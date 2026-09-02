@@ -237,8 +237,6 @@ export default function AgentConfig({
       return;
     }
     
-    clearConfigFocusRequest();
-    
     const newTab = BASIC_CONFIG_SECTIONS.has(target.section)
       ? "basic"
       : SECURITY_CONFIG_SECTIONS.has(target.section)
@@ -251,6 +249,7 @@ export default function AgentConfig({
       current[target.section] ? current : { ...current, [target.section]: true }
     );
 
+    lastScrolledRequestRef.current = requestKey;
     const frameId = window.requestAnimationFrame(() => {
       const sectionRefs: Record<ConfigSectionKey, React.RefObject<HTMLDivElement | null>> = {
         display_info: displayInfoSectionRef,
@@ -264,7 +263,10 @@ export default function AgentConfig({
         guardrail: guardrailSectionRef,
       };
       const sectionElement = sectionRefs[target.section].current;
-      if (!sectionElement) return;
+      if (!sectionElement) {
+        clearConfigFocusRequest();
+        return;
+      }
 
       const prefersReducedMotion = window.matchMedia(
         "(prefers-reduced-motion: reduce)"
@@ -273,7 +275,7 @@ export default function AgentConfig({
         behavior: prefersReducedMotion ? "auto" : "smooth",
         block: "nearest",
       });
-      lastScrolledRequestRef.current = requestKey;
+      clearConfigFocusRequest();
     });
 
     return () => window.cancelAnimationFrame(frameId);
