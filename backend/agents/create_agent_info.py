@@ -8,7 +8,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
@@ -17,12 +17,19 @@ from nexent.core.agents.context import (
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
+from nexent.core.models.prompt_cache import (
+    resolve_prompt_cache_profile,
+    resolve_provider_usage_profile,
+)
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
     ProviderCapabilityUnknown,
     ResolverError,
     resolve_capacity,
+)
+from nexent.core.models.feature_capability import (
+    normalize_feature_profile,
+    resolve_feature_capabilities,
 )
 from nexent.core.models.capacity_budget import (
     BudgetResolverError,
@@ -35,6 +42,11 @@ from nexent.core.agents.sandbox import SandboxConfig
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
+from consts.model_feature_capabilities import (
+    CATALOG_REVISION as FEATURE_CATALOG_REVISION,
+    EXACT_CATALOG as FEATURE_EXACT_CATALOG,
+    FAMILY_RULES as FEATURE_FAMILY_RULES,
+)
 
 from services.file_management_service import validate_urls_access
 from services.vectordatabase_service import (
@@ -233,6 +245,58 @@ def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
         if value is not None:
             overrides[field] = value
     return overrides
+
+
+def _effective_feature_factory(model_info: Optional[dict]) -> str:
+    """Resolve a known provider only when a generic factory URL proves it."""
+    record = model_info if isinstance(model_info, dict) else {}
+    factory = str(record.get("model_factory") or "").strip().lower()
+    normalized_factory = re.sub(r"[^a-z0-9]+", "", factory)
+    if normalized_factory not in {
+        "openaiapicompatible",
+        "openaicompatible",
+        "openaiapi",
+    }:
+        return factory
+
+    raw_url = str(record.get("base_url") or "").strip()
+    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
+    host = (parsed.hostname or "").lower().rstrip(".")
+    provider_hosts = (
+        ("dashscope", ("dashscope.aliyuncs.com",)),
+        ("silicon", ("api.siliconflow.cn", "siliconflow.cn")),
+        ("deepseek", ("api.deepseek.com",)),
+        ("openai", ("api.openai.com",)),
+        ("tokenpony", ("api.tokenpony.cn",)),
+    )
+    for provider, hosts in provider_hosts:
+        if host in hosts:
+            return provider
+    return factory
+
+
+def _resolve_model_feature_capabilities(model_info: Optional[dict]) -> dict:
+    """Use persisted sanitized metadata or a factory-scoped catalog fallback."""
+    record = model_info if isinstance(model_info, dict) else {}
+    persisted = normalize_feature_profile(record.get("feature_capability_metadata"))
+    if persisted and any(
+        persisted[branch]["supported"] is not None
+        for branch in ("reasoning", "prompt_cache")
+    ):
+        return persisted
+    model_name = str(record.get("model_name") or "")
+    model_repo = str(record.get("model_repo") or "")
+    full_model_name = (
+        model_name if "/" in model_name or not model_repo
+        else f"{model_repo}/{model_name}"
+    )
+    return resolve_feature_capabilities(
+        _effective_feature_factory(record),
+        full_model_name,
+        exact_catalog=FEATURE_EXACT_CATALOG,
+        family_rules=FEATURE_FAMILY_RULES,
+        catalog_revision=FEATURE_CATALOG_REVISION,
+    )
 
 
 def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
@@ -886,6 +950,8 @@ async def create_model_config_list(tenant_id):
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = []
     for record in records:
+        effective_feature_factory = _effective_feature_factory(record)
+        feature_capabilities = _resolve_model_feature_capabilities(record)
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
                         api_key=record.get("api_key", ""),
@@ -899,7 +965,12 @@ async def create_model_config_list(tenant_id):
                         timeout_seconds=record.get("timeout_seconds"),
                         concurrency_limit=record.get("concurrency_limit"),
                         prompt_cache=resolve_prompt_cache_profile(
-                            record.get("model_factory")),
+                            effective_feature_factory, feature_capabilities),
+                        feature_capabilities=feature_capabilities,
+                        provider_usage_profile=resolve_provider_usage_profile(
+                            effective_feature_factory,
+                            record.get("capability_profile_version"),
+                        ),
                         # W1 step 6: pass capacity columns through so SDK can
                         # honor operator-configured values end to end.
                         max_output_tokens=record.get("max_output_tokens"),
@@ -917,8 +988,10 @@ async def create_model_config_list(tenant_id):
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    main_effective_feature_factory = _effective_feature_factory(main_model_config)
+    main_feature_capabilities = _resolve_model_feature_capabilities(main_model_config)
     main_prompt_cache = resolve_prompt_cache_profile(
-        main_model_config.get("model_factory"))
+        main_effective_feature_factory, main_feature_capabilities)
     model_list.append(
         ModelConfig(cite_name="main_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -930,6 +1003,11 @@ async def create_model_config_list(tenant_id):
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
                     prompt_cache=main_prompt_cache,
+                    feature_capabilities=main_feature_capabilities,
+                    provider_usage_profile=resolve_provider_usage_profile(
+                        main_effective_feature_factory,
+                        main_model_config.get("capability_profile_version"),
+                    ),
                     max_output_tokens=main_model_config.get("max_output_tokens"),
                     max_tokens=main_model_config.get("max_tokens"),
                     context_window_tokens=main_model_config.get("context_window_tokens"),
@@ -953,6 +1031,11 @@ async def create_model_config_list(tenant_id):
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
                     prompt_cache=main_prompt_cache,
+                    feature_capabilities=main_feature_capabilities,
+                    provider_usage_profile=resolve_provider_usage_profile(
+                        main_effective_feature_factory,
+                        main_model_config.get("capability_profile_version"),
+                    ),
                     max_output_tokens=main_model_config.get("max_output_tokens"),
                     max_tokens=main_model_config.get("max_tokens"),
                     context_window_tokens=main_model_config.get("context_window_tokens"),

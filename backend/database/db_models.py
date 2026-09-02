@@ -457,6 +457,8 @@ class ModelRecord(TableBase):
         JSONB, doc="Versioned independent tokenizer match and conformance state.")
     token_count_probe_metadata = Column(
         JSONB, doc="Versioned sanitized Provider token-count probe state.")
+    feature_capability_metadata = Column(
+        JSONB, doc="Versioned reasoning and prompt-cache capability resolution without secrets.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):

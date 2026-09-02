@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import threading
+import uuid
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from enum import Enum
@@ -18,6 +19,7 @@ from smolagents.models import ChatMessage, MessageRole
 from ...context_runtime.contracts import ContextEvidence, FinalContext
 from ..summary_cache import CompressionCallRecord
 from .budget import extract_message_text, message_role
+from .archive import RunHistoryArchive, SearchArchivedHistoryTool
 from .config import ContextManagerConfig
 from .history_compression import HistoryCompressor, HistorySummaryCandidate
 from .llm_summary import LLMSummary
@@ -58,6 +60,8 @@ class ContextManager:
         self._previous_stable_items: dict[str, str] = {}
         self._pending_history_summary_event: dict[str, Any] | None = None
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
+        self._archive: RunHistoryArchive | None = None
+        self._archive_tool: SearchArchivedHistoryTool | None = None
 
     def _soft_input_budget_tokens(self) -> int:
         return self.config.soft_input_budget_tokens or self.config.token_threshold
@@ -81,6 +85,8 @@ class ContextManager:
         items: Optional[Sequence[Any]] = None,
     ) -> ManagedRunContext:
         self._history_candidate = None
+        self._archive = None
+        self._archive_tool = None
         self._current_item_cache.clear()
         source = self._item_source(items)
         if fallback_system_prompt and not any(item.type == ContextItemType.SYSTEM for item in source):
@@ -120,6 +126,7 @@ class ContextManager:
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
         target_input_budget_tokens: int | None = None,
+        emergency_archive: bool = False,
     ) -> FinalContext:
         run_context = run_context or self.prepare_run_context(memory, "")
         policy = resolve_policy(self.config.policy_layers)
@@ -142,7 +149,20 @@ class ContextManager:
             task=task,
             final_answer_templates=final_answer_templates,
         )
-        canonical_tools = self._canonical_tools(tools or ())
+        archived_item_count = 0
+        if emergency_archive:
+            self.activate_emergency_archive(hard_budget=target_input_budget_tokens or self._hard_input_budget_tokens())
+        runtime_tools = list(tools or ())
+        if emergency_archive and self._archive_tool is not None and all(
+            getattr(tool, "name", None) != self._archive_tool.name for tool in runtime_tools
+        ):
+            runtime_tools.append(self._archive_tool)
+        canonical_tools = self._canonical_tools(runtime_tools)
+        if emergency_archive:
+            items, archived_item_count = self._select_emergency_working_set(
+                items, purpose_stable, purpose_dynamic, canonical_tools,
+                target_tokens=target_input_budget_tokens or self._hard_input_budget_tokens(),
+            )
         raw_tokens = self._estimate_items(items, purpose_stable, purpose_dynamic, canonical_tools)
         soft_budget = self._soft_input_budget_tokens()
         hard_budget = self._hard_input_budget_tokens()
@@ -238,16 +258,25 @@ class ContextManager:
         )
         self._previous_stable_fingerprint = stable_fp
         selected_ids = tuple(item.id for item in final_items)
+        from .composition import estimate_context_segments
+
+        composition_estimate = estimate_context_segments(
+            final_items,
+            purpose_messages=[*purpose_stable, *purpose_dynamic],
+            tools=canonical_tools,
+        )
         message_roles = tuple(message_role(message) for message in messages)
         system_messages = [message for message in messages if message_role(message) in {"system", "developer"}]
         history_messages = [message for message in messages if message_role(message) not in {"system", "developer"}]
         return FinalContext(
             messages=messages,
             tools=canonical_tools,
+            runtime_tools=tuple(runtime_tools),
             evidence=ContextEvidence(
                 purpose=purpose,
                 selected_item_ids=selected_ids,
                 selected_item_types=tuple(item.type.value for item in final_items),
+                context_composition_estimate=tuple(composition_estimate.items()),
                 stable_message_count=len(stable) + len(purpose_stable),
                 dynamic_message_count=len(dynamic) + len(purpose_dynamic),
                 compression_records=tuple(self._step_local_log),
@@ -292,8 +321,73 @@ class ContextManager:
                 history_message_roles=tuple(message_role(message) for message in history_messages),
                 compression_attempted=bool(self._step_local_log),
                 fallback_compaction_used=any(representation != "raw" for _, representation in representations),
+                archive_active=emergency_archive,
+                archived_item_count=archived_item_count,
+                retained_item_count=len(final_items),
+                recall_invocation_count=self._archive.recall_invocations if self._archive else 0,
+                recalled_tokens=self._archive.recalled_tokens if self._archive else 0,
             ),
         )
+
+    @property
+    def archive_tool(self) -> SearchArchivedHistoryTool | None:
+        return self._archive_tool
+
+    def activate_emergency_archive(self, *, hard_budget: int) -> SearchArchivedHistoryTool:
+        if self._archive is None:
+            self._archive = RunHistoryArchive(
+                run_id=uuid.uuid4().hex,
+                hard_input_budget=hard_budget,
+                chars_per_token=self.config.chars_per_token,
+            )
+            self._archive_tool = SearchArchivedHistoryTool(self._archive)
+        return self._archive_tool
+
+    def _select_emergency_working_set(self, items, stable, dynamic, tools, *, target_tokens: int):
+        turns = [item for item in items if item.type == ContextItemType.CONVERSATION_TURN]
+        actions = [item for item in items if item.type == ContextItemType.CURRENT_ACTION]
+        considered = set(item.id for item in [*turns[-3:], *actions[-4:]])
+        protected = set(item.id for item in [*turns[-1:], *actions[-1:]])
+        retained = [
+            item for item in items
+            if item.type not in {ContextItemType.CONVERSATION_TURN, ContextItemType.CURRENT_ACTION}
+            or item.id in considered
+        ]
+        optional = [item for item in retained if item.id in considered and item.id not in protected]
+        for item in optional:
+            if self._estimate_items(retained, stable, dynamic, tools) <= target_tokens:
+                break
+            retained.remove(item)
+        retained_ids = {item.id for item in retained}
+        omitted = [item for item in items if item.id not in retained_ids]
+        for item in omitted:
+            self._archive_item(item)
+        if omitted:
+            manifest = ContextItem.from_input(ContextItemInput(
+                id="system:archive_manifest",
+                type=ContextItemType.SYSTEM,
+                content={"text": (
+                    f"Older history was archived ({len(omitted)} items). It may contain prior user turns, "
+                    "final answers, tool calls, observations, errors, and results. Call search_archived_history "
+                    "only when missing detail is relevant; do not guess archived content."
+                )},
+                metadata={"layout_order": 9_999, "run_local": True},
+            ))
+            retained.append(manifest)
+        return sorted(retained, key=lambda item: item.layout_key), len(omitted)
+
+    def _archive_item(self, item: ContextItem) -> None:
+        if self._archive is None:
+            return
+        if item.type == ContextItemType.CONVERSATION_TURN:
+            self._archive.add(kind="chat_turn", source_id=item.id, content=item.content)
+            return
+        content = item.content
+        for field, kind in (
+            ("tool_calls", "tool_call"), ("observations", "observation"),
+            ("error", "error"), ("result", "result"),
+        ):
+            self._archive.add(kind=kind, source_id=item.id, content=content.get(field))
 
     def _budget_failure_reason(
         self,

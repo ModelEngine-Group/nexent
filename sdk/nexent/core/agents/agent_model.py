@@ -114,6 +114,14 @@ class ModelConfig(BaseModel):
         ),
         default=None,
     )
+    feature_capabilities: Optional[Dict[str, Any]] = Field(
+        description="Resolved model-level reasoning and prompt-cache capabilities.",
+        default=None,
+    )
+    provider_usage_profile: Optional[Dict[str, Any]] = Field(
+        description="P7 provider usage field paths and verified semantic relationships.",
+        default=None,
+    )
 
     @model_validator(mode="after")
     def _backfill_max_output_from_legacy_max_tokens(self) -> "ModelConfig":

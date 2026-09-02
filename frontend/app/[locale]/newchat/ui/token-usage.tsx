@@ -5,8 +5,15 @@ import { useTranslation } from "react-i18next";
 import { useAuiState, useMessageTiming } from "@assistant-ui/react";
 import { Zap } from "lucide-react";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   stepTokenCounts,
+  type ProviderCallUsageV2,
   type StepTokenCount,
+  type TurnUsageV2,
 } from "../adapter/remote-chat-model-adapter";
 
 interface TokenUsageProps {
@@ -28,92 +35,97 @@ export const TokenUsage: FC<TokenUsageProps> = ({ className }) => {
   const usagePercent = Math.round((tokenCount / 128000) * 100);
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted ${className ?? ""}`}
+    <Popover open={expanded} onOpenChange={setExpanded}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted ${className ?? ""}`}
+        >
+          <Zap className="size-3 text-amber-500" />
+          <span className="font-medium text-foreground">{usagePercent}%</span>
+          <span className="text-muted-foreground/70">
+            {t("chat.tokenUsage.used")}
+          </span>
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={4}
+        collisionPadding={8}
+        sticky="always"
+        className="max-h-[var(--radix-popover-content-available-height)] w-[min(16rem,calc(100vw-1rem))] max-w-[var(--radix-popover-content-available-width)] overflow-y-auto rounded-lg p-3"
       >
-        <Zap className="size-3 text-amber-500" />
-        <span className="font-medium text-foreground">{usagePercent}%</span>
-        <span className="text-muted-foreground/70">
-          {t("chat.tokenUsage.used")}
-        </span>
-      </button>
-
-      {/* Expanded details popover */}
-      {expanded && (
-        <div className="absolute bottom-full right-0 z-50 mb-1 w-64 rounded-lg border border-border bg-popover p-3 shadow-lg">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs font-medium text-foreground">
-              {t("chat.tokenUsage.details")}
-            </span>
-            <button
-              type="button"
-              onClick={() => setExpanded(false)}
-              className="text-muted-foreground hover:text-foreground"
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-xs font-medium text-foreground">
+            {t("chat.tokenUsage.details")}
+          </span>
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <span className="sr-only">{t("chat.tokenUsage.close")}</span>
+            <svg
+              className="size-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              <span className="sr-only">{t("chat.tokenUsage.close")}</span>
-              <svg
-                className="size-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-
-          {/* Progress bar */}
-          <div className="mb-3">
-            <div className="mb-1 flex justify-between text-xs">
-              <span className="text-muted-foreground">
-                {t("chat.tokenUsage.context")}
-              </span>
-              <span className="font-medium text-foreground">
-                {tokenCount.toLocaleString()} / 128000
-              </span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-amber-500 transition-all"
-                style={{ width: `${Math.min(usagePercent, 100)}%` }}
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
               />
-            </div>
-          </div>
+            </svg>
+          </button>
+        </div>
 
-          {/* Details */}
-          <div className="space-y-2 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="size-2 rounded-full bg-blue-500" />
-                {t("chat.tokenUsage.output")}
-              </span>
-              <span className="font-medium text-foreground">
-                {tokenCount.toLocaleString()}
-              </span>
-            </div>
-            {timing.tokensPerSecond !== undefined && (
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="size-2 rounded-full bg-green-500" />
-                  {t("chat.tokenUsage.speed")}
-                </span>
-                <span className="font-medium text-foreground">
-                  {timing.tokensPerSecond.toFixed(1)} tok/s
-                </span>
-              </div>
-            )}
+        {/* Progress bar */}
+        <div className="mb-3">
+          <div className="mb-1 flex justify-between text-xs">
+            <span className="text-muted-foreground">
+              {t("chat.tokenUsage.context")}
+            </span>
+            <span className="font-medium text-foreground">
+              {tokenCount.toLocaleString()} / 128000
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-amber-500 transition-all"
+              style={{ width: `${Math.min(usagePercent, 100)}%` }}
+            />
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Details */}
+        <div className="space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="size-2 rounded-full bg-blue-500" />
+              {t("chat.tokenUsage.output")}
+            </span>
+            <span className="font-medium text-foreground">
+              {tokenCount.toLocaleString()}
+            </span>
+          </div>
+          {timing.tokensPerSecond !== undefined && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <span className="size-2 rounded-full bg-green-500" />
+                {t("chat.tokenUsage.speed")}
+              </span>
+              <span className="font-medium text-foreground">
+                {timing.tokensPerSecond.toFixed(1)} tok/s
+              </span>
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 };
 
@@ -144,6 +156,50 @@ const CONTEXT_COMPONENTS = [
   ],
 ] as const;
 
+const V2_CONTEXT_COMPONENTS = [
+  [
+    "system_instructions",
+    "chat.tokenUsage.components.systemInstructions",
+    "bg-blue-500",
+  ],
+  ["user_history", "chat.tokenUsage.components.userHistory", "bg-cyan-500"],
+  [
+    "assistant_history",
+    "chat.tokenUsage.components.assistantHistory",
+    "bg-sky-500",
+  ],
+  [
+    "current_request",
+    "chat.tokenUsage.components.currentRequest",
+    "bg-indigo-500",
+  ],
+  [
+    "retrieved_context",
+    "chat.tokenUsage.components.retrievedContext",
+    "bg-emerald-500",
+  ],
+  [
+    "tool_definitions",
+    "chat.tokenUsage.components.toolDefinitions",
+    "bg-violet-500",
+  ],
+  [
+    "tool_calls_results",
+    "chat.tokenUsage.components.toolResults",
+    "bg-fuchsia-500",
+  ],
+  [
+    "attachments_media",
+    "chat.tokenUsage.components.attachmentsMedia",
+    "bg-pink-500",
+  ],
+  [
+    "provider_overhead",
+    "chat.tokenUsage.components.providerOverhead",
+    "bg-slate-400",
+  ],
+] as const;
+
 /**
  * Displays per-step token consumption with a stacked progress bar.
  * Each step shows input tokens (blue) + output tokens (amber) relative to the token threshold.
@@ -163,8 +219,29 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
 
   const messageSteps = useAuiState((s) => {
     const custom = s.message.metadata?.custom as
-      { stepTokenCounts?: StepTokenCount[] } | undefined;
+      | {
+          stepTokenCounts?: StepTokenCount[];
+          providerCallUsages?: ProviderCallUsageV2[];
+          turnUsage?: TurnUsageV2;
+        }
+      | undefined;
     return custom?.stepTokenCounts;
+  });
+  const providerCallUsages = useAuiState((s) => {
+    const custom = s.message.metadata?.custom as
+      | {
+          providerCallUsages?: ProviderCallUsageV2[];
+        }
+      | undefined;
+    return custom?.providerCallUsages;
+  });
+  const turnUsage = useAuiState((s) => {
+    const custom = s.message.metadata?.custom as
+      | {
+          turnUsage?: TurnUsageV2;
+        }
+      | undefined;
+    return custom?.turnUsage;
   });
 
   // Message-level metadata wins when present; otherwise use the live stream
@@ -172,23 +249,40 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
   // conversations take the metadata path, live streaming takes the registry.
   const steps: readonly StepTokenCount[] = messageSteps ?? stepTokenCounts;
 
-  if (steps.length === 0) return null;
+  if (steps.length === 0 && !turnUsage) return null;
 
   const latestStep = steps[steps.length - 1];
-  const budget = latestStep.contextBudget;
-  const contextWindowTokens = latestStep.contextWindowTokens;
-  const tokenThreshold = latestStep.tokenThreshold;
+  const recoveryStep = [...steps].reverse().find((step) => {
+    const state = step.contextBudget?.recovery_state;
+    return Boolean(state && !["not_needed", "not_attempted"].includes(state));
+  });
+  // Recovery commonly happens on the action step before a second step emits
+  // the final answer. Preserve that recovery evidence instead of hiding it
+  // behind the last step's ordinary, non-recovery budget snapshot.
+  const budget = recoveryStep?.contextBudget ?? latestStep?.contextBudget;
+  const contextWindowTokens = latestStep?.contextWindowTokens ?? null;
+  const tokenThreshold = latestStep?.tokenThreshold ?? null;
   const maxTokens = contextWindowTokens ?? tokenThreshold;
 
-  if (maxTokens === null) return null;
-
   const stepCount = steps.length;
-
-  const finalInputTokens = budget?.final_tokens ?? latestStep.stepInputTokens;
+  const peakContext = turnUsage?.peak_context;
+  const finalInputTokens =
+    peakContext?.input_tokens ??
+    budget?.final_tokens ??
+    latestStep?.stepInputTokens;
+  if (finalInputTokens === undefined || finalInputTokens === null) return null;
   const compositionDenominator = Math.max(1, finalInputTokens);
-  const effectiveLimit = budget?.hard_budget ?? maxTokens;
-  const outputTokens = latestStep.totalOutputTokens;
-  const usagePercent = Math.round((finalInputTokens / effectiveLimit) * 100);
+  const effectiveLimit =
+    peakContext?.limit_tokens ?? budget?.hard_budget ?? maxTokens;
+  const outputTokens =
+    turnUsage?.usage.output_tokens ?? latestStep?.totalOutputTokens ?? 0;
+  const usagePercent = effectiveLimit
+    ? Math.round((finalInputTokens / effectiveLimit) * 100)
+    : null;
+  const peakCall = providerCallUsages?.find(
+    (call) => call.call_id === peakContext?.call_id
+  );
+  const v2Composition = peakCall?.context_composition;
   const knownComponents = budget
     ? CONTEXT_COMPONENTS.map(([key, label, color]) => ({
         key,
@@ -205,39 +299,71 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
     0,
     finalInputTokens - knownComponentTotal
   );
-  const composition = budget
-    ? [
-        ...knownComponents,
-        ...(unclassifiedTokens > 0
-          ? [
-              {
-                key: "unclassified",
-                label: "chat.tokenUsage.components.unclassified",
-                color: "bg-slate-400",
-                tokens: unclassifiedTokens,
-              },
-            ]
-          : []),
-      ]
-    : [];
+  const composition = v2Composition
+    ? V2_CONTEXT_COMPONENTS.map(([key, label, color]) => ({
+        key,
+        label,
+        color,
+        tokens: Math.max(0, v2Composition.segments[key] ?? 0),
+      })).filter((item) => item.tokens > 0)
+    : budget
+      ? [
+          ...knownComponents,
+          ...(unclassifiedTokens > 0
+            ? [
+                {
+                  key: "unclassified",
+                  label: "chat.tokenUsage.components.unclassified",
+                  color: "bg-slate-400",
+                  tokens: unclassifiedTokens,
+                },
+              ]
+            : []),
+        ]
+      : [];
+
+  const recoveryExhausted =
+    budget?.recovery_state === "exhausted" ||
+    Boolean(budget?.recovery?.terminal_reason);
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted ${className ?? ""}`}
-      >
-        <Zap className="size-3 text-amber-500" />
-        <span className="font-medium text-foreground">{usagePercent}%</span>
-        <span className="text-muted-foreground/70">
-          {t("chat.tokenUsage.turn")}
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {budget?.recovery?.auto_continued && (
+        <span className="rounded bg-green-50 px-1.5 py-0.5 text-xs text-green-700">
+          {t("taskWindow.contextBudget.autoContinued")}
         </span>
-      </button>
+      )}
+      {recoveryExhausted && budget?.recovery?.partial_preserved && (
+        <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-700">
+          {t("chat.tokenUsage.recoveryExhausted")}
+        </span>
+      )}
+      <Popover open={expanded} onOpenChange={setExpanded}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted ${className ?? ""}`}
+          >
+            <Zap className="size-3 text-amber-500" />
+            <span className="font-medium text-foreground">
+              {usagePercent === null
+                ? `${finalInputTokens.toLocaleString()} input`
+                : `${usagePercent}%`}
+            </span>
+            <span className="text-muted-foreground/70">
+              {t("chat.tokenUsage.turn")}
+            </span>
+          </button>
+        </PopoverTrigger>
 
-      {/* Expanded details popover */}
-      {expanded && (
-        <div className="absolute bottom-full right-0 z-50 mb-1 w-80 rounded-lg border border-border bg-popover p-4 shadow-lg">
+        <PopoverContent
+          side="top"
+          align="end"
+          sideOffset={4}
+          collisionPadding={8}
+          sticky="always"
+          className="max-h-[var(--radix-popover-content-available-height)] w-[min(20rem,calc(100vw-1rem))] max-w-[var(--radix-popover-content-available-width)] overflow-y-auto rounded-lg p-4"
+        >
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-medium text-foreground">
               {t("chat.tokenUsage.turnDetails")}
@@ -271,8 +397,9 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                 {t("chat.tokenUsage.finalRequest")}
               </span>
               <span className="font-medium text-foreground">
-                {finalInputTokens.toLocaleString()} /{" "}
-                {effectiveLimit.toLocaleString()}
+                {effectiveLimit
+                  ? `${finalInputTokens.toLocaleString()} / ${effectiveLimit.toLocaleString()}`
+                  : `${finalInputTokens.toLocaleString()} input`}
               </span>
             </div>
             <div
@@ -283,7 +410,9 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                 <div
                   key={item.key}
                   className={item.color}
-                  style={{ width: `${(item.tokens / effectiveLimit) * 100}%` }}
+                  style={{
+                    width: `${(item.tokens / compositionDenominator) * 100}%`,
+                  }}
                   title={`${t(item.label)}: ${item.tokens.toLocaleString()}`}
                 />
               ))}
@@ -300,6 +429,44 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
           </div>
 
           <div className="space-y-2 text-xs">
+            {turnUsage && (
+              <div className="mb-3 space-y-1 border-b border-border pb-3">
+                <div className="font-medium text-foreground">
+                  {t("chat.tokenUsage.actualProviderUsage")}
+                </div>
+                {[
+                  ["fresh_input_tokens", "chat.tokenUsage.freshInput"],
+                  ["cache_read_tokens", "chat.tokenUsage.cacheRead"],
+                  ["cache_write_tokens", "chat.tokenUsage.cacheWrite"],
+                  ["visible_output_tokens", "chat.tokenUsage.visibleOutput"],
+                  ["reasoning_tokens", "chat.tokenUsage.reasoning"],
+                  ["total_tokens", "chat.tokenUsage.total"],
+                ].map(([key, label]) => {
+                  const value = turnUsage.usage[key];
+                  return (
+                    <div
+                      key={key}
+                      className="flex justify-between text-muted-foreground"
+                    >
+                      <span>{t(label)}</span>
+                      <span>
+                        {value === null || value === undefined
+                          ? "—"
+                          : value.toLocaleString()}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="flex justify-between text-muted-foreground">
+                  <span>{t("chat.tokenUsage.source")}</span>
+                  <span>{turnUsage.data_quality}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>{t("chat.tokenUsage.calls")}</span>
+                  <span>{turnUsage.call_count}</span>
+                </div>
+              </div>
+            )}
             {budget && (
               <div className="space-y-1">
                 {composition.map((item) => (
@@ -325,6 +492,14 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                   <span>{t("chat.tokenUsage.generated")}</span>
                   <span>{outputTokens.toLocaleString()}</span>
                 </div>
+                {v2Composition?.high_adjustment && (
+                  <div className="flex justify-between text-amber-600">
+                    <span>{t("chat.tokenUsage.highAdjustment")}</span>
+                    <span>
+                      {Math.round(v2Composition.adjustment_ratio * 100)}%
+                    </span>
+                  </div>
+                )}
                 {latestStep.outputFinishReason && (
                   <div className="flex justify-between text-muted-foreground">
                     <span>{t("chat.tokenUsage.finishReason")}</span>
@@ -350,16 +525,56 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                     <span>{budget.recovery_state}</span>
                   </div>
                 )}
+                {budget.recovery?.archive_active && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>{t("chat.tokenUsage.archive")}</span>
+                    <span>
+                      {budget.recovery.archived_item_count ?? 0} /{" "}
+                      {budget.recovery.retained_item_count ?? 0}
+                    </span>
+                  </div>
+                )}
+                {(budget.recovery?.recalled_tokens ?? 0) > 0 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>{t("chat.tokenUsage.recalledTokens")}</span>
+                    <span>
+                      {budget.recovery?.recalled_tokens?.toLocaleString()}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
-            {!budget && (
+            {!budget && !v2Composition && (
               <div className="text-muted-foreground">
                 {t("chat.tokenUsage.breakdownUnavailable")}
               </div>
             )}
+            {providerCallUsages && providerCallUsages.length > 0 && (
+              <details className="border-t border-border pt-2">
+                <summary className="cursor-pointer font-medium text-foreground">
+                  {t("chat.tokenUsage.providerCalls")}
+                </summary>
+                <div className="mt-2 space-y-1">
+                  {providerCallUsages.map((call, index) => (
+                    <div
+                      key={call.call_id}
+                      className="flex justify-between text-muted-foreground"
+                    >
+                      <span>
+                        #{index + 1} {call.purpose}
+                      </span>
+                      <span>
+                        {call.usage.input_tokens ?? "—"} in ·{" "}
+                        {call.usage.output_tokens ?? "—"} out
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 };

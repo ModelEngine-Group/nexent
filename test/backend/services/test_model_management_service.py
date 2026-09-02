@@ -1945,6 +1945,53 @@ async def test_batch_create_models_for_tenant_update_branch_persists_operator_ca
 
 
 @pytest.mark.asyncio
+async def test_p8_existing_model_sync_persists_sanitized_feature_capabilities():
+    svc = import_svc()
+    existing_row = {
+        "model_id": 43,
+        "model_repo": "",
+        "model_name": "qwen3.7-plus",
+        "feature_capability_metadata": None,
+    }
+    incoming_profile = {
+        "schema_version": 1,
+        "reasoning": {
+            "supported": True,
+            "mode": "effort",
+            "request_style": "openai_reasoning_effort",
+            "efforts": ["low", "high"],
+            "secret": "discard-me",
+        },
+        "prompt_cache": {
+            "supported": True,
+            "mode": "provider_automatic",
+            "metrics_available": True,
+        },
+        "source": "catalog_family",
+        "unknown_top_level": "discard-me",
+    }
+    batch_payload = {
+        "provider": "dashscope",
+        "type": "llm",
+        "models": [{"id": "qwen3.7-plus", "feature_capability_metadata": incoming_profile}],
+        "api_key": "dash-key",
+    }
+
+    with mock.patch.object(
+        svc, "get_models_by_tenant_factory_type", return_value=[existing_row]
+    ), mock.patch.object(svc, "split_repo_name", return_value=("", "qwen3.7-plus")), \
+            mock.patch.object(svc, "add_repo_to_name", return_value="qwen3.7-plus"), \
+            mock.patch.object(svc, "apply_model_mutations") as mock_apply:
+        await svc.batch_create_models_for_tenant("u1", "t1", batch_payload)
+
+    _, update = mock_apply.call_args.kwargs["updates"][0]
+    persisted = update["feature_capability_metadata"]
+    assert persisted["reasoning"]["supported"] is True
+    assert "secret" not in persisted["reasoning"]
+    assert "unknown_top_level" not in persisted
+
+
+@pytest.mark.asyncio
 async def test_batch_create_models_for_tenant_tracks_provider_candidate_fields():
     """Provider facts fill unknown fields without claiming operator provenance.
 

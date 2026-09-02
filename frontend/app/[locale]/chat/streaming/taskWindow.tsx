@@ -459,14 +459,15 @@ const messageHandlers: MessageHandler[] = [
                 })}
               </div>
             )}
-            {budget.recovery_state &&
-              !["not_needed", "not_attempted"].includes(
-                budget.recovery_state
-              ) && (
-                <div className="mt-1 text-xs text-blue-800">
-                  {t("taskWindow.contextBudget.recovery", {
-                    state: budget.recovery_state,
-                  })}
+            {budget.recovery?.auto_continued && (
+              <div className="mt-1 text-xs text-blue-800">
+                {t("taskWindow.contextBudget.autoContinued")}
+              </div>
+            )}
+            {budget.recovery?.partial_preserved &&
+              budget.recovery?.terminal_reason && (
+                <div className="mt-1 text-xs text-red-700">
+                  {t("chat.tokenUsage.recoveryExhausted")}
                 </div>
               )}
           </div>

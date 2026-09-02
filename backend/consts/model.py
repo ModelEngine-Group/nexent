@@ -165,6 +165,7 @@ class ModelRequest(BaseModel):
     tokenizer_family: Optional[str] = None
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
+    feature_capability_metadata: Optional[Dict[str, Any]] = None
     capacity_mode: Optional[Literal["auto", "manual"]] = None
     # W11 accept-signal fields (audit/metrics only — never persisted). Sent by
     # the frontend when the operator clicks "Use suggestion" and saves; the

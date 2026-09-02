@@ -45,6 +45,7 @@ from services.model_capacity_governance_service import (
 )
 from services.model_token_count_probe_service import run_token_count_probe
 from nexent.core.models.model_identity import MATCHER_VERSION
+from nexent.core.models.feature_capability import normalize_feature_profile
 from services.model_provider_service import (
     prepare_model_dict,
     merge_existing_model_attributes,
@@ -628,6 +629,17 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
 
             if existing_model:
                 update_data: Dict[str, Any] = {}
+                feature_capability_metadata = normalize_feature_profile(
+                    model.get("feature_capability_metadata")
+                )
+                if (
+                    feature_capability_metadata is not None
+                    and existing_model.get("feature_capability_metadata")
+                    != feature_capability_metadata
+                ):
+                    update_data["feature_capability_metadata"] = (
+                        feature_capability_metadata
+                    )
                 if model_type not in CAPACITY_COVERAGE_MODEL_TYPES:
                     new_max_tokens = model.get("max_tokens")
                     if new_max_tokens is not None and existing_model.get("max_tokens") != new_max_tokens:

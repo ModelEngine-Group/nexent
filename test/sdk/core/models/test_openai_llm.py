@@ -553,6 +553,16 @@ def test_call_normal_operation(openai_model_instance):
         assert result == mock_result_message
         mock_prepare.assert_called_once()
 
+        # AC-TU-001/004: one physical dispatch produces one complete v2 record.
+        assert len(openai_model_instance.provider_call_usages) == 1
+        call_usage = openai_model_instance.provider_call_usages[0]
+        assert call_usage.status == "completed"
+        assert call_usage.usage.input_tokens == 10
+        assert call_usage.usage.output_tokens == 5
+        assert call_usage.usage.total_tokens == 15
+        assert call_usage.to_dict()["schema_version"] == 2
+        assert tuple(openai_model_instance.provider_call_usages) == result.provider_call_usages
+
         # Verify observer calls
         openai_model_instance.observer.add_model_new_token.assert_any_call(
             "Hello")
@@ -1821,14 +1831,18 @@ def test_ac_p2_005_create_overflow_rebuilds_and_retries_once(openai_model_instan
     assert _recorded_recovery_states(openai_model_instance)[-1] == "recovered"
 
 
-def test_ac_p2_006_second_overflow_is_terminal(openai_model_instance):
+def test_ac_p6_001_third_overflow_is_terminal_after_two_recovery_requests(openai_model_instance):
     snapshot = _safe_input_budget_snapshot(128)
     openai_model_instance.safe_input_budget_snapshot = snapshot
     openai_model_instance.client.chat.completions.create.side_effect = [
         Exception("context_length_exceeded: first"),
         Exception("context_length_exceeded: second"),
+        Exception("context_length_exceeded: third"),
     ]
-    rebuild = MagicMock(return_value=[{"role": "user", "content": "short"}])
+    rebuild = MagicMock(side_effect=[
+        [{"role": "user", "content": "shorter first retry"}],
+        [{"role": "user", "content": "x"}],
+    ])
 
     with pytest.raises(
         openai_llm_module.ProviderContextOverflowRetryExhausted
@@ -1840,12 +1854,69 @@ def test_ac_p2_006_second_overflow_is_terminal(openai_model_instance):
             )
 
     assert error.value.reason_code == "provider_context_overflow_retry_exhausted"
-    assert openai_model_instance.client.chat.completions.create.call_count == 2
-    assert rebuild.call_count == 1
+    assert openai_model_instance.client.chat.completions.create.call_count == 3
+    assert rebuild.call_count == 2
+    assert rebuild.call_args_list[1].kwargs == {"emergency_archive": True}
     assert _recorded_recovery_states(openai_model_instance)[-1] == "retry_exhausted"
 
 
-def test_ac_p2_006_overflow_after_stream_chunk_never_retries(openai_model_instance):
+def test_ac_p6_002_local_first_rebuild_exhaustion_advances_to_emergency_archive(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(128)
+    openai_model_instance.safe_input_budget_snapshot = snapshot
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        Exception("context_length_exceeded: first"),
+        _successful_stream(),
+    ]
+    rebuild = MagicMock(side_effect=[
+        openai_llm_module.ContextRebuildOverBudget(
+            failure_reason="compaction_no_reduction",
+            actual=900,
+            hard_budget=700,
+        ),
+        [{"role": "user", "content": "archive retry"}],
+    ])
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs):
+        result = openai_model_instance(
+            [{"role": "user", "content": "x" * 400}],
+            context_rebuild=rebuild,
+        )
+
+    assert result.content == "ok"
+    assert openai_model_instance.client.chat.completions.create.call_count == 2
+    assert rebuild.call_count == 2
+    assert rebuild.call_args_list[0].kwargs == {}
+    assert rebuild.call_args_list[1].kwargs == {"emergency_archive": True}
+
+
+@pytest.mark.parametrize("failure_reason", ["fixed_context_over_budget", "single_context_item_oversize"])
+def test_ac_p6_002_protected_rebuild_failures_remain_terminal(
+    openai_model_instance, failure_reason
+):
+    snapshot = _safe_input_budget_snapshot(128)
+    openai_model_instance.safe_input_budget_snapshot = snapshot
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: first"
+    )
+    rebuild_error = openai_llm_module.ContextRebuildOverBudget(
+        failure_reason=failure_reason,
+        actual=900,
+        hard_budget=700,
+    )
+    rebuild = MagicMock(side_effect=rebuild_error)
+
+    with pytest.raises(openai_llm_module.ContextRebuildOverBudget) as error:
+        with patch.object(openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs):
+            openai_model_instance(
+                [{"role": "user", "content": "x" * 400}],
+                context_rebuild=rebuild,
+            )
+
+    assert error.value.failure_reason == failure_reason
+    rebuild.assert_called_once()
+
+
+def test_ac_p6_004_partial_prose_is_continued_into_one_message(openai_model_instance):
     snapshot = _safe_input_budget_snapshot(128)
     openai_model_instance.safe_input_budget_snapshot = snapshot
 
@@ -1853,20 +1924,69 @@ def test_ac_p2_006_overflow_after_stream_chunk_never_retries(openai_model_instan
         yield _successful_stream("partial")[0]
         raise Exception("context_length_exceeded: late")
 
-    openai_model_instance.client.chat.completions.create.return_value = partial_stream()
-    rebuild = MagicMock(return_value=[{"role": "user", "content": "short"}])
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        partial_stream(), _successful_stream(" continuation"),
+    ]
+    rebuild = MagicMock(return_value=[{"role": "user", "content": "x"}])
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs):
-        with pytest.raises(openai_llm_module.ProviderContextOverflowRetryUnsafe) as error:
+        result = openai_model_instance(
+            [{"role": "user", "content": "hello " * 100}], context_rebuild=rebuild,
+        )
+
+    assert result.content == "partial continuation"
+    assert openai_model_instance.client.chat.completions.create.call_count == 2
+    rebuilt_messages = openai_model_instance.client.chat.completions.create.call_args.kwargs["messages"]
+    assert rebuilt_messages[-2]["content"] == "partial"
+    assert "Do not repeat" in rebuilt_messages[-1]["content"]
+
+
+def test_ac_p6_004_tool_fragments_prevent_automatic_continuation(openai_model_instance):
+    snapshot = _safe_input_budget_snapshot(128)
+    openai_model_instance.safe_input_budget_snapshot = snapshot
+    delta = types.SimpleNamespace(
+        content=None, role="assistant", reasoning_content=None,
+        tool_calls=[types.SimpleNamespace(
+            index=0, id="call_1", type="function",
+            function=types.SimpleNamespace(name="write_data", arguments='{'),
+        )],
+    )
+
+    def unsafe_stream():
+        yield types.SimpleNamespace(
+            choices=[types.SimpleNamespace(delta=delta, finish_reason=None)], usage=None,
+        )
+        raise Exception("context_length_exceeded: late")
+
+    openai_model_instance.client.chat.completions.create.return_value = unsafe_stream()
+    rebuild = MagicMock(return_value=[{"role": "user", "content": "short"}])
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs):
+        with pytest.raises(openai_llm_module.ProviderContextOverflowRetryUnsafe):
             openai_model_instance(
-                [{"role": "user", "content": "hello"}],
-                context_rebuild=rebuild,
+                [{"role": "user", "content": "hello"}], context_rebuild=rebuild,
             )
 
-    assert error.value.reason_code == "provider_context_overflow_retry_unsafe"
-    assert openai_model_instance.client.chat.completions.create.call_count == 1
     rebuild.assert_not_called()
-    assert _recorded_recovery_states(openai_model_instance)[-1] == "retry_unsafe_after_response"
+    assert openai_model_instance.client.chat.completions.create.call_count == 1
+
+
+def test_ac_p6_005_unknown_capacity_uses_run_local_provisional_32k(openai_model_instance):
+    openai_model_instance.safe_input_budget_snapshot = None
+    openai_model_instance.model_id = "gpt-test"
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        Exception("context_length_exceeded: first"), _successful_stream("ok"),
+    ]
+    rebuild = MagicMock(return_value=[{"role": "user", "content": "x"}])
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs):
+        result = openai_model_instance(
+            [{"role": "user", "content": "large " * 100}], context_rebuild=rebuild,
+        )
+
+    assert result.content == "ok"
+    assert openai_model_instance.safe_input_budget_snapshot is None
+    assert openai_model_instance.last_final_request_preflight.hard_budget == 32_768 - 4_096
+    assert openai_model_instance._using_provisional_capacity is True
 
 
 def test_ac_p2_004_soft_excess_rebuilds_before_provider_call(openai_model_instance):
@@ -2053,6 +2173,62 @@ def test_prompt_cache_usage_extracts_openai_cached_tokens(openai_model_instance)
     assert openai_model_instance.last_prompt_cache_usage.uncached_input_tokens == 60
     assert openai_model_instance.last_prompt_cache_usage.provider_cache_hit is True
     assert openai_model_instance.last_prompt_cache_usage.estimated_saved_input_tokens == 0
+
+
+def test_p8_feature_resolution_is_emitted_as_sanitized_span_attributes(
+    openai_model_instance,
+):
+    openai_model_instance.feature_capabilities = {
+        "source": "catalog_family",
+        "match_kind": "catalog_family",
+        "catalog_revision": "2026-09-01.2",
+        "profile_version": "dashscope/qwen3-hybrid-family@1",
+        "reasoning": {
+            "supported": True,
+            "mode": "effort",
+            "request_style": "openai_reasoning_effort",
+        },
+        "prompt_cache": {
+            "supported": True,
+            "mode": "provider_automatic",
+        },
+    }
+    openai_model_instance.prompt_cache = {
+        "mode": "provider_automatic",
+        "enabled": True,
+    }
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "ok"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.choices[0].finish_reason = "stop"
+    mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        openai_model_instance([{"role": "user", "content": "verify"}])
+
+    feature_attributes = next(
+        call.kwargs
+        for call in reversed(
+            openai_model_instance._monitoring.set_span_attributes.call_args_list
+        )
+        if "llm.feature.source" in call.kwargs
+    )
+    assert feature_attributes == {
+        "llm.feature.source": "catalog_family",
+        "llm.feature.match_kind": "catalog_family",
+        "llm.feature.catalog_revision": "2026-09-01.2",
+        "llm.feature.profile_version": "dashscope/qwen3-hybrid-family@1",
+        "llm.reasoning.supported": True,
+        "llm.reasoning.mode": "effort",
+        "llm.reasoning.request_style": "openai_reasoning_effort",
+        "llm.prompt_cache.mode": "provider_automatic",
+        "llm.prompt_cache.supported": True,
+        "llm.prompt_cache.directive_reason": "provider_automatic_cache",
+        "llm.prompt_cache.profile_supported": True,
+    }
 
 
 def test_provider_adapter_preserves_context_manager_tool_order(openai_model_instance):

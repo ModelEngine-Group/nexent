@@ -90,6 +90,42 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.tools == [{"name": "a"}, {"name": "z"}]
 
 
+def test_ac_p6_002_emergency_archive_keeps_recent_turns_and_indexes_older_turns():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    for index in range(5):
+        manager.register_item(ContextItemInput(
+            id=f"turn:{index}",
+            type="conversation_turn",
+            content={
+                "user_message": f"user request {index}",
+                "assistant_final_answer": f"answer {index}",
+                "user_message_id": index * 2 + 1,
+                "assistant_message_id": index * 2 + 2,
+            },
+            metadata={"layout_order": index},
+        ))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="")
+
+    final = manager.assemble_final_context(
+        model=None, memory=memory, current_run_start_idx=0,
+        run_context=run_context, target_input_budget_tokens=9000,
+        emergency_archive=True,
+    )
+
+    assert final.evidence.archive_active is True
+    assert final.evidence.archived_item_count == 2
+    assert "turn:0" not in final.evidence.selected_item_ids
+    assert "turn:4" in final.evidence.selected_item_ids
+    assert [tool.name for tool in final.runtime_tools] == ["search_archived_history"]
+    recall = manager.archive_tool.forward("user request 0", kinds=["chat_turn"])
+    assert recall["results"][0]["source_id"] == "turn:0"
+    rendered = "\n".join(_message_text(message) for message in final.messages)
+    assert "user request 0" not in rendered
+    assert "search_archived_history" in rendered
+
+
 def test_context_fingerprint_bounds_cycles_and_excessive_depth():
     manager = ContextManager()
     cyclic = {}

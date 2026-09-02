@@ -27,12 +27,19 @@ def _compression_reasons(context_evidence: Any) -> list[str]:
     return reasons
 
 
-def build_context_budget_event(preflight: Any, context_evidence: Any, *, step_number: int, recovery_state: str = "not_needed") -> dict[str, Any]:
+def build_context_budget_event(
+    preflight: Any,
+    context_evidence: Any,
+    *,
+    step_number: int,
+    recovery_state: str = "not_needed",
+    recovery: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     components = preflight.components
     raw_context = int(getattr(context_evidence, "raw_token_estimate", 0) or 0)
     final_context = int(getattr(context_evidence, "final_token_estimate", 0) or 0)
     saved = max(raw_context - final_context, 0)
-    return {
+    event = {
         "schema_version": 1, "purpose": getattr(context_evidence, "purpose", "step"),
         "step_number": int(step_number), "raw_tokens": raw_context, "final_tokens": final_context,
         "soft_budget": int(preflight.soft_budget), "hard_budget": int(preflight.hard_budget),
@@ -52,3 +59,17 @@ def build_context_budget_event(preflight: Any, context_evidence: Any, *, step_nu
         "recovery_state": recovery_state, "request_fingerprint": preflight.request_fingerprint,
         "budget_fingerprint": preflight.identity_fingerprint, "retry_ordinal": int(preflight.retry_ordinal),
     }
+    archive_active = bool(getattr(context_evidence, "archive_active", False))
+    if archive_active or recovery:
+        details = dict(recovery or {})
+        details.setdefault("phase", "archive" if archive_active else "compression")
+        details.setdefault("attempt", int(preflight.retry_ordinal))
+        details.setdefault("maximum_attempts", 2)
+        details.setdefault("compression_target", int(preflight.hard_budget))
+        details.setdefault("archive_active", archive_active)
+        details.setdefault("archived_item_count", int(getattr(context_evidence, "archived_item_count", 0)))
+        details.setdefault("retained_item_count", int(getattr(context_evidence, "retained_item_count", 0)))
+        details.setdefault("recall_invocation_count", int(getattr(context_evidence, "recall_invocation_count", 0)))
+        details.setdefault("recalled_tokens", int(getattr(context_evidence, "recalled_tokens", 0)))
+        event["recovery"] = details
+    return event

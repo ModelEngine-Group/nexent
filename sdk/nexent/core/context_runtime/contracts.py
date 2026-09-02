@@ -68,6 +68,12 @@ class ContextEvidence:
     history_message_roles: tuple[str, ...] = ()
     compression_attempted: bool = False
     fallback_compaction_used: bool = False
+    archive_active: bool = False
+    archived_item_count: int = 0
+    retained_item_count: int = 0
+    recall_invocation_count: int = 0
+    recalled_tokens: int = 0
+    context_composition_estimate: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,7 @@ class FinalContext:
     messages: list[ModelMessage]
     tools: list[dict[str, object]] = field(default_factory=list)
     evidence: ContextEvidence = field(default_factory=ContextEvidence)
+    runtime_tools: tuple[ModelTool, ...] = ()
 
 
 class ContextRuntime(Protocol):
@@ -98,6 +105,7 @@ class ContextRuntime(Protocol):
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
         target_input_budget_tokens: int | None = None,
+        emergency_archive: bool = False,
     ) -> FinalContext:
         """Return all model messages for the current step."""
 
@@ -111,6 +119,7 @@ class ContextRuntime(Protocol):
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
         target_input_budget_tokens: int | None = None,
+        emergency_archive: bool = False,
     ) -> FinalContext:
         """Return all model messages for final-answer generation."""
 

@@ -74,6 +74,12 @@ sys.modules["consts.capability_profiles"] = types.ModuleType(
     "consts.capability_profiles"
 )
 sys.modules["consts.capability_profiles"].CATALOG = {}
+sys.modules["consts.model_feature_capabilities"] = types.ModuleType(
+    "consts.model_feature_capabilities"
+)
+sys.modules["consts.model_feature_capabilities"].CATALOG_REVISION = "test"
+sys.modules["consts.model_feature_capabilities"].EXACT_CATALOG = {}
+sys.modules["consts.model_feature_capabilities"].FAMILY_RULES = ()
 
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
@@ -178,6 +184,16 @@ class MockAgentVerificationConfig:
         return value or {}
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
+sys.modules['nexent.core.models.feature_capability'] = _create_stub_module(
+    "nexent.core.models.feature_capability",
+    normalize_feature_profile=lambda value: value if isinstance(value, dict) else None,
+    resolve_feature_capabilities=lambda *args, **kwargs: {
+        "schema_version": 1,
+        "reasoning": {"supported": None, "mode": "unknown", "request_style": "unknown", "efforts": []},
+        "prompt_cache": {"supported": None, "mode": "unknown", "metrics_available": None},
+        "source": "unknown",
+    },
+)
 sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     "nexent.core.agents.agent_model",
     AgentHistory=AgentHistory,
@@ -213,10 +229,14 @@ sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
 )
 sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
     "nexent.core.models.prompt_cache",
-    resolve_prompt_cache_profile=lambda provider: (
+    resolve_prompt_cache_profile=lambda provider, explicit_profile=None: (
         {"mode": "openai_automatic", "enabled": True}
         if (provider or "").lower() == "openai" else None
     ),
+    resolve_provider_usage_profile=lambda provider, version=None: {
+        "capability_profile_version": version,
+        "reasoning_usage_semantics": "unavailable",
+    },
 )
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
@@ -528,6 +548,7 @@ from backend.agents.create_agent_info import (
     _build_security_headers,
     _resolve_scheme_field,
     _build_auth_header_for_scheme,
+    _effective_feature_factory,
     _get_external_a2a_agents,
     _build_internal_s3_url,
     _format_minio_files_for_content,
@@ -3764,6 +3785,25 @@ class TestCreateAgentConfig:
                 assert last_tool.name == "parallel_executor"
                 assert last_tool.class_name == "ParallelExecutorTool"
                 assert last_tool.source == "local"
+
+
+def test_p8_effective_feature_factory_requires_generic_factory_and_exact_known_host():
+    assert _effective_feature_factory({
+        "model_factory": "OpenAI-API-Compatible",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    }) == "dashscope"
+    assert _effective_feature_factory({
+        "model_factory": "OpenAI-API-Compatible",
+        "base_url": "https://api.openai.com/v1",
+    }) == "openai"
+    assert _effective_feature_factory({
+        "model_factory": "OpenAI-API-Compatible",
+        "base_url": "https://dashscope.aliyuncs.com.evil.example/v1",
+    }) == "openai-api-compatible"
+    assert _effective_feature_factory({
+        "model_factory": "modelengine",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    }) == "modelengine"
 
 
 class TestCreateModelConfigList:

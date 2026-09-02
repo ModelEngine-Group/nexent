@@ -50,6 +50,22 @@ export interface ContextBudgetMetrics {
     >;
   };
   recovery_state: string;
+  recovery?: {
+    trigger?: string;
+    phase?: "compression" | "archive";
+    attempt?: number;
+    maximum_attempts?: number;
+    compression_target?: number;
+    provisional_capacity?: boolean;
+    archive_active?: boolean;
+    archived_item_count?: number;
+    retained_item_count?: number;
+    recall_invocation_count?: number;
+    recalled_tokens?: number;
+    partial_preserved?: boolean;
+    auto_continued?: boolean;
+    terminal_reason?: string;
+  };
   retry_ordinal: number;
 }
 

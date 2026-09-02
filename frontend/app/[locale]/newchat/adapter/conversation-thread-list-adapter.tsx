@@ -40,12 +40,16 @@ import {
   remoteChatModelAdapter,
   parseStepTokenCount,
   parseContextBudget,
+  parseProviderCallUsage,
+  parseTurnUsage,
   parsePlan,
   parsePlanStepUpdate,
   planRegistry,
   type PlanData,
   type SearchSource,
   type ContextBudgetEvent,
+  type ProviderCallUsageV2,
+  type TurnUsageV2,
   type StepTokenCount,
 } from "./remote-chat-model-adapter";
 
@@ -385,6 +389,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // no streaming run to read from.
       const stepTokenCounts: StepTokenCount[] = [];
       const pendingContextBudgets = new Map<number, ContextBudgetEvent>();
+      const providerCallUsages: ProviderCallUsageV2[] = [];
+      let turnUsage: TurnUsageV2 | null = null;
 
       // Populate conversationSourcesRegistry for historical assistant messages
       // and build the matching `source` parts that drive the
@@ -606,6 +612,15 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               if (step) step.contextBudget = budget;
               else pendingContextBudgets.set(budget.step_number, budget);
             }
+            continue;
+          }
+          if (part.type === "llm_usage") {
+            const usage = parseProviderCallUsage(part.content);
+            if (usage) providerCallUsages.push(usage);
+            continue;
+          }
+          if (part.type === "turn_usage") {
+            turnUsage = parseTurnUsage(part.content);
             continue;
           }
 
@@ -1028,7 +1043,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // always include the field and only set the token bucket when we have
       // historical step data.
       const metadata = {
-        custom: stepTokenCounts.length > 0 ? { stepTokenCounts } : {},
+        custom: {
+          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(providerCallUsages.length > 0 ? { providerCallUsages } : {}),
+          ...(turnUsage ? { turnUsage } : {}),
+        },
       };
 
       messages.push({

@@ -136,6 +136,22 @@ class CompactionNoReduction(FinalRequestBudgetError):
     reason_code = "compaction_no_reduction"
 
 
+class ContextRebuildOverBudget(FinalRequestBudgetError):
+    """A source-backed rebuild could not satisfy its requested input target."""
+
+    reason_code = "context_rebuild_over_budget"
+
+    def __init__(self, *, failure_reason: str, actual: int, hard_budget: int) -> None:
+        self.context_rebuild_over_budget = True
+        self.failure_reason = failure_reason
+        self.actual = actual
+        self.hard_budget = hard_budget
+        super().__init__(
+            f"{failure_reason}: Context input remains over the model hard budget "
+            f"after compaction: {actual} > {hard_budget} tokens"
+        )
+
+
 class RequestSideEffectGuard:
     """Monotonic proof that a physical request is still safe to rebuild."""
 

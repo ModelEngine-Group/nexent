@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import threading
+from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
@@ -2309,6 +2310,82 @@ class TestRunStreamRealExecution:
         assert agent.context_runtime.prepare_step.call_args.kwargs[
             "target_input_budget_tokens"
         ] == 123
+
+    def test_ac_002_emergency_archive_tool_refreshes_live_executor_registry(self):
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        agent = object.__new__(CoreAgent)
+        existing_tool = MagicMock(name="existing_tool")
+        archive_tool = MagicMock(name="archive_tool")
+        archive_tool.name = "search_archived_history"
+        agent.tools = {"existing_tool": existing_tool}
+        agent.managed_agents = {}
+        agent.python_executor = MagicMock()
+        agent.context_runtime = MagicMock()
+        agent.context_runtime.context_manager.activate_emergency_archive.return_value = archive_tool
+        agent._guardrail_wrap_tools = MagicMock()
+        agent._wrap_visible_tool_events = MagicMock()
+
+        result = agent._activate_emergency_archive_tool(hard_budget=10_000)
+
+        assert result is archive_tool
+        assert agent.tools["search_archived_history"] is archive_tool
+        agent.python_executor.send_tools.assert_called_once_with({
+            "existing_tool": existing_tool,
+            "search_archived_history": archive_tool,
+        })
+
+    def test_ac_003_recall_execution_emits_updated_persistable_budget_event(self):
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        module.ProcessType.CONTEXT_BUDGET = "context_budget"
+
+        @dataclass(frozen=True)
+        class Evidence:
+            purpose: str = "step"
+            raw_token_estimate: int = 100
+            final_token_estimate: int = 80
+            compression_attempted: bool = True
+            fallback_compaction_used: bool = False
+            compression_records: tuple = ()
+            archive_active: bool = True
+            archived_item_count: int = 2
+            retained_item_count: int = 4
+            recall_invocation_count: int = 0
+            recalled_tokens: int = 0
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.step_number = 1
+        agent.observer = MagicMock()
+        archive = SimpleNamespace(recall_invocations=1, recalled_tokens=4000)
+        agent.context_runtime = SimpleNamespace(
+            context_manager=SimpleNamespace(
+                archive_tool=SimpleNamespace(archive=archive)
+            )
+        )
+        components = SimpleNamespace(
+            message_text=50, message_framing=5, tools=10,
+            media=0, reasoning=0, other_semantic=0,
+        )
+        preflight = SimpleNamespace(
+            components=components, soft_budget=100, hard_budget=90,
+            hard_count=70, count_source="estimated",
+            request_fingerprint="request", identity_fingerprint="budget",
+            retry_ordinal=2,
+        )
+        agent.model = SimpleNamespace(
+            last_context_evidence=Evidence(),
+            last_final_request_preflight=preflight,
+            _using_provisional_capacity=False,
+        )
+
+        agent._emit_archive_recall_budget_update()
+
+        emitted = json.loads(agent.observer.add_message.call_args.args[2])
+        assert emitted["recovery"]["recall_invocation_count"] == 1
+        assert emitted["recovery"]["recalled_tokens"] == 4000
+        assert agent.model.last_context_evidence.recalled_tokens == 4000
 
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""

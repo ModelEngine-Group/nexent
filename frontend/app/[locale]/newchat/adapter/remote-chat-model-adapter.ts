@@ -344,6 +344,99 @@ export interface ContextBudgetEvent {
   count_source: string;
   compression: { attempted: boolean; saved_tokens: number; ratio: number };
   recovery_state: string;
+  recovery?: {
+    archive_active?: boolean;
+    archived_item_count?: number;
+    retained_item_count?: number;
+    recalled_tokens?: number;
+    partial_preserved?: boolean;
+    auto_continued?: boolean;
+    provisional_capacity?: boolean;
+    terminal_reason?: string;
+  };
+}
+
+export interface ProviderCallUsageV2 {
+  schema_version: 2;
+  call_id: string;
+  turn_id: string | null;
+  step_number: number | null;
+  purpose: string;
+  attempt: number;
+  provider: string;
+  model: string;
+  capability_profile_version: string | null;
+  source: "provider" | "estimated" | "missing" | string;
+  status: "completed" | "partial" | "failed" | "cancelled";
+  usage: {
+    input_tokens: number | null;
+    output_tokens: number | null;
+    total_tokens: number | null;
+    fresh_input_tokens: number | null;
+    cache_read_tokens: number | null;
+    cache_write_tokens: number | null;
+    reasoning_tokens: number | null;
+    visible_output_tokens: number | null;
+    total_source: string;
+  };
+  quality: { degraded: boolean; reasons: string[] };
+  finish_reason: string | null;
+  duration_ms: number | null;
+  time_to_first_token_ms: number | null;
+  provider_metadata: Record<string, number>;
+  context_composition: {
+    source: string;
+    denominator_tokens: number;
+    estimator_version: string;
+    segments: Record<string, number>;
+    adjustment_ratio: number;
+    high_adjustment: boolean;
+  } | null;
+}
+
+export interface TurnUsageV2 {
+  schema_version: 2;
+  turn_id: string;
+  call_count: number;
+  known_usage_call_count: number;
+  known_field_call_counts: Record<string, number>;
+  usage: Record<string, number | null>;
+  latest_context: {
+    call_id: string;
+    input_tokens: number;
+    limit_tokens: number | null;
+  } | null;
+  peak_context: {
+    call_id: string;
+    input_tokens: number;
+    limit_tokens: number | null;
+  } | null;
+  data_quality: string;
+  call_ids: string[];
+}
+
+export function parseProviderCallUsage(
+  content: string
+): ProviderCallUsageV2 | null {
+  try {
+    const data = JSON.parse(content);
+    return data?.schema_version === 2 && typeof data.call_id === "string"
+      ? (data as ProviderCallUsageV2)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseTurnUsage(content: string): TurnUsageV2 | null {
+  try {
+    const data = JSON.parse(content);
+    return data?.schema_version === 2 && Array.isArray(data.call_ids)
+      ? (data as TurnUsageV2)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function parseContextBudget(content: string): ContextBudgetEvent | null {
@@ -1903,9 +1996,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const providerCallUsages: ProviderCallUsageV2[] = [];
+    let turnUsage: TurnUsageV2 | null = null;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
       content: collapseSubAgentParts(content),
-      metadata: nl2a ? { custom: { nl2a } } : undefined,
+      metadata: {
+        custom: {
+          ...(nl2a ? { nl2a } : {}),
+          ...(providerCallUsages.length > 0
+            ? { providerCallUsages: [...providerCallUsages] }
+            : {}),
+          ...(turnUsage ? { turnUsage } : {}),
+        },
+      },
     });
 
     const streamStartTime = Date.now();
@@ -1989,6 +2092,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               if (step) step.contextBudget = budget;
               else pendingContextBudgets.set(budget.step_number, budget);
             }
+            continue;
+          }
+          if (chunk.type === "llm_usage") {
+            const usage = parseProviderCallUsage(chunk.content);
+            if (usage) {
+              const index = providerCallUsages.findIndex(
+                (item) => item.call_id === usage.call_id
+              );
+              if (index >= 0) providerCallUsages[index] = usage;
+              else providerCallUsages.push(usage);
+            }
+            continue;
+          }
+          if (chunk.type === "turn_usage") {
+            turnUsage = parseTurnUsage(chunk.content);
             continue;
           }
 
