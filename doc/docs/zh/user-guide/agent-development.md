@@ -11,7 +11,7 @@
 | [模型配置](./agent-development/model-configuration) | 接入和管理 AI 模型，包括大语言模型、向量化模型、视觉语言模型、重排模型以及语音模型（语音合成与语音识别） |
 | [知识库配置](./agent-development/knowledge-configuration) | 创建知识库、查看个人容量、处理文档和管理 Chunk，让智能体检索私有数据 |
 | [记忆配置](./agent-development/memory-configuration) | 管理 Tenant、User、Agent 三层记忆，并通过 Dreaming 将稳定的短期记忆整理为长期记忆 |
-| [智能体配置](./agent-development/agent-configuration) | 使用智能生成或手动方式配置智能体，并完成资源绑定、调试、发布和版本管理 |
+| [智能体配置](./agent-development/agent-configuration) | 使用智能生成完成整套配置或局部优化，也可以手动调整参数，并完成资源绑定、调试、发布和版本管理 |
 
 ## 主要步骤
 

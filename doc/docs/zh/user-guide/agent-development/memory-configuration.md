@@ -82,11 +82,8 @@ Dreaming 会分析当前用户积累的 Agent 短期记忆，筛选反复被召�
 
 Dreaming 依次完成短期信号收集、稳定模式识别、候选筛选和长期记忆生成。执行依赖专用后台 worker；若长时间停留在排队状态，请联系管理员检查对应服务。
 
-::: info 截图待补充
-**截图内容**：基础设置中的 Dreaming 执行状态、立即运行按钮和自动计划设置。
+![Dreaming基础设置](./../assets/memory-management/dreaming-run-and-schedule.png)
 
-**建议文件**：`doc/docs/zh/user-guide/assets/memory-management/dreaming-run-and-schedule.png`
-:::
 
 ### 高级参数
 
@@ -103,11 +100,7 @@ Dreaming 依次完成短期信号收集、稳定模式识别、候选筛选和�
 
 调低前三项会更快生成长期记忆，但可能纳入尚未稳定的信息；调高会更保守。增加单次记忆数、输出上限或总结重试次数，通常也会增加执行时间和模型成本。
 
-::: info 截图待补充
-**截图内容**：Dreaming“高级设置”弹窗，展示六个参数及默认值。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/memory-management/dreaming-advanced-settings.png`
-:::
+![Dreaming高级设置](./../assets/memory-management/dreaming-advanced-settings.png)
 
 ## 🗂️ 查看和筛选记忆
 
@@ -141,11 +134,6 @@ Tenant 和 User 页签展示当前活跃版本。点击“编辑”后，可以�
 
 版本下拉框会显示版本号、来源和创建时间。来源包括手动编辑和 Dreaming。选择历史版本可以查看内容；点击“设为活跃版本”并确认后，后续智能体运行将使用该版本，同时保留其他历史版本。
 
-::: info 截图待补充
-**截图内容**：User 长期记忆的活跃版本、版本历史下拉框、编辑/预览和切换版本操作。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/memory-management/memory-version-history.png`
-:::
 
 ### 编辑和删除 Agent 记忆
 

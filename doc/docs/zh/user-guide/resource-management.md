@@ -204,11 +204,6 @@ Nexent 采用基于角色的访问控制（RBAC）模型，通过租户与用户
 
 API Key 属于敏感凭证。不要把真实值放入截图、文档、日志、会话 Metadata 或代码仓库；补充文档截图时必须遮盖 Key 和真实邮箱。
 
-::: info 截图待补充
-**截图内容**：租户资源的 API Key 页签，展示列表字段、刷新和删除操作；必须遮盖真实 Key 与邮箱。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/user-management/api-key-management.png`
-:::
 
 ### 4.4 个人知识库容量
 
@@ -220,18 +215,6 @@ API Key 属于敏感凭证。不要把真实值放入截图、文档、日志、
 - 设置租户默认个人配额，或为某个用户设置独立配额
 
 默认配额只影响没有独立配额的用户；独立配额优先于默认值。配额不能设置为低于当前总用量。修改默认配额后，相关用户会在下一次上传时按新配额校验，已有文件不会被自动删除。
-
-::: info 截图待补充
-**截图内容**：个人知识库容量总览，包含汇总指标、用户表格、搜索、排序和展开后的知识库明细。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/user-management/personal-kb-capacity-overview.png`
-:::
-
-::: info 截图待补充
-**截图内容**：默认配额与用户独立配额设置弹窗，包含当前用量和“不能低于当前用量”的提示。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/user-management/personal-kb-quota-setting.png`
-:::
 
 ### 4.5 筛选和定位资源
 

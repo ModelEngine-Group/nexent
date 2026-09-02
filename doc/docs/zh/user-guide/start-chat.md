@@ -61,12 +61,6 @@
 
 > **注意**：删除操作无法撤销。批量删除还会取消并清理绑定到所选对话的自动化任务；确认前请检查选择数量。
 
-::: info 截图待补充
-**截图内容**：按日期分组的对话列表，以及进入批量管理后显示的复选框、已选数量、全选和删除按钮。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/start-chat/conversation-management.png`
-:::
-
 ### 2. 智能体开场白和示例问题
 
 智能体首页中央区域会显示该智能体的开场白（介绍用途和能力）以及预设的示例问题。开场白和示例问题由智能体开发者在智能体配置页面中设置。点击示例问题会自动填入输入框，用户可修改后发送或直接发送。
@@ -107,11 +101,6 @@
 - 大小不能超过 64 KiB；保存空对象 `{}` 会清除当前会话已存储的 Metadata。
 - Metadata 对模型可见，请勿填写密码、访问令牌、个人隐私或其他敏感信息。
 
-::: info 截图待补充
-**截图内容**：输入区域的 Metadata 入口和 JSON 编辑弹窗，保留格式校验与安全提示。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/start-chat/runtime-metadata.png`
-:::
 
 #### 上传附件
 
@@ -473,11 +462,6 @@ Nexent 智能体基于 [smolagents](https://github.com/huggingface/smolagents) �
 
 如果某种格式不能在浏览器中预览，仍可直接下载后使用本地应用打开。生成文件是否可用取决于智能体配置的工具或 Skill；普通文本回答不会自动产生文件。
 
-::: info 截图待补充
-**截图内容**：一条包含生成文件的智能体回复，展示文件名、预览入口和下载入口。
-
-**建议文件**：`doc/docs/zh/user-guide/assets/start-chat/generated-file-preview.png`
-:::
 
 ## 七、Mermaid 图表
 
