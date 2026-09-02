@@ -6,7 +6,6 @@ import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
 // @ts-ignore
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -946,15 +945,13 @@ const convertLatexDelimiters = (content: string): string => {
 };
 
 /**
- * Convert custom code tags to standard markdown code fences for proper rendering
- * Handles both complete and incomplete tags (for streaming scenarios)
- * - <code>...</code> → ```python ... ```
- * - <code>... (incomplete) → ```python\n (open code fence)
+ * Convert custom display tags to standard markdown code fences.
+ * Handles complete and incomplete tags for streaming responses.
  * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
- * - <DISPLAY:language>... (incomplete) → ```language\n (open code fence)
+ * - <DISPLAY:language>... (incomplete) → ```language\n
  */
-const convertCustomCodeTags = (content: string): string => {
-  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+const convertDisplayCodeTags = (content: string): string => {
+  // Handle complete <DISPLAY:language>...</DISPLAY> blocks
   content = content.replace(
     /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
     (_match, language, code) => {
@@ -962,26 +959,11 @@ const convertCustomCodeTags = (content: string): string => {
     }
   );
 
-  // Step 2: Handle complete <code>...</code> blocks
-  content = content.replace(/<code>([\s\S]*?)<\/code>/g, (_match, code) => {
-    return `\`\`\`python\n${code.trim()}\n\`\`\``;
-  });
-
-  // Step 3: Handle incomplete tags during streaming
-  // <DISPLAY:language> without closing </DISPLAY> → ```language\n
-  content = content.replace(
+  // Handle incomplete tags during streaming.
+  return content.replace(
     /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
-    (_match, language) => {
-      return `\`\`\`${language}\n`;
-    }
+    (_match, language) => `\`\`\`${language}\n`
   );
-
-  // <code> without closing </code> → ```python\n
-  content = content.replace(/<code>(?![\s\S]*<\/code>)/g, () => {
-    return `\`\`\`python\n`;
-  });
-
-  return content;
 };
 
 // Video component with error handling - defined outside to prevent re-creation on each render
@@ -1169,8 +1151,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 }) => {
   const { t } = useTranslation("common");
 
-  // Preprocess content: convert LaTeX delimiters and custom code tags
-  const convertedContent = convertCustomCodeTags(
+  // Preprocess LaTeX delimiters and streaming display-code tags.
+  const convertedContent = convertDisplayCodeTags(
     convertLatexDelimiters(content)
   );
   const processedContent = enableSkillDirectives
@@ -1464,10 +1446,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     trust: true,
                   },
                 ],
-                rehypeRaw,
               ] as any
             }
-            skipHtml={false}
+            skipHtml={true}
             components={{
               // Heading components - now using CSS classes
               h1: ({ children, node }: any) => renderHeading(1, children, node),
