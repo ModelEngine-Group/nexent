@@ -333,9 +333,13 @@ class ConversationSourceSearch(TableBase):
         String(400), doc="URL link or file path of the search source")
     source_content = Column(String, doc="Original text of the search source")
     score_overall = Column(Numeric(
-        7, 6), doc="Overall similarity score between the source and the user query, calculated by weighted average of details")
+        14, 6), doc="Overall retrieval score between the source and the user query")
     score_accuracy = Column(Numeric(7, 6), doc="Accuracy score")
     score_semantic = Column(Numeric(7, 6), doc="Semantic similarity score")
+    retrieval_highlight_terms = Column(
+        JSONB,
+        doc="Exact lexical terms returned by the retrieval engine for source highlighting",
+    )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")
     cite_index = Column(

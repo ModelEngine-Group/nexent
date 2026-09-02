@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.utils.context_utils import (
+    _build_execution_flow_text,
     build_app_context_string,
     build_authorized_context_input,
     build_context_inputs,
@@ -142,6 +143,22 @@ def test_restricted_python_policy_is_injected_before_code_norms(language):
     assert item_ids.index(policy_item.id) < item_ids.index("system:code_norms")
     if language == "en":
         assert "### Python Code Execution Boundary" in policy_text
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_text"),
+    [
+        ("zh", "一个引用标记只对应它紧前的一句话"),
+        ("en", "applies only to the sentence immediately before it"),
+    ],
+)
+def test_retrieval_citation_prompt_requires_sentence_level_marks(
+    language, expected_text
+):
+    prompt = _build_execution_flow_text(language=language, is_manager=False)
+
+    assert expected_text in prompt
+    assert "同一句可标记多个来源" in prompt or "multiple sources may be marked" in prompt
 
 
 def test_all_sources_are_naturally_granular_and_keep_stable_order():

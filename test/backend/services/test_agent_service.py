@@ -13408,7 +13408,16 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
         yield json.dumps({
             "type": "search_content",
             "content": json.dumps([
-                {"title": "Result 1", "url": "http://example.com/1", "text": "Content 1", "score": 0.9},
+                {
+                    "title": "Result 1",
+                    "url": "http://example.com/1",
+                    "text": "Content 1",
+                    "score": 0.9,
+                    "score_details": {
+                        "semantic": 0.8,
+                        "retrieval_highlight_terms": ["Content", "1"],
+                    },
+                },
                 {"title": "Result 2", "url": "http://example.com/2", "text": "Content 2", "score": 0.8}
             ])
         })
@@ -13431,6 +13440,26 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
         agent_service,
         "persist_assistant_run_batch",
         lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        "backend.services.agent_service.save_message_unit",
+        MagicMock(return_value=4243),
+        raising=False,
+    )
+
+    class ImmediateFuture:
+        def __init__(self, value):
+            self.value = value
+
+        def result(self):
+            return self.value
+
+    # Run persistence callbacks synchronously so assertions are deterministic.
+    monkeypatch.setattr(
+        "backend.services.agent_service.submit",
+        lambda fn, *args, **kwargs: ImmediateFuture(fn(*args, **kwargs)),
         raising=False,
     )
 
@@ -13459,6 +13488,13 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
     assert batch["message_units"][0]["unit_index"] == 0
     assert len(batch["search_records"]) == 2
     assert {record["unit_index"] for record in batch["search_records"]} == {0}
+
+    # source_search rows keep retrieval highlight terms for later rendering
+    search_records = batch["search_records"]
+    assert len(search_records) == 2
+    assert search_records[0]["retrieval_highlight_terms"] == ["Content", "1"]
+    assert search_records[0]["score_semantic"] == 0.8
+    assert search_records[1]["retrieval_highlight_terms"] == []
 
 
 @pytest.mark.asyncio

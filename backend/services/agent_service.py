@@ -1259,6 +1259,9 @@ async def _stream_agent_chunks(
                                     "score_semantic": float(result.get("score_details", {}).get("semantic"))
                                     if result.get("score_details", {}).get("semantic") not in (None, "")
                                     else None,
+                                    "retrieval_highlight_terms": result.get(
+                                        "score_details", {}
+                                    ).get("retrieval_highlight_terms", []),
                                     "published_date": result.get("published_date")
                                     if result.get("published_date") not in (None, "")
                                     else None,

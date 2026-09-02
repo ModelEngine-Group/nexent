@@ -58,6 +58,11 @@ interface FinalMessageProps {
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
+  onCitationClick?: (
+    messageId: string,
+    citationKey: string,
+    answerText: string
+  ) => void;
   shareSelected?: boolean;
 }
 
@@ -78,6 +83,7 @@ function ChatStreamFinalMessageInner({
   index,
   currentConversationId,
   onCitationHover,
+  onCitationClick,
   shareSelected = false,
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
@@ -358,6 +364,18 @@ function ChatStreamFinalMessageInner({
                 )}
                 searchResults={message?.searchResults}
                 onCitationHover={onCitationHover}
+                onCitationClick={(citationKey, citationContext) => {
+                  if (message.id) {
+                    onCitationClick?.(
+                      message.id,
+                      citationKey,
+                      citationContext ||
+                        message.finalAnswer ||
+                        message.content ||
+                        ""
+                    );
+                  }
+                }}
                 // For historical messages, content already represents the final answer
                 // when finalAnswer is not present, so enable S3 resolution in both cases.
                 resolveS3Media={Boolean(message.finalAnswer || message.content)}

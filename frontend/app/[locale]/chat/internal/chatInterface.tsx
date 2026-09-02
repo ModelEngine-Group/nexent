@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -215,6 +216,10 @@ export function ChatInterface() {
   const [selectedMessageId, setSelectedMessageId] = useState<
     string | undefined
   >();
+  const [selectedCitationKey, setSelectedCitationKey] = useState<
+    string | undefined
+  >();
+  const [selectedCitationContext, setSelectedCitationContext] = useState("");
 
   // Add force scroll to bottom state control
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
@@ -1867,7 +1872,24 @@ export function ChatInterface() {
   const handleMessageSelect = useCallback((messageId: string) => {
     setShowRightPanel(true);
     setSelectedMessageId(messageId);
+    setSelectedCitationKey(undefined);
+    setSelectedCitationContext("");
   }, []);
+
+  const handleCitationClick = useCallback(
+    (messageId: string, citationKey: string, answerText: string) => {
+      // Clicking a citation marker always opens the panel and selects the
+      // matching source card; the flag only gates sentence-level highlight
+      // extraction from the cited answer context.
+      setShowRightPanel(true);
+      setSelectedMessageId(messageId);
+      setSelectedCitationKey(citationKey);
+      setSelectedCitationContext(
+        ENABLE_CITATION_CLICK_HIGHLIGHT ? answerText : ""
+      );
+    },
+    []
+  );
 
   const hydrateConversationMessageIds = useCallback(
     async (conversationId: number) => {
@@ -2240,6 +2262,7 @@ export function ChatInterface() {
               selectedAgentId={selectedAgentId}
               onAgentSelect={handleAgentSelectWithGreeting}
               onCitationHover={clearCompletedIndicator}
+              onCitationClick={handleCitationClick}
               onScroll={clearCompletedIndicator}
               agentGreeting={agentGreeting}
               agentExampleQuestions={agentExampleQuestions}
@@ -2261,6 +2284,8 @@ export function ChatInterface() {
             isVisible={showRightPanel}
             toggleRightPanel={toggleRightPanel}
             selectedMessageId={selectedMessageId}
+            selectedCitationKey={selectedCitationKey}
+            selectedCitationContext={selectedCitationContext}
           />
         </div>
       </Layout>

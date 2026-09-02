@@ -117,9 +117,10 @@ CREATE TABLE IF NOT EXISTS "conversation_source_search_t" (
   "source_title" varchar(400) COLLATE "pg_catalog"."default",
   "source_location" varchar(400) COLLATE "pg_catalog"."default",
   "source_content" varchar COLLATE "pg_catalog"."default",
-  "score_overall" numeric(7,6),
+  "score_overall" numeric(14,6),
   "score_accuracy" numeric(7,6),
   "score_semantic" numeric(7,6),
+  "retrieval_highlight_terms" jsonb,
   "published_date" timestamp(0),
   "cite_index" int4,
   "search_type" varchar(100) COLLATE "pg_catalog"."default",
@@ -142,6 +143,7 @@ COMMENT ON COLUMN "conversation_source_search_t"."source_content" IS 'Original t
 COMMENT ON COLUMN "conversation_source_search_t"."score_overall" IS 'Overall similarity score between source and user query, calculated as weighted average of details';
 COMMENT ON COLUMN "conversation_source_search_t"."score_accuracy" IS 'Accuracy score';
 COMMENT ON COLUMN "conversation_source_search_t"."score_semantic" IS 'Semantic similarity score';
+COMMENT ON COLUMN "conversation_source_search_t"."retrieval_highlight_terms" IS 'Exact lexical terms returned by retrieval for source highlighting';
 COMMENT ON COLUMN "conversation_source_search_t"."published_date" IS 'Upload date of local file or network search date';
 COMMENT ON COLUMN "conversation_source_search_t"."cite_index" IS 'Citation sequence number, used for precise tracing';
 COMMENT ON COLUMN "conversation_source_search_t"."search_type" IS 'Search source type, specifically describes the search tool used for this record, optional values web_search/knowledge_base_search';
