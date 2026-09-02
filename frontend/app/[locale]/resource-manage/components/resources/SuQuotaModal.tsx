@@ -6,11 +6,10 @@
  * Minimal UI focused on SU's sole responsibility:
  * allocating storage capacity to individual tenants.
  */
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Modal,
-  InputNumber,
   App,
   Descriptions,
   Progress,
@@ -53,8 +52,8 @@ export function SuQuotaModal({
     useState<PlatformQuotaOverview | null>(null);
   const [saving, setSaving] = useState(false);
   const [unit, setUnit] = useState<"GB" | "MB">("GB");
-  const [quotaValue, setQuotaValue] = useState<number | null>(null);
-  const quotaInputIsEmptyRef = useRef(false);
+  const [quotaInput, setQuotaInput] = useState("");
+  const quotaValue = quotaInput === "" ? null : Number(quotaInput);
 
   // Reset local state when modal opens; then load data
   useEffect(() => {
@@ -65,8 +64,7 @@ export function SuQuotaModal({
     setUsageData(null);
     setPlatformOverview(null);
     setUnit("GB");
-    setQuotaValue(null);
-    quotaInputIsEmptyRef.current = false;
+    setQuotaInput("");
 
     let cancelled = false;
     setLoading(true);
@@ -88,10 +86,10 @@ export function SuQuotaModal({
         const currentBytes: number | null = cfg?.hard_limit_bytes ?? null;
         if (currentBytes && currentBytes < GB) {
           setUnit("MB");
-          setQuotaValue(Math.round(currentBytes / MB));
+          setQuotaInput(String(Math.round(currentBytes / MB)));
         } else {
           setUnit("GB");
-          setQuotaValue(currentBytes ? Math.round(currentBytes / GB) : null);
+          setQuotaInput(currentBytes ? String(Math.round(currentBytes / GB)) : "");
         }
       } catch (err: any) {
         if (!cancelled) {
@@ -111,7 +109,7 @@ export function SuQuotaModal({
   const handleSave = async () => {
     try {
       setSaving(true);
-      if (quotaValue == null || quotaInputIsEmptyRef.current) {
+      if (quotaValue == null) {
         // Deleting this config restores the tenant to unlimited without
         // resetting its warning preferences.
         await quotaService.deleteTenantQuota(tenantId!);
@@ -164,20 +162,11 @@ export function SuQuotaModal({
     if (nextUnit === unit) return;
     const valueBytes = quotaValue == null ? null : quotaValue * unitBytes;
     setUnit(nextUnit);
-    setQuotaValue(
+    setQuotaInput(
       valueBytes == null
-        ? null
-        : Math.round(valueBytes / (nextUnit === "GB" ? GB : MB))
+        ? ""
+        : String(Math.round(valueBytes / (nextUnit === "GB" ? GB : MB)))
     );
-  };
-
-  const recordQuotaEmptyOnBlur = (target: EventTarget | null) => {
-    if (
-      target instanceof HTMLInputElement &&
-      target.classList.contains("ant-input-number-input")
-    ) {
-      quotaInputIsEmptyRef.current = target.value === "";
-    }
   };
 
   return (
@@ -247,27 +236,31 @@ export function SuQuotaModal({
               {t("quota.tenantHardLimit", "Tenant Hard Storage Limit")}
             </span>
           </div>
-          <div onBlurCapture={(event) => recordQuotaEmptyOnBlur(event.target)}>
-            <Space>
-              <InputNumber
-                style={{ width: 200 }}
-                value={quotaValue}
-                onChange={(value) => setQuotaValue(value ?? null)}
-                changeOnBlur={false}
-                addonAfter={unit}
-                placeholder={t("quota.unlimited", "Unlimited")}
-                min={quotaValue == null ? undefined : minimumQuota}
-                max={validMaximumQuota}
-                precision={0}
-                size="large"
-              />
-              <Segmented
-                options={["GB", "MB"]}
-                value={unit}
-                onChange={(val) => changeUnit(val as "GB" | "MB")}
-              />
-            </Space>
-          </div>
+          <Space>
+            <div className="flex items-stretch">
+            <input
+              style={{ width: 200 }}
+              className="ant-input rounded-r-none"
+              value={quotaInput}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                if (nextValue === "" || /^\d+$/.test(nextValue)) {
+                  setQuotaInput(nextValue);
+                }
+              }}
+              placeholder={t("quota.unlimited", "Unlimited")}
+              inputMode="numeric"
+            />
+            <span className="flex items-center border border-l-0 border-solid border-[#d9d9d9] rounded-r-md bg-[#fafafa] px-3 text-sm text-[#555]">
+              {unit}
+            </span>
+            </div>
+            <Segmented
+              options={["GB", "MB"]}
+              value={unit}
+              onChange={(val) => changeUnit(val as "GB" | "MB")}
+            />
+          </Space>
           <div style={{ marginTop: 4, fontSize: 12, color: "#999" }}>
             {platformOverview?.platform_capacity_bytes == null
               ? t(
