@@ -1,5 +1,5 @@
 # =====================================================================
-# Sandbox runtime image for LLM-generated Python execution.
+# Full sandbox runtime for the supported Anthropic document, design, web, and MCP skills.
 #
 # Design reference: doc/docs/zh/backend/sandbox-design.md#6-docker镜像设计
 # This image is consumed by smolagents DockerExecutor. Depending on the
@@ -58,6 +58,83 @@ COPY sdk/nexent /opt/sdk/nexent
 RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv pip install --system --link-mode copy "/opt/sdk" $(test -n "$MIRROR" && echo "-i $MIRROR")
 
+# Node is copied into the Python runtime image instead of installed from a
+# distribution repository so workspace scripts can rely on the Node 20
+# permission model on every supported architecture.
+FROM node:20-bookworm-slim AS node-builder
+
+ARG NPM_MIRROR
+
+RUN if [ -n "$NPM_MIRROR" ]; then npm config set registry "$NPM_MIRROR"; fi
+
+RUN npm install --global "pnpm@9.15.9"
+
+WORKDIR /opt/nexent
+RUN npm init -y && npm install --save-exact \
+        "docx@9.5.1" \
+        "pdf-lib@1.17.1" \
+        "pdfjs-dist@4.10.38" \
+        "pptxgenjs@3.12.0" \
+        "react@18.3.1" \
+        "react-dom@18.3.1" \
+        "react-icons@5.5.0" \
+        "sharp@0.33.5"
+
+# Prime pnpm's content-addressed store during the image build. Runtime package
+# installs are forced offline and can only resolve content already present here.
+WORKDIR /opt/nexent/web-cache
+RUN pnpm init && pnpm add \
+        "vite@5.4.21" "typescript@5.7.3" "@vitejs/plugin-react@4.3.4" \
+        "tailwindcss@3.4.17" "postcss@8.5.3" "autoprefixer@10.4.21" \
+        "tailwindcss-animate@1.0.7" "@types/node@22.13.10" \
+        "@types/react@18.3.18" "@types/react-dom@18.3.5" \
+        "class-variance-authority@0.7.1" "clsx@2.1.1" "tailwind-merge@2.6.0" \
+        "lucide-react@0.468.0" "next-themes@0.4.4" \
+        "sonner@1.7.4" "cmdk@1.1.1" "vaul@1.1.2" \
+        "embla-carousel-react@8.5.2" "react-day-picker@9.5.1" \
+        "react-resizable-panels@2.1.7" "date-fns@4.1.0" \
+        "react-hook-form@7.54.2" "@hookform/resolvers@3.10.0" "zod@3.24.2" \
+        "parcel@2.13.3" "@parcel/config-default@2.13.3" \
+        "parcel-resolver-tspaths@0.0.9" "html-inline@1.2.0" \
+        "@radix-ui/react-accordion@1.2.3" "@radix-ui/react-avatar@1.1.3" \
+        "@radix-ui/react-checkbox@1.3.1" "@radix-ui/react-dialog@1.1.6" \
+        "@radix-ui/react-dropdown-menu@2.1.6" "@radix-ui/react-label@2.1.2" \
+        "@radix-ui/react-popover@1.1.6" "@radix-ui/react-progress@1.1.2" \
+        "@radix-ui/react-radio-group@1.3.2" "@radix-ui/react-scroll-area@1.2.3" \
+        "@radix-ui/react-select@2.1.6" "@radix-ui/react-separator@1.1.2" \
+        "@radix-ui/react-slider@1.3.1" "@radix-ui/react-slot@1.2.0" \
+        "@radix-ui/react-switch@1.2.1" "@radix-ui/react-tabs@1.1.3" \
+        "@radix-ui/react-toast@1.2.6" "@radix-ui/react-tooltip@1.2.8"
+RUN pnpm add \
+        @radix-ui/react-aspect-ratio @radix-ui/react-collapsible \
+        @radix-ui/react-context-menu @radix-ui/react-hover-card \
+        @radix-ui/react-menubar @radix-ui/react-navigation-menu \
+        @radix-ui/react-toggle @radix-ui/react-toggle-group
+
+# `pnpm create vite` uses pnpm's separate dlx metadata/cache in addition to
+# the content-addressed store. Prime that exact workflow and every unpinned
+# dependency installed by Anthropic's web-artifacts-builder scripts so the
+# same commands work with DNS and outbound traffic disabled at runtime.
+RUN pnpm create vite nexent-vite-template --template react-ts && \
+    cd /opt/nexent/web-cache/nexent-vite-template && \
+    pnpm install && \
+    pnpm add -D tailwindcss@3.4.1 postcss autoprefixer @types/node tailwindcss-animate && \
+    pnpm add class-variance-authority clsx tailwind-merge lucide-react next-themes && \
+    pnpm add \
+        @radix-ui/react-accordion @radix-ui/react-aspect-ratio @radix-ui/react-avatar \
+        @radix-ui/react-checkbox @radix-ui/react-collapsible @radix-ui/react-context-menu \
+        @radix-ui/react-dialog @radix-ui/react-dropdown-menu @radix-ui/react-hover-card \
+        @radix-ui/react-label @radix-ui/react-menubar @radix-ui/react-navigation-menu \
+        @radix-ui/react-popover @radix-ui/react-progress @radix-ui/react-radio-group \
+        @radix-ui/react-scroll-area @radix-ui/react-select @radix-ui/react-separator \
+        @radix-ui/react-slider @radix-ui/react-slot @radix-ui/react-switch \
+        @radix-ui/react-tabs @radix-ui/react-toast @radix-ui/react-toggle \
+        @radix-ui/react-toggle-group @radix-ui/react-tooltip && \
+    pnpm add @hookform/resolvers cmdk date-fns embla-carousel-react react-day-picker \
+        react-hook-form react-resizable-panels sonner vaul zod && \
+    pnpm add -D parcel @parcel/config-default parcel-resolver-tspaths html-inline && \
+    rm -rf /opt/nexent/web-cache/nexent-vite-template
+
 # ---------------------------------------------------------------------
 # Stage 2: runtime - minimal Python image with Jupyter Kernel Gateway
 # (smolagents DockerExecutor's default IPC channel) and a non-root
@@ -70,9 +147,10 @@ FROM python:3.11-slim AS runtime
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
-LABEL org.opencontainers.image.title="Nexent Sandbox" \
-      org.opencontainers.image.description="Default lightweight Nexent sandbox runtime" \
-      io.nexent.sandbox.variant="lightweight"
+LABEL org.opencontainers.image.title="Nexent Sandbox Full" \
+      org.opencontainers.image.description="Nexent sandbox for 10 supported Anthropic skills" \
+      io.nexent.sandbox.variant="full" \
+      io.nexent.sandbox.skills="docx,pdf,pptx,xlsx,canvas-design,frontend-design,slack-gif-creator,mcp-builder,web-artifacts-builder,skill-creator"
 
 USER root
 RUN umask 0022
@@ -96,7 +174,16 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
     apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
+        fontconfig \
+        fonts-dejavu-core \
+        fonts-liberation \
         libgomp1 \
+        libreoffice-calc \
+        libreoffice-impress \
+        libreoffice-writer \
+        pandoc \
+        poppler-utils \
+        tesseract-ocr \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -113,17 +200,30 @@ RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/p
 # target of `uv pip install --system` on python:3.11-slim.
 COPY --from=builder /opt/sdk /opt/sdk
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=node-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node-builder /opt/nexent/node_modules /opt/nexent/node_modules
+COPY --from=node-builder /root/.local/share/pnpm/store /opt/nexent/pnpm-store
+COPY --from=node-builder --chown=1000:1000 /root/.cache/pnpm /home/sandbox/.cache/pnpm
+
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    ln -s /usr/local/lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
+
+ENV NODE_PATH=/opt/nexent/node_modules:/usr/local/lib/node_modules \
+    PNPM_CONFIG_OFFLINE=true \
+    PNPM_CONFIG_STORE_DIR=/mnt/nexent/workdir/.pnpm-store \
+    npm_config_offline=true \
+    npm_config_store_dir=/mnt/nexent/workdir/.pnpm-store \
+    COREPACK_ENABLE_NETWORK=0
 
 # ---------------------------------------------------------------------
-# Stage 2.5: pre-install the LLM-friendly Python library whitelist
-# (design doc §6.4). Versions are pinned with upper bounds so upstream
-# releases do not silently break reproducibility. No auto-`pip install`
-# happens at sandbox execution time; missing imports return a structured
-# diagnostic that nudges the LLM toward supported packages.
+# Stage 2.5: install only the Python dependencies used by the supported skills.
 # ---------------------------------------------------------------------
 FROM runtime AS with-libs
 
 ARG MIRROR
+ARG TARGETARCH
 
 RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
     pip install --no-cache-dir \
@@ -145,16 +245,16 @@ RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/p
         "reportlab>=4.2,<5.1" \
         "odfpy>=1.4,<2.0" \
         "defusedxml>=0.7,<1.0" \
-        "matplotlib>=3.7,<4.0" \
-        "scipy>=1.11,<2.0" \
-        "scikit-learn>=1.3,<2.0" \
-        "pydantic>=2.0,<3.0" \
-        "sympy>=1.12,<2.0" \
-        "statsmodels>=0.14,<1.0" \
         "tabulate>=0.9,<1.0" \
         "python-dateutil>=2.8,<3.0" \
+        "anthropic>=0.39,<1.0" \
+        "imageio>=2.31,<3.0" \
+        "imageio-ffmpeg>=0.4.9,<1.0" \
+        "markitdown[pptx]>=0.1,<1.0" \
+        "pdf2image>=1.17,<2.0" \
+        "pytesseract>=0.3.13,<1.0" \
     $(test -n "$MIRROR" && echo "-i $MIRROR") \
-    && python -c "import numpy, pandas, requests, PIL, bs4, lxml, openpyxl, xlsxwriter, xlrd, pyxlsb, docx, docx2txt, pptx, pypdf, pdfplumber, reportlab, odf, defusedxml, matplotlib, scipy, sklearn, pydantic, sympy, statsmodels, tabulate, dateutil; print('OK')" \
+    && python -c "import anthropic, imageio, numpy, pandas, pdf2image, pytesseract, requests, PIL, bs4, lxml, openpyxl, xlsxwriter, xlrd, pyxlsb, docx, docx2txt, pptx, pypdf, pdfplumber, reportlab, odf, defusedxml, tabulate, dateutil, yaml; print('OK')" \
     && pip check
 
 # Create a non-root user and the fixed workspace mount root. Runtime creates
@@ -167,6 +267,7 @@ RUN useradd --uid 1000 --create-home --shell /bin/bash sandbox && \
              /home/sandbox/workdir/output \
              /home/sandbox/workdir/tmp \
              /mnt/nexent/workdir && \
+    mkdir -p /home/sandbox/.cache && \
     chown -R sandbox:sandbox /home/sandbox /mnt/nexent
 
 WORKDIR /home/sandbox/workdir

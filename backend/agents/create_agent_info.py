@@ -758,12 +758,23 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="RunSkillScriptTool",
                 name="run_skill_script",
-                description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
-                inputs='{"skill_name": "str", "script_path": "str", "params": "str"}',
+                description=(
+                    "Execute an enabled skill's bundled script, or a generated Python/Node.js "
+                    "script in the current run workspace, inside the Docker sandbox. For "
+                    "workspace scripts written as bare filenames by the code executor, pass "
+                    "script_path='outputs/<filename>'. Ordinary agent code must not use "
+                    "subprocess, os.system, or shell calls for system commands; use a "
+                    "skill-bundled wrapper or a shell-free language API."
+                ),
+                inputs=(
+                    '{"skill_name": "str", "script_path": "str", '
+                    '"params": "str", "source": "str"}'
+                ),
                 output_type="string",
                 params={
                     "local_skills_dir": CONTAINER_SKILLS_PATH,
                     "workspace_path": file_context.get("workspace_path"),
+                    "authorized_skill_names": sorted(skill_config_values),
                 },
                 source="builtin",
                 usage="builtin",
@@ -797,7 +808,10 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="WriteSkillFileTool",
                 name="write_skill_file",
-                description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
+                description=(
+                    "Edit an installed tenant-scoped skill file. This does not create files in "
+                    "the current run workspace or outputs directory."
+                ),
                 inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
