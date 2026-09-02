@@ -8,6 +8,7 @@ class ProviderEnum(str, Enum):
     MODELENGINE = "modelengine"
     DASHSCOPE = "dashscope"
     TOKENPONY = "tokenpony"
+    LITELLM = "litellm"
 
 
 # Silicon Flow
