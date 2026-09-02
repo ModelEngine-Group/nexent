@@ -41,7 +41,7 @@ usage() {
 用法：deploy/images/build.sh [选项]
 
 选项：
-  --images LIST              逗号分隔的镜像列表：all,main,web,data-process,mcp,terminal,docs
+  --images LIST              逗号分隔的镜像列表：all,main,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              兼容参数，等同于只传一个 --images
   --all                      构建全部镜像
   --main                     构建 nexent/nexent
@@ -50,6 +50,8 @@ usage() {
   --mcp                      构建 nexent/nexent-mcp
   --terminal                 构建 nexent/nexent-ubuntu-terminal
   --docs                     构建 nexent/nexent-docs
+  --sandbox                  构建默认轻量沙箱 nexent/nexent-sandbox
+  --sandbox-full             构建可选完整沙箱 nexent/nexent-sandbox-full
   --components LIST          将部署组件兼容映射为镜像列表
   --platform linux/amd64|linux/arm64|linux/amd64,linux/arm64
   --version VERSION          镜像 tag，例如 v2.2.1 或 latest。默认读取根目录 VERSION
@@ -71,7 +73,7 @@ USAGE
 Usage: deploy/images/build.sh [options]
 
 Options:
-  --images LIST              Comma-separated image list: all,main,web,data-process,mcp,terminal,docs,sandbox
+  --images LIST              Comma-separated image list: all,main,web,data-process,mcp,terminal,docs,sandbox,sandbox-full
   --image IMAGE              Compatibility alias for --images with one image
   --all                      Build all images
   --main                     Build nexent/nexent
@@ -80,6 +82,8 @@ Options:
   --mcp                      Build nexent/nexent-mcp
   --terminal                 Build nexent/nexent-ubuntu-terminal
   --docs                     Build nexent/nexent-docs
+  --sandbox                  Build the default lightweight nexent/nexent-sandbox image
+  --sandbox-full             Build the optional nexent/nexent-sandbox-full image
   --components LIST          Compatibility mapping from deployment components to images.
   --platform linux/amd64|linux/arm64|linux/amd64,linux/arm64
   --version VERSION          Image tag, for example v2.2.1 or latest. Defaults to root VERSION.
@@ -108,6 +112,7 @@ while [ $# -gt 0 ]; do
     --terminal) REQUESTED_IMAGES+=("terminal"); shift ;;
     --docs) REQUESTED_IMAGES+=("docs"); shift ;;
     --sandbox) REQUESTED_IMAGES+=("sandbox"); shift ;;
+    --sandbox-full) REQUESTED_IMAGES+=("sandbox-full"); shift ;;
     --components) COMPONENTS="$2"; shift 2 ;;
     --platform) PLATFORM="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
@@ -168,7 +173,7 @@ select_images_from_csv() {
       all)
         select_all_images
         ;;
-      main|web|data-process|mcp|terminal|docs|sandbox)
+      main|web|data-process|mcp|terminal|docs|sandbox|sandbox-full)
         add_image_if_missing "$normalized"
         ;;
       *)
@@ -187,7 +192,7 @@ select_images_from_csv() {
 image_tui_multiselect() {
   [ -t 0 ] || return 1
 
-  local images=(main web data-process mcp terminal docs sandbox)
+  local images=(main web data-process mcp terminal docs sandbox sandbox-full)
   local details=(
     "$(deployment_i18n image_build.detail.main)"
     "$(deployment_i18n image_build.detail.web)"
@@ -196,8 +201,9 @@ image_tui_multiselect() {
     "$(deployment_i18n image_build.detail.terminal)"
     "$(deployment_i18n image_build.detail.docs)"
     "Sandbox runtime for LLM-generated Python execution"
+    "Extended sandbox with Node, office, browser, and Anthropic skill dependencies"
   )
-  local selected=(1 1 0 0 0 0 0)
+  local selected=(1 1 0 0 0 0 0 0)
   local cursor=0
   local i key key_tail selection
 
@@ -295,7 +301,7 @@ run_interactive_configuration() {
       else
         echo "Images:"
       fi
-      echo "  main, web, data-process, mcp, terminal, docs, sandbox"
+      echo "  main, web, data-process, mcp, terminal, docs, sandbox, sandbox-full"
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         IMAGES="$(prompt_choice "请输入镜像（默认：main,web）：" "main,web")"
       else
@@ -366,10 +372,12 @@ case "$REGISTRY" in
   general)
     PY_MIRROR_ARGS=()
     WEB_MIRROR_ARGS=()
+    NPM_MIRROR_ARGS=()
     ;;
   mainland)
     PY_MIRROR_ARGS=(--build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua)
     WEB_MIRROR_ARGS=(--build-arg MIRROR=https://repo.huaweicloud.com/repository/npm/ --build-arg APK_MIRROR=tsinghua)
+    NPM_MIRROR_ARGS=(--build-arg NPM_MIRROR=https://repo.huaweicloud.com/repository/npm/)
     ;;
   *)
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -519,6 +527,7 @@ build_selected_image() {
       build_one "$image_name" "$DOCKERFILE_DIR/terminal/Dockerfile" --build-arg TERMINAL_VARIANT="$TERMINAL_VARIANT"
       ;;
     sandbox) build_one nexent-sandbox "$DOCKERFILE_DIR/sandbox/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
+    sandbox-full) build_one nexent-sandbox-full "$DOCKERFILE_DIR/sandbox-full/Dockerfile" "${PY_MIRROR_ARGS[@]}" "${NPM_MIRROR_ARGS[@]}" ;;
     *)
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "不支持的镜像：$1" >&2
