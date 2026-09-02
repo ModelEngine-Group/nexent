@@ -16,23 +16,324 @@ in via ``SandboxConfig`` — this module never calls ``os.getenv()`` directly.
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import hmac
+import io
 import json
 import logging
+import mimetypes
 import re
 import secrets
+import shlex
+import tarfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from contextlib import closing
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
+
 
 logger = logging.getLogger(__name__)
+
+
+_TOOL_BRIDGE_VALUE_MARKER = "__nexent_tool_bridge_value__"
+
+
+class SandboxSkillScriptRunner:
+    """Copy a validated skill into Docker and execute its script there.
+
+    The runtime remains the control plane: it resolves tenant-scoped skills
+    and validates that the requested path cannot escape the skill root.  The
+    script process itself, its interpreter and dependencies live exclusively
+    in the sandbox container.
+    """
+
+    def __init__(
+        self,
+        executor: Any,
+        timeout_seconds: int = 300,
+        workspace_path: Optional[str] = None,
+    ) -> None:
+        self._executor = executor
+        self._container = getattr(executor, "container", None)
+        self._timeout_seconds = max(1, int(timeout_seconds))
+        self._workspace_path = (workspace_path or "").rstrip("/")
+        self._root = (
+            f"{self._workspace_path}/skills"
+            if self._workspace_path
+            else ""
+        )
+        self._staged_skills: dict[str, str] = {}
+        self._stage_lock = threading.Lock()
+
+    @property
+    def available(self) -> bool:
+        """Return whether this runner has a real Docker execution target."""
+        return self._container is not None and getattr(self._executor, "_nexent_backend", None) == "docker"
+
+    @staticmethod
+    def _output_text(output: Any) -> str:
+        if isinstance(output, bytes):
+            return output.decode("utf-8", errors="replace")
+        return str(output or "")
+
+    def _run_container_command(self, command: list[str], **kwargs: Any) -> Any:
+        result = self._container.exec_run(command, **kwargs)
+        exit_code = getattr(result, "exit_code", None)
+        if exit_code != 0:
+            output = self._output_text(getattr(result, "output", b""))
+            raise RuntimeError(
+                f"Sandbox preparation command failed (exit={exit_code}): {output.strip()}"
+            )
+        return result
+
+    def _resolve_skills_root(self, working_directory: Optional[str]) -> str:
+        """Return the run-scoped skills directory and reject workspace drift."""
+        workspace_path = (working_directory or self._workspace_path).rstrip("/")
+        if not workspace_path:
+            raise RuntimeError("Skill scripts require a run-scoped workspace")
+        skills_root = f"{workspace_path}/skills"
+        if self._root and skills_root != self._root:
+            raise RuntimeError("Skill script workspace does not match the sandbox runner workspace")
+        self._root = skills_root
+        return skills_root
+
+    def _stage_skill(
+        self,
+        manager: Any,
+        skill_name: str,
+        script_path: str,
+        tenant_id: Optional[str],
+        skills_root: str,
+    ) -> tuple[str, str]:
+        """Copy one validated skill into the run workspace once and make it read-only."""
+        local_skill_dir, local_script, normalized_script = manager.resolve_skill_script(
+            skill_name,
+            script_path,
+            tenant_id=tenant_id,
+        )
+        local_skill_root = str(Path(local_skill_dir).resolve())
+        relative_script = Path(local_script).resolve().relative_to(Path(local_skill_root))
+
+        with self._stage_lock:
+            sandbox_skill_dir = self._staged_skills.get(local_skill_root)
+            if sandbox_skill_dir is None:
+                safe_skill_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", skill_name).strip("._") or "skill"
+                skill_digest = hashlib.sha256(local_skill_root.encode("utf-8")).hexdigest()[:16]
+                skill_key = f"{safe_skill_name}-{skill_digest}"
+                sandbox_skill_dir = f"{skills_root}/{skill_key}"
+
+                self._run_container_command(["mkdir", "-p", skills_root], user="0")
+                archive = io.BytesIO()
+                with tarfile.open(fileobj=archive, mode="w") as tar:
+                    tar.add(local_skill_dir, arcname=skill_key, recursive=True)
+                if not self._container.put_archive(skills_root, archive.getvalue()):
+                    raise RuntimeError("Failed to copy the skill directory into the sandbox workspace")
+                self._run_container_command(
+                    ["chmod", "-R", "a+rX", sandbox_skill_dir],
+                    user="0",
+                )
+                self._run_container_command(
+                    ["chmod", "-R", "a-w", sandbox_skill_dir],
+                    user="0",
+                )
+                self._staged_skills[local_skill_root] = sandbox_skill_dir
+
+        return f"{sandbox_skill_dir}/{relative_script.as_posix()}", normalized_script
+
+    def __call__(
+        self,
+        *,
+        manager: Any,
+        skill_name: str,
+        script_path: str,
+        params: Optional[str],
+        tenant_id: Optional[str],
+        working_directory: Optional[str],
+    ) -> str:
+        if not self.available:
+            raise RuntimeError(
+                "Skill scripts require a Docker sandbox, but the configured sandbox executor is unavailable"
+            )
+
+        skills_root = self._resolve_skills_root(working_directory)
+        sandbox_script, normalized_script = self._stage_skill(
+            manager,
+            skill_name,
+            script_path,
+            tenant_id,
+            skills_root,
+        )
+        interpreter = "python" if normalized_script.endswith(".py") else "bash"
+        command = [
+            "timeout",
+            "--signal=KILL",
+            str(self._timeout_seconds),
+            interpreter,
+            sandbox_script,
+            *shlex.split(params or ""),
+        ]
+        workdir = working_directory or "/home/sandbox/workdir/output"
+        output_dir = (
+            f"{working_directory.rstrip('/')}/outputs"
+            if working_directory
+            else workdir
+        )
+        result = self._container.exec_run(
+            command,
+            user="sandbox",
+            workdir=workdir,
+            environment={
+                "NEXENT_WORKSPACE": workdir,
+                "NEXENT_OUTPUT_DIR": output_dir,
+            },
+            demux=True,
+        )
+        exit_code = getattr(result, "exit_code", None)
+        raw_output = getattr(result, "output", b"")
+        if isinstance(raw_output, tuple):
+            stdout, stderr = raw_output
+        else:
+            stdout, stderr = raw_output, b""
+        output = self._output_text(stdout)
+        error_output = self._output_text(stderr)
+        if exit_code == 124 or exit_code == 137:
+            raise TimeoutError(f"Script execution timed out: {normalized_script}")
+        if exit_code != 0:
+            failure_message = error_output or output
+            logger.error(
+                "Sandbox skill script failed skill=%s script=%s exit=%s output=%s",
+                skill_name,
+                normalized_script,
+                exit_code,
+                failure_message,
+            )
+            return json.dumps({
+                "error": failure_message,
+                "output": output if error_output else "",
+            })
+        return output
+
+    def cleanup(self) -> None:
+        """Remove this run's private skill copy from a shared container."""
+        if not self.available:
+            return
+        if not self._root:
+            return
+        try:
+            # Docker archive extraction may preserve root ownership on nested
+            # skill directories. Cleanup is a control-plane operation against
+            # an exact runner-generated path, so use root and verify the result
+            # instead of silently leaving data in a system-scoped container.
+            result = self._container.exec_run(
+                ["rm", "-rf", "--", self._root],
+                user="0",
+            )
+            exit_code = getattr(result, "exit_code", None)
+            if exit_code != 0:
+                output = self._output_text(getattr(result, "output", b""))
+                logger.warning(
+                    "Failed to remove sandbox skill directory %s (exit=%s): %s",
+                    self._root,
+                    exit_code,
+                    output.strip(),
+                )
+        except Exception as exc:
+            logger.warning("Failed to remove sandbox skill directory %s: %s", self._root, exc)
+
+
+def _serialize_tool_bridge_value(value: Any) -> Any:
+    """Convert host-tool results into a lossless JSON-compatible value."""
+    try:
+        from smolagents.agent_types import AgentAudio, AgentImage
+    except ImportError:  # pragma: no cover - smolagents is a runtime dependency
+        AgentAudio = AgentImage = ()
+
+    if AgentImage and isinstance(value, AgentImage):
+        value = value.to_raw()
+
+    try:
+        from PIL import Image
+    except ImportError:  # pragma: no cover - Pillow is a smolagents dependency
+        Image = None
+
+    if Image is not None and isinstance(value, Image.Image):
+        buffer = io.BytesIO()
+        value.save(buffer, format="PNG")
+        return {
+            _TOOL_BRIDGE_VALUE_MARKER: 1,
+            "kind": "image",
+            "mime_type": "image/png",
+            "encoding": "base64",
+            "data": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        }
+
+    # AgentAudio inherits from str, so it must be handled before primitive strings.
+    if AgentAudio and isinstance(value, AgentAudio):
+        audio_location = str(value.to_string())
+        audio_path = Path(audio_location)
+        if audio_path.is_file():
+            mime_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+            return {
+                _TOOL_BRIDGE_VALUE_MARKER: 1,
+                "kind": "audio",
+                "mime_type": mime_type,
+                "encoding": "base64",
+                "data": base64.b64encode(audio_path.read_bytes()).decode("ascii"),
+            }
+        return audio_location
+
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {
+            _TOOL_BRIDGE_VALUE_MARKER: 1,
+            "kind": "binary",
+            "mime_type": "application/octet-stream",
+            "encoding": "base64",
+            "data": base64.b64encode(bytes(value)).decode("ascii"),
+        }
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _serialize_tool_bridge_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialize_tool_bridge_value(item) for item in value]
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _serialize_tool_bridge_value(model_dump(mode="json"))
+
+    raise TypeError(
+        f"Host tool returned unsupported result type: {type(value).__module__}.{type(value).__name__}"
+    )
+
+
+def _deserialize_tool_bridge_value(value: Any, tools: dict[str, Any]) -> Any:
+    """Restore bridge-owned references in arguments received from a sandbox."""
+    if (
+        isinstance(value, dict)
+        and value.get(_TOOL_BRIDGE_VALUE_MARKER) == 1
+        and value.get("kind") == "tool_reference"
+    ):
+        tool_name = value.get("name")
+        if not isinstance(tool_name, str) or tool_name not in tools:
+            raise ValueError(f"Unknown local tool reference: {tool_name}")
+        return tools[tool_name]
+    if isinstance(value, dict):
+        return {
+            key: _deserialize_tool_bridge_value(item, tools)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_deserialize_tool_bridge_value(item, tools) for item in value]
+    return value
 
 
 # ----------------------------------------------------------------------
@@ -165,6 +466,7 @@ class SandboxConfig:
     cpu_quota: float = 1.0
     network_disabled: bool = True
     timeout_seconds: int = 30
+    host_tool_timeout_seconds: Optional[float] = None
     shell_policy: ShellPolicy = ShellPolicy.DISABLED
     output_dir: str = "/home/sandbox/workdir/output"
     auto_sync_outputs: bool = True
@@ -175,6 +477,12 @@ class SandboxConfig:
         """Build a SandboxConfig from a plain dict (e.g. from AgentConfig.sandbox_policy)."""
         if not data:
             return cls()
+        host_tool_timeout_raw = data.get("host_tool_timeout_seconds")
+        host_tool_timeout_seconds = None
+        if host_tool_timeout_raw not in (None, ""):
+            parsed_timeout = float(host_tool_timeout_raw)
+            if parsed_timeout > 0:
+                host_tool_timeout_seconds = parsed_timeout
         return cls(
             level=SandboxLevel(data.get("level", "local")),
             scope=SandboxScope(data.get("scope", "session")),
@@ -183,6 +491,7 @@ class SandboxConfig:
             cpu_quota=float(data.get("cpu_quota", 1.0)),
             network_disabled=bool(data.get("network_disabled", True)),
             timeout_seconds=int(data.get("timeout_seconds", 30)),
+            host_tool_timeout_seconds=host_tool_timeout_seconds,
             shell_policy=ShellPolicy(data.get("shell_policy", "disabled")),
             output_dir=data.get("output_dir", "/home/sandbox/workdir/output"),
             auto_sync_outputs=bool(data.get("auto_sync_outputs", True)),
@@ -278,8 +587,19 @@ def _is_host_tool(tool: Any) -> bool:
 class _ToolBridge:
     """Token-authenticated HTTP bridge from a sandbox to live host tools."""
 
-    def __init__(self, logger_: logging.Logger) -> None:
+    def __init__(
+        self,
+        logger_: logging.Logger,
+        request_timeout_seconds: Optional[float] = None,
+    ) -> None:
         self._logger = logger_
+        if isinstance(request_timeout_seconds, bool):
+            raise ValueError("Host tool timeout must be a positive number or None")
+        if request_timeout_seconds is not None:
+            request_timeout_seconds = float(request_timeout_seconds)
+            if request_timeout_seconds <= 0:
+                raise ValueError("Host tool timeout must be a positive number or None")
+        self._request_timeout_seconds = request_timeout_seconds
         self._token = secrets.token_urlsafe(32)
         self._tools: dict[str, Any] = {}
         bridge = self
@@ -301,8 +621,15 @@ class _ToolBridge:
                     tool = bridge._tools.get(tool_name)
                     if tool is None:
                         raise ValueError(f"Unknown local tool: {tool_name}")
-                    result = tool(*payload.get("args", []), **payload.get("kwargs", {}))
-                    body = json.dumps({"result": result}, ensure_ascii=False, default=str).encode("utf-8")
+                    args = _deserialize_tool_bridge_value(
+                        payload.get("args", []), bridge._tools
+                    )
+                    kwargs = _deserialize_tool_bridge_value(
+                        payload.get("kwargs", {}), bridge._tools
+                    )
+                    result = tool(*args, **kwargs)
+                    serialized_result = _serialize_tool_bridge_value(result)
+                    body = json.dumps({"result": serialized_result}, ensure_ascii=False).encode("utf-8")
                     self.send_response(200)
                 except Exception as exc:
                     bridge._logger.exception("Local tool bridge invocation failed")
@@ -337,28 +664,82 @@ class _ToolBridge:
         for name in tools:
             definitions.append(
                 f"def {name}(*args, **kwargs):\n"
-                f"    return _nexent_call_host_tool({name!r}, args, kwargs)"
+                f"    return _nexent_call_host_tool({name!r}, args, kwargs)\n"
+                f"{name}._nexent_tool_bridge_name = {name!r}"
             )
         host = bridge_host or self._bridge_host()
         return (
+            "import base64 as _nexent_base64\n"
+            "import io as _nexent_io\n"
             "import json as _nexent_json\n"
             "import urllib.request as _nexent_urllib\n"
+            "import urllib.error as _nexent_urllib_error\n"
+            "class _NexentBridgedMedia:\n"
+            "    def __init__(self, data, mime_type):\n"
+            "        self.data = data\n"
+            "        self.mime_type = mime_type\n"
+            "    def save(self, destination, *args, **kwargs):\n"
+            "        if hasattr(destination, 'write'):\n"
+            "            destination.write(self.data)\n"
+            "        else:\n"
+            "            with open(destination, 'wb') as output_file:\n"
+            "                output_file.write(self.data)\n"
+            "    def to_bytes(self):\n"
+            "        return self.data\n"
+            "def _nexent_decode_tool_bridge_value(value):\n"
+            f"    if isinstance(value, dict) and value.get({_TOOL_BRIDGE_VALUE_MARKER!r}) == 1:\n"
+            "        raw = _nexent_base64.b64decode(value['data'])\n"
+            "        kind = value.get('kind')\n"
+            "        if kind == 'image':\n"
+            "            try:\n"
+            "                from PIL import Image as _nexent_pil_image\n"
+            "                image = _nexent_pil_image.open(_nexent_io.BytesIO(raw))\n"
+            "                image.load()\n"
+            "                return image\n"
+            "            except ImportError:\n"
+            "                return _NexentBridgedMedia(raw, value.get('mime_type'))\n"
+            "        if kind == 'binary':\n"
+            "            return raw\n"
+            "        return _NexentBridgedMedia(raw, value.get('mime_type'))\n"
+            "    if isinstance(value, dict):\n"
+            "        return {key: _nexent_decode_tool_bridge_value(item) for key, item in value.items()}\n"
+            "    if isinstance(value, list):\n"
+            "        return [_nexent_decode_tool_bridge_value(item) for item in value]\n"
+            "    return value\n"
+            "def _nexent_encode_tool_bridge_value(value):\n"
+            "    tool_name = getattr(value, '_nexent_tool_bridge_name', None)\n"
+            "    if isinstance(tool_name, str):\n"
+            f"        return {{{_TOOL_BRIDGE_VALUE_MARKER!r}: 1, 'kind': 'tool_reference', 'name': tool_name}}\n"
+            "    raise TypeError(\n"
+            "        'Object of type ' + type(value).__name__ + ' is not JSON serializable'\n"
+            "    )\n"
             f"_NEXENT_TOOL_BRIDGE_URL = 'http://{host}:{self.port}/invoke'\n"
             f"_NEXENT_TOOL_BRIDGE_TOKEN = {self._token!r}\n"
+            f"_NEXENT_TOOL_BRIDGE_TIMEOUT = {self._request_timeout_seconds!r}\n"
             "def _nexent_call_host_tool(name, args, kwargs):\n"
-            "    payload = _nexent_json.dumps({'tool': name, 'args': args, 'kwargs': kwargs}).encode('utf-8')\n"
+            "    payload = _nexent_json.dumps(\n"
+            "        {'tool': name, 'args': args, 'kwargs': kwargs},\n"
+            "        default=_nexent_encode_tool_bridge_value,\n"
+            "    ).encode('utf-8')\n"
             "    request = _nexent_urllib.Request(_NEXENT_TOOL_BRIDGE_URL, data=payload, headers={\n"
             "        'Authorization': 'Bearer ' + _NEXENT_TOOL_BRIDGE_TOKEN,\n"
             "        'Content-Type': 'application/json',\n"
             "    })\n"
             "    try:\n"
-            "        with _nexent_urllib.urlopen(request, timeout=120) as response:\n"
+            "        with _nexent_urllib.urlopen(request, timeout=_NEXENT_TOOL_BRIDGE_TIMEOUT) as response:\n"
             "            result = _nexent_json.loads(response.read().decode('utf-8'))\n"
+            "    except _nexent_urllib_error.HTTPError as exc:\n"
+            "        try:\n"
+            "            error_result = _nexent_json.loads(exc.read().decode('utf-8'))\n"
+            "            error_message = error_result.get('error') or str(exc)\n"
+            "        except Exception:\n"
+            "            error_message = str(exc)\n"
+            "        raise RuntimeError('Local tool bridge request failed: ' + error_message) from exc\n"
             "    except Exception as exc:\n"
             "        raise RuntimeError('Local tool bridge request failed: ' + str(exc)) from exc\n"
             "    if 'error' in result:\n"
             "        raise RuntimeError(result['error'])\n"
-            "    return result.get('result')\n\n"
+            "    return _nexent_decode_tool_bridge_value(result.get('result'))\n\n"
             + "\n\n".join(definitions)
         )
 
@@ -368,12 +749,16 @@ class _ToolBridge:
         self._thread.join(timeout=5)
 
 
-def _install_host_tool_bridge(executor: Any, logger_: logging.Logger) -> Any:
+def _install_host_tool_bridge(
+    executor: Any,
+    logger_: logging.Logger,
+    request_timeout_seconds: Optional[float] = None,
+) -> Any:
     """Keep Nexent tools local while code runs in a remote executor."""
     if getattr(executor, "_nexent_tool_bridge_installed", False):
         return executor
 
-    bridge = _ToolBridge(logger_)
+    bridge = _ToolBridge(logger_, request_timeout_seconds=request_timeout_seconds)
     original_send_tools = executor.send_tools
     original_cleanup = getattr(executor, "cleanup", None)
 
@@ -388,7 +773,16 @@ def _install_host_tool_bridge(executor: Any, logger_: logging.Logger) -> Any:
                 if getattr(executor, "container", None) is not None
                 else "127.0.0.1"
             )
-            output = executor.run_code_raise_errors(bridge.proxy_code(host_tools, bridge_host))
+            proxy_code = bridge.proxy_code(host_tools, bridge_host)
+            register_bootstrap = (
+                getattr(executor, "register_kernel_bootstrap_code", None)
+                if getattr(executor, "_nexent_kernel_recovery_supported", False)
+                else None
+            )
+            if callable(register_bootstrap):
+                output = register_bootstrap(proxy_code)
+            else:
+                output = executor.run_code_raise_errors(proxy_code)
             logger_.debug("Registered %d host tool proxy/proxies: %s", len(host_tools), sorted(host_tools))
             if getattr(output, "logs", None):
                 logger_.debug("Host tool proxy registration output: %s", output.logs)
@@ -590,6 +984,7 @@ def cleanup_executor(executor: Any, logger_: logging.Logger, timeout: float = 5.
 SANDBOX_CONTAINER_NAME = "nexent-runtime-sandbox"
 SANDBOX_NETWORK_NAME = "nexent_network"
 SANDBOX_JUPYTER_PORT = 8888
+SANDBOX_SESSION_CONTAINER_PREFIX = "nexent-runtime-sandbox-session"
 
 
 def _is_containerized_runtime() -> bool:
@@ -631,13 +1026,14 @@ class _RecoveredDockerExecutor:
         logger_: logging.Logger,
         host: str,
         additional_imports: Optional[list[str]] = None,
+        port: int = SANDBOX_JUPYTER_PORT,
     ) -> None:
         self.container = container
         self.client = container.client
         self.logger = _make_smolagents_logger(logger_)
         self._logger = logger_
         self.host = host
-        self.port = SANDBOX_JUPYTER_PORT
+        self.port = port
         self.base_url = f"http://{self.host}:{self.port}"
         self.additional_imports = additional_imports or []
         self.installed_packages = []
@@ -654,7 +1050,12 @@ class _RecoveredDockerExecutor:
 class _DockerKernelLease:
     """Expose one isolated Jupyter kernel backed by a shared Docker container."""
 
-    def __init__(self, container_executor: Any, logger_: logging.Logger) -> None:
+    def __init__(
+        self,
+        container_executor: Any,
+        logger_: logging.Logger,
+        receive_timeout_seconds: float = 30,
+    ) -> None:
         import requests
         from smolagents.remote_executors import _create_kernel_http
 
@@ -662,14 +1063,35 @@ class _DockerKernelLease:
         self.logger = container_executor.logger
         self.additional_imports = getattr(container_executor, "additional_imports", [])
         self.installed_packages = list(getattr(container_executor, "installed_packages", []))
+        self._nexent_backend = getattr(container_executor, "_nexent_backend", "docker")
         self._logger = logger_
         self.base_url = container_executor.base_url
         self.host = container_executor.host
         self.port = container_executor.port
         self.kernel_id = _create_kernel_http(f"{self.base_url}/api/kernels", self.logger)
-        self.ws_url = f"ws://{self.host}:{self.port}/api/kernels/{self.kernel_id}/channels"
+        self._channel_session_id = secrets.token_hex(16)
+        self.ws_url = self._build_channels_url(self.kernel_id)
+        self._receive_timeout_seconds = float(receive_timeout_seconds)
+        if self._receive_timeout_seconds <= 0:
+            raise ValueError("Sandbox WebSocket receive timeout must be positive")
         self._closed = False
+        self._unhealthy = False
+        self._nexent_kernel_recovery_supported = True
         self._requests = requests
+        self._cached_variables: Optional[dict[str, Any]] = None
+        self._cached_tools: Optional[dict[str, Any]] = None
+        self._kernel_bootstrap_code: list[str] = []
+
+    def _build_channels_url(self, kernel_id: str) -> str:
+        """Build a Kernel Gateway channel URL with a stable client session."""
+        session_id = getattr(self, "_channel_session_id", None)
+        if not session_id:
+            session_id = secrets.token_hex(16)
+            self._channel_session_id = session_id
+        return (
+            f"ws://{self.host}:{self.port}/api/kernels/{kernel_id}/channels"
+            f"?session_id={session_id}"
+        )
 
     @property
     def container(self) -> Any:
@@ -677,20 +1099,231 @@ class _DockerKernelLease:
         return self._container_executor.container
 
     def run_code_raise_errors(self, code: str) -> Any:
-        from smolagents.remote_executors import _websocket_run_code_raise_errors
-        from websocket import create_connection
+        import base64
+        import json
+        import pickle
+
+        from smolagents.remote_executors import (
+            AgentError,
+            CodeOutput,
+            RemotePythonExecutor,
+            _websocket_send_execute_request,
+        )
+        from websocket import (
+            ABNF,
+            WebSocketConnectionClosedException,
+            WebSocketTimeoutException,
+            create_connection,
+        )
 
         if self._closed:
             raise RuntimeError("Sandbox kernel lease is already closed")
-        with closing(create_connection(self.ws_url)) as ws:
-            return _websocket_run_code_raise_errors(code, ws, self.logger)
+        if self._unhealthy:
+            self._replace_unhealthy_kernel()
+
+        with closing(
+            create_connection(self.ws_url, timeout=self._receive_timeout_seconds)
+        ) as ws:
+            msg_id = _websocket_send_execute_request(code, ws)
+            outputs = []
+            result = None
+            is_final_answer = False
+            status_deadline = time.monotonic() + self._receive_timeout_seconds
+
+            while True:
+                now = time.monotonic()
+                if now >= status_deadline:
+                    self._check_kernel_channel_health(
+                        "the terminal execution message was not received before the watchdog deadline"
+                    )
+                    status_deadline = time.monotonic() + self._receive_timeout_seconds
+                    now = time.monotonic()
+
+                ws.settimeout(max(status_deadline - now, 0.001))
+                raw_message = None
+                try:
+                    opcode, raw_message = ws.recv_data(control_frame=True)
+                except WebSocketTimeoutException as exc:
+                    try:
+                        self._check_kernel_channel_health(
+                            "no WebSocket messages were received before the watchdog deadline"
+                        )
+                    except RuntimeError as health_error:
+                        raise health_error from exc
+                    status_deadline = time.monotonic() + self._receive_timeout_seconds
+                    continue
+                except WebSocketConnectionClosedException as exc:
+                    try:
+                        self._check_kernel_channel_health(
+                            "the Jupyter WebSocket connection closed unexpectedly",
+                            allow_busy=False,
+                        )
+                    except RuntimeError as health_error:
+                        raise health_error from exc
+
+                if opcode in (ABNF.OPCODE_PING, ABNF.OPCODE_PONG):
+                    continue
+                if opcode == ABNF.OPCODE_CLOSE:
+                    self._check_kernel_channel_health(
+                        "the Jupyter WebSocket connection sent a close frame",
+                        allow_busy=False,
+                    )
+                if not raw_message:
+                    self._check_kernel_channel_health(
+                        "the Jupyter WebSocket connection returned an empty frame",
+                        allow_busy=False,
+                    )
+                if isinstance(raw_message, bytes):
+                    raw_message = raw_message.decode("utf-8")
+
+                message = json.loads(raw_message)
+                parent_msg_id = message.get("parent_header", {}).get("msg_id")
+                if parent_msg_id != msg_id:
+                    continue
+
+                msg_type = message.get("msg_type", "")
+                content = message.get("content", {})
+                if msg_type == "stream":
+                    outputs.append(content["text"])
+                    status_deadline = time.monotonic() + self._receive_timeout_seconds
+                elif msg_type == "execute_result":
+                    result = content["data"].get("text/plain")
+                    status_deadline = time.monotonic() + self._receive_timeout_seconds
+                elif msg_type == "error":
+                    if content.get("ename", "") == RemotePythonExecutor.FINAL_ANSWER_EXCEPTION:
+                        result = pickle.loads(base64.b64decode(content.get("evalue", "")))
+                        is_final_answer = True
+                    else:
+                        raise AgentError("\n".join(content.get("traceback", [])), self.logger)
+                elif msg_type == "status" and content.get("execution_state") == "idle":
+                    break
+
+            return CodeOutput(
+                output=result,
+                logs="".join(outputs),
+                is_final_answer=is_final_answer,
+            )
+
+    def _check_kernel_channel_health(
+        self,
+        reason: str,
+        *,
+        allow_busy: bool = True,
+    ) -> None:
+        """Fail a lost kernel channel while allowing a genuinely busy kernel to continue."""
+        state = self._get_kernel_execution_state()
+        if allow_busy and state == "busy":
+            self._logger.debug(
+                "Sandbox kernel %s remains busy after %.1fs: %s",
+                self.kernel_id,
+                self._receive_timeout_seconds,
+                reason,
+            )
+            return
+
+        self._unhealthy = True
+        message = (
+            f"Sandbox kernel channel failed: {reason}; state={state!r}; "
+            "the kernel lease was marked unhealthy and will be replaced before the next execution"
+        )
+        self._logger.warning(message)
+        raise RuntimeError(message)
+
+    def _get_kernel_execution_state(self) -> Optional[str]:
+        """Return the live Jupyter kernel state after a WebSocket receive timeout."""
+        try:
+            response = self._requests.get(
+                f"{self.base_url}/api/kernels/{self.kernel_id}",
+                timeout=self._receive_timeout_seconds,
+            )
+            response.raise_for_status()
+            return response.json().get("execution_state")
+        except Exception as exc:
+            self._logger.warning(
+                "Failed to query sandbox kernel %s after WebSocket timeout: %s",
+                self.kernel_id,
+                exc,
+            )
+            return None
+
+    def _replace_unhealthy_kernel(self) -> None:
+        """Replace a failed kernel and restore framework-managed execution state."""
+        from smolagents.remote_executors import (
+            RemotePythonExecutor,
+            _create_kernel_http,
+        )
+
+        previous_kernel_id = self.kernel_id
+        try:
+            response = self._requests.delete(
+                f"{self.base_url}/api/kernels/{previous_kernel_id}",
+                timeout=5,
+            )
+            if response.status_code not in (204, 404):
+                self._logger.warning(
+                    "Failed to delete unhealthy sandbox kernel %s before replacement: status=%s",
+                    previous_kernel_id,
+                    response.status_code,
+                )
+        except Exception as exc:
+            self._logger.warning(
+                "Failed to delete unhealthy sandbox kernel %s before replacement: %s",
+                previous_kernel_id,
+                exc,
+            )
+
+        self._logger.warning(
+            "Replacing unhealthy sandbox kernel %s for the current agent run",
+            previous_kernel_id,
+        )
+        try:
+            kernel_id = _create_kernel_http(f"{self.base_url}/api/kernels", self.logger)
+            self.kernel_id = kernel_id
+            self._channel_session_id = secrets.token_hex(16)
+            self.ws_url = self._build_channels_url(kernel_id)
+            self._unhealthy = False
+
+            if self._cached_variables is not None:
+                RemotePythonExecutor.send_variables(self, self._cached_variables)
+            if self._cached_tools is not None:
+                RemotePythonExecutor.send_tools(self, self._cached_tools)
+            for code in self._kernel_bootstrap_code:
+                self.run_code_raise_errors(code)
+        except Exception as exc:
+            self._unhealthy = True
+            self._logger.exception(
+                "Failed to replace unhealthy sandbox kernel %s",
+                previous_kernel_id,
+            )
+            raise RuntimeError(
+                f"Failed to replace unhealthy sandbox kernel {previous_kernel_id}"
+            ) from exc
+
+        self._logger.info(
+            "Replaced unhealthy sandbox kernel %s with %s",
+            previous_kernel_id,
+            self.kernel_id,
+        )
 
     def __call__(self, code_action: str) -> Any:
         return self.run_code_raise_errors(code_action)
 
     def send_variables(self, variables: dict[str, Any]) -> None:
         from smolagents.remote_executors import RemotePythonExecutor
-        RemotePythonExecutor.send_variables(self, variables)
+        self._cached_variables = dict(variables)
+        try:
+            RemotePythonExecutor.send_variables(self, variables)
+        except Exception as exc:
+            if not self._unhealthy:
+                raise
+            self._logger.warning(
+                "Retrying sandbox variable registration with a replacement kernel: %s",
+                exc,
+            )
+            # Kernel replacement replays _cached_variables together with all
+            # other framework-managed state, so a second explicit send would
+            # only duplicate the registration.
+            self._replace_unhealthy_kernel()
 
     def install_packages(self, additional_imports: list[str]) -> list[str]:
         from smolagents.remote_executors import RemotePythonExecutor
@@ -699,6 +1332,9 @@ class _DockerKernelLease:
     def _patch_final_answer_with_exception(self, final_answer_tool: Any) -> None:
         """Patch final_answer while preserving its class-defined implementation."""
         import inspect
+
+        if getattr(final_answer_tool, "_nexent_final_answer_patched", False):
+            return
 
         instance_forward = final_answer_tool.forward
         original_forward = getattr(instance_forward, "__func__", None)
@@ -729,10 +1365,40 @@ class _DockerKernelLease:
         if wrapped_instance_forward:
             del final_answer_tool.forward
         final_answer_tool.__class__ = _FinalAnswerTool
+        final_answer_tool._nexent_final_answer_patched = True
 
     def send_tools(self, tools: dict[str, Any]) -> None:
         from smolagents.remote_executors import RemotePythonExecutor
-        RemotePythonExecutor.send_tools(self, tools)
+        self._cached_tools = dict(tools)
+        try:
+            RemotePythonExecutor.send_tools(self, tools)
+        except Exception as exc:
+            if not self._unhealthy:
+                raise
+            self._logger.warning(
+                "Retrying sandbox tool registration with a replacement kernel: %s",
+                exc,
+            )
+            # _replace_unhealthy_kernel replays the cached tools, variables,
+            # host-tool proxies, and run-workspace bootstrap in one pass.
+            self._replace_unhealthy_kernel()
+
+    def register_kernel_bootstrap_code(self, code: str) -> Any:
+        """Execute and retain framework bootstrap code for future kernel replacement."""
+        try:
+            output = self.run_code_raise_errors(code)
+        except Exception as exc:
+            if not self._unhealthy:
+                raise
+            self._logger.warning(
+                "Retrying sandbox bootstrap registration with a replacement kernel: %s",
+                exc,
+            )
+            self._replace_unhealthy_kernel()
+            output = self.run_code_raise_errors(code)
+        if code not in self._kernel_bootstrap_code:
+            self._kernel_bootstrap_code.append(code)
+        return output
 
     def cleanup(self) -> None:
         """Delete this kernel while leaving the shared container running."""
@@ -748,6 +1414,73 @@ class _DockerKernelLease:
                 )
         finally:
             self._closed = True
+
+
+class _SessionDockerContainerGroup:
+    """Reference-count the kernel leases that share one session container."""
+
+    def __init__(self, container_executor: Any) -> None:
+        self.container_executor = container_executor
+        self._lease_count = 0
+        self._closed = False
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Session sandbox container group is already closed")
+            self._lease_count += 1
+
+    def release(self) -> None:
+        should_cleanup = False
+        with self._lock:
+            if self._lease_count <= 0:
+                return
+            self._lease_count -= 1
+            if self._lease_count == 0 and not self._closed:
+                self._closed = True
+                should_cleanup = True
+        if should_cleanup:
+            self.container_executor.cleanup()
+
+    def close_if_unused(self) -> None:
+        """Remove the container when construction failed before a lease attached."""
+        should_cleanup = False
+        with self._lock:
+            if self._lease_count == 0 and not self._closed:
+                self._closed = True
+                should_cleanup = True
+        if should_cleanup:
+            self.container_executor.cleanup()
+
+
+class _SessionDockerExecutor(_DockerKernelLease):
+    """A dedicated kernel lease in an agent-tree-shared session container."""
+
+    def __init__(
+        self,
+        container_group: _SessionDockerContainerGroup,
+        logger_: logging.Logger,
+        receive_timeout_seconds: float = 30,
+    ) -> None:
+        self._session_container_group = container_group
+        self._session_lease_released = False
+        super().__init__(
+            container_group.container_executor,
+            logger_,
+            receive_timeout_seconds,
+        )
+        container_group.acquire()
+
+    def cleanup(self) -> None:
+        """Delete this kernel and release its shared container reference once."""
+        if self._session_lease_released:
+            return
+        try:
+            super().cleanup()
+        finally:
+            self._session_lease_released = True
+            self._session_container_group.release()
 
 
 class SandboxPoolManager:
@@ -809,6 +1542,7 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         host_tools_exist: bool = False,
+        session_container_group: Optional[_SessionDockerContainerGroup] = None,
     ) -> Any:
         """
         Acquire a warm executor from the pool, or create a new one if the pool
@@ -818,7 +1552,12 @@ class SandboxPoolManager:
         For ``scope=SYSTEM`` this tries to pop from the pool first.
         """
         if config.scope == SandboxScope.SESSION:
-            return self._build_executor(config, logger_, host_tools_exist)
+            return self._build_executor(
+                config,
+                logger_,
+                host_tools_exist,
+                session_container_group=session_container_group,
+            )
 
         if config.level == SandboxLevel.DOCKER:
             return self._acquire_shared_docker_kernel(config, logger_, host_tools_exist)
@@ -863,38 +1602,96 @@ class SandboxPoolManager:
         host_tools_exist: bool,
     ) -> Any:
         """Create one Docker container per system pool and lease one kernel per run."""
-        pool_key = (
-            f"{config.docker_image}|host_tools=true"
-            if host_tools_exist
-            else config.docker_image
-        )
-        with self._lock:
-            container_executor = self._system_containers.get(pool_key)
-            if container_executor is not None and not self._is_alive(container_executor):
-                self._system_containers.pop(pool_key, None)
-                self._destroy_executor(container_executor, logger_)
-                container_executor = None
+        # A system sandbox has one fixed Docker container and network regardless
+        # of whether an individual lease exposes Runtime-hosted tools. Host-tool
+        # bridges are installed per kernel lease below, so splitting the owner by
+        # host_tools_exist would let two pool owners manage and remove the same
+        # named container.
+        pool_key = config.docker_image
 
-        if container_executor is None:
+        def discard_owner(owner: Any) -> None:
+            removed = False
+            with self._lock:
+                if self._system_containers.get(pool_key) is owner:
+                    self._system_containers.pop(pool_key, None)
+                    removed = True
+            if removed:
+                self._destroy_executor(owner, logger_)
+
+        def get_or_create_owner() -> Any:
+            with self._lock:
+                owner = self._system_containers.get(pool_key)
+            if owner is not None and self._is_alive(owner):
+                return owner
+            if owner is not None:
+                discard_owner(owner)
+
             with self._container_build_lock:
                 with self._lock:
-                    container_executor = self._system_containers.get(pool_key)
-                if container_executor is None:
-                    container_executor = self._recover_docker_container(config, logger_, host_tools_exist)
-                if container_executor is None:
-                    self._remove_stale_docker_containers(config, logger_)
-                    container_executor = self._build_executor(config, logger_, host_tools_exist)
-                if not hasattr(container_executor, "base_url") or not hasattr(container_executor, "container"):
-                    return container_executor
-                with self._lock:
-                    existing = self._system_containers.setdefault(pool_key, container_executor)
-                    if existing is not container_executor:
-                        self._destroy_executor(container_executor, logger_)
-                        container_executor = existing
+                    owner = self._system_containers.get(pool_key)
+                if owner is not None and self._is_alive(owner):
+                    return owner
+                if owner is not None:
+                    discard_owner(owner)
 
-        lease = _DockerKernelLease(container_executor, logger_)
+                owner = self._recover_docker_container(
+                    config,
+                    logger_,
+                    host_tools_exist,
+                )
+                if owner is None:
+                    self._remove_stale_docker_containers(config, logger_)
+                    owner = self._build_executor(config, logger_, host_tools_exist)
+                if not hasattr(owner, "base_url") or not hasattr(owner, "container"):
+                    return owner
+                with self._lock:
+                    existing = self._system_containers.setdefault(pool_key, owner)
+                if existing is not owner:
+                    self._destroy_executor(owner, logger_)
+                    owner = existing
+                return owner
+
+        container_executor = None
+        lease = None
+        for attempt in range(2):
+            container_executor = get_or_create_owner()
+            if not hasattr(container_executor, "base_url") or not hasattr(
+                container_executor,
+                "container",
+            ):
+                return container_executor
+            try:
+                # Revalidate immediately before creating the kernel. This closes
+                # the restart window between owner lookup and the Kernel Gateway
+                # request, while the one retry rebuilds stale recovered owners.
+                if not self._is_alive(container_executor):
+                    raise RuntimeError("Shared sandbox container stopped before kernel lease creation")
+                lease = _DockerKernelLease(
+                    container_executor,
+                    logger_,
+                    receive_timeout_seconds=config.timeout_seconds,
+                )
+                break
+            except Exception as exc:
+                discard_owner(container_executor)
+                if attempt == 0:
+                    logger_.warning(
+                        "Shared sandbox lease creation failed; rebuilding owner once: %s",
+                        exc,
+                    )
+                    continue
+                raise RuntimeError(
+                    "Failed to create a kernel lease after rebuilding the shared sandbox"
+                ) from exc
+
+        if lease is None:  # pragma: no cover - loop either assigns or raises
+            raise RuntimeError("Failed to create a shared sandbox kernel lease")
         if host_tools_exist:
-            lease = _install_host_tool_bridge(lease, logger_)
+            lease = _install_host_tool_bridge(
+                lease,
+                logger_,
+                request_timeout_seconds=config.host_tool_timeout_seconds,
+            )
         lease = _wrap_executor(lease, config, logger_)
         lease._nexent_sandbox_config = config
         lease._nexent_pool_key = pool_key
@@ -1003,6 +1800,7 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         host_tools_exist: bool = False,
+        session_container_group: Optional[_SessionDockerContainerGroup] = None,
     ) -> Any:
         """Construct and (for docker) eagerly start a container."""
         level = config.level
@@ -1016,7 +1814,12 @@ class SandboxPoolManager:
             )
 
         if level == SandboxLevel.DOCKER:
-            return self._build_docker_executor(config, logger_, host_tools_exist)
+            return self._build_docker_executor(
+                config,
+                logger_,
+                host_tools_exist,
+                session_container_group=session_container_group,
+            )
 
         if level == SandboxLevel.WASM:
             if host_tools_exist:
@@ -1056,6 +1859,26 @@ class SandboxPoolManager:
             if container.status != "running":
                 logger_.warning("Persisted sandbox container is not running (status=%s)", container.status)
                 return None
+
+            workspace_volume_name = config.extra_kwargs.get("workspace_volume_name")
+            workspace_root = config.extra_kwargs.get("workspace_root")
+            if workspace_volume_name and workspace_root:
+                expected_destination = str(Path(workspace_root).resolve())
+                mounts = container.attrs.get("Mounts") or []
+                has_expected_mount = any(
+                    mount.get("Type") == "volume"
+                    and mount.get("Name") == workspace_volume_name
+                    and mount.get("Destination") == expected_destination
+                    and mount.get("RW") is not False
+                    for mount in mounts
+                )
+                if not has_expected_mount:
+                    logger_.warning(
+                        "Persisted sandbox container does not use workspace volume %s at %s",
+                        workspace_volume_name,
+                        expected_destination,
+                    )
+                    return None
 
             networks = (container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
             if SANDBOX_NETWORK_NAME not in networks:
@@ -1130,6 +1953,147 @@ class SandboxPoolManager:
         except Exception as exc:
             logger_.debug("Could not inspect stale sandbox containers: %s", exc)
 
+    def _build_session_docker_executor(
+        self,
+        config: SandboxConfig,
+        logger_: logging.Logger,
+        container_run_kwargs: dict[str, Any],
+    ) -> Any:
+        """Create a per-session container without a fixed host-port binding."""
+        import docker
+        import requests
+
+        client = docker.from_env()
+        run_kwargs = dict(container_run_kwargs)
+        container_name = f"{SANDBOX_SESSION_CONTAINER_PREFIX}-{secrets.token_hex(8)}"
+        run_kwargs.update({
+            "name": container_name,
+            "labels": {"com.nexent.sandbox": "session"},
+            "command": _kernel_gateway_command(),
+            "detach": True,
+            # Kernel Gateway needs a network namespace for its HTTP/WebSocket
+            # control plane. Its published endpoint remains constrained to host
+            # loopback or to the Nexent Docker network.
+            "network_disabled": False,
+        })
+        if config.network_disabled:
+            logger_.warning(
+                "Docker NetworkDisabled cannot be used for the Jupyter control plane; "
+                "the session sandbox is reachable only through its local control endpoint. "
+                "Enforce outbound restrictions with the deployment network or firewall."
+            )
+
+        if _is_containerized_runtime():
+            # The runtime's 127.0.0.1 is not the Docker host. Connect directly
+            # over the shared Docker network using this container's unique DNS
+            # name and do not publish a host port.
+            try:
+                client.networks.get(SANDBOX_NETWORK_NAME)
+            except docker.errors.NotFound:
+                client.networks.create(SANDBOX_NETWORK_NAME, driver="bridge")
+            run_kwargs.pop("ports", None)
+            run_kwargs["network"] = SANDBOX_NETWORK_NAME
+            connection_host = container_name
+            connection_port = SANDBOX_JUPYTER_PORT
+        else:
+            # Let Docker allocate an available host port atomically. Selecting a
+            # port in Python before container creation would retain a TOCTOU race.
+            run_kwargs["ports"] = {
+                f"{SANDBOX_JUPYTER_PORT}/tcp": ("127.0.0.1", None)
+            }
+            connection_host = "127.0.0.1"
+            connection_port = 0
+
+        container = client.containers.run(config.docker_image, **run_kwargs)
+        owner = None
+        container_group = None
+        executor = None
+        try:
+            container.reload()
+            if not _is_containerized_runtime():
+                ports = (container.attrs.get("NetworkSettings") or {}).get("Ports") or {}
+                bindings = ports.get(f"{SANDBOX_JUPYTER_PORT}/tcp") or []
+                if not bindings or not bindings[0].get("HostPort"):
+                    raise RuntimeError("Docker did not allocate a Jupyter host port")
+                connection_port = int(bindings[0]["HostPort"])
+
+            deadline = time.monotonic() + max(10, config.timeout_seconds)
+            base_url = f"http://{connection_host}:{connection_port}"
+            while time.monotonic() < deadline:
+                container.reload()
+                if container.status not in (None, "created", "running"):
+                    raise RuntimeError(
+                        f"Session sandbox container stopped before Jupyter was ready "
+                        f"(status={container.status})"
+                    )
+                try:
+                    response = requests.get(f"{base_url}/api/kernels", timeout=1)
+                    response.raise_for_status()
+                    if isinstance(response.json(), list):
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
+            else:
+                raise RuntimeError(f"Jupyter kernel API did not become ready at {base_url}")
+
+            owner = _RecoveredDockerExecutor(
+                container,
+                logger_,
+                connection_host,
+                config.extra_kwargs.get("additional_imports", []),
+                port=connection_port,
+            )
+            container_group = _SessionDockerContainerGroup(owner)
+            executor = self._lease_session_docker_kernel(
+                config,
+                logger_,
+                container_group,
+            )
+            logger_.info(
+                "Created session Docker sandbox %s (url=%s)",
+                container.short_id,
+                executor.base_url,
+            )
+            return executor
+        except Exception:
+            if executor is not None:
+                executor.cleanup()
+            if container_group is not None:
+                container_group.close_if_unused()
+            elif owner is not None:
+                owner.cleanup()
+            else:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+            raise
+
+    def _lease_session_docker_kernel(
+        self,
+        config: SandboxConfig,
+        logger_: logging.Logger,
+        container_group: _SessionDockerContainerGroup,
+    ) -> Any:
+        """Lease an isolated kernel from an agent-tree session container."""
+        if not self._is_alive(container_group.container_executor):
+            raise RuntimeError("Shared session sandbox container is not running")
+        executor = _SessionDockerExecutor(
+            container_group,
+            logger_,
+            receive_timeout_seconds=config.timeout_seconds,
+        )
+        try:
+            executor.installed_packages = executor.install_packages(
+                executor.additional_imports
+            )
+        except Exception:
+            executor.cleanup()
+            raise
+        executor._nexent_session_container_group = container_group
+        return executor
+
     def _build_system_docker_executor(
         self,
         config: SandboxConfig,
@@ -1197,11 +2161,15 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         host_tools_exist: bool = False,
+        session_container_group: Optional[_SessionDockerContainerGroup] = None,
     ) -> Any:
         """Construct a Docker executor with Nexent hardening."""
         try:
             from smolagents.remote_executors import DockerExecutor
-        except ImportError as exc:
+
+            if DockerExecutor is None:
+                raise ImportError("DockerExecutor is unavailable")
+        except ImportError:
             logger_.error(
                 "DockerExecutor requires smolagents[docker]. "
                 "Install it with: pip install 'smolagents[docker]'. "
@@ -1225,6 +2193,18 @@ class SandboxPoolManager:
             ),
             **({"extra_hosts": {"host.docker.internal": "host-gateway"}} if host_tools_exist else {}),
         }
+        workspace_root = config.extra_kwargs.get("workspace_root")
+        if workspace_root:
+            resolved_workspace_root = str(Path(workspace_root).resolve())
+            workspace_volume_name = config.extra_kwargs.get("workspace_volume_name")
+            if not workspace_volume_name:
+                Path(resolved_workspace_root).mkdir(parents=True, exist_ok=True)
+            container_run_kwargs["volumes"] = {
+                (workspace_volume_name or resolved_workspace_root): {
+                    "bind": resolved_workspace_root,
+                    "mode": "rw",
+                }
+            }
         if config.scope == SandboxScope.SYSTEM:
             try:
                 import docker
@@ -1258,13 +2238,18 @@ class SandboxPoolManager:
                     container_run_kwargs,
                 )
             else:
-                executor = DockerExecutor(
-                    additional_imports=config.extra_kwargs.get("additional_imports", []),
-                    logger=_make_smolagents_logger(logger_),
-                    image_name=config.docker_image,
-                    build_new_image=False,
-                    container_run_kwargs=container_run_kwargs,
-                )
+                if session_container_group is None:
+                    executor = self._build_session_docker_executor(
+                        config,
+                        logger_,
+                        container_run_kwargs,
+                    )
+                else:
+                    executor = self._lease_session_docker_kernel(
+                        config,
+                        logger_,
+                        session_container_group,
+                    )
             executor._nexent_sandbox_config = config  # store for pool bookkeeping
             executor._nexent_backend = "docker"
             logger_.debug(
@@ -1288,7 +2273,11 @@ class SandboxPoolManager:
         if config.scope == SandboxScope.SYSTEM:
             return executor
         if host_tools_exist:
-            executor = _install_host_tool_bridge(executor, logger_)
+            executor = _install_host_tool_bridge(
+                executor,
+                logger_,
+                request_timeout_seconds=config.host_tool_timeout_seconds,
+            )
         return _wrap_executor(executor, config, logger_)
 
     def _build_wasm_executor(
@@ -1416,6 +2405,7 @@ def build_python_executor(
     logger_: logging.Logger,
     managed_agents_exist: bool = False,
     host_tools_exist: bool = False,
+    session_container_group: Optional[_SessionDockerContainerGroup] = None,
 ) -> Any:
     """
     Factory function: build a python_executor from ``SandboxConfig``.
@@ -1427,28 +2417,31 @@ def build_python_executor(
     Args:
         config: sandbox configuration.
         logger_: logger instance.
-        managed_agents_exist: if True and level != LOCAL, log a warning and
-            fall back to LOCAL (smolagents limitation — managed_agents share
-            the parent's python_executor).
+        managed_agents_exist: Deprecated compatibility flag. Managed-agent
+            orchestration is proxied to the Runtime process, so it no longer
+            requires disabling the configured sandbox.
+        session_container_group: Internal agent-tree container group. When set,
+            a session-scoped Docker executor leases a new isolated kernel from
+            the existing container instead of starting another container.
 
     Returns:
         A wrapped python_executor.  Never raises — always returns a usable
         executor (falls back to LocalPythonExecutor on any error).
     """
-    if managed_agents_exist and config.level != SandboxLevel.LOCAL:
-        logger_.warning(
-            "Sandbox level '%s' is incompatible with managed_agents "
-            "(smolagents limitation).  Falling back to LOCAL.",
-            config.level.value,
-        )
-        config.level = SandboxLevel.LOCAL
-
     pool = SandboxPoolManager.get_instance()
 
     if config.scope == SandboxScope.SESSION:
         # Per-run fresh executor — pool manager still calls _build_executor
         # but we immediately destroy it when release() is called.
-        executor = pool.acquire(config, logger_, host_tools_exist)
+        if session_container_group is None:
+            executor = pool.acquire(config, logger_, host_tools_exist)
+        else:
+            executor = pool.acquire(
+                config,
+                logger_,
+                host_tools_exist,
+                session_container_group=session_container_group,
+            )
         return executor
 
     # SYSTEM scope — pool manager handles lifecycle.

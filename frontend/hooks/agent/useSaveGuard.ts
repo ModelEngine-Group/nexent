@@ -1,414 +1,174 @@
 import { useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import { App } from "antd";
-import { useQueryClient } from "@tanstack/react-query";
-import { useConfirmModal } from "../useConfirmModal";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
-import {
-  updateAgentInfo,
-  updateToolConfig,
-  searchToolConfig,
-  searchAgentInfo,
-} from "@/services/agentConfigService";
-import { Agent } from "@/types/agentConfig";
-import log from "@/lib/logger";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
-/**
- * Coarse type check used to reject values that obviously don't match the
- * declared parameter type. The backend will happily accept e.g. a string
- * into an `int` field (Pydantic coerces, or in some cases passes it
- * straight through to a downstream service that crashes with a cryptic
- * number_format_exception). Doing this guard on the save path means a
- * stale / wrongly-shaped value in the frontend state cannot be persisted
- * to the database, so the next "Test" execution uses the backend default
- * instead of the polluted value.
- */
-function isValueCompatibleWithType(
-  value: unknown,
-  type: string | undefined
-): boolean {
-  if (type === undefined) return true;
-  switch (type) {
-    case "number":
-      // Accept actual numbers AND numeric strings, but reject obvious KB id
-      // strings that contain dashes — these never parse as numbers.
-      if (typeof value === "number") return Number.isFinite(value);
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (trimmed === "") return false;
-        return !Number.isNaN(Number(trimmed));
-      }
-      return false;
-    case "boolean":
-      return (
-        typeof value === "boolean" || value === "true" || value === "false"
-      );
-    case "array":
-      return Array.isArray(value);
-    case "object":
-      return (
-        typeof value === "object" && value !== null && !Array.isArray(value)
-      );
-    case "string":
-    default:
-      // For string-like params, anything other than null/undefined is acceptable;
-      // we already filtered those above.
-      return true;
+import { checkAgentNameConflictBatch } from "@/services/agentConfigService";
+import { useAgentStore } from "@/stores/agentStore";
+
+const AGENT_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+export const AGENT_NAME_MAX_LENGTH = 60;
+export const AGENT_DESCRIPTION_MAX_LENGTH = 500;
+
+export const isValidAgentName = (name: string): boolean =>
+  name.length <= AGENT_NAME_MAX_LENGTH && AGENT_NAME_PATTERN.test(name);
+
+export const isValidAgentDisplayName = (name: string): boolean =>
+  name.length <= AGENT_NAME_MAX_LENGTH;
+
+export const isValidAgentDescription = (description: string): boolean =>
+  description.length <= AGENT_DESCRIPTION_MAX_LENGTH;
+
+type AgentNameField = "name" | "display_name";
+
+type AgentNameConflictStatus =
+  | "available"
+  | "name_duplicate"
+  | "display_name_duplicate"
+  | "check_failed";
+
+export async function checkAgentNameConflict(
+  field: AgentNameField,
+  value: string | undefined,
+  agentId?: number
+): Promise<AgentNameConflictStatus> {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "available";
+
+  const result = await checkAgentNameConflictBatch({
+    items: [
+      {
+        [field]: trimmed,
+        agent_id: agentId,
+      },
+    ],
+  });
+  if (!result.success || !Array.isArray(result.data)) {
+    return "check_failed";
   }
+
+  const conflict = result.data[0];
+  if (conflict?.name_conflict) return "name_duplicate";
+  if (conflict?.display_name_conflict) return "display_name_duplicate";
+  return "available";
 }
 
-/**
- * Batch update tool configurations for an agent
- * Handles create, update, and enable/disable operations
- *
- * Logic:
- * 1. For newly selected tools (not in baseline): Create tool instance with enable=true
- * 2. For previously selected tools (in baseline): Update tool params with enable=true
- * 3. For deselected tools (in baseline but not in current): Set enable=false
- *
- * @param agentId - The agent ID
- * @param currentTools - Current tool list from edited agent
- * @param baselineTools - Baseline tool list (original state before editing)
- */
-async function batchUpdateToolConfigs(
-  agentId: number,
-  currentTools: any[],
-  baselineTools: any[]
-) {
-  // Get the set of currently selected tool IDs
-  const currentToolIds = new Set(currentTools.map((tool) => parseInt(tool.id)));
+export const createAgentNameConflictValidator = (
+  t: TFunction,
+  field: AgentNameField,
+  agentId?: number
+) => ({
+  async validator(_: unknown, value: string) {
+    const status = await checkAgentNameConflict(field, value, agentId);
+    if (status === "available") return Promise.resolve();
 
-  // Get the set of baseline (original) tool IDs
-  const baselineToolIds = new Set(
-    baselineTools.map((tool) => parseInt(tool.id))
-  );
-
-  // Process each tool in the current selection
-  for (const tool of currentTools) {
-    const toolId = parseInt(tool.id);
-    const isEnabled = true; // Selected tools are always enabled
-    // Only include params that have a defined value (not undefined or null)
-    // and whose value actually matches the declared parameter type. The
-    // second check guards against stale/wrongly-shaped data being persisted
-    // — e.g. when a knowledge_base_search top_k slot was previously polluted
-    // with a KB id string, we want to drop it so the backend default kicks in
-    // instead of saving the wrong value again.
-    const params =
-      tool.initParams?.reduce(
-        (acc: Record<string, any>, param: any) => {
-          if (param.value === undefined || param.value === null) {
-            return acc;
-          }
-          if (
-            param.type &&
-            !isValueCompatibleWithType(param.value, param.type)
-          ) {
-            return acc;
-          }
-          acc[param.name] = param.value;
-          return acc;
-        },
-        {} as Record<string, any>
-      ) || {};
-
-    try {
-      // Update or create tool instance with current params and enabled status
-      await updateToolConfig(toolId, agentId, params, isEnabled);
-    } catch (error) {
-      log.error(`Failed to save tool config for tool ${toolId}:`, error);
-      throw error;
-    }
-  }
-
-  // Disable tools that were previously selected but are now deselected
-  const toolsToDisable = Array.from(baselineToolIds).filter(
-    (toolId) => !currentToolIds.has(toolId)
-  );
-
-  for (const toolId of toolsToDisable) {
-    try {
-      // Fetch existing params to preserve them when disabling
-      const toolInstance = await searchToolConfig(toolId, agentId);
-      const existingParams =
-        toolInstance.success && toolInstance.data?.params
-          ? toolInstance.data.params
-          : {};
-
-      // Disable the tool while preserving its params
-      await updateToolConfig(toolId, agentId, existingParams, false);
-    } catch (error) {
-      log.error(`Failed to disable tool ${toolId}:`, error);
-      throw error;
-    }
-  }
-}
+    const messageKey =
+      status === "name_duplicate"
+        ? "agent.validation.nameDuplicate"
+        : status === "display_name_duplicate"
+          ? "agent.validation.displayNameDuplicate"
+          : field === "name"
+            ? "agent.validation.nameConflictCheckFailed"
+            : "agent.validation.displayNameConflictCheckFailed";
+    return Promise.reject(new Error(t(messageKey)));
+  },
+});
 
 /**
- * Hook for handling agent save guard logic
- * Provides two functions: one with confirmation dialog, one for direct save
- *
- * This hook encapsulates the complete flow of checking for unsaved changes
- * and handling the save/discard decision for agent configurations.
- *
- * @returns object with promptSaveGuard and saveDirectly functions
+ * Waits for automatic draft persistence after validating the current agent.
  */
 export const useSaveGuard = () => {
   const { t } = useTranslation("common");
-  const { confirm } = useConfirmModal();
   const { message } = App.useApp();
-  const queryClient = useQueryClient();
 
-  // Shared save logic
+  const validateCurrentAgent = useCallback(async (): Promise<boolean> => {
+    const { agentId, editedAgent } = useAgentStore.getState();
+    if (!editedAgent || agentId === null) return false;
+
+    const name = (editedAgent.name ?? "").trim();
+    const displayName = (editedAgent.display_name ?? "").trim();
+    const description = (editedAgent.description ?? "").trim();
+
+    if (!displayName) {
+      message.error(t("agent.validation.displayNameRequired"));
+      return false;
+    }
+    if (!isValidAgentDisplayName(displayName)) {
+      message.error(
+        t("agent.validation.displayNameMaxLength", {
+          max: AGENT_NAME_MAX_LENGTH,
+        })
+      );
+      return false;
+    }
+    if (!name) {
+      message.error(t("agent.validation.nameRequired"));
+      return false;
+    }
+    if (!isValidAgentName(name)) {
+      message.error(t("agent.validation.namePattern"));
+      return false;
+    }
+    if (!description) {
+      message.error(t("agent.validation.descriptionRequired"));
+      return false;
+    }
+    if (!isValidAgentDescription(description)) {
+      message.error(
+        t("agent.validation.descriptionMaxLength", {
+          max: AGENT_DESCRIPTION_MAX_LENGTH,
+        })
+      );
+      return false;
+    }
+    if (!editedAgent.model_ids?.length) {
+      message.error(t("agent.validation.modelRequired"));
+      return false;
+    }
+
+    const nameStatus = await checkAgentNameConflict("name", name, agentId);
+    if (nameStatus !== "available") {
+      message.error(
+        t(
+          nameStatus === "name_duplicate"
+            ? "agent.validation.nameDuplicate"
+            : "agent.validation.nameConflictCheckFailed"
+        )
+      );
+      return false;
+    }
+
+    const displayNameStatus = await checkAgentNameConflict(
+      "display_name",
+      displayName,
+      agentId
+    );
+    if (displayNameStatus !== "available") {
+      message.error(
+        t(
+          displayNameStatus === "display_name_duplicate"
+            ? "agent.validation.displayNameDuplicate"
+            : "agent.validation.displayNameConflictCheckFailed"
+        )
+      );
+      return false;
+    }
+
+    return true;
+  }, [message, t]);
+
   const save = useCallback(async (): Promise<boolean> => {
-    try {
-      await useAgentConfigStore.getState().validateBeforeSave();
-    } catch {
+    const store = useAgentStore.getState();
+    store.flushDraft();
+    if (!(await store.waitForIdle())) {
+      message.error(t("businessLogic.config.error.saveFailed"));
       return false;
     }
 
-    try {
-      const currentEditedAgent = useAgentConfigStore.getState().editedAgent;
-      const currentAgentId = useAgentConfigStore.getState().currentAgentId;
+    return validateCurrentAgent();
 
-      // Validate required fields
-      if (!currentEditedAgent.name.trim()) {
-        message.error(t("agent.validation.nameRequired"));
-        return false;
-      }
+  }, [message, t, validateCurrentAgent]);
 
-      const enabledToolIds = (currentEditedAgent.tools || [])
-        .filter((tool: any) => tool && tool.is_available !== false)
-        .map((tool: any) => Number(tool.id))
-        .filter((id: number) => Number.isFinite(id));
-
-      const relatedAgentIds = (currentEditedAgent.sub_agent_id_list || [])
-        .map((id: any) => Number(id))
-        .filter((id: number) => Number.isFinite(id));
-
-      // Build related_agents directly from sub_agent_relations.
-      // sub_agent_relations is kept in sync by CollaborativeAgent when adding/removing:
-      // - Newly selected agents get their current_version_no from the published list
-      // - Already saved agents retain their original version_no
-      const relatedAgents = (currentEditedAgent.sub_agent_relations || [])
-        .filter((rel: any) => rel?.agent_id != null && Number.isFinite(Number(rel.agent_id)))
-        .map((rel: any) => ({
-          agent_id: Number(rel.agent_id),
-          version_no: rel.version_no != null ? Number(rel.version_no) : 0,
-        }));
-
-      const relatedExternalAgentIds = (
-        currentEditedAgent.external_sub_agent_id_list || []
-      )
-        .map((id: any) => Number(id))
-        .filter((id: number) => Number.isFinite(id));
-
-      const groupIds = (currentEditedAgent.group_ids || [])
-        .map((id: any) => Number(id))
-        .filter((id: number) => Number.isFinite(id));
-
-      const enabledSkillIds = (currentEditedAgent.skills || [])
-        .map((skill: any) => Number(skill.skill_id))
-        .filter((id: number) => Number.isFinite(id));
-
-      const skillInstances = (currentEditedAgent.skills || [])
-        .map((skill: any) => ({
-          skill_id: Number(skill.skill_id),
-          enabled: true,
-          config_values:
-            skill.config_values && typeof skill.config_values === "object"
-              ? skill.config_values
-              : {},
-        }))
-        .filter((skill: { skill_id: number }) =>
-          Number.isFinite(skill.skill_id)
-        );
-
-      // Ensure model_ids always has a value - fall back to a single-element array
-      // using the first element from model_names when model_ids is empty
-      const modelIdsToSave = (() => {
-        if (
-          currentEditedAgent.model_ids &&
-          currentEditedAgent.model_ids.length > 0
-        ) {
-          return currentEditedAgent.model_ids;
-        }
-        // Fallback: when only model name is available, map it to model_ids via available LLM list
-        const modelName = currentEditedAgent.model;
-        if (!modelName) return undefined;
-        // Use the business_logic_model_id or any model lookup; this is best-effort fallback
-        // and the backend will perform final resolution.
-        return undefined;
-      })();
-
-      const result = await updateAgentInfo({
-        agent_id: currentAgentId ?? undefined, // undefined=create, number=update
-        name: currentEditedAgent.name,
-        display_name: currentEditedAgent.display_name,
-        description: currentEditedAgent.description,
-        author: currentEditedAgent.author,
-        group_ids: groupIds,
-        model_ids: modelIdsToSave,
-        max_steps: currentEditedAgent.max_step,
-        is_main_agent: currentEditedAgent.is_main_agent ?? true,
-        requested_output_tokens:
-          currentEditedAgent.requested_output_tokens ?? null,
-        provide_run_summary: currentEditedAgent.provide_run_summary,
-        verification_config: currentEditedAgent.verification_config,
-        enabled: true,
-        business_description: currentEditedAgent.business_description,
-        duty_prompt: currentEditedAgent.duty_prompt,
-        constraint_prompt: currentEditedAgent.constraint_prompt,
-        few_shots_prompt: currentEditedAgent.few_shots_prompt,
-        business_logic_model_name:
-          currentEditedAgent.business_logic_model_name ?? undefined,
-        business_logic_model_id:
-          currentEditedAgent.business_logic_model_id ?? undefined,
-        prompt_template_id: currentEditedAgent.prompt_template_id ?? 0,
-        prompt_template_name:
-          currentEditedAgent.prompt_template_name ?? "system_default",
-        enabled_tool_ids: enabledToolIds,
-        enabled_skill_ids: enabledSkillIds,
-        skill_instances: skillInstances,
-        related_agent_ids: relatedAgentIds,
-        related_agents: relatedAgents,
-        related_external_agent_ids: relatedExternalAgentIds,
-        ingroup_permission:
-          currentEditedAgent.ingroup_permission ?? "READ_ONLY",
-        greeting_message: currentEditedAgent.greeting_message,
-        example_questions: currentEditedAgent.example_questions,
-      });
-
-      if (result.success) {
-        // Get the final agent ID (from result for new agents, existing currentAgentId for updates)
-        const finalAgentId = result.data?.agent_id || currentAgentId;
-        if (!finalAgentId) {
-          throw new Error("Failed to get agent ID after save operation");
-        }
-
-        // Handle create mode: exit create mode and select the newly created agent
-        const isCreatingMode = useAgentConfigStore.getState().isCreatingMode;
-        if (isCreatingMode) {
-          try {
-            // Load the full agent details
-            const agentDetailResult = await searchAgentInfo(
-              Number(finalAgentId)
-            );
-            if (agentDetailResult.success && agentDetailResult.data) {
-              // Exit create mode and set the newly created agent as current
-              useAgentConfigStore.getState().setCurrentAgent({
-                ...agentDetailResult.data,
-                permission: "EDIT",
-              });
-            }
-          } catch (error) {
-            log.error("Failed to load newly created agent details:", error);
-            // Still exit create mode even if detail loading fails
-            useAgentConfigStore.getState().setCurrentAgent(null);
-          }
-        }
-
-        // Batch process tool configurations for both create and update modes
-        const baselineTools =
-          useAgentConfigStore.getState().baselineAgent?.tools || [];
-        await batchUpdateToolConfigs(
-          finalAgentId,
-          currentEditedAgent.tools || [],
-          baselineTools
-        );
-
-        // Refresh cache
-        await queryClient.invalidateQueries({
-          queryKey: ["agentInfo", finalAgentId],
-        });
-        await queryClient.refetchQueries({
-          queryKey: ["agentInfo", finalAgentId],
-        });
-
-        // CRITICAL: Update store with the latest data from cache after saving tool configs
-        // This ensures that on subsequent saves, the tool initParams reflect the latest
-        // values that were saved (including any defaults merged by the backend)
-        const latestAgentData = queryClient.getQueryData([
-          "agentInfo",
-          finalAgentId,
-        ]);
-        if (
-          latestAgentData &&
-          typeof latestAgentData === "object" &&
-          "tools" in latestAgentData
-        ) {
-          const latestTools = (latestAgentData as any).tools || [];
-          // Update editedAgent with the latest tools from cache
-          useAgentConfigStore.getState().updateTools(latestTools);
-        }
-
-        // Refresh skill instances after save
-        await queryClient.invalidateQueries({
-          queryKey: ["agentSkillInstances", finalAgentId],
-        });
-
-        // Also invalidate the agents list cache to ensure the list reflects any changes
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-
-        // Mark as saved (this will sync editedAgent to baselineAgent)
-        useAgentConfigStore.getState().markAsSaved();
-        message.success(t("businessLogic.config.message.agentSaveSuccess"));
-        return true;
-      } else {
-        message.error(
-          result.message || t("businessLogic.config.error.saveFailed")
-        );
-        return false;
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "";
-      message.error(reason || t("businessLogic.config.error.saveFailed"));
-      return false;
-    }
-  }, [t, message, queryClient]);
-
-  // Function with confirmation dialog - prompts user to save/discard
-  const saveWithModal = useCallback(async (): Promise<boolean> => {
-    // Get the latest hasUnsavedChanges from store at call time
-    const currentHasUnsavedChanges =
-      useAgentConfigStore.getState().hasUnsavedChanges;
-
-    if (!currentHasUnsavedChanges) {
-      return true; // No unsaved changes, proceed
-    }
-
-    // Show confirmation dialog
-    return new Promise((resolve) => {
-      confirm({
-        title: t("agentConfig.modals.saveConfirm.title"),
-        content: t("agentConfig.modals.saveConfirm.content"),
-        okText: t("agentConfig.modals.saveConfirm.save"),
-        cancelText: t("agentConfig.modals.saveConfirm.discard"),
-        onOk: async () => {
-          const success = await save();
-          resolve(success);
-        },
-        onCancel: () => {
-          // Discard changes
-          useAgentConfigStore.getState().discardChanges();
-          resolve(true);
-        },
-      });
-    });
-  }, []);
-
-  // Function for direct save - saves without confirmation dialog
-  const saveDirectly = useCallback(async (): Promise<boolean> => {
-    // Get the latest hasUnsavedChanges from store at call time
-    const currentHasUnsavedChanges =
-      useAgentConfigStore.getState().hasUnsavedChanges;
-
-    if (!currentHasUnsavedChanges) {
-      return true; // No unsaved changes, nothing to save
-    }
-
-    // Save directly without confirmation
-    return await save();
-  }, []);
-
-  return { save, saveWithModal };
+  return { save, saveWithModal: save };
 };

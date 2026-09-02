@@ -369,6 +369,16 @@ class ContextManager:
         return [replacement_by_id.get(item.id, item) for item in result]
 
 
+    def _neutral_action_content(self, step: ActionStep, action_index: int) -> dict[str, Any]:
+        """Preserve completed-action evidence without upstream protocol labels."""
+        return {
+            "step_number": getattr(step, "step_number", action_index + 1),
+            "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
+            "observations": self._to_json_value(getattr(step, "observations", None)),
+            "error": str(getattr(step, "error", "")) if getattr(step, "error", None) else None,
+            "result": self._to_json_value(getattr(step, "action_output", None)),
+        }
+
     def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:
         projected: list[ContextItem] = []
         action_index = planning_index = 0
@@ -392,14 +402,15 @@ class ContextManager:
                 )
                 projected.append(item)
             elif isinstance(step, ActionStep):
-                content = {
-                    "step_number": getattr(step, "step_number", action_index + 1),
-                    "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
-                    "observations": self._to_json_value(getattr(step, "observations", None)),
-                    "error": str(getattr(step, "error", "")) if getattr(step, "error", None) else None,
-                    "result": self._to_json_value(getattr(step, "action_output", None)),
-                    "messages": [self._message_to_dict(message) for message in step.to_messages()],
-                }
+                content = self._neutral_action_content(step, action_index)
+                # Render completed actions from structured fields instead of
+                # smolagents ActionStep.to_messages(). The upstream rendering
+                # injects protocol labels such as "Calling tools:" and
+                # "Observation:" into the next model request, which can prime
+                # reasoning models to emit a configured stop sequence. The
+                # neutral representation preserves the executable action,
+                # outcome, error, result, and ordering without changing how
+                # the live ReAct step is parsed or executed.
                 item = ContextItem.from_input(
                     ContextItemInput(
                         id=f"current_action:{action_index}",
@@ -504,8 +515,21 @@ class ContextManager:
         messages = []
         if memory.system_prompt:
             messages.extend(memory.system_prompt.to_messages())
+        action_index = 0
         for step in memory.steps:
-            messages.extend(step.to_messages())
+            if isinstance(step, ActionStep):
+                item = ContextItem.from_input(
+                    ContextItemInput(
+                        id=f"summary_action:{action_index}",
+                        type=ContextItemType.CURRENT_ACTION,
+                        content=self._neutral_action_content(step, action_index),
+                        metadata={"layout_order": action_index},
+                    )
+                )
+                messages.extend(self.build_context_messages([item]))
+                action_index += 1
+            else:
+                messages.extend(step.to_messages())
         return messages
 
     def register_item(self, item):

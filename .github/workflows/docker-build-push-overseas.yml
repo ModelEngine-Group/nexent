@@ -69,3 +69,14 @@ jobs:
             --version "${{ steps.version.outputs.value }}" \
             --registry general \
             --push
+
+  build-offline-package:
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
+    needs: build-and-push
+    uses: ./.github/workflows/build-offline-package.yml
+    with:
+      version: ${{ github.ref_name }}
+      image_source: general
+      include_source: false
+      upload_to_obs: true
+    secrets: inherit

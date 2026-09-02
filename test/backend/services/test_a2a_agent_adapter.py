@@ -163,6 +163,22 @@ class TestBuildAgentRequest:
         assert result["correlation_id"] == "corr-789"
         assert result["metadata"] == {"source": "test"}
 
+    def test_extract_runtime_metadata_uses_message_level_only(self):
+        adapter = A2AAgentAdapter()
+        payload = {
+            "metadata": {"request_level": "ignored"},
+            "message": {"metadata": {"message_level": "accepted"}},
+        }
+
+        assert adapter.extract_runtime_metadata(payload) == {
+            "message_level": "accepted"
+        }
+
+    def test_extract_runtime_metadata_defaults_to_empty_object(self):
+        adapter = A2AAgentAdapter()
+
+        assert adapter.extract_runtime_metadata({"message": {}}) == {}
+
 
 class TestParseA2AMessage:
     """Test class for parse_a2a_message method."""

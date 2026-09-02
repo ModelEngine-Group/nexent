@@ -47,8 +47,6 @@ const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
-const MARKET_BACKEND =
-  process.env.MARKET_BACKEND || "http://60.204.251.153:8010"; // market
 const SHARE_BASE_URL =
   process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 
@@ -604,7 +602,6 @@ app.prepare().then(() => {
     console.log(`> HTTP Backend Target: ${HTTP_BACKEND}`);
     console.log(`> WebSocket Backend Target: ${WS_BACKEND}`);
     console.log(`> MinIO Backend Target: ${MINIO_BACKEND}`);
-    console.log(`> Market Backend Target: ${MARKET_BACKEND}`);
     console.log("> ---------------------------------");
   });
 });
@@ -673,14 +670,7 @@ function handleAllApiProxy(pathname, req, res) {
     return true;
   }
 
-  // 2. 市场接口
-  if (pathname.startsWith("/api/market/")) {
-    req.url = req.url.replace("/api/market", "");
-    proxy.web(req, res, { target: MARKET_BACKEND, changeOrigin: true });
-    return true;
-  }
-
-  // 3. 判断是否为 runtime 运行时接口
+  // 2. 判断是否为 runtime 运行时接口
   const runtimePathPrefixes = [
     "/api/agent/run",
     "/api/agent/nl2agent/run",
@@ -694,7 +684,7 @@ function handleAllApiProxy(pathname, req, res) {
   ];
   const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
 
-  // 4. skills 特殊接口
+  // 3. skills 特殊接口
   // 分发代理目标
   if (isRuntime) {
     const runtimeProxyTimeout =

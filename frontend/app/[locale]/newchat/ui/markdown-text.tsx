@@ -10,7 +10,7 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import { useAuiState } from "@assistant-ui/react";
-import { type FC, memo, useState } from "react";
+import { type FC, memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
@@ -25,7 +25,10 @@ import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { remarkCite } from "./remark-cite";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
-import { isLocalStorageObjectUrl } from "@/services/storageService";
+import {
+  getLocalFileDownloadUrl,
+  isLocalStorageObjectUrl,
+} from "@/services/storageService";
 import { useSourcesPanel } from "./sources-panel-context";
 import { getCitationKey, getCitationLabel, type PanelSourceItem } from "./sources-panel";
 import {
@@ -57,8 +60,10 @@ interface MessageSourcePart {
   retrievalHighlightTerms?: string[];
 }
 
-const markdownUrlTransform: UrlTransform = (url, key, node) => {
-  if (key === "src" && node.tagName === "img" && url.startsWith("s3://")) {
+const markdownUrlTransform: UrlTransform = (url) => {
+  // React Markdown rejects non-web protocols by default. s3:// is Nexent's
+  // permanent file-reference protocol and is converted by custom renderers.
+  if (url.startsWith("s3://")) {
     return url;
   }
   return defaultUrlTransform(url);
@@ -141,6 +146,25 @@ function getSourceLabel(source: PanelSourceItem | undefined): string | undefined
     return "来源: Nexent";
   }
   return `来源: ${extractDomain(source.url)}`;
+}
+
+function buildCitationDisplayIndexMap(
+  content: readonly MessageSourcePart[]
+): Map<string, number> {
+  const displayIndexMap = new Map<string, number>();
+
+  for (const part of content) {
+    if (part.type !== "text" || typeof part.text !== "string") continue;
+
+    for (const match of part.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+      const citekey = match[1];
+      if (!displayIndexMap.has(citekey)) {
+        displayIndexMap.set(citekey, displayIndexMap.size + 1);
+      }
+    }
+  }
+
+  return displayIndexMap;
 }
 
 function toPanelSource(source: SearchSource): PanelSourceItem {
@@ -270,10 +294,12 @@ const CiteComponent: FC<
   const source = findCiteSource(messageSources, citekey);
   const panelSource = source ? toPanelSource(source) : undefined;
   const citeIndex = getCiteIndex(citekey);
-  const resolvedCiteIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
   const citationKey = source
     ? getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign })
     : citekey.trim().toLowerCase();
+  const citationDisplayIndexMap = buildCitationDisplayIndexMap(content);
+  const displayIndex = citationDisplayIndexMap.get(citekey) ?? sourceIndex;
   const panelItems = messageSources.map(toPanelSource);
   const sources = panelItems.filter((item) => !item.isImage);
   const images = panelItems.filter((item) => item.isImage);
@@ -281,13 +307,14 @@ const CiteComponent: FC<
   return (
     <CiteMarker
       citekey={citekey}
-      citeIndex={resolvedCiteIndex}
+      displayIndex={displayIndex}
+      sourceIndex={sourceIndex}
       label={source ? getCitationLabel(toPanelSource(source), {
         knowledgeBase: t("chat.sources.knowledgeBase"),
         web: t("chat.sources.web"),
         source: t("chat.sources.source"),
-      }) : `${t("chat.sources.source")} ${resolvedCiteIndex}`}
-      title={source?.title ?? `Source ${resolvedCiteIndex}`}
+      }) : `${t("chat.sources.source")} ${displayIndex}`}
+      title={source?.title ?? `Source ${displayIndex}`}
       text={panelSource?.text}
       filename={panelSource?.filename}
       url={panelSource?.url}
@@ -318,6 +345,10 @@ const CiteComponent: FC<
 // Wrapper component that safely renders MarkdownTextPrimitive
 // Guards against rendering for non-text parts or when text is not a valid string
 const MarkdownTextImpl = () => {
+  const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const content = useAuiState(
+    (s) => s.message.content as readonly MessageSourcePart[]
+  );
   // Check if we have a valid text part context using useAuiState
   const isValidTextPart = useAuiState((s) => {
     const part = s.part;
@@ -328,23 +359,42 @@ const MarkdownTextImpl = () => {
       part.text.length > 0
     );
   });
+  const citationDisplayIndexMap = useMemo(
+    () => buildCitationDisplayIndexMap(content),
+    [content]
+  );
+  const citationIndexMapAttribute = useMemo(
+    () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),
+    [citationDisplayIndexMap]
+  );
+
+  useEffect(() => {
+    if (citationDisplayIndexMap.size === 0) return;
+
+    console.info("[Nexent] Citation display index mapping", {
+      messageId,
+      citationIndexMap: Object.fromEntries(citationDisplayIndexMap),
+    });
+  }, [citationDisplayIndexMap, messageId]);
 
   if (!isValidTextPart) {
     return null;
   }
 
   return (
-    <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm, remarkCite]}
-      urlTransform={markdownUrlTransform}
-      className="aui-md"
-      components={defaultComponents}
-      componentsByLanguage={{
-        mermaid: {
-          SyntaxHighlighter: MermaidDiagram,
-        },
-      }}
-    />
+    <div data-citation-index-map={citationIndexMapAttribute}>
+      <MarkdownTextPrimitive
+        remarkPlugins={[remarkGfm, remarkCite]}
+        urlTransform={markdownUrlTransform}
+        className="aui-md"
+        components={defaultComponents}
+        componentsByLanguage={{
+          mermaid: {
+            SyntaxHighlighter: MermaidDiagram,
+          },
+        }}
+      />
+    </div>
   );
 };
 
@@ -480,6 +530,24 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   return <AuthenticatedImage src={src} alt={alt} {...props} />;
 };
 
+const PermanentFileLink: FC<React.ComponentProps<"a">> = ({
+  href,
+  className,
+  ...props
+}) => {
+  const resolvedHref = getLocalFileDownloadUrl(href) || href;
+  return (
+    <a
+      href={resolvedHref}
+      className={cn(
+        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+        className
+      )}
+      {...props}
+    />
+  );
+};
+
 const defaultComponents = memoizeMarkdownComponents({
   SyntaxHighlighter: MarkdownSyntaxHighlighter,
   img: VerifiedMarkdownImage,
@@ -546,15 +614,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
-    <a
-      className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
-        className
-      )}
-      {...props}
-    />
-  ),
+  a: PermanentFileLink,
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(

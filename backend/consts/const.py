@@ -33,6 +33,7 @@ ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
+RUNTIME_SERVICE_URL = os.getenv("RUNTIME_SERVICE_URL", "http://localhost:5014").rstrip("/")
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
@@ -44,6 +45,7 @@ UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
+AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
@@ -261,6 +263,9 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 RUNTIME_STATE_REDIS_URL = os.getenv("RUNTIME_STATE_REDIS_URL") or REDIS_URL
 RUNTIME_STREAM_TTL_SECONDS = int(os.getenv("RUNTIME_STREAM_TTL_SECONDS", "86400"))
 RUNTIME_STREAM_MAX_LEN = int(os.getenv("RUNTIME_STREAM_MAX_LEN", "10000"))
+RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES = int(
+    os.getenv("RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", str(8 * 1024 * 1024))
+)
 RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
@@ -315,10 +320,17 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 # Worker Configuration
 RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
-QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
+QUEUES = os.getenv(
+    "QUEUES",
+    "process_q,process_part_q,forward_q,forward_part_q,forward_aggregate_q",
+)
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
-WORKER_CONCURRENCY = DP_PART_PROCESSOR_COUNT + 1
+# The data-process service sets a queue-specific value for each child worker.
+# Keep the historical default when the variable is not provided.
+WORKER_CONCURRENCY = int(
+    os.getenv("WORKER_CONCURRENCY", str(DP_PART_PROCESSOR_COUNT + 1))
+)
 RAY_WARM_ACTOR_POOL_SIZE_PART = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
 RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
@@ -504,6 +516,7 @@ MODEL_CONFIG_MAPPING = {
     "vlm": "VLM_ID",
     "vlm2": "VLM2_ID",
     "vlm3": "VLM3_ID",
+    "vlm4": "VLM4_ID",
     "stt": "STT_ID",
     "tts": "TTS_ID"
 }
@@ -702,11 +715,27 @@ NEXENT_SANDBOX_DOCKER_IMAGE = os.getenv(
 )
 """Docker image used when level is 'docker'."""
 
+NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
+    "NEXENT_SANDBOX_WORKSPACE_VOLUME", "nexent-agent-workspace"
+)
+"""Docker named volume shared by the runtime and the system-scoped sandbox."""
+
 NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
 
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
 
 NEXENT_SANDBOX_TIMEOUT_S = int(os.getenv("NEXENT_SANDBOX_TIMEOUT_S", "30"))
+
+_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW = os.getenv(
+    "NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S", ""
+).strip()
+NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S = (
+    float(_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW)
+    if _NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW
+    and float(_NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_RAW) > 0
+    else None
+)
+"""Optional Runtime host-tool bridge timeout. Empty or non-positive disables it."""
 
 NEXENT_SANDBOX_NETWORK_DISABLED = (
     os.getenv("NEXENT_SANDBOX_NETWORK", "disabled").lower() == "disabled"
@@ -736,6 +765,11 @@ STREAMABLE_CONTENT_TYPES = frozenset([
     "tool",
     "execution_logs",
 ])
+
+# LLM Model Configuration
+LLM_INCLUDE_LOGPROBS = os.getenv("LLM_INCLUDE_LOGPROBS", "false").lower() == "true"
+"""When True, adds logprobs=true to every chat.completions.create request body,
+enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -15,7 +15,10 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
-import { resolveS3UrlToDataUrl } from "@/services/storageService";
+import {
+  getLocalFileDownloadUrl,
+  resolveS3UrlToDataUrl,
+} from "@/services/storageService";
 import {
   Tooltip,
   TooltipContent,
@@ -68,6 +71,12 @@ interface ParsedMarkdownHeading extends MarkdownHeading {
   offset: number;
 }
 
+interface CitationReference {
+  key: string;
+  toolSign: string;
+  sourceIndex: number;
+}
+
 // Simple in-memory cache to avoid refetching the same S3 object multiple times
 const s3MediaCache = new Map<string, string>();
 const mediaObjectUrlCache = new Map<string, string>();
@@ -75,6 +84,9 @@ const mediaObjectUrlPromiseCache = new Map<string, Promise<string | null>>();
 const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
 
 const isBrowserEnvironment = typeof window !== "undefined";
+
+const markdownUrlTransform = (url: string): string =>
+  url.startsWith("s3://") ? url : defaultUrlTransform(url);
 
 const flattenTextContent = (value: React.ReactNode): string => {
   if (typeof value === "string" || typeof value === "number") {
@@ -230,6 +242,51 @@ export const extractMarkdownHeadings = (content: string): MarkdownHeading[] => {
     level,
     text,
   }));
+};
+
+const parseCitationReference = (value: string): CitationReference | null => {
+  const toolSign = value.charAt(0);
+  const sourceIndex = Number.parseInt(value.slice(1), 10);
+
+  if (!toolSign || Number.isNaN(sourceIndex)) {
+    return null;
+  }
+
+  return {
+    key: `${toolSign}${sourceIndex}`,
+    toolSign,
+    sourceIndex,
+  };
+};
+
+const buildCitationDisplayIndexMap = (
+  content: string,
+  searchResults: SearchResult[]
+): Map<string, number> => {
+  const validCitationKeys = new Set(
+    searchResults
+      .filter(
+        (result) => result.tool_sign && typeof result.cite_index === "number"
+      )
+      .map((result) => `${result.tool_sign}${result.cite_index}`)
+  );
+  const displayIndexMap = new Map<string, number>();
+  const citationPattern = /\[\[([^\]]+)\]\]/g;
+
+  for (const match of content.matchAll(citationPattern)) {
+    const reference = parseCitationReference(match[1]);
+    if (
+      !reference ||
+      !validCitationKeys.has(reference.key) ||
+      displayIndexMap.has(reference.key)
+    ) {
+      continue;
+    }
+
+    displayIndexMap.set(reference.key, displayIndexMap.size + 1);
+  }
+
+  return displayIndexMap;
 };
 
 const getSessionCachedValue = (key: string): string | null => {
@@ -561,13 +618,19 @@ const getBackgroundColor = (toolSign: string) => {
 // Replace the original LinkIcon component
 const CitationBadge = ({
   toolSign,
-  citeIndex,
+  sourceIndex,
+  displayIndex,
 }: {
   toolSign: string;
-  citeIndex: number;
+  sourceIndex: number;
+  displayIndex: number;
 }) => (
   <span
     className="ds-markdown-cite"
+    data-citation-key={`${toolSign}${sourceIndex}`}
+    data-citation-tool-sign={toolSign}
+    data-citation-source-index={sourceIndex}
+    data-citation-display-index={displayIndex}
     style={{
       verticalAlign: "middle",
       fontVariant: "tabular-nums",
@@ -589,7 +652,7 @@ const CitationBadge = ({
       top: "-2px",
     }}
   >
-    {citeIndex}
+    {displayIndex}
   </span>
 );
 
@@ -647,11 +710,13 @@ const getCitationScopeText = (citationElement: HTMLElement | null) => {
 // Modified HoverableText component
 const HoverableText = ({
   text,
+  displayIndex,
   searchResults,
   onCitationHover,
   onCitationClick,
 }: {
   text: string;
+  displayIndex: number;
   searchResults?: SearchResult[];
   onCitationHover?: () => void;
   onCitationClick?: (citationKey: string, citationContext: string) => void;
@@ -840,7 +905,11 @@ const HoverableText = ({
               onClick={handleCitationClick}
               onKeyDown={handleCitationKeyDown}
             >
-              <CitationBadge toolSign={toolSign} citeIndex={citeIndex} />
+              <CitationBadge
+                toolSign={toolSign}
+                sourceIndex={citeIndex}
+                displayIndex={displayIndex}
+              />
             </button>
           </span>
         </TooltipTrigger>
@@ -1192,6 +1261,17 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     () => extractParsedMarkdownHeadings(content),
     [content]
   );
+  const citationDisplayIndexMap = React.useMemo(
+    () => buildCitationDisplayIndexMap(processedContent, searchResults),
+    [processedContent, searchResults]
+  );
+  const citationIndexMapAttribute = React.useMemo(() => {
+    if (citationDisplayIndexMap.size === 0) {
+      return undefined;
+    }
+
+    return JSON.stringify(Object.fromEntries(citationDisplayIndexMap));
+  }, [citationDisplayIndexMap]);
   let renderedHeadingIndex = 0;
 
   const renderCodeFallback = (text: string, key?: React.Key) => (
@@ -1284,20 +1364,18 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           const match = part.match(/^\[\[([^\]]+)\]\]$/);
           if (match) {
             const innerText = match[1];
-
-            const toolSign = innerText.charAt(0);
-            const citeIndex = parseInt(innerText.slice(1));
-            const hasMatch = searchResults?.some(
-              (result) =>
-                result.tool_sign === toolSign && result.cite_index === citeIndex
-            );
+            const reference = parseCitationReference(innerText);
+            const displayIndex = reference
+              ? citationDisplayIndexMap.get(reference.key)
+              : undefined;
 
             // Only show citation icon when matching search result is found
-            if (hasMatch) {
+            if (displayIndex !== undefined) {
               return (
                 <HoverableText
                   key={index}
                   text={innerText}
+                  displayIndex={displayIndex}
                   searchResults={searchResults}
                   onCitationHover={onCitationHover}
                   onCitationClick={onCitationClick}
@@ -1443,9 +1521,13 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 
   return (
     <>
-      <div className={`markdown-body ${className || ""}`}>
+      <div
+        className={`markdown-body ${className || ""}`}
+        data-citation-index-map={citationIndexMapAttribute}
+      >
         <MarkdownErrorBoundary rawContent={processedContent}>
           <ReactMarkdown
+            urlTransform={markdownUrlTransform}
             remarkPlugins={
               [
                 remarkGfm,
@@ -1534,8 +1616,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               ),
               // Link
               a: ({ href, children, ...props }: any) => {
+                const resolvedHref = getLocalFileDownloadUrl(href) || href;
                 return (
-                  <a href={href} className="markdown-link" {...props}>
+                  <a href={resolvedHref} className="markdown-link" {...props}>
                     <TextWrapper>{children}</TextWrapper>
                   </a>
                 );

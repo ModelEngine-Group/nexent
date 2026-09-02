@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,7 +24,7 @@ function safeSetFieldValue(form: FormInstance, field: string, value: unknown) {
   });
 }
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { CloseOutlined } from "@ant-design/icons";
 
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
@@ -66,8 +66,8 @@ export interface ToolConfigModalProps {
   tool: Tool;
   initialParams: ToolParam[];
   selectedTool?: Tool | null;
-  isCreatingMode?: boolean;
   currentAgentId?: number;
+  localOnly?: boolean;
 }
 
 // Tool types that require knowledge base selection
@@ -92,7 +92,7 @@ const TOOLS_SUPPORTING_RERANK = [
 const ANALYZE_TOOL_MODEL_TYPES: Record<string, ModelType> = {
   analyze_text_file: MODEL_TYPES.LLM,
   analyze_image: MODEL_TYPES.VLM,
-  analyze_audio: MODEL_TYPES.VLM3,
+  analyze_audio: MODEL_TYPES.VLM4,
   analyze_video: MODEL_TYPES.VLM3,
 };
 
@@ -102,7 +102,7 @@ const ANALYZE_TOOL_MODEL_DESCRIPTIONS: Record<string, string> = {
   analyze_image:
     "Optional Nexent image understanding model ID to use for image analysis. If omitted, the default image understanding model is used.",
   analyze_audio:
-    "Optional Nexent video understanding model ID to use for audio analysis. If omitted, the default video understanding model is used.",
+    "Optional Nexent audio understanding model ID to use for audio analysis. If omitted, the default audio understanding model is used.",
   analyze_video:
     "Optional Nexent video understanding model ID to use for video analysis. If omitted, the default video understanding model is used.",
 };
@@ -187,15 +187,15 @@ export default function ToolConfigModal({
   tool,
   initialParams,
   selectedTool,
-  isCreatingMode,
   currentAgentId,
+  localOnly = false,
 }: ToolConfigModalProps) {
   const [currentParams, setCurrentParams] = useState<ToolParam[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
-  const updateTools = useAgentConfigStore((state) => state.updateTools);
+  const updateTools = useAgentStore((state) => state.updateTools);
   const { message } = App.useApp();
 
   // Tool test panel visibility state
@@ -243,6 +243,9 @@ export default function ToolConfigModal({
 
   // Track if user has attempted to submit the form
   const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  // Track whether any form field currently has a validation error
+  const [hasFormErrors, setHasFormErrors] = useState(false);
 
   // Dify configuration state
   const [difyConfig, setDifyConfig] = useState<{
@@ -1129,13 +1132,14 @@ export default function ToolConfigModal({
     }
   }, [knowledgeBases, selectedKbIds]);
 
-  // Filter selected KB IDs to the current accessible list. For AIDP, an
-  // successfully loaded empty list is meaningful: the current user cannot
-  // read any of the KBs saved by the agent creator.
+  // Filter selected KB IDs to the current accessible list. For managed
+  // knowledge tools, a loaded empty list means no saved KB remains readable.
   useEffect(() => {
     const canValidateSelection =
       knowledgeBases.length > 0 ||
-      ((toolKbType === "aidp_search" || toolKbType === "ind_aidp_search") &&
+      ((isKnowledgeBaseSearchTool ||
+        toolKbType === "aidp_search" ||
+        toolKbType === "ind_aidp_search") &&
         isKbListLoaded);
 
     if (selectedKbIds.length > 0 && canValidateSelection) {
@@ -1153,18 +1157,26 @@ export default function ToolConfigModal({
         });
         setSelectedKbDisplayNames(displayNames);
 
-        if (toolKbType === "aidp_search") {
+        if (
+          isKnowledgeBaseSearchTool ||
+          toolKbType === "aidp_search" ||
+          toolKbType === "ind_aidp_search"
+        ) {
           setTestPanelKbIds(validKbIds);
           setTestPanelKbDisplayNames(displayNames);
           const fieldIndex = currentParams.findIndex(
-            (p) => p.name === "kds_list"
+            (p) =>
+              p.name ===
+              (isKnowledgeBaseSearchTool ? "index_names" : "kds_list")
           );
           if (fieldIndex !== -1) {
             form.setFieldValue(`param_${fieldIndex}`, validKbIds);
           }
           setCurrentParams((prevParams) => {
             const prevFieldIndex = prevParams.findIndex(
-              (p) => p.name === "kds_list"
+              (p) =>
+                p.name ===
+                (isKnowledgeBaseSearchTool ? "index_names" : "kds_list")
             );
             if (prevFieldIndex === -1) return prevParams;
             const updatedParams = [...prevParams];
@@ -1180,6 +1192,7 @@ export default function ToolConfigModal({
   }, [
     knowledgeBases,
     isKbListLoaded,
+    isKnowledgeBaseSearchTool,
     toolKbType,
     selectedKbIds,
     currentParams,
@@ -1373,6 +1386,24 @@ export default function ToolConfigModal({
 
   // Watch all form values and sync to currentParams
   const formValues = Form.useWatch([], form);
+
+  // Detect required fields that are still empty so the save/test buttons stay
+  // disabled until they are filled in. Uses currentParams.value instead of
+  // formValues because the KB selector fields (index_names/dataset_ids/
+  // kds_list) have no Form.Item name and are not tracked by useWatch.
+  const hasEmptyRequired = useMemo(() => {
+    return currentParams.some((param) => {
+      if (!param.required) return false;
+      const value = param.value;
+      return (
+        value === undefined ||
+        value === null ||
+        value === "" ||
+        (Array.isArray(value) && value.length === 0)
+      );
+    });
+  }, [currentParams]);
+
   useEffect(() => {
     if (formValues) {
       const newParams = [...currentParams];
@@ -1471,7 +1502,7 @@ export default function ToolConfigModal({
           ? { display_names: selectedKbDisplayNames }
           : {}),
       };
-      const currentTools = useAgentConfigStore.getState().editedAgent.tools;
+      const currentTools = useAgentStore.getState().editedAgent?.tools ?? [];
 
       // Check if tool already exists, if so replace it, otherwise add it
       const existingToolIndex = currentTools.findIndex(
@@ -1488,15 +1519,16 @@ export default function ToolConfigModal({
         newSelectedTools = [...currentTools, updatedTool];
       }
 
-      // Update local state only - actual save will happen when user clicks "Save Agent"
-      updateTools(newSelectedTools);
+      if (!localOnly) {
+        updateTools(newSelectedTools);
+      }
 
       message.success(t("toolConfig.message.saveSuccess"));
       handleClose(); // Close modal
 
       // Call original onSave if provided
       if (onSave) {
-        onSave(currentParams);
+        onSave(syncedParams);
       }
     } catch {
       // Form validation failed, error will be shown by antd Form
@@ -1507,6 +1539,9 @@ export default function ToolConfigModal({
     setTestPanelVisible(false);
     // Reset user modification tracking state for datamate URL
     setHasUserModifiedDatamateUrl(false);
+    // Reset validation tracking so the next open starts with an enabled save button
+    setHasSubmitted(false);
+    setHasFormErrors(false);
 
     // Clear knowledge base cache to ensure fresh data on next open
     // This is especially important after saving tool config with KB changes
@@ -1933,13 +1968,17 @@ export default function ToolConfigModal({
     if (param.name === "selected_model_id" && isAnalyzeToolWithModelSelection) {
       return (
         <Select
-          placeholder="未选择时使用默认模型"
+          placeholder={t("toolConfig.placeholder.useDefaultModel")}
           options={analyzeToolModelOptions}
           loading={registeredModelsLoading}
           allowClear
           showSearch
           optionFilterProp="label"
-          notFoundContent={registeredModelsLoading ? undefined : "暂无可选模型"}
+          notFoundContent={
+            registeredModelsLoading
+              ? undefined
+              : t("toolConfig.placeholder.noAvailableModels")
+          }
         />
       );
     }
@@ -1989,6 +2028,8 @@ export default function ToolConfigModal({
         const currentValue = form.getFieldValue(fieldName);
         return (
           <Select
+            showSearch
+            optionFilterProp="label"
             placeholder={t("toolConfig.input.string.placeholder", {
               name: param.description,
             })}
@@ -2185,7 +2226,7 @@ export default function ToolConfigModal({
               </button>
               <button
                 onClick={handleSave}
-                disabled={isLoading}
+                disabled={isLoading || hasFormErrors || hasEmptyRequired}
                 className="flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 h-8"
               >
                 {isLoading
@@ -2228,6 +2269,11 @@ export default function ToolConfigModal({
                   }
                 }
               }}
+              onFieldsChange={(_, allFields) => {
+                setHasFormErrors(
+                  allFields.some((field) => (field.errors?.length ?? 0) > 0)
+                );
+              }}
             >
               <div className="pr-2 mt-3">
                 {currentParams.map((param, index) => {
@@ -2249,6 +2295,52 @@ export default function ToolConfigModal({
                     rules.push({
                       required: true,
                       message: t("toolConfig.validation.required"),
+                    });
+                  }
+
+                  // Add numeric constraint validation (ge/gt/le/lt)
+                  if (
+                    param.type === TOOL_PARAM_TYPES.NUMBER &&
+                    param.constraints
+                  ) {
+                    const { ge, gt, le, lt } = param.constraints;
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (
+                          value === undefined ||
+                          value === null ||
+                          value === ""
+                        ) {
+                          return Promise.resolve();
+                        }
+                        const num = Number(value);
+                        if (Number.isNaN(num)) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.invalid")
+                          );
+                        }
+                        if (ge !== undefined && num < ge) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.min", { min: ge })
+                          );
+                        }
+                        if (gt !== undefined && num <= gt) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.gt", { value: gt })
+                          );
+                        }
+                        if (le !== undefined && num > le) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.max", { max: le })
+                          );
+                        }
+                        if (lt !== undefined && num >= lt) {
+                          return Promise.reject(
+                            t("toolConfig.validation.number.lt", { value: lt })
+                          );
+                        }
+                        return Promise.resolve();
+                      },
                     });
                   }
 
@@ -2494,6 +2586,7 @@ export default function ToolConfigModal({
                 onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
                 testPanelKbIds={testPanelKbIds}
                 testPanelKbDisplayNames={testPanelKbDisplayNames}
+                configInvalid={hasFormErrors || hasEmptyRequired}
                 toolKbType={toolKbType}
                 haotianKnowledgeSets={haotianKnowledgeSets}
               />

@@ -43,6 +43,10 @@ class ErrorMessage:
         ErrorCode.CHAT_MESSAGE_NOT_FOUND: "Message not found.",
         ErrorCode.CHAT_CONVERSATION_SAVE_FAILED: "Failed to save conversation.",
         ErrorCode.CHAT_TITLE_GENERATION_FAILED: "Failed to generate conversation title.",
+        ErrorCode.CHAT_METADATA_NOT_ALLOWED: "Runtime metadata input is disabled for this agent.",
+        ErrorCode.CHAT_METADATA_INVALID: "Runtime metadata is invalid.",
+        ErrorCode.CHAT_METADATA_TOO_LARGE: "Runtime metadata exceeds the maximum allowed size.",
+        ErrorCode.CHAT_METADATA_VERSION_CONFLICT: "Runtime metadata was updated by another request.",
 
         # ==================== 02 QuickConfig / 快速配置 ====================
         ErrorCode.QUICK_CONFIG_INVALID: "Invalid configuration.",
@@ -68,6 +72,9 @@ class ErrorMessage:
         ErrorCode.KNOWLEDGE_SYNC_FAILED: "Failed to sync knowledge base.",
         ErrorCode.KNOWLEDGE_INDEX_NOT_FOUND: "Search index not found.",
         ErrorCode.KNOWLEDGE_SEARCH_FAILED: "Knowledge search failed.",
+        ErrorCode.KNOWLEDGE_INDEX_WRITE_BLOCKED: "Knowledge base ingestion failed because storage space is insufficient.",
+        ErrorCode.KNOWLEDGE_STORAGE_COMMIT_FAILED: "File upload failed because the storage service is unavailable.",
+        ErrorCode.KNOWLEDGE_TASK_SUBMIT_FAILED: "The file was uploaded, but the ingestion service is unavailable.",
 
         # ==================== 07 MCPTools / MCP 工具 ====================
         ErrorCode.MCP_TOOL_NOT_FOUND: "Tool not found.",
@@ -76,6 +83,17 @@ class ErrorMessage:
         ErrorCode.MCP_CONNECTION_FAILED: "Failed to connect to MCP service.",
         ErrorCode.MCP_CONTAINER_ERROR: "MCP container operation failed.",
         ErrorCode.MCP_NAME_ILLEGAL: "MCP name contains invalid characters.",
+        ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES: {
+            "valid_type": "{tool_name} {param_name} must be a valid {value_type}",
+            "integer": "{tool_name} {param_name} must be an integer",
+            "ge": "{tool_name} {param_name} must be >= {value}",
+            "gt": "{tool_name} {param_name} must be > {value}",
+            "le": "{tool_name} {param_name} must be <= {value}",
+            "lt": "{tool_name} {param_name} must be < {value}",
+            "min_length": "{tool_name} {param_name} length must be >= {value}",
+            "max_length": "{tool_name} {param_name} length must be <= {value}",
+            # "multiple_of": "{tool_name} {param_name} must be a multiple of {value}",
+        },
 
         # ==================== 08 MonitorOps / 监控与运维 ====================
         ErrorCode.MONITOROPS_METRIC_QUERY_FAILED: "Metric query failed.",
@@ -113,6 +131,9 @@ class ErrorMessage:
         ErrorCode.TENANT_DISABLED: "Tenant is disabled.",
         ErrorCode.TENANT_CONFIG_ERROR: "Tenant configuration error.",
         ErrorCode.TENANT_RESOURCE_EXCEEDED: "Tenant resource exceeded.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: "Personal knowledge base quota exceeded.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: "Personal knowledge base quota usage is unavailable.",
+        ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE: "Personal knowledge base quota cannot be lower than current usage.",
 
         # ==================== 13 External / 外部服务 ====================
         ErrorCode.DATAMATE_CONNECTION_FAILED: "Failed to connect to DataMate service.",
@@ -190,6 +211,11 @@ class ErrorMessage:
     def get_message(cls, error_code: ErrorCode) -> str:
         """Get error message by error code."""
         return cls._MESSAGES.get(error_code, "An error occurred. Please try again later.")
+
+    @classmethod
+    def get_param_constraint_messages(cls) -> Dict[str, str]:
+        """Get tool parameter constraint validation message templates."""
+        return cls._MESSAGES.get(ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES, {})
 
     @classmethod
     def get_message_with_code(cls, error_code: ErrorCode) -> Tuple[int, str]:

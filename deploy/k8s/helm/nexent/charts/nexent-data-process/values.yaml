@@ -19,3 +19,7 @@ config:
   skipProxy: "true"
   pythonPath: "/opt/backend"
   dockerEnvironment: "false"
+
+service:
+  type: ClusterIP
+  nodePorts: {}

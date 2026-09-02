@@ -17,7 +17,14 @@ import type {
   RemoteThreadListAdapter,
   ThreadHistoryAdapter,
 } from "@assistant-ui/react";
-import { conversationService } from "@/services/conversationService";
+
+import {
+  CONVERSATION_PAGE_SIZE,
+  conversationService,
+} from "@/services/conversationService";
+import { getConversationDateBoundaries } from "@/lib/conversationViewport";
+import { toMessageCreatedAt } from "@/lib/messageDate";
+
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
@@ -33,7 +40,6 @@ import {
   buildToolCallPart,
   conversationSourcesRegistry,
   extractAidpImageKeys,
-  extractMarkdownImageUrls,
   searchImagesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
@@ -63,8 +69,7 @@ type HistoricalChatMode = "planning" | "execution";
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
 let historicalChatModeListener:
-  | ((mode: HistoricalChatMode) => void)
-  | undefined;
+  ((mode: HistoricalChatMode) => void) | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -150,8 +155,7 @@ const toToolSearchItem = (value: unknown) => {
   const item = value as Record<string, unknown>;
   const url = typeof item.url === "string" ? item.url : "";
   const filename = typeof item.filename === "string" ? item.filename : "";
-  const sourceFile =
-    typeof item.source_file === "string" ? item.source_file : "";
+  const sourceFile = typeof item.source_file === "string" ? item.source_file : "";
   const imageMetadata = parseImageMetadata(item.text);
   const resolvedUrl = imageMetadata?.image_url || url;
   const title =
@@ -166,24 +170,17 @@ const toToolSearchItem = (value: unknown) => {
       : typeof item.citeIndex === "number"
         ? item.citeIndex
         : undefined;
-  const toolSign =
-    typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+  const toolSign = typeof item.tool_sign === "string" ? item.tool_sign : undefined;
 
   return resolvedUrl || sourceFile
     ? {
         url: resolvedUrl,
         title,
-        text: imageMetadata
-          ? undefined
-          : typeof item.text === "string"
-            ? item.text
-            : undefined,
-        sourceType:
-          typeof item.source_type === "string" ? item.source_type : undefined,
+        text: imageMetadata ? undefined : typeof item.text === "string" ? item.text : undefined,
+        sourceType: typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
-        objectName:
-          typeof item.object_name === "string" ? item.object_name : undefined,
+        objectName: typeof item.object_name === "string" ? item.object_name : undefined,
         citeIndex,
         toolSign,
         isImage: Boolean(imageMetadata),
@@ -231,7 +228,7 @@ const buildBranchableHistory = (
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length; ) {
+  for (let groupStart = 0; groupStart < messages.length;) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -375,16 +372,6 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           typeof part.content === "string"
             ? [part.content]
             : []
-        )
-      );
-      const persistedAnswerImageUrls = new Set(
-        extractMarkdownImageUrls(
-          messageParts.flatMap((part) =>
-            (part.type === "final_answer" || part.type === "text") &&
-            typeof part.content === "string"
-              ? [part.content]
-              : []
-          )
         )
       );
 
@@ -643,7 +630,20 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              appendHistoricalImage(imageUrl);
+              const imagePart = appendHistoricalImage(imageUrl);
+              if (imagePart) {
+                attachSearchContentToTool(
+                  content,
+                  {
+                    url: imagePart.url,
+                    title: imagePart.title,
+                    text: imagePart.text,
+                    isImage: true,
+                    imageKey: imagePart.imageKey,
+                  },
+                  part.tool_call_id,
+                );
+              }
             }
             continue;
           }
@@ -933,21 +933,6 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           ...restoredImages,
         ]);
 
-        for (const image of restoredImages) {
-          if (
-            persistedAnswerImageUrls.has(image.url) ||
-            ((image.url.includes("/KnowledgeBase/Tenants/") ||
-              image.url.includes("/ind-aidp/images/")) &&
-              image.imageKey &&
-              answerImageKeys.includes(image.imageKey))
-          ) {
-            continue;
-          }
-          // Native image parts survive ExportedMessageRepository history
-          // normalization; custom fields on empty text parts do not.
-          content.push({ type: "image", image: image.url });
-        }
-
         // Emit a `source` part for each persisted search result so the
         // `group-source` block renders the inline "检索结果" trigger button.
         // Mirrors the streaming adapter's end-of-stream emission, but uses the
@@ -958,8 +943,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                | Record<string, unknown>
-                | undefined;
+                Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||
@@ -1024,14 +1008,19 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // requires `metadata.custom` to be present on every message, so we
       // always include the field and only set the token bucket when we have
       // historical step data.
+      const createdAt = toMessageCreatedAt(msg.create_time);
       const metadata = {
-        custom: stepTokenCounts.length > 0 ? { stepTokenCounts } : {},
+        custom: {
+          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
+        },
       };
 
       messages.push({
         id: messageId,
         role: msg.role,
         content,
+        ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }
           : {}),
@@ -1130,6 +1119,19 @@ const toRemoteThreadMetadata = (
         }
       : {}),
   };
+};
+
+const INITIAL_CONVERSATION_PAGE_SIZE = 30;
+
+const parseConversationListOffset = (after: string | undefined): number => {
+  if (after === undefined) return 0;
+
+  const offset = Number(after);
+  return Number.isSafeInteger(offset) &&
+    offset >= 0 &&
+    offset <= Number.MAX_SAFE_INTEGER - CONVERSATION_PAGE_SIZE
+    ? offset
+    : 0;
 };
 
 const createHistoryProvider = (): FC<PropsWithChildren> => {
@@ -1278,6 +1280,12 @@ export const setServerConversationIdState = (
   serverConversationIdState = state;
 };
 
+let pendingThreadOperationId: string | undefined;
+
+export const setPendingThreadOperationId = (threadId: string | undefined) => {
+  pendingThreadOperationId = threadId;
+};
+
 const MAX_TITLE_WAIT_MS = 5_000;
 const TITLE_POLL_INTERVAL_MS = 50;
 
@@ -1297,13 +1305,21 @@ const waitForServerConversationId = async (
   // reliable than the active-thread registry while the sidebar is switching.
   if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
 
-  // Fast path: the ref is already populated for a new thread after its first
-  // agent run has returned the server-side conversation ID.
+  // New threads use an empty remoteId until they are reloaded from the
+  // backend. The sidebar captures the local ID before calling rename/delete,
+  // because assistant-ui may switch the active thread as part of that action.
   const readNow = (): string | undefined => {
+    if (pendingThreadOperationId) {
+      const fromPendingThread = idsRef.current.get(pendingThreadOperationId);
+      if (isValidConversationId(fromPendingThread)) return fromPendingThread;
+    }
+
     const activeThreadId = getActiveThreadId();
     if (!activeThreadId) return undefined;
-    const fromRef = idsRef.current.get(activeThreadId);
-    return isValidConversationId(fromRef) ? fromRef : undefined;
+    const fromActiveThread = idsRef.current.get(activeThreadId);
+    return isValidConversationId(fromActiveThread)
+      ? fromActiveThread
+      : undefined;
   };
 
   const immediate = readNow();
@@ -1323,15 +1339,24 @@ const waitForServerConversationId = async (
 export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   unstable_Provider: createHistoryProvider(),
 
-  async list(): Promise<RemoteThreadListResponse> {
-    try {
-      const data = await conversationService.getList();
-      return {
-        threads: data.map(toRemoteThreadMetadata),
-      };
-    } catch (error) {
-      return { threads: [] };
-    }
+  async list({ after } = {}): Promise<RemoteThreadListResponse> {
+    const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
+    const offset = parseConversationListOffset(after);
+    const limit =
+      offset === 0 ? INITIAL_CONVERSATION_PAGE_SIZE : CONVERSATION_PAGE_SIZE;
+    const data = await conversationService.getList({
+      offset,
+      limit,
+      todayStartMs,
+      weekStartMs,
+    });
+    const nextOffset = offset + data.items.length;
+
+    return {
+      threads: data.items.map(toRemoteThreadMetadata),
+      nextCursor:
+        nextOffset < data.metadata.total ? String(nextOffset) : undefined,
+    };
   },
 
   async initialize(_threadId: string): Promise<RemoteThreadInitializeResponse> {
@@ -1346,19 +1371,6 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     // doing so would create a second, empty conversation that the agent
     // run never reuses (see commit history for details).
     //
-    // We return an empty-string `remoteId` rather than `undefined` because
-    // the assistant-ui `RemoteThreadListAdapter["initialize"]` contract
-    // requires a string. The empty string is a safe placeholder: the page
-    // resolves `activeConversationId` with priority
-    // `serverConversationIdsRef → remoteId → activeThreadId`, so as soon as
-    // the adapter captures the server id from the response header the page
-    // starts using the real id instead of this placeholder.
-    //
-    // `generateTitle` follows the same priority chain: it consults the page's
-    // `serverConversationIdsRef` via `waitForServerConversationId` before
-    // falling back to the raw `remoteId`, so a brand-new thread no longer
-    // triggers a `conversation_id: 0` request (which would silently fail on
-    // the backend's `WHERE conversation_id = 0` filter).
     return {
       remoteId: "",
       externalId: "",
@@ -1396,30 +1408,30 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   },
 
   async delete(remoteId: string): Promise<void> {
-    await conversationService.delete(Number(remoteId));
+    const candidateId = await waitForServerConversationId(remoteId);
+    const conversationId = Number(candidateId);
+    if (
+      !candidateId ||
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0
+    ) {
+      throw new Error(
+        "Cannot delete a conversation without a backend conversation ID."
+      );
+    }
+    await conversationService.delete(conversationId);
   },
 
   async fetch(threadId: string): Promise<RemoteThreadMetadata> {
-    const [detail, conversations] = await Promise.all([
-      conversationService.getById(threadId),
-      conversationService.getList(),
-    ]);
-    const conversation = conversations.find(
-      // Conversation detail serializes the id as a string, while the list
-      // endpoint returns a number. Normalize both sides so direct URL entry
-      // can reuse the persisted conversation title instead of the fallback.
-      (item) => String(item.conversation_id) === String(detail.conversation_id)
-    );
+    const detail = await conversationService.getById(threadId);
 
-    return toRemoteThreadMetadata(
-      conversation ?? {
-        conversation_id: Number(detail.conversation_id),
-        conversation_title: "Untitled conversation",
-        agent_id: detail.agent_id,
-        create_time: detail.create_time,
-        update_time: detail.create_time,
-      }
-    );
+    return toRemoteThreadMetadata({
+      conversation_id: Number(detail.conversation_id),
+      conversation_title: detail.conversation_title ?? "Untitled conversation",
+      agent_id: detail.agent_id,
+      create_time: detail.create_time,
+      update_time: detail.create_time,
+    });
   },
 
   async generateTitle(_remoteId, _messages) {

@@ -66,7 +66,6 @@ def publish_version_impl(
     release_note: Optional[str] = None,
     source_type: str = SOURCE_TYPE_NORMAL,
     source_version_no: Optional[int] = None,
-    publish_as_a2a: bool = False,
 ) -> dict:
     """
     Publish a new version
@@ -79,6 +78,8 @@ def publish_version_impl(
     agent_draft, tools_draft, relations_draft = query_agent_draft(agent_id, tenant_id)
     if not agent_draft:
         raise ValueError("Agent draft not found")
+
+    publish_as_a2a = bool(agent_draft.get("is_a2a", False))
 
     # Calculate new version number
     new_version_no = get_next_version_no(agent_id, tenant_id)
@@ -146,7 +147,6 @@ def publish_version_impl(
         'source_type': source_type,
         'source_version_no': source_version_no,
         'status': STATUS_RELEASED,
-        'is_a2a': publish_as_a2a,
         'created_by': user_id,
         'updated_by': user_id,
     }
@@ -989,6 +989,7 @@ async def list_published_agents_impl(
                 "version_name": agent.get("version_name"),
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
+                "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
             })
 
         return simple_agent_list

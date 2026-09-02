@@ -117,6 +117,7 @@ def setup_common_mocks():
         "vlm": "VLM_ID",
         "vlm2": "VLM2_ID",
         "vlm3": "VLM3_ID",
+        "vlm4": "VLM4_ID",
         "stt": "STT_ID",
         "tts": "TTS_ID"
     }

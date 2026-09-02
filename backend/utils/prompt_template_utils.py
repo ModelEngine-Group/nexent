@@ -10,6 +10,7 @@ from consts.prompt_template import (
     PROMPT_GENERATE_TEMPLATE_FIELDS,
 )
 
+
 logger = logging.getLogger("prompt_template_utils")
 
 PROMPT_GENERATE_TEMPLATE_KEY_MAP = PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP

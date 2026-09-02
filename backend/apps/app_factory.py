@@ -7,7 +7,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from consts.exceptions import AppException, QuotaExceededError
+from apps.health_app import install_health_contract
+from consts.exceptions import AppException, QuotaExceededError, TokenExpiredError
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,9 @@ def create_app(
     # Register exception handlers
     register_exception_handlers(app)
 
+    # Process health endpoints never poll external dependencies.
+    install_health_contract(app)
+
     # Initialize monitoring if enabled
     if enable_monitoring:
         try:
@@ -92,6 +96,17 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "code": exc.error_code.value,
                 "message": exc.message,
                 "details": exc.details if exc.details else None
+            },
+        )
+
+    @app.exception_handler(TokenExpiredError)
+    async def token_expired_exception_handler(request, exc):
+        logger.info("TokenExpiredError: %s", exc)
+        return JSONResponse(
+            status_code=401,
+            content={
+                "message": "Session expired, please log in again",
+                "code": "TOKEN_EXPIRED",
             },
         )
 

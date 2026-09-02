@@ -35,6 +35,15 @@ def _messages(**kwargs):
     return ContextItemRenderer().render(normalize_context_inputs(build_context_inputs(**kwargs)))
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_runtime_system_context_does_not_guide_observation_markers(language):
+    rendered = str(_messages(language=language))
+
+    assert "Observation" not in rendered
+    assert "Observe Results" not in rendered
+    assert "观察结果" not in rendered
+
+
 def test_authorized_context_snapshot_merges_config_summary_and_turns_in_order():
     configured_item = ContextItemInput(
         id="system:duty",

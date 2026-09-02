@@ -10,7 +10,7 @@ import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 # Mock external dependencies before any imports
 boto3_module = types.ModuleType("boto3")
@@ -434,6 +434,26 @@ class TestGetUsers:
 
         mock_group_db.assert_called_once_with(["user_a", "user_b"])
 
+    def test_get_users_with_filters_passes_filter_arguments(self):
+        """Test that resource filters are forwarded to the database layer."""
+        from backend.services import user_service
+
+        user_service.get_users_by_tenant_id.return_value = {
+            "users": [], "total": 0
+        }
+
+        result = get_users(
+            "tenant123", 1, 20, "created_at", "desc",
+            search="alice", roles=["ADMIN"], group_ids=[7]
+        )
+
+        assert result["users"] == []
+        user_service.get_users_by_tenant_id.assert_called_once_with(
+            tenant_id="tenant123", page=1, page_size=20,
+            sort_by="created_at", sort_order="desc", search="alice",
+            roles=["ADMIN"], group_ids=[7]
+        )
+
 
 @pytest.mark.asyncio
 class TestUpdateUser:
@@ -749,6 +769,150 @@ class TestDeleteUserAndCleanup:
         # Should not raise, errors are logged and swallowed
         await delete_user_and_cleanup(user_id, tenant_id)
 
+    def _mock_base_cleanup(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
+            return_value=True,
+        )
+        mocker.patch(
+            "backend.services.user_service.remove_user_from_all_groups",
+            return_value=1,
+        )
+        mocker.patch(
+            "backend.services.user_service.soft_delete_all_configs_by_user_id"
+        )
+        mocker.patch(
+            "backend.services.user_service.soft_delete_all_conversations_by_user",
+            return_value=5,
+        )
+        mocker.patch(
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
+            return_value=0,
+        )
+        mock_get_admin = mocker.patch(
+            "backend.services.user_service.get_supabase_admin_client"
+        )
+        mock_admin = MagicMock()
+        mock_admin.auth.admin.delete_user = MagicMock()
+        mock_get_admin.return_value = mock_admin
+
+    def _install_fake_vdb(self, mocker, delete_side_effect=None):
+        fake_vdb = types.ModuleType("services.vectordatabase_service")
+        fake_vdb.get_vector_db_core = MagicMock(return_value="vdb-core")
+        fake_vdb.ElasticSearchService = MagicMock()
+        fake_vdb.ElasticSearchService.full_delete_knowledge_base = AsyncMock(
+            side_effect=delete_side_effect
+        )
+        mocker.patch.dict(
+            sys.modules, {"services.vectordatabase_service": fake_vdb}
+        )
+        return fake_vdb
+
+    @pytest.mark.asyncio
+    async def test_delete_user_and_cleanup_success_with_private_kb_cleanup(
+        self, mocker
+    ):
+        self._mock_base_cleanup(mocker)
+        mocker.patch(
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
+            return_value=[
+                {"knowledge_id": 1, "index_name": "private-kb-1"},
+                {"knowledge_id": 2, "index_name": "private-kb-2"},
+            ],
+        )
+        fake_vdb = self._install_fake_vdb(mocker)
+
+        result = await delete_user_and_cleanup("user123", "tenant456")
+
+        assert result == {"total": 2, "succeeded": 2, "failed": 0}
+        fake_vdb.get_vector_db_core.assert_called_once_with()
+        assert (
+            fake_vdb.ElasticSearchService.full_delete_knowledge_base.await_count
+            == 2
+        )
+        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_any_await(
+            "private-kb-1", "vdb-core", "user123"
+        )
+        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_any_await(
+            "private-kb-2", "vdb-core", "user123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_user_and_cleanup_reports_partial_cleanup_failures(
+        self, mocker
+    ):
+        self._mock_base_cleanup(mocker)
+        mocker.patch(
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
+            return_value=[
+                {"knowledge_id": 1, "index_name": "private-kb-1"},
+                {"knowledge_id": 2, "index_name": "private-kb-2"},
+            ],
+        )
+        fake_vdb = self._install_fake_vdb(
+            mocker, delete_side_effect=[None, Exception("delete failed")]
+        )
+
+        result = await delete_user_and_cleanup("user123", "tenant456")
+
+        assert result == {"total": 2, "succeeded": 1, "failed": 1}
+        assert (
+            fake_vdb.ElasticSearchService.full_delete_knowledge_base.await_count
+            == 2
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_user_and_cleanup_skips_private_kb_cleanup_when_none(
+        self, mocker
+    ):
+        self._mock_base_cleanup(mocker)
+        mocker.patch(
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
+            return_value=[],
+        )
+        fake_vdb = self._install_fake_vdb(mocker)
+
+        result = await delete_user_and_cleanup("user123", "tenant456")
+
+        assert result is None
+        fake_vdb.get_vector_db_core.assert_not_called()
+        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_user_and_cleanup_counts_missing_index_name_as_failed(
+        self, mocker
+    ):
+        self._mock_base_cleanup(mocker)
+        mocker.patch(
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
+            return_value=[
+                {"knowledge_id": 1, "index_name": None},
+                {"knowledge_id": 2, "index_name": "private-kb-2"},
+            ],
+        )
+        fake_vdb = self._install_fake_vdb(mocker)
+
+        result = await delete_user_and_cleanup("user123", "tenant456")
+
+        assert result == {"total": 2, "succeeded": 1, "failed": 1}
+        fake_vdb.ElasticSearchService.full_delete_knowledge_base.assert_awaited_once_with(
+            "private-kb-2", "vdb-core", "user123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_user_and_cleanup_private_kb_query_failure_is_swallowed(
+        self, mocker
+    ):
+        self._mock_base_cleanup(mocker)
+        mocker.patch(
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
+            side_effect=Exception("query failed"),
+        )
+
+        result = await delete_user_and_cleanup("user123", "tenant456")
+
+        assert result is None
+
 
 class TestCoverageGaps:
     """Cover authorization and cleanup fallback branches."""
@@ -765,6 +929,23 @@ class TestCoverageGaps:
             requester_role="SU",
         ) == {"users": [], "total": 0}
         mock_get_users.assert_called_once_with("tenant-2", 1, 20, "created_at", "desc")
+
+    def test_requester_forwards_resource_filters(self, mocker):
+        """Test that authorized requests with filters use the filtered call path."""
+        mock_get_users = mocker.patch(
+            "backend.services.user_service.get_users",
+            return_value={"users": [], "total": 0},
+        )
+
+        result = get_users_for_requester(
+            "tenant-1", 1, 20, "created_at", "desc",
+            search="alice", requester_tenant_id="tenant-1", requester_role="ADMIN",
+        )
+
+        assert result == {"users": [], "total": 0}
+        mock_get_users.assert_called_once_with(
+            "tenant-1", 1, 20, "created_at", "desc", "alice", None, None
+        )
 
     @pytest.mark.asyncio
     async def test_superuser_can_update_any_user(self, mocker):
@@ -797,6 +978,24 @@ class TestCoverageGaps:
         mocker.patch("backend.services.user_service.get_supabase_admin_client", return_value=None)
 
         await delete_user_and_cleanup("user-1", "tenant-1")
+
+    @pytest.mark.asyncio
+    async def test_cleanup_revokes_api_keys_and_skips_supabase_without_email(self, mocker):
+        mocker.patch(
+            "backend.services.user_service.get_user_tenant_by_user_id",
+            return_value={"user_id": "user-1", "user_email": None},
+        )
+        mocker.patch(
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
+            return_value=True,
+        )
+        mock_revoke = mocker.patch("database.token_db.soft_delete_tokens_by_user")
+        mock_get_admin = mocker.patch("backend.services.user_service.get_supabase_admin_client")
+
+        await delete_user_and_cleanup("user-1", "tenant-1")
+
+        mock_revoke.assert_called_once_with("user-1", "user-1")
+        mock_get_admin.assert_not_called()
 
 
 # Run tests when executed directly

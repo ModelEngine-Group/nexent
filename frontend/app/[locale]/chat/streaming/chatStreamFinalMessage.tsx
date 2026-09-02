@@ -43,6 +43,7 @@ import { ChatAttachment } from "../components/chatAttachment";
 import { AlertTriangle } from "lucide-react";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import { AuthenticatedImage } from "../../newchat/ui/authenticated-image";
+import { formatMessageTime } from "@/lib/messageDate";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -261,6 +262,7 @@ function ChatStreamFinalMessageInner({
   };
 
   const ttsButtonContent = getTTSButtonContent();
+  const displayTime = formatMessageTime(message.databaseCreateTime);
 
   return (
     <div
@@ -552,6 +554,14 @@ function ChatStreamFinalMessageInner({
                 )}
             </div>
           )}
+        {displayTime && (
+          <time
+            dateTime={message.databaseCreateTime!.toISOString()}
+            className="mt-1 text-xs text-gray-500"
+          >
+            {displayTime}
+          </time>
+        )}
       </div>
     </div>
   );

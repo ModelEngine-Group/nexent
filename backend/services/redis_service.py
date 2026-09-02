@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Dict, Any, Optional, Tuple, Set, List
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import redis
 
@@ -11,6 +11,7 @@ from consts.const import (
     REDIS_ERROR_INFO_TTL_SECONDS,
     REDIS_URL,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -906,8 +907,27 @@ class RedisService:
     def _extract_error_metadata_from_exc_message(self, exc_message: Any) -> Optional[Dict[str, Any]]:
         """
         Try to parse embedded JSON metadata from exception message with tolerant escaping.
+
+        Celery serializes ``Exception.args`` as a JSON array in the result backend.
+        Our processing tasks raise a JSON-encoded metadata string, so failed task
+        records commonly contain that string inside ``exc_message[0]``.  Unwrap
+        sequence values before parsing instead of converting the Python sequence
+        representation back to text (which is not valid JSON).
         """
         try:
+            if isinstance(exc_message, dict):
+                return exc_message
+
+            if isinstance(exc_message, (list, tuple)):
+                for item in exc_message:
+                    metadata = self._extract_error_metadata_from_exc_message(item)
+                    if metadata:
+                        return metadata
+                return None
+
+            if isinstance(exc_message, bytes):
+                exc_message = exc_message.decode("utf-8", errors="replace")
+
             exc_str = str(exc_message or "")
             if "{" not in exc_str or "}" not in exc_str:
                 return None

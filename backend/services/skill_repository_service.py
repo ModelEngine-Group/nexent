@@ -40,7 +40,7 @@ from services.notification_service import (
     create_repository_review_notification,
     deactivate_notifications,
 )
-from services.skill_service import SkillService
+from services.skill_service import SkillService, generate_available_copy_skill_name
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
@@ -797,31 +797,21 @@ def _extract_duplicate_skill_name(error_message: str) -> Optional[str]:
     return None
 
 
-def _truncate_copy_base_name(base_name: str, suffix: str) -> str:
-    """Trim a copied skill base name so the final name fits the database limit."""
-    max_base_length = max(_MAX_COPY_NAME_LENGTH - len(suffix), 1)
-    if len(base_name) <= max_base_length:
-        return base_name
-    return base_name[:max_base_length].rstrip() or base_name[:max_base_length]
-
-
 def _generate_available_copy_skill_name(
     *,
     base_name: str,
     tenant_id: str,
 ) -> str:
     """Generate an available skill name for repository copy within the tenant."""
-    normalized_base = (base_name or "Skill").strip() or "Skill"
-    if not get_skill_by_name(normalized_base, tenant_id):
-        return normalized_base
-
-    index = 1
+    unavailable_names: set[str] = set()
     while True:
-        suffix = " 副本" if index == 1 else f" 副本 {index}"
-        candidate = f"{_truncate_copy_base_name(normalized_base, suffix)}{suffix}"
+        candidate = generate_available_copy_skill_name(
+            base_name,
+            unavailable_names,
+        )
         if not get_skill_by_name(candidate, tenant_id):
             return candidate
-        index += 1
+        unavailable_names.add(candidate)
 
 
 def install_skill_from_repository_impl(

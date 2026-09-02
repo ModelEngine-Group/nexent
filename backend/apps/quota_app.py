@@ -8,14 +8,22 @@ import logging
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID
-from consts.exceptions import PlatformQuotaConflictError
+from consts.exceptions import (
+    AppException,
+    PlatformQuotaConflictError,
+    TokenExpiredError,
+)
 from database.user_tenant_db import get_user_tenant_by_user_id
+from permissions.depends import authenticate, require
+from permissions.models import CurrentUser
+from permissions.tenant_scope import resolve_personal_target_tenant
 from services.quota_service import QuotaService
 from utils.auth_utils import get_current_user_id
+from utils.bytes_utils import bytes_to_readable
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +32,14 @@ tenant_quota_router = APIRouter(prefix="/tenants")
 
 # Platform-level quota router
 platform_quota_router = APIRouter(prefix="/platform/quota")
+
+# Personal KB capacity router
+personal_quota_router = APIRouter(prefix="/capacity/personal")
+
+QUOTA_PAYLOAD_DESCRIPTION = "Quota payload"
+PERSONAL_KB_CAPACITY_READ_PERMISSION = "kb.capacity:read"
+PERSONAL_KB_CAPACITY_MANAGE_PERMISSION = "kb.capacity:manage"
+TARGET_TENANT_ID_DESCRIPTION = "Target tenant ID (SU/SPEED only)"
 
 
 def _platform_quota_conflict_response(exc: PlatformQuotaConflictError) -> JSONResponse:
@@ -133,6 +149,9 @@ def get_tenant_quota(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error getting tenant quota for %s", tenant_id)
         raise HTTPException(
@@ -227,6 +246,9 @@ def update_tenant_quota(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error updating tenant quota for %s", tenant_id)
         raise HTTPException(
@@ -265,6 +287,9 @@ def delete_tenant_quota(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error deleting tenant quota for %s", tenant_id)
         raise HTTPException(
@@ -308,6 +333,9 @@ def get_tenant_quota_usage(
         return JSONResponse(status_code=HTTPStatus.OK, content=usage)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error getting usage for tenant %s", tenant_id)
         raise HTTPException(
@@ -337,6 +365,9 @@ def get_platform_overview(
         return JSONResponse(status_code=HTTPStatus.OK, content=overview)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error getting platform overview")
         raise HTTPException(
@@ -370,6 +401,9 @@ def set_platform_capacity(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error setting platform capacity")
         raise HTTPException(
@@ -397,6 +431,9 @@ def delete_platform_capacity(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error deleting platform capacity")
         raise HTTPException(
@@ -439,6 +476,9 @@ def set_tenant_hard_quota(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error setting tenant hard quota for %s", tenant_id)
         raise HTTPException(
@@ -470,9 +510,250 @@ def delete_tenant_hard_quota(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error deleting tenant hard quota for %s", tenant_id)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail=f"Error deleting tenant hard quota: {str(exc)}",
+        )
+
+
+# Personal KB capacity endpoints
+
+@personal_quota_router.get("/me")
+def get_personal_self_capacity(
+    current_user: CurrentUser = Depends(authenticate),
+):
+    """Return the current user's own personal KB capacity."""
+    try:
+        service = QuotaService(current_user.tenant_id, current_user.user_id)
+        data = service.get_personal_self_capacity(current_user.user_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content=data)
+    except AppException:
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error getting current user's personal KB capacity")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error getting personal KB capacity: {str(exc)}",
+        )
+
+@personal_quota_router.get("/users")
+def list_personal_capacity_users(
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
+    sort_by: str = Query(
+        "total_bytes",
+        description=(
+            "Sort field: user_name, kb_count, total_bytes, "
+            "quota_limit_bytes, usage_rate"
+        ),
+    ),
+    sort_order: str = Query("desc", description="Sort order: asc or desc"),
+    keyword: Optional[str] = Query(
+        None, description="Filter users by user name or email"
+    ),
+):
+    """List personal KB storage aggregated by user."""
+    try:
+        if sort_by not in {
+            "user_name",
+            "kb_count",
+            "total_bytes",
+            "quota_limit_bytes",
+            "usage_rate",
+        }:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=(
+                    "sort_by must be one of user_name, kb_count, "
+                    "total_bytes, quota_limit_bytes, usage_rate"
+                ),
+            )
+        if sort_order.lower() not in {"asc", "desc"}:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="sort_order must be asc or desc",
+            )
+        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
+        service = QuotaService(target_tenant_id, current_user.user_id)
+        data = service.list_personal_capacity_users(
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            keyword=keyword,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=data)
+    except HTTPException:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logger.exception("Error listing personal KB capacity users")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error listing personal KB capacity: {str(exc)}",
+        )
+
+
+@personal_quota_router.get("/users/{user_id}/kbs")
+def get_personal_capacity_kbs(
+    user_id: str = Path(..., description="User ID"),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    page_size: int = Query(20, ge=1, le=100, description="Page size from 1 to 100"),
+):
+    """List a user's personal KB records with storage details."""
+    try:
+        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
+        service = QuotaService(target_tenant_id, current_user.user_id)
+        data = service.get_personal_kb_details(
+            user_id,
+            page=page,
+            page_size=page_size,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=data)
+    except HTTPException:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logger.exception("Error getting personal KB details for user %s", user_id)
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error getting personal KB details: {str(exc)}",
+        )
+
+
+@personal_quota_router.get("/summary")
+def get_personal_capacity_summary(
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
+):
+    """Return aggregate personal KB capacity stats for a tenant."""
+    try:
+        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
+        service = QuotaService(target_tenant_id, current_user.user_id)
+        data = service.get_personal_capacity_summary()
+        return JSONResponse(status_code=HTTPStatus.OK, content=data)
+    except HTTPException:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logger.exception("Error getting personal KB capacity summary")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error getting personal KB capacity summary: {str(exc)}",
+        )
+
+
+@personal_quota_router.put("/users/{user_id}/quota")
+def set_personal_user_quota(
+    user_id: str = Path(..., description="User ID"),
+    payload: Dict[str, Any] = Body(..., description=QUOTA_PAYLOAD_DESCRIPTION),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_MANAGE_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
+):
+    """Set or clear a user's personal KB quota."""
+    try:
+        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
+        quota_limit_bytes = payload.get("quota_limit_bytes")
+        unlimited = bool(payload.get("unlimited", False))
+        if quota_limit_bytes is None and not unlimited:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Provide quota_limit_bytes or unlimited=true",
+            )
+        service = QuotaService(target_tenant_id, current_user.user_id)
+        result = service.set_personal_user_quota(
+            user_id,
+            quota_limit_bytes=quota_limit_bytes,
+            unlimited=unlimited,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AppException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error setting personal KB quota")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error setting personal KB quota: {str(exc)}",
+        )
+
+
+@personal_quota_router.get("/default-quota")
+def get_personal_default_quota(
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_READ_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
+):
+    """Get the tenant default personal KB quota."""
+    try:
+        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
+        service = QuotaService(target_tenant_id, current_user.user_id)
+        quota_limit_bytes = service.get_personal_default_quota()
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "quota_limit_bytes": quota_limit_bytes,
+                "quota_limit_readable": bytes_to_readable(quota_limit_bytes),
+                "unlimited": quota_limit_bytes is None,
+            },
+        )
+    except HTTPException:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logger.exception("Error getting personal KB default quota")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error getting personal KB default quota: {str(exc)}",
+        )
+
+
+@personal_quota_router.put("/default-quota")
+def set_personal_default_quota(
+    payload: Dict[str, Any] = Body(..., description=QUOTA_PAYLOAD_DESCRIPTION),
+    current_user: CurrentUser = Depends(require(PERSONAL_KB_CAPACITY_MANAGE_PERMISSION)),
+    tenant_id: Optional[str] = Query(None, description=TARGET_TENANT_ID_DESCRIPTION),
+):
+    """Set or clear the tenant default personal KB quota."""
+    try:
+        target_tenant_id = resolve_personal_target_tenant(current_user, tenant_id)
+        quota_limit_bytes = payload.get("quota_limit_bytes")
+        unlimited = bool(payload.get("unlimited", False))
+        if quota_limit_bytes is None and not unlimited:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Provide quota_limit_bytes or unlimited=true",
+            )
+        service = QuotaService(target_tenant_id, current_user.user_id)
+        result = service.set_personal_default_quota(
+            quota_limit_bytes=quota_limit_bytes,
+            unlimited=unlimited,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except HTTPException:
+        raise
+    except AppException:
+        raise
+    except Exception as exc:
+        logger.exception("Error setting personal KB default quota")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Error setting personal KB default quota: {str(exc)}",
         )

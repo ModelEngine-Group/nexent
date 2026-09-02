@@ -451,7 +451,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         # 1. Deactivate all users in the tenant (full cleanup including Supabase deletion)
         logger.info(f"Deactivating users for tenant {tenant_id}")
         users_result = get_users_by_tenant_id(
-            tenant_id, page=1, page_size=10000)
+            tenant_id, page=1, page_size=10000, email_required=False)
         users = users_result.get("users", [])
 
         if users:

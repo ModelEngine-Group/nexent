@@ -37,3 +37,7 @@ config:
   postgresHost: "nexent-supabase-db"
   postgresPort: "5436"
   additionalRedirectUrls: ""
+
+service:
+  type: ClusterIP
+  nodePort: null

@@ -91,6 +91,16 @@ cp deploy/env/.env.example deploy/env/.env  # Fill required configs
 bash deploy.sh        # Interactive deployment
 ```
 
+### Docker Compatibility
+
+- Keep Docker deployments compatible with Docker Engine 18.09 (API v1.39). The Docker Compose CLI may be a current
+  version; do not assume that the Compose CLI itself is legacy.
+- Do not require daemon capabilities introduced after API v1.39, such as GPU device requests, cgroup namespace modes,
+  or healthcheck `start_interval`, unless an Engine version check and an 18.09-compatible fallback are provided.
+- Values under an `environment` mapping must be strings. Always quote YAML boolean-like and numeric values such as
+  `true`, `false`, `yes`, `no`, `on`, `off`, `0022`, and port numbers.
+- Boolean fields defined by the Compose schema, such as `privileged` and `external`, should remain native booleans.
+
 ---
 
 ## Architecture
@@ -117,11 +127,13 @@ bash deploy.sh        # Interactive deployment
 
 ## Database Migrations
 
-**Location**: `docker/sql/*.sql` (versioned migration scripts)
+**Location**: `deploy/sql/`
 
-**Critical rule**: When adding columns/tables via migration script:
-- Update `docker/init.sql` (Docker Compose fresh deploy)
-- Update `k8s/helm/nexent/charts/nexent-common/files/init.sql` (K8s fresh deploy)
+**Critical rule**: Every `.sql` file that already exists in the target branch is immutable.
+
+- This rule applies to all migration, init, and Supabase SQL files without exception.
+- Do not modify, rename, or delete an existing SQL file after it has been merged.
+- Make database changes only by adding a new versioned migration file under `deploy/sql/migrations/`.
 
 **Version**: Tracked in `backend/consts/const.py` as `APP_VERSION`
 

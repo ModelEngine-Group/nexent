@@ -8,6 +8,7 @@ from pydantic import Field
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
 
@@ -27,8 +28,60 @@ class IdataSearchTool(Tool):
         "domain expertise, or any information that has been indexed in iData knowledge bases. "
         "Suitable for queries requiring access to stored knowledge that may not be publicly available."
     )
+    description_zh = (
+        "基于你的查询词在 iData 知识库中进行搜索，返回最相关的搜索结果。"
+        "适用于检索 iData 知识库中存储的领域专业知识、文档和信息。"
+        "当用户询问与专业知识、技术文档、领域专长或任何已在 iData 知识库中建立索引的信息相关的问题时，请使用此工具。"
+        "特别适合需要访问可能无法公开获取的存储知识的查询。"
+    )
     inputs = {
-        "question": {"type": "string", "description": "The search query to perform."},
+        "question": {
+            "type": "string",
+            "description": "The search query to perform.",
+            "description_zh": "要执行的搜索查询词"
+        }
+    }
+    init_param_descriptions = {
+        "server_url": {
+            "description": "iData API base URL",
+            "description_zh": "iData API 基础 URL"
+        },
+        "api_key": {
+            "description": "iData API key with Bearer token",
+            "description_zh": "iData API 密钥（带 Bearer token）"
+        },
+        "user_id": {
+            "description": "iData user ID",
+            "description_zh": "iData 用户 ID"
+        },
+        "knowledge_space_id": {
+            "description": "iData knowledge space ID",
+            "description_zh": "iData 知识空间 ID"
+        },
+        "dataset_ids": {
+            "description": "JSON string array of iData knowledge base IDs",
+            "description_zh": "iData 知识库 ID 的 JSON 字符串数组"
+        },
+        "rerank_model_id": {
+            "description": "Rerank model ID",
+            "description_zh": "Rerank 模型 ID"
+        },
+        "top_k": {
+            "description": "Maximum number of search results",
+            "description_zh": "最大返回搜索结果数量"
+        },
+        "similarity_threshold": {
+            "description": "Rerank similarity threshold score",
+            "description_zh": "Rerank 相似度阈值"
+        },
+        "keyword_similarity_weight": {
+            "description": "Keyword similarity weight",
+            "description_zh": "关键词相似度权重"
+        },
+        "vector_similarity_weight": {
+            "description": "Vector similarity weight",
+            "description_zh": "向量相似度权重"
+        },
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
@@ -45,13 +98,13 @@ class IdataSearchTool(Tool):
             description="JSON string array of iData knowledge base IDs"),
         rerank_model_id: str = Field(description="Rerank model ID"),
         top_k: int = Field(
-            description="Maximum number of search results", default=10),
+            description="Maximum number of search results", default=10, ge=1, le=100),
         similarity_threshold: float = Field(
-            description="Rerank similarity threshold score", default=-10.0),
+            description="Rerank similarity threshold score", default=-10.0, le=1.0),
         keyword_similarity_weight: float = Field(
-            description="Keyword similarity weight", default=0.10),
+            description="Keyword similarity weight", default=0.10, ge=0.0, le=1.0),
         vector_similarity_weight: float = Field(
-            description="Vector similarity weight", default=0.3),
+            description="Vector similarity weight", default=0.3, ge=0.0, le=1.0),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True),
     ):
@@ -71,6 +124,11 @@ class IdataSearchTool(Tool):
             observer (MessageObserver, optional): Message observer instance. Defaults to None.
         """
         super().__init__()
+
+        top_k = unwrap_field_info(top_k)
+        similarity_threshold = unwrap_field_info(similarity_threshold)
+        keyword_similarity_weight = unwrap_field_info(keyword_similarity_weight)
+        vector_similarity_weight = unwrap_field_info(vector_similarity_weight)
 
         # Validate server_url
         if not server_url or not isinstance(server_url, str):
@@ -120,10 +178,10 @@ class IdataSearchTool(Tool):
         self.user_id = user_id
         self.knowledge_space_id = knowledge_space_id
         self.rerank_model_id = rerank_model_id
-        self.top_k = top_k
-        self.similarity_threshold = similarity_threshold
-        self.keyword_similarity_weight = keyword_similarity_weight
-        self.vector_similarity_weight = vector_similarity_weight
+        self.top_k = max(1, min(int(top_k or 10), 100))
+        self.similarity_threshold = min(float(similarity_threshold if similarity_threshold is not None else -10.0), 1.0)
+        self.keyword_similarity_weight = max(0.0, min(float(keyword_similarity_weight if keyword_similarity_weight is not None else 0.10), 1.0))
+        self.vector_similarity_weight = max(0.0, min(float(vector_similarity_weight if vector_similarity_weight is not None else 0.3), 1.0))
         self.observer = observer
 
         # Cache HTTP client for reuse (uses shared HttpClientManager internally)

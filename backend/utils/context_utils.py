@@ -137,7 +137,7 @@ def _build_execution_flow_text(
 
     if language == "zh":
         lines = ["### 执行流程"]
-        lines.append("要解决任务，你必须通过一系列步骤向前规划，以'思考：'和'代码：'序列循环进行。**注意：禁止在代码执行前输出'观察结果：'，观察结果只能由代码执行后产生。**")
+        lines.append("要解决任务，你必须通过一系列步骤向前规划，以'思考：'和'代码：'序列循环进行。")
         lines.append("")
         lines.append("1. 思考：")
         if is_manager:
@@ -169,12 +169,11 @@ def _build_execution_flow_text(
             lines.append("   - 根据格式规范正确调用工具")
         lines.append("   - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码")
         lines.append("   - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。")
-        lines.append("   - **重要**：代码执行后，系统会返回 \"Observation:\" 标记的内容（这是真实的执行结果）。请基于这些真实结果继续下一步思考，**不要在代码执行前自行编造观察结果**。")
         lines.append("")
         lines.append("3. 自验证：")
         lines.append("   - 关键事件（工具调用、检索结果、代码执行、助手返回、准备最终回答）后，系统会进行显式自验证。")
         lines.append("   - 如果自验证提示存在错误、证据不足、参数不完整或结果不可靠，必须优先修正、补充证据、重新调用工具，或清晰说明无法完成的部分。")
-        lines.append("   - 最终回答只有在自验证通过后才会展示给用户；如果系统返回 Verification feedback，请把它视为真实观察结果继续修正，不要忽略。")
+        lines.append("   - 最终回答只有在自验证通过后才会展示给用户；如果系统返回 Verification feedback，请根据该反馈继续修正，不要忽略。")
         lines.append("")
         lines.append("在思考结束后，当你认为可以回答用户问题，那么可以不生成代码，直接生成最终回答给到用户并停止循环。")
         lines.append("")
@@ -182,6 +181,8 @@ def _build_execution_flow_text(
         lines.append("1. Markdown格式要求：")
         lines.append("  - 使用标准Markdown语法格式化输出，支持标题、列表、表格、代码块、链接等")
         lines.append("  - 展示图片和视频使用链接方式，不需要外套代码块，格式：[链接文本](URL)，图片格式：![alt文本](图片URL)，视频格式：<video src=\"视频URL\" controls></video>")
+        lines.append("  - 对已上传或生成的 Nexent 文件，必须使用工具结果中的永久 S3 URL（`s3://存储桶/对象路径`）作为 Markdown URL")
+        lines.append("  - 禁止在最终回答中输出 presigned_url、带签名查询参数的 MinIO URL 或本地文件路径")
         lines.append("  - 段落之间使用单个空行分隔，避免多个连续空行")
         lines.append("  - 数学公式使用标准Markdown格式：行内公式用 $公式$，块级公式用 $$公式$$")
         lines.append("")
@@ -205,7 +206,7 @@ def _build_execution_flow_text(
             lines.append("注意最后生成的回答要语义连贯，信息清晰，可读性高。")
     else:
         lines = ["### Execution Process"]
-        lines.append("To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences. **IMPORTANT: You must NOT output 'Observe Results:' before code execution. Observation results can ONLY be generated after code execution.**")
+        lines.append("To solve tasks, you must plan forward through a series of steps in a loop of 'Think:' and 'Code:' sequences.")
         lines.append("")
         lines.append("1. Think:")
         if is_manager:
@@ -239,12 +240,11 @@ def _build_execution_flow_text(
             lines.append("   - Call tools correctly according to format specifications")
         lines.append("   - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code")
         lines.append("   - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.")
-        lines.append("   - **IMPORTANT**: After code execution, the system will return content with \"Observation:\" marker (this is the real execution result). Please continue your next thinking based on these real results. **Do NOT fabricate observation results before code execution.**")
         lines.append("")
         lines.append("3. Self-verification:")
         lines.append("   - After critical events (tool calls, retrieval results, code execution, agent handoffs, and final-answer preparation), the system may run explicit verification.")
         lines.append("   - If verification reports errors, insufficient evidence, incomplete parameters, or unreliable results, you must repair the issue, gather more evidence, call tools again, or clearly state what cannot be completed.")
-        lines.append("   - The final answer is shown to the user only after verification passes. If the system returns Verification feedback, treat it as a real observation and continue revising.")
+        lines.append("   - The final answer is shown to the user only after verification passes. If the system returns Verification feedback, continue revising based on that feedback.")
         lines.append("")
         lines.append("After thinking, when you believe you can answer the user's question, you can generate a final answer directly to the user without generating code and stop the loop.")
         lines.append("")
@@ -252,6 +252,8 @@ def _build_execution_flow_text(
         lines.append("1. **Markdown Format Requirements**:")
         lines.append("   - Use standard Markdown syntax to format your output, supporting headings, lists, tables, code blocks, and links.")
         lines.append("   - Display images and videos using links instead of wrapping them in code blocks. Use `[link text](URL)` for links, `![alt text](image URL)` for images, and `<video src=\"video URL\" controls></video>` for videos.")
+        lines.append("   - For uploaded or generated Nexent files, use the permanent S3 URL (`s3://bucket/object-path`) returned by the tool as the Markdown URL.")
+        lines.append("   - Never expose a presigned URL, a signed MinIO URL, or a local file path in the final answer.")
         lines.append("   - Use a single blank line between paragraphs, avoid multiple consecutive blank lines")
         lines.append("   - Mathematical formulas use standard Markdown format: inline formulas use $formula$, block formulas use $$formula$$")
         lines.append("")

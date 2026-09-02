@@ -201,6 +201,19 @@ smolagents_mod.tools = smolagents_tools_mod
 _set_module("smolagents", smolagents_mod)
 _set_module("smolagents.tools", smolagents_tools_mod)
 
+# Stub the gateway bridge: the tool only uses these adapter symbols for typing;
+# the real gateway eagerly registers every vendor adapter and pulls absolute
+# ``nexent.*`` / ``smolagents.*`` imports that the mocked env cannot satisfy.
+_gateway_mod = types.ModuleType("sdk.nexent.core.gateway")
+_gateway_mod.__path__ = []
+_gateway_modality_mod = types.ModuleType("sdk.nexent.core.gateway.modality")
+_gateway_modality_mod.__path__ = []
+for _name in ("EmbeddingAdapter", "RerankAdapter"):
+    setattr(_gateway_modality_mod, _name, MagicMock(name=f"gateway.modality.{_name}"))
+_gateway_mod.modality = _gateway_modality_mod
+_set_module("sdk.nexent.core.gateway", _gateway_mod)
+_set_module("sdk.nexent.core.gateway.modality", _gateway_modality_mod)
+
 MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "tools" / "knowledge_base_search_tool.py"
 MODULE_NAME = "sdk.nexent.core.tools.knowledge_base_search_tool"
 spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)

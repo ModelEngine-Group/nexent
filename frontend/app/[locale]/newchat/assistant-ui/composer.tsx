@@ -57,6 +57,7 @@ import {
   combinedSkillDirectiveFormatter,
   skillDirectiveIconMap,
 } from "../ui/skill-directives";
+import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 
 export type ChatMode = "planning" | "execution";
 
@@ -77,6 +78,10 @@ export interface ComposerProps {
   ) => Promise<void> | void;
   compact?: boolean;
   skillFiles?: readonly SkillFileContent[];
+  runtimeMetadata?: Record<string, unknown>;
+  onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
+  allowRuntimeMetadata?: boolean;
+  disabled?: boolean;
 }
 
 // Simple tooltip wrapper
@@ -202,6 +207,10 @@ export const Composer: FC<ComposerProps> = ({
   onKnowledgeScopeChange,
   compact = false,
   skillFiles,
+  runtimeMetadata = {},
+  onRuntimeMetadataChange,
+  allowRuntimeMetadata = false,
+  disabled = false,
 }) => {
   const { t } = useTranslation();
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
@@ -296,7 +305,14 @@ export const Composer: FC<ComposerProps> = ({
   ]);
 
   return (
-    <div className="relative flex w-full flex-col overflow-visible rounded-2xl border border-border bg-card shadow-sm">
+    <fieldset
+      disabled={disabled}
+      aria-disabled={disabled}
+      className={cn(
+        "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
+        disabled && "cursor-not-allowed opacity-60"
+      )}
+    >
       {!compact && <PlanView />}
 
       {/* Mode switcher above input */}
@@ -395,6 +411,13 @@ export const Composer: FC<ComposerProps> = ({
                     <span className="truncate">{knowledgeSummary}</span>
                   </Button>
                 )}
+              {!compact && allowRuntimeMetadata && onRuntimeMetadataChange && (
+                <RuntimeMetadataEditor
+                  value={runtimeMetadata}
+                  onChange={onRuntimeMetadataChange}
+                  disabled={isRunning}
+                />
+              )}
             </div>
             <div className="ml-auto flex items-center gap-1">
               {!compact && <ComposerAddAttachment />}
@@ -462,7 +485,7 @@ export const Composer: FC<ComposerProps> = ({
           />
         )}
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-    </div>
+    </fieldset>
   );
 };
 
@@ -473,6 +496,7 @@ export const Composer: FC<ComposerProps> = ({
 // two branches declaratively based on `thread.isRunning`.
 const ComposerSendOrCancel: FC = () => {
   const { t } = useTranslation();
+  const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
   return (
     <>
@@ -492,7 +516,12 @@ const ComposerSendOrCancel: FC = () => {
       <AuiIf condition={(s) => !s.thread.isRunning}>
         <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
           <ComposerPrimitive.Send asChild>
-            <Button size="icon" className="size-8 rounded-full ml-2">
+            <Button
+              size="icon"
+              className="size-8 rounded-full ml-2"
+              disabled={!hasText}
+              aria-label={t("chat.composer.send")}
+            >
               <ArrowUp className="size-5" />
             </Button>
           </ComposerPrimitive.Send>

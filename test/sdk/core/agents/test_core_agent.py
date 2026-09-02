@@ -375,11 +375,32 @@ def test_complete_answer_that_names_tool_is_not_misclassified():
     ) is False
 
 
+@pytest.mark.parametrize(
+    "output",
+    [
+        (
+            "思考：工具调用成功。根据策略，我需要用 `final_answer` 返回工具结果。\n\n"
+            "最终回答：\n定时任务提案已生成，请核对任务内容和执行时间后确认创建。"
+        ),
+        (
+            "Analysis: The tool call succeeded, so I will use `final_answer` to return the result.\n\n"
+            "Final answer:\nThe scheduled-task proposal is ready for confirmation."
+        ),
+    ],
+)
+def test_complete_explicit_final_answer_is_not_misclassified(output):
+    assert core_agent_module._looks_like_incomplete_action_output(
+        output,
+        available_tool_names={"final_answer", "create_scheduled_task_proposal"},
+    ) is False
+
+
 def test_length_truncated_non_code_output_is_not_a_final_answer():
     assert core_agent_module._looks_like_incomplete_action_output(
         "这是一个尚未完成的回答",
         finish_reason="length",
     ) is True
+
 
 def test_parse_code_blobs_run_format():
     """Test parse_code_blobs with <code>...</code> pattern (new format)."""
@@ -1862,6 +1883,44 @@ class TestMaxStepsReached:
 class TestRunStreamRealExecution:
     """Tests that actually execute the real _run_stream method for line coverage."""
 
+    class _FakeActionStep:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class _FakeAgentGenerationError(Exception):
+        def __init__(self, message, logger):
+            super().__init__(message)
+
+    @classmethod
+    def _create_canonical_run_agent(cls, monkeypatch, **attributes):
+        monkeypatch.setattr(core_agent_module, "ActionStep", cls._FakeActionStep)
+        monkeypatch.setattr(core_agent_module, "AgentGenerationError", cls._FakeAgentGenerationError)
+        monkeypatch.setattr(core_agent_module, "FinalAnswerStep", lambda output: SimpleNamespace(output=output))
+        monkeypatch.setattr(core_agent_module, "handle_agent_output_types", lambda output: output)
+
+        agent = object.__new__(core_agent_module.CoreAgent)
+        defaults = {
+            "agent_name": "test_agent",
+            "name": "test_agent",
+            "observer": MagicMock(),
+            "stop_event": MagicMock(),
+            "step_number": 1,
+            "memory": MagicMock(),
+            "logger": MagicMock(),
+            "model": MagicMock(),
+            "final_answer_checks": [],
+            "enable_planning": False,
+            "verification_config": SimpleNamespace(enabled=False, final_verification_enabled=False),
+            "_finalize_step": MagicMock(),
+            "_collect_step_metrics": MagicMock(),
+        }
+        defaults.update(attributes)
+        for name, value in defaults.items():
+            setattr(agent, name, value)
+        agent.stop_event.is_set.return_value = False
+        agent.memory.steps = []
+        return agent
+
     @staticmethod
     def _context_runtime_mock(
         *,
@@ -2053,7 +2112,6 @@ class TestRunStreamRealExecution:
         # Load CoreAgent in isolation
         module = self._load_core_agent_in_isolation()
         CoreAgent = module.CoreAgent
-
         # Verify CoreAgent is a real class, not a Mock
         assert not isinstance(CoreAgent, MagicMock), "CoreAgent should not be MagicMock"
 
@@ -2061,9 +2119,15 @@ class TestRunStreamRealExecution:
         def mock_add_message(agent_name, process_type, data):
             observer_calls.append((agent_name, process_type, data))
 
-        # Create mock action output
-        mock_action_output = MagicMock()
-        mock_action_output.is_final_answer = False
+        # Use a real output type so the isinstance branch is covered while
+        # is_final_answer=False continues to the max-step fallback.
+        class FakeActionOutput:
+            def __init__(self):
+                self.output = "intermediate result"
+                self.is_final_answer = False
+
+        module.ActionOutput = FakeActionOutput
+        mock_action_output = FakeActionOutput()
 
         # Track _handle_max_steps_reached
         handle_calls = []
@@ -2112,6 +2176,11 @@ class TestRunStreamRealExecution:
         agent.managed_agents = {}
         agent.provide_run_summary = False
         agent._use_structured_outputs_internally = False
+        agent.enable_planning = False
+        agent.verification_config = SimpleNamespace(
+            enabled=False,
+            final_verification_enabled=False,
+        )
         agent.context_runtime = self._context_runtime_mock()
         agent.step_metrics = []
 
@@ -2256,6 +2325,41 @@ class TestRunStreamRealExecution:
 
         # When the runtime has no raw count, fall back to msg_token_count.
         assert agent._last_uncompressed_est != 5000
+
+    def test_step_stream_rejects_whitespace_only_model_output(self, monkeypatch):
+        """Whitespace-only provider content is a generation error, not a final answer."""
+        module = core_agent_module
+        CoreAgent = module.CoreAgent
+        monkeypatch.setattr(module, "AgentExecutionError", type("AgentExecutionError", (Exception,), {}))
+        monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        final_context = MagicMock()
+        final_context.messages = [MagicMock()]
+        final_context.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_step.return_value = final_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+
+        response = MagicMock()
+        response.content = "   \n\t"
+        response.token_usage = None
+        agent.model = MagicMock(return_value=response)
+
+        action_step = MagicMock()
+        stream = agent._step_stream(action_step)
+        with pytest.raises(Exception, match="empty or whitespace-only output"):
+            next(stream)
+
+        assert action_step.model_output == "   \n\t"
 
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
@@ -2489,6 +2593,86 @@ class TestRunStreamRealExecution:
         max_steps_calls = [c for c in observer_calls if c[1] == TestProcessType.MAX_STEPS_REACHED]
         assert len(max_steps_calls) == 0
 
+    def test_run_stream_retries_empty_final_answer_tool_result(self, monkeypatch):
+        """An empty final_answer tool result must not end the run successfully."""
+        module = core_agent_module
+
+        class FakeActionOutput:
+            def __init__(self, output, is_final_answer):
+                self.output = output
+                self.is_final_answer = is_final_answer
+
+        class FakeAgentError(Exception):
+            pass
+
+        class FakeAgentExecutionError(FakeAgentError):
+            def __init__(self, message, logger):
+                super().__init__(message)
+
+        monkeypatch.setattr(module, "ActionOutput", FakeActionOutput)
+        monkeypatch.setattr(module, "AgentError", FakeAgentError)
+        monkeypatch.setattr(module, "AgentExecutionError", FakeAgentExecutionError)
+        agent = self._create_canonical_run_agent(
+            monkeypatch,
+            model=MagicMock(last_response_diagnostics={"finish_reason": "stop"}),
+        )
+
+        outputs = iter(["", "valid answer"])
+
+        def mock_step_stream(_action_step):
+            yield FakeActionOutput(next(outputs), True)
+
+        agent._step_stream = mock_step_stream
+
+        results = list(agent._run_stream("test task", max_steps=2))
+
+        assert results[-1].output == "valid answer"
+        assert len(agent.memory.steps) == 2
+        assert agent.memory.steps[0].error is not None
+
+    def test_planning_run_retries_empty_direct_answer_then_verifies_valid_answer(self, monkeypatch):
+        """Planning runs reset state, retry an empty answer, and verify the next answer."""
+        module = core_agent_module
+
+        agent = self._create_canonical_run_agent(
+            monkeypatch,
+            enable_planning=True,
+            model=MagicMock(last_response_diagnostics={"finish_reason": "length"}),
+            verification_config=SimpleNamespace(
+                enabled=True,
+                final_verification_enabled=True,
+                max_final_rounds=2,
+            ),
+        )
+        agent.current_plan = "stale plan"
+        agent.current_step_index = 99
+        agent.verification_controller = MagicMock()
+        agent.verification_controller.verify_final_answer.return_value = SimpleNamespace(
+            passed=True
+        )
+        agent._build_verification_memory_summary = MagicMock(return_value="summary")
+
+        direct_answers = iter([" \n", "valid direct answer"])
+
+        def mock_step_stream(action_step):
+            action_step.model_output = next(direct_answers)
+            if False:
+                yield None
+            raise module.FinalAnswerError()
+
+        agent._step_stream = mock_step_stream
+
+        results = list(agent._run_stream("test task", max_steps=2))
+
+        assert results[-1].output == "valid direct answer"
+        assert agent.current_plan is None
+        assert agent.current_step_index == 0
+        assert len(agent.memory.steps) == 2
+        assert agent.memory.steps[0].error is not None
+        agent.verification_controller.verify_final_answer.assert_called_once()
+        assert agent.verification_controller.verify_final_answer.call_args.kwargs[
+            "candidate"
+        ] == "valid direct answer"
 
 # ----------------------------------------------------------------------------
 # Tests for _handle_max_steps_reached method
@@ -2611,6 +2795,37 @@ class TestHandleMaxStepsReached:
             if call[1].get("level") and "ERROR" in str(call[1].get("level"))
         ]
         assert len(error_calls) >= 1
+
+    def test_handle_max_steps_reached_empty_content_uses_fallback(self, caplog, monkeypatch):
+        """Empty max-step synthesis returns a visible fallback and records why."""
+        agent, _module = self._create_agent_for_handle_max_steps_test()
+
+        class FakeActionStep:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class FakeAgentMaxStepsError(Exception):
+            def __init__(self, message, logger):
+                super().__init__(message)
+
+        monkeypatch.setattr(core_agent_module, "ActionStep", FakeActionStep)
+        monkeypatch.setattr(core_agent_module, "AgentMaxStepsError", FakeAgentMaxStepsError)
+
+        mock_chat_message = MagicMock()
+        mock_chat_message.role = "assistant"
+        mock_chat_message.content = " \n\t"
+        mock_chat_message.token_usage = None
+        agent.model = MagicMock(return_value=mock_chat_message)
+        agent._finalize_step = MagicMock()
+
+        result = core_agent_module.CoreAgent._handle_max_steps_reached(agent, "original task")
+
+        assert result == (
+            "The agent was unable to generate a valid response after reaching "
+            "the maximum number of steps. Please try rephrasing your request."
+        )
+        assert agent.memory.steps[0].action_output == result
+        assert "model returned empty content, using fallback" in caplog.text
 
     def test_handle_max_steps_reached_creates_memory_step_with_error(self):
         """Test that a memory step with AgentMaxStepsError is created."""
@@ -2813,6 +3028,27 @@ class TestLogModelCallParameters:
         content = call_args[1]["content"]
         assert "REDACTED" in content
 
+    def test_log_model_call_parameters_redacts_runtime_metadata(self):
+        agent, _ = self._create_agent_for_log_params_test()
+        mock_msg = MagicMock()
+        mock_msg.model_dump.return_value = {
+            "role": "user",
+            "content": (
+                'question\n<runtime_metadata trust="untrusted-data">'
+                '{"secret":"must-not-leak"}</runtime_metadata>'
+            ),
+        }
+
+        agent._log_model_call_parameters(
+            [mock_msg],
+            [],
+            {"metadata": {"secret": "must-not-leak"}},
+        )
+
+        content = agent.logger.log_markdown.call_args.kwargs["content"]
+        assert "must-not-leak" not in content
+        assert "REDACTED" in content
+
     def test_log_model_call_parameters_exception_handling(self):
         """Test _log_model_call_parameters handles exceptions gracefully."""
         agent, module = self._create_agent_for_log_params_test()
@@ -2981,6 +3217,35 @@ def test_wrap_tool_for_observer_emits_unique_ids_for_same_name_calls(monkeypatch
     ]
 
 
+def test_wrap_tool_for_observer_maps_positional_values_to_input_names(monkeypatch):
+    observer = MagicMock()
+    observer.tool_call_context.return_value.__enter__.return_value = None
+    tool = type(
+        "RunSkillTool",
+        (),
+        {
+            "name": "run_skill_script",
+            "inputs": {"skill_name": {}, "script_path": {}, "params": {}},
+        },
+    )()
+    tool.forward = lambda skill_name, script_path, params=None: "ok"
+    monkeypatch.setattr(core_agent_module.uuid, "uuid4", lambda: "call-1")
+
+    core_agent_module._wrap_tool_for_observer(tool, observer, "agent")
+    result = tool.forward(
+        "sandbox-execution-probe",
+        "scripts/check_execution_env.py",
+        {"compact": True},
+    )
+
+    assert result == "ok"
+    assert observer.add_message.call_args.kwargs["tool_arguments"] == {
+        "skill_name": "sandbox-execution-probe",
+        "script_path": "scripts/check_execution_env.py",
+        "params": {"compact": True},
+    }
+
+
 def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones():
     """Collect stringified keys from tools and managed agents only."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
@@ -3106,3 +3371,131 @@ def test_run_injects_current_time_when_missing():
     assert agent.task.startswith("[Current time:")
     assert "What time is it?" in agent.task
 
+
+def test_managed_agent_call_injects_workspace_instructions(tmp_path):
+    """Managed sub-agents receive the run output path in their delegated task."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    module.RunResult = type("RunResult", (), {})
+    workspace = tmp_path / "user" / "run"
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.workspace_path = str(workspace)
+    agent.name = "file_generation_assistant"
+    agent.state = {}
+    agent.prompt_templates = {
+        "managed_agent": {
+            "task": "{{ task }}",
+            "report": "{{ final_answer }}",
+        }
+    }
+    agent.run = MagicMock(return_value="done")
+    agent.observer = MagicMock()
+    agent.provide_run_summary = False
+
+    agent("create test.txt")
+
+    render_payload = module.Template.return_value.render.call_args_list[0].args[0]
+    managed_task = render_payload["task"]
+    assert "[Nexent run workspace]" in managed_task
+    assert str(workspace / "outputs") in managed_task
+    assert "current working directory" in managed_task
+    assert "Never prefix a relative output path" in managed_task
+    assert "pass the same bare relative path" in managed_task
+    assert "use its permanent s3_url in Markdown" in managed_task
+    assert "Never use a local path or presigned_url" in managed_task
+    assert "only call .save() on PIL images" in managed_task
+
+
+def test_run_with_metadata_injects_untrusted_metadata_block():
+    """run() must serialize runtime metadata and inline extra args into the task."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    list(agent.run(
+        task="Handle the request",
+        stream=True,
+        additional_args={"metadata": {"session": "abc", "lang": "zh"}, "window_id": "w1"},
+    ))
+
+    assert "window_id" in agent.task
+    assert '<runtime_metadata trust="untrusted-data">' in agent.task
+    assert '"session":"abc"' in agent.task
+    assert agent.state["metadata"] == {"session": "abc", "lang": "zh"}
+
+
+def test_run_with_metadata_skips_optional_sections():
+    """run() with only metadata provided must not inline extra-args or metadata text when absent."""
+    agent = _create_minimal_core_agent_for_time_tests()
+
+    list(agent.run(
+        task="Handle the request",
+        stream=True,
+        additional_args={"metadata": {"session": "abc"}},
+    ))
+
+    assert '<runtime_metadata trust="untrusted-data">' in agent.task
+    # extra-args hint is only rendered when non-metadata additional args exist
+    assert "additional arguments, that you can access" not in agent.task
+
+
+def test_call_forwards_metadata_to_sub_agent_run():
+    """__call__ must exclude metadata from the template state and pass it via additional_args."""
+    module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
+    agent = module.CoreAgent.__new__(module.CoreAgent)
+    agent.workspace_path = None
+    agent.max_steps = 3
+    agent.state = {"metadata": {"session": "abc"}, "region": "cn"}
+    agent.memory = MagicMock()
+    agent.monitor = MagicMock()
+    agent.context_runtime = MagicMock()
+    agent.system_prompt = ""
+    agent.logger = MagicMock()
+    agent.model = MagicMock()
+    agent.name = "test_agent"
+    agent.observer = MagicMock()
+    agent.python_executor = None
+    agent.prompt_templates = {
+        "managed_agent": {
+            "task": "Task for {name}: {task}",
+            "report": "Report {name}: {final_answer}",
+        }
+    }
+    agent.provide_run_summary = False
+
+    # Provide a real type for the RunResult isinstance gate (the isolated-load
+    # smolagents mock leaves it as a MagicMock, which isinstance rejects).
+    fake_run_result = type("FakeRunResult", (), {})
+    module.RunResult = fake_run_result
+
+    # Replace the mocked jinja Template with a recorder so we can assert on the
+    # rendered context (template_state must drop metadata but keep state keys).
+    recorded_renders = []
+
+    class _RecorderTemplate:
+        def __init__(self, template, **kwargs):
+            self._template = template
+
+        def render(self, context, **kwargs):
+            recorded_renders.append({"template": self._template, "context": dict(context)})
+            return f"RENDERED-{len(recorded_renders)}"
+
+    module.Template = _RecorderTemplate
+
+    calls = {}
+    def fake_run(full_task, **kwargs):
+        calls["full_task"] = full_task
+        calls["kwargs"] = kwargs
+        result = fake_run_result()
+        result.output = "sub-agent-output"
+        return result
+
+    agent.run = fake_run
+
+    answer = agent(task="summarize")
+
+    task_render = recorded_renders[0]["context"]
+    # metadata was kept out of the rendered template state
+    assert "metadata" not in task_render
+    assert task_render["region"] == "cn"
+    assert "Task for {name}: {task}" in recorded_renders[0]["template"]
+    assert "Report {name}: {final_answer}" in recorded_renders[1]["template"]
+    assert calls["kwargs"]["additional_args"] == {"metadata": {"session": "abc"}}
+    assert answer == "RENDERED-2"

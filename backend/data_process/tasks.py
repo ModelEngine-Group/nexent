@@ -6,45 +6,52 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, List, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
-import requests
-import re
 import ray
-from celery import Task, chain, states, group, chord
+import requests
+from celery import Task, chain, chord, group, states
 from celery.exceptions import Retry
 from celery.result import allow_join_result
 
-from utils.file_management_utils import get_file_size
-from utils.knowledge_telemetry import knowledge_span, set_span_attributes, trace_knowledge_operation
+from consts.const import (
+    DISABLE_RAY_DASHBOARD,
+    DP_FILE_SPLIT_SIZE_MB,
+    DP_PART_PROCESSOR_COUNT,
+    DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
+    DP_REDIS_CHUNKS_WAIT_TIMEOUT_S,
+    ELASTICSEARCH_SERVICE,
+    FORWARD_REDIS_RETRY_DELAY_S,
+    FORWARD_REDIS_RETRY_MAX,
+    MAX_TIMEOUT,
+    PER_WAVE_TIMEOUT,
+    RAY_ACTOR_NUM_CPUS,
+    RAY_ACTOR_WARM_TIMEOUT_S,
+    RAY_GLOBAL_ACTOR_POOL_NAME,
+    RAY_GLOBAL_ACTOR_POOL_NAMESPACE,
+    RAY_NUM_CPUS,
+    REDIS_BACKEND_URL,
+    ROOT_DIR,
+)
+from consts.error_code import ErrorCode
 from database.attachment_db import get_file_stream
 from database.knowledge_db import get_knowledge_record
 from services.redis_service import get_redis_service
+from utils.file_management_utils import get_file_size
+from utils.knowledge_ingestion_errors import (
+    ClassifiedIngestionException,
+    classify_ingestion_exception,
+)
+from utils.knowledge_telemetry import knowledge_span, set_span_attributes, trace_knowledge_operation
+
 from .app import app
 from .ray_actors import DataProcessorRayActor
-from consts.const import (
-    ELASTICSEARCH_SERVICE,
-    REDIS_BACKEND_URL,
-    FORWARD_REDIS_RETRY_DELAY_S,
-    FORWARD_REDIS_RETRY_MAX,
-    DP_REDIS_CHUNKS_WAIT_TIMEOUT_S,
-    DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-    DP_FILE_SPLIT_SIZE_MB,
-    DP_PART_PROCESSOR_COUNT,
-    RAY_ACTOR_NUM_CPUS,
-    RAY_NUM_CPUS,
-    DISABLE_RAY_DASHBOARD,
-    ROOT_DIR,
-    PER_WAVE_TIMEOUT,
-    MAX_TIMEOUT,
-    RAY_ACTOR_WARM_TIMEOUT_S,
-    RAY_GLOBAL_ACTOR_POOL_NAME,
-    RAY_GLOBAL_ACTOR_POOL_NAMESPACE
-)
 
 
 logger = logging.getLogger("data_process.tasks")
@@ -52,6 +59,66 @@ ASYNC_SPLIT_RETRY_MAX = max(
     FORWARD_REDIS_RETRY_MAX * 5, FORWARD_REDIS_RETRY_MAX)
 FORWARD_ES_CHUNK_BATCH_SIZE = 64
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
+_NON_RETRYABLE_FORWARD_CODES = {
+    ErrorCode.KNOWLEDGE_INDEX_WRITE_BLOCKED.value,
+    "es_bulk_failed",
+    "es_dim_mismatch",
+}
+
+
+def _update_file_lifecycle(
+    *,
+    file_id: Optional[str],
+    tenant_id: Optional[str],
+    index_name: Optional[str],
+    source: Optional[str],
+    status: Optional[str],
+    stage: str,
+    updated_by: Optional[str] = None,
+    **fields: Any,
+) -> None:
+    """Best-effort durable status update with a legacy path fallback.
+
+    Data-process workers can be deployed before the lifecycle migration, so a
+    missing table must never turn a processing result into a second failure.
+    """
+    if not index_name:
+        return
+    try:
+        from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
+
+        record = None
+        if file_id and tenant_id:
+            record = get_file_record(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=index_name,
+                include_hidden=True,
+            )
+        if not record and source:
+            record = get_file_record(
+                tenant_id=tenant_id,
+                index_name=index_name,
+                object_name=source,
+                include_hidden=True,
+            )
+        if not record or record.get("status") in {"DELETE_REQUESTED", "DELETED"}:
+            return
+        transition_file_record(
+            record["file_id"],
+            status=status,
+            stage=stage,
+            expected_statuses=(record.get("status"),),
+            updated_by=updated_by,
+            **fields,
+        )
+    except Exception as lifecycle_exc:
+        logger.warning(
+            "Failed to update file lifecycle for index=%s source=%s: %s",
+            index_name,
+            source,
+            lifecycle_exc,
+        )
 
 
 @trace_knowledge_operation("knowledge.minio.fetch", "minio.fetch")
@@ -210,35 +277,34 @@ def extract_error_code(reason: str, parsed_error: Optional[Dict] = None) -> Opti
     Extract error code from error message or parsed error dict.
     Returns error code if matched, None otherwise.
     """
-    # 1) parsed_error dict
-    if parsed_error and isinstance(parsed_error, dict):
-        code = parsed_error.get("error_code")
+    if parsed_error:
+        code = classify_ingestion_exception(parsed_error, "").error_code
         if code:
             return code
 
-    # 2) try parse reason as JSON
-    try:
-        parsed = json.loads(reason)
-        if isinstance(parsed, dict):
-            code = parsed.get("error_code")
-            if code:
-                return code
-            detail = parsed.get("detail")
-            if isinstance(detail, dict) and detail.get("error_code"):
-                return detail.get("error_code")
-    except Exception:
-        pass
+    code = classify_ingestion_exception(reason, "").error_code
+    if code:
+        return code
 
-    # 3) regex from raw string (supports single/double quotes)
+    # Keep the legacy regex fallback for callers/tests that patch ``tasks.re``.
+    # The classifier remains the source of truth; this only covers malformed
+    # payloads that are not valid JSON mappings.
     try:
         match = re.search(
-            r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', reason)
-        if match:
-            return match.group(1)
+            r'["\'](?:error_code|code)["\']\s*:\s*["\']([^"\']+)["\']',
+            reason,
+        )
     except Exception:
-        pass
+        return None
+    return match.group(1) if match else None
 
-    return "unknown_error"
+
+def _redis_error_reason(classified: ClassifiedIngestionException) -> str:
+    """Keep Redis compatible with the lifecycle code-or-message representation."""
+    if classified.error_code:
+        return json.dumps({"error_code": classified.error_code}, ensure_ascii=False)
+    message = classified.error_message or ""
+    return message[:200] + "..." if len(message) > 200 else message
 
 
 def save_error_to_redis(task_id: str, error_reason: str, start_time: float):
@@ -387,14 +453,18 @@ def _build_forward_error(
     index_name: str,
     source: Optional[str],
     original_filename: Optional[str],
+    error_code: Optional[str] = None,
 ) -> Exception:
-    return Exception(json.dumps({
+    error = {
         "message": message,
         "index_name": index_name,
         "task_name": "forward",
         "source": source,
-        "original_filename": original_filename
-    }, ensure_ascii=False))
+        "original_filename": original_filename,
+    }
+    if error_code:
+        error["error_code"] = error_code
+    return Exception(json.dumps(error, ensure_ascii=False))
 
 
 def _parse_json_or_none(text: str) -> Optional[Dict[str, Any]]:
@@ -610,26 +680,13 @@ def _extract_error_code_from_es_response(
     parsed_body: Optional[Dict[str, Any]],
     text: str,
 ) -> Optional[str]:
-    error_code = None
-    if isinstance(parsed_body, dict):
-        error_code = parsed_body.get("error_code")
-        detail = parsed_body.get("detail")
-        if isinstance(detail, dict) and detail.get("error_code"):
-            error_code = detail.get("error_code")
-        elif isinstance(detail, str):
-            parsed_detail = _parse_json_or_none(detail)
-            if isinstance(parsed_detail, dict):
-                error_code = parsed_detail.get("error_code", error_code)
-
-    if error_code:
-        return error_code
-
-    try:
-        match = re.search(
-            r'["\']error_code["\']\s*:\s*["\']([^"\']+)["\']', text)
-        return match.group(1) if match else None
-    except Exception:
-        return None
+    # Some gateways return a non-code JSON body while retaining the upstream
+    # error_code in the raw response text. Check both representations.
+    return (
+        classify_ingestion_exception(parsed_body, "FORWARD").error_code
+        if parsed_body is not None
+        else None
+    ) or classify_ingestion_exception(text, "FORWARD").error_code
 
 
 @trace_knowledge_operation("knowledge.forward.elasticsearch", "forward.elasticsearch")
@@ -683,9 +740,13 @@ def _send_chunks_to_es(
                         error_code = _extract_error_code_from_es_response(
                             parsed_body, text)
                         if error_code:
-                            raise Exception(json.dumps({
-                                "error_code": error_code
-                            }, ensure_ascii=False))
+                            raise _build_forward_error(
+                                message=f"ElasticSearch service returned HTTP {status}",
+                                index_name=index_name,
+                                source=source,
+                                original_filename=original_filename,
+                                error_code=error_code,
+                            )
 
                         raise Exception(
                             f"ElasticSearch service returned HTTP {status}")
@@ -712,6 +773,7 @@ def _send_chunks_to_es(
                 original_filename=original_filename,
             )
         except Exception as e:
+            classified = classify_ingestion_exception(e, "FORWARD")
             logger.error(
                 f"[{task_id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}.")
             raise _build_forward_error(
@@ -719,6 +781,7 @@ def _send_chunks_to_es(
                 index_name=index_name,
                 source=source,
                 original_filename=original_filename,
+                error_code=classified.error_code,
             )
 
     return run_async(_post())
@@ -1025,7 +1088,7 @@ def aggregate_store_chunks(
     }
 
 
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward_part', queue='forward_q')
+@app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward_part', queue='forward_part_q')
 @trace_knowledge_operation("knowledge.forward.batch", "forward.batch")
 def forward_part(
         self,
@@ -1048,11 +1111,29 @@ def forward_part(
         if parent_task_id:
             try:
                 redis_service = get_redis_service()
-                if redis_service.is_task_cancelled(parent_task_id):
-                    raise RuntimeError(
-                        f"Parent task {parent_task_id} marked as cancelled")
-            except Exception:
-                pass
+                parent_cancelled = redis_service.is_task_cancelled(parent_task_id)
+            except Exception as cancellation_exc:
+                logger.warning(
+                    "Unable to read parent cancellation state for task %s: %s",
+                    parent_task_id,
+                    cancellation_exc,
+                )
+                parent_cancelled = False
+            if parent_cancelled:
+                logger.info(
+                    "Skipping cancelled forward batch %s/%s for parent task %s",
+                    batch_index,
+                    total_batches,
+                    parent_task_id,
+                )
+                return {
+                    "success": True,
+                    "total_indexed": 0,
+                    "total_submitted": 0,
+                    "batch_index": batch_index,
+                    "total_batches": total_batches,
+                    "cancelled": True,
+                }
 
         es_result = _send_chunks_to_es(
             chunks=chunks,
@@ -1099,6 +1180,24 @@ def forward_part(
             "total_batches": total_batches,
         }
     except Exception as e:
+        classified = classify_ingestion_exception(e, "FORWARD")
+        if classified.error_code in _NON_RETRYABLE_FORWARD_CODES:
+            if parent_task_id:
+                try:
+                    get_redis_service().mark_task_cancelled(parent_task_id)
+                except Exception as cancellation_exc:
+                    logger.warning(
+                        "Unable to mark parent task %s cancelled after a non-retryable forwarding failure: %s",
+                        parent_task_id,
+                        cancellation_exc,
+                    )
+            logger.error(
+                "Forward batch %s/%s stopped because forwarding failed with non-retryable code %s",
+                batch_index,
+                total_batches,
+                classified.error_code,
+            )
+            raise
         retry_num = getattr(self.request, 'retries', 0)
         logger.warning(
             f"[{self.request.id}] FORWARD PART: Failed batch {batch_index}/{total_batches} "
@@ -1111,14 +1210,19 @@ def forward_part(
         )
 
 
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.aggregate_forward_parts', queue='forward_q')
+@app.task(
+    bind=True,
+    base=LoggingTask,
+    name='data_process.tasks.aggregate_forward_parts',
+    queue='forward_aggregate_q',
+)
 @trace_knowledge_operation("knowledge.forward.aggregate", "forward.aggregate")
 def aggregate_forward_parts(
         self,
         parts_results: List[Dict[str, Any]],
         source: Optional[str] = None,
         index_name: Optional[str] = None,
-        original_filename: Optional[str] = None
+        original_filename: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Aggregate forward_part results.
@@ -1458,6 +1562,16 @@ def process(
     """
     start_time = time.time()
     task_id = self.request.id
+    file_id = params.get("file_id")
+    _update_file_lifecycle(
+        file_id=file_id,
+        tenant_id=tenant_id,
+        index_name=index_name,
+        source=source,
+        status="PROCESSING",
+        stage="PROCESS",
+        process_task_id=task_id,
+    )
     # _warn_if_queue_mismatch("PROCESS TASK", "process_q", self.request)
 
     logger.info(
@@ -1470,6 +1584,7 @@ def process(
             'source_type': source_type,
             'index_name': index_name,
             'original_filename': original_filename,
+            'file_id': file_id,
             'task_name': 'process',
             'start_time': start_time,
             'stage': 'extracting_text'
@@ -1598,11 +1713,22 @@ def process(
                 'source': source,
                 'index_name': index_name,
                 'original_filename': original_filename,
+                'file_id': file_id,
                 'task_name': 'process',
                 'stage': 'text_extracted',
                 'file_size_mb': file_size_mb,
                 'processing_speed_mb_s': file_size_mb / elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
             }
+        )
+
+        _update_file_lifecycle(
+            file_id=file_id,
+            tenant_id=tenant_id,
+            index_name=index_name,
+            source=source,
+            status="FORWARDING",
+            stage="FORWARD",
+            process_task_id=task_id,
         )
 
         logger.info(
@@ -1618,6 +1744,7 @@ def process(
             'task_id': task_id,
             'split_async': split_async,
             'image_metadata_chunk_count': image_metadata_chunk_count,
+            'file_id': file_id,
         }
 
         return returned_data
@@ -1650,23 +1777,28 @@ def process(
                 "task_name": "process",
                 "source": source,
                 "original_filename": original_filename,
+                "file_id": file_id,
             }
 
-            # Extract error code from parsed error or error message
-            error_code = extract_error_code(error_message, parsed_error)
+            classified = classify_ingestion_exception(parsed_error or error_message, "PROCESS")
+            error_code = classified.error_code
+            _update_file_lifecycle(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=index_name,
+                source=source,
+                status="FAILED",
+                stage="PROCESS",
+                error_code=error_code,
+                error_message=classified.error_message,
+                error_stage="PROCESS",
+                failed_at=datetime.utcnow(),
+                process_task_id=task_id,
+            )
             if error_code:
                 error_info["error_code"] = error_code
 
-            # Store only error code (if available) or raw error message
-            if error_code:
-                reason_to_store = json.dumps({
-                    "error_code": error_code
-                }, ensure_ascii=False)
-            else:
-                # Fallback: store raw error message (truncated if too long)
-                reason_to_store = error_message
-                if len(reason_to_store) > 200:
-                    reason_to_store = reason_to_store[:200] + "..."
+            reason_to_store = _redis_error_reason(classified)
 
             # Save error info to Redis BEFORE re-raising
             logger.info(
@@ -1682,6 +1814,7 @@ def process(
                     "original_filename": error_info.get(
                         "original_filename", ""
                     ),
+                    "file_id": file_id,
                     "custom_error": error_info.get("message", str(e)),
                     "stage": "text_extraction_failed",
                 }
@@ -1711,19 +1844,23 @@ def process(
                     )
                     parsed_error = None
 
-                # Extract error code from parsed error or error message
-                error_code = extract_error_code(error_message, parsed_error)
+                classified = classify_ingestion_exception(parsed_error or error_message, "PROCESS")
+                error_code = classified.error_code
+                _update_file_lifecycle(
+                    file_id=file_id,
+                    tenant_id=tenant_id,
+                    index_name=index_name,
+                    source=source,
+                    status="FAILED",
+                    stage="PROCESS",
+                    error_code=error_code,
+                    error_message=classified.error_message,
+                    error_stage="PROCESS",
+                    failed_at=datetime.utcnow(),
+                    process_task_id=task_id,
+                )
 
-                # Store only error code (if available) or raw error message
-                if error_code:
-                    reason_to_store = json.dumps({
-                        "error_code": error_code
-                    }, ensure_ascii=False)
-                else:
-                    # Fallback: store raw error message (truncated if too long)
-                    reason_to_store = error_message
-                    if len(reason_to_store) > 200:
-                        reason_to_store = reason_to_store[:200] + "..."
+                reason_to_store = _redis_error_reason(classified)
 
                 save_error_to_redis(task_id, reason_to_store, start_time)
             except Exception:
@@ -1748,6 +1885,8 @@ def forward(
         original_filename: Optional[str] = None,
         authorization: Optional[str] = None,
         telemetry_context: Optional[Dict[str, str]] = None,
+        tenant_id: Optional[str] = None,
+        file_id: Optional[str] = None,
 ) -> Dict:
     """
     Vectorize and store processed chunks in Elasticsearch
@@ -1769,6 +1908,16 @@ def forward(
     original_source = source
     original_index_name = index_name
     filename = original_filename
+    file_id = file_id or (processed_data or {}).get("file_id")
+    _update_file_lifecycle(
+        file_id=file_id,
+        tenant_id=tenant_id,
+        index_name=index_name,
+        source=source,
+        status="FORWARDING",
+        stage="FORWARD",
+        forward_task_id=task_id,
+    )
 
     try:
         ctx = _init_forward_context(
@@ -1852,6 +2001,7 @@ def forward(
                 'source': original_source,
                 'index_name': original_index_name,
                 'original_filename': filename,
+                'file_id': file_id,
                 'task_name': 'forward',
                 'start_time': start_time,
                 'stage': 'vectorizing_and_storing',
@@ -1859,6 +2009,7 @@ def forward(
                 'processed_chunks': 0  # Will be updated during vectorization via Redis
             }
         )
+
         try:
             redis_service = get_redis_service()
             redis_service.save_progress_info(task_id, 0, total_chunks)
@@ -1912,13 +2063,13 @@ def forward(
                     total_batches=total_batches,
                     # If request was split into multiple groups, force all groups to use large path.
                     large_mode=True,
-                ).set(queue='forward_q') for idx, batch in enumerate(batches)
+                ).set(queue='forward_part_q') for idx, batch in enumerate(batches)
             )
             callback = aggregate_forward_parts.s(
                 source=original_source,
                 index_name=original_index_name,
-                original_filename=original_filename
-            ).set(queue='forward_q')
+                original_filename=original_filename,
+            ).set(queue='forward_aggregate_q')
             result = chord(group_tasks)(callback)
             with allow_join_result():
                 es_result = result.get()
@@ -1980,6 +2131,7 @@ def forward(
                 'source': original_source,
                 'index_name': original_index_name,
                 'original_filename': original_filename,
+                'file_id': file_id,
                 'task_name': 'forward',
                 'es_result': es_result,
                 'stage': 'completed',
@@ -1988,11 +2140,23 @@ def forward(
             }
         )
 
+        _update_file_lifecycle(
+            file_id=file_id,
+            tenant_id=tenant_id,
+            index_name=original_index_name,
+            source=original_source,
+            status="COMPLETED",
+            stage="COMPLETED",
+            forward_task_id=task_id,
+            completed_at=datetime.utcnow(),
+        )
+
         logger.info(
             f"[{self.request.id}] FORWARD TASK: Successfully stored {len(chunks)} chunks to index {original_index_name} in {end_time - start_time:.2f}s")
 
         return {
             'task_id': task_id,
+            'file_id': file_id,
             'source': original_source,
             'index_name': original_index_name,
             'original_filename': original_filename,
@@ -2013,19 +2177,23 @@ def forward(
             logger.error(
                 f"Error forwarding chunks for index '{error_info.get('index_name', '')}': {error_message}")
 
-            # Extract error code from parsed error or error message
-            error_code = extract_error_code(error_message, error_info)
+            classified = classify_ingestion_exception(error_info, "FORWARD")
+            error_code = classified.error_code
+            _update_file_lifecycle(
+                file_id=file_id,
+                tenant_id=tenant_id,
+                index_name=error_info.get("index_name") or original_index_name,
+                source=error_info.get("source") or original_source,
+                status="FAILED",
+                stage="FORWARD",
+                error_code=error_code,
+                error_message=classified.error_message,
+                error_stage="FORWARD",
+                failed_at=datetime.utcnow(),
+                forward_task_id=task_id,
+            )
 
-            # Store only error code (if available) or raw error message
-            if error_code:
-                reason_to_store = json.dumps({
-                    "error_code": error_code
-                }, ensure_ascii=False)
-            else:
-                # Fallback: store raw error message (truncated if too long)
-                reason_to_store = error_message
-                if len(reason_to_store) > 200:
-                    reason_to_store = reason_to_store[:200] + "..."
+            reason_to_store = _redis_error_reason(classified)
 
             # Save error info to Redis BEFORE re-raising
             logger.info(
@@ -2038,6 +2206,7 @@ def forward(
                     'index_name': error_info.get('index_name', ''),
                     'task_name': error_info.get('task_name', ''),
                     'original_filename': error_info.get('original_filename', ''),
+                    'file_id': file_id,
                     'custom_error': error_message,
                     'stage': 'forward_task_failed'
                 }
@@ -2047,25 +2216,30 @@ def forward(
             # Try to save error even if parsing fails
             try:
                 error_message = str(e)
-                # Extract error code from error message
-                error_code = extract_error_code(error_message, None)
+                classified = classify_ingestion_exception(error_message, "FORWARD")
+                error_code = classified.error_code
+                _update_file_lifecycle(
+                    file_id=file_id,
+                    tenant_id=tenant_id,
+                    index_name=original_index_name,
+                    source=original_source,
+                    status="FAILED",
+                    stage="FORWARD",
+                    error_code=error_code,
+                    error_message=classified.error_message,
+                    error_stage="FORWARD",
+                    failed_at=datetime.utcnow(),
+                    forward_task_id=task_id,
+                )
 
-                # Store only error code (if available) or raw error message
-                if error_code:
-                    reason_to_store = json.dumps({
-                        "error_code": error_code
-                    }, ensure_ascii=False)
-                else:
-                    # Fallback: store raw error message (truncated if too long)
-                    reason_to_store = error_message
-                    if len(reason_to_store) > 200:
-                        reason_to_store = reason_to_store[:200] + "..."
+                reason_to_store = _redis_error_reason(classified)
 
                 save_error_to_redis(task_id, reason_to_store, start_time)
             except Exception:
                 pass
             self.update_state(
                 meta={
+                    'file_id': file_id,
                     'custom_error': str(e),
                     'stage': 'forward_task_failed'
                 }
@@ -2193,6 +2367,7 @@ def submit_process_forward_chain(
         embedding_model_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         telemetry_context: Optional[Dict[str, str]] = None,
+        file_id: Optional[str] = None,
 ) -> str:
     """
     Build and enqueue a Celery chain: process -> forward.
@@ -2200,24 +2375,35 @@ def submit_process_forward_chain(
     Returns:
         Celery chain task ID, or empty string if enqueue failed.
     """
+    process_kwargs = {
+        "source": source,
+        "source_type": source_type,
+        "chunking_strategy": chunking_strategy,
+        "index_name": index_name,
+        "original_filename": original_filename,
+        "embedding_model_id": embedding_model_id,
+        "tenant_id": tenant_id,
+        "telemetry_context": telemetry_context or {},
+    }
+    forward_kwargs = {
+        "index_name": index_name,
+        "source": source,
+        "source_type": source_type,
+        "original_filename": original_filename,
+        "authorization": authorization,
+        "tenant_id": tenant_id,
+        "telemetry_context": telemetry_context or {},
+    }
+    if file_id is not None:
+        process_kwargs["file_id"] = file_id
+        forward_kwargs["file_id"] = file_id
+
     task_chain = chain(
         process.s(
-            source=source,
-            source_type=source_type,
-            chunking_strategy=chunking_strategy,
-            index_name=index_name,
-            original_filename=original_filename,
-            embedding_model_id=embedding_model_id,
-            tenant_id=tenant_id,
-            telemetry_context=telemetry_context or {},
+            **process_kwargs,
         ).set(queue='process_q'),
         forward.s(
-            index_name=index_name,
-            source=source,
-            source_type=source_type,
-            original_filename=original_filename,
-            authorization=authorization,
-            telemetry_context=telemetry_context or {},
+            **forward_kwargs,
         ).set(queue='forward_q'),
         cleanup_source.s(
             authorization=authorization,
@@ -2245,6 +2431,7 @@ def process_and_forward(
         embedding_model_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         telemetry_context: Optional[Dict[str, str]] = None,
+        file_id: Optional[str] = None,
 ) -> str:
     """
     Combined task that chains processing and forwarding
@@ -2267,7 +2454,7 @@ def process_and_forward(
     logger.info(
         f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}, model_id={embedding_model_id}")
 
-    chain_id = submit_process_forward_chain(
+    chain_kwargs = dict(
         source=source,
         source_type=source_type,
         chunking_strategy=chunking_strategy,
@@ -2278,6 +2465,9 @@ def process_and_forward(
         tenant_id=tenant_id,
         telemetry_context=telemetry_context or {},
     )
+    if file_id is not None:
+        chain_kwargs["file_id"] = file_id
+    chain_id = submit_process_forward_chain(**chain_kwargs)
     if chain_id:
         logger.info(f"Created task chain ID: {chain_id}")
     return chain_id

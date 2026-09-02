@@ -33,7 +33,7 @@ import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout, message } from "antd";
-import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useConfig } from "@/hooks/useConfig";
@@ -157,6 +157,12 @@ const HomeContent: FC<{
     useState<KnowledgeScopeEffectivePreview | null>(null);
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
     useState<KnowledgeCapabilities | null>(null);
+  const [runtimeMetadata, setRuntimeMetadata] = useState<
+    Record<string, unknown>
+  >({});
+  const [runtimeMetadataVersion, setRuntimeMetadataVersion] = useState(0);
+  const [runtimeMetadataDirty, setRuntimeMetadataDirty] = useState(false);
+  const resumedConversationIdsRef = useRef(new Set<number>());
   const knowledgeScopesRef = useRef<
     Map<string, ConversationKnowledgeScope | null>
   >(new Map());
@@ -167,8 +173,11 @@ const HomeContent: FC<{
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
   const isLoading = useAuiState((s) => s.threads.isLoading);
+  const isThreadLoading = useAuiState((s) => s.thread.isLoading);
+  const isThreadRunning = useAuiState((s) => s.thread.isRunning);
   const threadItems = useAuiState((s) => s.threads.threadItems);
-  const ready = runtimeMainThreadId !== undefined && !isLoading;
+  const ready =
+    runtimeMainThreadId !== undefined && !isLoading && !isThreadLoading;
 
   // Maintain thread ID state to pass conversation_id to the adapter reliably
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
@@ -231,6 +240,13 @@ const HomeContent: FC<{
     [chatMode]
   );
 
+  const handleGenerationStopped = useCallback((conversationId: number) => {
+    // A user-initiated stop transitions assistant-ui to idle before the
+    // backend has persisted the terminal message. Do not mistake that short
+    // window for a disconnected stream and replay its existing chunks.
+    resumedConversationIdsRef.current.add(conversationId);
+  }, []);
+
   const activeThread = (
     threadItems as ReadonlyArray<{
       id: string;
@@ -260,8 +276,7 @@ const HomeContent: FC<{
     }
 
     let cancelled = false;
-    const versionNo = (selectedAgent as unknown as PublishedAgent)
-      .current_version_no;
+    const versionNo = selectedAgent.current_version_no;
     void conversationService
       .getKnowledgeCapabilities(Number(selectedAgent.id), versionNo)
       .then((capabilities) => {
@@ -330,6 +345,54 @@ const HomeContent: FC<{
       cancelled = true;
     };
   }, [activeConversationId, activeThreadId]);
+
+  useEffect(() => {
+    const numericConversationId = Number(activeConversationId);
+    setRuntimeMetadata({});
+    setRuntimeMetadataVersion(0);
+    setRuntimeMetadataDirty(false);
+    if (
+      !Number.isInteger(numericConversationId) ||
+      numericConversationId <= 0
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void conversationService
+      .getById(String(numericConversationId))
+      .then((conversation) => {
+        if (cancelled) return;
+        setRuntimeMetadata(conversation.runtime_metadata ?? {});
+        setRuntimeMetadataVersion(conversation.runtime_metadata_version ?? 0);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          log.error("[HomeContent] Failed to restore runtime metadata:", error);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId]);
+
+  const handleRuntimeMetadataChange = useCallback(
+    (value: Record<string, unknown>) => {
+      setRuntimeMetadata(value);
+      setRuntimeMetadataDirty(true);
+    },
+    []
+  );
+
+  const handleRuntimeMetadataSent = useCallback((version?: number) => {
+    setRuntimeMetadataDirty(false);
+    if (version !== undefined) {
+      setRuntimeMetadataVersion(version);
+    } else {
+      setRuntimeMetadataVersion((currentVersion) => currentVersion + 1);
+    }
+  }, []);
 
   const showKnowledgeScopeWarnings = useCallback(
     (warnings: KnowledgeScopeWarning[]) => {
@@ -459,9 +522,20 @@ const HomeContent: FC<{
     runtime.thread.composer.setRunConfig({
       custom: {
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
+        ...(selectedAgent?.current_version_no
+          ? {
+              agentVersionNo: selectedAgent.current_version_no,
+            }
+          : {}),
         ...(activeConversationId ? { threadId: activeConversationId } : {}),
         ...(knowledgeScope ? { knowledgeScope } : {}),
+        ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
+        ...(runtimeMetadataDirty && Number(activeConversationId) > 0
+          ? { runtimeMetadataVersion }
+          : {}),
+        onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
+        onGenerationStopped: handleGenerationStopped,
         enablePlan: chatMode === "planning",
         ...(activeThreadId
           ? {
@@ -485,7 +559,12 @@ const HomeContent: FC<{
     activeThreadId,
     chatMode,
     knowledgeScope,
+    runtimeMetadata,
+    runtimeMetadataDirty,
+    runtimeMetadataVersion,
+    handleRuntimeMetadataSent,
     handleKnowledgeScopeResolved,
+    handleGenerationStopped,
     handleServerConversationId,
   ]);
 
@@ -506,6 +585,86 @@ const HomeContent: FC<{
 
     restoreHistoricalChatMode(conversationId);
   }, [activeConversationId, activeThreadId]);
+
+  // A route change tears down the local stream, while the backend keeps the
+  // conversation marked as streaming. Reconnect the assistant-ui runtime when
+  // the historical load reports that state.
+  useEffect(() => {
+    const numericConversationId = Number(activeConversationId);
+    if (
+      !ready ||
+      isThreadRunning ||
+      !activeThreadId ||
+      !Number.isInteger(numericConversationId) ||
+      numericConversationId <= 0 ||
+      resumedConversationIdsRef.current.has(numericConversationId)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void conversationService
+      .getById(String(numericConversationId))
+      .then((conversation) => {
+        if (
+          cancelled ||
+          conversation.streaming_message?.status !== "streaming" ||
+          resumedConversationIdsRef.current.has(numericConversationId)
+        ) {
+          return;
+        }
+
+        resumedConversationIdsRef.current.add(numericConversationId);
+        const messages = runtime.thread.getState().messages;
+        const parentId = messages.at(-1)?.id ?? null;
+        runtime.thread.resumeRun({
+          parentId,
+          sourceId: null,
+          runConfig: {
+            custom: {
+              threadId: String(numericConversationId),
+              ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
+              ...(selectedAgent?.current_version_no
+                ? { agentVersionNo: selectedAgent.current_version_no }
+                : {}),
+              onGenerationStopped: handleGenerationStopped,
+              enablePlan: chatMode === "planning",
+              resume: true,
+            },
+          },
+          stream: async function* (options) {
+            const resumedRun = remoteChatModelAdapter.run(options);
+            if (Symbol.asyncIterator in resumedRun) {
+              yield* resumedRun;
+            } else {
+              yield await resumedRun;
+            }
+          },
+        });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          resumedConversationIdsRef.current.delete(numericConversationId);
+          log.error(
+            `[HomeContent] Failed to resume conversation ${numericConversationId}:`,
+            error
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeConversationId,
+    activeThreadId,
+    chatMode,
+    isThreadRunning,
+    ready,
+    runtime,
+    selectedAgent,
+    handleGenerationStopped,
+  ]);
 
   // Publish the server conversation id registry to the thread-list adapter so
   // `generateTitle` can wait for the real backend id before issuing its
@@ -588,6 +747,8 @@ const HomeContent: FC<{
           knowledgePreview={knowledgePreview}
           knowledgeCapabilities={knowledgeCapabilities}
           onKnowledgeScopeChange={handleKnowledgeScopeChange}
+          runtimeMetadata={runtimeMetadata}
+          onRuntimeMetadataChange={handleRuntimeMetadataChange}
         />
       </div>
     </div>

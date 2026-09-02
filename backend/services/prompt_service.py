@@ -899,18 +899,21 @@ def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_lis
          for tool in tool_info_list])
     assistant_description = "\n".join(
         [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list])
-    scope_instruction = (
-        "知识库工具仅代表检索能力。不得在生成内容中写入具体知识库名称、知识库 ID、索引名称、"
-        "KDS ID、固定 index_names 或固定 kds_list；统一表述为当前会话允许的知识库范围。"
-        if language == LANGUAGE["ZH"] else
-        "Knowledge tools represent capabilities only. Do not include concrete knowledge base names, IDs, index "
-        "names, KDS IDs, fixed index_names, or fixed kds_list values. Refer to the knowledge scope allowed for "
-        "the current conversation."
-    )
-    tool_description = f"{tool_description}\n\n{scope_instruction}"
     has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(
         tool_info_list
     )
+    if has_local_knowledge_tool or has_aidp_knowledge_tool:
+        scope_instruction = (
+            "知识库工具仅代表检索能力。不得在生成内容中写入具体知识库名称、知识库 ID、索引名称、"
+            "KDS ID、固定 index_names 或固定 kds_list；统一表述为当前会话允许的知识库范围。"
+            if language == LANGUAGE["ZH"] else
+            "Knowledge tools represent capabilities only. Do not include concrete knowledge base names, IDs, index "
+            "names, KDS IDs, fixed index_names, or fixed kds_list values. Refer to the knowledge scope allowed for "
+            "the current conversation."
+        )
+        tool_description = "\n\n".join(
+            part for part in (tool_description, scope_instruction) if part
+        )
 
     # Build template context
     template_context = {
@@ -975,14 +978,17 @@ def join_info_for_optimize_prompt_section(
     has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(
         tool_info_list
     )
-    scope_instruction = (
-        "优化后的内容不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names "
-        "或固定 kds_list；应改写为当前会话允许的知识库范围。"
-        if language == LANGUAGE["ZH"] else
-        "The optimized content must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, "
-        "fixed index_names, or fixed kds_list values. Refer to the scope allowed for the current conversation."
-    )
-    tool_description = f"{tool_description}\n\n{scope_instruction}"
+    if has_local_knowledge_tool or has_aidp_knowledge_tool:
+        scope_instruction = (
+            "优化后的内容不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names "
+            "或固定 kds_list；应改写为当前会话允许的知识库范围。"
+            if language == LANGUAGE["ZH"] else
+            "The optimized content must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, "
+            "fixed index_names, or fixed kds_list values. Refer to the scope allowed for the current conversation."
+        )
+        tool_description = "\n\n".join(
+            part for part in (tool_description, scope_instruction) if part
+        )
 
     template_context = {
         "section_type": section_type,

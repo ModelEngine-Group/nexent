@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Form, Input, Select, Upload } from "antd";
+import {
+  Button,
+  Card,
+  Form,
+  Input,
+  InputNumber,
+  Select,
+  Space,
+  Tabs,
+  Upload,
+} from "antd";
 import type { UploadFile } from "antd";
-import { ApiOutlined, CloudOutlined, ContainerOutlined, LinkOutlined } from "@ant-design/icons";
+import { Container, Import, Unplug, Upload as UploadIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpDeploymentType, McpTransportType } from "@/const/mcpTools";
 import type { LocalAddMcpDraft } from "@/types/mcpTools";
@@ -10,31 +20,75 @@ import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
-import ContainerPortField from "../../shared/ContainerPortField";
 import TagEditor from "../../shared/TagEditor";
+import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 
-const DEPLOYMENT_OPTIONS = [
+/** Maps the shared add-server tabs (mirroring the MCP config modal) to deployment types. */
+const DEPLOYMENT_TAB_ITEMS = [
   {
-    value: McpDeploymentType.REMOTE_LINK,
-    labelKey: "mcpTools.deploymentType.remoteLink",
-    Icon: LinkOutlined,
+    key: "remote",
+    type: McpDeploymentType.REMOTE_LINK,
+    labelKey: "mcpConfig.addServer.title",
+    Icon: Unplug,
   },
   {
-    value: McpDeploymentType.CONTAINER,
-    labelKey: "mcpTools.deploymentType.container",
-    Icon: ContainerOutlined,
+    key: "container",
+    type: McpDeploymentType.CONTAINER,
+    labelKey: "mcpConfig.addContainer.title",
+    Icon: Container,
   },
   {
-    value: McpDeploymentType.API,
-    labelKey: "mcpTools.deploymentType.api",
-    Icon: ApiOutlined,
+    key: "openapi",
+    type: McpDeploymentType.API,
+    labelKey: "mcpConfig.openApiToMcp.title",
+    Icon: Import,
   },
   {
-    value: McpDeploymentType.LOCAL_IMAGE,
-    labelKey: "mcpTools.deploymentType.localImage",
-    Icon: CloudOutlined,
+    key: "upload",
+    type: McpDeploymentType.LOCAL_IMAGE,
+    labelKey: "mcpConfig.uploadImage.title",
+    Icon: UploadIcon,
   },
 ] as const;
+
+const DEPLOYMENT_TAB_KEY: Record<McpDeploymentType, string> = {
+  [McpDeploymentType.REMOTE_LINK]: "remote",
+  [McpDeploymentType.CONTAINER]: "container",
+  [McpDeploymentType.API]: "openapi",
+  [McpDeploymentType.LOCAL_IMAGE]: "upload",
+};
+
+const VALIDATION_FIELDS_BY_DEPLOYMENT: Record<
+  McpDeploymentType,
+  Array<keyof LocalAddMcpDraft>
+> = {
+  [McpDeploymentType.REMOTE_LINK]: [
+    "name",
+    "description",
+    "serverUrl",
+    "authorizationToken",
+    "customHeaders",
+  ],
+  [McpDeploymentType.CONTAINER]: [
+    "name",
+    "description",
+    "containerConfigJson",
+    "authorizationToken",
+  ],
+  [McpDeploymentType.API]: [
+    "name",
+    "description",
+    "serverUrl",
+    "customHeaders",
+    "openApiJson",
+  ],
+  [McpDeploymentType.LOCAL_IMAGE]: [
+    "name",
+    "description",
+    "uploadImageFile",
+    "authorizationToken",
+  ],
+};
 
 const createInitialDraft = (): LocalAddMcpDraft => ({
   name: "",
@@ -69,10 +123,17 @@ export default function AddMcpServiceLocalSection({
   const { t } = useTranslation("common");
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
-  const [draft, setDraft] = useState<LocalAddMcpDraft>(() => createInitialDraft());
+  const [draft, setDraft] = useState<LocalAddMcpDraft>(() =>
+    createInitialDraft()
+  );
   const [deploymentType, setDeploymentType] = useState<McpDeploymentType>(
     McpDeploymentType.REMOTE_LINK
   );
+  const [deploymentStarted, setDeploymentStarted] = useState(false);
+  const [deployedContainerId, setDeployedContainerId] = useState<string | null>(
+    null
+  );
+  const [logsOpen, setLogsOpen] = useState(false);
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const { data: groupData } = useGroupList(tenantId);
@@ -84,6 +145,7 @@ export default function AddMcpServiceLocalSection({
       form.resetFields();
       onAdded();
     },
+    onContainerStarted: (containerId) => setDeployedContainerId(containerId),
   });
 
   // Notify parent modal of submitting state to block close during submission
@@ -95,11 +157,37 @@ export default function AddMcpServiceLocalSection({
     setDraft((prev) => ({ ...prev, ...patch }));
   };
 
-  const deploymentOptions = enableUploadImage
-    ? DEPLOYMENT_OPTIONS
-    : DEPLOYMENT_OPTIONS.filter(
-        (option) => option.value !== McpDeploymentType.LOCAL_IMAGE
+  const deploymentTabItems = enableUploadImage
+    ? DEPLOYMENT_TAB_ITEMS
+    : DEPLOYMENT_TAB_ITEMS.filter(
+        (item) => item.type !== McpDeploymentType.LOCAL_IMAGE
       );
+  const activeTabKey = DEPLOYMENT_TAB_KEY[deploymentType];
+
+  const handleTabChange = (key: string) => {
+    const item = DEPLOYMENT_TAB_ITEMS.find((i) => i.key === key);
+    if (!item) return;
+    const nextType = item.type;
+    const nextTransport =
+      nextType === McpDeploymentType.CONTAINER ||
+      nextType === McpDeploymentType.LOCAL_IMAGE
+        ? McpTransportType.CONTAINER
+        : McpTransportType.URL;
+    patchDraft({
+      deploymentType: nextType,
+      transportType: nextTransport,
+      uploadImageFile:
+        nextType === McpDeploymentType.LOCAL_IMAGE
+          ? draft.uploadImageFile
+          : null,
+      groupIds: draft.groupIds,
+      ingroupPermission: "READ_ONLY" as "EDIT" | "READ_ONLY" | "PRIVATE",
+    });
+    setDeploymentType(nextType);
+    form.setFieldValue("ingroup_permission", "READ_ONLY");
+    form.setFieldValue("group_ids", []);
+    form.setFieldValue("transportType", nextTransport);
+  };
 
   const uploadFileList: UploadFile[] = draft.uploadImageFile
     ? [
@@ -119,7 +207,8 @@ export default function AddMcpServiceLocalSection({
         eventOrValue &&
         typeof eventOrValue === "object" &&
         "target" in (eventOrValue as Record<string, unknown>)
-          ? (eventOrValue as { target: { value: LocalAddMcpDraft[K] } }).target.value
+          ? (eventOrValue as { target: { value: LocalAddMcpDraft[K] } }).target
+              .value
           : (eventOrValue as LocalAddMcpDraft[K]);
       patchDraft({ [key]: next } as Partial<LocalAddMcpDraft>);
       form.setFieldValue(key as string, next);
@@ -147,408 +236,473 @@ export default function AddMcpServiceLocalSection({
 
   const handleSubmit = async () => {
     try {
-      await form.validateFields();
+      await form.validateFields(
+        VALIDATION_FIELDS_BY_DEPLOYMENT[deploymentType]
+      );
     } catch {
       return;
+    }
+    const isContainerDeployment =
+      deploymentType === McpDeploymentType.CONTAINER ||
+      deploymentType === McpDeploymentType.LOCAL_IMAGE;
+    if (isContainerDeployment) {
+      setDeploymentStarted(true);
+      setDeployedContainerId(null);
     }
     await submit(draft);
   };
 
+  const renderDescriptionInput = () => (
+    <Form.Item
+      name="description"
+      rules={rules.description}
+      className="mb-0"
+      style={{ marginBottom: 0 }}
+    >
+      <Input
+        placeholder={t("mcpTools.detail.serviceDescription")}
+        {...bindField("description")}
+      />
+    </Form.Item>
+  );
+
   if (!active) return null;
 
-  const isRemoteLink = deploymentType === McpDeploymentType.REMOTE_LINK;
-  const isContainer = deploymentType === McpDeploymentType.CONTAINER;
   const isApi = deploymentType === McpDeploymentType.API;
   const isLocalImage = deploymentType === McpDeploymentType.LOCAL_IMAGE;
   const isGroupSelectDisabled = draft.ingroupPermission === "PRIVATE" || isApi;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col">
       <Form
         form={form}
         layout="vertical"
         requiredMark={false}
-        className="flex-1 space-y-5 px-6 py-5"
+        className="space-y-5 px-6 py-5"
       >
-        {/* Deployment type selector */}
-        <div>
-          <label className="mb-2 block text-sm font-medium text-slate-700">
-            {t("mcpTools.detail.addMethod")}
-          </label>
-          <div className="grid grid-cols-4 gap-3">
-            {deploymentOptions.map(({ value, labelKey, Icon }) => {
-              const selected = deploymentType === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => {
-                    setDeploymentType(value);
-                    const nextTransport =
-                      value === McpDeploymentType.CONTAINER ||
-                      value === McpDeploymentType.LOCAL_IMAGE
-                        ? McpTransportType.CONTAINER
-                        : McpTransportType.URL;
-                    const nextPermission = "READ_ONLY";
-                    patchDraft({
-                      deploymentType: value,
-                      transportType: nextTransport,
-                      uploadImageFile:
-                        value === McpDeploymentType.LOCAL_IMAGE
-                          ? draft.uploadImageFile
-                          : null,
-                      groupIds: draft.groupIds,
-                      ingroupPermission: nextPermission as "EDIT" | "READ_ONLY" | "PRIVATE",
-                    });
-                    form.setFieldValue("ingroup_permission", nextPermission);
-                    form.setFieldValue("group_ids", []);
-                    form.setFieldValue("transportType", nextTransport);
-                  }}
-                  className={`flex h-20 flex-col items-center justify-center gap-2 rounded-xl border text-sm transition ${
-                    selected
-                      ? "border-blue-500 bg-blue-50 text-blue-600 shadow-sm"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50/40"
-                  }`}
+        <Tabs
+          activeKey={activeTabKey}
+          onChange={handleTabChange}
+          size="small"
+          items={deploymentTabItems.map(({ key, type, labelKey, Icon }) => ({
+            key,
+            label: (
+              <span
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                <Icon style={{ width: 16, height: 16 }} />
+                {t(labelKey)}
+              </span>
+            ),
+            children: (
+              <Card size="small" style={{ marginTop: 8 }}>
+                <Space
+                  direction="vertical"
+                  style={{ width: "100%" }}
+                  size="small"
                 >
-                  <Icon className="text-xl" />
-                  <span>{t(labelKey)}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                  {type === McpDeploymentType.REMOTE_LINK ? (
+                    <>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <Form.Item
+                          name="name"
+                          rules={rules.name}
+                          className="mb-0"
+                          style={{ flex: 0.8, marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={t(
+                              "mcpConfig.addServer.namePlaceholder"
+                            )}
+                            {...bindField("name")}
+                            maxLength={20}
+                            autoComplete="off"
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name="serverUrl"
+                          rules={rules.httpUrl}
+                          className="mb-0"
+                          style={{ flex: 3, marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={t(
+                              "mcpConfig.addServer.urlPlaceholder"
+                            )}
+                            {...bindField("serverUrl")}
+                            autoComplete="off"
+                          />
+                        </Form.Item>
+                      </div>
+                      {renderDescriptionInput()}
+                      <Form.Item
+                        name="customHeaders"
+                        className="mb-0"
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Input.TextArea
+                          placeholder={t(
+                            "mcpConfig.addServer.customHeadersPlaceholder"
+                          )}
+                          {...bindField("customHeaders")}
+                          rows={2}
+                          style={{ fontSize: 14 }}
+                        />
+                      </Form.Item>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <Form.Item
+                          name="authorizationToken"
+                          rules={rules.authToken}
+                          className="mb-0"
+                          style={{ flex: 1, marginBottom: 0 }}
+                        >
+                          <Input.Password
+                            placeholder={t(
+                              "mcpConfig.editServer.authorizationTokenPlaceholder"
+                            )}
+                            {...bindField("authorizationToken")}
+                            autoComplete="new-password"
+                          />
+                        </Form.Item>
+                      </div>
+                    </>
+                  ) : null}
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">
-            {t("mcpTools.detail.serviceName")}
-          </label>
-          <Form.Item name="name" rules={rules.name} className="mb-0">
-            <Input {...bindField("name")} className="w-full rounded-md" />
-          </Form.Item>
-        </div>
+                  {type === McpDeploymentType.CONTAINER ? (
+                    <>
+                      <div>
+                        <Form.Item className="mb-0" style={{ marginBottom: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "rgba(0,0,0,0.45)",
+                              display: "block",
+                              marginBottom: 8,
+                            }}
+                          >
+                            {t("mcpConfig.addContainer.configHint")}
+                          </div>
+                        </Form.Item>
+                        <Form.Item
+                          name="containerConfigJson"
+                          rules={rules.containerConfig}
+                          className="mb-0"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input.TextArea
+                            placeholder={t(
+                              "mcpConfig.addContainer.configPlaceholder"
+                            )}
+                            {...bindField("containerConfigJson")}
+                            rows={6}
+                            style={{ fontFamily: "monospace", fontSize: 12 }}
+                          />
+                        </Form.Item>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <span style={{ minWidth: 80 }}>
+                          {t("mcpConfig.addContainer.serviceName")}:
+                        </span>
+                        <Form.Item
+                          name="name"
+                          rules={rules.name}
+                          className="mb-0"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={t(
+                              "mcpConfig.addContainer.serviceNamePlaceholder"
+                            )}
+                            {...bindField("name")}
+                            style={{ width: 150 }}
+                            maxLength={20}
+                          />
+                        </Form.Item>
+                        <span style={{ minWidth: 60 }}>
+                          {t("mcpConfig.addContainer.port")}:
+                        </span>
+                        <InputNumber
+                          placeholder={t(
+                            "mcpConfig.addContainer.portPlaceholder"
+                          )}
+                          value={draft.containerPort}
+                          onChange={(value) => {
+                            const next = value === null ? undefined : value;
+                            patchDraft({ containerPort: next });
+                            form.setFieldValue("containerPort", next);
+                          }}
+                          min={1}
+                          max={65535}
+                          style={{ width: 120 }}
+                          controls={false}
+                        />
+                        <div style={{ flex: 1 }} />
+                      </div>
+                      {renderDescriptionInput()}
+                    </>
+                  ) : null}
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700">
-            {t("mcpTools.detail.serviceDescription")}
-          </label>
-          <Form.Item name="description" rules={rules.description} className="mb-0">
-            <Input.TextArea
-              {...bindField("description")}
-              autoSize={{ minRows: 4, maxRows: 10 }}
-              className="w-full rounded-md"
-            />
-          </Form.Item>
-        </div>
+                  {type === McpDeploymentType.API ? (
+                    <>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <Form.Item
+                          name="name"
+                          rules={rules.name}
+                          className="mb-0"
+                          style={{ flex: 0.8, marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={t(
+                              "mcpConfig.openapiService.form.serviceNamePlaceholder"
+                            )}
+                            {...bindField("name")}
+                            maxLength={20}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name="serverUrl"
+                          rules={rules.httpUrl}
+                          className="mb-0"
+                          style={{ flex: 3, marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={t(
+                              "mcpConfig.openapiService.form.serverUrlPlaceholder"
+                            )}
+                            {...bindField("serverUrl")}
+                          />
+                        </Form.Item>
+                      </div>
+                      {renderDescriptionInput()}
+                      <Form.Item
+                        name="customHeaders"
+                        className="mb-0"
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Input.TextArea
+                          placeholder={t(
+                            "mcpConfig.addServer.customHeadersPlaceholder"
+                          )}
+                          {...bindField("customHeaders")}
+                          rows={2}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        name="openApiJson"
+                        rules={rules.openApiJson}
+                        className="mb-0"
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Input.TextArea
+                          placeholder={t(
+                            "mcpConfig.openApiToMcp.jsonPlaceholder"
+                          )}
+                          {...bindField("openApiJson")}
+                          rows={6}
+                        />
+                      </Form.Item>
+                      <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
+                        {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+                      </span>
+                    </>
+                  ) : null}
 
-        {isRemoteLink ? (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              {t("mcpTools.detail.serviceConfigTitle")}
-            </label>
-            <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpTools.addModal.serverUrl")}
-                </label>
-                <div className="flex items-center gap-2">
-                  <Form.Item name="serverUrl" rules={rules.httpUrl} className="mb-0 flex-1">
-                    <Input
-                      {...bindField("serverUrl")}
-                      className="w-full rounded-md"
-                      placeholder={t("mcpTools.addModal.serverUrl")}
-                    />
-                  </Form.Item>
-                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
-                    <input
-                      type="checkbox"
-                      className="rounded border-slate-300"
-                      checked={draft.sharedFields?.["serverUrl"] ?? false}
-                      onChange={(e) => {
-                        const next = { ...(draft.sharedFields || {}), serverUrl: e.target.checked };
-                        patchDraft({ sharedFields: next });
-                      }}
-                    />
-                    {t("mcpTools.detail.share")}
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpTools.addModal.bearerTokenOptional")}
-                </label>
-                <div className="flex items-center gap-2">
-                  <Form.Item name="authorizationToken" rules={rules.authToken} className="mb-0 flex-1">
-                    <Input
-                      {...bindField("authorizationToken")}
-                      className="w-full rounded-md"
-                      placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
-                    />
-                  </Form.Item>
-                  <label className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
-                    <input
-                      type="checkbox"
-                      className="rounded border-slate-300"
-                      checked={draft.sharedFields?.["authorizationToken"] ?? false}
-                      onChange={(e) => {
-                        const next = { ...(draft.sharedFields || {}), authorizationToken: e.target.checked };
-                        patchDraft({ sharedFields: next });
-                      }}
-                    />
-                    {t("mcpTools.detail.share")}
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpTools.addModal.customHeaders")}
-                </label>
-                <div className="flex items-center gap-2">
-                  <Form.Item name="customHeaders" className="mb-0 flex-1">
-                    <Input.TextArea
-                      {...bindField("customHeaders")}
-                      rows={2}
-                      className="w-full rounded-md"
-                      placeholder={t("mcpTools.addModal.customHeadersPlaceholder")}
-                    />
-                  </Form.Item>
-                  <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
-                    <input
-                      type="checkbox"
-                      className="rounded border-slate-300"
-                      checked={draft.sharedFields?.["customHeaders"] ?? false}
-                      onChange={(e) => {
-                        const next = { ...(draft.sharedFields || {}), customHeaders: e.target.checked };
-                        patchDraft({ sharedFields: next });
-                      }}
-                    />
-                    {t("mcpTools.detail.share")}
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : isContainer ? (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              {t("mcpTools.detail.serviceConfigTitle")}
-            </label>
-            <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpTools.addModal.containerConfig")}
-                </label>
-                <div className="flex items-center gap-2">
-                  <Form.Item name="containerConfigJson" rules={rules.containerConfig} className="mb-0 flex-1">
-                    <Input.TextArea
-                      {...bindField("containerConfigJson")}
-                      rows={5}
-                      placeholder={t("mcpTools.addModal.containerConfigPlaceholder")}
-                      className="w-full"
-                    />
-                  </Form.Item>
-                  <label className="flex shrink-0 items-center gap-1 self-start pt-1 text-xs text-slate-400">
-                    <input
-                      type="checkbox"
-                      className="rounded border-slate-300"
-                      checked={draft.sharedFields?.["containerConfigJson"] ?? false}
-                      onChange={(e) => {
-                        const next = { ...(draft.sharedFields || {}), containerConfigJson: e.target.checked };
-                        patchDraft({ sharedFields: next });
-                      }}
-                    />
-                    {t("mcpTools.detail.share")}
-                  </label>
-                </div>
-              </div>
-
-              <Form.Item name="containerPort" rules={rules.containerPort} className="mb-0">
-                <div>
-                  <ContainerPortField
-                    scope="local"
-                    containerPort={draft.containerPort}
-                    setContainerPort={(value) => {
-                      patchDraft({ containerPort: value });
-                      form.setFieldValue("containerPort", value);
-                    }}
-                  />
-                </div>
-              </Form.Item>
-            </div>
-          </div>
-        ) : null}
-
-        {isApi ? (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              {t("mcpTools.detail.serviceConfigTitle")}
-            </label>
-            <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpTools.addModal.serverUrl")}
-                </label>
-                <Form.Item name="serverUrl" rules={rules.httpUrl} className="mb-0">
-                  <Input
-                    {...bindField("serverUrl")}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.serverUrl")}
-                  />
-                </Form.Item>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpConfig.addServer.customHeaders")}
-                </label>
-                <Form.Item name="customHeaders" className="mb-0">
-                  <Input.TextArea
-                    {...bindField("customHeaders")}
-                    rows={2}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpConfig.addServer.customHeadersPlaceholder")}
-                  />
-                </Form.Item>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpConfig.openapiService.form.openapiJson")}
-                  <span className="ml-1 text-red-500">*</span>
-                </label>
-                <Form.Item name="openApiJson" rules={rules.openApiJson} className="mb-0">
-                  <Input.TextArea
-                    {...bindField("openApiJson")}
-                    rows={6}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
-                  />
-                </Form.Item>
-                <p className="mt-1 text-xs text-slate-400">
-                  {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {isLocalImage ? (
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">
-              {t("mcpTools.detail.serviceConfigTitle")}
-            </label>
-            <div className="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpConfig.uploadImage.filePlaceholder")}
-                </label>
-                <Form.Item
-                  name="uploadImageFile"
-                  className="mb-0"
-                  rules={[
-                    {
-                      required: true,
-                      message: t("mcpConfig.message.uploadImageFileRequired"),
-                    },
-                    {
-                      validator: (_, value) => {
-                        // The value can be a File, an antd Upload event object
-                        // (antd stores the raw `info` when Upload is inside a
-                        // Form.Item without valuePropName), or null. Only enforce
-                        // the .tar check on a real File so validation never throws.
-                        const fileName =
-                          value &&
-                          typeof value === "object" &&
-                          "name" in value
-                            ? String(value.name || "")
-                            : "";
-                        if (fileName && !fileName.endsWith(".tar")) {
-                          return Promise.reject(
-                            new Error(
-                              t("mcpConfig.message.uploadImageInvalidFileType")
-                            )
-                          );
-                        }
-                        return Promise.resolve();
-                      },
-                    },
-                  ]}
-                >
-                  <Upload
-                    beforeUpload={() => false}
-                    accept=".tar"
-                    maxCount={1}
-                    fileList={uploadFileList}
-                    onRemove={() => {
-                      patchDraft({ uploadImageFile: null });
-                      form.setFieldValue("uploadImageFile", null);
-                    }}
-                    onChange={(info) => {
-                      const file = info.fileList[0]?.originFileObj ?? null;
-                      patchDraft({ uploadImageFile: file as File | null });
-                      form.setFieldValue("uploadImageFile", file);
-                    }}
-                  >
-                    <Button>{t("mcpConfig.uploadImage.button.selectFile")}</Button>
-                  </Upload>
-                </Form.Item>
-                <p className="mt-1 text-xs text-slate-400">
-                  {t("mcpConfig.uploadImage.fileHint")}
-                </p>
-              </div>
-
-              <Form.Item name="containerPort" rules={rules.containerPort} className="mb-0">
-                <div>
-                  <ContainerPortField
-                    scope="local"
-                    showSuggestButton={false}
-                    containerPort={draft.containerPort}
-                    setContainerPort={(value) => {
-                      patchDraft({ containerPort: value });
-                      form.setFieldValue("containerPort", value);
-                    }}
-                  />
-                </div>
-              </Form.Item>
-
-              <div>
-                <label className="mb-1 block text-sm font-normal text-slate-500">
-                  {t("mcpTools.addModal.bearerTokenOptional")}
-                </label>
-                <Form.Item name="authorizationToken" rules={rules.authToken} className="mb-0">
-                  <Input
-                    {...bindField("authorizationToken")}
-                    className="w-full rounded-md"
-                    placeholder={t("mcpTools.addModal.bearerTokenPlaceholder")}
-                  />
-                </Form.Item>
-              </div>
-            </div>
-          </div>
-        ) : null}
+                  {type === McpDeploymentType.LOCAL_IMAGE ? (
+                    <>
+                      <div>
+                        <Form.Item className="mb-0" style={{ marginBottom: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "rgba(0,0,0,0.45)",
+                              display: "block",
+                              marginBottom: 8,
+                            }}
+                          >
+                            {t("mcpConfig.uploadImage.fileHint")}
+                          </div>
+                        </Form.Item>
+                        <Form.Item
+                          name="uploadImageFile"
+                          className="mb-0"
+                          style={{ marginBottom: 0 }}
+                          rules={[
+                            {
+                              required: true,
+                              message: t(
+                                "mcpConfig.message.uploadImageFileRequired"
+                              ),
+                            },
+                            {
+                              validator: (_, value) => {
+                                const fileName =
+                                  value &&
+                                  typeof value === "object" &&
+                                  "name" in value
+                                    ? String(value.name || "")
+                                    : "";
+                                if (fileName && !fileName.endsWith(".tar")) {
+                                  return Promise.reject(
+                                    new Error(
+                                      t(
+                                        "mcpConfig.message.uploadImageInvalidFileType"
+                                      )
+                                    )
+                                  );
+                                }
+                                return Promise.resolve();
+                              },
+                            },
+                          ]}
+                        >
+                          <Upload
+                            beforeUpload={() => false}
+                            accept=".tar"
+                            maxCount={1}
+                            fileList={uploadFileList}
+                            onRemove={() => {
+                              patchDraft({ uploadImageFile: null });
+                              form.setFieldValue("uploadImageFile", null);
+                            }}
+                            onChange={(info) => {
+                              const file =
+                                info.fileList[0]?.originFileObj ?? null;
+                              patchDraft({
+                                uploadImageFile: file as File | null,
+                              });
+                              form.setFieldValue("uploadImageFile", file);
+                            }}
+                          >
+                            <Button icon={<UploadIcon size={16} />}>
+                              {t("mcpConfig.uploadImage.button.selectFile")}
+                            </Button>
+                          </Upload>
+                        </Form.Item>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <InputNumber
+                          placeholder={t(
+                            "mcpConfig.uploadImage.portPlaceholder"
+                          )}
+                          value={draft.containerPort}
+                          onChange={(value) => {
+                            const next = value === null ? undefined : value;
+                            patchDraft({ containerPort: next });
+                            form.setFieldValue("containerPort", next);
+                          }}
+                          min={1}
+                          max={65535}
+                          style={{ width: 150 }}
+                          controls={false}
+                        />
+                        <Form.Item
+                          name="name"
+                          rules={rules.name}
+                          className="mb-0"
+                          style={{ flex: 1, marginBottom: 0 }}
+                        >
+                          <Input
+                            placeholder={t(
+                              "mcpConfig.uploadImage.serviceNamePlaceholder"
+                            )}
+                            {...bindField("name")}
+                          />
+                        </Form.Item>
+                      </div>
+                      {renderDescriptionInput()}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <Form.Item
+                          name="authorizationToken"
+                          rules={rules.authToken}
+                          className="mb-0"
+                          style={{ flex: 1, marginBottom: 0 }}
+                        >
+                          <Input.Password
+                            placeholder={t(
+                              "mcpConfig.editServer.authorizationTokenPlaceholder"
+                            )}
+                            {...bindField("authorizationToken")}
+                            autoComplete="new-password"
+                          />
+                        </Form.Item>
+                      </div>
+                    </>
+                  ) : null}
+                </Space>
+              </Card>
+            ),
+          }))}
+        />
 
         <Can permission="group:read">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="mt-8 grid grid-cols-2 gap-4">
             <Form.Item
               name="group_ids"
               label={t("tenantResources.knowledgeBase.groupNames")}
               className="mb-0"
+              help={
+                isApi ? (
+                  <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
+                    {t("mcpTools.detail.groupPermissionUnsupported")}
+                  </span>
+                ) : undefined
+              }
             >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={
                   isGroupSelectDisabled
                     ? t("knowledgeBase.create.permission.groupPlaceholder")
                     : t("tenantResources.knowledgeBase.groupNames")
                 }
                 value={isGroupSelectDisabled ? [] : draft.groupIds}
-                options={groups.map((group: { group_id: number; group_name: string }) => ({
-                  label: group.group_name,
-                  value: group.group_id,
-                }))}
+                options={groups.map(
+                  (group: { group_id: number; group_name: string }) => ({
+                    label: group.group_name,
+                    value: group.group_id,
+                  })
+                )}
                 disabled={isGroupSelectDisabled}
-                onChange={(values: number[]) => patchDraft({ groupIds: values })}
+                onChange={(values: number[]) =>
+                  patchDraft({ groupIds: values })
+                }
                 className="rounded-md"
               />
             </Form.Item>
@@ -563,19 +717,24 @@ export default function AddMcpServiceLocalSection({
                   onChange={handlePermissionChange}
                   disabled={isApi}
                   options={[
-                    { value: "READ_ONLY", label: t("knowledgeBase.ingroup.permission.READ_ONLY") },
-                    { value: "EDIT", label: t("knowledgeBase.ingroup.permission.EDIT") },
-                    { value: "PRIVATE", label: t("knowledgeBase.ingroup.permission.PRIVATE") },
+                    {
+                      value: "READ_ONLY",
+                      label: t("knowledgeBase.ingroup.permission.READ_ONLY"),
+                    },
+                    {
+                      value: "EDIT",
+                      label: t("knowledgeBase.ingroup.permission.EDIT"),
+                    },
+                    {
+                      value: "PRIVATE",
+                      label: t("knowledgeBase.ingroup.permission.PRIVATE"),
+                    },
                   ]}
                 />
               </Form.Item>
             </Can>
           </div>
         </Can>
-        {isApi ? (
-          <p className="text-xs text-slate-400">{t("mcpTools.detail.groupPermissionUnsupported")}</p>
-        ) : null}
-
         <div className="flex flex-col gap-4">
           <TagEditor
             title={t("mcpTools.detail.tags")}
@@ -589,12 +748,31 @@ export default function AddMcpServiceLocalSection({
         </div>
       </Form>
 
-      <div className="sticky bottom-0 flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
-        <div />
-        <Button type="primary" onClick={handleSubmit} loading={submitting} disabled={isLocalImage && !draft.uploadImageFile}>
+      <div className="flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
+        <div>
+          {deploymentStarted ? (
+            <Button onClick={() => setLogsOpen(true)}>
+              {t("mcpTools.detail.viewContainerLogs")}
+            </Button>
+          ) : null}
+        </div>
+        <Button
+          type="primary"
+          onClick={handleSubmit}
+          loading={submitting}
+          disabled={isLocalImage && !draft.uploadImageFile}
+        >
           {t("mcpTools.addModal.saveAndAdd")}
         </Button>
       </div>
+
+      {deploymentStarted ? (
+        <McpContainerLogsModal
+          open={logsOpen}
+          onCancel={() => setLogsOpen(false)}
+          containerId={deployedContainerId}
+        />
+      ) : null}
     </div>
   );
 }

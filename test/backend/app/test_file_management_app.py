@@ -71,7 +71,12 @@ def _stub_resolve_minio_upload_folder(
     return folder or "attachments"
 
 
-def _stub_check_file_access(object_name: str, user_id: str | None, caller_tenant_id: str | None = None) -> bool:
+def _stub_check_file_access(
+    object_name: str,
+    user_id: str | None,
+    caller_tenant_id: str | None = None,
+    required_permission: str = "READ",
+) -> bool:
     """Stub for check_file_access - allows access by default for testing."""
     if not user_id:
         return False
@@ -137,7 +142,7 @@ setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 # Stub utils.auth_utils.get_current_user_id (the function actually used in the app)
 utils_pkg = types.ModuleType("utils")
-utils_pkg.__path__ = []
+utils_pkg.__path__ = [os.path.join(BACKEND_ROOT, "utils")]
 sys.modules.setdefault("utils", utils_pkg)
 
 auth_utils_stub = types.ModuleType("utils.auth_utils")
@@ -165,32 +170,44 @@ setattr(utils_pkg, "file_management_utils", fmu_stub)
 
 # Stub consts.model.ProcessParams
 consts_pkg = types.ModuleType("consts")
-consts_pkg.__path__ = []
+consts_pkg.__path__ = [os.path.join(BACKEND_ROOT, "consts")]
 sys.modules.setdefault("consts", consts_pkg)
 
 model_stub = types.ModuleType("consts.model")
 class ProcessParams:  # minimal stub
-    def __init__(self, chunking_strategy: str, source_type: str, index_name: str, authorization: str | None):
+    def __init__(
+        self,
+        chunking_strategy: str,
+        source_type: str,
+        index_name: str,
+        authorization: str | None,
+        model_id: int | None = None,
+    ):
         self.chunking_strategy = chunking_strategy
         self.source_type = source_type
         self.index_name = index_name
         self.authorization = authorization
+        self.model_id = model_id
 model_stub.ProcessParams = ProcessParams
 sys.modules.setdefault("consts.model", model_stub)
 setattr(consts_pkg, "model", model_stub)
 
 # Stub consts.exceptions with real exception classes so isinstance checks work
 exceptions_stub = types.ModuleType("consts.exceptions")
+class AppException(Exception): pass
 class NotFoundException(Exception): pass
 class OfficeConversionException(Exception): pass
 class UnsupportedFileTypeException(Exception): pass
 class FileTooLargeException(Exception): pass
 class QuotaExceededError(Exception): pass
+class UnauthorizedError(Exception): pass
+exceptions_stub.AppException = AppException
 exceptions_stub.NotFoundException = NotFoundException
 exceptions_stub.OfficeConversionException = OfficeConversionException
 exceptions_stub.UnsupportedFileTypeException = UnsupportedFileTypeException
 exceptions_stub.FileTooLargeException = FileTooLargeException
 exceptions_stub.QuotaExceededError = QuotaExceededError
+exceptions_stub.UnauthorizedError = UnauthorizedError
 sys.modules["consts.exceptions"] = exceptions_stub
 setattr(consts_pkg, "exceptions", exceptions_stub)
 
@@ -288,16 +305,37 @@ async def test_upload_files_no_files_bad_request():
 
 @pytest.mark.asyncio
 async def test_upload_files_no_valid_files_uploaded(monkeypatch):
+    class UploadResult(tuple):
+        def __new__(cls):
+            result = super().__new__(cls, (["Failed to upload x.txt: parser unavailable"], [], []))
+            result.quota_status = {"quota_status": "warning"}
+            result.file_records = [
+                {
+                    "file_id": "failed-file",
+                    "status": "FAILED",
+                    "error_code": "UPLOAD_FAILED",
+                    "error_message": "parser unavailable",
+                }
+            ]
+            return result
+
     async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
-        return ["err"], [], []
+        return UploadResult()
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
-    with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(
-            file=[make_upload_file("x.txt")], destination="minio", folder="attachments", index_name=None,
-            authorization=MOCK_AUTH
-        )
-    assert "No valid files uploaded" in str(ei.value)
+    response = await file_management_app.upload_files(
+        file=[make_upload_file("x.txt")], destination="minio", folder="attachments", index_name=None,
+        authorization=MOCK_AUTH
+    )
+
+    assert response.status_code == 400
+    assert response.body
+    content = response.body.decode()
+    assert '"message":"No valid files uploaded"' in content
+    assert '"detail":"No valid files uploaded"' in content
+    assert '"quota_status":"warning"' in content
+    assert "parser unavailable" in content
+    assert "failed-file" in content
 
 
 @pytest.mark.asyncio
@@ -313,6 +351,26 @@ async def test_upload_files_internal_error(monkeypatch):
             authorization=MOCK_AUTH
         )
     assert "File upload error" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_maps_unauthorized_error(monkeypatch):
+    def unauthorized(*_args, **_kwargs):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_file(
+            object_name="knowledge_base/a.txt",
+            download="",
+            expires=60,
+            filename=None,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
 
 
 @pytest.mark.asyncio
@@ -366,25 +424,203 @@ async def test_process_files_error_message(monkeypatch):
     assert "boom" in str(ei.value)
 
 
+@pytest.mark.asyncio
+async def test_process_files_persists_submit_failure(monkeypatch):
+    """A process-submit error is persisted on the durable lifecycle record."""
+    async def fake_trigger(files, params):
+        return {"status": "error", "message": "queue unavailable"}
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-submit"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.process_files(
+            files=[{"file_id": "fid-submit", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+            chunking_strategy="basic",
+            index_name="kb",
+            destination="minio",
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 500
+    assert raised.value.detail == "queue unavailable"
+    lifecycle_module.get_file_record.assert_called_once()
+    lifecycle_module.transition_file_record.assert_called_once()
+    assert lifecycle_module.get_file_record.call_args.kwargs["tenant_id"] == "tenant1"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "060108"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_process_files_persists_only_failed_item_for_partial_batch(monkeypatch):
+    """Partial task submission keeps successful files running and fails only the omitted file."""
+    async def fake_trigger(files, params):
+        return {
+            "status": "partial_success",
+            "task_ids": ["task-a"],
+            "results": [
+                {"file_id": "fid-a", "status": "SUBMITTED", "task_id": "task-a"},
+                {
+                    "file_id": "fid-b",
+                    "status": "FAILED",
+                    "error_code": "TASK_SUBMIT_FAILED",
+                    "error_message": "broker unavailable",
+                },
+            ],
+            "submitted_count": 1,
+            "failed_count": 1,
+        }
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-b"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    resp = await file_management_app.process_files(
+        files=[
+            {"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"},
+            {"file_id": "fid-b", "path_or_url": "knowledge_base/b.txt", "filename": "b.txt"},
+        ],
+        chunking_strategy="basic",
+        index_name="kb",
+        destination="minio",
+        authorization=MOCK_AUTH,
+    )
+
+    assert resp.status_code == 201
+    assert resp.body
+    lifecycle_module.transition_file_record.assert_called_once()
+    assert lifecycle_module.transition_file_record.call_args.args[0] == "fid-b"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "060108"
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_process_files_all_batch_submissions_failed(monkeypatch):
+    """All failed submissions retain failure details and preserve the 500 contract."""
+    async def fake_trigger(files, params):
+        return {
+            "status": "failed",
+            "task_ids": [],
+            "results": [
+                {"file_id": "fid-a", "status": "FAILED", "error_message": "queue down"},
+                {"file_id": "fid-b", "status": "FAILED", "error_message": "queue down"},
+            ],
+            "submitted_count": 0,
+            "failed_count": 2,
+        }
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(side_effect=[{"file_id": "fid-a"}, {"file_id": "fid-b"}])
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.process_files(
+            files=[
+                {"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"},
+                {"file_id": "fid-b", "path_or_url": "knowledge_base/b.txt", "filename": "b.txt"},
+            ],
+            chunking_strategy="basic",
+            index_name="kb",
+            destination="minio",
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 500
+    assert raised.value.detail == "queue down"
+    assert lifecycle_module.transition_file_record.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_process_files_legacy_empty_task_ids_mark_all_failed(monkeypatch):
+    """Old data-process responses with no task ids must not leave UPLOADED rows behind."""
+    async def fake_trigger(files, params):
+        return {"task_ids": []}
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-a"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.process_files(
+            files=[{"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+            chunking_strategy="basic",
+            index_name="kb",
+            destination="minio",
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 500
+    assert lifecycle_module.transition_file_record.call_args.kwargs["error_code"] == "060108"
+
+
+@pytest.mark.asyncio
+async def test_get_storage_files_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_files(
+            prefix="", limit=10, include_urls=True, authorization=MOCK_AUTH
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_batch_urls_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.get_storage_file_batch_urls(
+            request_data={"object_names": ["knowledge_base/a.txt"]},
+            expires=60,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
+
+
 # --- storage_upload_files tests ---
 
 @pytest.mark.asyncio
 async def test_storage_upload_files_knowledge_base_folder(monkeypatch):
-    """Test storage_upload_files with knowledge_base folder (shared, no user isolation)."""
-    async def fake_upload(files, folder, user_id=None):
-        return [{"success": True, "file_name": "shared.pdf", "key": f"{folder}/shared.pdf"}]
-
-    monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
-
+    """Generic storage uploads cannot create unowned knowledge-base objects."""
     f1 = make_upload_file("shared.pdf")
-    result = await file_management_app.storage_upload_files(
-        files=[f1],
-        folder="knowledge_base",
-        authorization=MOCK_AUTH
-    )
-    assert result["message"].startswith("Processed 1")
-    assert result["success_count"] == 1
-    assert result["failed_count"] == 0
+    with pytest.raises(HTTPException) as exc_info:
+        await file_management_app.storage_upload_files(
+            files=[f1],
+            folder="knowledge_base",
+            authorization=MOCK_AUTH
+        )
+    assert exc_info.value.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -524,8 +760,8 @@ async def test_get_storage_files_with_user_id_filters_by_access(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_storage_files_no_auth_only_knowledge_base(monkeypatch):
-    """Test that unauthenticated requests only see knowledge_base files."""
+async def test_get_storage_files_no_auth_returns_no_files(monkeypatch):
+    """Test that unauthenticated requests cannot list storage objects."""
     async def fake_list(prefix, limit):
         return [
             {"name": "a", "key": "knowledge_base/shared.txt"},
@@ -537,10 +773,7 @@ async def test_get_storage_files_no_auth_only_knowledge_base(monkeypatch):
     out = await file_management_app.get_storage_files(
         prefix="", limit=10, include_urls=False, authorization=MOCK_AUTH_NONE
     )
-    # Without auth, only knowledge_base files should be visible
-    keys = [f["key"] for f in out["files"]]
-    assert "knowledge_base/shared.txt" in keys
-    assert "attachments/user1/mine.txt" not in keys
+    assert out["files"] == []
 
 
 @pytest.mark.asyncio
@@ -690,7 +923,7 @@ async def test_get_storage_file_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_access_denied_for_attachments(monkeypatch):
     """Test that access to other user's attachments is forbidden."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -749,7 +982,7 @@ async def test_remove_storage_file_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_remove_storage_file_access_denied(monkeypatch):
     """Test that deletion of other user's file is forbidden."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -826,7 +1059,7 @@ async def test_get_storage_file_batch_urls_mixed(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_batch_urls_all_denied(monkeypatch):
     """Test batch URLs when all files are denied access."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         return False  # Deny all access
 
     def fake_get(object_name, expires):
@@ -849,7 +1082,7 @@ async def test_get_storage_file_batch_urls_all_denied(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_storage_file_batch_urls_error(monkeypatch):
     """Test batch URLs with internal error returns error in results, not exception."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         return True
 
     def fake_get(object_name, expires):
@@ -1007,6 +1240,36 @@ async def test_get_storage_file_stream_without_filename(monkeypatch):
     assert resp.media_type == "text/plain"
     content_disposition = resp.headers.get("content-disposition", "")
     assert "test.txt" in content_disposition
+
+
+@pytest.mark.asyncio
+async def test_get_storage_file_stream_chinese_object_name_has_ascii_headers(monkeypatch):
+    """Chinese object keys must be encoded before being placed in download headers."""
+    chinese_object_name = "knowledge_base/新员工入职培训手册.docx"
+
+    async def fake_get_stream(object_name):
+        assert object_name == chinese_object_name
+
+        async def gen():
+            yield b"docx-content"
+
+        return gen(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", fake_get_stream)
+    resp = await file_management_app.get_storage_file(
+        object_name=chinese_object_name,
+        download="stream",
+        expires=60,
+        filename=None,
+        authorization=MOCK_AUTH
+    )
+
+    content_disposition = resp.headers.get("content-disposition", "")
+    etag = resp.headers.get("etag", "")
+    assert "filename*=UTF-8''" in content_disposition
+    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in content_disposition
+    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in etag
+    assert etag.isascii()
 
 
 @pytest.mark.asyncio
@@ -1557,6 +1820,28 @@ async def test_preview_file_chinese_filename(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_preview_file_chinese_object_name_has_ascii_etag(monkeypatch):
+    """Chinese characters in an object key must not leak into ASGI response headers."""
+    object_name = "knowledge_base/新员工入职培训手册.docx"
+    monkeypatch.setattr(file_management_app, "resolve_preview_file",
+                        AsyncMock(return_value=(object_name, "application/pdf", 1024)))
+    monkeypatch.setattr(file_management_app, "get_preview_stream",
+                        MagicMock(return_value=_make_mock_stream()))
+
+    resp = await file_management_app.preview_file(
+        object_name=object_name,
+        filename="新员工入职培训手册.docx",
+        range_header=None,
+        authorization=MOCK_AUTH
+    )
+
+    etag = resp.headers.get("etag", "")
+    assert "新员工" not in etag
+    assert "%E6%96%B0%E5%91%98%E5%B7%A5" in etag
+    assert etag.isascii()
+
+
+@pytest.mark.asyncio
 async def test_preview_file_simple_object_name_without_slash(monkeypatch):
     """Object name without slash: uses it directly as display filename."""
     monkeypatch.setattr(file_management_app, "resolve_preview_file",
@@ -1596,7 +1881,7 @@ async def test_preview_file_office_converted_to_pdf(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_access_denied(monkeypatch):
     """Test preview_file access denied for other user's attachments."""
-    def fake_check_access(object_name, user_id, caller_tenant_id=None):
+    def fake_check_access(object_name, user_id, caller_tenant_id=None, required_permission="READ"):
         if object_name.startswith("attachments/"):
             expected_prefix = f"attachments/{user_id}"
             return object_name.startswith(expected_prefix)
@@ -1896,7 +2181,25 @@ async def test_preview_file_internal_error(monkeypatch):
             authorization=MOCK_AUTH
         )
     assert "Failed to preview file" in str(ei.value)
-    assert "Internal server error" not in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_preview_file_maps_unauthorized_error(monkeypatch):
+    def unauthorized(_authorization):
+        raise file_management_app.UnauthorizedError("token expired")
+
+    monkeypatch.setattr(file_management_app, "get_current_user_id", unauthorized)
+
+    with pytest.raises(HTTPException) as raised:
+        await file_management_app.preview_file(
+            object_name="knowledge_base/a.txt",
+            filename=None,
+            range_header=None,
+            authorization=MOCK_AUTH,
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.detail == "token expired"
 
 
 @pytest.mark.asyncio

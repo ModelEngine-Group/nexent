@@ -106,6 +106,11 @@ def configure_aidp_constants(monkeypatch):
         aidp_mgmt_app.auth_utils_module, "get_current_user_id",
         lambda *_a, **_kw: (USER_ID, TENANT_ID),
     )
+    # Existing management tests exercise the shared-KB path. Individual
+    # USER-policy tests override this role explicitly below.
+    monkeypatch.setattr(
+        aidp_mgmt_app, "get_user_role_by_tenant", lambda *_a, **_kw: "DEV"
+    )
     yield
     aidp_access_service.invalidate_aidp_catalog_cache()
     aidp_access_service.invalidate_aidp_kb_detail_cache()
@@ -562,6 +567,8 @@ class TestUpdateKnowledgeBase:
 
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_permission_service, "update_permission",
+                          return_value=True) as mock_update_permission, \
              patch.object(aidp_mgmt_app, "update_aidp_kb_impl", return_value={"ok": True}) as mock_update:
             response = client.put(
                 "/aidp-mgmt/knowledge-bases/kb-1",
@@ -575,6 +582,12 @@ class TestUpdateKnowledgeBase:
         positional = call_args.args
         assert positional[2] == "kb-1"
         assert positional[3] == {"name": "new"}
+        mock_update_permission.assert_called_once_with(
+            kb_id="kb-1",
+            tenant_id="tenant-test",
+            kds_name="new",
+            updated_by="user-test",
+        )
 
 
 # --- Upload documents ----------------------------------------------------
@@ -873,6 +886,28 @@ class TestListKbsActiveStatus:
 
 
 class TestCreateKnowledgeBaseEdgeCases:
+    def test_user_create_normalizes_shared_permission_to_private(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_mgmt_app, "get_user_role_by_tenant", return_value="USER"), \
+             patch.object(aidp_mgmt_app, "create_aidp_kb_impl", return_value={"kds_id": "kb-user"}), \
+             patch.object(aidp_permission_service.aidp_permission_db,
+                          "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_permission_service, "create_permission", return_value=1) as mock_perm, \
+             patch.object(aidp_permission_service, "update_resource_status", return_value=True):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases",
+                headers=_bearer(),
+                json={"name": "User KB", "ingroup_permission": "EDIT", "group_ids": [1]},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        perm_kwargs = mock_perm.call_args.kwargs
+        assert perm_kwargs["ingroup_permission"] == "PRIVATE"
+        assert perm_kwargs["group_ids"] == []
+
     def test_create_rejects_invalid_ingroup_permission(self):
         client = _client()
         response = client.post(
@@ -1101,6 +1136,24 @@ class TestListDocumentsCountFailure:
 
 
 class TestSetPermissionEdgeCases:
+    def test_user_cannot_change_private_kb_to_shared_permission(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_mgmt_app, "get_user_role_by_tenant", return_value="USER"), \
+             patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_permission_service, "update_permission") as mock_update:
+            response = client.patch(
+                "/aidp-mgmt/aidp-permissions/kb-user",
+                headers=_bearer(),
+                json={"ingroup_permission": "READ_ONLY", "group_ids": [1]},
+            )
+
+        assert response.status_code == HTTPStatus.FORBIDDEN
+        mock_update.assert_not_called()
+
     def test_set_permission_rejects_unsupported_value(self):
         client = _client()
         from ext_components.aidp.services import aidp_permission_service

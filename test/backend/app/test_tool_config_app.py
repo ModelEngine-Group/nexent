@@ -134,28 +134,26 @@ class TestSearchToolInfoAPI:
 class TestUpdateToolInfoAPI:
     """Test endpoint for updating tool information"""
 
+    @pytest.mark.asyncio
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.update_tool_info_impl')
-    def test_update_tool_info_success(self, mock_update_tool_info, mock_get_user_id):
+    async def test_update_tool_info_success(self, mock_update_tool_info, mock_get_user_id):
         """Test successful tool information update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_update_tool_info.return_value = {
             "updated": True, "tool_id": "tool456"}
 
-        response = client.post(
-            "/tool/update",
-            json={
+        response = await tool_config_app.update_tool_info_api(
+            tool_config_app.ToolInstanceInfoRequest(**{
                 "agent_id": 123,
                 "tool_id": 456,
                 "params": {"key": "value"},
                 "enabled": True
-            }
+            }),
+            authorization=None,
         )
 
-        assert response.status_code == HTTPStatus.OK
-        data = response.json()
-        assert data["updated"] == True
-        assert data["tool_id"] == "tool456"
+        assert response == {"updated": True, "tool_id": "tool456"}
 
         mock_get_user_id.assert_called_once_with(None)
         assert mock_update_tool_info.call_count == 1
@@ -163,26 +161,58 @@ class TestUpdateToolInfoAPI:
         assert args[1] == "tenant456"
         assert args[2] == "user123"
 
+    @pytest.mark.asyncio
     @patch('apps.tool_config_app.get_current_user_id')
     @patch('apps.tool_config_app.update_tool_info_impl')
-    def test_update_tool_info_service_error(self, mock_update_tool_info, mock_get_user_id):
+    async def test_update_tool_info_service_error(self, mock_update_tool_info, mock_get_user_id):
         """Test service error when updating tool info"""
         mock_get_user_id.return_value = ("user123", "tenant456")
         mock_update_tool_info.side_effect = Exception("Update error")
 
-        response = client.post(
-            "/tool/update",
-            json={
-                "agent_id": 123,
-                "tool_id": 456,
-                "params": {"key": "value"},
-                "enabled": True
-            }
+        with pytest.raises(tool_config_app.HTTPException) as exc_info:
+            await tool_config_app.update_tool_info_api(
+                tool_config_app.ToolInstanceInfoRequest(
+                    agent_id=123,
+                    tool_id=456,
+                    params={"key": "value"},
+                    enabled=True,
+                ),
+                authorization=None,
+            )
+
+        assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert exc_info.value.detail == "Failed to update tool"
+        assert "Update error" not in str(exc_info.value.detail)
+
+    @pytest.mark.asyncio
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.update_tool_info_impl')
+    async def test_update_tool_info_returns_stable_binding_error(
+        self,
+        mock_update_tool_info,
+        mock_get_user_id,
+    ):
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update_tool_info.side_effect = tool_config_app.AgentDraftEditError(
+            "agent_read_only"
         )
 
-        assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-        data = response.json()
-        assert "Failed to update tool, error in: Update error" in data["detail"]
+        with pytest.raises(tool_config_app.HTTPException) as exc_info:
+            await tool_config_app.update_tool_info_api(
+                tool_config_app.ToolInstanceInfoRequest(
+                    agent_id=123,
+                    tool_id=456,
+                    params={},
+                    enabled=True,
+                ),
+                authorization=None,
+            )
+
+        assert exc_info.value.status_code == HTTPStatus.FORBIDDEN
+        assert exc_info.value.detail == {
+            "code": "agent_read_only",
+            "message": "The requested draft resource cannot be updated.",
+        }
 
 
 class TestScanAndUpdateToolAPI:
@@ -1313,3 +1343,65 @@ def test_update_tool_info_passthrough_http_exception(mock_update_tool_info, mock
 
     assert response.status_code == 409
     assert response.json()["detail"] == "conflict"
+
+
+class TestTokenExpiredMapping:
+    """Every tool config endpoint maps an expired token to 401."""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_list_tools_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/list")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_search_tool_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/search", json={"agent_id": 123, "tool_id": 456})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_update_tool_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/update",
+            json={
+                "agent_id": 123,
+                "tool_id": 456,
+                "params": {"key": "value"},
+                "enabled": True,
+            },
+        )
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_load_last_tool_config_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/load_config/123")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_list_openapi_services_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/openapi_services")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_update_tool_labels_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.put(
+            "/tool/labels", json={"tool_id": 1, "labels": ["database"]})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED

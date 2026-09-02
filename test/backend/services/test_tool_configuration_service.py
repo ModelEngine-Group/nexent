@@ -938,15 +938,21 @@ class TestUpdateToolInfoImpl:
         with pytest.raises(Exception):
             update_tool_info_impl(mock_request, "test_tenant", "test_user")
 
-    @patch('backend.services.tool_configuration_service._is_aidp_search_tool', return_value=False)
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @patch('backend.services.tool_configuration_service.require_agent_draft_edit')
     @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
-    def test_update_tool_info_impl_with_version_no_zero(self, mock_create_update, _mock_is_aidp):
+    def test_update_tool_info_impl_with_version_no_zero(
+        self, mock_create_update, mock_require_edit, mock_query_tools
+    ):
         """Test update_tool_info_impl when version_no is 0"""
         mock_request = Mock(spec=ToolInstanceInfoRequest)
         mock_request.version_no = 0
         mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 0}
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
+        mock_query_tools.return_value = [
+            {"tool_id": 1, "name": "test_tool", "is_available": True}
+        ]
 
         from backend.services.tool_configuration_service import update_tool_info_impl
         result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
@@ -956,9 +962,12 @@ class TestUpdateToolInfoImpl:
         mock_create_update.assert_called_once_with(
             mock_request, "test_tenant", "test_user", version_no=0)
 
-    @patch('backend.services.tool_configuration_service._is_aidp_search_tool', return_value=False)
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @patch('backend.services.tool_configuration_service.require_agent_draft_edit')
     @patch('backend.services.tool_configuration_service.create_or_update_tool_by_tool_info')
-    def test_update_tool_info_impl_without_version_no(self, mock_create_update, _mock_is_aidp):
+    def test_update_tool_info_impl_without_version_no(
+        self, mock_create_update, mock_require_edit, mock_query_tools
+    ):
         """Test update_tool_info_impl when version_no is not provided (should default to 0)"""
         # Create a simple object without version_no attribute
         class MockToolInfoWithoutVersion:
@@ -970,6 +979,9 @@ class TestUpdateToolInfoImpl:
         mock_request = MockToolInfoWithoutVersion()
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
+        mock_query_tools.return_value = [
+            {"tool_id": 1, "name": "test_tool", "is_available": True}
+        ]
 
         from backend.services.tool_configuration_service import update_tool_info_impl
         result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
@@ -986,16 +998,11 @@ class TestUpdateToolInfoImpl:
         mock_request = Mock(spec=ToolInstanceInfoRequest)
         mock_request.version_no = 5
         mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 5}
-        mock_tool_instance = {"id": 1, "name": "test_tool"}
-        mock_create_update.return_value = mock_tool_instance
-
+        from backend.services.agent_draft_permission_service import AgentDraftEditError
         from backend.services.tool_configuration_service import update_tool_info_impl
-        result = update_tool_info_impl(mock_request, "test_tenant", "test_user")
-
-        assert result["tool_instance"] == mock_tool_instance
-        # Verify that create_or_update_tool_by_tool_info was called with version_no=5
-        mock_create_update.assert_called_once_with(
-            mock_request, "test_tenant", "test_user", version_no=5)
+        with pytest.raises(AgentDraftEditError, match="agent_not_draft"):
+            update_tool_info_impl(mock_request, "test_tenant", "test_user")
+        mock_create_update.assert_not_called()
 
 
 class TestListAllTools:
@@ -1417,6 +1424,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[0].name == "test_tool_1"
         assert result[0].description == "Test tool 1 description"
         assert result[0].source == ToolSourceEnum.MCP.value
+        assert result[0].output_type == "object"
         assert result[0].usage == "test_server"
         assert result[1].name == "test_tool_2"
         assert result[1].description == "Test tool 2 description"
@@ -3397,7 +3405,8 @@ class TestValidateLocalToolAnalyzeAudioVideo:
         )
 
         assert result == f"{tool_name} result"
-        mock_get_video_model.assert_called_once_with("tenant1", None, slot="vlm3")
+        expected_slot = "vlm4" if tool_name == "analyze_audio" else "vlm3"
+        mock_get_video_model.assert_called_once_with("tenant1", None, slot=expected_slot)
         call_kwargs = mock_tool_class.call_args.kwargs
         assert call_kwargs["vlm_model"] == "mock_video_model"
         assert "storage_client" in call_kwargs
@@ -3747,7 +3756,7 @@ class TestValidateLocalToolAnalyzeTextFile:
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
-    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service.get_llm_adapter')
     @patch('backend.services.tool_configuration_service.minio_client')
     @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://data-process-service")
     def test_validate_local_tool_analyze_text_file_success(self, mock_minio_client, mock_get_llm_model,
@@ -3800,7 +3809,7 @@ class TestValidateLocalToolAnalyzeTextFile:
         mock_tool_instance.forward.assert_called_once_with(input="test input")
 
         # Verify service calls
-        mock_get_llm_model.assert_called_once_with(tenant_id="tenant1", model_id=None)
+        mock_get_llm_model.assert_called_once_with("tenant1", None, modality="llm_long_context")
 
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     def test_validate_local_tool_analyze_text_file_missing_tenant_id(self, mock_get_class):
@@ -5163,7 +5172,7 @@ class TestValidateLocalToolMonitoring:
     @patch('backend.services.tool_configuration_service.set_monitoring_context')
     @patch('backend.services.tool_configuration_service.minio_client')
     @patch('backend.services.tool_configuration_service.DATA_PROCESS_SERVICE', "http://svc")
-    @patch('backend.services.tool_configuration_service.get_llm_model')
+    @patch('backend.services.tool_configuration_service.get_llm_adapter')
     @patch('backend.services.tool_configuration_service._get_tool_class_by_name')
     @patch('backend.services.tool_configuration_service.inspect.signature')
     def test_analyze_text_file_sets_monitoring_context(
@@ -5272,6 +5281,27 @@ class TestUpdateToolInfoImplAidpPermission:
         request.version_no = 0
         return request
 
+    @pytest.fixture(autouse=True)
+    def mock_binding_preconditions(self, mocker):
+        mocker.patch(
+            "backend.services.tool_configuration_service.require_agent_draft_edit"
+        )
+        mocker.patch(
+            "backend.services.tool_configuration_service.query_all_tools",
+            return_value=[
+                {
+                    "tool_id": 9,
+                    "name": "aidp_search",
+                    "is_available": True,
+                },
+                {
+                    "tool_id": 8,
+                    "name": "knowledge_base_search",
+                    "is_available": True,
+                },
+            ],
+        )
+
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
     @patch("backend.services.tool_configuration_service._resolve_aidp_snapshot")
@@ -5345,6 +5375,7 @@ class TestUpdateToolInfoImplAidpPermission:
         mock_create_update.return_value = {"id": 5}
         tool_info = self._request(["kb1"])
         tool_info.name = "knowledge_base_search"
+        tool_info.tool_id = 8
 
         from backend.services.tool_configuration_service import update_tool_info_impl
         result = update_tool_info_impl(tool_info, "tenant1", "user1")
@@ -5571,6 +5602,19 @@ class _AnonymousToolInfo:
 def test_update_tool_info_preserves_existing_kds_when_key_missing(mocker):
     """A missing kds_list key means the scope was not edited; keep existing ids."""
     mocker.patch(
+        "backend.services.tool_configuration_service.require_agent_draft_edit"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_all_tools",
+        return_value=[
+            {
+                "tool_id": 9,
+                "name": "aidp_search",
+                "is_available": True,
+            }
+        ],
+    )
+    mocker.patch(
         "backend.services.tool_configuration_service._is_aidp_search_tool",
         return_value=True,
     )
@@ -5595,6 +5639,19 @@ def test_update_tool_info_rejects_new_kds_when_aidp_unavailable(mocker):
     """When AIDP is unreachable and the submission adds ids, the edit must fail."""
     from consts.exceptions import ValidationError
 
+    mocker.patch(
+        "backend.services.tool_configuration_service.require_agent_draft_edit"
+    )
+    mocker.patch(
+        "backend.services.tool_configuration_service.query_all_tools",
+        return_value=[
+            {
+                "tool_id": 9,
+                "name": "aidp_search",
+                "is_available": True,
+            }
+        ],
+    )
     mocker.patch(
         "backend.services.tool_configuration_service._is_aidp_search_tool",
         return_value=True,
@@ -5669,3 +5726,192 @@ def test_validate_local_tool_aidp_search_rejects_unavailable_kds(mocker):
             tenant_id="tenant-1",
             user_id="user-1",
         )
+
+
+class TestExtractFieldConstraints:
+    """Tests for _extract_field_constraints (Pydantic Field constraint extraction)."""
+
+    def test_extract_numeric_constraints(self):
+        from pydantic import Field
+
+        field_info = Field(ge=1, le=100)
+        result = _tool_cfg_service._extract_field_constraints(field_info)
+        assert result == {"ge": 1, "le": 100}
+
+    def test_extract_length_constraints(self):
+        from pydantic import Field
+
+        field_info = Field(min_length=1, max_length=5)
+        result = _tool_cfg_service._extract_field_constraints(field_info)
+        assert result == {"min_length": 1, "max_length": 5}
+
+    def test_extract_no_constraints(self):
+        from pydantic import Field
+
+        field_info = Field(default=3)
+        assert _tool_cfg_service._extract_field_constraints(field_info) == {}
+
+    def test_extract_without_metadata(self):
+        assert _tool_cfg_service._extract_field_constraints(object()) == {}
+
+
+class TestGetToolRecord:
+    """Tests for _get_tool_record."""
+
+    def test_returns_first_record(self):
+        with patch(
+            "backend.services.tool_configuration_service.query_tools_by_ids",
+            return_value=[{"id": 1, "name": "tool_a"}],
+        ):
+            assert _tool_cfg_service._get_tool_record(1) == {"id": 1, "name": "tool_a"}
+
+    def test_returns_none_when_empty(self):
+        with patch(
+            "backend.services.tool_configuration_service.query_tools_by_ids",
+            return_value=[],
+        ):
+            assert _tool_cfg_service._get_tool_record(1) is None
+
+    def test_returns_none_on_exception(self):
+        with patch(
+            "backend.services.tool_configuration_service.query_tools_by_ids",
+            side_effect=RuntimeError("db down"),
+        ):
+            assert _tool_cfg_service._get_tool_record(1) is None
+
+
+class TestCoerceParamValue:
+    """Tests for _coerce_param_value."""
+
+    def test_length_constraint_returns_string_length(self):
+        result = _tool_cfg_service._coerce_param_value(
+            "t", "p", "string", "hello", "min_length"
+        )
+        assert result == 5
+
+    def test_string_type_returns_str(self):
+        assert _tool_cfg_service._coerce_param_value("t", "p", "string", 123, "ge") == "123"
+
+    def test_integer_returns_float(self):
+        assert _tool_cfg_service._coerce_param_value("t", "p", "integer", "5", "ge") == 5.0
+
+    def test_number_returns_float(self):
+        assert _tool_cfg_service._coerce_param_value("t", "p", "number", 2.5, "le") == 2.5
+
+    def test_invalid_numeric_raises_valid_type(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="p must be a valid integer"):
+            _tool_cfg_service._coerce_param_value("t", "p", "integer", "abc", "ge")
+
+    def test_non_integer_for_integer_type_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="p must be an integer"):
+            _tool_cfg_service._coerce_param_value("t", "p", "integer", 1.5, "ge")
+
+
+class TestFormatConstraintMessage:
+    """Tests for _format_constraint_message."""
+
+    def test_formats_ge_message(self):
+        msg = _tool_cfg_service._format_constraint_message("ge", "tool_a", "top_k", 1)
+        assert msg == "tool_a top_k must be >= 1"
+
+
+class TestApplyParamConstraints:
+    """Tests for _apply_param_constraints."""
+
+    def test_no_constraint_keys_returns(self):
+        # Should not raise even with a value that would violate nothing.
+        _tool_cfg_service._apply_param_constraints("t", "p", "integer", 0, {})
+
+    def test_ge_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="top_k must be >= 1"):
+            _tool_cfg_service._apply_param_constraints(
+                "t", "top_k", "integer", 0, {"ge": 1}
+            )
+
+    def test_ge_satisfied(self):
+        _tool_cfg_service._apply_param_constraints(
+            "t", "top_k", "integer", "5", {"ge": 1}
+        )
+
+    def test_le_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="top_k must be <= 100"):
+            _tool_cfg_service._apply_param_constraints(
+                "t", "top_k", "integer", 101, {"le": 100}
+            )
+
+    def test_min_length_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="name length must be >= 3"):
+            _tool_cfg_service._apply_param_constraints(
+                "t", "name", "string", "ab", {"min_length": 3}
+            )
+
+    def test_max_length_satisfied(self):
+        _tool_cfg_service._apply_param_constraints(
+            "t", "name", "string", "abc", {"max_length": 5}
+        )
+
+
+class TestValidateToolParamRanges:
+    """Tests for _validate_tool_param_ranges."""
+
+    def _tool(self, params):
+        return {"name": "tool_a", "params": params}
+
+    def test_skips_when_no_record(self):
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=None,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
+
+    def test_skips_when_configured_value_is_none(self):
+        tool = self._tool([{"name": "top_k", "type": "integer", "constraints": {"ge": 1}}])
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": None})
+
+    def test_skips_param_without_constraints(self):
+        tool = self._tool([{"name": "top_k", "type": "integer"}])
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
+
+    def test_violation_raises(self):
+        from consts.exceptions import ValidationError
+
+        tool = self._tool([{"name": "top_k", "type": "integer", "constraints": {"ge": 1}}])
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            with pytest.raises(ValidationError, match="top_k must be >= 1"):
+                _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
+
+    def test_satisfied_does_not_raise(self):
+        tool = self._tool(
+            [
+                {"name": "top_k", "type": "integer", "constraints": {"ge": 1, "le": 100}},
+                {"name": "threshold", "type": "number", "constraints": {"ge": 0.0, "le": 1.0}},
+            ]
+        )
+        with patch(
+            "backend.services.tool_configuration_service._get_tool_record",
+            return_value=tool,
+        ):
+            _tool_cfg_service._validate_tool_param_ranges(
+                1, {"top_k": 50, "threshold": 0.5}
+            )

@@ -1,16 +1,36 @@
-from typing import Any, Dict, List, Optional
-
 import logging
 import uuid
-from sqlalchemy import func
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from consts.exceptions import DuplicateError
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES
 from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
 from utils.str_utils import convert_list_to_string
-from consts.scheduler import VALID_SUMMARY_FREQUENCIES
 
 logger = logging.getLogger("knowledge_db")
+
+
+def _lock_and_check_knowledge_name(session, tenant_id: Optional[str], knowledge_name: Optional[str]) -> None:
+    """Serialize and validate tenant-scoped knowledge base name creation."""
+    if not tenant_id or not knowledge_name:
+        return
+
+    lock_key = f"knowledge-name:{tenant_id}:{knowledge_name}"
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": lock_key},
+    )
+    existing_record = session.query(KnowledgeRecord.knowledge_id).filter(
+        KnowledgeRecord.tenant_id == tenant_id,
+        KnowledgeRecord.knowledge_name == knowledge_name,
+        KnowledgeRecord.delete_flag != 'Y',
+    ).first()
+    if existing_record is not None:
+        raise DuplicateError(f"Knowledge base name '{knowledge_name}' already exists")
 
 
 def _generate_index_name(knowledge_id: int) -> str:
@@ -42,8 +62,10 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
     try:
         with get_db_session() as session:
             # Determine user-facing knowledge base name
-            knowledge_name = query.get(
-                "knowledge_name") or query.get("index_name")
+            raw_knowledge_name = query.get("knowledge_name") or query.get("index_name")
+            knowledge_name = raw_knowledge_name.strip() if isinstance(raw_knowledge_name, str) else raw_knowledge_name
+            tenant_id = query.get("tenant_id")
+            _lock_and_check_knowledge_name(session, tenant_id, knowledge_name)
 
             # Prepare data dictionary
             group_ids = query.get("group_ids")
@@ -52,7 +74,7 @@ def create_knowledge_record(query: Dict[str, Any]) -> Dict[str, Any]:
                 "created_by": query.get("user_id"),
                 "updated_by": query.get("user_id"),
                 "knowledge_sources": query.get("knowledge_sources", "elasticsearch"),
-                "tenant_id": query.get("tenant_id"),
+                "tenant_id": tenant_id,
                 "embedding_model_name": query.get("embedding_model_name"),
                 "embedding_model_id": query.get("embedding_model_id"),
                 "knowledge_name": knowledge_name,
@@ -356,16 +378,49 @@ def get_knowledge_ids_by_index_names(index_names: List[str]) -> List[str]:
         raise e
 
 
-def get_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
+def get_knowledge_info_by_tenant_id(
+    tenant_id: str,
+    ordered: bool = False,
+) -> List[Dict[str, Any]]:
     try:
         with get_db_session() as session:
-            result = session.query(KnowledgeRecord).filter(
+            query = session.query(KnowledgeRecord).filter(
                 KnowledgeRecord.tenant_id == tenant_id,
                 KnowledgeRecord.delete_flag != 'Y'
-            ).all()
+            )
+            if ordered:
+                query = query.order_by(
+                    KnowledgeRecord.update_time.desc(),
+                    KnowledgeRecord.knowledge_id.desc(),
+                    KnowledgeRecord.index_name.desc(),
+                )
+            result = query.all()
             return [as_dict(item) for item in result]
     except SQLAlchemyError as e:
         raise e
+
+
+def get_private_knowledge_info_by_tenant_id(tenant_id: str) -> List[Dict[str, Any]]:
+    """Get non-deleted PRIVATE knowledge base records for a tenant."""
+    with get_db_session() as session:
+        result = session.query(KnowledgeRecord).filter(
+            KnowledgeRecord.tenant_id == tenant_id,
+            KnowledgeRecord.ingroup_permission == 'PRIVATE',
+            KnowledgeRecord.delete_flag != 'Y'
+        ).all()
+        return [as_dict(item) for item in result]
+
+
+def get_private_knowledge_info_by_creator(tenant_id: str, created_by: str) -> List[Dict[str, Any]]:
+    """Get non-deleted PRIVATE knowledge base records created by a user."""
+    with get_db_session() as session:
+        result = session.query(KnowledgeRecord).filter(
+            KnowledgeRecord.tenant_id == tenant_id,
+            KnowledgeRecord.created_by == created_by,
+            KnowledgeRecord.ingroup_permission == 'PRIVATE',
+            KnowledgeRecord.delete_flag != 'Y'
+        ).all()
+        return [as_dict(item) for item in result]
 
 
 def get_knowledge_info_by_tenant_and_source(tenant_id: str, knowledge_sources: str) -> List[Dict[str, Any]]:
