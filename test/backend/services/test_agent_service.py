@@ -13489,6 +13489,13 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
     assert len(batch["search_records"]) == 2
     assert {record["unit_index"] for record in batch["search_records"]} == {0}
 
+    # source_search rows keep retrieval highlight terms for later rendering
+    search_records = batch["search_records"]
+    assert len(search_records) == 2
+    assert search_records[0]["retrieval_highlight_terms"] == ["Content", "1"]
+    assert search_records[0]["score_semantic"] == 0.8
+    assert search_records[1]["retrieval_highlight_terms"] == []
+
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_buffers_valid_automation_proposals(monkeypatch, caplog):
@@ -13549,12 +13556,6 @@ async def test_stream_agent_chunks_buffers_valid_automation_proposals(monkeypatc
     assert [unit["unit_index"] for unit in batch["message_units"]] == [0, 1]
     assert batch["automation_proposals"] == [{"unit_index": 0, "proposal_id": 77}]
     assert "Invalid persisted automation proposal event payload" in caplog.text
-
-    # source_search rows keep retrieval highlight terms for later rendering
-    assert len(save_source_search_calls) == 2
-    assert save_source_search_calls[0]["retrieval_highlight_terms"] == ["Content", "1"]
-    assert save_source_search_calls[0]["score_semantic"] == 0.8
-    assert save_source_search_calls[1]["retrieval_highlight_terms"] == []
 
 
 @pytest.mark.asyncio
