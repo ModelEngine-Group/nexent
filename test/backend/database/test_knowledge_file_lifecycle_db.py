@@ -4,6 +4,7 @@ import contextlib
 import importlib
 import sys
 import types
+from datetime import datetime
 from unittest.mock import MagicMock
 
 
@@ -196,6 +197,65 @@ def test_list_file_records_applies_tenant_and_hides_deleted_rows(monkeypatch):
     query.order_by.return_value.all.return_value = []
     assert lifecycle_db.list_file_records(index_name="kb-1", include_hidden=True) == []
     assert query.filter.call_count == 1
+
+
+def test_fail_interrupted_file_tasks_reuses_failed_state(monkeypatch):
+    session = MagicMock()
+    query = session.query.return_value
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    processing = types.SimpleNamespace(
+        file_id="processing",
+        status="PROCESSING",
+        stage="PROCESS",
+        process_task_id="process-1",
+        forward_task_id=None,
+        version=1,
+    )
+    forwarding = types.SimpleNamespace(
+        file_id="forwarding",
+        status="FORWARDING",
+        stage="FORWARD",
+        process_task_id="process-2",
+        forward_task_id="forward-2",
+        version=4,
+    )
+    query.all.return_value = [processing, forwarding]
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+    monkeypatch.setattr(
+        lifecycle_db,
+        "as_dict",
+        lambda value: {
+            "file_id": value.file_id,
+            "process_task_id": value.process_task_id,
+            "forward_task_id": value.forward_task_id,
+        },
+    )
+
+    records = lifecycle_db.fail_interrupted_file_tasks()
+
+    assert [record["file_id"] for record in records] == ["processing", "forwarding"]
+    assert processing.status == "FAILED"
+    assert processing.error_stage == "PROCESS"
+    assert processing.version == 2
+    assert forwarding.status == "FAILED"
+    assert forwarding.error_stage == "FORWARD"
+    assert forwarding.version == 5
+
+
+def test_list_uploading_files_created_before_uses_cutoff(monkeypatch):
+    session = MagicMock()
+    query = session.query.return_value
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.all.return_value = [types.SimpleNamespace(file_id="uploading")]
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+    monkeypatch.setattr(lifecycle_db, "as_dict", lambda value: {"file_id": value.file_id})
+
+    rows = lifecycle_db.list_uploading_files_created_before(datetime(2026, 9, 1))
+
+    assert rows == [{"file_id": "uploading"}]
+    query.order_by.assert_called_once()
 
 
 def test_transition_file_record_updates_allowed_fields_and_version(monkeypatch):

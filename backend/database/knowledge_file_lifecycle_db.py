@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
+
+from sqlalchemy import and_, or_
 
 from .client import as_dict, get_db_session
 from .db_models import KnowledgeFileLifecycle
@@ -138,6 +141,59 @@ def list_file_records(
         if not include_hidden:
             query = query.filter(KnowledgeFileLifecycle.status.notin_(HIDDEN_STATUSES))
         return [as_dict(row) for row in query.order_by(KnowledgeFileLifecycle.create_time.asc()).all()]
+
+
+def fail_interrupted_file_tasks() -> List[Dict[str, Any]]:
+    """Fail ingestion stages that had actually started before worker restart.
+
+    FORWARDING without a forward task ID is still queued behind a completed
+    process task and is intentionally left for the existing Celery chain.
+    """
+    with get_db_session() as session:
+        rows = (
+            session.query(KnowledgeFileLifecycle)
+            .filter(
+                KnowledgeFileLifecycle.delete_flag == "N",
+                or_(
+                    KnowledgeFileLifecycle.status == "PROCESSING",
+                    and_(
+                        KnowledgeFileLifecycle.status == "FORWARDING",
+                        KnowledgeFileLifecycle.forward_task_id.is_not(None),
+                    ),
+                ),
+            )
+            .with_for_update()
+            .all()
+        )
+        recovered = []
+        failed_at = datetime.utcnow()
+        for row in rows:
+            recovered.append(as_dict(row))
+            row.status = "FAILED"
+            row.error_code = "CONTAINER_RESTARTED"
+            row.error_message = "Data-process service restarted before the task completed"
+            row.error_stage = row.stage or (
+                "FORWARD" if row.forward_task_id else "PROCESS"
+            )
+            row.failed_at = failed_at
+            row.version = int(row.version or 0) + 1
+        return recovered
+
+
+def list_uploading_files_created_before(cutoff: datetime) -> List[Dict[str, Any]]:
+    """Return upload placeholders created before a container startup cutoff."""
+    with get_db_session() as session:
+        rows = (
+            session.query(KnowledgeFileLifecycle)
+            .filter(
+                KnowledgeFileLifecycle.status == "UPLOADING",
+                KnowledgeFileLifecycle.delete_flag == "N",
+                KnowledgeFileLifecycle.create_time < cutoff,
+            )
+            .order_by(KnowledgeFileLifecycle.create_time.asc())
+            .all()
+        )
+        return [as_dict(row) for row in rows]
 
 
 def transition_file_record(

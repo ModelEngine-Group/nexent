@@ -1479,6 +1479,26 @@ class TestUpdateTaskState:
             assert result is False
 
 
+class TestFailActiveTasksOnStartup:
+    def test_moves_submitted_and_working_tasks_to_failed(self):
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.update.return_value = 2
+        session = MagicMock(name="session")
+        session.query.return_value = query
+        context = MagicMock(name="context")
+        context.__enter__.return_value = session
+        context.__exit__.return_value = None
+
+        with patch.object(a2a_db, '_get_db_session', return_value=context):
+            assert a2a_db.fail_active_tasks_on_startup() == 2
+
+        updates = query.update.call_args.args[0]
+        assert updates["task_state"] == "TASK_STATE_FAILED"
+        assert updates["result_data"]["error"]["code"] == "CONTAINER_RESTARTED"
+        assert updates["completed_at"] is not None
+
+
 class TestListTasks:
     def test_returns_tasks_list(self, task):
         with patch.object(a2a_db, '_get_db_session') as mk:

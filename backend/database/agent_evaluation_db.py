@@ -772,24 +772,124 @@ def reap_stale_runs(tenant_id: str, timeout_minutes: int = 10) -> int:
             )
             .all()
         )
-        for (eid,) in stale:
-            session.query(AgentEvaluation).filter(
-                AgentEvaluation.agent_evaluation_id == eid,
-                AgentEvaluation.tenant_id == tenant_id,
+        stale_ids = [eid for (eid,) in stale]
+        if stale_ids:
+            error_message = "Server restarted — evaluation was interrupted"
+            session.query(AgentEvaluationCase).filter(
+                AgentEvaluationCase.agent_evaluation_id.in_(stale_ids),
+                AgentEvaluationCase.tenant_id == tenant_id,
+                AgentEvaluationCase.status.in_(("PENDING", "RUNNING")),
             ).update(
                 {
-                    "status": EvalRunStatus.FAILED,
-                    "error_message": "Server restarted — evaluation was interrupted",
+                    "status": "FAILED",
+                    "error_message": error_message,
+                    "update_time": datetime.now(timezone.utc),
                 },
                 synchronize_session=False,
             )
-            count += 1
+            session.query(AgentEvaluation).filter(
+                AgentEvaluation.agent_evaluation_id.in_(stale_ids),
+                AgentEvaluation.tenant_id == tenant_id,
+                AgentEvaluation.status == EvalRunStatus.RUNNING,
+            ).update(
+                {
+                    "status": EvalRunStatus.FAILED,
+                    "error_message": error_message,
+                    "update_time": datetime.now(timezone.utc),
+                },
+                synchronize_session=False,
+            )
+            count = len(stale_ids)
         session.commit()
     if count:
         logger.info(
             "Reaped %d stale RUNNING evaluations for tenant %s", count, tenant_id
         )
     return count
+
+
+def list_evaluation_tenant_ids() -> list[str]:
+    """Return tenants that currently own running evaluation work."""
+    with get_db_session() as session:
+        rows = (
+            session.query(AgentEvaluation.tenant_id)
+            .filter(
+                AgentEvaluation.status == EvalRunStatus.RUNNING,
+                AgentEvaluation.delete_flag == "N",
+            )
+            .distinct()
+            .all()
+        )
+        return [str(tenant_id) for (tenant_id,) in rows if tenant_id is not None]
+
+
+def fail_interrupted_no_set_runs_on_startup() -> int:
+    """Fail no-set setup work that cannot be resumed after config restart.
+
+    Regular pending runs already have a durable evaluation set and can be
+    redispatched by evaluation maintenance. A no-set run with set ID ``0`` is
+    still generating its temporary cases in process memory, so it has no
+    durable continuation point.
+    """
+    with get_db_session() as session:
+        pending_ids = [
+            evaluation_id
+            for (evaluation_id,) in session.query(
+                AgentEvaluation.agent_evaluation_id
+            )
+            .filter(
+                AgentEvaluation.status == EvalRunStatus.PENDING,
+                AgentEvaluation.evaluation_set_id == 0,
+                AgentEvaluation.delete_flag == "N",
+            )
+            .all()
+        ]
+        if not pending_ids:
+            return 0
+
+        error_message = "Server restarted before evaluation execution started"
+        update_time = datetime.now(timezone.utc)
+        session.query(AgentEvaluationCase).filter(
+            AgentEvaluationCase.agent_evaluation_id.in_(pending_ids),
+            AgentEvaluationCase.status == "PENDING",
+        ).update(
+            {
+                "status": "FAILED",
+                "error_message": error_message,
+                "update_time": update_time,
+            },
+            synchronize_session=False,
+        )
+        session.query(AgentEvaluation).filter(
+            AgentEvaluation.agent_evaluation_id.in_(pending_ids),
+            AgentEvaluation.status == EvalRunStatus.PENDING,
+            AgentEvaluation.delete_flag == "N",
+        ).update(
+            {
+                "status": EvalRunStatus.FAILED,
+                "error_message": error_message,
+                "update_time": update_time,
+            },
+            synchronize_session=False,
+        )
+        session.commit()
+        return len(pending_ids)
+
+
+def list_dispatchable_pending_runs() -> list[dict[str, Any]]:
+    """Return pending evaluations that already have a durable case set."""
+    with get_db_session() as session:
+        rows = (
+            session.query(AgentEvaluation)
+            .filter(
+                AgentEvaluation.status == EvalRunStatus.PENDING,
+                AgentEvaluation.evaluation_set_id > 0,
+                AgentEvaluation.delete_flag == "N",
+            )
+            .order_by(AgentEvaluation.create_time.asc())
+            .all()
+        )
+        return [as_dict(row) for row in rows]
 
 
 def count_active_runs(tenant_id: str) -> int:

@@ -146,6 +146,9 @@ _evaluation_set_db_mock.soft_delete_evaluation_set = MagicMock()
 # ---- 补齐 agent_evaluation_service.py import 的所有函数（L56-L61）----
 _evaluation_set_db_mock.create_evaluation_set = MagicMock(return_value={"evaluation_set_id": 1})
 _evaluation_set_db_mock.get_evaluation_set_cases_all = MagicMock(return_value=[])
+_evaluation_set_db_mock.materialize_virtual_evaluation_set_for_run = MagicMock(
+    return_value=1
+)
 _evaluation_set_db_mock.insert_evaluation_set_cases = MagicMock(return_value=0)
 _evaluation_set_db_mock.update_evaluation_set_case_count = MagicMock()
 _evaluation_set_db_mock.hard_delete_evaluation_set = MagicMock()
@@ -2300,11 +2303,9 @@ class TestSetupNoSetAndExecute:
 
         service_module.get_db_session = _gs
         service_module._generate_test_queries = MagicMock(return_value=["q1", "q2"])
-        service_module.create_evaluation_set = MagicMock(
-            return_value={"evaluation_set_id": 7}
+        service_module.materialize_virtual_evaluation_set_for_run = MagicMock(
+            return_value=7
         )
-        service_module.insert_evaluation_set_cases = MagicMock()
-        service_module.update_evaluation_set_case_count = MagicMock()
         service_module.get_evaluation_set_cases_all = MagicMock(
             return_value=[{"evaluation_set_case_id": 1}]
         )
@@ -2321,17 +2322,19 @@ class TestSetupNoSetAndExecute:
         # Judge model is itself an LLM -> used as-is for generation.
         assert service_module._generate_test_queries.call_args.kwargs["model_id"] == 99
         assert service_module._generate_test_queries.call_args.kwargs["query_count"] == 5
-        service_module.create_evaluation_set.assert_called_once()
+        service_module.materialize_virtual_evaluation_set_for_run.assert_called_once()
         service_module._dispatch_agent_evaluation_run.assert_called_once_with(
             agent_evaluation_id=10,
             user_id="u1",
             tenant_id="t1",
         )
-        # Second session (run update) wrote set id + total.
-        assert len(sessions) == 2
-        update_kw = sessions[-1].updates[-1][0][0]
-        assert update_kw["evaluation_set_id"] == 7
-        assert update_kw["progress_total"] == 2
+        # The virtual set and run link are now committed in one DB transaction.
+        assert len(sessions) == 1
+        materialize_kw = (
+            service_module.materialize_virtual_evaluation_set_for_run.call_args.kwargs
+        )
+        assert materialize_kw["agent_evaluation_id"] == 10
+        assert len(materialize_kw["cases"]) == 2
 
     def test_judge_not_llm_falls_back_to_newest_llm(self, service_module):
         models = [
@@ -2361,9 +2364,9 @@ class TestSetupNoSetAndExecute:
 
         service_module.get_db_session = _flaky_gs
         service_module._generate_test_queries = MagicMock(return_value=["q1"])
-        service_module.create_evaluation_set = MagicMock(return_value={"evaluation_set_id": 1})
-        service_module.insert_evaluation_set_cases = MagicMock()
-        service_module.update_evaluation_set_case_count = MagicMock()
+        service_module.materialize_virtual_evaluation_set_for_run = MagicMock(
+            return_value=1
+        )
         service_module.get_evaluation_set_cases_all = MagicMock(return_value=[])
         service_module.create_agent_evaluation_cases = MagicMock()
         service_module._dispatch_agent_evaluation_run = MagicMock()
