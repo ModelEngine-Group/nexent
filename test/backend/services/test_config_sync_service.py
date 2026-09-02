@@ -69,7 +69,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         load_config_impl,
         build_models_config,
         build_app_config,
-        build_model_config
+        build_model_config,
+        get_model_id_for_config,
     )
 
 
@@ -1765,3 +1766,82 @@ class TestBuildModelConfig:
         assert result["apiConfig"]["apiKey"] == "test-key"
         # Should have dimension since model_type contains 'embedding'
         assert result["dimension"] == 512
+
+
+class TestAdditionalConfigSyncCoverage:
+    """Cover lookup and application configuration persistence branches."""
+
+    def test_get_model_id_for_config_prefers_matching_model_record(self, service_mocks):
+        service_mocks["get_model_records"].return_value = [{"model_id": 42}]
+
+        result = get_model_id_for_config("embedding", "text-embedding", "tenant-id")
+
+        assert result == 42
+        service_mocks["get_model_records"].assert_called_once_with(
+            {"display_name": "text-embedding", "model_type": "embedding"},
+            "tenant-id",
+        )
+        service_mocks["get_model_id"].assert_not_called()
+
+    def test_get_model_id_for_config_returns_none_for_empty_display_name(
+        self,
+        service_mocks,
+    ):
+        assert get_model_id_for_config("embedding", "", "tenant-id") is None
+        service_mocks["get_model_records"].assert_not_called()
+        service_mocks["get_model_id"].assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("existing_value", "new_value", "expected_calls"),
+        [
+            (None, "created", [call("user-id", "tenant-id", "CUSTOM_URL", "created")]),
+            ("unchanged", "unchanged", [call("tenant-id", "CUSTOM_URL")]),
+            ("present", "", [call("tenant-id", "CUSTOM_URL")]),
+            (
+                "old",
+                "replacement",
+                [
+                    call("tenant-id", "CUSTOM_URL"),
+                    call("user-id", "tenant-id", "CUSTOM_URL", "replacement"),
+                ],
+            ),
+        ],
+    )
+    async def test_save_config_impl_persists_app_configuration_changes(
+        self,
+        service_mocks,
+        existing_value,
+        new_value,
+        expected_calls,
+    ):
+        config = MagicMock()
+        config.model_dump.return_value = {
+            "app": {"customUrl": new_value},
+            "models": {},
+        }
+        service_mocks["get_env_key"].return_value = "CUSTOM_URL"
+        service_mocks["safe_value"].side_effect = lambda value: value or ""
+        service_mocks["tenant_config_manager"].load_config.return_value = (
+            {} if existing_value is None else {"CUSTOM_URL": existing_value}
+        )
+
+        await save_config_impl(config, "tenant-id", "user-id")
+
+        manager = service_mocks["tenant_config_manager"]
+        if existing_value == new_value:
+            manager.update_single_config.assert_has_calls(expected_calls)
+            manager.delete_single_config.assert_not_called()
+            manager.set_single_config.assert_not_called()
+        elif existing_value == "":
+            manager.delete_single_config.assert_has_calls(expected_calls)
+            manager.update_single_config.assert_not_called()
+            manager.set_single_config.assert_not_called()
+        elif existing_value is None:
+            manager.set_single_config.assert_has_calls(expected_calls)
+            manager.delete_single_config.assert_not_called()
+            manager.update_single_config.assert_not_called()
+        else:
+            manager.delete_single_config.assert_has_calls(expected_calls[:1])
+            manager.set_single_config.assert_has_calls(expected_calls[1:])
+            manager.update_single_config.assert_not_called()
