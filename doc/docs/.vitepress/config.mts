@@ -111,6 +111,14 @@ export default defineConfig({
                     link: "/en/user-guide/agent-development/agent-configuration",
                     items: [
                       {
+                        text: "Add External A2A Agents",
+                        link: "/en/user-guide/agent-development/a2a-external",
+                      },
+                      {
+                        text: "Publish as A2A Agent",
+                        link: "/en/user-guide/agent-development/a2a-publish",
+                      },
+                      {
                         text: "Local Tools",
                         link: "/en/user-guide/local-tools/",
                       },
@@ -382,6 +390,14 @@ export default defineConfig({
                     text: "智能体配置",
                     link: "/zh/user-guide/agent-development/agent-configuration",
                     items: [
+                      {
+                        text: "添加外部 A2A Agent",
+                        link: "/zh/user-guide/agent-development/a2a-external",
+                      },
+                      {
+                        text: "发布为 A2A Agent",
+                        link: "/zh/user-guide/agent-development/a2a-publish",
+                      },
                       {
                         text: "本地工具",
                         link: "/zh/user-guide/local-tools/",

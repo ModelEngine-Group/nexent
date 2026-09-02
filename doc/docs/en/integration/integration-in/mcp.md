@@ -233,6 +233,7 @@ See [MCP Tool Development](../../backend/tools/mcp) documentation.
 
 ## Related Resources
 
+- [MCP Repository](../../user-guide/resource-repository/mcp-repository) — Browse, install, and manage MCP services
 - [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Use MCP tools in Agents
 - [MCP Tool Development](../../backend/tools/mcp) — Develop custom MCP services
 - [MCP Ecosystem](../../mcp-ecosystem/overview) — Learn more about MCP ecosystem

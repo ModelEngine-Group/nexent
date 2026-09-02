@@ -200,7 +200,6 @@ See [Northbound API](./northbound-api) for complete API parameters, request/resp
 
 ## Related Resources
 
-- [Agent Export](./agents-export) — Export Agent configuration to JSON/ZIP
+- [Publish as A2A Agent](../../user-guide/agent-development/a2a-publish) — Full guide for publishing and calling A2A agents
 - [Northbound API](./northbound-api) — Northbound RESTful API detailed reference
-- [Agent Integration](../integration-in/agents) — Integrate third-party Agents via A2A protocol
 - [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Agent configuration details

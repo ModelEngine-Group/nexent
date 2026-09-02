@@ -233,6 +233,7 @@ ModelScope 提供了丰富的 MCP 服务，以下是接入 GitHub MCP 的示例�
 
 ## 🔗 相关资源
 
+- [MCP 仓库](../../user-guide/resource-repository/mcp-repository) — 浏览、安装和管理 MCP 服务的详细指导
 - [智能体配置](../../user-guide/agent-development/agent-configuration) — 在智能体中使用 MCP 工具
 - [MCP 工具开发](../../backend/tools/mcp) — 开发自定义 MCP 服务
 - [MCP 生态系统](../../mcp-ecosystem/overview) — 了解更多 MCP 生态

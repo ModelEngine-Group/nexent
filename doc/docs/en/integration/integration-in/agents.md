@@ -232,5 +232,5 @@ See the [A2A Protocol Specification](https://github.com/model-context-protocol/s
 
 ## Related Resources
 
-- [Agent Configuration](../../user-guide/agent-development/agent-configuration) — Configure collaborator Agents in Agents
+- [Add External A2A Agent](../../user-guide/agent-development/a2a-external) — Detailed instructions for adding external A2A Agent
 - [A2A Protocol Specification](https://github.com/model-context-protocol/specification) — Official protocol documentation

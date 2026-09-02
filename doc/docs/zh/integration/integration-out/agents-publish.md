@@ -200,7 +200,6 @@ Authorization: Bearer {access_key}
 
 ## 🔗 相关资源
 
-- [Agent 智能体导出](./agents-export) — 导出 Agent 配置到 JSON/ZIP
+- [发布为 A2A Agent](../../user-guide/agent-development/a2a-publish) — 发布和调用 A2A Agent 的完整操作指南
 - [调用 Agent 北向 API](./northbound-api) — 北向 RESTful API 详细参考
-- [Agent 接入](../integration-in/agents) — 通过 A2A 协议接入第三方 Agent
 - [智能体配置](../../user-guide/agent-development/agent-configuration) — Agent 配置详解
