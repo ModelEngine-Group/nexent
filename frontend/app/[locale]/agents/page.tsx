@@ -162,6 +162,8 @@ function AgentSetupContent() {
     flowAgentId === currentAgentId &&
     !isRequestedAgentLoading &&
     (isFormLocked || isComposerDisabled);
+  const showOptimizationSuggestions =
+    !isRequestedAgentLoading && !isNl2AgentUnavailable;
 
   useEffect(() => {
     resetFlow(currentAgentId);
@@ -208,9 +210,7 @@ function AgentSetupContent() {
 
   const synchronizeCompletion = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId, {
-        section: "conversation_guide",
-      }).then((synchronized) => {
+      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
         if (synchronized) markCompletionSynced(agentId);
         else markCompletionSyncFailed(agentId);
       });
@@ -371,6 +371,7 @@ function AgentSetupContent() {
                 ref={nl2AgentChatPanelRef}
                 key={sessionGeneration}
                 agentId={currentAgentId}
+                showOptimizationSuggestions={showOptimizationSuggestions}
                 disabled={
                   isComposerDisabled ||
                   isRequestedAgentLoading ||

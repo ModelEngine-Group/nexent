@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from apps.health_app import install_health_contract
 from consts.error_code import ERROR_CODE_HTTP_STATUS, ErrorCode
 from consts.exceptions import (
     AppException,
@@ -68,6 +69,9 @@ def create_app(
 
     # Register exception handlers
     register_exception_handlers(app)
+
+    # Process health endpoints never poll external dependencies.
+    install_health_contract(app)
 
     # Initialize monitoring if enabled
     if enable_monitoring:

@@ -728,7 +728,7 @@ NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
 )
 """Docker named volume shared by the runtime and the system-scoped sandbox."""
 
-NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
+NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "2048"))
 
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
 

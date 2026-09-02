@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Button, Form, Tooltip } from "antd";
+import { App, Alert, Button, Form, Tooltip } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
@@ -11,6 +11,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 import { useSaveGuard } from "@/hooks/agent/useSaveGuard";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
@@ -33,7 +35,7 @@ import KnowledgeBaseConfig, {
 import AgentVersionPubulishModal from "./versions/AgentVersionPubulishModal";
 
 import {
-  ChevronDown,
+  ChevronRight,
   Info,
   Cpu,
   Wrench,
@@ -45,6 +47,7 @@ import {
   Bug,
   LockOpen,
   Rocket,
+  RefreshCw,
 } from "lucide-react";
 
 type AgentConfigTab = "basic" | "advanced";
@@ -100,9 +103,9 @@ function ConfigSection({
         className="overflow-hidden rounded-lg border border-gray-200 bg-white"
       >
         <div className="flex items-center gap-4  transition-colors hover:bg-gray-50 px-2">
-          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center px-2 py-4 gap-4 text-left">
+          <CollapsibleTrigger className="group flex min-w-0 flex-1 cursor-pointer select-none items-center px-2 py-4 gap-4 text-left">
             <div className="flex min-w-0 items-center gap-2">
-              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+              <ChevronRight className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-90" />
 
               <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-gray-900">
                 {icon}
@@ -145,6 +148,7 @@ export default function AgentConfig({
   const { t } = useTranslation("common");
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [isRefreshingAvailability, setIsRefreshingAvailability] = useState(false);
   const [activeConfigTab, setActiveConfigTab] =
     useState<AgentConfigTab>("basic");
   const [openSections, setOpenSections] = useState<
@@ -161,6 +165,12 @@ export default function AgentConfig({
   const isReadOnly = useAgentReadOnly();
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
+  const unavailableReasonLabels = getUnavailableReasonLabels(
+    Array.isArray(editedAgent?.unavailable_reasons)
+      ? editedAgent.unavailable_reasons.filter(Boolean)
+      : [],
+    t
+  );
   const serverSnapshotRevision = useAgentStore(
     (state) => state.serverSnapshotRevision
   );
@@ -169,6 +179,24 @@ export default function AgentConfig({
   const { message } = App.useApp();
   const saveError = useAgentStore((state) => state.saveError);
   const clearSaveError = useAgentStore((state) => state.clearSaveError);
+  const replaceServerSnapshot = useAgentStore((state) => state.replaceServerSnapshot);
+
+  const handleRefreshAvailability = useCallback(async () => {
+    if (!agentId || isRefreshingAvailability) return;
+    setIsRefreshingAvailability(true);
+    try {
+      const result = await searchAgentInfo(agentId);
+      if (result.success && result.data) {
+        replaceServerSnapshot(agentId, result.data);
+      } else {
+        message.error(result.message || t("agent.config.refreshAvailabilityFailed"));
+      }
+    } catch {
+      message.error(t("agent.config.refreshAvailabilityFailed"));
+    } finally {
+      setIsRefreshingAvailability(false);
+    }
+  }, [agentId, isRefreshingAvailability, message, replaceServerSnapshot, t]);
 
   useEffect(() => {
     setActiveConfigTab("basic");
@@ -322,10 +350,37 @@ export default function AgentConfig({
             {t("agent.config.tab.advanced")}
           </TabsTrigger>
         </TabsList>
+        <div className="mt-2">
+          {unavailableReasonLabels.length > 0 && (
+            <Alert
+              className="mt-2"
+              type="warning"
+              showIcon
+              title={
+                <div className="">
+                  <span className="flex justify-between items-center gap-2">
+                    <span>{`${t("agent.unavailable")}${unavailableReasonLabels.join("、")}`}</span>
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RefreshCw size={12} className={isRefreshingAvailability ? "animate-spin" : ""} />}
+                      onClick={handleRefreshAvailability}
+                      disabled={isRefreshingAvailability}
+                      loading={isRefreshingAvailability}
+                    >
+                      {t("agent.config.refreshAvailability")}
+                    </Button>
+                  </span>
+                </div>
+              }
+            />
+          )}
+        </div>
+
 
         <TabsContent
           value="basic"
-          className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-2"
         >
           {/* 1. 展示信息 */}
           <ConfigSection
