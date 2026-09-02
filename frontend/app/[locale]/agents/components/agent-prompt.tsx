@@ -140,12 +140,12 @@ export default function AgentPrompt() {
                 });
               }}
               maxTagCount={3}
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? "")
-                  .toLowerCase()
-                  .includes(input.toLowerCase())
-              }
+              showSearch={{
+                filterOption: (input, option) =>
+                  (option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase()),
+              }}
               disabled={!canManage && !isSpeedMode}
             />
           </Form.Item>
