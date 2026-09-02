@@ -338,6 +338,22 @@ def test_long_term_memory_documents_are_structured_memory_items():
     assert memory_item.metadata["authority"] == "retrieved"
 
 
+def test_long_term_memory_uses_dreaming_version_id_when_version_id_is_missing():
+    items = build_context_inputs(
+        long_term_memory_items=[{
+            "memory": "Generated memory", "memory_level": "user",
+            "dreaming_version_id": 13, "source": "dreaming",
+        }],
+    )
+
+    memory_item = next(item for item in items if item.id == "memory:0")
+
+    assert memory_item.metadata["version_id"] == 13
+    assert memory_item.metadata["memory_type"] == "long_term"
+    assert memory_item.metadata["scope"] == "user"
+    assert memory_item.metadata["source"] == "dreaming"
+
+
 def test_group_rendering_uses_only_selected_tool_items():
     items = normalize_context_inputs(build_context_inputs(
         tools={
