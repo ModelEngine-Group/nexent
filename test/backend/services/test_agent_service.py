@@ -7970,7 +7970,13 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Track import order and relationship creation
     imported_ids = []
 
-    async def fake_import_agent_by_agent_id(import_agent_info, tenant_id, user_id, skip_duplicate_regeneration=False):
+    async def fake_import_agent_by_agent_id(
+        import_agent_info,
+        tenant_id,
+        user_id,
+        skip_duplicate_regeneration=False,
+        resolve_name_conflicts=False,
+    ):
         # Assign synthetic new IDs based on source id
         new_id = 100 + import_agent_info.agent_id
         imported_ids.append(import_agent_info.agent_id)
@@ -9107,6 +9113,78 @@ async def test_get_agent_info_impl_with_unavailable_agent(
 
     assert result["is_available"] is False
     assert result["unavailable_reasons"] == ["tool_unavailable"]
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.create_agent')
+@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
+async def test_import_agent_by_agent_id_resolves_name_and_display_name_conflicts_for_repository_copy(
+    mock_query_agents,
+    mock_resolve_model,
+    mock_query_all_tools,
+    mock_create_agent,
+    mock_create_tool,
+):
+    mock_query_agents.side_effect = [
+        [{
+            "agent_id": 1,
+            "name": "duplicate_name",
+            "display_name": "Duplicate Display",
+        }],
+        [{
+            "agent_id": 2,
+            "name": "existing_agent",
+            "display_name": "Existing Agent",
+        }],
+    ]
+    mock_query_all_tools.return_value = []
+    mock_resolve_model.side_effect = [[1], [2], [1], [2]]
+    mock_create_agent.return_value = {"agent_id": 456}
+
+    agent_info = ExportAndImportAgentInfo(
+        agent_id=123,
+        name="duplicate_name",
+        display_name="Duplicate Display",
+        description="Test",
+        business_description="Test business",
+        max_steps=5,
+        provide_run_summary=True,
+        duty_prompt="",
+        constraint_prompt="",
+        few_shots_prompt="",
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+        model_id=1,
+        model_name="Model1",
+        business_logic_model_id=2,
+        business_logic_model_name="Model2",
+    )
+
+    await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        resolve_name_conflicts=True,
+    )
+
+    created_agent = mock_create_agent.call_args.kwargs["agent_info"]
+    assert created_agent["name"] == "duplicate_name_1"
+    assert created_agent["display_name"] == "Duplicate Display_1"
+
+    await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        resolve_name_conflicts=True,
+    )
+
+    created_agent = mock_create_agent.call_args.kwargs["agent_info"]
+    assert created_agent["name"] == "duplicate_name"
+    assert created_agent["display_name"] == "Duplicate Display"
 
 
 @pytest.mark.asyncio
