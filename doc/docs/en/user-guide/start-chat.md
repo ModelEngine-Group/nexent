@@ -390,8 +390,6 @@ Key terms in the matched chunk are highlighted in two colors:
 
 With highlighting, you can see the exact fragments a response is based on without reading the entire source document. Knowledge base files can still be previewed or downloaded, and web sources can still be opened via the original link.
 
-![Citation markers and matched fragment example](./assets/start-chat/retrieval-citation-sentence-scope.png)
-
 > **Note**: Clicking a citation number to locate and highlight the matched fragment is disabled by default; deployers can enable it by setting `ENABLE_CITATION_CLICK_HIGHLIGHT` (`frontend/const/citation.ts`) to `true`.
 
 ## 5. Image Processing

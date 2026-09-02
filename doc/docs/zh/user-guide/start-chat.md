@@ -390,8 +390,6 @@ Nexent 智能体基于 [smolagents](https://github.com/huggingface/smolagents) �
 
 借助高亮，用户无需阅读整篇原始文档，即可查看回答所依据的具体片段。知识库文件仍可预览或下载，网页来源仍可打开原始链接。
 
-![引用标记与命中片段示例](./assets/start-chat/retrieval-citation-sentence-scope.png)
-
 > **说明**：点击编号后定位并高亮命中片段的行为当前默认关闭，可由部署方将前端配置 `ENABLE_CITATION_CLICK_HIGHLIGHT`（`frontend/const/citation.ts`）设为 `true` 开启。
 
 ## 五、图像处理功能
