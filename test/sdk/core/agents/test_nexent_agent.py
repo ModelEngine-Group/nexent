@@ -4483,6 +4483,7 @@ class TestCreateBuiltinTool:
                 tenant_id="tenant_456",
                 version_no=1,
                 observer=nexent_agent_instance.observer,
+                authorized_skill_names=None,
             )
 
 
@@ -4627,6 +4628,9 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         assert "Run workspace" in result
         assert "Use bare relative paths" in result
         assert "not 'outputs/report.pdf'" in result
+        assert "script_path='outputs/build.js'" in result
+        assert "Direct subprocess, os.system, and shell calls" in result
+        assert "sys.executable -m pip install" in result
         push.assert_called_once_with()
 
     def test_initialize_sandbox_workspaces_sets_cwd_for_every_docker_kernel(
@@ -4982,7 +4986,18 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         skill_file = workspace / "skills" / "probe" / "scripts" / "probe.py"
         uploaded_file = workspace / "outputs" / "uploaded.txt"
         failed_file = workspace / "outputs" / "failed.txt"
-        for path in (input_file, skill_file, uploaded_file, failed_file):
+        dependency_file = workspace / "outputs" / "app" / "node_modules" / "pkg" / "index.js"
+        cache_file = workspace / "outputs" / "app" / ".parcel-cache" / "state"
+        virtualenv_file = workspace / "outputs" / ".venv" / "lib" / "module.py"
+        for path in (
+            input_file,
+            skill_file,
+            uploaded_file,
+            failed_file,
+            dependency_file,
+            cache_file,
+            virtualenv_file,
+        ):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("data", encoding="utf-8")
         upload_tool = MagicMock()
@@ -6506,6 +6521,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         mock_sandbox_config.level = SandboxLevel(level_value)
         mock_sandbox_config.scope = MagicMock()
         mock_sandbox_config.scope.value = scope_value
+        mock_sandbox_config.network_disabled = True
         return mock_sandbox_config
 
     def test_sandbox_build_local_level_skips_warmup(self, nexent_agent_instance, mock_model_config, mock_core_agent):
@@ -6643,6 +6659,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             executor,
             timeout_seconds=300,
             workspace_path=nexent_agent_instance.workspace_path,
+            network_enabled=False,
         )
         tool.bind_execution_backend.assert_called_once_with(
             runner,

@@ -13,6 +13,7 @@ DEFAULT_PLATFORM="amd64"
 DEFAULT_OUTPUT_DIR="$PROJECT_ROOT/offline-package"
 DEFAULT_INCLUDE_SOURCE="false"
 DEFAULT_INCLUDE_SANDBOX="true"
+DEFAULT_INCLUDE_SANDBOX_FULL="false"
 DEFAULT_TARGET="all"
 DEFAULT_COMPRESS="false"
 
@@ -21,6 +22,7 @@ PLATFORM=""
 OUTPUT_DIR=""
 INCLUDE_SOURCE=""
 INCLUDE_SANDBOX=""
+INCLUDE_SANDBOX_FULL=""
 TARGET=""
 COMPRESS=""
 PACKAGE_NAME=""
@@ -57,6 +59,9 @@ show_help() {
     echo "                           默认：$DEFAULT_INCLUDE_SOURCE"
     echo "  --include-sandbox BOOL  是否包含 Sandbox 镜像（true 或 false）"
     echo "                           默认：$DEFAULT_INCLUDE_SANDBOX"
+    echo "  --include-sandbox-full BOOL"
+    echo "                           是否包含可选的完整 Sandbox 镜像（true 或 false）"
+    echo "                           默认：$DEFAULT_INCLUDE_SANDBOX_FULL"
     echo "  --target TARGET         docker、k8s 或 all"
     echo "                           默认：$DEFAULT_TARGET"
     echo "  --compress BOOL         构建后是否创建 zip 压缩包（true 或 false）"
@@ -95,6 +100,9 @@ show_help() {
   echo "                           Default: $DEFAULT_INCLUDE_SOURCE"
   echo "  --include-sandbox BOOL  Include the Sandbox image (true or false)"
   echo "                           Default: $DEFAULT_INCLUDE_SANDBOX"
+  echo "  --include-sandbox-full BOOL"
+  echo "                           Include the optional full Sandbox image (true or false)"
+  echo "                           Default: $DEFAULT_INCLUDE_SANDBOX_FULL"
   echo "  --target TARGET         docker, k8s, or all"
   echo "                           Default: $DEFAULT_TARGET"
   echo "  --compress BOOL        Create zip archive after package build (true or false)"
@@ -140,6 +148,10 @@ parse_args() {
         ;;
       --include-sandbox)
         INCLUDE_SANDBOX="$2"
+        shift 2
+        ;;
+      --include-sandbox-full)
+        INCLUDE_SANDBOX_FULL="$2"
         shift 2
         ;;
       --target)
@@ -191,6 +203,7 @@ parse_args() {
   OUTPUT_DIR="${OUTPUT_DIR:-$DEFAULT_OUTPUT_DIR}"
   INCLUDE_SOURCE="${INCLUDE_SOURCE:-$DEFAULT_INCLUDE_SOURCE}"
   INCLUDE_SANDBOX="${INCLUDE_SANDBOX:-$DEFAULT_INCLUDE_SANDBOX}"
+  INCLUDE_SANDBOX_FULL="${INCLUDE_SANDBOX_FULL:-$DEFAULT_INCLUDE_SANDBOX_FULL}"
   TARGET="${TARGET:-$DEFAULT_TARGET}"
   COMPRESS="${COMPRESS:-$DEFAULT_COMPRESS}"
   PACKAGE_NAME="${PACKAGE_NAME%.zip}"
@@ -224,6 +237,14 @@ parse_args() {
       echo "错误：Include sandbox 必须是 'true' 或 'false'"
     else
       echo "Error: Include sandbox must be 'true' or 'false'"
+    fi
+    exit 1
+  fi
+  if [[ "$INCLUDE_SANDBOX_FULL" != "true" && "$INCLUDE_SANDBOX_FULL" != "false" ]]; then
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "错误：Include full sandbox 必须是 'true' 或 'false'"
+    else
+      echo "Error: Include full sandbox must be 'true' or 'false'"
     fi
     exit 1
   fi
@@ -261,6 +282,7 @@ show_dry_run_plan() {
     echo "输出目录：$OUTPUT_DIR"
     echo "包含源码：$INCLUDE_SOURCE"
     echo "包含 Sandbox 镜像：$INCLUDE_SANDBOX"
+    echo "包含完整 Sandbox 镜像：$INCLUDE_SANDBOX_FULL"
     echo "目标：$TARGET"
     echo "压缩：$COMPRESS"
     echo "最终包名称：$(offline_package_name).zip"
@@ -282,6 +304,7 @@ show_dry_run_plan() {
     echo "Output directory: $OUTPUT_DIR"
     echo "Include source: $INCLUDE_SOURCE"
     echo "Include Sandbox image: $INCLUDE_SANDBOX"
+    echo "Include full Sandbox image: $INCLUDE_SANDBOX_FULL"
     echo "Target: $TARGET"
     echo "Compress: $COMPRESS"
     echo "Package name: $(offline_package_name).zip"
@@ -304,7 +327,14 @@ get_nexent_images() {
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && echo "$NEXENT_DATA_PROCESS_IMAGE"
   deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && echo "$OPENSSH_SERVER_IMAGE"
   [ "$INCLUDE_SANDBOX" = "true" ] && echo "$NEXENT_SANDBOX_IMAGE"
+  [ "$INCLUDE_SANDBOX_FULL" = "true" ] && full_sandbox_image
   true
+}
+
+full_sandbox_image() {
+  local image_prefix="${NEXENT_SANDBOX_IMAGE%nexent-sandbox:*}"
+  local image_tag="${NEXENT_SANDBOX_IMAGE##*:}"
+  echo "${image_prefix}nexent-sandbox-full:${image_tag}"
 }
 
 get_third_party_images() {
@@ -697,6 +727,7 @@ create_manifest() {
     echo "target: \"$TARGET\""
     echo "components: \"$DEPLOYMENT_COMPONENTS\""
     echo "includeSandbox: \"$INCLUDE_SANDBOX\""
+    echo "includeFullSandbox: \"$INCLUDE_SANDBOX_FULL\""
     echo "imageSource: \"$DEPLOYMENT_IMAGE_SOURCE\""
     echo "imageRegistryPrefix: \"$DEPLOYMENT_IMAGE_REGISTRY_PREFIX\""
     echo "images:"
@@ -792,6 +823,8 @@ main() {
   echo "Platform: $PLATFORM"
   echo "Output directory: $OUTPUT_DIR"
   echo "Include source: $INCLUDE_SOURCE"
+  echo "Include Sandbox image: $INCLUDE_SANDBOX"
+  echo "Include full Sandbox image: $INCLUDE_SANDBOX_FULL"
   echo "Target: $TARGET"
   echo "Compress: $COMPRESS"
   echo "Package name: $(offline_package_name).zip"

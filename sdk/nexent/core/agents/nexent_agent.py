@@ -53,6 +53,17 @@ def get_local_python_authorized_imports() -> List[str]:
 
 logger = logging.getLogger(__name__)
 
+_WORKSPACE_UPLOAD_EXCLUDED_DIRS = {
+    ".cache",
+    ".npm",
+    ".parcel-cache",
+    ".pnpm-store",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
+
 
 def cleanup_run_workspace(
     workspace_path: str | None,
@@ -520,6 +531,7 @@ class NexentAgent:
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 observer=self.observer,
+                authorized_skill_names=params.get("authorized_skill_names"),
             )
             if params.get("workspace_path"):
                 kwargs["workspace_path"] = params["workspace_path"]
@@ -823,6 +835,7 @@ class NexentAgent:
                         python_executor,
                         timeout_seconds=skill_timeout,
                         workspace_path=self.workspace_path,
+                        network_enabled=not self.sandbox_config.network_disabled,
                     )
                     for tool in tool_list:
                         bind_backend = getattr(tool, "bind_execution_backend", None)
@@ -1207,6 +1220,18 @@ class NexentAgent:
             "The code executor already runs in that outputs directory. Use bare relative "
             "paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an "
             "outputs/outputs directory.\n"
+            "Exception: run_skill_script(source='workspace') resolves script_path from the "
+            "run workspace root. If code writes a generated script as bare 'build.js', call "
+            "run_skill_script with script_path='outputs/build.js'. The generated script itself "
+            "still writes output artifacts with bare filenames because its CWD is outputs.\n"
+            "Direct subprocess, os.system, and shell calls for system commands are blocked by "
+            "the code executor. Use run_skill_script with a skill-bundled wrapper, or use a "
+            "shell-free Python/Node.js API instead. When sandbox networking is enabled, only a "
+            "shell-free argv call to sys.executable -m pip install is permitted for dependency "
+            "installation.\n"
+            "For skill-creator output packages, create the new skill under outputs/<new-skill> "
+            "with normal code-executor file APIs; write_skill_file edits installed tenant skills "
+            "and does not create files in this run workspace.\n"
             "Files created there are uploaded to MinIO automatically when the run finishes."
         )
         if file_lines:
@@ -1413,6 +1438,8 @@ class NexentAgent:
                 continue
             relative = path.relative_to(workspace)
             if relative.parts and relative.parts[0] in {"inputs", "skills"}:
+                continue
+            if any(part in _WORKSPACE_UPLOAD_EXCLUDED_DIRS for part in relative.parts[:-1]):
                 continue
             normalized = os.path.normcase(os.path.abspath(str(path)))
             if normalized in uploaded_paths:
