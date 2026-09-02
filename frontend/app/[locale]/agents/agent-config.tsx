@@ -62,6 +62,13 @@ type ConfigSectionKey =
   | "conversation_guide"
   | "guardrail";
 
+const BASIC_CONFIG_SECTIONS = new Set<ConfigSectionKey>([
+  "display_info",
+  "role_model",
+  "knowledge_base",
+  "conversation_guide",
+]);
+
 const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   display_info: true,
   role_model: true,
@@ -157,8 +164,12 @@ export default function AgentConfig({
   const displayInfoSectionRef = useRef<HTMLDivElement>(null);
   const roleModelSectionRef = useRef<HTMLDivElement>(null);
   const toolsSkillsSectionRef = useRef<HTMLDivElement>(null);
+  const runStrategySectionRef = useRef<HTMLDivElement>(null);
+  const publishAttributesSectionRef = useRef<HTMLDivElement>(null);
+  const collaborativeAgentsSectionRef = useRef<HTMLDivElement>(null);
   const knowledgeBaseSectionRef = useRef<HTMLDivElement>(null);
   const conversationGuideSectionRef = useRef<HTMLDivElement>(null);
+  const guardrailSectionRef = useRef<HTMLDivElement>(null);
   const lastScrolledRequestRef = useRef<string | null>(null);
   const { configFocusRequest } = useNl2AgentFlow();
 
@@ -217,10 +228,7 @@ export default function AgentConfig({
 
     const { requestId, target } = configFocusRequest;
     setActiveConfigTab(
-      target.section === "conversation_guide" ||
-        target.section === "knowledge_base"
-        ? "advanced"
-        : "basic"
+      BASIC_CONFIG_SECTIONS.has(target.section) ? "basic" : "advanced"
     );
     setOpenSections((current) =>
       current[target.section] ? current : { ...current, [target.section]: true }
@@ -230,16 +238,18 @@ export default function AgentConfig({
       const requestKey = `${configFocusRequest.agentId}:${requestId}`;
       if (lastScrolledRequestRef.current === requestKey) return;
 
-      const sectionElement =
-        target.section === "display_info"
-          ? displayInfoSectionRef.current
-          : target.section === "role_model"
-            ? roleModelSectionRef.current
-            : target.section === "tools_skills"
-              ? toolsSkillsSectionRef.current
-              : target.section === "knowledge_base"
-                ? knowledgeBaseSectionRef.current
-                : conversationGuideSectionRef.current;
+      const sectionRefs: Record<ConfigSectionKey, React.RefObject<HTMLDivElement | null>> = {
+        display_info: displayInfoSectionRef,
+        role_model: roleModelSectionRef,
+        tools_skills: toolsSkillsSectionRef,
+        run_strategy: runStrategySectionRef,
+        publish_attributes: publishAttributesSectionRef,
+        collaborative_agents: collaborativeAgentsSectionRef,
+        knowledge_base: knowledgeBaseSectionRef,
+        conversation_guide: conversationGuideSectionRef,
+        guardrail: guardrailSectionRef,
+      };
+      const sectionElement = sectionRefs[target.section].current;
       if (!sectionElement) return;
 
       const prefersReducedMotion = window.matchMedia(
@@ -253,7 +263,7 @@ export default function AgentConfig({
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [agentId, configFocusRequest]);
+  }, [activeConfigTab, agentId, configFocusRequest]);
 
   const handleTabChange = useCallback(
     (value: string) => {
@@ -408,68 +418,7 @@ export default function AgentConfig({
             <AgentPrmopt />
           </ConfigSection>
 
-          {/* 3. 工具与技能 */}
-          <ConfigSection
-            title={t("agent.config.section.toolsSkills.title")}
-            description={t("agent.config.section.toolsSkills.description")}
-            icon={<Wrench className="h-4 w-4 shrink-0 text-blue-500" />}
-            open={openSections.tools_skills}
-            onOpenChange={(open) =>
-              handleSectionOpenChange("tools_skills", open)
-            }
-            containerRef={toolsSkillsSectionRef}
-          >
-            <AgentCapability />
-          </ConfigSection>
-
-          {/* 4. 运行策略 */}
-          <ConfigSection
-            title={t("agent.config.section.runStrategy.title")}
-            description={t("agent.config.section.runStrategy.description")}
-            icon={<Play className="h-4 w-4 shrink-0 text-blue-500" />}
-            open={openSections.run_strategy}
-            onOpenChange={(open) =>
-              handleSectionOpenChange("run_strategy", open)
-            }
-          >
-            <AgentRunPolicy />
-          </ConfigSection>
-
-          {/* 5. 发布属性 */}
-          <ConfigSection
-            title={t("agent.config.section.publishAttributes.title")}
-            description={t(
-              "agent.config.section.publishAttributes.description"
-            )}
-            icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
-            open={openSections.publish_attributes}
-            onOpenChange={(open) =>
-              handleSectionOpenChange("publish_attributes", open)
-            }
-          >
-            <AgentDeployment />
-          </ConfigSection>
-        </TabsContent>
-
-        <TabsContent
-          value="advanced"
-          className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
-        >
-          <ConfigSection
-            title={t("agent.config.section.collaborativeAgents.title")}
-            description={t(
-              "agent.config.section.collaborativeAgents.description"
-            )}
-            icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
-            open={openSections.collaborative_agents}
-            onOpenChange={(open) =>
-              handleSectionOpenChange("collaborative_agents", open)
-            }
-            headerActions={<CollaborativeAgentActions />}
-          >
-            <CollaborativeAgent />
-          </ConfigSection>
-
+          {/* 3. 知识库 */}
           <ConfigSection
             title={t("agent.config.section.knowledgeBase.title")}
             description={t("agent.config.section.knowledgeBase.description")}
@@ -484,6 +433,7 @@ export default function AgentConfig({
             <KnowledgeBaseConfig />
           </ConfigSection>
 
+          {/* 4. 开场白 */}
           <ConfigSection
             title={t("agent.config.section.conversationGuide.title")}
             description={t(
@@ -498,13 +448,81 @@ export default function AgentConfig({
           >
             <AgentGuide />
           </ConfigSection>
+        </TabsContent>
 
+        <TabsContent
+          value="advanced"
+          className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
+        >
+          {/* 1. 工具与技能 */}
+          <ConfigSection
+            title={t("agent.config.section.toolsSkills.title")}
+            description={t("agent.config.section.toolsSkills.description")}
+            icon={<Wrench className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.tools_skills}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("tools_skills", open)
+            }
+            containerRef={toolsSkillsSectionRef}
+          >
+            <AgentCapability />
+          </ConfigSection>
+
+          {/* 2. 运行策略 */}
+          <ConfigSection
+            title={t("agent.config.section.runStrategy.title")}
+            description={t("agent.config.section.runStrategy.description")}
+            icon={<Play className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.run_strategy}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("run_strategy", open)
+            }
+            containerRef={runStrategySectionRef}
+          >
+            <AgentRunPolicy />
+          </ConfigSection>
+
+          {/* 3. 发布属性 */}
+          <ConfigSection
+            title={t("agent.config.section.publishAttributes.title")}
+            description={t(
+              "agent.config.section.publishAttributes.description"
+            )}
+            icon={<Globe className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.publish_attributes}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("publish_attributes", open)
+            }
+            containerRef={publishAttributesSectionRef}
+          >
+            <AgentDeployment />
+          </ConfigSection>
+
+          {/* 4. 协同 Agent */}
+          <ConfigSection
+            title={t("agent.config.section.collaborativeAgents.title")}
+            description={t(
+              "agent.config.section.collaborativeAgents.description"
+            )}
+            icon={<Cpu className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.collaborative_agents}
+            onOpenChange={(open) =>
+              handleSectionOpenChange("collaborative_agents", open)
+            }
+            containerRef={collaborativeAgentsSectionRef}
+            headerActions={<CollaborativeAgentActions />}
+          >
+            <CollaborativeAgent />
+          </ConfigSection>
+
+          {/* 5. Guardrail */}
           <ConfigSection
             title={t("agent.config.section.guardrail.title")}
             description={t("agent.config.section.guardrail.description")}
             icon={<ShieldCheck className="h-4 w-4 shrink-0 text-blue-500" />}
             open={openSections.guardrail}
             onOpenChange={(open) => handleSectionOpenChange("guardrail", open)}
+            containerRef={guardrailSectionRef}
             headerActions={<GuardrailConfigActions />}
           >
             <GuardrailConfigContent />
