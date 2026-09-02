@@ -260,7 +260,7 @@ flowchart LR
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | 空 | FastAPI 自动埋点排除 URL，逗号分隔正则 |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span，流式接口建议保持默认 |
-| `OTEL_COLLECTOR_VERSION` | `0.150.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
+| `OTEL_COLLECTOR_VERSION` | `0.151.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
 | `PHOENIX_VERSION` | `15` | 本地 Phoenix 镜像版本 |
 | `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
 | `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
@@ -387,9 +387,9 @@ bash deploy.sh docker --components infrastructure,monitoring --monitoring-provid
 
 部署脚本职责：
 
-- 创建或复用 `nexent-network`。
+- 创建或复用 `nexent_network`（所有 compose 文件统一声明的网络名）。
 - 首次启动时从 `monitoring.env.example` 生成 `monitoring.env`。
-- 根据 `MONITORING_PROVIDER` 或 `--stack` 选择 Docker Compose profile。
+- 根据 `MONITORING_PROVIDER`（或 `--monitoring-provider` 参数）选择 Docker Compose profile。
 - 根据部署形态设置 `OTEL_COLLECTOR_CONFIG_FILE`。
 - Langfuse 本地形态下，如果 `LANGFUSE_OTLP_AUTH_HEADER` 未显式配置，则使用初始化项目的 public/secret key 生成 Basic Auth header。
 - LangSmith 在线形态要求 `LANGSMITH_API_KEY`，启动时会校验该变量，避免 Collector 静默丢弃鉴权失败的 trace。
@@ -509,7 +509,6 @@ Collector trace pipeline 使用 `zipkin` exporter 转发到 `http://zipkin:9411/
 | `llm.token_count.completion` | counter | model | 输出 token 成本 |
 | `llm.error.count` | counter | model、operation | LLM 错误率 |
 | `agent.step.count` | counter | agent、step type、tool | Agent 步骤和工具调用量 |
-| `agent.execution.duration` | histogram | agent、status | Agent 总耗时 |
 | `agent.error.count` | counter | agent、error type | Agent 异常统计 |
 
 ## Agent 运行数据流

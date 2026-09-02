@@ -69,20 +69,30 @@
 
 ```python
 class ToolExample(Tool):
-    name = "tool_name"                    # 工具唯一标识符
-    description = "工具功能描述"          # 详细功能说明
-    inputs = {                           # 输入参数定义
-        "param": {"type": "string", "description": "参数描述"}
+    name = "tool_name"                     # 工具唯一标识符
+    description = "Tool function description"  # 详细功能说明（英文）
+    description_zh = "工具功能描述"        # 详细功能说明（中文）
+    inputs = {                             # 输入参数定义
+        "param": {
+            "type": "string",
+            "description": "Parameter description",
+            "description_zh": "参数描述"
+        }
     }
-    output_type = "string"               # 输出类型
-    category = "search"                  # 工具分类（ToolCategory 枚举值）
-    tool_sign = "b"                      # 工具标识符（ToolSign 枚举值）
+    init_param_descriptions = {            # 构造参数说明（与 __init__ 参数对应）
+        "config_param": {"description": "Config parameter description", "description_zh": "配置参数说明"}
+    }
+    output_type = "string"                 # 输出类型
+    category = "search"                    # 工具分类（ToolCategory 枚举值）
+    tool_sign = "b"                        # 工具标识符（ToolSign 枚举值）
 ```
 
 ### 3. 消息处理机制
 - **ProcessType 枚举**: 使用不同类型区分消息（TOOL, CARD, SEARCH_CONTENT, PICTURE_WEB 等）
 - **Observer 模式**: 通过 MessageObserver 实现实时消息推送
 - **JSON 格式**: 所有消息内容使用 JSON 格式确保一致性
+- **运行状态消息统一发送**: `ProcessType.TOOL` 运行状态消息由 `core_agent.py` 中的 `_wrap_tool_for_observer` 桥接器在每次调用工具时统一发送（并附带 `tool_call_id` 关联上下文）。工具内部不再自行发送 TOOL 消息，只需发送 `CARD`、`SEARCH_CONTENT`、`PICTURE_WEB` 等补充消息
+- **历史遗留**: 早期部分工具（如 SQL 工具基类）仍保留 `running_prompt_zh/en` 属性并在工具内发送 TOOL 消息，新工具不再采用该写法
 
 ### 4. 异常处理策略
 - **统一异常**: 使用 Exception 抛出错误信息
@@ -104,7 +114,7 @@ class ToolExample(Tool):
 ### 属性和方法命名
 - **格式**: 小写字母，单词间用下划线连接
 - **私有方法**: 以单下划线开头（如 `_filter_images`）
-- **示例**: `max_results`, `running_prompt_en`, `_decode_subject`
+- **示例**: `max_results`, `description_zh`, `_decode_subject`
 
 ### 工具标识符规范
 - **tool_sign**: 单字母标识符，用于区分工具来源（如在前端引用标注 `[b0]`、`[a1]` 中标识检索来源）
@@ -137,18 +147,25 @@ logger = logging.getLogger("your_tool_name")
 
 class YourTool(Tool):
     name = "your_tool"
-    description = "工具功能的详细描述，说明适用场景和使用方法"
+    description = "Detailed description of the tool function, including applicable scenarios and usage"
+    description_zh = "工具功能的中文描述，说明适用场景和使用方法"
     inputs = {
         "param1": {
-            "type": "string", 
-            "description": "参数1的详细描述"
+            "type": "string",
+            "description": "Detailed description of parameter 1",
+            "description_zh": "参数1的中文描述"
         },
         "param2": {
-            "type": "integer", 
-            "description": "参数2的详细描述", 
-            "default": 10, 
+            "type": "integer",
+            "description": "Detailed description of parameter 2",
+            "description_zh": "参数2的中文描述",
+            "default": 10,
             "nullable": True
         }
+    }
+    init_param_descriptions = {          # 构造参数说明（与 __init__ 参数对应）
+        "config_param": {"description": "Config parameter description", "description_zh": "配置参数说明"},
+        "optional_param": {"description": "Optional parameter description", "description_zh": "可选参数说明"}
     }
     output_type = "string"
     category = ToolCategory.FILE.value  # 按工具类型选择 ToolCategory 枚举成员
@@ -156,18 +173,14 @@ class YourTool(Tool):
 
     def __init__(
         self,
-        config_param: str = Field(description="配置参数"),
-        observer: MessageObserver = Field(description="消息观察者", default=None, exclude=True),
-        optional_param: int = Field(description="可选参数", default=5)
+        config_param: str = Field(description="Config parameter"),
+        observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
+        optional_param: int = Field(description="Optional parameter", default=5)
     ):
         super().__init__()
         self.config_param = config_param
         self.observer = observer
         self.optional_param = optional_param
-        
-        # 多语言提示信息
-        self.running_prompt_zh = "正在执行..."
-        self.running_prompt_en = "Processing..."
         
         # 记录操作序号（如果需要）
         self.record_ops = 0
@@ -186,14 +199,8 @@ class YourTool(Tool):
             Exception: 详细的错误信息
         """
         try:
-            # 发送工具运行消息
+            # 发送卡片信息（可选）
             if self.observer:
-                running_prompt = (self.running_prompt_zh 
-                                if self.observer.lang == "zh" 
-                                else self.running_prompt_en)
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
-                
-                # 发送卡片信息（可选）
                 card_content = [{"icon": "your_icon", "text": param1}]
                 self.observer.add_message("", ProcessType.CARD, 
                                         json.dumps(card_content, ensure_ascii=False))
@@ -239,10 +246,14 @@ logger = logging.getLogger("search_tool_name")
 
 class SearchTool(Tool):
     name = "search_tool"
-    description = "搜索工具的详细描述，包括搜索范围和适用场景"
+    description = "Detailed description of the search tool, including search scope and applicable scenarios"
+    description_zh = "搜索工具的中文描述，包括搜索范围和适用场景"
     inputs = {
-        "query": {"type": "string", "description": "搜索查询"},
-        "max_results": {"type": "integer", "description": "最大结果数", "default": 5, "nullable": True}
+        "query": {"type": "string", "description": "The search query to perform", "description_zh": "搜索查询词"},
+        "max_results": {"type": "integer", "description": "Maximum number of results", "description_zh": "最大结果数", "default": 5, "nullable": True}
+    }
+    init_param_descriptions = {          # 构造参数说明（与 __init__ 参数对应）
+        "api_key": {"description": "API key", "description_zh": "API密钥"}
     }
     output_type = "string"
     category = ToolCategory.SEARCH.value
@@ -250,29 +261,23 @@ class SearchTool(Tool):
 
     def __init__(
         self,
-        api_key: str = Field(description="API密钥"),
-        observer: MessageObserver = Field(description="消息观察者", default=None, exclude=True),
-        max_results: int = Field(description="最大搜索结果数", default=5)
+        api_key: str = Field(description="API key"),
+        observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
+        max_results: int = Field(description="Maximum number of search results", default=5)
     ):
         super().__init__()
         self.api_key = api_key
         self.observer = observer
         self.max_results = max_results
-        self.record_ops = 0
-        
-        self.running_prompt_zh = "搜索中..."
-        self.running_prompt_en = "Searching..."
+        # 引用序号从 1 起始（供 SearchResultTextMessage 的 cite_index 使用）
+        self.record_ops = 1
 
     def forward(self, query: str, max_results: int = None) -> str:
         if max_results is None:
             max_results = self.max_results
-            
-        # 发送搜索状态消息
+
+        # 发送卡片信息（可选；TOOL 运行状态消息由 core_agent 桥接器统一发送）
         if self.observer:
-            running_prompt = (self.running_prompt_zh 
-                            if self.observer.lang == "zh" 
-                            else self.running_prompt_en)
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, 
                                     json.dumps(card_content, ensure_ascii=False))

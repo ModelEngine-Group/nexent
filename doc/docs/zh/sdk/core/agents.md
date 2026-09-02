@@ -52,7 +52,7 @@ CoreAgent 实现了ReAct框架的思考-行动-观察循环：
 - **多语言支持**: 支持中英文输出格式
 - **统一接口**: 为不同来源的消息提供统一处理方式
 
-ProcessType枚举定义了以下处理阶段：
+ProcessType枚举的常用处理阶段包括（完整定义见 `nexent.core.utils.observer.ProcessType`）：
 - `STEP_COUNT`: 当前执行步骤
 - `MODEL_OUTPUT_THINKING`: 模型思考过程输出
 - `MODEL_OUTPUT_CODE`: 模型代码生成输出

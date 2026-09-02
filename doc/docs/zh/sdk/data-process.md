@@ -206,12 +206,17 @@ print(f"支持的处理器类型: {processors}")
 
 | 异常类型 | 触发条件 | 解决方案 |
 |----------|----------|----------|
-| `ValueError` | 参数无效（如不支持的分块策略或处理器类型、无法从文件名识别出受支持的类型） | 检查参数取值与文件扩展名 |
+| `ValueError` | 参数无效（如不支持的分块策略或处理器类型） | 检查参数取值 |
+| `UnsupportedFileFormatError` | 文件扩展名不受支持，或内存字节无法识别出类型（未安装 libmagic 时从内存检测类型会失败） | 检查文件扩展名是否受支持；处理内存字节前确认已安装 libmagic |
 | `ImportError` | 缺少必需的处理依赖（如 unstructured） | 安装 `nexent[data_process]` extra |
 | `RuntimeError` | `file_split()` 拆分失败 | 查看日志定位拆分错误 |
 
+> 💡 **libmagic 依赖提示**：`file_process()` 仅支持内存字节数据输入，unstructured 从内存字节检测文件类型依赖系统 libmagic。Linux/macOS 一般默认可用；Windows 默认无 libmagic，需要先安装（如 `pip install python-magic-bin`），否则处理 `.txt` 等格式会抛出 `UnsupportedFileFormatError`。
+
 ### 错误处理示例
 ```python
+from unstructured.partition.common import UnsupportedFileFormatError
+
 try:
     chunks, images_info = core.file_process(
         file_data=file_bytes,
@@ -220,6 +225,8 @@ try:
     )
 except ValueError as e:
     print(f"参数错误: {e}")
+except UnsupportedFileFormatError as e:
+    print(f"文件类型不受支持或无法识别: {e}")
 except ImportError as e:
     print(f"缺少依赖: {e}")
 except Exception as e:

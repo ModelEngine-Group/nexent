@@ -240,7 +240,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span；默认关闭，避免 AI trace 被普通 HTTP 请求刷屏 |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | （空） | FastAPI 自动埋点排除 URL，逗号分隔正则；例如只看 agent 业务 span 时可设为 `/agent/run` |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span；流式接口建议保持默认值 |
-| `OTEL_COLLECTOR_VERSION` | `0.150.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
+| `OTEL_COLLECTOR_VERSION` | `0.151.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
 | `PHOENIX_VERSION` | `15` | 本地 Phoenix 镜像版本 |
 | `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
 | `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
@@ -290,7 +290,7 @@ Agent 上下文指标由 SDK 生命周期自动写入。每个 action step 会�
 
 ```python
 @monitoring_manager.monitor_llm_call("gpt-4", "chat_completion")
-def call_llm(messages):
+def call_llm(messages, **kwargs):
     return llm_response
 ```
 

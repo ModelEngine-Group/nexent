@@ -184,7 +184,7 @@ docker network rm elastic
      ```
 
 2. 网络配置检查清单
-   - 确保远程服务器的防火墙允许9201端口访问
+   - 确保远程服务器的防火墙允许9200端口访问
      ```bash
      # 对于使用iptables的系统
      sudo iptables -A INPUT -p tcp --dport 9200 -j ACCEPT
@@ -335,7 +335,7 @@ results = vdb_core.semantic_search(["my_documents"], "示例查询", embedding_m
 for result in results:
     print(f"得分: {result['score']}, 文档: {result['document']['title']}")
 
-# 混合搜索（weight_accurate 可选，默认按查询词频自动计算权重）
+# 混合搜索（weight_accurate 可选，默认自动推断：查询含数字时偏向精确搜索 0.7，否则 0.3）
 results = vdb_core.hybrid_search(
     ["my_documents"],
     "示例查询",

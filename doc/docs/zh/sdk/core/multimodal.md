@@ -74,7 +74,7 @@ def process_image(image_url: bytes):
     print(f"文件大小: {len(image_url)} bytes")
     return image_url
 
-# 调用process_file方法
+# 调用process_image方法
 result = process_image(image_url=f"http://example/pic.PNG")
 ```
 
@@ -101,7 +101,7 @@ def process_image(image_url: Image.Image):
     resized = image_url.resize((800, 600))
     return resized
 
-# 调用process_file方法
+# 调用process_image方法
 result = process_image(image_url=f"http://example/pic.PNG")
 ```
 
@@ -119,7 +119,7 @@ def process_two_images(image_url1: Image.Image, image_url2: Image.Image):
     combined.paste(image_url2, (800, 0))
     return combined
 
-# 调用process_file方法
+# 调用process_two_images方法
 result = process_two_images(image_url1=f"http://example/pic1.PNG", image_url2=f"http://example/pic2.PNG")
 ```
 
@@ -137,7 +137,7 @@ def process_image_list(image_urls: List[Image.Image]):
         results.append(img.resize((200, 200)))
     return results
 
-# 调用process_file方法
+# 调用process_image_list方法
 result = process_image_list(image_urls=["http://example/pic1.PNG", "http://example/pic2.PNG"])
 ```
 
