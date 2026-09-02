@@ -29,6 +29,7 @@ import {
   submitSkillForm,
   submitSkillFromFile,
   findSkillByName,
+  type SkillCreatedCallback,
   type SkillListItem,
   type SkillData,
 } from "@/services/skillService";
@@ -60,7 +61,7 @@ const CAN_EDIT_ALL_ROLES: ReadonlySet<string> = new Set([
 interface SkillBuildModalProps {
   isOpen: boolean;
   onCancel: () => void;
-  onSuccess: () => void | Promise<void>;
+  onSuccess: SkillCreatedCallback;
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
   zIndex?: number;

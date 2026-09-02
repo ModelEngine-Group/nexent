@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Download,
   Loader2,
+  Plus,
   Settings2,
   SkipForward,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MCP_TOOLS_QUERY_KEYS, McpSource } from "@/const/mcpTools";
+import SkillBuildModal from "../../agents/components/agentConfig/SkillBuildModal";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import { refreshToolListWithToast } from "@/hooks/mcpTools/useRefreshToolListWithToast";
@@ -30,11 +32,17 @@ import {
   suggestMcpContainerPortService,
 } from "@/services/mcpToolsService";
 import {
+  searchAgentInfo,
+  saveSkillInstance,
+} from "@/services/agentConfigService";
+import {
   installOfficialSkills,
   fetchOfficialSkillsWithStatus,
 } from "@/services/skillService";
 import skillRepositoryService from "@/services/skillRepositoryService";
 import { toApiError, type ApiError } from "@/services/api";
+import { useAgentStore } from "@/stores/agentStore";
+import type { Skill } from "@/types/agentConfig";
 import type { CommunityQuickAddDraft } from "@/types/mcpTools";
 import type {
   Nl2AgentCardAction,
@@ -233,6 +241,15 @@ export function SuggestedResourceInstallationCard({
     "not_started" | "failed"
   >("not_started");
   const [submitted, setSubmitted] = useState(false);
+  const [isSkillBuildOpen, setIsSkillBuildOpen] = useState(false);
+  const [createdSkill, setCreatedSkill] = useState<Skill | null>(null);
+  const [isSkillBinding, setIsSkillBinding] = useState(false);
+  const [skillBindingError, setSkillBindingError] = useState<string | null>(
+    null
+  );
+  const replaceServerSnapshot = useAgentStore(
+    (state) => state.replaceServerSnapshot
+  );
 
   useEffect(() => {
     registerCard(cardKey, payload.subtype);
@@ -247,7 +264,92 @@ export function SuggestedResourceInstallationCard({
   const installedCount = items.filter(
     (item) => item.status === "installed"
   ).length;
-  const canContinue = interactive && !hasFailed && !isBusy;
+  const canContinue = interactive && !hasFailed && !isBusy && !isSkillBinding;
+
+  const extractCreatedSkill = (value: unknown): Skill => {
+    const data =
+      value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+    const rawId =
+      data.skill_id ??
+      data.id ??
+      (data.data as Record<string, unknown> | undefined)?.skill_id;
+    const skillId = Number(rawId);
+    if (!Number.isInteger(skillId) || skillId <= 0) {
+      throw new Error("Created Skill ID could not be resolved");
+    }
+    return {
+      skill_id: skillId,
+      name: String(data.name ?? ""),
+      description: String(data.description ?? ""),
+      source: String(data.source ?? "custom"),
+      tags: Array.isArray(data.tags) ? (data.tags as string[]) : [],
+      config_schemas: Array.isArray(data.config_schemas)
+        ? (data.config_schemas as Skill["config_schemas"])
+        : [],
+      config_values:
+        data.config_values && typeof data.config_values === "object"
+          ? (data.config_values as Skill["config_values"])
+          : null,
+    };
+  };
+
+  const bindCreatedSkill = async (skill: Skill) => {
+    if (isSkillBinding) return;
+    setIsSkillBinding(true);
+    setSkillBindingError(null);
+    try {
+      const result = await saveSkillInstance(
+        skill.skill_id,
+        payload.agent_id,
+        true,
+        0,
+        {}
+      );
+      if (!result.success) throw result.error ?? new Error(result.message);
+      const refreshed = await searchAgentInfo(payload.agent_id, undefined, 0);
+      if (
+        !refreshed.success ||
+        !refreshed.data ||
+        !replaceServerSnapshot(payload.agent_id, refreshed.data)
+      ) {
+        throw new Error("Agent snapshot could not be refreshed");
+      }
+      queryClient.setQueryData(["agentInfo", payload.agent_id], refreshed.data);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["agentSkillInstances", payload.agent_id],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["skills"] }),
+      ]);
+      message.success(
+        t("nl2agent.resourceInstallation.skillBound", "Skill created and bound")
+      );
+    } catch (error) {
+      setSkillBindingError(
+        error instanceof Error
+          ? error.message
+          : t(
+              "nl2agent.resourceInstallation.skillBindFailed",
+              "Skill was created, but binding failed"
+            )
+      );
+    } finally {
+      setIsSkillBinding(false);
+    }
+  };
+
+  const handleSkillCreated = async (value: unknown) => {
+    const skill = extractCreatedSkill(value);
+    setCreatedSkill(skill);
+    await bindCreatedSkill(skill);
+  };
+
+  const retryCreatedSkillBinding = () => {
+    if (createdSkill) void bindCreatedSkill(createdSkill);
+  };
 
   const openConfig = async (item: InstallationItem) => {
     if (!interactive || item.status === "installed") return;
@@ -580,6 +682,23 @@ export function SuggestedResourceInstallationCard({
           </p>
         </div>
         <Badge variant="outline">{items.length}</Badge>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!interactive || isSkillBinding}
+          onClick={() => {
+            setSkillBindingError(null);
+            setIsSkillBuildOpen(true);
+          }}
+        >
+          {isSkillBinding ? (
+            <Loader2 className="mr-1 size-4 animate-spin" />
+          ) : (
+            <Plus className="mr-1 size-4" />
+          )}
+          {t("nl2agent.resourceInstallation.createSkill", "Create Skill")}
+        </Button>
       </div>
 
       <div className="divide-y">
@@ -699,6 +818,46 @@ export function SuggestedResourceInstallationCard({
         ))}
       </div>
 
+      {createdSkill ? (
+        <div className="flex flex-col gap-2 border-t bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{createdSkill.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {skillBindingError
+                ? t(
+                    "nl2agent.resourceInstallation.skillBindFailed",
+                    "Skill was created, but binding failed"
+                  )
+                : t(
+                    "nl2agent.resourceInstallation.skillBound",
+                    "Skill created and bound"
+                  )}
+            </p>
+          </div>
+          {skillBindingError ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={!interactive || isSkillBinding}
+              onClick={retryCreatedSkillBinding}
+            >
+              {isSkillBinding ? (
+                <Loader2 className="mr-1 size-4 animate-spin" />
+              ) : null}
+              {t(
+                "nl2agent.resourceInstallation.retrySkillBinding",
+                "Retry binding"
+              )}
+            </Button>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-emerald-600">
+              <CheckCircle2 className="size-4" />
+              {t("nl2agent.resourceBinding.bound", "Bound")}
+            </span>
+          )}
+        </div>
+      ) : null}
+
       <div className="flex justify-end border-t px-4 py-3">
         <Button type="button" disabled={!canContinue} onClick={continueFlow}>
           {installedCount > 0
@@ -706,6 +865,13 @@ export function SuggestedResourceInstallationCard({
             : t("nl2agent.resourceBinding.skip", "Skip")}
         </Button>
       </div>
+
+      <SkillBuildModal
+        isOpen={isSkillBuildOpen}
+        onCancel={() => setIsSkillBuildOpen(false)}
+        onSuccess={handleSkillCreated}
+        zIndex={1100}
+      />
 
       <Modal
         open={Boolean(dialogItem && dialogDraft)}
