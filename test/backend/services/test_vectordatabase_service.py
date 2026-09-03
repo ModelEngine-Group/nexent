@@ -80,6 +80,25 @@ embedding_model_module = types.ModuleType('nexent.core.models.embedding_model')
 consts_exceptions_mod = types.ModuleType("consts.exceptions")
 
 
+class AppException(Exception):
+    def __init__(self, error_code, message=None, details=None):
+        self.error_code = error_code
+        self.message = message or str(error_code)
+        self.details = details or {}
+        super().__init__(self.message)
+
+    @property
+    def http_status(self):
+        return 500
+
+    def to_dict(self):
+        return {
+            "code": str(getattr(self.error_code, "value", self.error_code)),
+            "message": self.message,
+            "details": self.details or None,
+        }
+
+
 class UnauthorizedError(Exception):
     pass
 
@@ -101,6 +120,7 @@ class TenantResourceLimitError(ValidationError, ValueError):
 
 
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
+consts_exceptions_mod.AppException = AppException
 consts_exceptions_mod.NotFoundException = NotFoundException
 consts_exceptions_mod.DuplicateError = DuplicateError
 consts_exceptions_mod.ValidationError = ValidationError
@@ -5787,8 +5807,9 @@ class TestRethrowOrPlain(unittest.TestCase):
         # Should re-raise the original string, not the JSON
         self.assertEqual(str(exc.exception), json_message)
 
+    @patch('backend.services.vectordatabase_service.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
-    def test_full_delete_knowledge_base_no_files_redis_warning(self, mock_get_redis):
+    def test_full_delete_knowledge_base_no_files_redis_warning(self, mock_get_redis, mock_list_file_records):
         """full_delete_knowledge_base handles empty file list and surfaces Redis warnings."""
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()
@@ -5818,8 +5839,9 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_list_files.assert_awaited_once()
         mock_delete_index.assert_awaited_once()
 
+    @patch('backend.services.vectordatabase_service.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
-    def test_full_delete_knowledge_base_minio_and_redis_error(self, mock_get_redis):
+    def test_full_delete_knowledge_base_minio_and_redis_error(self, mock_get_redis, mock_list_file_records):
         """full_delete_knowledge_base logs minio summary and handles redis cleanup errors."""
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()
@@ -5867,6 +5889,110 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_list_files.assert_awaited_once()
         mock_delete_index.assert_awaited_once_with(
             "kb-2", mock_vdb_core, "user-2")
+
+    def test_full_delete_knowledge_base_blocks_inflight_lifecycle_file(self):
+        """An active lifecycle row blocks deletion before external cleanup starts."""
+        lifecycle_rows = [{
+            "file_id": "file-processing",
+            "original_filename": "report.pdf",
+            "object_name": "knowledge_base/report.pdf",
+            "status": "PROCESSING",
+        }]
+        mock_vdb_core = MagicMock()
+
+        with patch(
+            "backend.services.vectordatabase_service.list_file_records",
+            return_value=lifecycle_rows,
+        ), patch(
+            "backend.services.vectordatabase_service.ElasticSearchService._delete_kb_source_objects",
+            new_callable=AsyncMock,
+        ) as mock_minio_cleanup, patch(
+            "backend.services.vectordatabase_service.ElasticSearchService.delete_index",
+            new_callable=AsyncMock,
+        ) as mock_delete_index:
+            with self.assertRaises(AppException) as context:
+                asyncio.run(
+                    ElasticSearchService.full_delete_knowledge_base(
+                        index_name="kb-blocked",
+                        vdb_core=mock_vdb_core,
+                        user_id="user-1",
+                    )
+                )
+
+        self.assertEqual(context.exception.details["index_name"], "kb-blocked")
+        self.assertEqual(
+            context.exception.details["blocking_files"],
+            [{
+                "file_id": "file-processing",
+                "file_name": "report.pdf",
+                "status": "PROCESSING",
+            }],
+        )
+        mock_minio_cleanup.assert_not_awaited()
+        mock_delete_index.assert_not_awaited()
+
+    def test_full_delete_knowledge_base_allows_delete_requested_row(self):
+        """A file already in single-file deletion does not block KB deletion."""
+        mock_vdb_core = MagicMock()
+        mock_redis = MagicMock()
+        mock_redis.delete_knowledgebase_records.return_value = {
+            "total_deleted": 0,
+            "errors": [],
+        }
+
+        with patch(
+            "backend.services.vectordatabase_service.list_file_records",
+            return_value=[{
+                "file_id": "file-delete-requested",
+                "original_filename": "old.pdf",
+                "object_name": "knowledge_base/old.pdf",
+                "status": "DELETE_REQUESTED",
+            }],
+        ), patch(
+            "services.redis_service.get_redis_service",
+            return_value=mock_redis,
+        ), patch(
+            "backend.services.vectordatabase_service.ElasticSearchService.list_files",
+            new_callable=AsyncMock,
+            return_value={"files": []},
+        ), patch(
+            "backend.services.vectordatabase_service.ElasticSearchService.delete_index",
+            new_callable=AsyncMock,
+            return_value={"status": "success"},
+        ) as mock_delete_index:
+            result = asyncio.run(
+                ElasticSearchService.full_delete_knowledge_base(
+                    index_name="kb-delete-requested",
+                    vdb_core=mock_vdb_core,
+                    user_id="user-1",
+                )
+            )
+
+        self.assertEqual(result["status"], "success")
+        mock_delete_index.assert_awaited_once()
+
+    def test_full_delete_knowledge_base_lifecycle_read_error_uses_eds(self):
+        """A lifecycle lookup failure is returned as a structured EDS error."""
+        with patch(
+            "backend.services.vectordatabase_service.list_file_records",
+            side_effect=RuntimeError("database unavailable"),
+        ):
+            with self.assertRaises(AppException) as context:
+                asyncio.run(
+                    ElasticSearchService.full_delete_knowledge_base(
+                        index_name="kb-db-error",
+                        vdb_core=MagicMock(),
+                        user_id="user-1",
+                    )
+                )
+
+        self.assertEqual(
+            context.exception.details,
+            {
+                "operation": "knowledge_base_delete_guard",
+                "index_name": "kb-db-error",
+            },
+        )
 
     @patch('backend.services.vectordatabase_service.get_embedding_model')
     @patch('backend.services.vectordatabase_service.get_model_by_model_id')
@@ -7339,8 +7465,9 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result, "")
 
     # Tests for full_delete_knowledge_base - list_files exception (lines 453-457)
+    @patch('backend.services.vectordatabase_service.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
-    def test_full_delete_knowledge_base_list_files_exception(self, mock_get_redis):
+    def test_full_delete_knowledge_base_list_files_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base when list_files raises (lines 453-457)."""
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()
@@ -7368,8 +7495,9 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_delete_index.assert_awaited_once()
 
     # Tests for full_delete_knowledge_base - minio deletion exception (lines 487-489)
+    @patch('backend.services.vectordatabase_service.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
-    def test_full_delete_knowledge_base_minio_deletion_exception(self, mock_get_redis):
+    def test_full_delete_knowledge_base_minio_deletion_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base when delete_file raises (lines 487-489)."""
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()
@@ -7649,8 +7777,9 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Hybrid search failed", str(ctx.exception))
 
     # Tests for full_delete_knowledge_base - file without path_or_url (lines 467-471)
+    @patch('backend.services.vectordatabase_service.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
-    def test_full_delete_knowledge_base_file_without_path_or_url(self, mock_get_redis):
+    def test_full_delete_knowledge_base_file_without_path_or_url(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base skips file when path_or_url is missing (lines 467-471)."""
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()
@@ -7681,8 +7810,9 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_delete_file.assert_not_called()
 
     # Tests for full_delete_knowledge_base - outer exception (lines 545-548)
+    @patch('backend.services.vectordatabase_service.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
-    def test_full_delete_knowledge_base_outer_exception(self, mock_get_redis):
+    def test_full_delete_knowledge_base_outer_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base raises outer exception (lines 545-548)."""
         mock_vdb_core = MagicMock()
         mock_redis = MagicMock()

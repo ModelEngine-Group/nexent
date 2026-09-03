@@ -1001,6 +1001,8 @@
   "knowledgeBase.modal.deleteDataMate.content": "{productName}无法删除DataMate知识库，请前往DataMate页面进行操作。",
   "knowledgeBase.message.deleteSuccess": "删除知识库成功",
   "knowledgeBase.message.deleteError": "删除知识库失败",
+  "knowledgeBase.message.deleteBlocked": "知识库包含正在处理的文件，暂时无法删除",
+  "knowledgeBase.message.deleteBlockedWithFiles": "知识库包含正在处理的文件，暂时无法删除：{{files}}",
   "knowledgeBase.message.syncSuccess": "同步知识库成功",
   "knowledgeBase.message.syncError": "同步知识库失败",
   "knowledgeBase.message.syncDataMateSuccess": "同步DataMate知识库成功",
