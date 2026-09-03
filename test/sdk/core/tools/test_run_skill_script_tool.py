@@ -121,6 +121,7 @@ _mock_nexent_skills.SkillManager = MockSkillManager
 # -- Now import the module under test ---------------------------------------
 from sdk.nexent.core.tools.run_skill_script_tool import (
     RunSkillScriptTool,
+    SkillScriptExecutionError,
     _uncached_run_skill_script_tool,
 )
 
@@ -308,6 +309,79 @@ class TestExecute:
             tenant_id="test-tenant",
             working_directory="/mnt/nexent/workdir/user/run",
         )
+
+    def test_execute_workspace_source_passes_source_to_backend(self, temp_skills_dir):
+        backend = MagicMock(return_value="workspace output")
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            agent_id=7,
+            tenant_id="test-tenant",
+            workspace_path="/mnt/nexent/workdir/user/run",
+            execution_backend=backend,
+            authorized_skill_names=["docx"],
+        )
+        manager = MagicMock()
+        tool.skill_manager = manager
+
+        assert tool.execute("docx", "outputs/build.js", source="workspace") == "workspace output"
+        backend.assert_called_once_with(
+            manager=manager,
+            skill_name="docx",
+            script_path="outputs/build.js",
+            params=None,
+            tenant_id="test-tenant",
+            working_directory="/mnt/nexent/workdir/user/run",
+            source="workspace",
+        )
+
+    def test_execute_workspace_failure_stops_followup_actions(self, temp_skills_dir):
+        backend = MagicMock(return_value=json.dumps({"error": "SyntaxError: bad.js:12"}))
+        on_complete = MagicMock()
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            workspace_path="/mnt/nexent/workdir/user/run",
+            execution_backend=backend,
+            on_complete=on_complete,
+            authorized_skill_names=["pptx"],
+        )
+        tool.skill_manager = MagicMock()
+
+        with pytest.raises(SkillScriptExecutionError, match="Repair the script"):
+            tool.execute("pptx", "outputs/create.js", source="workspace")
+
+        on_complete.assert_not_called()
+
+    def test_execute_rejects_skill_not_enabled_for_agent(self, temp_skills_dir):
+        backend = MagicMock()
+        tool = RunSkillScriptTool(
+            local_skills_dir=temp_skills_dir,
+            agent_id=7,
+            execution_backend=backend,
+            authorized_skill_names=["docx"],
+        )
+
+        result = tool.execute("pptx", "scripts/build.py")
+
+        assert "PermissionError" in result
+        assert "not enabled for agent 7" in result
+        backend.assert_not_called()
+
+    def test_execute_rejects_invalid_source(self, temp_skills_dir):
+        backend = MagicMock()
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir, execution_backend=backend)
+
+        result = tool.execute("docx", "scripts/build.py", source="host")
+
+        assert "ValueError" in result
+        assert "source must be either" in result
+        backend.assert_not_called()
+
+    def test_workspace_source_requires_bound_docker_backend(self, temp_skills_dir):
+        tool = RunSkillScriptTool(local_skills_dir=temp_skills_dir)
+
+        result = tool.execute("docx", "outputs/build.js", source="workspace")
+
+        assert "require an available Docker sandbox" in result
 
     def test_bind_execution_backend_replaces_completion_callback(self, temp_skills_dir):
         backend = MagicMock(return_value="ok")

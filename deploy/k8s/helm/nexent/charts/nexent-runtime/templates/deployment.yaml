@@ -54,6 +54,26 @@ spec:
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 5014
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 5014
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 5014
+            initialDelaySeconds: 5
+            periodSeconds: 5
           volumeMounts:
             - name: nexent-sql-files
               mountPath: /opt/nexent/sql
