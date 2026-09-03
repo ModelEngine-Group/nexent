@@ -12,23 +12,25 @@ Follow these steps to upgrade Nexent on Kubernetes safely:
 
 ## 🔄 Step 1: Update Code
 
-Before updating, record the current deployment version and data directory information.
+Before updating, record the current version, storage configuration, and deployment options, and back up PostgreSQL, MinIO, and other important data.
 
 - Current Deployment Version Location: root `VERSION`
 - Local volume directories: each Helm sub-chart's `storage.hostPath`, defaulting to `/var/lib/nexent-data/nexent-*`
 
 **Code downloaded via git**
 
-Update the code using git commands:
+Make sure you are on the branch used for deployment, then pull changes with fast-forward only:
 
 ```bash
-git pull
+git branch --show-current
+git pull --ff-only
 ```
 
 **Code downloaded via ZIP package or other means**
 
-1. Re-download the latest code from GitHub and extract it.
-2. Copy the `deploy.options` file from the `deploy/k8s` directory of your previous deployment to the same directory in the new code. (If the file does not exist, you can ignore this step).
+1. Download and extract the target version from GitHub.
+2. Copy `deploy/k8s/deploy.options` from the old deployment directory to the same location in the new code. Skip this step if the file does not exist.
+3. Alternatively, use `--reuse-from` during deployment to reuse the environment configuration and deployment options from the old directory.
 
 ## 🔄 Step 2: Execute the Upgrade
 
@@ -40,8 +42,9 @@ bash deploy.sh k8s
 
 The script will detect your saved deployment settings (components, port policy, image source, etc.) from `deploy.options`. If the file is missing, you will be prompted to enter configuration details.
 
-> 💡 Tip
-> Existing values, comments, ordering, and old-only variables in `deploy/env/.env` are preserved, while variables newly introduced by the current `deploy/env/.env.example` are appended automatically. A readable template is required before deployment starts. Generated Helm values are then recreated from the merged `.env`; do not edit them directly. Configure voice models (STT/TTS) in `deploy/env/.env`.
+> 💡 Tips
+> - Existing values, comments, ordering, and legacy-only variables in `deploy/env/.env` are preserved, while variables introduced in the current `deploy/env/.env.example` are appended automatically. A readable template must exist before deployment. Generated Helm values are recreated from the merged `.env`; do not edit them directly.
+> - v2.5.0 adds a shared runtime workspace and sandbox image. In offline or multi-node clusters, make sure every node that may run a related Pod can obtain the sandbox image.
 
 ---
 
@@ -50,7 +53,9 @@ The script will detect your saved deployment settings (components, port policy, 
 After deployment:
 
 1. Open `http://localhost:30000` in your browser.
-2. Review the [User Guide](../user-guide/home-page) to validate agent functionality.
+2. Check that the selected application Pods are ready.
+3. Confirm that the `nexent-workspace` PVC is bound and can be mounted by the relevant Config, Runtime, MCP, Northbound, and Data Process Pods.
+4. Follow the [User Guide](../user-guide/home-page) to validate agent configuration and chat.
 
 ---
 
@@ -59,6 +64,8 @@ After deployment:
 SQL migrations are no longer executed manually. In Kubernetes, only `nexent-config` runs `deploy/common/run-sql-migrations.sh` on startup and automatically applies `*.sql` files from `deploy/sql/migrations/` in filename order; the other backend services only wait for migration records to reach the target state. The deploy script renders `deploy/sql` into the shared SQL ConfigMap mounted at `/opt/nexent/sql`, so SQL-only changes require rerunning deployment, not rebuilding images.
 
 The migration runner uses each SQL filename as the migration ID in `nexent.schema_migrations`. If a recorded file has the same checksum, it is skipped; if the checksum changes, the same file is rerun and the checksum, execution time, app version, and source file are updated.
+
+Published migration files must not be modified, renamed, or deleted. Database schema changes must be implemented in a new versioned migration under `deploy/sql/migrations/`. v2.5.0 uses a consolidated migration file to apply the database changes for this release.
 
 > 💡 Tips
 > - Create a backup before running migrations:
@@ -79,6 +86,7 @@ The migration runner uses each SQL filename as the migration ID in `nexent.schem
 ```bash
 kubectl get pods -n nexent
 kubectl rollout status deployment/nexent-config -n nexent
+kubectl get pvc nexent-workspace -n nexent
 ```
 
 ### View Logs

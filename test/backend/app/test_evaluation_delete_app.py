@@ -1,15 +1,15 @@
-"""Unit tests for the new DELETE endpoints on agent_evaluation_app
-and evaluation_set_app.
+"""HTTP endpoint tests for agent evaluations and evaluation sets.
 
-These tests run in their own subprocess via ``conftest.py`` (see
-``test/conftest_app_delete.py``) so the heavy stubbing required to load
-``apps.agent_evaluation_app`` and ``apps.evaluation_set_app`` does not
-pollute the in-process test environment for other service tests.
+The project runner executes each file in a separate process. Service and
+persistence stubs keep these tests focused on real routers and error mapping.
 """
 
+import importlib
 import os
 import sys
+import types
 import unittest
+from unittest.mock import MagicMock as _MagicMock
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -23,65 +23,37 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
 
-# ---------------------------------------------------------------------------
-# Stub heavy / optional modules before they are imported.
-# ---------------------------------------------------------------------------
-from unittest.mock import MagicMock as _MagicMock
-
-# boto3 / botocore (imported transitively by the SDK chain).
-sys.modules.setdefault("boto3", _MagicMock())
-sys.modules.setdefault("botocore", _MagicMock())
-sys.modules.setdefault("botocore.client", _MagicMock())
-sys.modules.setdefault("botocore.exceptions", _MagicMock())
-
-# xlrd is an optional dep used by utils.evaluation_set_excel_utils.
-sys.modules.setdefault("xlrd", _MagicMock())
-
-# openjiuwen is an optional SDK used by adapters.jiuwen_sdk_adapter.
-sys.modules.setdefault("openjiuwen", _MagicMock())
-
-
-# ---------------------------------------------------------------------------
-# Pre-import the modules we patch so they are present in ``sys.modules``
-# and survive any test pollution from sibling test files.
-# ---------------------------------------------------------------------------
-import importlib
-
-
-def _safe_import(name):
-    try:
-        return importlib.import_module(name)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _ensure_attr(parent_name: str, child_name: str):
-    parent = sys.modules.get(parent_name)
-    if parent is None:
-        return
-    if not hasattr(parent, child_name):
-        qualified_name = f"{parent_name}.{child_name}"
-        child = sys.modules.get(qualified_name) or _safe_import(qualified_name)
-        if child is not None:
-            setattr(parent, child_name, child)
-
-
-for _name in ("services", "utils", "apps"):
-    _safe_import(_name)
-
-for _parent, _children in (
-    (
-        "services",
-        (
-            "agent_evaluation_service",
-            "evaluation_report_service",
-            "evaluation_set_service",
-        ),
+# Isolate service and persistence boundaries before loading the real routers.
+_STUB_SYMBOLS = {
+    "services.agent_evaluation_service": (
+        "create_agent_evaluation_run_impl", "delete_agent_evaluation_run_impl",
+        "generate_analysis_report_impl", "get_agent_evaluation_run_impl",
+        "get_evaluation_stats_impl", "list_agent_evaluation_cases_impl",
+        "list_agent_evaluations_by_agent_impl", "trial_run_evaluator_impl",
     ),
-    ("utils", ("auth_utils", "evaluation_set_excel_utils")),
-):
-    for _child in _children:
-        _ensure_attr(_parent, _child)
+    "services.evaluation_report_service": ("generate_agent_evaluation_report_impl",),
+    "services.evaluation_set_service": (
+        "_generate_cases_async", "_update_generation_status", "add_evaluation_set_case_impl",
+        "batch_delete_evaluation_set_cases_impl", "count_active_runs_using_set",
+        "count_evaluation_sets_impl", "create_empty_evaluation_set", "create_evaluation_set_from_cases",
+        "delete_evaluation_set_case_impl", "delete_evaluation_set_impl", "export_evaluation_set_impl",
+        "get_evaluation_set_impl", "list_evaluation_set_cases_impl", "list_evaluation_sets_impl",
+        "update_evaluation_set_case_impl",
+    ),
+    "database.agent_evaluation_db": ("update_annotation_schema_ids",),
+    "utils.auth_utils": ("get_current_user_id", "get_current_user_info"),
+    "utils.evaluation_set_excel_utils": (
+        "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
+    ),
+    "utils.thread_utils": ("pool",),
+}
+for _module_name, _symbols in _STUB_SYMBOLS.items():
+    _module = types.ModuleType(_module_name)
+    for _symbol in _symbols:
+        setattr(_module, _symbol, _MagicMock())
+    sys.modules[_module_name] = _module
+    _parent_name, _child_name = _module_name.rsplit(".", 1)
+    setattr(importlib.import_module(_parent_name), _child_name, _module)
 
 
 # Patched symbol index map (kept in sync with ``_PATCH_TARGETS``):

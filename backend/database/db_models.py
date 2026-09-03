@@ -888,6 +888,14 @@ class KnowledgeFileLifecycle(TableBase):
             "object_name",
         ),
         Index(
+            "idx_knowledge_file_lifecycle_upload_recovery",
+            "upload_owner_service",
+            "create_time",
+            postgresql_where=text(
+                "delete_flag = 'N' AND status = 'UPLOADING'"
+            ),
+        ),
+        Index(
             "uq_knowledge_file_lifecycle_active_identity",
             "tenant_id",
             "index_name",
@@ -912,6 +920,11 @@ class KnowledgeFileLifecycle(TableBase):
         doc="Effective filename used by processing and displayed to users",
     )
     file_size = Column(BigInteger, nullable=True, doc="Uploaded file size in bytes")
+    upload_owner_service = Column(
+        String(32),
+        nullable=True,
+        doc="Service that owns recovery of an in-progress upload",
+    )
     uploaded_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful MinIO upload time")
     completed_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful ES indexing time")
     status = Column(

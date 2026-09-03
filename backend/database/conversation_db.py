@@ -518,6 +518,53 @@ def update_conversation_message_status(message_id: int, status: str,
         )
 
 
+def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
+    """Mark assistant messages left streaming by a stopped runtime as failed.
+
+    Returns the affected runtime identities so the caller can finish the
+    corresponding short-lived Redis state with the existing runtime-state API.
+    The conditional update makes repeated startup recovery idempotent.
+    """
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                ConversationMessage.message_id,
+                ConversationMessage.conversation_id,
+                ConversationMessage.created_by,
+            )
+            .filter(
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.status == "streaming",
+                ConversationMessage.delete_flag == "N",
+            )
+            .with_for_update()
+            .all()
+        )
+        if not rows:
+            return []
+
+        message_ids = [int(row.message_id) for row in rows]
+        session.query(ConversationMessage).filter(
+            ConversationMessage.message_id.in_(message_ids),
+            ConversationMessage.status == "streaming",
+            ConversationMessage.delete_flag == "N",
+        ).update(
+            {
+                "status": "failed",
+                "update_time": func.current_timestamp(),
+            },
+            synchronize_session=False,
+        )
+        return [
+            {
+                "message_id": int(row.message_id),
+                "conversation_id": int(row.conversation_id),
+                "user_id": row.created_by,
+            }
+            for row in rows
+        ]
+
+
 def update_conversation_message_content(message_id: int, content: str,
                                          user_id: Optional[str] = None) -> None:
     """

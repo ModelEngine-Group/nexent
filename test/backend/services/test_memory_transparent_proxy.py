@@ -189,8 +189,8 @@ index_svc_mod = types.ModuleType("services.memory_index_service")
 index_svc_mod.MemoryIndexService = MagicMock
 index_svc_mod.get_memory_index_service = MagicMock()
 index_svc_mod.reset_memory_index_service = MagicMock()
-vector_db_svc_mod = types.ModuleType("services.vectordatabase_service")
-vector_db_svc_mod.get_vector_db_core = MagicMock(return_value=MagicMock())
+knowledge_base_service_mod = types.ModuleType("management.services.knowledge_base.service")
+knowledge_base_service_mod.get_vector_db_core = MagicMock(return_value=MagicMock())
 external_provider_svc_mod = types.ModuleType("services.memory_external_provider_service")
 external_provider_svc_mod.get_memory_external_provider_service = MagicMock()
 ingestion_event_svc_mod = types.ModuleType("services.memory_ingestion_event_service")
@@ -199,7 +199,7 @@ sys.modules["services"] = services_pkg
 sys.modules["services.memory_record_service"] = record_svc_mod
 sys.modules["services.memory_retrieval_service"] = retrieval_svc_mod
 sys.modules["services.memory_index_service"] = index_svc_mod
-sys.modules["services.vectordatabase_service"] = vector_db_svc_mod
+sys.modules["management.services.knowledge_base.service"] = knowledge_base_service_mod
 sys.modules["services.memory_external_provider_service"] = external_provider_svc_mod
 sys.modules["services.memory_ingestion_event_service"] = ingestion_event_svc_mod
 sys.modules["backend.services.memory_external_provider_service"] = external_provider_svc_mod

@@ -21,7 +21,7 @@ _MOCKED_MODULE_NAMES = [
     "database.group_db",
     "database.skill_db",
     "database.user_tenant_db",
-    "services.skill_service",
+    "management.services.skill.service",
     "services.notification_service",
     "utils.str_utils",
 ]
@@ -189,7 +189,7 @@ def _generate_available_copy_skill_name_mock(base_name, unavailable_names=None):
 
 
 _skill_service_module_mock.generate_available_copy_skill_name = _generate_available_copy_skill_name_mock
-sys.modules["services.skill_service"] = _skill_service_module_mock
+sys.modules["management.services.skill.service"] = _skill_service_module_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["services.notification_service"] = _notification_service_mock

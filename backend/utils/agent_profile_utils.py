@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from database.agent_db import query_sub_agent_relations, search_agent_info_by_agent_id
 from database.tool_db import search_tools_for_sub_agent
-from services.skill_service import SkillService
+from management.services.skill.service import SkillService
 
 
 logger = logging.getLogger(__name__)

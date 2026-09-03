@@ -31,7 +31,7 @@ from database.agent_repository_db import (
     update_agent_repository_status_by_id,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
-from services.agent_service import (
+from management.services.agent.service import (
     collect_skill_zip_entries,
     export_agent_dict_for_repository_impl,
     import_agent_impl,

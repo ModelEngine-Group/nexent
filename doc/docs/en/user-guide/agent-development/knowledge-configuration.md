@@ -1,6 +1,8 @@
 # Knowledge Configuration
 
-Create and manage knowledge bases, upload documents, and generate summaries. Knowledge bases are critical information sources that let agents securely use your private data.
+In the Knowledge Base module, you can create and manage knowledge bases, upload files, monitor processing, maintain chunks, and generate summaries. Administrators and developers can share knowledge bases with user groups, while regular users can create and manage private knowledge bases.
+
+Regular users can view **Personal Knowledge Base Capacity** at the bottom of the knowledge-base list, including current usage and the effective quota. If no limit is configured, the page shows **Unlimited**. When the quota is reached, Nexent blocks new content and file uploads but does not delete existing data.
 
 ## 🔧 Create a Knowledge Base
 
@@ -35,6 +37,8 @@ Create and manage knowledge bases, upload documents, and generate summaries. Kno
 Maximum upload size per file is **20 MB**. Files exceeding this limit cannot be uploaded.
 :::
 
+Before upload, Nexent also checks the knowledge-base quota, tenant capacity, and personal knowledge-base capacity. If the page reports insufficient capacity, delete files you no longer need or ask an administrator to adjust the relevant quota.
+
 ### Document Processing Status
 
 Uploaded files go through multiple stages. There are 6 distinct statuses:
@@ -48,22 +52,28 @@ Uploaded files go through multiple stages. There are 6 distinct statuses:
 | **Parse Failed** | An error occurred during parsing. Hover over the status icon to see the detailed error reason and troubleshooting suggestions |
 | **Ingest Failed** | An error occurred during vectorization. Hover over the status icon to see the detailed error reason and troubleshooting suggestions |
 
-💡 Hover over the status icon to view real-time progress (e.g., "23/50 chunks processed") and error details for failed documents.
+Hover over the status icon to view progress, such as “23/50 chunks processed.” For parsing or ingestion failures, the tooltip also provides a cause and suggested action. Common causes include:
 
-![Processing Progress and Error Tooltip](../assets/knowledge-base/tip.png)
+- The file does not exist, exceeds 20 MB, or uses an unsupported type
+- No valid text can be extracted, or the file contains an unsupported line-break format
+- The embedding model is busy, its dimensions do not match, or the number of chunks exceeds its concurrency limit
+- Elasticsearch, object storage, or the data-processing service is unavailable
+- The knowledge base, tenant, or personal knowledge-base quota has been reached
+
+Fix the issue shown in the tooltip and upload the file again. If the issue points to a platform service or storage capacity, contact an administrator instead of repeatedly submitting the same file.
 
 ### Supported File Formats
 
-Nexent supports multiple file formats, including:
+The upload area currently supports:
 
-- **Text:** .txt, .md, .json
-- **PDF:** .pdf
-- **Word:** .docx
-- **PowerPoint:** .pptx
-- **Excel:** .xlsx
-- **EPUB:** .epub
-- **Data files:** .csv
-- **Web content:** .html, .xml
+- **Text and structured data:** `.txt`, `.md`, `.csv`, `.json`, `.xml`
+- **Web pages:** `.html`
+- **PDF and e-books:** `.pdf`, `.epub`
+- **Word:** `.doc`, `.docx`
+- **PowerPoint:** `.pptx`
+- **Excel:** `.xlsx`
+
+A supported extension does not guarantee that valid content can be extracted. For example, an image-only scanned PDF may require OCR or another image-capable processing method.
 
 ## 📊 Knowledge Base Summary
 
@@ -105,16 +115,16 @@ After upload, each document is split into multiple **Chunks**. Each chunk contai
 
 ### Searching Chunks
 
-Use the search box on the Chunk Details page to search for chunks. The system performs a hybrid search combining keyword matching and semantic matching, and returns results ranked by overall relevance.
+Use the search box on the Chunk Details page to search for chunks. The system performs a hybrid search combining keyword and semantic matching, then ranks results by overall relevance. Clear the search box to return to the paginated list for the current document.
 
 ### Manually Managing Chunks
 
 | Action | Description |
 |--------|-------------|
-| **Create** | Add a custom chunk manually on the Chunk Details page |
-| **Edit** | Click a chunk card to enter edit mode and modify its text content |
-| **Delete** | Remove unwanted chunks |
-| **Download** | Export chunk content as a download |
+| **Create** | Add a custom chunk on the Chunk Details page, then go to the last page to view it |
+| **Edit** | Modify chunk text and regenerate its vector |
+| **Delete** | Remove a chunk and update the knowledge base's chunk count |
+| **Download** | Download one chunk as a `.txt` file |
 
 :::warning Model Compatibility Restriction
 Chunk edit and create operations depend on embedding model consistency. If the model configuration has changed, these operations may be automatically disabled to prevent incompatible vector data from being written.
@@ -135,7 +145,7 @@ The embedding model selected when a knowledge base is created remains bound to t
 
 ## 🔧 Using Knowledge Bases
 
-Nexent supports binding knowledge bases to agents. When creating an agent, enable the appropriate knowledge retrieval tool in the tool configuration panel and select the associated knowledge bases.
+Nexent supports binding knowledge bases to agents. When creating an agent, enable the relevant knowledge retrieval tool under **Advanced Settings** in the tool configuration area and select the associated knowledge bases.
 
 For Nexent-native knowledge bases, enable the **knowledge_base_search** tool:
 

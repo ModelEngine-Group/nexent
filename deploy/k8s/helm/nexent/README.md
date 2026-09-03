@@ -98,6 +98,8 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 
 Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
+Config, Runtime, Northbound, and Data Process are intentionally single-replica workloads and use the Kubernetes `Recreate` deployment strategy. Their startup paths mark in-process work left by the previous container as failed, so an old and a new Pod must never overlap. Helm rendering fails if any of these services is scaled above one replica or configured with another strategy. Upgrading one of these services therefore causes a short interruption while Kubernetes stops the old Pod and starts its replacement; stateless services such as Web keep their existing scaling behavior.
+
 ## Deploy Options
 
 | Option | Description | Values |

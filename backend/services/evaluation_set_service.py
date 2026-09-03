@@ -530,7 +530,7 @@ def _plan_search_queries(kb_info, description, model_id, tenant_id):
 
 
 def _execute_kb_searches(kb_info, queries, tenant_id, top_k=3):
-    from services.vectordatabase_service import get_vector_db_core
+    from management.services.knowledge_base.service import get_vector_db_core
 
     if not kb_info or not queries:
         return ""
@@ -554,7 +554,7 @@ def _get_kb_embedding_model(tenant_id: str, kb: dict) -> Any:
 
     Returns ``None`` (with a warning log) when the model is unavailable.
     """
-    from services.vectordatabase_service import get_embedding_model_by_index_name
+    from management.services.knowledge_base.service import get_embedding_model_by_index_name
 
     try:
         embedding_model, _, _ = get_embedding_model_by_index_name(

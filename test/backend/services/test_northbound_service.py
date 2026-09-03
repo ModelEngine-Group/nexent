@@ -167,9 +167,9 @@ runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = Async
 sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 
 # Mock agent_service
-agent_service_mod = types.ModuleType("services.agent_service")
+agent_service_mod = types.ModuleType("management.services.agent.service")
 agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
-sys.modules["services.agent_service"] = agent_service_mod
+sys.modules["management.services.agent.service"] = agent_service_mod
 
 # Mock runtime forwarding service
 runtime_proxy_mod = types.ModuleType("services.runtime_proxy_service")
@@ -203,13 +203,18 @@ knowledge_scope_service_mod.AIDP_TOOL_CLASS = "AidpSearchTool"
 knowledge_scope_service_mod.get_agent_knowledge_capabilities = MagicMock()
 sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_mod
 
-vectordatabase_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordatabase_service_mod = types.ModuleType("management.services.knowledge_base.service")
 vectordatabase_service_mod.ElasticSearchService = MagicMock()
 vectordatabase_service_mod.ElasticSearchService.filter_accessible_indices = MagicMock(
     return_value=[]
 )
-vectordatabase_service_mod._is_multimodal_by_model_id = MagicMock(return_value=False)
-sys.modules["services.vectordatabase_service"] = vectordatabase_service_mod
+sys.modules["management.services.knowledge_base.service"] = vectordatabase_service_mod
+
+model_resolver_mod = types.ModuleType("management.services.model.resolver")
+model_resolver_mod.get_model_descriptor = MagicMock(
+    return_value=types.SimpleNamespace(is_multimodal=False)
+)
+sys.modules["management.services.model.resolver"] = model_resolver_mod
 
 # Mock file_management_service
 file_mgmt_mod = types.ModuleType("services.file_management_service")

@@ -423,7 +423,7 @@ async def _load_installed_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.skill_service import SkillService
+    from management.services.skill.service import SkillService
     from services.tool_configuration_service import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
@@ -760,7 +760,7 @@ async def _load_internal_uninstalled_resource_catalog(
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )
-    from services.skill_service import get_official_skills_with_status
+    from management.services.skill.service import get_official_skills_with_status
 
     catalog: list[dict[str, Any]] = []
     for skill in get_official_skills_with_status(tenant_id=tenant_id):

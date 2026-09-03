@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import copy
 import json
 import logging
@@ -37,11 +37,11 @@ from nexent.memory import models as memory_models
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import validate_urls_access
-from services.vectordatabase_service import (
+from management.services.model.resolver import get_rerank_model
+from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
-    get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
 from services.memory_external_provider_service import get_memory_external_provider_service
@@ -557,7 +557,7 @@ def _get_skills_for_template(
         List of skill dicts with name and description
     """
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
         skill_service = SkillService()
         enabled_skills = skill_service.get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -748,7 +748,7 @@ def _get_skill_script_tools(
 
     skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
 
         enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -2278,7 +2278,7 @@ async def create_agent_run_info(
     # Resolve sandbox config: DB policy overrides env-var defaults.
     # build_sandbox_policy returns None when level=local (backward-compatible).
     # Import inside function body to avoid circular dependency.
-    from services.agent_service import build_sandbox_policy, get_sandbox_minio_client
+    from management.services.agent.service import build_sandbox_policy, get_sandbox_minio_client
     sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
     agent_db_policy = getattr(agent_config, "sandbox_policy", None)
     merged_policy = sandbox_policy if sandbox_policy else agent_db_policy
