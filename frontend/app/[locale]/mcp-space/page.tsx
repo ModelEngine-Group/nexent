@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, ConfigProvider, Empty, Modal, Spin } from "antd";
+import { App, Button, ConfigProvider, Empty, Modal, Popover, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import {
@@ -18,6 +18,7 @@ import {
   Plus,
   Puzzle,
   ShieldCheck,
+  Tag,
   User,
   XCircle,
 } from "lucide-react";
@@ -67,6 +68,13 @@ import {
   resolveDeploymentType,
 } from "@/lib/mcpTools";
 import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import RepositoryTagFilter from "@/components/tag/RepositoryTagFilter";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
+import type { TagResourcePredicate } from "@/types/tagManagement";
+import { tagManagementApi } from "@/services/tagManagementService";
 import AddMcpServiceCard from "./components/AddMcpServiceCard";
 import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
 import McpCommunityDetailModal from "./components/add/community/McpCommunityDetailModal";
@@ -150,6 +158,10 @@ export default function McpToolsPage() {
     McpToolsServicesTab.REPOSITORY
   );
   const [showAddModal, setShowAddModal] = useState(false);
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultLibrary =
+    tagLibraries?.find((lib) => lib.bucket_key === "default_resource") ?? null;
   const [selectedLocal, setSelectedLocal] = useState<McpServiceItem | null>(
     null
   );
@@ -275,14 +287,23 @@ export default function McpToolsPage() {
 
   const searchActions =
     tab === McpToolsServicesTab.MINE ? (
-      <Button
-        type="primary"
-        className="flex h-11 shrink-0 items-center gap-1.5"
-        icon={<Plus className="size-4" />}
-        onClick={openAddModal}
-      >
-        {t("mcpTools.addModal.title")}
-      </Button>
+      <>
+        <Button
+          type="primary"
+          className="flex h-11 shrink-0 items-center gap-1.5"
+          icon={<Plus className="size-4" />}
+          onClick={openAddModal}
+        >
+          {t("mcpTools.addModal.title")}
+        </Button>
+        <Button
+          className="flex h-11 shrink-0 items-center gap-1.5"
+          icon={<Tag className="size-4" />}
+          onClick={() => setTagManagementOpen(true)}
+        >
+          {t("mcpTools.tagManagement")}
+        </Button>
+      </>
     ) : null;
 
   return (
@@ -442,6 +463,14 @@ export default function McpToolsPage() {
                 open={showAddModal}
                 onClose={() => setShowAddModal(false)}
               />
+
+              <TagDefinitionManagementModal
+                open={tagManagementOpen}
+                onClose={() => setTagManagementOpen(false)}
+                bucketId={defaultLibrary?.bucket_id ?? 0}
+                bucketName={defaultLibrary?.bucket_name ?? ""}
+                canManage={true}
+              />
             </div>
           </motion.div>
         </div>
@@ -494,6 +523,17 @@ function RepositoryView({
       <McpToolsSearchFilterBar
         search={browser.filters.search}
         actions={actions}
+        searchActions={
+          <RepositoryTagFilter
+            value={
+              browser.filters.tag === FILTER_ALL ? undefined : browser.filters.tag
+            }
+            tags={browser.tagStats}
+            onChange={(value) =>
+              browser.updateFilter("tag", value ?? FILTER_ALL)
+            }
+          />
+        }
         onSearchChange={(value) => browser.updateFilter("search", value)}
       />
 
@@ -567,6 +607,20 @@ function MineView({
   const [deploymentType, setDeploymentType] =
     useState<DeploymentFilter>(FILTER_ALL);
   const [tag, setTag] = useState(FILTER_ALL);
+  const { data: mineTagLibraries } = useTagLibraries();
+  const mineDefaultLibrary =
+    mineTagLibraries?.find((lib) => lib.bucket_key === "default_resource") ??
+    null;
+  const { data: mineTagDefinitions } = useTagDefinitions(
+    mineDefaultLibrary?.bucket_id ?? null
+  );
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [matchedTagIds, setMatchedTagIds] = useState<Set<string> | null>(null);
+  const [matchedSearchTagIds, setMatchedSearchTagIds] = useState<
+    Set<string> | null
+  >(null);
   const [page, setPage] = useState(1);
   const [publishingKey, setPublishingKey] = useState<string | null>(null);
   const [unpublishingKey, setUnpublishingKey] = useState<string | null>(null);
@@ -687,10 +741,81 @@ function MineView({
     [items, t]
   );
 
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(mineTagDefinitions, search, t),
+    [mineTagDefinitions, search, t]
+  );
+
+  useEffect(() => {
+    if (tagPredicates.length === 0) {
+      setMatchedTagIds(null);
+      return;
+    }
+    const localItems = items
+      .filter((item) => item.kind === "local")
+      .map((item) => String(item.service.mcpId))
+      .filter(Boolean);
+    if (localItems.length === 0) {
+      setMatchedTagIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    tagManagementApi
+      .filterResourceIds("mcp_service", localItems, tagPredicates)
+      .then((result) => {
+        if (cancelled) return;
+        setMatchedTagIds(new Set(result.matched_resource_ids ?? []));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMatchedTagIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagPredicates, items]);
+
+  useEffect(() => {
+    if (searchTagPredicates.length === 0) {
+      setMatchedSearchTagIds(null);
+      return;
+    }
+    const localItems = items
+      .filter((item) => item.kind === "local")
+      .map((item) => String(item.service.mcpId))
+      .filter(Boolean);
+    if (localItems.length === 0) {
+      setMatchedSearchTagIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      searchTagPredicates.map((predicate) =>
+        tagManagementApi.filterResourceIds("mcp_service", localItems, [predicate])
+      )
+    )
+      .then((results) => {
+        if (cancelled) return;
+        setMatchedSearchTagIds(
+          new Set(results.flatMap((result) => result.matched_resource_ids ?? []))
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMatchedSearchTagIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [items, searchTagPredicates]);
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const service = item.service;
-      if (!matchesNameOrTag(service, search)) return false;
+      const matchesStructuredTag =
+        item.kind === "local" &&
+        matchedSearchTagIds?.has(String(item.service.mcpId));
+      if (!matchesNameOrTag(service, search) && !matchesStructuredTag)
+        return false;
       if (tag !== FILTER_ALL && !(service.tags || []).includes(tag))
         return false;
       if (
@@ -698,13 +823,17 @@ function MineView({
         resolveDeploymentType(service) !== deploymentType
       )
         return false;
+      if (matchedTagIds !== null) {
+        if (item.kind !== "local") return false;
+        if (!matchedTagIds.has(String(item.service.mcpId))) return false;
+      }
       return true;
     });
-  }, [items, search, tag, deploymentType]);
+  }, [items, search, tag, deploymentType, matchedTagIds, matchedSearchTagIds]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, tag, deploymentType]);
+  }, [search, tag, deploymentType, tagPredicates]);
 
   const firstPageSize = MINE_PAGE_SIZE - 1;
 
@@ -978,6 +1107,38 @@ function MineView({
         deploymentType={deploymentType}
         categoryStats={categoryStats}
         actions={actions}
+        filterActions={
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <div className="w-72">
+                <TagFilterControls
+                  definitions={mineTagDefinitions ?? []}
+                  value={tagPredicates}
+                  onChange={setTagPredicates}
+                />
+                {tagPredicates.length > 0 ? (
+                  <button
+                    type="button"
+                    className="mt-2 text-xs text-blue-600 hover:underline"
+                    onClick={() => setTagPredicates([])}
+                  >
+                    {t("mcpTools.tagFilter.clear")}
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            <Button
+              type={tagPredicates.length > 0 ? "primary" : "default"}
+              icon={<Tag className="size-3.5" aria-hidden />}
+              aria-label={t("mcpTools.tagFilter.button")}
+            >
+              {t("mcpTools.tagFilter.button")}
+            </Button>
+          </Popover>
+        }
         onSearchChange={setSearch}
         onDeploymentTypeChange={setDeploymentType}
       />

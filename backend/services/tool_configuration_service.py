@@ -58,12 +58,13 @@ from .agent_draft_permission_service import (
     ResourceBindingError,
     require_agent_draft_edit,
 )
-from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
+from management.services.knowledge_base.service import get_embedding_model_by_index_name
+from management.services.model.resolver import get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
 from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from services.vectordatabase_service import get_vector_db_core
+from management.services.knowledge_base.service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 

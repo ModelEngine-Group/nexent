@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 
 from backend.utils.context_utils import (
-    build_app_context_string,
     build_authorized_context_input,
     build_context_inputs,
 )
@@ -112,6 +111,7 @@ def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
     items = build_context_inputs()
 
     assert [item.id for item in items] == [
+        "system:header",
         "system:execution_flow",
         "system:available_resources_header",
         "system:agent_fallback",
@@ -119,6 +119,29 @@ def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
         "system:code_norms",
     ]
     assert all(item.type == ContextItemType.SYSTEM for item in items)
+
+
+@pytest.mark.parametrize(
+    ("language", "identity"),
+    [
+        (
+            "zh",
+            "你是 Nexent，Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。",
+        ),
+        (
+            "en",
+            "You are Nexent. Nexent is an open-source agent platform built on the MCP tool ecosystem",
+        ),
+    ],
+)
+def test_app_identity_is_static(language, identity):
+    header = next(
+        item for item in build_context_inputs(language=language)
+        if item.id == "system:header"
+    )
+
+    assert identity in header.content["text"]
+    assert header.metadata["authority"] == "platform"
 
 
 @pytest.mark.parametrize("language", ["en", "zh"])
@@ -149,9 +172,6 @@ def test_all_sources_are_naturally_granular_and_keep_stable_order():
         duty="duty",
         constraint="constraint",
         few_shots="example",
-        app_name="app",
-        app_description="description",
-        user_id="user",
         tools={"one": Value(), "two": Value()},
         skills=[{"name": "skill-one", "description": "one"}, {"name": "skill-two", "description": "two"}],
         managed_agents={"worker": Value()},
@@ -318,6 +338,22 @@ def test_long_term_memory_documents_are_structured_memory_items():
     assert memory_item.metadata["authority"] == "retrieved"
 
 
+def test_long_term_memory_uses_dreaming_version_id_when_version_id_is_missing():
+    items = build_context_inputs(
+        long_term_memory_items=[{
+            "memory": "Generated memory", "memory_level": "user",
+            "dreaming_version_id": 13, "source": "dreaming",
+        }],
+    )
+
+    memory_item = next(item for item in items if item.id == "memory:0")
+
+    assert memory_item.metadata["version_id"] == 13
+    assert memory_item.metadata["memory_type"] == "long_term"
+    assert memory_item.metadata["scope"] == "user"
+    assert memory_item.metadata["source"] == "dreaming"
+
+
 def test_group_rendering_uses_only_selected_tool_items():
     items = normalize_context_inputs(build_context_inputs(
         tools={
@@ -365,9 +401,3 @@ def test_agent_presearch_result_is_rendered_into_model_context():
 
     assert "**Agent Level Memory:**" in rendered_text
     assert result_text in rendered_text
-
-
-def test_app_context_compatibility_string_is_unchanged():
-    assert build_app_context_string("App", "Description", "user") == (
-        "Application: App\nDescription: Description\nCurrent user: user"
-    )

@@ -37,7 +37,7 @@ from consts.const import (
     IS_SPEED_MODE,
 )
 from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UserRegistrationException
-from services.skill_service import install_skills_from_zip_for_tenant
+from management.services.skill.service import install_skills_from_zip_for_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +275,7 @@ def create_tenant(
                     f"Failed to install skills from ZIP for tenant {tenant_id}: {e}")
         elif skill_ids:
             try:
-                from services.skill_service import install_skills_for_tenant as install_by_ids
+                from management.services.skill.service import install_skills_for_tenant as install_by_ids
                 installed_by_ids = install_by_ids(
                     skill_ids=skill_ids,
                     tenant_id=tenant_id,

@@ -478,7 +478,7 @@ class QuotaService:
 
         if index_names:
             try:
-                from services.vectordatabase_service import get_vector_db_core
+                from management.services.knowledge_base.service import get_vector_db_core
 
                 vdb_core = get_vector_db_core()
                 raw_indices_detail = vdb_core.get_indices_detail(index_names) or {}

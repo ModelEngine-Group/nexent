@@ -10,7 +10,7 @@
 | **架构** | x86_64 / ARM64 |
 | **软件** | Kubernetes 1.24+, Helm 3+, kubectl 已配置 | Kubernetes 1.28+ |
 
-> **💡 注意**：推荐的 **8 核 64 GiB 内存** 配置可确保生产环境下的最佳性能。
+> **💡 注意**：推荐配置适合完整部署。实际资源需求还取决于副本数、知识库规模和并发智能体数量，生产环境应根据压测结果设置 requests 与 limits。
 
 ## 🚀 快速开始
 
@@ -43,6 +43,16 @@ cd nexent
 bash deploy.sh k8s
 ```
 
+默认流程使用两个独立 Helm release：先安装 `nexent-infrastructure`（Elasticsearch、PostgreSQL、Redis、MinIO），等待四个组件就绪并初始化 Elasticsearch API Key 后，再首次安装应用侧 `nexent`。因此应用 Pod 不会因补写 API Key 再次滚动。可使用 `--release-scope all|infrastructure|nexent` 选择完整流程或单独操作一侧：
+
+```bash
+bash deploy.sh k8s --release-scope all
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
+```
+
+仅部署 `nexent` 时，脚本会先确认基础 release 存在且四个组件均已就绪；仅卸载基础 release 时，如果 `nexent` 仍存在则拒绝执行。检测到旧版单一 `nexent` release 仍管理基础组件时，脚本会直接报错；当前版本只支持全新双 release 部署，不执行自动迁移。
+
 执行此命令后，系统会通过 Bash TUI 选择配置选项。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
 
 **组件组合:**
@@ -52,6 +62,8 @@ bash deploy.sh k8s
 - **supabase（默认选中，可选）**: 启用用户、租户和认证能力
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
+
+`application` 还会准备智能体沙箱镜像信息。Runtime 使用共享工作区处理上传文件和生成文件；需要保留的产物会同步到 MinIO。
 
 **端口策略:**
 - **development（默认）**: 使用 NodePort 暴露 Web 和调试/内部服务
@@ -103,7 +115,7 @@ bash deploy.sh k8s
 解压离线部署包：
 
 ```bash
-unzip nexent-v2.2.1-amd64.zip -d nexent
+unzip nexent-<version>-amd64.zip -d nexent
 cd nexent
 ```
 
@@ -160,9 +172,9 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 **应用服务:**
 | 服务 | 描述 | 默认端口 |
 |---------|-------------|--------------|
-| nexent-config | 配置服务 | 5010 |
-| nexent-runtime | 运行时服务 | 5014 |
-| nexent-mcp | MCP 容器服务 | 5011 |
+| nexent-config | 配置与管理 API | 5010 |
+| nexent-runtime | 智能体运行时 API | 5014 |
+| nexent-mcp | MCP 管理与工具服务 | 5011 |
 | nexent-northbound | 北向 API 服务 | 5013 |
 | nexent-web | Web 前端 | 3000 |
 | nexent-data-process | 数据处理服务 | 5012 |
@@ -172,7 +184,7 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 |---------|-------------|
 | nexent-elasticsearch | 搜索引擎和索引服务 |
 | nexent-postgresql | 关系型数据库 |
-| nexent-redis | 缓存层 |
+| nexent-redis | 缓存、分布式锁和任务消息代理 |
 | nexent-minio | S3 兼容对象存储 |
 
 **Supabase 服务（选择 `supabase` 组件时）:**
@@ -187,6 +199,8 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 |---------|-------------|
 | nexent-openssh-server | AI 智能体 SSH 终端 |
 | nexent-monitoring | 可选观测组件 |
+
+沙箱不是常驻的业务 Pod。Runtime 会根据部署配置创建隔离执行环境，用于运行模型生成的代码和 Skill 脚本。
 
 ## 🔌 端口映射
 
@@ -212,6 +226,8 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 | 共享工作区 | nexent-workspace-pv | `/var/lib/nexent` |
 | 共享技能目录 | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
+`nexent-workspace` 默认申请 10 GiB、`ReadWriteMany` 存储，用于应用服务之间传递本次运行的输入与输出。使用自定义 StorageClass 时，应确认其支持配置的访问模式；多副本部署尤其需要所有相关 Pod 能访问同一工作区。
+
 卸载 Helm release 默认不会删除本地 hostPath 数据。可使用 `bash uninstall.sh k8s --delete-local-data true` 删除 `/var/lib/nexent`、`/var/lib/nexent-data/skills` 和 `/var/lib/nexent-data/nexent-*` 下的 Nexent 本地卷内容，使用 `--keep-local-data` 显式保留。
 
 ### 卸载 Kubernetes 部署
@@ -219,8 +235,14 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 请在仓库根目录使用统一卸载入口：
 
 ```bash
-# 删除 Helm release；交互模式会询问是否删除 namespace 和本地数据
+# 依次删除 nexent 和 nexent-infrastructure；交互模式会询问是否删除 namespace 和本地数据
 bash uninstall.sh k8s
+
+# 仅卸载应用 release
+bash uninstall.sh k8s --release-scope nexent --keep-namespace
+
+# 仅卸载基础 release（要求应用 release 已不存在）
+bash uninstall.sh k8s --release-scope infrastructure --keep-namespace
 
 # 仅清理 Helm release 状态，适合修复卡住的发布
 bash uninstall.sh k8s clean
@@ -242,6 +264,10 @@ bash uninstall.sh k8s delete-all
 ```bash
 # 交互式部署
 bash deploy.sh k8s
+
+# 仅升级基础或应用 release
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
 
 # 非交互式部署默认组件
 bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general

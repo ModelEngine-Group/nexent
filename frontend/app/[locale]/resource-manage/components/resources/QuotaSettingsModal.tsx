@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   Modal,
   Form,
+  Input,
   InputNumber,
   Switch,
   Slider,
@@ -117,8 +118,9 @@ export function QuotaSettingsModal({
   const [activeThresholdIndex, setActiveThresholdIndex] = useState<
     number | null
   >(null);
-  // Quota input managed as plain controlled state (not Form field)
-  const [quotaValue, setQuotaValue] = useState<number | null>(null);
+  // An empty string explicitly represents an unlimited hard quota.
+  const [quotaInput, setQuotaInput] = useState("");
+  const quotaValue = quotaInput === "" ? null : Number(quotaInput);
 
   // Fetch current quota config and usage
   const fetchData = useCallback(async () => {
@@ -157,10 +159,10 @@ export function QuotaSettingsModal({
       const quotaBytes = configData.hard_limit_bytes;
       if (quotaBytes && quotaBytes < GB) {
         setUnit("MB");
-        setQuotaValue(Math.round(quotaBytes / MB));
+        setQuotaInput(String(Math.round(quotaBytes / MB)));
       } else {
         setUnit("GB");
-        setQuotaValue(quotaBytes ? Math.round(quotaBytes / GB) : null);
+        setQuotaInput(quotaBytes ? String(Math.round(quotaBytes / GB)) : "");
       }
     } catch (err: any) {
       message.error(err.message || "Failed to load quota settings");
@@ -260,15 +262,25 @@ export function QuotaSettingsModal({
         warning_threshold_pct: values.warning_threshold_pct,
         critical_threshold_pct: values.critical_threshold_pct,
       };
-      // Only include hard limit when user is allowed to change it
+      // Only include hard limit when user is allowed to change it.
+      // The update API intentionally ignores null hard-limit fields, so an
+      // empty input must use the dedicated DELETE endpoint after saving the
+      // warning settings.
       if (canEditHardLimit) {
-        if (unit === "GB") {
-          payload.hard_limit_gb = quotaValue;
+        if (quotaValue == null) {
+          await quotaService.updateTenantQuota(tenantId, payload);
+          await quotaService.deleteTenantQuota(tenantId);
         } else {
-          payload.hard_limit_mb = quotaValue;
+          if (unit === "GB") {
+            payload.hard_limit_gb = quotaValue;
+          } else {
+            payload.hard_limit_mb = quotaValue;
+          }
+          await quotaService.updateTenantQuota(tenantId, payload);
         }
+      } else {
+        await quotaService.updateTenantQuota(tenantId, payload);
       }
-      await quotaService.updateTenantQuota(tenantId, payload);
 
       message.success(
         t("quota.saveSuccess", "Quota settings saved successfully")
@@ -374,16 +386,20 @@ export function QuotaSettingsModal({
           </Space>
         </div>
         <Space>
-          <InputNumber
-            min={0}
-            precision={0}
-            value={quotaValue}
-            onChange={(v) => setQuotaValue(v ?? null)}
-            addonAfter={unit}
-            placeholder={t("quota.unlimited", "Unlimited")}
-            style={{ width: 200 }}
-            disabled={config?.hard_limit_editable === false}
-          />
+          <Input
+              style={{ width: 200 }}
+              value={quotaInput}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                if (nextValue === "" || /^\d+$/.test(nextValue)) {
+                  setQuotaInput(nextValue);
+                }
+              }}
+              addonAfter={unit}
+              placeholder={t("quota.unlimited", "Unlimited")}
+              inputMode="numeric"
+              disabled={config?.hard_limit_editable === false}
+            />
           <Segmented
             options={["GB", "MB"]}
             value={unit}

@@ -142,6 +142,10 @@ def test_start_all_services_starts_enabled_services_in_order(service_module, mon
     scheduler_module = types.ModuleType("services.auto_summary_scheduler")
     scheduler_module.auto_summary_scheduler = scheduler
     monkeypatch.setitem(sys.modules, "services.auto_summary_scheduler", scheduler_module)
+    recovery = MagicMock()
+    recovery_module = types.ModuleType("services.startup_recovery_service")
+    recovery_module.recover_data_process_tasks = recovery
+    monkeypatch.setitem(sys.modules, "services.startup_recovery_service", recovery_module)
 
     manager = service_module.ServiceManager(
         {"start_redis": True, "start_ray": True, "start_workers": False, "disable_celery_flower": True}
@@ -153,6 +157,7 @@ def test_start_all_services_starts_enabled_services_in_order(service_module, mon
 
     assert manager.start_all_services() is True
     assert started == ["redis", "ray"]
+    recovery.assert_called_once_with()
     manager.log_service_info.assert_called_once()
     scheduler.start.assert_called_once()
 
@@ -161,6 +166,10 @@ def test_start_all_services_reports_failure(service_module, monkeypatch):
     scheduler_module = types.ModuleType("services.auto_summary_scheduler")
     scheduler_module.auto_summary_scheduler = types.SimpleNamespace(start=MagicMock())
     monkeypatch.setitem(sys.modules, "services.auto_summary_scheduler", scheduler_module)
+    recovery = MagicMock()
+    recovery_module = types.ModuleType("services.startup_recovery_service")
+    recovery_module.recover_data_process_tasks = recovery
+    monkeypatch.setitem(sys.modules, "services.startup_recovery_service", recovery_module)
 
     manager = service_module.ServiceManager(
         {"start_redis": True, "start_ray": False, "start_workers": False, "disable_celery_flower": True}
@@ -169,6 +178,7 @@ def test_start_all_services_reports_failure(service_module, monkeypatch):
     manager.log_service_info = MagicMock()
 
     assert manager.start_all_services() is False
+    recovery.assert_called_once_with()
     manager.log_service_info.assert_not_called()
 
 

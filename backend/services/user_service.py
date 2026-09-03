@@ -197,7 +197,7 @@ async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optio
     if not private_kbs:
         return None
 
-    from services.vectordatabase_service import (
+    from management.services.knowledge_base.service import (
         ElasticSearchService,
         get_vector_db_core,
     )

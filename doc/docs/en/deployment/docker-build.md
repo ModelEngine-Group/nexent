@@ -40,6 +40,22 @@ Variant options:
 - `--dependency-variant cpu|gpu` controls data-process dependencies and defaults to `cpu`. `gpu` builds GPU/CUDA dependencies and uses the `-gpu` image-name suffix.
 - `--terminal-variant slim|conda` controls the terminal image and defaults to `slim`. `conda` keeps Miniconda, `vim`, and the compiler toolchain and uses the `-conda` image-name suffix.
 
+Two independent sandbox images are available:
+
+- `nexent/nexent-sandbox` is the standard lightweight default. Its Dockerfile is under `deploy/images/dockerfiles/sandbox/`. It retains Python, Jupyter Kernel Gateway, the Nexent SDK, the non-root user, and the workspace protocol.
+- `nexent/nexent-sandbox-full` is the optional skills image under `deploy/images/dockerfiles/sandbox-full/`. It is scoped to `docx`, `pdf`, `pptx`, `xlsx`, `canvas-design`, `frontend-design`, `slack-gif-creator`, `mcp-builder`, `web-artifacts-builder`, and `skill-creator`. It provides Node.js 20, the pnpm offline cache, LibreOffice, Pandoc, Poppler, Tesseract, and the Python/Node dependencies for those skills. Playwright/Chromium is intentionally excluded.
+
+`--all` includes only the default lightweight sandbox. Build the full image explicitly:
+
+```bash
+bash build.sh --sandbox --version latest --load
+bash build.sh --sandbox-full --version latest --load
+```
+
+Manual runs of `docker-deploy.yml` also build only the lightweight sandbox by default. Enable `build_full_sandbox` to build the full image as well.
+
+The runtime mechanism is image-variant agnostic. Keep `NEXENT_SANDBOX_DOCKER_IMAGE=nexent/nexent-sandbox:latest` for the standard deployment, or switch it to `nexent/nexent-sandbox-full:latest` and roll the runtime service when the extended capabilities are required. With sandbox networking enabled, the lightweight image can install pure-Python packages or dependencies with compatible wheels at runtime. It cannot install system programs as the non-root runtime user and cannot execute Node.js workspace scripts.
+
 When building `data-process`, `deploy/images/build.sh` prepares `model-assets` automatically: it first uses an existing root `model-assets` directory, then tries `~/model-assets`, and otherwise clones the Hugging Face repository and runs `git lfs pull`. If you run `docker build` directly, prepare `model-assets` in the repository root first.
 
 Image options:
@@ -49,36 +65,8 @@ Image options:
 - `--mcp` builds `nexent-mcp`
 - `--terminal` builds `nexent-ubuntu-terminal`
 - `--docs` builds `nexent-docs`
-- `--sandbox` builds `nexent-sandbox`
-
-The following diagram shows the actual build flow of `deploy/images/build.sh`:
-
-```mermaid
-flowchart TD
-    A["Run bash build.sh"] --> B{"Argument form"}
-    B -->|"No arguments, interactive terminal"| C["Interactively choose images, version, and registry<br/>defaults to main,web and latest"]
-    B -->|"With arguments"| D["Parse the --images list or single image options"]
-    C --> E["Determine registry and build arguments"]
-    D --> E
-    E --> F{"Registry selection"}
-    F -->|"general"| G["Image tags start with nexent/"]
-    F -->|"mainland"| H["Inject mainland build mirrors<br/>web image automatically adds --no-cache"]
-    G --> I["Build each selected image"]
-    H --> I
-    I --> J["main uses main/Dockerfile<br/>builds nexent"]
-    I --> K["web uses web/Dockerfile<br/>docs uses docs/Dockerfile"]
-    I --> L["mcp uses mcp/Dockerfile<br/>sandbox uses sandbox/Dockerfile"]
-    I --> M["data-process uses data-process/Dockerfile<br/>cpu or gpu variant<br/>model-assets prepared automatically before build"]
-    I --> N["terminal uses terminal/Dockerfile<br/>slim or conda variant"]
-    J --> O{"Output mode"}
-    K --> O
-    L --> O
-    M --> O
-    N --> O
-    O -->|"--push"| P["Push to image registry<br/>mainland pushes to ccr.ccs.tencentyun.com/nexent-hub"]
-    O -->|"--load"| Q["Load into local Docker"]
-    O -->|"Default"| R["Local build only"]
-```
+- `--sandbox` builds the default lightweight `nexent-sandbox`
+- `--sandbox-full` builds the optional `nexent-sandbox-full`
 
 ```bash
 # 🛠️ Create and use a new builder instance that supports multi-architecture builds
