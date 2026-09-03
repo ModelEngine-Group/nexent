@@ -66,6 +66,8 @@ def test_docker_bridge_gateway_returns_concrete_ipv4_address():
         attrs={
             "IPAM": {
                 "Config": [
+                    {},
+                    {"Gateway": "not-an-ip"},
                     {"Gateway": "fd00::1"},
                     {"Gateway": "172.17.0.1"},
                 ]
