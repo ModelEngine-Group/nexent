@@ -1066,9 +1066,14 @@ async def import_agent_from_repository_impl(
             snapshot.skills,
             authorization,
             skill_resolutions=skill_resolutions,
+            resolve_name_conflicts=True,
         )
     else:
-        result = await import_agent_impl(snapshot, authorization)
+        result = await import_agent_impl(
+            snapshot,
+            authorization,
+            resolve_name_conflicts=True,
+        )
 
     affected = increment_agent_repository_downloads(agent_repository_id)
     if affected == 0:
