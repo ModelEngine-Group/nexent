@@ -61,7 +61,7 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
-from management.services.skill.service import SkillService, generate_available_copy_skill_name
+from management.services.skill.service import SkillService
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -78,6 +78,7 @@ from services.conversation_management_service import (
 )
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 

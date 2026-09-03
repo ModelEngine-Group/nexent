@@ -149,7 +149,8 @@ sys.modules['services.runtime_state_service'] = runtime_state_service_module
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
 agent_version_service_mock = MagicMock()
-skill_service_mock = MagicMock()
+skill_service_mock = types.ModuleType("management.services.skill.service")
+skill_service_mock.SkillService = MagicMock()
 skill_service_mock.SkillService.return_value.list_skill_instances.return_value = []
 prompt_template_service_mock = MagicMock()
 prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_ID = 0
@@ -163,7 +164,6 @@ sys.modules['services.agent_version_service'] = agent_version_service_mock
 sys.modules['management.services.skill.service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 sys.modules['services.file_management_service'] = MagicMock()
-sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['services.streaming_channel'] = MagicMock()
 
 model_gateway_service_mock = types.ModuleType("services.model_gateway_service")
