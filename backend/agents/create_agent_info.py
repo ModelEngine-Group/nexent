@@ -1403,10 +1403,6 @@ async def create_agent_config(
         include_empty_message=not bool(runtime_knowledge_context),
     )
 
-    # This compatibility flag controls compression only. ContextManager remains
-    # the single context assembly path when compression is disabled.
-    enable_context_manager = agent_info.get("enable_context_manager", False)
-
     # Get the skills included in ContextManager items.
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
@@ -1463,12 +1459,14 @@ async def create_agent_config(
         capacity_snapshot = None
         resolved_capacity_snapshot = None
 
-    requested_output_tokens = agent_info.get("requested_output_tokens")
+    # Legacy model/Agent/request output-reserve overrides no longer influence
+    # runtime. W1 derives one automatic protection value from model capacity.
+    requested_output_tokens = None
     safe_input_budget_snapshot = _resolve_safe_input_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
-        agent_requested_output_tokens=requested_output_tokens,
-        request_requested_output_tokens=request_requested_output_tokens,
+        agent_requested_output_tokens=None,
+        request_requested_output_tokens=None,
     )
     if safe_input_budget_snapshot is not None:
         soft_input_budget_tokens = safe_input_budget_snapshot["soft_input_budget_tokens"]
@@ -1528,13 +1526,10 @@ async def create_agent_config(
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
     )
+    # Automatic compaction is the single production policy. Persisted legacy
+    # tenant/Agent/request switches are ignored during the compatibility window.
     policy_layers = PolicyLayers.model_validate({
-        "platform": {
-            "processing_mode": "adaptive_compact" if enable_context_manager else "passthrough"
-        },
-        "tenant": tenant_config_manager.get_context_policy(tenant_id),
-        "agent": agent_info.get("context_policy"),
-        "request": request_context_policy,
+        "platform": {"processing_mode": "adaptive_compact"},
     })
     effective_context_policy = resolve_policy(policy_layers)
     effective_processing_mode = getattr(
@@ -2279,10 +2274,8 @@ async def create_agent_run_info(
         })
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
-    if requested_output_tokens is not None:
-        create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
-    if context_policy is not None:
-        create_config_kwargs["request_context_policy"] = context_policy
+    # Legacy per-run output/context overrides are accepted at the API boundary
+    # for rolling compatibility, but runtime policy is now automatic.
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 

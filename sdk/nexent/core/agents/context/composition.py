@@ -138,7 +138,7 @@ def reconcile_context_composition(
 
     ratio = round(adjustment / denominator, 4) if denominator else (1.0 if adjustment else 0.0)
     return ContextComposition(
-        source="provider_reconciled_estimate",
+        source="estimated",
         denominator_tokens=denominator,
         estimator_version=CONTEXT_COMPOSITION_ESTIMATOR_VERSION,
         segments=segments,

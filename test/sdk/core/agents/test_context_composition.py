@@ -40,7 +40,7 @@ def test_ac_tu_006_reconciles_shortfall_to_provider_overhead_exactly():
         100,
     )
 
-    assert composition.source == "provider_reconciled_estimate"
+    assert composition.source == "estimated"
     assert composition.segments["provider_overhead"] == 60
     assert sum(composition.segments.values()) == 100
     assert composition.adjustment_ratio == 0.6

@@ -553,14 +553,14 @@ def test_call_normal_operation(openai_model_instance):
         assert result == mock_result_message
         mock_prepare.assert_called_once()
 
-        # AC-TU-001/004: one physical dispatch produces one complete v2 record.
+        # P10-AC-001: one physical dispatch produces one complete observed-only record.
         assert len(openai_model_instance.provider_call_usages) == 1
         call_usage = openai_model_instance.provider_call_usages[0]
         assert call_usage.status == "completed"
         assert call_usage.usage.input_tokens == 10
         assert call_usage.usage.output_tokens == 5
         assert call_usage.usage.total_tokens == 15
-        assert call_usage.to_dict()["schema_version"] == 2
+        assert call_usage.to_dict()["schema_version"] == 3
         assert tuple(openai_model_instance.provider_call_usages) == result.provider_call_usages
 
         # Verify observer calls
@@ -1575,7 +1575,7 @@ def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
         openai_model_instance.__call__(messages)
 
     create_kwargs = openai_model_instance.client.chat.completions.create.call_args.kwargs
-    assert create_kwargs["max_tokens"] == 8192
+    assert create_kwargs["max_tokens"] == 131072
 
 
 def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model_instance):
@@ -1593,6 +1593,7 @@ def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model
 
 
 def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_instance):
+    openai_model_instance.max_output_tokens = 8192
     openai_model_instance._dispatch_chat_completion(
         safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
         stream=True,
@@ -1602,7 +1603,7 @@ def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_ins
     openai_model_instance.client.chat.completions.create.assert_called_once_with(
         stream=True,
         messages=[],
-        max_tokens=256,
+        max_tokens=8192,
     )
 
     dispatched = openai_model_instance.client.chat.completions.create.call_args.kwargs
@@ -1613,21 +1614,23 @@ def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_ins
 
 
 def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instance):
+    openai_model_instance.max_output_tokens = 8192
     openai_model_instance._dispatch_chat_completion(
         safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
         stream=True,
         messages=[],
-        max_tokens=256,
+        max_tokens=8192,
     )
 
     openai_model_instance.client.chat.completions.create.assert_called_once_with(
         stream=True,
         messages=[],
-        max_tokens=256,
+        max_tokens=8192,
     )
 
 
 def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
+    openai_model_instance.max_output_tokens = 8192
     with pytest.raises(openai_llm_module.CallerMaxTokensOverrideForbidden):
         openai_model_instance._dispatch_chat_completion(
             safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
@@ -1775,17 +1778,78 @@ def test_safe_input_budget_trace_attributes_are_prefixed():
     assert attrs["w2.hard_input_budget_tokens"] == 1000
 
 
-def _successful_stream(content="ok", prompt_tokens=10):
+def _successful_stream(content="ok", prompt_tokens=10, finish_reason="stop"):
     chunk = MagicMock()
     chunk.choices = [MagicMock()]
     chunk.choices[0].delta.content = content
     chunk.choices[0].delta.reasoning_content = None
     chunk.choices[0].delta.role = "assistant"
-    chunk.choices[0].finish_reason = "stop"
+    chunk.choices[0].finish_reason = finish_reason
     chunk.usage = MagicMock()
     chunk.usage.prompt_tokens = prompt_tokens
     chunk.usage.completion_tokens = 1
     return [chunk]
+
+
+def test_length_prose_continues_and_removes_repeated_boundary(openai_model_instance):
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        _successful_stream("alpha beta", finish_reason="length"),
+        _successful_stream(" beta gamma"),
+    ]
+
+    with patch.object(
+        openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs
+    ):
+        result = openai_model_instance([{"role": "user", "content": "write"}])
+
+    assert result.content == "alpha beta gamma"
+    assert result.token_usage.input_tokens == 20
+    assert result.token_usage.output_tokens == 2
+    assert openai_model_instance.client.chat.completions.create.call_count == 2
+
+
+def test_length_prose_stops_after_two_continuations(openai_model_instance):
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        _successful_stream("one", finish_reason="length"),
+        _successful_stream(" two", finish_reason="length"),
+        _successful_stream(" three", finish_reason="length"),
+        _successful_stream(" unexpected"),
+    ]
+
+    with patch.object(
+        openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs
+    ):
+        result = openai_model_instance([{"role": "user", "content": "write"}])
+
+    assert result.content == "one two three"
+    assert result.token_usage.input_tokens == 30
+    assert result.token_usage.output_tokens == 3
+    assert openai_model_instance.client.chat.completions.create.call_count == 3
+    assert openai_model_instance.last_finish_reason == "length"
+
+
+def test_length_tool_call_is_not_executed_or_continued(openai_model_instance):
+    function = types.SimpleNamespace(name="dangerous_tool", arguments='{"value":')
+    delta = types.SimpleNamespace(
+        content=None,
+        role="assistant",
+        reasoning_content=None,
+        tool_calls=[types.SimpleNamespace(
+            index=0, id="call_partial", type="function", function=function
+        )],
+    )
+    chunk = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(delta=delta, finish_reason="length")],
+        usage=types.SimpleNamespace(prompt_tokens=10, completion_tokens=1),
+    )
+    openai_model_instance.client.chat.completions.create.return_value = [chunk]
+
+    with patch.object(
+        openai_model_instance, "_prepare_completion_kwargs", side_effect=_p2_prepare_kwargs
+    ), pytest.raises(openai_llm_module.IncompleteToolCallError):
+        openai_model_instance([{"role": "user", "content": "act"}])
+
+    assert openai_model_instance.client.chat.completions.create.call_count == 1
 
 
 def _p2_prepare_kwargs(messages=None, model=None, **kwargs):

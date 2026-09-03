@@ -31,7 +31,7 @@ MAX_GATE_MULTIPLIER = 2.0
 TOOL_PROTOCOL_OVERHEAD_TOKENS = 208
 
 RequestShape = Literal["text", "tools", "media", "tools_media"]
-CountSource = Literal["provider", "tokenizer", "estimated"]
+CountSource = Literal["provider", "tokenizer", "estimated", "provider_anchor_delta"]
 SideEffectState = Literal[
     "pristine", "response_started", "tool_effect", "application_effect", "persisted"
 ]
@@ -307,6 +307,12 @@ class FinalRequestPreflight:
     calibration_p95: Optional[float]
     calibration_p99: Optional[float]
     fallback_reason: Optional[str]
+    stable_semantic_fingerprint: str = ""
+    context_stable_fingerprint: str = ""
+    message_fingerprints: tuple[str, ...] = ()
+    anchor_input_tokens: Optional[int] = None
+    estimated_delta_tokens: Optional[int] = None
+    anchor_invalidation_reason: Optional[str] = None
     retry_ordinal: int = 0
     estimator_version: str = ESTIMATOR_VERSION
 
@@ -316,6 +322,15 @@ class _Sample:
     request_id: str
     ratio: float
     observed_at: float
+
+
+@dataclass(frozen=True)
+class _ObservedRequestAnchor:
+    identity_fingerprint: str
+    stable_semantic_fingerprint: str
+    context_stable_fingerprint: str
+    message_fingerprints: tuple[str, ...]
+    input_tokens: int
 
 
 class CalibrationStore:
@@ -471,6 +486,65 @@ def build_final_request_shape(completion_kwargs: Mapping[str, Any]) -> FinalRequ
 class FinalRequestMeter:
     def __init__(self, calibration_store: CalibrationStore = GLOBAL_CALIBRATION_STORE) -> None:
         self.calibration_store = calibration_store
+        self._observed_anchor: Optional[_ObservedRequestAnchor] = None
+        self._anchor_lock = threading.Lock()
+
+    def clear_observed_anchor(self) -> None:
+        with self._anchor_lock:
+            self._observed_anchor = None
+
+    def observe_request_input(
+        self,
+        preflight: FinalRequestPreflight,
+        identity: FinalRequestIdentity,
+        *,
+        provider_prompt_tokens: int,
+    ) -> None:
+        if provider_prompt_tokens <= 0 or preflight.identity_fingerprint != identity.fingerprint:
+            return
+        with self._anchor_lock:
+            self._observed_anchor = _ObservedRequestAnchor(
+                identity_fingerprint=identity.fingerprint,
+                stable_semantic_fingerprint=preflight.stable_semantic_fingerprint,
+                context_stable_fingerprint=preflight.context_stable_fingerprint,
+                message_fingerprints=preflight.message_fingerprints,
+                input_tokens=provider_prompt_tokens,
+            )
+
+    def estimate_context_candidate(
+        self, messages: Sequence[Any], tools: Sequence[Any]
+    ) -> Optional[int]:
+        message_fingerprints = tuple(_fingerprint(message) for message in messages)
+        context_stable = _fingerprint({"tools": list(tools)})
+        with self._anchor_lock:
+            anchor = self._observed_anchor
+        if anchor is None or anchor.context_stable_fingerprint != context_stable:
+            return None
+        if message_fingerprints[: len(anchor.message_fingerprints)] != anchor.message_fingerprints:
+            return None
+        delta = _estimate_message_delta(messages[len(anchor.message_fingerprints) :])
+        return anchor.input_tokens + math.ceil(delta * DEFAULT_CORRECTION_MULTIPLIER)
+
+    def _anchor_delta(
+        self,
+        *,
+        identity: FinalRequestIdentity,
+        stable_semantic_fingerprint: str,
+        message_fingerprints: tuple[str, ...],
+        messages: Sequence[Any],
+    ) -> tuple[Optional[int], Optional[int], Optional[str]]:
+        with self._anchor_lock:
+            anchor = self._observed_anchor
+        if anchor is None:
+            return None, None, None
+        if anchor.identity_fingerprint != identity.fingerprint:
+            return None, None, "anchor_identity_changed"
+        if anchor.stable_semantic_fingerprint != stable_semantic_fingerprint:
+            return None, None, "anchor_semantics_changed"
+        if message_fingerprints[: len(anchor.message_fingerprints)] != anchor.message_fingerprints:
+            return None, None, "anchor_non_append_only"
+        delta = _estimate_message_delta(messages[len(anchor.message_fingerprints) :])
+        return anchor.input_tokens, delta, None
 
     def measure(
         self,
@@ -486,6 +560,14 @@ class FinalRequestMeter:
         request_id: Optional[str] = None,
     ) -> FinalRequestPreflight:
         shape = build_final_request_shape(completion_kwargs)
+        messages = list(shape.semantic_request.get("messages") or [])
+        message_fingerprints = tuple(_fingerprint(message) for message in messages)
+        stable_semantic_fingerprint = _fingerprint(
+            {key: value for key, value in shape.semantic_request.items() if key != "messages"}
+        )
+        context_stable_fingerprint = _fingerprint(
+            {"tools": shape.semantic_request.get("tools") or []}
+        )
         raw = shape.components.raw_total
         key = CalibrationKey(
             endpoint_fingerprint=identity.endpoint_fingerprint,
@@ -495,11 +577,22 @@ class FinalRequestMeter:
             reasoning_mode=shape.reasoning_mode,
         )
         stats = self.calibration_store.stats(key)
+        anchor_input, estimated_delta, anchor_reason = self._anchor_delta(
+            identity=identity,
+            stable_semantic_fingerprint=stable_semantic_fingerprint,
+            message_fingerprints=message_fingerprints,
+            messages=messages,
+        )
         if provider_count is not None:
             if provider_count <= 0:
                 raise ValueError("provider_count must be positive")
             source: CountSource = "provider"
             soft_count = hard_count = provider_count
+        elif anchor_input is not None and estimated_delta is not None:
+            source = "provider_anchor_delta"
+            soft_count = hard_count = anchor_input + math.ceil(
+                estimated_delta * DEFAULT_CORRECTION_MULTIPLIER
+            )
         else:
             base = tokenizer_count if tokenizer_count is not None else raw
             if base <= 0:
@@ -533,13 +626,17 @@ class FinalRequestMeter:
             calibration_p95=stats.p95,
             calibration_p99=stats.p99,
             fallback_reason=fallback_reason,
+            stable_semantic_fingerprint=stable_semantic_fingerprint,
+            context_stable_fingerprint=context_stable_fingerprint,
+            message_fingerprints=message_fingerprints,
+            anchor_input_tokens=anchor_input,
+            estimated_delta_tokens=estimated_delta,
+            anchor_invalidation_reason=anchor_reason,
             retry_ordinal=retry_ordinal,
         )
-        if preflight.hard_exceeded:
-            raise FinalRequestOverHardBudget(
-                actual=hard_count,
-                hard_budget=hard_budget,
-                preflight=preflight,
+        if provider_count is not None:
+            self.observe_request_input(
+                preflight, identity, provider_prompt_tokens=provider_count
             )
         return preflight
 
@@ -579,6 +676,12 @@ def _gate_multiplier(value: Optional[float]) -> float:
 def _json_tokens(value: Any) -> int:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return estimate_tokens_text(encoded)
+
+
+def _estimate_message_delta(messages: Sequence[Any]) -> int:
+    if not messages:
+        return 0
+    return build_final_request_shape({"messages": list(messages)}).components.raw_total
 
 
 def _fingerprint(value: Any) -> str:

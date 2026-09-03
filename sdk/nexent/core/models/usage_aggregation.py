@@ -45,6 +45,7 @@ def aggregate_turn_usage(
         record
         for record in calls
         if record.purpose in _CONTEXT_PURPOSES
+        and record.source == "provider"
         and record.status in {"completed", "partial"}
         and record.usage.input_tokens is not None
     ]
@@ -63,7 +64,7 @@ def aggregate_turn_usage(
         data_quality = "degraded"
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "call_count": len(calls),
         "known_usage_call_count": sum(
             record.usage.input_tokens is not None or record.usage.output_tokens is not None

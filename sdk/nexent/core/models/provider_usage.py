@@ -8,7 +8,7 @@ from typing import Any, Mapping, Optional
 from uuid import uuid4
 
 
-PROVIDER_USAGE_SCHEMA_VERSION = 2
+PROVIDER_USAGE_SCHEMA_VERSION = 3
 
 
 def resolve_provider_usage_profile(
@@ -85,8 +85,6 @@ def normalize_provider_usage(
     provider: Optional[str],
     model: Optional[str],
     capability_profile: Optional[Mapping[str, Any]] = None,
-    estimated_input_tokens: Optional[int] = None,
-    estimated_output_tokens: Optional[int] = None,
 ) -> tuple[NormalizedTokenUsage, UsageQuality, str, dict[str, int]]:
     """Normalize OpenAI-compatible usage without turning missing fields into zero."""
 
@@ -104,11 +102,7 @@ def normalize_provider_usage(
         raw_usage, ("total_tokens",), "total_tokens", reasons
     )
 
-    source = "provider" if raw_usage is not None and (input_tokens is not None or output_tokens is not None) else "estimated"
-    if input_tokens is None and estimated_input_tokens is not None:
-        input_tokens = _valid_estimate(estimated_input_tokens)
-    if output_tokens is None and estimated_output_tokens is not None:
-        output_tokens = _valid_estimate(estimated_output_tokens)
+    source = "provider" if raw_usage is not None and (input_tokens is not None or output_tokens is not None) else "missing"
     if input_tokens is None and output_tokens is None:
         source = "missing"
 

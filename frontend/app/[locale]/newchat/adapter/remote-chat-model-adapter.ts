@@ -357,7 +357,7 @@ export interface ContextBudgetEvent {
 }
 
 export interface ProviderCallUsageV2 {
-  schema_version: 2;
+  schema_version: 2 | 3;
   call_id: string;
   turn_id: string | null;
   step_number: number | null;
@@ -395,7 +395,7 @@ export interface ProviderCallUsageV2 {
 }
 
 export interface TurnUsageV2 {
-  schema_version: 2;
+  schema_version: 2 | 3;
   turn_id: string;
   call_count: number;
   known_usage_call_count: number;
@@ -420,7 +420,8 @@ export function parseProviderCallUsage(
 ): ProviderCallUsageV2 | null {
   try {
     const data = JSON.parse(content);
-    return data?.schema_version === 2 && typeof data.call_id === "string"
+    return [2, 3].includes(data?.schema_version) &&
+      typeof data.call_id === "string"
       ? (data as ProviderCallUsageV2)
       : null;
   } catch {
@@ -431,7 +432,7 @@ export function parseProviderCallUsage(
 export function parseTurnUsage(content: string): TurnUsageV2 | null {
   try {
     const data = JSON.parse(content);
-    return data?.schema_version === 2 && Array.isArray(data.call_ids)
+    return [2, 3].includes(data?.schema_version) && Array.isArray(data.call_ids)
       ? (data as TurnUsageV2)
       : null;
   } catch {

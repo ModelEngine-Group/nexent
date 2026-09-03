@@ -2319,7 +2319,7 @@ class TestCreateAgentConfig:
         assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
-        assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
+        assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):

@@ -92,20 +92,18 @@ def test_ac_tu_003_preserves_missing_as_null_and_explicit_zero():
     assert quality.degraded is False
 
 
-def test_ac_tu_003_estimated_fallback_keeps_optional_details_null():
+def test_p10_ac_001_missing_provider_usage_stays_null():
     usage, quality, source, _ = normalize_provider_usage(
         None,
         provider="unknown",
         model="model",
-        estimated_input_tokens=12,
-        estimated_output_tokens=4,
     )
 
-    assert source == "estimated"
-    assert usage.input_tokens == 12
-    assert usage.output_tokens == 4
-    assert usage.total_tokens == 16
-    assert usage.total_source == "derived"
+    assert source == "missing"
+    assert usage.input_tokens is None
+    assert usage.output_tokens is None
+    assert usage.total_tokens is None
+    assert usage.total_source == "missing"
     assert usage.fresh_input_tokens is None
     assert usage.reasoning_tokens is None
     assert quality.degraded is False

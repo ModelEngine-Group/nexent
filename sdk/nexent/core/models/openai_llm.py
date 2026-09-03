@@ -25,6 +25,7 @@ from .capacity_budget import (
     SafeInputBudgetSnapshot,
     compute_w2_fingerprint,
 )
+from .capacity_resolver import derive_output_protection_tokens
 from ..utils.observer import MessageObserver, ProcessType
 from .prompt_cache import (
     apply_cache_directives,
@@ -37,7 +38,6 @@ from .final_request_budget import (
     FinalRequestIdentity,
     FinalRequestMeter,
     FinalRequestPreflight,
-    FinalRequestOverHardBudget,
     FinalRequestSoftBudgetExceeded,
     CompactionNoReduction,
     ContextRebuildOverBudget,
@@ -60,6 +60,24 @@ logger = logging.getLogger("openai_llm")
 
 class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
+
+
+class IncompleteToolCallError(RuntimeError):
+    """Raised when a length stop leaves tool-call arguments incomplete."""
+
+
+def _merge_continuation_text(existing: str, continuation: str) -> tuple[str, bool]:
+    """Join an automatic continuation while removing a repeated boundary prefix."""
+    if not continuation.strip():
+        return existing, False
+    max_overlap = min(len(existing), len(continuation), 2048)
+    for overlap in range(max_overlap, 0, -1):
+        if existing[-overlap:] == continuation[:overlap]:
+            continuation = continuation[overlap:]
+            break
+    if not continuation.strip():
+        return existing, False
+    return existing + continuation, True
 
 
 class OpenAIModel(OpenAIServerModel):
@@ -205,6 +223,7 @@ class OpenAIModel(OpenAIServerModel):
                  _side_effect_guard: Optional[RequestSideEffectGuard] = None,
                  _recovery_original_hard_count: Optional[int] = None,
                  _provider_safe_limit: Optional[int] = None,
+                 _length_continuation_ordinal: int = 0,
                  usage_purpose: str = "main_agent",
                  usage_turn_id: Optional[str] = None,
                  **kwargs, ) -> ChatMessage:
@@ -221,6 +240,7 @@ class OpenAIModel(OpenAIServerModel):
             self._active_usage_turn_id = effective_turn_id
             if effective_turn_id != self._provider_usage_turn_id:
                 self.turn_provider_call_usages = []
+                self._final_request_meter.clear_observed_anchor()
                 self._provider_usage_turn_id = effective_turn_id
             trusted_budget_snapshot = (
                 safe_input_budget_snapshot or self.safe_input_budget_snapshot
@@ -266,6 +286,7 @@ class OpenAIModel(OpenAIServerModel):
                     _side_effect_guard=side_effect_guard,
                     _recovery_original_hard_count=_recovery_original_hard_count,
                     _provider_safe_limit=_provider_safe_limit,
+                    _length_continuation_ordinal=_length_continuation_ordinal,
                     usage_purpose=usage_purpose,
                     usage_turn_id=usage_turn_id,
                     **kwargs,
@@ -702,6 +723,11 @@ class OpenAIModel(OpenAIServerModel):
                     self._build_final_request_identity(trusted_budget_snapshot),
                     provider_prompt_tokens=input_tokens,
                 )
+                self._final_request_meter.observe_request_input(
+                    self.last_final_request_preflight,
+                    self._build_final_request_identity(trusted_budget_snapshot),
+                    provider_prompt_tokens=input_tokens,
+                )
                 self._monitoring.set_span_attributes(
                     **{
                         "context.final_request.calibration_observed": calibration_added,
@@ -801,6 +827,70 @@ class OpenAIModel(OpenAIServerModel):
             message.raw = current_request
             message.provider_call_usages = tuple(self.provider_call_usages)
             message.role = MessageRole.ASSISTANT
+
+            if finish_reason == "length":
+                if tool_calls:
+                    self._monitoring.add_span_event(
+                        "length_continuation_blocked",
+                        {"reason": "incomplete_tool_call"},
+                    )
+                    raise IncompleteToolCallError(
+                        "model output limit interrupted a tool call; the partial call was not executed"
+                    )
+                if _length_continuation_ordinal < 2 and model_output.strip():
+                    self._monitoring.add_span_event(
+                        "length_continuation_started",
+                        {"ordinal": _length_continuation_ordinal + 1},
+                    )
+                    continuation_messages = [
+                        *messages,
+                        {"role": "assistant", "content": model_output},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Continue the preceding answer exactly where it stopped. "
+                                "Do not repeat existing text and do not add a new introduction."
+                            ),
+                        },
+                    ]
+                    continuation = self.__call__(
+                        messages=continuation_messages,
+                        stop_sequences=stop_sequences,
+                        response_format=response_format,
+                        tools_to_call_from=tools_to_call_from,
+                        _token_tracker=token_tracker,
+                        safe_input_budget_snapshot=safe_input_budget_snapshot,
+                        context_rebuild=context_rebuild,
+                        _budget_retry_ordinal=_budget_retry_ordinal,
+                        _soft_rebuild_attempted=_soft_rebuild_attempted,
+                        _previous_preflight=self.last_final_request_preflight,
+                        _side_effect_guard=side_effect_guard,
+                        _recovery_original_hard_count=_recovery_original_hard_count,
+                        _provider_safe_limit=_provider_safe_limit,
+                        _length_continuation_ordinal=_length_continuation_ordinal + 1,
+                        usage_purpose=usage_purpose,
+                        usage_turn_id=usage_turn_id,
+                        **kwargs,
+                    )
+                    continuation_text = continuation.content or ""
+                    merged_content, made_progress = _merge_continuation_text(
+                        model_output, continuation_text
+                    )
+                    if made_progress:
+                        continuation.content = merged_content
+                        if continuation.token_usage is not None and message.token_usage is not None:
+                            continuation.token_usage = TokenUsage(
+                                input_tokens=(
+                                    message.token_usage.input_tokens
+                                    + continuation.token_usage.input_tokens
+                                ),
+                                output_tokens=(
+                                    message.token_usage.output_tokens
+                                    + continuation.token_usage.output_tokens
+                                ),
+                            )
+                        continuation.provider_call_usages = tuple(self.provider_call_usages)
+                        return continuation
             return message
 
         except Exception as e:
@@ -893,7 +983,12 @@ class OpenAIModel(OpenAIServerModel):
                     expected=snapshot.model_name,
                     actual=str(request_model),
                 )
-            trusted_max_tokens = snapshot.requested_output_tokens
+            # Profile/operator model capacity is the wire authority. The
+            # snapshot fallback only keeps legacy SDK callers without a model
+            # capacity contract operational during the compatibility window.
+            trusted_max_tokens = (
+                self.max_output_tokens or snapshot.requested_output_tokens
+            )
             caller_max_tokens = completion_kwargs.get("max_tokens")
             if caller_max_tokens is not None and caller_max_tokens != trusted_max_tokens:
                 raise CallerMaxTokensOverrideForbidden(
@@ -901,6 +996,9 @@ class OpenAIModel(OpenAIServerModel):
                     caller_value=caller_max_tokens,
                 )
             completion_kwargs["max_tokens"] = trusted_max_tokens
+            self._monitoring.set_span_attributes(
+                **{"llm.request.max_output_tokens": trusted_max_tokens}
+            )
             identity = self._build_final_request_identity(snapshot)
             final_shape = build_final_request_shape(completion_kwargs)
             provider_count, fallback_reason = count_final_request(
@@ -913,25 +1011,16 @@ class OpenAIModel(OpenAIServerModel):
                 ssl_verify=self._token_count_ssl_verify,
             )
             tokenizer_count = self._verified_tokenizer_count(final_shape)
-            try:
-                preflight = self._final_request_meter.measure(
-                    completion_kwargs,
-                    identity=identity,
-                    soft_budget=snapshot.soft_input_budget_tokens,
-                    hard_budget=snapshot.hard_input_budget_tokens,
-                    provider_count=provider_count,
-                    tokenizer_count=tokenizer_count,
-                    fallback_reason=fallback_reason,
-                    retry_ordinal=retry_ordinal,
-                )
-            except FinalRequestOverHardBudget as budget_error:
-                if budget_error.preflight is not None:
-                    self.last_final_request_preflight = budget_error.preflight
-                    self._record_final_request_preflight(
-                        budget_error.preflight,
-                        recovery_state="hard_stop",
-                    )
-                raise
+            preflight = self._final_request_meter.measure(
+                completion_kwargs,
+                identity=identity,
+                soft_budget=snapshot.soft_input_budget_tokens,
+                hard_budget=snapshot.hard_input_budget_tokens,
+                provider_count=provider_count,
+                tokenizer_count=tokenizer_count,
+                fallback_reason=fallback_reason,
+                retry_ordinal=retry_ordinal,
+            )
             if retry_ordinal > 0 and previous_preflight is not None and (
                 preflight.request_fingerprint == previous_preflight.request_fingerprint
                 or preflight.hard_count >= previous_preflight.hard_count
@@ -1006,8 +1095,6 @@ class OpenAIModel(OpenAIServerModel):
             provider=record.provider,
             model=record.model,
             capability_profile=self.provider_usage_profile,
-            estimated_input_tokens=input_tokens,
-            estimated_output_tokens=output_tokens,
         )
         started_at = getattr(record, "_started_at", None)
         record.source = source
@@ -1035,7 +1122,7 @@ class OpenAIModel(OpenAIServerModel):
         )
         record.context_composition = reconcile_context_composition(
             raw_composition,
-            record.usage.input_tokens,
+            record.usage.input_tokens if record.source == "provider" else None,
         ).to_dict()
         if not getattr(record, "_usage_event_emitted", False):
             usage_event_type = getattr(ProcessType, "LLM_USAGE", None)
@@ -1273,9 +1360,12 @@ class OpenAIModel(OpenAIServerModel):
 
     def _provisional_budget_snapshot(self) -> SafeInputBudgetSnapshot:
         """Build a non-persisted 32K capacity snapshot for this invocation."""
-        requested_output = max(1, int(self.max_output_tokens or 4096))
+        requested_output = derive_output_protection_tokens(
+            context_window_tokens=32_768,
+            max_output_tokens=max(1, int(self.max_output_tokens or 4096)),
+        )
         provider_input = max(1, 32_768 - requested_output)
-        soft = max(1, int(provider_input * 0.9))
+        soft = provider_input
         fields = {
             "requested_output_tokens": "model_default",
             "soft_limit_ratio": "code_default",
@@ -1373,6 +1463,9 @@ class OpenAIModel(OpenAIServerModel):
             "provider_overflow": recovery_state in {"retrying", "retry_exhausted", "retry_unsafe"},
             "recovery_attempted": preflight.retry_ordinal > 0,
             "recovery_succeeded": recovery_state == "recovered",
+            "anchor_input_tokens": preflight.anchor_input_tokens,
+            "estimated_delta_tokens": preflight.estimated_delta_tokens,
+            "anchor_invalidation_reason": preflight.anchor_invalidation_reason,
         })
         context_budget_type = getattr(ProcessType, "CONTEXT_BUDGET", None)
         if self.observer is not None and context_budget_type is not None:
@@ -1423,6 +1516,9 @@ class OpenAIModel(OpenAIServerModel):
                 "context.final_request.calibration_p95": preflight.calibration_p95 or 0.0,
                 "context.final_request.calibration_p99": preflight.calibration_p99 or 0.0,
                 "context.final_request.estimator_version": preflight.estimator_version,
+                "context.final_request.anchor_input_tokens": preflight.anchor_input_tokens or 0,
+                "context.final_request.estimated_delta_tokens": preflight.estimated_delta_tokens or 0,
+                "context.final_request.anchor_invalidation_reason": preflight.anchor_invalidation_reason or "",
                 "context.final_request.retry_ordinal": preflight.retry_ordinal,
                 "context.final_request.recovery_state": recovery_state,
                 "context.final_request.count_fallback_reason": preflight.fallback_reason or "",

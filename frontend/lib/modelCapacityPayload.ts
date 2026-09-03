@@ -27,12 +27,7 @@ export const buildCamelCapacityPayload = (value: CapacityFormValue) => {
   if (!hasCapacityInput(value)) return {};
   return {
     contextWindowTokens: toOptionalPositiveInt(value.contextWindowTokens),
-    maxInputTokens: toOptionalPositiveInt(value.maxInputTokens),
     maxOutputTokens: toOptionalPositiveInt(value.maxOutputTokens),
-    defaultOutputReserveTokens: toOptionalPositiveInt(
-      value.defaultOutputReserveTokens
-    ),
-    tokenizerFamily: value.tokenizerFamily.trim() || undefined,
     capacitySource: "operator" as const,
   };
 };
@@ -41,12 +36,7 @@ export const buildSnakeCapacityPayload = (value: CapacityFormValue) => {
   if (!hasCapacityInput(value)) return {};
   return {
     context_window_tokens: toOptionalPositiveInt(value.contextWindowTokens),
-    max_input_tokens: toOptionalPositiveInt(value.maxInputTokens),
     max_output_tokens: toOptionalPositiveInt(value.maxOutputTokens),
-    default_output_reserve_tokens: toOptionalPositiveInt(
-      value.defaultOutputReserveTokens
-    ),
-    tokenizer_family: value.tokenizerFamily.trim() || undefined,
     capacity_source: "operator" as const,
   };
 };

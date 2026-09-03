@@ -2,7 +2,6 @@ import json
 import logging
 from typing import Dict, Any
 
-from pydantic import ValidationError
 from sqlalchemy.sql import func
 
 from database.model_management_db import get_model_by_model_id
@@ -17,8 +16,10 @@ from database.tenant_config_db import (
 logger = logging.getLogger("config_utils")
 
 
-CONTEXT_SOFT_LIMIT_RATIO_KEY = "context.soft_limit_ratio"
 CONTEXT_POLICY_KEY = "context.policy"
+# Deprecated compatibility key. Values remain readable during rolling
+# upgrades but no longer influence the automatic runtime policy.
+CONTEXT_SOFT_LIMIT_RATIO_KEY = "context.soft_limit_ratio"
 
 
 def safe_value(value):
@@ -118,37 +119,14 @@ class TenantConfigManager:
         return default
 
     def get_capacity_reserve_policy(self, tenant_id: str | None = None):
-        """Resolve W2 reserve policy from tenant config.
+        """Return the single automatic context action policy.
 
-        Missing `context.soft_limit_ratio` uses the code default. Invalid
-        configured values fail closed so production requests do not silently use
-        a different compaction envelope than operators configured.
+        The legacy tenant soft-ratio setting is accepted in storage for rolling
+        compatibility but intentionally does not alter runtime behavior.
         """
-        from nexent.core.models.capacity_budget import (
-            CapacityReservePolicy,
-            InvalidReservePolicy,
-        )
+        from nexent.core.models.capacity_budget import CapacityReservePolicy
 
-        if tenant_id is None:
-            logger.warning("No tenant_id specified when getting capacity reserve policy")
-            return CapacityReservePolicy()
-
-        tenant_config = self.load_config(tenant_id)
-        raw_ratio = tenant_config.get(CONTEXT_SOFT_LIMIT_RATIO_KEY)
-        if raw_ratio in (None, ""):
-            return CapacityReservePolicy()
-
-        try:
-            ratio = float(str(raw_ratio).strip())
-            return CapacityReservePolicy(
-                soft_limit_ratio=ratio,
-                soft_limit_ratio_source="tenant_config",
-            )
-        except (TypeError, ValueError, ValidationError) as exc:
-            raise InvalidReservePolicy(
-                f"{CONTEXT_SOFT_LIMIT_RATIO_KEY} must be a decimal in (0, 1], "
-                f"got {raw_ratio!r}"
-            ) from exc
+        return CapacityReservePolicy()
 
     def get_context_policy(self, tenant_id: str | None = None) -> dict[str, Any] | None:
         """Return the tenant's optional JSON context policy without caching it."""

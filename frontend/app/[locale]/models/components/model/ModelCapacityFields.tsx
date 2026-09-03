@@ -147,12 +147,7 @@ export const validateCapacityForm = (
   value: ModelCapacityFormState,
   requiredFields: Array<keyof ModelCapacityFormState> = []
 ): string | null => {
-  const numericValues = [
-    value.contextWindowTokens,
-    value.maxInputTokens,
-    value.maxOutputTokens,
-    value.defaultOutputReserveTokens,
-  ];
+  const numericValues = [value.contextWindowTokens, value.maxOutputTokens];
   if (!numericValues.every(isPositiveIntegerOrEmpty)) {
     return "model.dialog.capacity.error.positiveInteger";
   }
@@ -164,11 +159,7 @@ export const validateCapacityForm = (
   }
 
   const contextWindowTokens = toOptionalPositiveInt(value.contextWindowTokens);
-  const maxInputTokens = toOptionalPositiveInt(value.maxInputTokens);
   const maxOutputTokens = toOptionalPositiveInt(value.maxOutputTokens);
-  const defaultOutputReserveTokens = toOptionalPositiveInt(
-    value.defaultOutputReserveTokens
-  );
 
   if (
     contextWindowTokens !== undefined &&
@@ -176,22 +167,6 @@ export const validateCapacityForm = (
     maxOutputTokens >= contextWindowTokens
   ) {
     return "model.dialog.capacity.error.outputExceedsWindow";
-  }
-
-  if (
-    contextWindowTokens !== undefined &&
-    maxInputTokens !== undefined &&
-    maxInputTokens > contextWindowTokens
-  ) {
-    return "model.dialog.capacity.error.inputExceedsWindow";
-  }
-
-  if (
-    maxOutputTokens !== undefined &&
-    defaultOutputReserveTokens !== undefined &&
-    defaultOutputReserveTokens > maxOutputTokens
-  ) {
-    return "model.dialog.capacity.error.reserveExceedsOutput";
   }
 
   return null;
@@ -203,7 +178,10 @@ export const hasCapacityValues = (value: ModelCapacityFormState): boolean =>
 export const buildCapacityPayload = (
   value: ModelCapacityFormState,
   _options?: { applyDefaults?: boolean }
-) => buildCamelCapacityPayload(value);
+) => {
+  void _options;
+  return buildCamelCapacityPayload(value);
+};
 
 export const capacityFormFromModel = (model: {
   contextWindowTokens?: number;
@@ -252,7 +230,6 @@ export const ModelCapacityFields = ({
   reviewingAutomaticUpdate = false,
   onProbeTokenCount,
   probingTokenCount = false,
-  formMode = "edit",
   requiredFields = [],
   suggestion,
   onUseSuggestion,
@@ -291,10 +268,8 @@ export const ModelCapacityFields = ({
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
-  const hasValues = hasCapacityValues(value);
   const hasSuggestion = Boolean(suggestion?.suggestions);
   const requiredSet = new Set<keyof ModelCapacityFormState>(requiredFields);
-  const isAddMode = formMode === "add";
 
   // Per-field estimates rendered as native input placeholders. They are
   // never serialized unless the operator explicitly enters or selects them.
@@ -576,24 +551,9 @@ export const ModelCapacityFields = ({
           CONTEXT_WINDOW_PRESET_OPTIONS
         )}
         {renderNumberInput(
-          "maxInputTokens",
-          "model.dialog.capacity.maxInputTokens",
-          "model.dialog.capacity.maxInputTokens.tooltip"
-        )}
-        {renderNumberInput(
           "maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens.tooltip",
-          OUTPUT_RESERVE_PRESET_OPTIONS
-        )}
-        {/* defaultOutputReserveTokens is rendered in both add and edit modes
-            so newly added rows do not silently fall back to the SDK default at
-            runtime. Tokenizer renders full-width below in both modes for the
-            same consistency reason. */}
-        {renderNumberInput(
-          "defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens.tooltip",
           OUTPUT_RESERVE_PRESET_OPTIONS
         )}
       </div>

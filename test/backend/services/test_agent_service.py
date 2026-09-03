@@ -4260,10 +4260,8 @@ async def test_prepare_agent_run(
         is_debug=False,
         override_version_no=None,
         override_model_id=None,
-        requested_output_tokens=4096,
         tool_params=None,
         conversation_id=123,
-        context_policy=None,
         enable_planning=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(

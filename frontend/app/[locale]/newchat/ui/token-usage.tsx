@@ -193,12 +193,12 @@ const V2_CONTEXT_COMPONENTS = [
     "chat.tokenUsage.components.attachmentsMedia",
     "bg-pink-500",
   ],
-  [
-    "provider_overhead",
-    "chat.tokenUsage.components.providerOverhead",
-    "bg-slate-400",
-  ],
 ] as const;
+
+const countSourceKey = (value: string) =>
+  `chat.tokenUsage.countSources.${value}`;
+const recoveryStateKey = (value: string) =>
+  `chat.tokenUsage.recoveryStates.${value}`;
 
 /**
  * Displays per-step token consumption with a stacked progress bar.
@@ -265,17 +265,22 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
   const maxTokens = contextWindowTokens ?? tokenThreshold;
 
   const stepCount = steps.length;
-  const peakContext = turnUsage?.peak_context;
+  const finalProviderCall = [...(providerCallUsages ?? [])]
+    .reverse()
+    .find((call) => call.status === "completed" && call.source === "provider");
+  const observedTurnUsage =
+    turnUsage?.schema_version === 3 || turnUsage?.data_quality === "provider"
+      ? turnUsage
+      : null;
+  const peakContext = observedTurnUsage?.peak_context;
   const finalInputTokens =
     peakContext?.input_tokens ??
     budget?.final_tokens ??
     latestStep?.stepInputTokens;
   if (finalInputTokens === undefined || finalInputTokens === null) return null;
-  const compositionDenominator = Math.max(1, finalInputTokens);
   const effectiveLimit =
     peakContext?.limit_tokens ?? budget?.hard_budget ?? maxTokens;
-  const outputTokens =
-    turnUsage?.usage.output_tokens ?? latestStep?.totalOutputTokens ?? 0;
+  const outputTokens = finalProviderCall?.usage.output_tokens;
   const exactUsagePercent = effectiveLimit
     ? (finalInputTokens / effectiveLimit) * 100
     : null;
@@ -331,6 +336,10 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
             : []),
         ]
       : [];
+  const estimatedCompositionTotal = Math.max(
+    1,
+    composition.reduce((sum, item) => sum + item.tokens, 0)
+  );
 
   const recoveryExhausted =
     budget?.recovery_state === "exhausted" ||
@@ -404,7 +413,7 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
           <section className="rounded-lg border border-border bg-muted/20 p-3">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-xs">
               <span className="font-medium text-foreground">
-                {t("chat.tokenUsage.finalRequest")}
+                {t("chat.tokenUsage.observedPeakRequest")}
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
                 <span className="font-medium text-foreground">
@@ -433,19 +442,37 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
             </div>
             <div
               className="flex h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
-              aria-label={t("chat.tokenUsage.composition")}
+              aria-label={t("chat.tokenUsage.observedPeakRequest")}
             >
+              <div
+                className="bg-blue-500"
+                style={{
+                  width: `${Math.min(100, (finalInputTokens / contextBarDenominator) * 100)}%`,
+                }}
+                title={`${t("chat.tokenUsage.observedInput")}: ${finalInputTokens.toLocaleString()}`}
+              />
+            </div>
+            <div className="mt-3 mb-1 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="font-medium text-foreground">
+                {t("chat.tokenUsage.estimatedComposition")}
+              </span>
+              {budget && (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+                  {t("chat.tokenUsage.requestBudgetCountMethod")}:{" "}
+                  {t(countSourceKey(budget.count_source), {
+                    defaultValue: budget.count_source,
+                  })}
+                </span>
+              )}
+            </div>
+            <div className="flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
               {composition.map((item) => (
                 <div
                   key={item.key}
                   className={item.color}
                   style={{
-                    width: `${Math.min(
-                      100,
-                      (item.tokens / contextBarDenominator) * 100
-                    )}%`,
+                    width: `${(item.tokens / estimatedCompositionTotal) * 100}%`,
                   }}
-                  title={`${t(item.label)}: ${item.tokens.toLocaleString()}`}
                 />
               ))}
             </div>
@@ -453,15 +480,10 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
               {composition.map((item) => (
                 <span key={item.key} className="inline-flex items-center gap-1">
                   <span className={`size-2 rounded-sm ${item.color}`} />
-                  {t(item.label)}
+                  {t(item.label)} ·{" "}
+                  {Math.round((item.tokens / estimatedCompositionTotal) * 100)}%
                 </span>
               ))}
-              {unusedContextTokens !== null && unusedContextTokens > 0 && (
-                <span className="inline-flex items-center gap-1">
-                  <span className="size-2 rounded-sm bg-slate-200 ring-1 ring-slate-300 dark:bg-slate-700 dark:ring-slate-600" />
-                  {t("chat.tokenUsage.unusedContext")}
-                </span>
-              )}
               <span className="ml-auto rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
                 {t("chat.tokenUsage.steps", { count: stepCount })}
               </span>
@@ -472,19 +494,21 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
           <div className="mt-3 grid gap-3 text-xs md:grid-cols-3">
             <section className="min-w-0 rounded-lg border border-border p-3">
               <h3 className="mb-2 font-medium text-foreground">
-                {t("chat.tokenUsage.actualProviderUsage")}
+                {t("chat.tokenUsage.modelCallCost")}
               </h3>
-              {turnUsage && (
+              {finalProviderCall && (
                 <div className="space-y-1">
-                  {[
-                    ["fresh_input_tokens", "chat.tokenUsage.freshInput"],
-                    ["cache_read_tokens", "chat.tokenUsage.cacheRead"],
-                    ["cache_write_tokens", "chat.tokenUsage.cacheWrite"],
-                    ["visible_output_tokens", "chat.tokenUsage.visibleOutput"],
-                    ["reasoning_tokens", "chat.tokenUsage.reasoning"],
-                    ["total_tokens", "chat.tokenUsage.total"],
-                  ].map(([key, label]) => {
-                    const value = turnUsage.usage[key];
+                  {(
+                    [
+                      ["input_tokens", "chat.tokenUsage.input"],
+                      ["cache_read_tokens", "chat.tokenUsage.cacheRead"],
+                      ["cache_write_tokens", "chat.tokenUsage.cacheWrite"],
+                      ["output_tokens", "chat.tokenUsage.output"],
+                      ["reasoning_tokens", "chat.tokenUsage.reasoning"],
+                      ["total_tokens", "chat.tokenUsage.total"],
+                    ] as const
+                  ).map(([key, label]) => {
+                    const value = finalProviderCall.usage[key];
                     return (
                       <div
                         key={key}
@@ -499,19 +523,11 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                       </div>
                     );
                   })}
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>{t("chat.tokenUsage.source")}</span>
-                    <span>{turnUsage.data_quality}</span>
-                  </div>
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>{t("chat.tokenUsage.calls")}</span>
-                    <span>{turnUsage.call_count}</span>
-                  </div>
                 </div>
               )}
-              {!turnUsage && (
+              {!finalProviderCall && (
                 <div className="text-muted-foreground">
-                  {t("chat.tokenUsage.breakdownUnavailable")}
+                  {t("chat.tokenUsage.apiUsageUnavailable")}
                 </div>
               )}
             </section>
@@ -532,9 +548,8 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                         {t(item.label)}
                       </span>
                       <span>
-                        {item.tokens.toLocaleString()} ·{" "}
                         {Math.round(
-                          (item.tokens / compositionDenominator) * 100
+                          (item.tokens / estimatedCompositionTotal) * 100
                         )}
                         %
                       </span>
@@ -556,34 +571,12 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
               <div className="space-y-1">
                 <div className="flex justify-between text-muted-foreground">
                   <span>{t("chat.tokenUsage.generated")}</span>
-                  <span>{outputTokens.toLocaleString()}</span>
+                  <span>{outputTokens?.toLocaleString() ?? "—"}</span>
                 </div>
-                {v2Composition?.high_adjustment && (
-                  <div
-                    className="rounded-md bg-amber-50 px-2 py-1.5 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
-                    title={t("chat.tokenUsage.highAdjustmentExplanation")}
-                  >
-                    <div className="flex justify-between gap-3 font-medium">
-                      <span>{t("chat.tokenUsage.highAdjustment")}</span>
-                      <span>
-                        {Math.round(v2Composition.adjustment_ratio * 100)}%
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] leading-4">
-                      {t("chat.tokenUsage.highAdjustmentExplanation")}
-                    </p>
-                  </div>
-                )}
                 {latestStep?.outputFinishReason && (
                   <div className="flex justify-between text-muted-foreground">
                     <span>{t("chat.tokenUsage.finishReason")}</span>
                     <span>{latestStep.outputFinishReason}</span>
-                  </div>
-                )}
-                {budget && (
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>{t("chat.tokenUsage.countSource")}</span>
-                    <span>{budget.count_source}</span>
                   </div>
                 )}
                 {budget?.compression.attempted && (
@@ -598,7 +591,11 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                 {budget && budget.recovery_state !== "not_needed" && (
                   <div className="flex justify-between text-muted-foreground">
                     <span>{t("chat.tokenUsage.recovery")}</span>
-                    <span>{budget.recovery_state}</span>
+                    <span>
+                      {t(recoveryStateKey(budget.recovery_state), {
+                        defaultValue: budget.recovery_state,
+                      })}
+                    </span>
                   </div>
                 )}
                 {budget?.recovery?.archive_active && (
@@ -617,29 +614,6 @@ export const SingleTurnTokenUsage: FC<SingleTurnTokenUsageProps> = ({
                       {budget?.recovery?.recalled_tokens?.toLocaleString()}
                     </span>
                   </div>
-                )}
-                {providerCallUsages && providerCallUsages.length > 0 && (
-                  <details className="mt-2 border-t border-border pt-2">
-                    <summary className="cursor-pointer font-medium text-foreground">
-                      {t("chat.tokenUsage.providerCalls")}
-                    </summary>
-                    <div className="mt-2 space-y-1">
-                      {providerCallUsages.map((call, index) => (
-                        <div
-                          key={call.call_id}
-                          className="flex justify-between text-muted-foreground"
-                        >
-                          <span>
-                            #{index + 1} {call.purpose}
-                          </span>
-                          <span>
-                            {call.usage.input_tokens ?? "—"} in ·{" "}
-                            {call.usage.output_tokens ?? "—"} out
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
                 )}
               </div>
             </section>

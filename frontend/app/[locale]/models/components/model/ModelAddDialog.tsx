@@ -815,12 +815,7 @@ export const ModelAddDialog = ({
     const resolved = {
       context_window_tokens:
         model.context_window_tokens ?? fallback.context_window_tokens,
-      max_input_tokens: model.max_input_tokens ?? fallback.max_input_tokens,
       max_output_tokens: model.max_output_tokens ?? fallback.max_output_tokens,
-      default_output_reserve_tokens:
-        model.default_output_reserve_tokens ??
-        fallback.default_output_reserve_tokens,
-      tokenizer_family: model.tokenizer_family ?? fallback.tokenizer_family,
       capacity_source: model.capacity_source ?? fallback.capacity_source,
     };
 
@@ -1017,18 +1012,12 @@ export const ModelAddDialog = ({
                 context_window_tokens:
                   payload.context_window_tokens ??
                   (hasAny ? null : model.context_window_tokens),
-                max_input_tokens:
-                  payload.max_input_tokens ??
-                  (hasAny ? null : model.max_input_tokens),
+                max_input_tokens: null,
                 max_output_tokens:
                   payload.max_output_tokens ??
                   (hasAny ? null : model.max_output_tokens),
-                default_output_reserve_tokens:
-                  payload.default_output_reserve_tokens ??
-                  (hasAny ? null : model.default_output_reserve_tokens),
-                tokenizer_family:
-                  payload.tokenizer_family ??
-                  (hasAny ? null : model.tokenizer_family),
+                default_output_reserve_tokens: null,
+                tokenizer_family: null,
                 capacity_source: hasAny
                   ? payload.capacity_source
                   : model.capacity_source,

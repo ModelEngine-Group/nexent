@@ -17,6 +17,7 @@ from smolagents.memory import ActionStep, AgentMemory, TaskStep
 from smolagents.models import ChatMessage, MessageRole
 
 from ...context_runtime.contracts import ContextEvidence, FinalContext
+from ...models.final_request_budget import build_final_request_shape
 from ..summary_cache import CompressionCallRecord
 from .budget import extract_message_text, message_role
 from .archive import RunHistoryArchive, SearchArchivedHistoryTool
@@ -128,6 +129,7 @@ class ContextManager:
         target_input_budget_tokens: int | None = None,
         emergency_archive: bool = False,
     ) -> FinalContext:
+        self._active_request_meter = getattr(model, "_final_request_meter", None)
         run_context = run_context or self.prepare_run_context(memory, "")
         policy = resolve_policy(self.config.policy_layers)
         persisted_items = list(run_context.items)
@@ -224,7 +226,7 @@ class ContextManager:
         stable = [message for message in rendered if message_role(message) in {"system", "developer"}]
         dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
         messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
-        final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
+        final_tokens = self._request_tokens(messages, canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
         self._last_compressed_token_count = final_tokens
         hard = hard_budget
@@ -620,9 +622,19 @@ class ContextManager:
         )
 
     def _estimate_items(self, items, stable, dynamic, tools):
-        return self._message_tokens([*self.build_context_messages(items), *stable, *dynamic]) + self._tools_tokens(
-            tools
+        return self._request_tokens(
+            [*self.build_context_messages(items), *stable, *dynamic], tools
         )
+
+    def _request_tokens(self, messages, tools):
+        meter = getattr(self, "_active_request_meter", None)
+        if meter is not None:
+            anchored = meter.estimate_context_candidate(messages, tools)
+            if anchored is not None:
+                return anchored
+        return build_final_request_shape(
+            {"messages": list(messages), "tools": list(tools)}
+        ).components.raw_total
 
     def _message_tokens(self, messages):
         return max(

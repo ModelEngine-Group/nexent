@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 from typing import Any, List, Literal, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -268,6 +269,20 @@ _OVERRIDABLE_FIELDS = (
 _DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096
 
 
+def derive_output_protection_tokens(
+    *, context_window_tokens: Optional[int], max_output_tokens: Optional[int]
+) -> int:
+    """Derive context-management headroom without constraining completion output."""
+    if max_output_tokens is None or max_output_tokens <= 0:
+        raise ProviderCapabilityUnknown("max_output_tokens is required")
+    proportional = (
+        math.ceil(context_window_tokens * 0.10)
+        if context_window_tokens is not None
+        else _DEFAULT_REQUESTED_OUTPUT_TOKENS
+    )
+    return min(max_output_tokens, max(_DEFAULT_REQUESTED_OUTPUT_TOKENS, proportional))
+
+
 def resolve_capacity(
     *,
     model_id: str,
@@ -355,25 +370,18 @@ def resolve_capacity(
             f"so the override never takes effect"
         )
 
-    if requested_output_tokens is None:
-        requested_output_tokens = (
-            default_output_reserve_tokens
-            if default_output_reserve_tokens is not None
-            else _DEFAULT_REQUESTED_OUTPUT_TOKENS
-        )
+    # Legacy model/Agent/request reserve values are intentionally ignored.
+    # Input is observed and this automatically derived value only decides when
+    # context-management actions should run. The provider wire output cap is
+    # always max_output_tokens.
+    requested_output_tokens = derive_output_protection_tokens(
+        context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens,
+    )
     if requested_output_tokens <= 0:
         raise InvalidCapacityConfiguration(
             f"requested_output_tokens must be positive, got {requested_output_tokens}"
         )
-    if (
-        max_output_tokens is not None
-        and requested_output_tokens > max_output_tokens
-    ):
-        raise RequestedOutputExceedsCap(
-            f"requested_output_tokens ({requested_output_tokens}) exceeds "
-            f"max_output_tokens ({max_output_tokens})"
-        )
-
     derived_limits: list[int] = []
     if max_input_tokens is not None:
         derived_limits.append(max_input_tokens)
