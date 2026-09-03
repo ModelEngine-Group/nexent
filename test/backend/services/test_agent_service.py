@@ -15044,8 +15044,6 @@ async def test_stream_agent_chunks_skill_files_join_final_batch(monkeypatch):
 @pytest.mark.asyncio
 async def test_ac_tu_004_stream_persists_llm_and_turn_usage_units_atomically(monkeypatch):
     """P7 usage units join the existing assistant terminal batch in stream order."""
-    from backend.services import agent_service
-
     agent_request = AgentRequest(
         agent_id=1,
         conversation_id=999,
@@ -15075,20 +15073,20 @@ async def test_ac_tu_004_stream_persists_llm_and_turn_usage_units_atomically(mon
     persisted_batches = []
     channel = MagicMock()
     channel.publish = AsyncMock()
-    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
-    monkeypatch.setattr(agent_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
     monkeypatch.setattr(
-        agent_service,
+        agent_run_service,
         "persist_assistant_run_batch",
         lambda **kwargs: persisted_batches.append(kwargs),
     )
-    monkeypatch.setattr(agent_service.agent_run_manager, "unregister_agent_run", MagicMock())
-    monkeypatch.setattr(agent_service.streaming_channel_manager, "complete_channel", AsyncMock())
-    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
 
     chunks = [
         chunk
-        async for chunk in agent_service._stream_agent_chunks(
+        async for chunk in agent_run_service._stream_agent_chunks(
             agent_request,
             "user1",
             "tenant1",
