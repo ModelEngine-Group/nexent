@@ -44,10 +44,18 @@ interface ActiveNl2AgentCard {
   subtype: string;
 }
 
+interface SkillCreationRequest {
+  agentId: number;
+  cardKey: string;
+  requestId: number;
+  completed: boolean;
+}
+
 interface Nl2AgentFlowState {
   phase: Nl2AgentFlowPhase;
   agentId: number | null;
   activeCard: ActiveNl2AgentCard | null;
+  skillCreationRequest: SkillCreationRequest | null;
   submittedCardKeys: ReadonlySet<string>;
   failedPromptFields: readonly string[];
   configFocusRequest: Nl2AgentConfigFocusRequest | null;
@@ -61,6 +69,8 @@ type Nl2AgentFlowAction =
   | { type: "reset"; agentId: number | null }
   | { type: "register_card"; card: ActiveNl2AgentCard }
   | { type: "submit_card"; cardKey: string }
+  | { type: "request_skill_creation"; agentId: number; cardKey: string }
+  | { type: "complete_skill_creation"; agentId: number; requestId: number }
   | { type: "resources_bound"; agentId: number }
   | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
   | { type: "generation_stopped"; agentId: number }
@@ -77,6 +87,7 @@ const INITIAL_STATE: Nl2AgentFlowState = {
   phase: "idle",
   agentId: null,
   activeCard: null,
+  skillCreationRequest: null,
   submittedCardKeys: new Set(),
   failedPromptFields: [],
   configFocusRequest: null,
@@ -122,6 +133,30 @@ function reducer(
         submittedCardKeys,
       };
     }
+    case "request_skill_creation":
+      return {
+        ...state,
+        skillCreationRequest: {
+          agentId: action.agentId,
+          cardKey: action.cardKey,
+          requestId: (state.skillCreationRequest?.requestId ?? 0) + 1,
+          completed: false,
+        },
+      };
+    case "complete_skill_creation":
+      if (
+        state.skillCreationRequest?.agentId !== action.agentId ||
+        state.skillCreationRequest.requestId !== action.requestId
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        skillCreationRequest: {
+          ...state.skillCreationRequest,
+          completed: true,
+        },
+      };
     case "resources_bound":
       return {
         ...state,
@@ -202,6 +237,8 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   resetFlow: (agentId?: number | null) => void;
   registerCard: (key: string, subtype: string) => void;
   submitCard: (key: string) => void;
+  requestSkillCreation: (agentId: number, cardKey: string) => void;
+  completeSkillCreation: (agentId: number, requestId: number) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
   markGenerationStopped: (agentId: number) => void;
@@ -232,6 +269,16 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
   );
   const submitCard = useCallback(
     (cardKey: string) => dispatch({ type: "submit_card", cardKey }),
+    []
+  );
+  const requestSkillCreation = useCallback(
+    (agentId: number, cardKey: string) =>
+      dispatch({ type: "request_skill_creation", agentId, cardKey }),
+    []
+  );
+  const completeSkillCreation = useCallback(
+    (agentId: number, requestId: number) =>
+      dispatch({ type: "complete_skill_creation", agentId, requestId }),
     []
   );
   const markResourcesBound = useCallback(
@@ -275,6 +322,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       resetFlow,
       registerCard,
       submitCard,
+      requestSkillCreation,
+      completeSkillCreation,
       markResourcesBound,
       markPromptGenerationFailed,
       markGenerationStopped,
@@ -295,6 +344,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       registerCard,
       requestConfigFocus,
       resetFlow,
+      requestSkillCreation,
+      completeSkillCreation,
       state,
       submitCard,
     ]

@@ -23,6 +23,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     RecommendResourcesInput,
     RequirementClarificationPayload,
     ResourceCandidate,
+    ResourceGapResolutionPayload,
     ResourceRequirement,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
@@ -127,7 +128,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 7
+    assert len(code_blocks) == 8
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -157,6 +158,15 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
 
 def test_build_nl2agent_system_prompt_falls_back_to_chinese():
     assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert 'subtype="resource_gap_resolution"' in prompt
+    assert "resource_gap_resolution" in prompt
+    assert "skill_created" in prompt
 
 
 @pytest.mark.parametrize(
@@ -413,6 +423,25 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
     }
 
 
+def test_resource_gap_resolution_wrapper_preserves_original_requirements():
+    requirement = ResourceRequirement(
+        requirement_id="calendar_summary",
+        query="Summarize calendar events",
+        search_terms=["calendar", "summary"],
+    )
+
+    wrapped = build_nl2a_wrapper(
+        subtype="resource_gap_resolution",
+        agent_id=42,
+        requirements=[requirement],
+    )
+
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    resolution = ResourceGapResolutionPayload.model_validate(payload)
+    assert resolution.agent_id == 42
+    assert resolution.requirements == [requirement]
+
+
 def test_requirement_clarification_accepts_at_most_five_questions():
     questions = [
         {
@@ -478,6 +507,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         "agent_id",
         "resource_result",
         "questions",
+        "requirements",
     }
     assert config.instructions is None
     assert len(config.context_items) == 1

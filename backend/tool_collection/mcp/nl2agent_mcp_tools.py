@@ -117,6 +117,7 @@ NL2A_SUBTYPES = Literal[
     "requirement_clarification",
     "suggested_resource_installation",
     "installed_resource_binding",
+    "resource_gap_resolution",
 ]
 
 INSTALLED_RESOURCE_SOURCES = frozenset(
@@ -504,6 +505,23 @@ class RequirementClarificationPayload(BaseModel):
     )
 
 
+class ResourceGapResolutionPayload(BaseModel):
+    """NL2Agent payload for resolving requirements without matching resources."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subtype: Literal["resource_gap_resolution"] = "resource_gap_resolution"
+    agent_id: int = Field(gt=0)
+    requirements: list[ResourceRequirement] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_requirement_ids(self) -> "ResourceGapResolutionPayload":
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        return self
+
+
 class InstalledMcpToolRecommendation(BaseModel):
     """Safe display metadata for one installed MCP tool recommendation."""
 
@@ -541,6 +559,7 @@ def build_nl2a_wrapper(
     agent_id: int,
     resource_result: dict[str, Any] | RecommendResourcesOutput | None = None,
     questions: list[RequirementClarificationQuestion] | None = None,
+    requirements: list[ResourceRequirement] | None = None,
 ) -> str:
     """Fill the JSON template selected by subtype and return its wrapper."""
 
@@ -550,6 +569,13 @@ def build_nl2a_wrapper(
         output = RequirementClarificationPayload(
             agent_id=agent_id,
             questions=questions,
+        ).model_dump(mode="json")
+    elif subtype == "resource_gap_resolution":
+        if requirements is None:
+            raise ValueError("resource_gap_resolution requires requirements")
+        output = ResourceGapResolutionPayload(
+            agent_id=agent_id,
+            requirements=requirements,
         ).model_dump(mode="json")
     elif subtype in {
         "suggested_resource_installation",
@@ -664,6 +690,7 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                     "agent_id": "int",
                     "resource_result": "RecommendResourcesOutput | None",
                     "questions": "list[RequirementClarificationQuestion] | None",
+                    "requirements": "list[ResourceRequirement] | None",
                 },
                 separators=(",", ":"),
             ),
@@ -973,10 +1000,12 @@ async def nl2a_wrapper(
         "requirement_clarification",
         "suggested_resource_installation",
         "installed_resource_binding",
+        "resource_gap_resolution",
     ],
     agent_id: int,
     resource_result: dict[str, Any] | None = None,
     questions: list[RequirementClarificationQuestion] | None = None,
+    requirements: list[ResourceRequirement] | None = None,
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
@@ -1040,6 +1069,7 @@ async def nl2a_wrapper(
         agent_id=resolved_agent_id,
         resource_result=resource_result,
         questions=questions,
+        requirements=requirements,
     )
 
 

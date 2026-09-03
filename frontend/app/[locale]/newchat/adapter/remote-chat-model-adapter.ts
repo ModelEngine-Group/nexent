@@ -84,7 +84,8 @@ export interface Nl2aToolRecommendation {
 export type Nl2AgentCardActionSubtype =
   | "requirement_clarification"
   | "suggested_resource_installation"
-  | "installed_resource_binding";
+  | "installed_resource_binding"
+  | "resource_gap_resolution";
 
 export interface Nl2AgentCardAction {
   type: "nl2agent_card_action";
@@ -171,6 +172,19 @@ export interface Nl2aInstalledResourceBindingPayload {
   resources: Nl2aRecommendedResource[];
 }
 
+export interface Nl2aResourceRequirement {
+  requirement_id: string;
+  query: string;
+  resource_name_hint: string | null;
+  search_terms: string[];
+}
+
+export interface Nl2aResourceGapResolutionPayload {
+  subtype: "resource_gap_resolution";
+  agent_id: number;
+  requirements: Nl2aResourceRequirement[];
+}
+
 export interface Nl2aResourceCandidate {
   candidate_ref: string;
   resource_type: "tool" | "skill" | "mcp_server";
@@ -236,7 +250,8 @@ export type Nl2aPayload =
   | Nl2aLocalMcpRecommendationPayload
   | Nl2aAgentDraftPayload
   | Nl2aSuggestedResourceInstallationPayload
-  | Nl2aInstalledResourceBindingPayload;
+  | Nl2aInstalledResourceBindingPayload
+  | Nl2aResourceGapResolutionPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -839,6 +854,24 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         log.warn(
           "[ChatModelAdapter] Ignored invalid installation-card payload"
         );
+        return null;
+      }
+    }
+    if (content.subtype === "resource_gap_resolution") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.requirements) ||
+        content.requirements.length === 0 ||
+        content.requirements.length > 8 ||
+        content.requirements.some(
+          (requirement) =>
+            !requirement?.requirement_id ||
+            !requirement.query ||
+            !Array.isArray(requirement.search_terms)
+        )
+      ) {
+        log.warn("[ChatModelAdapter] Ignored invalid resource-gap payload");
         return null;
       }
     }
