@@ -437,6 +437,8 @@ render_k8s_runtime_config_values() {
     printf '    skipProxy: %s\n' "$(yaml_quote "$(env_or_default skip_proxy "true")")"
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
     printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
+    printf '    officialAgentsPath: %s\n' "$(yaml_quote "$(env_or_default OFFICIAL_AGENTS_PATH "/mnt/nexent/official-agents")")"
+    printf '    officialAgentProfiles: %s\n' "$(yaml_quote "$(env_or_default OFFICIAL_AGENT_PROFILES "")")"
     printf '    marketBackend: %s\n' "$(yaml_quote "$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
@@ -737,6 +739,18 @@ helm_upgrade_release() {
 wait_for_deployment_ready() {
     local deployment="$1"
     kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
+}
+
+sync_official_agents_after_deploy() {
+    local profiles="${OFFICIAL_AGENT_PROFILES:-}"
+    [ -n "$profiles" ] || return 0
+
+    echo "Synchronizing official agent bundles ($profiles)..."
+    if kubectl exec deployment/nexent-config -n "$NAMESPACE" -- python backend/scripts/sync_official_agents.py; then
+        echo "Official agent bundles synchronized."
+    else
+        echo "Warning: official agent synchronization failed; deployment will continue."
+    fi
 }
 
 recreate_legacy_nexent_secret_for_helm_management() {
@@ -1334,6 +1348,8 @@ apply() {
             exit 1
         fi
     fi
+
+    sync_official_agents_after_deploy
 
     # Save deployment options for future use
     persist_deploy_options
