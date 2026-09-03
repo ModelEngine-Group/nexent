@@ -374,19 +374,19 @@ def resolve_capacity(
     # Input is observed and this automatically derived value only decides when
     # context-management actions should run. The provider wire output cap is
     # always max_output_tokens.
-    requested_output_tokens = derive_output_protection_tokens(
+    output_protection_tokens = derive_output_protection_tokens(
         context_window_tokens=context_window_tokens,
         max_output_tokens=max_output_tokens,
     )
-    if requested_output_tokens <= 0:
+    if output_protection_tokens <= 0:
         raise InvalidCapacityConfiguration(
-            f"requested_output_tokens must be positive, got {requested_output_tokens}"
+            f"requested_output_tokens must be positive, got {output_protection_tokens}"
         )
     derived_limits: list[int] = []
     if max_input_tokens is not None:
         derived_limits.append(max_input_tokens)
     if context_window_tokens is not None:
-        derived_limits.append(context_window_tokens - requested_output_tokens)
+        derived_limits.append(context_window_tokens - output_protection_tokens)
     provider_input_limit_tokens = min(derived_limits)
     if provider_input_limit_tokens <= 0:
         raise InvalidCapacityConfiguration(
@@ -417,7 +417,7 @@ def resolve_capacity(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         default_output_reserve_tokens=default_output_reserve_tokens,
-        requested_output_tokens=requested_output_tokens,
+        requested_output_tokens=output_protection_tokens,
         provider_input_limit_tokens=provider_input_limit_tokens,
         tokenizer_family=tokenizer_family,
         counting_mode=counting_mode,
@@ -433,7 +433,7 @@ def resolve_capacity(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         default_output_reserve_tokens=default_output_reserve_tokens,
-        requested_output_tokens=requested_output_tokens,
+        requested_output_tokens=output_protection_tokens,
         provider_input_limit_tokens=provider_input_limit_tokens,
         tokenizer_family=tokenizer_family,
         counting_mode=counting_mode,

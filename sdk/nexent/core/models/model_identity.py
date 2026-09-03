@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 MATCHER_VERSION = "1.0.0"
 
 _TOKEN_PATTERN = re.compile(
-    r"\d+(?:\.\d+)?[a-z]+|[a-z]+\d+(?:\.\d+)?|[a-z]+|\d+(?:\.\d+)*"
+    r"[a-z]+(?:\d+(?:\.\d+)?)?|\d+(?:\.\d+)*(?:[a-z]+)?"
 )
 _SIZE_PATTERN = re.compile(r"^\d+(?:\.\d+)?[bmk]$")
 _CONTEXT_EXTENSION_PATTERN = re.compile(r"^\d+(?:\.\d+)?(?:k|m)$")
