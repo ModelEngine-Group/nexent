@@ -40,7 +40,8 @@ from services.notification_service import (
     create_repository_review_notification,
     deactivate_notifications,
 )
-from management.services.skill.service import SkillService, generate_available_copy_skill_name
+from management.services.skill.service import SkillService
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
