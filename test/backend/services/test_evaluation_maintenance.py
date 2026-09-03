@@ -130,6 +130,38 @@ def test_dispatch_pending_runs_reuses_runtime_dispatcher(mocker, monkeypatch):
     )
 
 
+def test_dispatch_pending_runs_returns_immediately_when_empty(monkeypatch):
+    monkeypatch.delitem(sys.modules, "services.runtime_proxy_service", raising=False)
+
+    em._dispatch_pending_runs([])
+
+    assert "services.runtime_proxy_service" not in sys.modules
+
+
+def test_dispatch_pending_runs_skips_incomplete_identity(mocker, monkeypatch):
+    dispatcher = MagicMock()
+    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy.dispatch_agent_evaluation_run = dispatcher
+    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+    warning = mocker.patch.object(em.logger, "warning")
+
+    em._dispatch_pending_runs(
+        [
+            {
+                "agent_evaluation_id": 7,
+                "tenant_id": "tenant-1",
+                "created_by": None,
+            }
+        ]
+    )
+
+    dispatcher.assert_not_called()
+    warning.assert_called_once_with(
+        "Cannot redispatch pending evaluation %s without tenant and creator",
+        7,
+    )
+
+
 def test_dispatch_pending_runs_keeps_failed_dispatch_pending(mocker, monkeypatch):
     dispatcher = MagicMock(side_effect=RuntimeError("runtime unavailable"))
     runtime_proxy = types.ModuleType("services.runtime_proxy_service")

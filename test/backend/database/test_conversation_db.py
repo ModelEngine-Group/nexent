@@ -279,6 +279,21 @@ def test_fail_streaming_assistant_messages_returns_runtime_identities(
     assert query.with_for_update.called
 
 
+def test_fail_streaming_assistant_messages_returns_empty_without_rows(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = []
+    session.query.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    assert fail_streaming_assistant_messages() == []
+    query.update.assert_not_called()
+
+
 @pytest.fixture(autouse=True)
 def reset_captured():
     """Reset captured SQLAlchemy values before each test."""

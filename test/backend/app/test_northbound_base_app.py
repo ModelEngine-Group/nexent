@@ -4,6 +4,7 @@ Unit tests for northbound_base_app module.
 Tests cover FastAPI application configuration, CORS middleware, router inclusion,
 and basic A2A endpoint routing and error handling.
 """
+import asyncio
 import os
 import sys
 import types
@@ -288,6 +289,7 @@ async def _async_iter(items):
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
+import apps.northbound_base_app as northbound_base_app_module  # noqa: E402
 from apps.northbound_base_app import A2AServerSettings, northbound_app as app  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -298,6 +300,44 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
     def setUp(self):
         self.client = TestClient(app)
+
+    def test_startup_recovery_runs_a2a_and_upload_cleanup(self):
+        recover_northbound_tasks = MagicMock()
+        schedule_upload_cleanup = AsyncMock()
+        startup_recovery_module = types.ModuleType(
+            "services.startup_recovery_service"
+        )
+        startup_recovery_module.recover_northbound_tasks = recover_northbound_tasks
+        startup_recovery_module.schedule_interrupted_upload_cleanup = (
+            schedule_upload_cleanup
+        )
+
+        with patch.dict(
+            sys.modules,
+            {"services.startup_recovery_service": startup_recovery_module},
+        ):
+            asyncio.run(
+                northbound_base_app_module.recover_northbound_tasks_on_startup()
+            )
+
+        recover_northbound_tasks.assert_called_once_with()
+        schedule_upload_cleanup.assert_awaited_once_with()
+
+    def test_lifespan_runs_startup_recovery(self):
+        recover_on_startup = AsyncMock()
+
+        async def exercise_lifespan():
+            async with northbound_base_app_module.northbound_lifespan(None):
+                pass
+
+        with patch.object(
+            northbound_base_app_module,
+            "recover_northbound_tasks_on_startup",
+            new=recover_on_startup,
+        ):
+            asyncio.run(exercise_lifespan())
+
+        recover_on_startup.assert_awaited_once_with()
 
     # -------------------------------------------------------------------
     # Application configuration
