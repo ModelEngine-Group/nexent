@@ -58,6 +58,54 @@ ShellPolicy = sandbox_module.ShellPolicy
 SandboxSkillScriptRunner = sandbox_module.SandboxSkillScriptRunner
 
 
+def test_docker_bridge_gateway_returns_concrete_ipv4_address():
+    network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "fd00::1"}, {"Gateway": "172.17.0.1"}]}})
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    assert sandbox_module._docker_bridge_gateway(client) == "172.17.0.1"
+    client.networks.get.assert_called_once_with("bridge")
+    network.reload.assert_called_once_with()
+
+
+def test_docker_bridge_gateway_rejects_missing_ipv4_address():
+    network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "fd00::1"}]}})
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    with pytest.raises(RuntimeError, match="does not expose an IPv4 gateway"):
+        sandbox_module._docker_bridge_gateway(client)
+
+
+@pytest.mark.parametrize("server_version", ["18.09.9", "19.03.15", "20.10.9-ce"])
+def test_legacy_docker_disables_seccomp_for_clone3_compatibility(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, MagicMock())
+
+    assert run_kwargs["security_opt"] == ["seccomp=unconfined"]
+
+
+@pytest.mark.parametrize("server_version", ["20.10.10", "20.10.24", "23.0.0", "29.1.0"])
+def test_modern_docker_preserves_default_seccomp_profile(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, MagicMock())
+
+    assert "security_opt" not in run_kwargs
+
+
+def test_unknown_docker_version_preserves_default_seccomp_profile():
+    client = SimpleNamespace(version=lambda: {"Version": "vendor-build"})
+    run_kwargs = {}
+    logger = MagicMock()
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger)
+
+    assert "security_opt" not in run_kwargs
+    logger.warning.assert_called_once()
+
+
 def _docker_available() -> bool:
     try:
         import docker
@@ -850,6 +898,7 @@ class TestPoolManagerLogic:
         )
         bridge_installer = MagicMock(side_effect=AssertionError("owner bridge installation"))
         monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
         monkeypatch.setattr(pm, "_build_system_docker_executor", lambda *args: owner)
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", bridge_installer)
 
@@ -2559,7 +2608,8 @@ class TestBuildSystemDockerExecutor:
         run = MagicMock(return_value=container)
         docker_module = SimpleNamespace(
             from_env=lambda: SimpleNamespace(
-                containers=SimpleNamespace(run=run)
+                containers=SimpleNamespace(run=run),
+                version=lambda: {"Version": "18.09.9"},
             )
         )
         monkeypatch.setitem(sys.modules, "docker", docker_module)
@@ -2571,6 +2621,7 @@ class TestBuildSystemDockerExecutor:
 
         assert executor.base_url == "http://127.0.0.1:8888"
         assert call_count[0] >= 2
+        assert run.call_args.kwargs["security_opt"] == ["seccomp=unconfined"]
 
     def test_removes_container_on_failure(self, monkeypatch):
         """Should remove container when kernel never becomes ready."""
@@ -2651,7 +2702,10 @@ class TestBuildSessionDockerExecutor:
         )
         run = MagicMock(return_value=container)
         docker_module = SimpleNamespace(
-            from_env=lambda: SimpleNamespace(containers=SimpleNamespace(run=run))
+            from_env=lambda: SimpleNamespace(
+                containers=SimpleNamespace(run=run),
+                version=lambda: {"Version": "18.09.9"},
+            )
         )
         response = SimpleNamespace(
             raise_for_status=lambda: None,
@@ -2668,6 +2722,7 @@ class TestBuildSessionDockerExecutor:
 
         assert run.call_args.kwargs["ports"] == {"8888/tcp": ("127.0.0.1", None)}
         assert run.call_args.kwargs["network_disabled"] is False
+        assert run.call_args.kwargs["security_opt"] == ["seccomp=unconfined"]
         assert captured["owner"].base_url == "http://127.0.0.1:49152"
         assert captured["installed"] == ["numpy"]
         assert executor.installed_packages == ["numpy"]
@@ -3549,6 +3604,69 @@ class TestReleaseImmedateWithSharedContainer:
 class TestBuildDockerExecutorNetworkModes:
     """Test Docker network mode configurations."""
 
+    def test_host_runtime_uses_concrete_bridge_gateway_for_host_tools(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        captured = {}
+        bridge_network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "172.18.0.1"}]}})
+        docker_client = SimpleNamespace(
+            networks=SimpleNamespace(get=MagicMock(return_value=bridge_network))
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "docker",
+            SimpleNamespace(from_env=MagicMock(return_value=docker_client)),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+        monkeypatch.setattr(
+            pool,
+            "_build_session_docker_executor",
+            lambda config, logger_, kwargs: captured.update(kwargs) or executor,
+        )
+        monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda item, *args, **kwargs: item)
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda item, config, logger_: item)
+
+        result = pool._build_docker_executor(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+            MagicMock(),
+            host_tools_exist=True,
+        )
+
+        assert result is executor
+        assert captured["extra_hosts"] == {"host.docker.internal": "172.18.0.1"}
+
+    def test_containerized_runtime_omits_unneeded_host_gateway_mapping(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        captured = {}
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
+        monkeypatch.setattr(
+            pool,
+            "_build_session_docker_executor",
+            lambda config, logger_, kwargs: captured.update(kwargs) or executor,
+        )
+        monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda item, *args, **kwargs: item)
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda item, config, logger_: item)
+
+        result = pool._build_docker_executor(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+            MagicMock(),
+            host_tools_exist=True,
+        )
+
+        assert result is executor
+        assert "extra_hosts" not in captured
+
     def test_network_disabled_but_host_tools_enables_bridge(self):
         """Network should be enabled when host_tools_exist but network_disabled is True."""
         pm = SandboxPoolManager.get_instance()
@@ -4301,6 +4419,7 @@ class TestTargetedSandboxCoverage:
         docker_module = SimpleNamespace(from_env=MagicMock(side_effect=RuntimeError("network unavailable")))
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
         monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
         bridge_installer = MagicMock(return_value=executor)
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", bridge_installer)
         config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
