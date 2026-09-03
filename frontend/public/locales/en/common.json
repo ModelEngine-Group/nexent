@@ -2523,7 +2523,6 @@
   "tenantResources.knowledgeBase.documents": "Documents",
   "tenantResources.knowledgeBase.chunks": "Chunks",
   "tenantResources.knowledgeBase.storeSize": "Storage",
-  "tenantResources.knowledgeBase.sourceSize": "Source File Size",
   "tenantResources.knowledgeBase.esPhysicalSize": "ES Physical Index",
   "tenantResources.knowledgeBase.processSource": "Process Source",
   "tenantResources.knowledgeBase.noGroups": "No user groups",

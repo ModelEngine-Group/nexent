@@ -337,7 +337,7 @@ export default function KnowledgeList({
       render: (count: number) => count || 0,
     },
     {
-      title: t("tenantResources.knowledgeBase.sourceSize"),
+      title: t("tenantResources.knowledgeBase.storeSize"),
       key: "source_size",
       width: 140,
       render: (_: any, record: KnowledgeBase) => {

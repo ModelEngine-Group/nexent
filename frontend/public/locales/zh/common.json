@@ -2506,7 +2506,6 @@
   "tenantResources.knowledgeBase.documents": "文档数",
   "tenantResources.knowledgeBase.chunks": "分块数",
   "tenantResources.knowledgeBase.storeSize": "占用空间",
-  "tenantResources.knowledgeBase.sourceSize": "源文件大小",
   "tenantResources.knowledgeBase.esPhysicalSize": "ES 物理索引",
   "tenantResources.knowledgeBase.processSource": "处理核心",
   "tenantResources.knowledgeBase.noGroups": "暂无用户组",
