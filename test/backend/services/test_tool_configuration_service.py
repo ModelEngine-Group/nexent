@@ -2299,7 +2299,7 @@ class TestLoadLastToolConfigImpl:
 
         assert result == "test result"
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=10)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
 
@@ -2334,7 +2334,7 @@ class TestLoadLastToolConfigImpl:
 
         assert result == "test result with token"
         mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token123", None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=10)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
 
@@ -2361,7 +2361,7 @@ class TestLoadLastToolConfigImpl:
 
         # Verify client was created and connection was checked
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=10)
         mock_client.is_connected.assert_called_once()
 
     @patch('backend.services.tool_configuration_service.urljoin')
@@ -5915,3 +5915,26 @@ class TestValidateToolParamRanges:
             _tool_cfg_service._validate_tool_param_ranges(
                 1, {"top_k": 50, "threshold": 0.5}
             )
+
+
+@pytest.mark.asyncio
+async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
+    """A stalled remote tool call is converted to a bounded MCP error."""
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.is_connected.return_value = True
+
+    async def stalled_call(*_args, **_kwargs):
+        await asyncio.sleep(1)
+
+    client.call_tool.side_effect = stalled_call
+    monkeypatch.setattr(_tool_cfg_service, "Client", MagicMock(return_value=client))
+    monkeypatch.setattr(_tool_cfg_service, "_create_mcp_transport", MagicMock())
+    monkeypatch.setattr(_tool_cfg_service, "MCP_REQUEST_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(MCPConnectionError, match="timed out after 0.01 seconds"):
+        await _tool_cfg_service._call_mcp_tool(
+            "https://mcp.example/mcp",
+            "slow_tool",
+            {},
+        )

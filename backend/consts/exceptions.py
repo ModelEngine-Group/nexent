@@ -241,7 +241,26 @@ class RuntimeMetadataVersionConflict(ValueError):
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        resource: str | None = None,
+        scope: str | None = None,
+        limit: int | None = None,
+        current_count: int | None = None,
+    ):
+        self.details = {
+            key: value
+            for key, value in {
+                "resource": resource,
+                "scope": scope,
+                "limit": limit,
+                "current_count": current_count,
+            }.items()
+            if value is not None
+        }
+        super().__init__(message)
 
 
 class NotFoundException(Exception):

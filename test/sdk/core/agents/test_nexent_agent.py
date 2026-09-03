@@ -367,6 +367,7 @@ with patch.dict("sys.modules", module_mocks):
         _build_tool_input, _wrap_tool_with_monitoring, _tool_name,
         SAFE_PYTHON_INTERPRETER_IMPORTS, get_local_python_authorized_imports,
     )
+    from sdk.nexent.core.agents.mcp_errors import MCPToolTimeoutError
     from sdk.nexent.core.agents.agent_model import ToolConfig, ModelConfig, AgentConfig, AgentHistory, ExternalA2AAgentConfig
 
     # Clean up after import
@@ -2025,6 +2026,21 @@ def test_agent_run_with_observer_with_exception(nexent_agent_instance, mock_core
     mock_core_agent.observer.add_message.assert_called_once_with(
         agent_name="test_agent", process_type=ProcessType.ERROR, content="Error in interaction: Test execution error"
     )
+
+
+def test_agent_run_with_observer_rethrows_mcp_timeout(nexent_agent_instance, mock_core_agent):
+    """MCP timeouts bypass the generic Agent error event and retry wrapper."""
+    nexent_agent_instance.agent = mock_core_agent
+    timeout_error = MCPToolTimeoutError(
+        "MCP tool request timed out after 10 seconds"
+    )
+    mock_core_agent.run.side_effect = timeout_error
+
+    with pytest.raises(MCPToolTimeoutError) as exc_info:
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    assert exc_info.value is timeout_error
+    mock_core_agent.observer.add_message.assert_not_called()
 
 
 def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):

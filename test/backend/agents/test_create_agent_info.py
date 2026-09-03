@@ -121,6 +121,7 @@ consts_const.POSTGRES_DB = "test_db"
 consts_const.POSTGRES_PORT = 5432
 consts_const.DEFAULT_TENANT_ID = "default_tenant"
 consts_const.LOCAL_MCP_SERVER = "http://localhost:5011"
+consts_const.MCP_REQUEST_TIMEOUT_SECONDS = 10
 consts_const.MODEL_CONFIG_MAPPING = {"llm": "llm_config"}
 consts_const.LANGUAGE = {"ZH": "zh"}
 consts_const.DATA_PROCESS_SERVICE = "https://example.com/data-process"
@@ -4039,6 +4040,7 @@ class TestCreateAgentRunInfo:
                     "url": "http://test.server",
                     "transport": "streamable-http"
                 }],
+                mcp_request_timeout_seconds=10,
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,

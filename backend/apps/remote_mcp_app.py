@@ -8,7 +8,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from http import HTTPStatus
 
 from consts.const import ENABLE_UPLOAD_IMAGE
+from consts.error_code import ErrorCode
 from consts.exceptions import (
+    AppException,
     MCPConnectionError,
     MCPNameIllegal,
     MCPContainerError,
@@ -17,6 +19,7 @@ from consts.exceptions import (
     McpNameConflictError,
     McpPortConflictError,
     UnauthorizedError,
+    TenantResourceLimitError,
 )
 from consts.model import (
     MCPConfigRequest,
@@ -57,6 +60,15 @@ router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")
 
 _MCP_SERVICE_ID_DESC = Query(..., description="MCP service ID")
+
+
+def _as_mcp_resource_limit_exception(error: TenantResourceLimitError) -> AppException:
+    """Convert the legacy quota exception to the standard API error envelope."""
+    return AppException(
+        ErrorCode.TENANT_RESOURCE_EXCEEDED,
+        str(error),
+        details=getattr(error, "details", None),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +208,9 @@ async def add_mcp_service_endpoint(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail=str(e) or "MCP connection failed"
         )
+    except TenantResourceLimitError as e:
+        logger.warning("MCP service creation rejected by tenant resource limit: %s", e)
+        raise _as_mcp_resource_limit_exception(e) from e
     except McpValidationError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -268,6 +283,9 @@ async def add_container_mcp_service_endpoint(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail=str(e) or "MCP connection failed"
         )
+    except TenantResourceLimitError as e:
+        logger.warning("Container MCP creation rejected by tenant resource limit: %s", e)
+        raise _as_mcp_resource_limit_exception(e) from e
     except Exception as e:
         logger.error(f"Failed to add container MCP service: {e}")
         raise HTTPException(
@@ -326,6 +344,15 @@ async def add_container_mcp_service_stream_endpoint(
 
             result = await deployment_task
             yield f"data: {json.dumps({'status': 'success', 'data': result}, ensure_ascii=False)}\n\n"
+        except TenantResourceLimitError as exc:
+            logger.warning("Streaming MCP creation rejected by tenant resource limit: %s", exc)
+            error_event = {
+                "status": "error",
+                "code": ErrorCode.TENANT_RESOURCE_EXCEEDED.value,
+                "message": str(exc),
+                "details": getattr(exc, "details", None),
+            }
+            yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
         except Exception:
             # Keep internal exception details out of the externally visible SSE
             # payload; the server log retains the traceback for diagnostics.
