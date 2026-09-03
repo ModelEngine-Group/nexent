@@ -118,6 +118,13 @@ class ModelConfig(BaseModel):
         description="Resolved model-level reasoning and prompt-cache capabilities.",
         default=None,
     )
+    feature_preferences: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Optional user behavior overrides applied within confirmed model capabilities. "
+            "Reserved for the future preference API/UI; absent means Nexent defaults."
+        ),
+        default=None,
+    )
     provider_usage_profile: Optional[Dict[str, Any]] = Field(
         description="P7 provider usage field paths and verified semantic relationships.",
         default=None,

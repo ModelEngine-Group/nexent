@@ -303,6 +303,7 @@ class NexentAgent:
                 for key, value in {
                     "provider_usage_profile": model_config.provider_usage_profile,
                     "feature_capabilities": model_config.feature_capabilities,
+                    "feature_preferences": model_config.feature_preferences,
                     "canonical_model_id": model_config.canonical_model_id,
                     "model_identity_metadata": model_config.model_identity_metadata,
                     "tokenizer_match_metadata": model_config.tokenizer_match_metadata,
