@@ -1,6 +1,7 @@
 "use client";
 
 import { useConfig } from "@/hooks/useConfig";
+import { APP_DISPLAY_NAME } from "@/const/modelConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
@@ -13,7 +14,7 @@ export function ChatTopNavContent() {
   const { i18n } = useTranslation();
   const { appConfig, getAppAvatarUrl } = useConfig();
   const sidebarAvatarUrl = getAppAvatarUrl(16);
-  
+
   // Static font-size for top navbar (no responsive sizing required)
 
   const colors = extractColorsFromUri(appConfig.avatarUri || "");
@@ -28,7 +29,7 @@ export function ChatTopNavContent() {
       <div className="h-6 w-6 rounded-full overflow-hidden mr-2">
         <img
           src={sidebarAvatarUrl}
-          alt={appConfig.appName}
+          alt={APP_DISPLAY_NAME}
           className="h-full w-full object-cover"
         />
       </div>
@@ -40,9 +41,8 @@ export function ChatTopNavContent() {
           backgroundImage: `linear-gradient(180deg, #${mainColor} 0%, #${secondaryColor} 100%)`,
         }}
       >
-        {appConfig.appName}
+        {APP_DISPLAY_NAME}
       </span>
     </div>
   );
 }
-

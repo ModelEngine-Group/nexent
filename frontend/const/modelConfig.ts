@@ -1,5 +1,9 @@
 import { publicAsset } from "@/lib/publicAsset";
 
+export const APP_DISPLAY_NAME = "Nexent";
+export const APP_DISPLAY_DESCRIPTION =
+  "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。";
+
 // Model type constants
 export const MODEL_TYPES = {
   LLM: "llm",
