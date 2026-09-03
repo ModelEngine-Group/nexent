@@ -41,15 +41,15 @@ export function stripStepLabel(text: string): string {
   return text.replace(STEP_LABEL_RE, "");
 }
 
-// Must have a closing </code> tag — matches backend parse_code_blobs behavior.
-// Unclosed <code> tags are treated as plain text.
-const CODE_TAG_RE = /<code>([\s\S]*?)<\/code>/gi;
+const CODE_TAG_RE = /<code>([\s\S]*?)(<\/code>|$)/gi;
 const BACKTICK_RUN_RE = /`+/g;
 
 export function normalizeReasoningCodeBlocks(text: string): string {
-  // Must have a closing </code> tag — consistent with backend parse_code_blobs.
-  return text.replace(CODE_TAG_RE, (_, rawCode: string) => {
-    let code = rawCode.replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+  return text.replace(CODE_TAG_RE, (_, rawCode: string, closingTag: string) => {
+    let code = rawCode.replace(/^\r?\n/, "");
+    if (closingTag) {
+      code = code.replace(/\r?\n$/, "");
+    }
     const longestBacktickRun = Math.max(
       0,
       ...Array.from(code.matchAll(BACKTICK_RUN_RE), (match) => match[0].length),
