@@ -20,6 +20,7 @@ import base64
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import logging
 import mimetypes
@@ -985,11 +986,62 @@ SANDBOX_CONTAINER_NAME = "nexent-runtime-sandbox"
 SANDBOX_NETWORK_NAME = "nexent_network"
 SANDBOX_JUPYTER_PORT = 8888
 SANDBOX_SESSION_CONTAINER_PREFIX = "nexent-runtime-sandbox-session"
+_DOCKER_CLONE3_SECCOMP_MIN_VERSION = (20, 10, 10)
 
 
 def _is_containerized_runtime() -> bool:
     """Return whether the current runtime is running inside a Docker container."""
     return Path("/.dockerenv").exists()
+
+
+def _docker_bridge_gateway(client: Any) -> str:
+    """Return the Docker host IPv4 address without requiring ``host-gateway``.
+
+    Docker Engine versions before 20.10 do not understand the special
+    ``host-gateway`` value in ``ExtraHosts``. The default bridge gateway is the
+    equivalent concrete host address and is supported by older daemons.
+    """
+    network = client.networks.get("bridge")
+    network.reload()
+    ipam_configs = ((network.attrs or {}).get("IPAM") or {}).get("Config") or []
+    for config in ipam_configs:
+        gateway = config.get("Gateway")
+        if not gateway:
+            continue
+        try:
+            if ipaddress.ip_address(gateway).version == 4:
+                return gateway
+        except ValueError:
+            continue
+    raise RuntimeError("Docker bridge network does not expose an IPv4 gateway")
+
+
+def _apply_legacy_docker_seccomp_compatibility(
+    client: Any,
+    container_run_kwargs: dict[str, Any],
+    logger_: logging.Logger,
+) -> None:
+    """Disable seccomp only for Docker versions whose default profile blocks clone3."""
+    try:
+        server_version = str(client.version()["Version"])
+        version_match = re.match(r"^(\d+)\.(\d+)\.(\d+)", server_version)
+        if version_match is None:
+            raise ValueError(f"unrecognized Docker server version: {server_version}")
+        parsed_version = tuple(int(part) for part in version_match.groups())
+    except Exception as exc:
+        logger_.warning(
+            "Could not determine Docker server version; preserving the default seccomp profile: %s",
+            exc,
+        )
+        return
+
+    if parsed_version < _DOCKER_CLONE3_SECCOMP_MIN_VERSION:
+        container_run_kwargs["security_opt"] = ["seccomp=unconfined"]
+        logger_.warning(
+            "Docker server %s predates clone3 support in the default seccomp profile; "
+            "starting the sandbox with seccomp=unconfined for compatibility",
+            server_version,
+        )
 
 
 def _kernel_gateway_command() -> list[str]:
@@ -1965,6 +2017,7 @@ class SandboxPoolManager:
 
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
+        _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
         container_name = f"{SANDBOX_SESSION_CONTAINER_PREFIX}-{secrets.token_hex(8)}"
         run_kwargs.update({
             "name": container_name,
@@ -2106,6 +2159,7 @@ class SandboxPoolManager:
 
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
+        _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
         if _is_containerized_runtime():
             run_kwargs.pop("ports", None)
         else:
@@ -2191,8 +2245,14 @@ class SandboxPoolManager:
                 if config.scope != SandboxScope.SYSTEM
                 else False
             ),
-            **({"extra_hosts": {"host.docker.internal": "host-gateway"}} if host_tools_exist else {}),
         }
+        if host_tools_exist and not _is_containerized_runtime():
+            import docker
+
+            docker_client = docker.from_env()
+            container_run_kwargs["extra_hosts"] = {
+                "host.docker.internal": _docker_bridge_gateway(docker_client)
+            }
         workspace_root = config.extra_kwargs.get("workspace_root")
         if workspace_root:
             resolved_workspace_root = str(Path(workspace_root).resolve())
