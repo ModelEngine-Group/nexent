@@ -82,6 +82,13 @@ CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 # Container-internal official skills ZIP directory
 OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
 
+# Container-internal official agent bundle directory. Bundles are maintained
+# outside of the Nexent source repository and selected by deployment profile.
+OFFICIAL_AGENTS_PATH = os.getenv("OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents")
+OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "general")
+OFFICIAL_AGENT_TENANT_ID = "__nexent_official__"
+OFFICIAL_AGENT_USER_ID = "__nexent_system__"
+
 
 # Preview Configuration
 FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
