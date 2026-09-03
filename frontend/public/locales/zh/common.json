@@ -908,7 +908,7 @@
   "nl2agent.assistant.description": "请描述你希望如何配置当前智能体，我会搜索已安装资源并生成 Prompt 字段。",
   "nl2agent.optimization.prompt.title": "生成提示词",
   "nl2agent.optimization.prompt.description": "根据已选工具与技能生成",
-  "nl2agent.optimization.prompt.input": "请根据当前智能体的角色、职责、目标以及已绑定的工具和 Skill，生成职责提示词、约束提示词和示例提示词。其他配置保持不变。",
+  "nl2agent.optimization.prompt.input": "请根据当前智能体的描述以及已绑定的工具和 Skill，生成职责提示词、约束提示词和示例提示词。其他配置保持不变。",
   "nl2agent.optimization.tools.title": "推荐可用工具",
   "nl2agent.optimization.tools.description": "根据当前角色推荐工具",
   "nl2agent.optimization.tools.input": "请根据当前智能体的角色、职责和目标，搜索并推荐合适的可用工具。完成工具绑定后，请根据新绑定的工具重新生成相关 Prompt。",
