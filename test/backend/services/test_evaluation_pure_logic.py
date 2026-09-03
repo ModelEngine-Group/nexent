@@ -290,7 +290,7 @@ def _install_sys_modules_stubs() -> None:
 
     # ---- services / utils --------------------------------------------------
     _services_pkg = _register_package("services")
-    _as_mod = _mk_mod("services.agent_service", prepare_agent_run=MagicMock())
+    _as_mod = _mk_mod("management.services.agent.service", prepare_agent_run=MagicMock())
     _services_pkg.agent_service = _as_mod
     _ess_mod = _mk_mod(
         "services.evaluation_set_service",

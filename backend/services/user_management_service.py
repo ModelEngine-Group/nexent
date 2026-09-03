@@ -53,7 +53,7 @@ from database.db_models import RolePermission
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
-from services.skill_service import init_skill_list_for_tenant
+from management.services.skill.service import init_skill_list_for_tenant
 
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)

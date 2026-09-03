@@ -6,6 +6,7 @@ import os
 import time
 import types
 import unittest
+from enum import Enum
 from pathlib import Path
 from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
@@ -111,6 +112,21 @@ consts_pkg = importlib.import_module("consts")
 consts_const_mod = importlib.import_module("consts.const")
 consts_scheduler_mod = importlib.import_module("consts.scheduler")
 
+# The shared test bootstrap can load a reduced consts stub before this module.
+# Supply the knowledge-base service constants required by the refactored module.
+if not hasattr(consts_const_mod, "DATAMATE_URL"):
+    consts_const_mod.DATAMATE_URL = "DATAMATE_URL"
+if not hasattr(consts_const_mod, "ES_API_KEY"):
+    consts_const_mod.ES_API_KEY = ""
+if not hasattr(consts_const_mod, "ES_HOST"):
+    consts_const_mod.ES_HOST = ""
+if not hasattr(consts_const_mod, "VectorDatabaseType"):
+    class VectorDatabaseType(str, Enum):
+        ELASTICSEARCH = "elasticsearch"
+        DATAMATE = "datamate"
+
+    consts_const_mod.VectorDatabaseType = VectorDatabaseType
+
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_const_mod
 sys.modules["consts.exceptions"] = consts_exceptions_mod
@@ -188,6 +204,14 @@ nexent_core_module = _create_package_mock('nexent.core')
 nexent_core_module.models = nexent_core_models_module
 sys.modules['nexent.core'] = nexent_core_module
 setattr(nexent_mock, 'core', nexent_core_module)
+
+nexent_core_gateway_module = _create_package_mock('nexent.core.gateway')
+nexent_core_gateway_modality_module = types.ModuleType('nexent.core.gateway.modality')
+nexent_core_gateway_modality_module.EmbeddingAdapter = MockBaseEmbedding
+nexent_core_gateway_module.modality = nexent_core_gateway_modality_module
+nexent_core_module.gateway = nexent_core_gateway_module
+sys.modules['nexent.core.gateway'] = nexent_core_gateway_module
+sys.modules['nexent.core.gateway.modality'] = nexent_core_gateway_modality_module
 
 # Mock nexent.vector_database modules
 vector_db_base_module = types.ModuleType('nexent.vector_database.base')
@@ -371,6 +395,13 @@ sys.modules['backend.utils.str_utils'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 setattr(sys.modules['backend.utils'], 'str_utils', str_utils_mock)
 
+storage_key_utils_mock = types.ModuleType('utils.storage_key_utils')
+storage_key_utils_mock.build_preview_pdf_object_key = MagicMock(return_value='preview/test.pdf')
+sys.modules['utils.storage_key_utils'] = storage_key_utils_mock
+sys.modules['backend.utils.storage_key_utils'] = storage_key_utils_mock
+setattr(sys.modules['utils'], 'storage_key_utils', storage_key_utils_mock)
+setattr(sys.modules['backend.utils'], 'storage_key_utils', storage_key_utils_mock)
+
 config_utils_mock = types.ModuleType('utils.config_utils')
 config_utils_mock.tenant_config_manager = MagicMock()
 config_utils_mock.tenant_config_manager.get_app_config = MagicMock(return_value='')
@@ -411,7 +442,8 @@ with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
     # Import utils.document_vector_utils to ensure it's available for patching
     import utils.document_vector_utils
-    from backend.services.vectordatabase_service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
+    from management.services.knowledge_base.deletion import KnowledgeBaseDocumentDeletionService
+    from management.services.knowledge_base.service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
 
 
 def _accurate_search_impl(request, vdb_core):
@@ -469,25 +501,25 @@ class TestElasticSearchService(unittest.TestCase):
 
         # Patch get_embedding_model for all tests
         self.get_embedding_model_patcher = patch(
-            'backend.services.vectordatabase_service.get_embedding_model')
+            'management.services.knowledge_base.management.get_embedding_model_by_id')
         self.mock_get_embedding = self.get_embedding_model_patcher.start()
         self.mock_embedding = MagicMock()
         self.mock_embedding.embedding_dim = 768
         self.mock_embedding.model = "test-model"
         self.mock_embedding.model_type = "text"
-        self.mock_get_embedding.return_value = self.mock_embedding
+        self.mock_get_embedding.return_value = (None, None)
 
         # Patch get_embedding_model_by_id so it returns (None, None) when model_id is None.
         # This is critical because setUp also patches get_model_by_model_id, which would
         # otherwise cause get_embedding_model_by_id(tenant_id, None) to return a real mock
         # instance and populate embedding_model_name in create_index.
         self.get_embedding_model_by_id_patcher = patch(
-            'backend.services.vectordatabase_service.get_embedding_model_by_id')
+            'management.services.knowledge_base.common.get_embedding_model_by_id')
         self.mock_get_embedding_by_id = self.get_embedding_model_by_id_patcher.start()
         self.mock_get_embedding_by_id.return_value = (None, None)
 
         self.get_model_by_id_patcher = patch(
-            'backend.services.vectordatabase_service.get_model_by_model_id')
+            'management.services.knowledge_base.management.get_model_by_model_id')
         self.mock_get_model_by_id = self.get_model_by_id_patcher.start()
         self.mock_get_model_by_id.return_value = {
             "model_id": 1,
@@ -503,7 +535,7 @@ class TestElasticSearchService(unittest.TestCase):
 
         # Patch get_rerank_model for all tests
         self.get_rerank_model_patcher = patch(
-            'backend.services.vectordatabase_service.get_rerank_model')
+            'management.services.model.resolver.get_rerank_model')
         self.mock_get_rerank = self.get_rerank_model_patcher.start()
         self.mock_rerank = MagicMock()
         self.mock_get_rerank.return_value = self.mock_rerank
@@ -524,7 +556,7 @@ class TestElasticSearchService(unittest.TestCase):
         if hasattr(ElasticSearchService, 'semantic_search'):
             del ElasticSearchService.semantic_search
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_index_success(self, mock_create_knowledge):
         """
         Test successful index creation.
@@ -564,7 +596,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["created_by"], "test_user")
         self.assertEqual(call_kwargs["tenant_id"], "test_tenant")
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_index_already_exists(self, mock_create_knowledge):
         """
         Test index creation when the index already exists.
@@ -590,8 +622,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("already exists", str(context.exception))
         mock_create_knowledge.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_generates_index(self, mock_create_knowledge, mock_get_embedding):
         """Ensure create_knowledge_base creates record then ES index."""
         self.mock_vdb_core.create_index.return_value = True
@@ -622,7 +654,7 @@ class TestElasticSearchService(unittest.TestCase):
         call_kwargs = mock_create_knowledge.call_args[0][0]
 
     @patch(
-        'backend.services.vectordatabase_service.create_knowledge_record',
+        'management.services.knowledge_base.management.create_knowledge_record',
         side_effect=DuplicateError("Knowledge base name 'kb1' already exists"),
     )
     def test_create_knowledge_base_name_conflict_does_not_create_es_index(self, _mock_create_knowledge):
@@ -638,8 +670,8 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.mock_vdb_core.create_index.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_with_group_permissions(self, mock_create_knowledge, mock_get_embedding):
         """
         Test create_knowledge_base with group permissions.
@@ -674,8 +706,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["ingroup_permission"], "EDIT")
         self.assertEqual(call_kwargs["group_ids"], [1, 2, 3])
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_with_partial_group_permissions(self, mock_create_knowledge, mock_get_embedding):
         """
         Test create_knowledge_base with only ingroup_permission (no group_ids).
@@ -709,8 +741,8 @@ class TestElasticSearchService(unittest.TestCase):
         # group_ids should not be in the call if not provided
         self.assertNotIn("group_ids", call_kwargs)
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_with_empty_group_ids(self, mock_create_knowledge, mock_get_embedding):
         """
         Test create_knowledge_base with empty group_ids list.
@@ -743,8 +775,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["ingroup_permission"], "PRIVATE")
         self.assertEqual(call_kwargs["group_ids"], [])
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_with_multimodal(self, mock_create_knowledge, mock_get_embedding):
         self.mock_vdb_core.create_index.return_value = True
         mock_get_embedding.return_value = (None, None)
@@ -766,7 +798,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.mock_get_model_by_id.assert_called_with(1, "tenant-1")
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_index_failure(self, mock_create_knowledge):
         """
         Test index creation failure.
@@ -797,8 +829,8 @@ class TestElasticSearchService(unittest.TestCase):
     # Tests for create_knowledge_base with embedding_model_name parameter
     # =============================================================================
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
     def test_create_knowledge_base_with_embedding_model_name(self, mock_get_embedding, mock_create_knowledge):
         """
         Test create_knowledge_base with embedding_model_name parameter.
@@ -842,8 +874,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
         self.assertEqual(call_kwargs["embedding_model_id"], 10)
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
     def test_create_knowledge_base_without_embedding_model_name_uses_default(self, mock_get_embedding,
                                                                              mock_create_knowledge):
         """
@@ -887,8 +919,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
         self.assertEqual(call_kwargs["embedding_model_id"], 11)
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
     def test_create_knowledge_base_with_group_permissions_and_embedding_model(self, mock_get_embedding,
                                                                               mock_create_knowledge):
         """
@@ -936,8 +968,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
         self.assertEqual(call_kwargs["embedding_model_id"], 12)
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
     def test_create_knowledge_base_saves_user_provided_model_name_when_provided(self, mock_get_embedding,
                                                                                 mock_create_knowledge):
         """
@@ -981,7 +1013,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_kwargs["embedding_model_name"], "Test model")
         self.assertEqual(call_kwargs["embedding_model_id"], 13)
 
-    @patch('backend.services.vectordatabase_service.delete_knowledge_record')
+    @patch('management.services.knowledge_base.management.delete_knowledge_record')
     def test_delete_index_success(self, mock_delete_knowledge):
         """
         Test successful index deletion.
@@ -1011,7 +1043,7 @@ class TestElasticSearchService(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    @patch('backend.services.vectordatabase_service.delete_knowledge_record')
+    @patch('management.services.knowledge_base.management.delete_knowledge_record')
     def test_delete_index_failure(self, mock_delete_knowledge):
         """
         Test index deletion failure.
@@ -1040,7 +1072,7 @@ class TestElasticSearchService(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    @patch('backend.services.vectordatabase_service.delete_knowledge_record')
+    @patch('management.services.knowledge_base.management.delete_knowledge_record')
     def test_delete_index_knowledge_record_failure(self, mock_delete_knowledge):
         """
         Test deletion when the index is deleted but knowledge record deletion fails.
@@ -1068,9 +1100,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         asyncio.run(run_test())
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_without_stats(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test listing indices without including statistics.
@@ -1109,9 +1141,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_user_indices.assert_called_once_with("*")
         mock_get_knowledge.assert_called_once_with("test_tenant")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_with_stats(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test listing indices with statistics included.
@@ -1167,9 +1199,9 @@ class TestElasticSearchService(unittest.TestCase):
             ["index1", "index2"])
         mock_get_knowledge.assert_called_once_with("test_tenant")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_paginates_before_loading_stats(
             self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         self.mock_vdb_core.get_user_indices.return_value = ["kb-1", "kb-2", "kb-3"]
@@ -1211,9 +1243,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["facets"]["models"], ["model-a", "model-b"])
         self.mock_vdb_core.get_indices_detail.assert_called_once_with(["kb-2"])
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_skips_missing_indices(self, mock_get_info, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices skips indices that exist in database but not in Elasticsearch.
@@ -1240,9 +1272,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices"], [])
         self.assertEqual(result["count"], 0)
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_stats_defaults_when_missing(self, mock_get_info, mock_get_user_tenant, mock_get_group_ids):
         """
         Test list_indices include_stats path when Elasticsearch returns no stats for an index.
@@ -1270,10 +1302,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]["name"], "index1")
         self.assertEqual(result["indices_info"][0]["stats"], {})
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_backfills_missing_model_names(self, mock_get_info, mock_update_model, mock_get_user_tenant,
                                                         mock_get_group_ids):
         """
@@ -1305,9 +1337,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["indices"][0], "index1")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_stats_surfaces_elasticsearch_errors(self, mock_get_info, mock_get_user_tenant,
                                                               mock_get_group_ids):
         """
@@ -1337,9 +1369,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.assertIn("503 Service Unavailable", str(context.exception))
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_stats_keeps_non_stat_fields(self, mock_get_info, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices preserves all stats fields returned by ElasticSearchCore.
@@ -1377,9 +1409,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]
                          ["stats"], detailed_stats["index1"])
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_creator_permission(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that creator of a knowledge base gets CREATOR permission.
@@ -1432,9 +1464,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("index1", result["indices"])
         self.assertNotIn("index2", result["indices"])
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_permission_edit_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
                                                            mock_get_group_ids):
         """
@@ -1478,10 +1510,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["indices_info"]), 1)
         self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
                                                            mock_get_group_ids):
         """
@@ -1525,10 +1557,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["indices_info"]), 1)
         self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_hides_private_knowledge_base_from_group_member(
         self,
         mock_get_knowledge,
@@ -1564,10 +1596,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["indices"], [])
         self.assertEqual(result["count"], 0)
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_permission_default_read_when_not_creator(self, mock_get_knowledge, mock_get_user_tenant,
                                                                    mock_get_group_ids):
         """
@@ -1613,9 +1645,9 @@ class TestElasticSearchService(unittest.TestCase):
         # Then line 605 sets permission = PERMISSION_READ (which is "READ_ONLY")
         self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_kb_group_ids_none(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices handles kb_group_ids_str as None correctly.
@@ -1659,9 +1691,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["indices_info"]), 1)
         self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_kb_group_ids_empty_string(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices handles kb_group_ids_str as empty string correctly.
@@ -1704,9 +1736,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["indices_info"]), 1)
         self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_fallback_admin_logic(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test the fallback admin logic when user_id equals tenant_id.
@@ -1742,7 +1774,7 @@ class TestElasticSearchService(unittest.TestCase):
         mock_get_group_ids.return_value = []
 
         # Execute
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.knowledge_base.management.logger') as mock_logger:
             result = ElasticSearchService.list_indices(
                 pattern="*",
                 include_stats=True,  # Need stats to see permissions
@@ -1766,9 +1798,9 @@ class TestElasticSearchService(unittest.TestCase):
             call("User legacy_admin_user identified as legacy admin")
         ])
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
     def test_list_indices_speed_version_admin_logic(self, mock_get_group_ids, mock_get_user_tenant, mock_get_knowledge):
         """
         Test the SPEED version admin logic when user is default user and tenant is default tenant.
@@ -1804,7 +1836,7 @@ class TestElasticSearchService(unittest.TestCase):
         mock_get_group_ids.return_value = []
 
         # Execute
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.knowledge_base.management.logger') as mock_logger:
             result = ElasticSearchService.list_indices(
                 pattern="*",
                 include_stats=True,  # Need stats to see permissions
@@ -1828,9 +1860,9 @@ class TestElasticSearchService(unittest.TestCase):
             call("User user_id identified as legacy admin")
         ])
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_skips_datamate_sources(self, mock_get_knowledge, mock_get_user_tenant, mock_get_group_ids):
         """
         Test that list_indices skips records with knowledge_sources='datamate'.
@@ -1892,9 +1924,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertNotIn("index2", result["indices"])  # datamate source should be excluded
         self.assertIn("index3", result["indices"])
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_uses_tenant_id_for_filtering(self, mock_get_knowledge, mock_get_user_tenant,
                                                        mock_get_group_ids):
         """
@@ -1961,9 +1993,9 @@ class TestElasticSearchService(unittest.TestCase):
         # Verify that get_knowledge_info_by_tenant_id was called with tenant_id
         mock_get_knowledge.assert_called_once_with("tenant_B")
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_includes_tenant_id_in_response(self, mock_get_knowledge, mock_get_user_tenant,
                                                          mock_get_group_ids):
         """
@@ -2027,9 +2059,9 @@ class TestElasticSearchService(unittest.TestCase):
         mock_embedding_model = MagicMock()
         mock_embedding_model.model = "test-model"
         mock_embedding_model.model_type = "text"
-        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
-                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
+        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
+                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
+                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
             mock_get_record.return_value = {"tenant_id": "tenant-1"}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
 
@@ -2082,9 +2114,9 @@ class TestElasticSearchService(unittest.TestCase):
         mock_embedding_model.model = "test-model"
         mock_embedding_model.model_type = "multimodal"
 
-        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
-                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
+        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
+                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
+                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
             mock_get_record.return_value = {
                 "tenant_id": consts_const_mod.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 6}
@@ -2108,10 +2140,10 @@ class TestElasticSearchService(unittest.TestCase):
         mock_embedding_model.model = "test-model"
         mock_embedding_model.model_type = "text"
 
-        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
-                patch('backend.services.vectordatabase_service.get_file_stream') as mock_get_stream, \
-                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
+        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
+                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
+                patch('management.services.knowledge_base.management.get_file_stream') as mock_get_stream, \
+                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
             mock_get_record.return_value = {
                 "tenant_id": consts_const_mod.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
@@ -2193,10 +2225,10 @@ class TestElasticSearchService(unittest.TestCase):
         ]
 
         # Execute
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.create_index') as mock_create_index, \
-                patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg, \
-                patch('backend.services.vectordatabase_service.update_last_doc_update_time'):
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.create_index') as mock_create_index, \
+                patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
+                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
+                patch('management.services.knowledge_base.management.update_last_doc_update_time'):
             mock_create_index.return_value = {"status": "success"}
             mock_get_record.return_value = {"tenant_id": "tenant-1"}
             mock_tenant_cfg.get_model_config.return_value = {
@@ -2241,8 +2273,8 @@ class TestElasticSearchService(unittest.TestCase):
         ]
 
         # Execute and Assert
-        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record, \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record, \
+                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg:
             mock_get_record.return_value = {"tenant_id": "tenant-1"}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 8}
 
@@ -2259,7 +2291,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(kwargs.get("embedding_batch_size"), 8)
         self.assertTrue(callable(kwargs.get("progress_callback")))
 
-    @patch('backend.services.vectordatabase_service.get_all_files_status')
+    @patch('management.services.knowledge_base.management.get_all_files_status')
     def test_list_files_without_chunks(self, mock_get_files_status):
         """
         Test listing files without including document chunks.
@@ -2299,11 +2331,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_documents_detail.assert_called_once_with(
             "test_index")
 
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    @patch('backend.services.vectordatabase_service.get_file_size', return_value=12)
-    @patch('backend.services.vectordatabase_service.list_file_records')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_all_files_status', new_callable=AsyncMock)
+    @patch('management.services.knowledge_base.common.get_redis_service')
+    @patch('management.services.knowledge_base.management.get_file_size', return_value=12)
+    @patch('management.services.knowledge_base.management.list_file_records')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_all_files_status', new_callable=AsyncMock)
     def test_list_files_merges_lifecycle_rows_and_hides_tombstones(
         self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_get_size, mock_redis
     ):
@@ -2356,10 +2388,10 @@ class TestElasticSearchService(unittest.TestCase):
         assert by_path["uploading.txt"]["status"] == "WAIT_FOR_PROCESSING"
         assert by_path["legacy-ms"]["create_time"] == 1700000000000
 
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    @patch('backend.services.vectordatabase_service.list_file_records')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_all_files_status', new_callable=AsyncMock)
+    @patch('management.services.knowledge_base.common.get_redis_service')
+    @patch('management.services.knowledge_base.management.list_file_records')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_all_files_status', new_callable=AsyncMock)
     def test_list_files_keeps_legacy_effective_filename_over_lifecycle_name(
         self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_redis
     ):
@@ -2394,9 +2426,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         assert result["files"][0]["file"] == "data_1.txt"
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_file_record')
-    @patch('backend.services.vectordatabase_service.transition_file_record')
+    @patch('management.services.knowledge_base.deletion.get_knowledge_record')
+    @patch('management.services.knowledge_base.deletion.get_file_record')
+    @patch('management.services.knowledge_base.deletion.transition_file_record')
     def test_mark_file_delete_requested_updates_existing_record(
         self, mock_transition, mock_get_record, mock_get_knowledge
     ):
@@ -2412,9 +2444,9 @@ class TestElasticSearchService(unittest.TestCase):
         assert mock_transition.call_args.args == ("fid-delete",)
         assert mock_transition.call_args.kwargs["status"] == "DELETE_REQUESTED"
 
-    @patch('backend.services.vectordatabase_service.create_delete_tombstone')
-    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.deletion.create_delete_tombstone')
+    @patch('management.services.knowledge_base.deletion.get_file_record', return_value=None)
+    @patch('management.services.knowledge_base.deletion.get_knowledge_record')
     def test_mark_file_delete_requested_creates_legacy_tombstone(
         self, mock_get_knowledge, _mock_get_record, mock_create_tombstone
     ):
@@ -2429,13 +2461,13 @@ class TestElasticSearchService(unittest.TestCase):
         assert result["status"] == "DELETE_REQUESTED"
         mock_create_tombstone.assert_called_once()
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={})
+    @patch('management.services.knowledge_base.deletion.get_knowledge_record', return_value={})
     def test_mark_file_delete_requested_skips_missing_knowledge_identity(self, _mock_get_knowledge):
         assert ElasticSearchService._mark_file_delete_requested("test_index", "missing.txt") is None
 
-    @patch('backend.services.vectordatabase_service.get_file_record')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
-    @patch('backend.services.vectordatabase_service.delete_file_record')
+    @patch('management.services.knowledge_base.deletion.get_file_record')
+    @patch('management.services.knowledge_base.deletion.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
+    @patch('management.services.knowledge_base.deletion.delete_file_record')
     def test_mark_file_deleted_finalizes_existing_record(
         self, mock_delete, _mock_get_knowledge, mock_get_record
     ):
@@ -2446,9 +2478,9 @@ class TestElasticSearchService(unittest.TestCase):
             expected_statuses=("DELETE_REQUESTED", "DELETED"),
         )
 
-    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
-    @patch('backend.services.vectordatabase_service.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
-    @patch('backend.services.vectordatabase_service.delete_file_record')
+    @patch('management.services.knowledge_base.deletion.get_file_record', return_value=None)
+    @patch('management.services.knowledge_base.deletion.get_knowledge_record', return_value={"tenant_id": "tenant-1"})
+    @patch('management.services.knowledge_base.deletion.delete_file_record')
     def test_mark_file_deleted_ignores_missing_record(
         self, mock_delete, _mock_get_knowledge, _mock_get_record
     ):
@@ -2456,8 +2488,8 @@ class TestElasticSearchService(unittest.TestCase):
         ElasticSearchService._mark_file_deleted("test_index", "knowledge_base/missing.txt")
         mock_delete.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
-    @patch('backend.services.vectordatabase_service.transition_file_record')
+    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
+    @patch('management.services.knowledge_base.deletion.transition_file_record')
     def test_delete_lifecycle_record_without_object_hard_deletes(self, mock_transition, mock_delete):
         mock_transition.return_value = {"file_id": "fid-no-object", "status": "DELETE_REQUESTED"}
 
@@ -2488,8 +2520,8 @@ class TestElasticSearchService(unittest.TestCase):
                 {"file_id": "fid-with-object", "object_name": "knowledge_base/a.txt"}
             )
 
-    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
-    @patch('backend.services.vectordatabase_service.transition_file_record')
+    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
+    @patch('management.services.knowledge_base.deletion.transition_file_record')
     def test_delete_lifecycle_record_without_object_hard_deletes_existing_deleted(self, mock_transition, mock_delete):
         result = ElasticSearchService.delete_lifecycle_record_without_object(
             {"file_id": "fid-deleted", "object_name": None, "status": "DELETED"}
@@ -2503,9 +2535,9 @@ class TestElasticSearchService(unittest.TestCase):
             expected_statuses=("DELETE_REQUESTED", "DELETED"),
         )
 
-    @patch('backend.services.vectordatabase_service.get_file_record')
-    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
-    @patch('backend.services.vectordatabase_service.transition_file_record')
+    @patch('management.services.knowledge_base.deletion.get_file_record')
+    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
+    @patch('management.services.knowledge_base.deletion.transition_file_record')
     def test_delete_lifecycle_record_without_object_reconciles_stale_delete_request(
         self, mock_transition, _mock_delete, mock_get_record
     ):
@@ -2533,11 +2565,11 @@ class TestElasticSearchService(unittest.TestCase):
         assert mock_transition.call_count == 1
 
     @patch(
-        'backend.services.vectordatabase_service.get_file_record',
+        'management.services.knowledge_base.deletion.get_file_record',
         side_effect=[{"status": "DELETED"}, None],
     )
-    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=False)
-    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=False)
+    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
     def test_delete_lifecycle_record_without_object_reconciles_deleted_race(
         self, _mock_transition, _mock_delete, _mock_get_record
     ):
@@ -2554,9 +2586,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         assert result["lifecycle_deleted"] is True
 
-    @patch('backend.services.vectordatabase_service.get_file_record', return_value=None)
-    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=False)
-    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    @patch('management.services.knowledge_base.deletion.get_file_record', return_value=None)
+    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=False)
+    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
     def test_delete_lifecycle_record_without_object_raises_when_request_is_stale(
         self, _mock_transition, _mock_delete, _mock_get_record
     ):
@@ -2571,9 +2603,9 @@ class TestElasticSearchService(unittest.TestCase):
                 }
             )
 
-    @patch('backend.services.vectordatabase_service.get_file_record', return_value={"status": "DELETED"})
-    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=True)
-    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    @patch('management.services.knowledge_base.deletion.get_file_record', return_value={"status": "DELETED"})
+    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=True)
+    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
     def test_delete_lifecycle_record_without_object_accepts_concurrent_finalization(
         self, _mock_transition, _mock_delete, _mock_get_record
     ):
@@ -2589,9 +2621,9 @@ class TestElasticSearchService(unittest.TestCase):
 
         assert result["lifecycle_deleted"] is True
 
-    @patch('backend.services.vectordatabase_service.get_file_record', return_value={"status": "FAILED"})
-    @patch('backend.services.vectordatabase_service.delete_file_record', return_value=False)
-    @patch('backend.services.vectordatabase_service.transition_file_record', return_value=None)
+    @patch('management.services.knowledge_base.deletion.get_file_record', return_value={"status": "FAILED"})
+    @patch('management.services.knowledge_base.deletion.delete_file_record', return_value=False)
+    @patch('management.services.knowledge_base.deletion.transition_file_record', return_value=None)
     def test_delete_lifecycle_record_without_object_raises_when_finalization_is_stale(
         self, _mock_transition, _mock_delete, _mock_get_record
     ):
@@ -2606,7 +2638,7 @@ class TestElasticSearchService(unittest.TestCase):
                 }
             )
 
-    @patch('backend.services.vectordatabase_service.get_all_files_status')
+    @patch('management.services.knowledge_base.deletion.get_all_files_status')
     def test_list_files_with_chunks(self, mock_get_files_status):
         """
         Test listing files with document chunks included.
@@ -2667,7 +2699,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["files"][0]["chunk_count"], 1)
         self.mock_vdb_core.multi_search.assert_called_once()
 
-    @patch('backend.services.vectordatabase_service.get_all_files_status')
+    @patch('management.services.knowledge_base.deletion.get_all_files_status')
     def test_list_files_msearch_error(self, mock_get_files_status):
         """
         Test listing files when msearch encounters an error.
@@ -2709,8 +2741,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["files"][0]["chunks"]), 0)
         self.assertEqual(result["files"][0]["chunk_count"], 1)
 
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
-    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('management.services.knowledge_base.deletion.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.deletion.delete_file')
     def test_delete_documents(self, mock_delete_file, mock_update_last_doc):
         """
         Test document deletion by path or URL.
@@ -2741,8 +2773,8 @@ class TestElasticSearchService(unittest.TestCase):
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
 
-    @patch('backend.services.vectordatabase_service.delete_file')
-    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
+    @patch('management.services.knowledge_base.management.delete_file')
+    @patch('management.services.knowledge_base.management.file_exists', return_value=False)
     def test_delete_source_file(self, mock_file_exists, mock_delete_file):
         mock_delete_file.return_value = {"success": True}
         result = ElasticSearchService.delete_source_file(
@@ -2751,10 +2783,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue(result["deleted_minio"])
         mock_delete_file.assert_called()
 
-    @patch('backend.services.vectordatabase_service.release_storage_charge')
-    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
-    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
-    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('management.services.knowledge_base.management.release_storage_charge')
+    @patch('management.services.knowledge_base.management.resolve_storage_reference')
+    @patch('management.services.knowledge_base.management.file_exists', return_value=False)
+    @patch('management.services.knowledge_base.management.delete_file')
     def test_delete_source_file_releases_charge_only_after_minio_success(
         self, mock_delete_file, _mock_exists, mock_resolve, mock_release
     ):
@@ -2783,10 +2815,10 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
     @patch(
-        'backend.services.vectordatabase_service.get_all_files_status',
+        'management.services.knowledge_base.deletion.get_all_files_status',
         new_callable=AsyncMock,
     )
-    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('management.services.knowledge_base.management.delete_file')
     def test_delete_document_by_scope_source_only(
         self, mock_delete_file, mock_get_status
     ):
@@ -2809,7 +2841,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.delete_documents.assert_not_called()
 
     @patch.object(
-        ElasticSearchService,
+        KnowledgeBaseDocumentDeletionService,
         'delete_documents',
         return_value={"status": "success", "deleted_minio": True},
     )
@@ -2831,13 +2863,13 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index", "knowledge_base/doc.pdf", self.mock_vdb_core
         )
 
-    @patch.object(ElasticSearchService, "_mark_file_deleted")
+    @patch.object(KnowledgeBaseDocumentDeletionService, "_mark_file_deleted")
     @patch.object(
-        ElasticSearchService,
+        KnowledgeBaseDocumentDeletionService,
         "delete_documents",
         return_value={"status": "success", "deleted_minio": True},
     )
-    @patch.object(ElasticSearchService, "_mark_file_delete_requested")
+    @patch.object(KnowledgeBaseDocumentDeletionService, "_mark_file_delete_requested")
     def test_legacy_delete_request_tombstone_uses_full_delete_flow(
         self, mock_mark_requested, mock_delete_documents, mock_mark_deleted
     ):
@@ -2864,16 +2896,16 @@ class TestElasticSearchService(unittest.TestCase):
         mock_mark_deleted.assert_called_once_with("test_index", "knowledge_base/legacy.txt")
 
     @patch.object(
-        ElasticSearchService,
+        KnowledgeBaseDocumentDeletionService,
         'delete_source_file',
         return_value={"deleted_minio": False},
     )
     @patch(
-        'backend.services.vectordatabase_service.get_knowledge_record',
+        'management.services.knowledge_base.deletion.get_knowledge_record',
         return_value={"tenant_id": "tenant-1"},
     )
     @patch(
-        'backend.services.vectordatabase_service.get_all_files_status',
+        'management.services.knowledge_base.deletion.get_all_files_status',
         new_callable=AsyncMock,
     )
     def test_delete_document_by_scope_source_only_reports_physical_failure(
@@ -2895,7 +2927,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue(result["source_available"])
 
     @patch(
-        'backend.services.vectordatabase_service.get_all_files_status',
+        'management.services.knowledge_base.deletion.get_all_files_status',
         new_callable=AsyncMock,
     )
     def test_delete_document_by_scope_rejects_processing(
@@ -2915,10 +2947,10 @@ class TestElasticSearchService(unittest.TestCase):
                 )
             )
 
-    @patch('backend.services.vectordatabase_service.release_storage_charge')
-    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('management.services.knowledge_base.deletion.release_storage_charge')
+    @patch('management.services.knowledge_base.deletion.delete_file')
     @patch(
-        'backend.services.vectordatabase_service.get_all_files_status',
+        'management.services.knowledge_base.deletion.get_all_files_status',
         new_callable=AsyncMock,
     )
     def test_processing_failure_does_not_delete_source_or_release_charge(
@@ -2940,10 +2972,10 @@ class TestElasticSearchService(unittest.TestCase):
         mock_delete_file.assert_not_called()
         mock_release.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.release_storage_charge')
-    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('management.services.knowledge_base.deletion.release_storage_charge')
+    @patch('management.services.knowledge_base.deletion.resolve_storage_reference')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.deletion.delete_file')
     def test_full_document_delete_keeps_charge_when_minio_fails(
         self, mock_delete_file, mock_get_knowledge, mock_resolve, mock_release
     ):
@@ -2955,7 +2987,7 @@ class TestElasticSearchService(unittest.TestCase):
         )
 
         with patch(
-            'backend.services.vectordatabase_service.update_last_doc_update_time'
+            'management.services.knowledge_base.deletion.update_last_doc_update_time'
         ):
             result = ElasticSearchService.delete_documents(
                 "kb-1", "knowledge_base/doc.pdf", self.mock_vdb_core
@@ -2965,11 +2997,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertFalse(result["deleted_minio"])
         mock_release.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.release_storage_charge')
-    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
-    @patch('backend.services.vectordatabase_service.delete_file')
-    @patch('backend.services.vectordatabase_service.list_committed_storage_objects')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.release_storage_charge')
+    @patch('management.services.knowledge_base.management.resolve_storage_reference')
+    @patch('management.services.knowledge_base.management.delete_file')
+    @patch('management.services.knowledge_base.management.list_committed_storage_objects')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_kb_source_cleanup_uses_canonical_union_and_preserves_failed_charge(
         self,
         mock_get_knowledge,
@@ -3001,7 +3033,7 @@ class TestElasticSearchService(unittest.TestCase):
         ]
 
         with patch(
-            'backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                'management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
             new_callable=AsyncMock,
             return_value={
                 "files": [
@@ -3026,11 +3058,11 @@ class TestElasticSearchService(unittest.TestCase):
             updated_by="user-1",
         )
 
-    @patch('backend.services.vectordatabase_service.release_storage_charge')
-    @patch('backend.services.vectordatabase_service.resolve_storage_reference')
-    @patch('backend.services.vectordatabase_service.delete_file')
-    @patch('backend.services.vectordatabase_service.list_committed_storage_objects')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.release_storage_charge')
+    @patch('management.services.knowledge_base.management.resolve_storage_reference')
+    @patch('management.services.knowledge_base.management.delete_file')
+    @patch('management.services.knowledge_base.management.list_committed_storage_objects')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_kb_source_cleanup_skips_non_canonical_es_reference(
         self,
         mock_get_knowledge,
@@ -3047,7 +3079,7 @@ class TestElasticSearchService(unittest.TestCase):
         mock_resolve.return_value = None
 
         with patch(
-            'backend.services.vectordatabase_service.ElasticSearchService.list_files',
+                'management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
             new_callable=AsyncMock,
             return_value={"files": [{"path_or_url": "https://example.com/source.pdf"}]},
         ):
@@ -3064,17 +3096,17 @@ class TestElasticSearchService(unittest.TestCase):
         mock_release.assert_not_called()
 
     def test_delete_index_skips_duplicate_source_cleanup(self):
-        from backend.services.vectordatabase_service import _SKIP_INDEX_SOURCE_CLEANUP
+        from management.services.knowledge_base.common import _SKIP_INDEX_SOURCE_CLEANUP
 
         self.mock_vdb_core.delete_index.return_value = True
         cleanup = AsyncMock()
         token = _SKIP_INDEX_SOURCE_CLEANUP.set(True)
         try:
             with patch(
-                'backend.services.vectordatabase_service.ElasticSearchService._delete_kb_source_objects',
+                'management.services.knowledge_base.service.ElasticSearchService._delete_kb_source_objects',
                 cleanup,
             ), patch(
-                'backend.services.vectordatabase_service.delete_knowledge_record',
+                'management.services.knowledge_base.management.delete_knowledge_record',
                 return_value=True,
             ):
                 result = asyncio.run(
@@ -3088,7 +3120,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         cleanup.assert_not_awaited()
 
-    @patch('backend.services.vectordatabase_service.file_exists', return_value=False)
+    @patch('management.services.knowledge_base.management.file_exists', return_value=False)
     def test_compute_source_available_completed_missing_minio(self, _mock_exists):
         available = ElasticSearchService._compute_source_available({
             "path_or_url": "knowledge_base/doc.pdf",
@@ -3103,8 +3135,8 @@ class TestElasticSearchService(unittest.TestCase):
         })
         self.assertTrue(available)
 
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
-    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.common.get_redis_service')
     def test_index_documents_respects_cancellation_flag(self, mock_get_redis_service, mock_update_last_doc):
         """
         Test that index_documents stops indexing when the task is marked as cancelled.
@@ -3132,9 +3164,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.vectorize_documents.side_effect = vectorize_side_effect
 
         # Provide minimal knowledge record for batch size lookup
-        with patch('backend.services.vectordatabase_service.get_knowledge_record') as mock_get_record:
+        with patch('management.services.knowledge_base.management.get_knowledge_record') as mock_get_record:
             mock_get_record.return_value = {"tenant_id": "tenant-1"}
-            with patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tenant_cfg:
+            with patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg:
                 mock_tenant_cfg.get_model_config.return_value = {
                     "chunk_batch": 10}
 
@@ -3287,7 +3319,7 @@ class TestElasticSearchService(unittest.TestCase):
             index_names=["test_index"], query="test query", top_k=10
         )
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_success(self, mock_get_embedding_by_index):
         """
         Test hybrid search (combining semantic and accurate search).
@@ -3337,6 +3369,42 @@ class TestElasticSearchService(unittest.TestCase):
             weight_accurate=0.5
         )
         mock_get_embedding_by_index.assert_called_once_with(consts_const_mod.DEFAULT_TENANT_ID, "test_index")
+
+    def test_apply_document_tag_predicates_keeps_only_matching_documents(self):
+        tag_projection_module = types.ModuleType('services.tag_document_projection')
+        tag_projection_module.LOCAL_DOCUMENT_PROVIDER = 'local'
+        tag_projection_module.decode_document_resource_id = (
+            lambda resource_id: tuple(resource_id.split(':', 2))
+        )
+        tag_management_module = types.ModuleType('services.tag_management_service')
+        tag_management_module.TagManagementService = type(
+            'TagManagementService',
+            (),
+            {
+                'filter_document_ids_by_predicates': staticmethod(
+                    lambda *_args: ['local:test_index:matched.md']
+                )
+            },
+        )
+
+        with patch.dict(
+            sys.modules,
+            {
+                'services.tag_document_projection': tag_projection_module,
+                'services.tag_management_service': tag_management_module,
+            },
+        ):
+            results = ElasticSearchService._apply_document_tag_predicates(
+                [
+                    {'index': 'test_index', 'path_or_url': 'matched.md'},
+                    {'index': 'test_index', 'path_or_url': 'other.md'},
+                ],
+                tenant_id='tenant-1',
+                index_names=['test_index'],
+                tag_predicates=[{'key': 'topic', 'values': ['marketing']}],
+            )
+
+        self.assertEqual(results, [{'index': 'test_index', 'path_or_url': 'matched.md'}])
 
     def test_search_hybrid_missing_tenant_id(self):
         """Test search_hybrid raises ValueError when tenant_id is missing."""
@@ -3405,7 +3473,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("weight_accurate must be between 0 and 1",
                       str(context.exception))
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_no_embedding_model(self, mock_get_embedding_by_index):
         """Test search_hybrid raises model-config error when embedding model is not configured."""
         mock_get_embedding_by_index.return_value = (
@@ -3423,7 +3491,7 @@ class TestElasticSearchService(unittest.TestCase):
                 vdb_core=self.mock_vdb_core
             )
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_exception(self, mock_get_embedding_by_index):
         """Test search_hybrid handles exceptions from vdb_core."""
         # Mock get_embedding_model_by_index_name
@@ -3443,7 +3511,7 @@ class TestElasticSearchService(unittest.TestCase):
             )
         self.assertIn("Error executing hybrid search", str(context.exception))
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_weight_accurate_boundary_values(self, mock_get_embedding_by_index):
         
         # Test with weight_accurate = 0.0 (semantic only)
@@ -3717,9 +3785,9 @@ class TestElasticSearchService(unittest.TestCase):
             mock_loop.run_in_executor = mock_run_in_executor
 
             # Patch asyncio functions to trigger RuntimeError fallback
-            with patch('backend.services.vectordatabase_service.asyncio.get_running_loop',
+            with patch('management.services.knowledge_base.service.asyncio.get_running_loop',
                        side_effect=RuntimeError("No running event loop")), \
-                    patch('backend.services.vectordatabase_service.asyncio.get_event_loop',
+                    patch('management.services.knowledge_base.service.asyncio.get_event_loop',
                           return_value=mock_loop) as mock_get_event_loop:
 
                 # Execute
@@ -3942,8 +4010,8 @@ class TestElasticSearchService(unittest.TestCase):
             "test_index")
         self.mock_vdb_core.search.assert_called_once()
 
-    @patch('backend.services.vectordatabase_service.update_last_summary_time')
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.service.update_last_summary_time')
+    @patch('management.services.knowledge_base.service.update_knowledge_record')
     def test_change_summary(self, mock_update_record, mock_update_last_summary):
         """
         Test changing the summary of a knowledge base.
@@ -3968,7 +4036,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["summary"], "Test summary")
         mock_update_record.assert_called_once()
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
     def test_update_knowledge_base_success(self, mock_update_record):
         """
         Test successful knowledge base update.
@@ -4001,7 +4069,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(call_args["group_ids"], "1,2,3")
         self.assertEqual(call_args["updated_by"], "test_user")
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
     def test_update_knowledge_base_partial_update_name(self, mock_update_record):
         """
         Test partial update - only updating knowledge name.
@@ -4030,7 +4098,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertNotIn("group_ids", call_args)
         self.assertNotIn("quota_limit_bytes", call_args)
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
     def test_update_knowledge_base_clear_quota(self, mock_update_record):
         """Test that an explicit None clears the knowledge base quota."""
         mock_update_record.return_value = True
@@ -4046,7 +4114,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("quota_limit_bytes", call_args)
         self.assertIsNone(call_args["quota_limit_bytes"])
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
     def test_update_knowledge_base_partial_update_permission(self, mock_update_record):
         """
         Test partial update - only updating permission.
@@ -4103,7 +4171,7 @@ class TestElasticSearchService(unittest.TestCase):
         1. Empty group_ids list is converted to empty string
         2. The update is still successful
         """
-        with patch('backend.services.vectordatabase_service.update_knowledge_record') as mock_update:
+        with patch('management.services.knowledge_base.management.update_knowledge_record') as mock_update:
             mock_update.return_value = True
 
             result = self.es_service.update_knowledge_base(
@@ -4118,7 +4186,7 @@ class TestElasticSearchService(unittest.TestCase):
             # Empty list becomes empty string
             self.assertEqual(call_args["group_ids"], "")
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
     def test_update_knowledge_base_not_found(self, mock_update_record):
         """
         Test update when knowledge base doesn't exist.
@@ -4141,7 +4209,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertFalse(result)
         mock_update_record.assert_called_once()
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
     def test_update_knowledge_base_with_single_group(self, mock_update_record):
         """
         Test update with single group ID.
@@ -4166,8 +4234,8 @@ class TestElasticSearchService(unittest.TestCase):
         call_args = mock_update_record.call_args[0][0]
         self.assertEqual(call_args["group_ids"], "5")
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_update_knowledge_base_user_can_rename_own_private_kb(
         self, mock_get_record, mock_update_record
     ):
@@ -4192,8 +4260,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertNotIn("ingroup_permission", call_args)
         self.assertNotIn("group_ids", call_args)
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_update_knowledge_base_user_cannot_make_private_shared(
         self, mock_get_record, mock_update_record
     ):
@@ -4215,8 +4283,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("cannot turn a personal knowledge base", str(context.exception))
         mock_update_record.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_update_knowledge_base_user_cannot_assign_groups(
         self, mock_get_record, mock_update_record
     ):
@@ -4238,8 +4306,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("cannot assign groups", str(context.exception))
         mock_update_record.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_update_knowledge_base_user_missing_record_raises(
         self, mock_get_record, mock_update_record
     ):
@@ -4257,7 +4325,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("not found", str(context.exception))
         mock_update_record.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_get_summary(self, mock_get_record):
         """
         Test retrieving the summary of a knowledge base.
@@ -4280,7 +4348,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["summary"], "Test summary")
         mock_get_record.assert_called_once_with({'index_name': 'test_index'})
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_get_summary_not_found(self, mock_get_record):
         """
         Test retrieving a summary when the knowledge record doesn't exist.
@@ -4403,8 +4471,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(payload["lang"], "en")
         self.assertIn("id", payload)
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_id')
     def test_create_chunk_generates_embedding_when_tenant_provided(self, mock_get_embedding_model_by_id,
                                                                    mock_get_knowledge_record):
         """
@@ -4454,8 +4522,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("embedding", payload)
         self.assertEqual(payload["embedding"], [0.1, 0.2, 0.3])
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_id')
     def test_create_chunk_without_tenant_no_embedding_generated(self, mock_get_embedding_model_by_id,
                                                                 mock_get_knowledge_record):
         """
@@ -4493,8 +4561,8 @@ class TestElasticSearchService(unittest.TestCase):
         _, payload = self.mock_vdb_core.create_chunk.call_args[0]
         self.assertNotIn("embedding", payload)
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
     def test_create_chunk_handles_embedding_failure_gracefully(self, mock_get_embedding_model_by_id,
                                                                mock_get_knowledge_record):
         """
@@ -4534,8 +4602,8 @@ class TestElasticSearchService(unittest.TestCase):
         _, payload = self.mock_vdb_core.create_chunk.call_args[0]
         self.assertNotIn("embedding", payload)
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
     def test_create_chunk_handles_empty_embedding_result(self, mock_get_embedding_model_by_id, mock_get_knowledge_record):
         """
         Test create_chunk handles empty embedding result gracefully.
@@ -4579,8 +4647,8 @@ class TestElasticSearchService(unittest.TestCase):
         _, payload = self.mock_vdb_core.create_chunk.call_args[0]
         self.assertNotIn("embedding", payload)
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
     def test_create_chunk_with_unknown_model_name_still_calls_embedding_model(self, mock_get_embedding_model_by_id,
                                                                               mock_get_knowledge_record):
         """
@@ -4695,9 +4763,9 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn(
             "Error deleting chunk: Chunk missing not found in index kb-index", str(exc.exception))
 
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     @patch('fastapi.Response')
     def test_list_indices_success_status_200(self, mock_response, mock_get_knowledge, mock_get_user_tenant,
                                              mock_get_group_ids):
@@ -4839,9 +4907,9 @@ class TestElasticSearchService(unittest.TestCase):
             index_names=["test_index"], query="valid query", top_k=10
         )
 
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.management.tenant_config_manager')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_vectorize_documents_success_status_200(self, mock_get_record, mock_tenant_cfg, mock_update_last_doc):
         """
         Test vectorize_documents method returns status code 200 on success.
@@ -4895,8 +4963,8 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertIn("success", result)
         self.assertTrue(result["success"])
 
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
-    @patch('backend.services.vectordatabase_service.delete_file')
+    @patch('management.services.knowledge_base.deletion.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.deletion.delete_file')
     def test_delete_documents_success_status_200(self, mock_delete_file, mock_update_last_doc):
         """
         Test delete_documents method returns status code 200 on success.
@@ -4930,7 +4998,7 @@ class TestElasticSearchService(unittest.TestCase):
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_get_summary_success_status_200(self, mock_get_record):
         """
         Test get_summary method returns status code 200 on success.
@@ -4957,7 +5025,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         mock_get_record.assert_called_once_with({'index_name': 'test_index'})
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_check_kb_exist_available(self, mock_get_knowledge):
         """Test knowledge base name availability when not found in tenant."""
         # Setup: knowledge_name not found in tenant
@@ -4978,7 +5046,7 @@ class TestElasticSearchService(unittest.TestCase):
         })
         self.assertEqual(result["status"], "available")
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_check_kb_exist_exists_in_tenant(self, mock_get_knowledge):
         """Test detection when knowledge base exists within the same tenant."""
         # Setup: knowledge_name exists in tenant
@@ -5011,7 +5079,7 @@ class TestElasticSearchService(unittest.TestCase):
         1. The get_vdb_core function returns the correct elastic_core instance
         2. The function is properly imported and accessible
         """
-        from backend.services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
 
         # Execute
         result = get_vector_db_core()
@@ -5021,547 +5089,22 @@ class TestElasticSearchService(unittest.TestCase):
         # The result should be the elastic_core instance
         self.assertTrue(hasattr(result, 'client'))
 
-    @patch('backend.services.vectordatabase_service.get_model_by_display_name')
-    def test_get_embedding_model_embedding_type(self, mock_get_model_by_display_name):
-        """
-        Test get_embedding_model with embedding model type.
 
-        This test verifies that:
-        1. When model_name is provided and model_type is "embedding", the adapter is built via build_adapter_fresh
-        2. The correct parameters are passed to build_adapter_fresh
-        """
-        # Setup
-        mock_get_model_by_display_name.return_value = {
-            "model_id": 123,
-            "model_type": "embedding",
-            "model_name": "test-model",
-            "model_repo": "test-repo",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True
-        }
 
-        # Stop the mock from setUp to test the real function
-        self.get_embedding_model_patcher.stop()
 
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
 
-                # Execute - now we can call the real function
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, _ = get_embedding_model("test_tenant", model_name="test-model")
 
-                # Assert
-                self.assertEqual(result, mock_adapter)
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "test-repo",
-                        "model_name": "test-model",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "embedding",
-                        "max_tokens": 1024,
-                        "ssl_verify": True,
-                    },
-                    "embedding",
-                    "embedding",
-                    None,
-                )
-        finally:
-            # Restart the mock for other tests
-            self.get_embedding_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_by_display_name')
-    def test_get_embedding_model_multi_embedding_type(self, mock_get_model_by_display_name):
-        """
-        Test get_embedding_model with multi_embedding model type.
 
-        This test verifies that:
-        1. When model_name is provided and model_type is "multi_embedding", the adapter is built via build_adapter_fresh
-        2. The correct parameters are passed to build_adapter_fresh
-        """
-        # Setup
-        mock_get_model_by_display_name.return_value = {
-            "model_id": 456,
-            "model_type": "multi_embedding",
-            "model_name": "test-model",
-            "model_repo": "test-repo",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 2048,
-            "ssl_verify": True
-        }
 
-        # Stop the mock from setUp to test the real function
-        self.get_embedding_model_patcher.stop()
 
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
 
-                # Execute - now we can call the real function
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant", model_name="test-model")
 
-                # Assert
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 456)
-                mock_get_model_by_display_name.assert_called_once_with("test-model", "test_tenant")
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "test-repo",
-                        "model_name": "test-model",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "multi_embedding",
-                        "max_tokens": 2048,
-                        "ssl_verify": True,
-                    },
-                    "multi_embedding",
-                    "multiEmbedding",
-                    None,
-                )
-        finally:
-            # Restart the mock for other tests
-            self.get_embedding_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_no_model_name_no_records(self, mock_get_model_records):
-        """
-        Test get_embedding_model when no model_name is provided and no records exist.
-
-        This test verifies that:
-        1. When no model_name is provided and no model records exist, returns (None, None)
-        2. Embedding models are queried before multi_embedding models
-        """
-        mock_get_model_records.side_effect = [
-            [],
-            [],
-        ]
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            from backend.services.vectordatabase_service import get_embedding_model
-            result, model_id = get_embedding_model("test_tenant")
-
-            self.assertIsNone(result)
-            self.assertIsNone(model_id)
-            mock_get_model_records.assert_any_call({"model_type": "embedding"}, "test_tenant")
-            mock_get_model_records.assert_any_call({"model_type": "multi_embedding"}, "test_tenant")
-        finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_default_embedding_record(self, mock_get_model_records):
-        """
-        Test get_embedding_model falls back to the newest embedding model when model_name is omitted.
-        """
-        mock_get_model_records.return_value = [{
-            "model_id": 101,
-            "model_type": "embedding",
-            "model_name": "default-embedding",
-            "model_repo": "openai",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True,
-        }]
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
-
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant")
-
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 101)
-                mock_get_model_records.assert_called_once_with({"model_type": "embedding"}, "test_tenant")
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "openai",
-                        "model_name": "default-embedding",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "embedding",
-                        "max_tokens": 1024,
-                        "ssl_verify": True,
-                    },
-                    "embedding",
-                    "embedding",
-                    None,
-                )
-        finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_fallback_to_multi_embedding(self, mock_get_model_records):
-        """
-        Test get_embedding_model falls back to multi_embedding when no embedding model exists.
-        """
-        mock_get_model_records.side_effect = [
-            [],
-            [{
-                "model_id": 202,
-                "model_type": "multi_embedding",
-                "model_name": "default-multi-embedding",
-                "model_repo": "jina",
-                "api_key": "test_api_key",
-                "base_url": "https://test.api.com",
-                "max_tokens": 2048,
-                "ssl_verify": True,
-            }],
-        ]
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
-
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant")
-
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 202)
-                self.assertEqual(mock_get_model_records.call_count, 2)
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "jina",
-                        "model_name": "default-multi-embedding",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "multi_embedding",
-                        "max_tokens": 2048,
-                        "ssl_verify": True,
-                    },
-                    "multi_embedding",
-                    "multiEmbedding",
-                    None,
-                )
-        finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_default_with_model_type_embedding(self, mock_get_model_records):
-        """
-        Test get_embedding_model queries by the provided model_type when model_name is omitted.
-        """
-        mock_get_model_records.return_value = [{
-            "model_id": 303,
-            "model_type": "embedding",
-            "model_name": "typed-embedding",
-            "model_repo": "openai",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True,
-        }]
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
-
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant", model_type="embedding")
-
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 303)
-                mock_get_model_records.assert_called_once_with({"model_type": "embedding"}, "test_tenant")
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "openai",
-                        "model_name": "typed-embedding",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "embedding",
-                        "max_tokens": 1024,
-                        "ssl_verify": True,
-                    },
-                    "embedding",
-                    "embedding",
-                    None,
-                )
-        finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    def test_get_embedding_model_default_with_model_type_multi_embedding(self, mock_get_model_records):
-        """
-        Test get_embedding_model queries multi_embedding records when model_type is specified.
-        """
-        mock_get_model_records.return_value = [{
-            "model_id": 404,
-            "model_type": "multi_embedding",
-            "model_name": "typed-multi-embedding",
-            "model_repo": "jina",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 2048,
-            "ssl_verify": True,
-        }]
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
-
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant", model_type="multi_embedding")
-
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 404)
-                mock_get_model_records.assert_called_once_with(
-                    {"model_type": "multi_embedding"}, "test_tenant"
-                )
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "jina",
-                        "model_name": "typed-multi-embedding",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "multi_embedding",
-                        "max_tokens": 2048,
-                        "ssl_verify": True,
-                    },
-                    "multi_embedding",
-                    "multiEmbedding",
-                    None,
-                )
-        finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_by_display_name')
-    def test_get_embedding_model_with_model_name_found(self, mock_get_model_by_display_name):
-        """
-        Test get_embedding_model with model_name parameter when the model is found.
-
-        This test verifies that:
-        1. When model_name is provided and found, the adapter is built via build_adapter_fresh
-        2. The correct parameters are passed to build_adapter_fresh
-        """
-        # Setup - mock get_model_by_display_name to return a model
-        mock_get_model_by_display_name.return_value = {
-            "model_id": 123,
-            "model_repo": "openai",
-            "model_name": "text-embedding-ada-002",
-            "model_type": "embedding",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True
-        }
-
-        # Stop the mock from setUp to test the real function
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
-
-                # Execute - now we can call the real function
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant", model_name="openai/text-embedding-ada-002")
-
-                # Assert
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 123)
-                mock_get_model_by_display_name.assert_called_once_with("openai/text-embedding-ada-002", "test_tenant")
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "openai",
-                        "model_name": "text-embedding-ada-002",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "embedding",
-                        "max_tokens": 1024,
-                        "ssl_verify": True,
-                    },
-                    "embedding",
-                    "embedding",
-                    None,
-                )
-        finally:
-            # Restart the mock for other tests
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_by_display_name')
-    def test_get_embedding_model_with_model_name_found_multimodal(self, mock_get_model_by_display_name):
-        mock_get_model_by_display_name.return_value = {
-            "model_id": 789,
-            "model_type": "multi_embedding",
-            "model_name": "jina-clip-v2",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True
-        }
-
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
-
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model(
-                    "test_tenant",
-                    model_name="jina/jina-clip-v2",
-                    model_type="multi_embedding",
-                )
-
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 789)
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "",
-                        "model_name": "jina-clip-v2",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "multi_embedding",
-                        "max_tokens": 1024,
-                        "ssl_verify": True,
-                    },
-                    "multi_embedding",
-                    "multiEmbedding",
-                    None,
-                )
-                mock_get_model_by_display_name.assert_called_once_with(
-                    "jina/jina-clip-v2", "test_tenant", "multi_embedding"
-                )
-        finally:
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_by_display_name')
-    def test_get_embedding_model_with_model_name_found_without_repo(self, mock_get_model_by_display_name):
-        """
-        Test get_embedding_model with model_name when model is found without model_repo.
-
-        This test verifies that:
-        1. When model_name is provided and found (without model_repo), the adapter is built via build_adapter_fresh
-        2. The function handles models without model_repo correctly using just model_name
-        """
-
-        # Setup
-        mock_get_model_by_display_name.return_value = {
-            "model_id": 456,
-            "model_type": "embedding",
-            "model_name": "simple-model",
-            "api_key": "test_api_key",
-            "base_url": "https://test.api.com",
-            "max_tokens": 1024,
-            "ssl_verify": True
-        }
-
-        # Stop the mock from setUp to test the real function
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
-                mock_adapter = MagicMock()
-                mock_build.return_value = mock_adapter
-
-                # Execute - now we can call the real function
-                from backend.services.vectordatabase_service import get_embedding_model
-                result, model_id = get_embedding_model("test_tenant", model_name="simple-model")
-
-                # Assert
-                self.assertEqual(result, mock_adapter)
-                self.assertEqual(model_id, 456)
-                mock_build.assert_called_once_with(
-                    {
-                        "model_repo": "",
-                        "model_name": "simple-model",
-                        "api_key": "test_api_key",
-                        "base_url": "https://test.api.com",
-                        "model_type": "embedding",
-                        "max_tokens": 1024,
-                        "ssl_verify": True,
-                    },
-                    "embedding",
-                    "embedding",
-                    None,
-                )
-        finally:
-            # Restart the mock for other tests
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_by_display_name')
-    def test_get_embedding_model_with_model_name_not_found(self, mock_get_model_by_display_name):
-        """
-        Test get_embedding_model with model_name when the model is not found.
-
-        This test verifies that:
-        1. When model_name is provided but not found, returns (None, None)
-        2. The function handles missing models gracefully
-        """
-        # Setup - mock get_model_by_display_name to return None (model not found)
-        mock_get_model_by_display_name.return_value = None
-
-        # Stop the mock from setUp to test the real function
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            # Execute - now we can call the real function
-            from backend.services.vectordatabase_service import get_embedding_model
-            result, model_id = get_embedding_model("test_tenant", model_name="nonexistent-model")
-
-            # Assert - should return (None, None)
-            self.assertIsNone(result)
-            self.assertIsNone(model_id)
-            mock_get_model_by_display_name.assert_called_once_with("nonexistent-model", "test_tenant")
-        finally:
-            # Restart the mock for other tests
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_model_by_display_name')
-    def test_get_embedding_model_with_model_name_exception(self, mock_get_model_by_display_name):
-        """
-        Test get_embedding_model with model_name when get_model_by_display_name throws exception.
-
-        This test verifies that:
-        1. When get_model_by_display_name throws exception, the function logs warning and returns (None, None)
-        2. The function handles exceptions gracefully
-        """
-        # Setup - mock get_model_by_display_name to throw exception
-        mock_get_model_by_display_name.side_effect = Exception("Database connection failed")
-
-        # Stop the mock from setUp to test the real function
-        self.get_embedding_model_patcher.stop()
-
-        try:
-            # Execute - now we can call the real function
-            from backend.services.vectordatabase_service import get_embedding_model
-            result, model_id = get_embedding_model("test_tenant", model_name="test-model")
-
-            # Assert - should return (None, None)
-            self.assertIsNone(result)
-            self.assertIsNone(model_id)
-            mock_get_model_by_display_name.assert_called_once_with("test-model", "test_tenant")
-        finally:
-            # Restart the mock for other tests
-            self.get_embedding_model_patcher.start()
-
-    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('management.services.knowledge_base.common.get_redis_service')
     def test_update_progress_success(self, mock_get_redis):
         """Ensure _update_progress updates Redis progress when not cancelled."""
-        from backend.services.vectordatabase_service import _update_progress
+        from management.services.knowledge_base.service import _update_progress
 
         mock_redis = MagicMock()
         mock_redis.is_task_cancelled.return_value = False
@@ -5573,10 +5116,10 @@ class TestElasticSearchService(unittest.TestCase):
         mock_redis.is_task_cancelled.assert_called_once_with("task-1")
         mock_redis.save_progress_info.assert_called_once_with("task-1", 5, 10)
 
-    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('management.services.knowledge_base.common.get_redis_service')
     def test_update_progress_save_failure(self, mock_get_redis):
         """_update_progress logs a warning when saving progress fails."""
-        from backend.services.vectordatabase_service import _update_progress
+        from management.services.knowledge_base.service import _update_progress
 
         mock_redis = MagicMock()
         mock_redis.is_task_cancelled.return_value = False
@@ -5597,7 +5140,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.mock_vdb_core.embedding_dim = 768
 
         self.get_embedding_model_patcher = patch(
-            'backend.services.vectordatabase_service.get_embedding_model')
+            'management.services.knowledge_base.management.get_embedding_model_by_id')
         self.mock_get_embedding = self.get_embedding_model_patcher.start()
         self.mock_embedding = MagicMock()
         self.mock_embedding.embedding_dim = 768
@@ -5605,7 +5148,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.mock_get_embedding.return_value = self.mock_embedding
 
         self.get_rerank_model_patcher = patch(
-            'backend.services.vectordatabase_service.get_rerank_model')
+            'management.services.model.resolver.get_rerank_model')
         self.mock_get_rerank = self.get_rerank_model_patcher.start()
         self.mock_rerank = MagicMock()
         self.mock_get_rerank.return_value = self.mock_rerank
@@ -5616,7 +5159,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
     def test_rethrow_or_plain_rethrows_json_error_code(self):
         """_rethrow_or_plain should re-raise JSON payload when error_code present."""
-        from backend.services.vectordatabase_service import _rethrow_or_plain
+        from management.services.knowledge_base.service import _rethrow_or_plain
 
         with self.assertRaises(Exception) as exc:
             _rethrow_or_plain(
@@ -5625,18 +5168,18 @@ class TestRethrowOrPlain(unittest.TestCase):
 
     def test_get_vector_db_core_unsupported_type(self):
         """get_vector_db_core raises on unsupported db type."""
-        from backend.services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
 
         with self.assertRaises(ValueError) as exc:
             get_vector_db_core(db_type="unsupported")
 
         self.assertIn("Unsupported vector database type", str(exc.exception))
 
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.DataMateCore')
+    @patch('management.services.knowledge_base.common.tenant_config_manager')
+    @patch('management.services.knowledge_base.common.DataMateCore')
     def test_get_vector_db_core_datamate_type(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore for DATAMATE type."""
-        from backend.services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
         from consts.const import VectorDatabaseType, DATAMATE_URL
 
         # Setup mocks
@@ -5651,11 +5194,11 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_datamate_core.assert_called_once_with(base_url=DATAMATE_URL)
         self.assertEqual(result, mock_datamate_core.return_value)
 
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.DataMateCore')
+    @patch('management.services.knowledge_base.common.tenant_config_manager')
+    @patch('management.services.knowledge_base.common.DataMateCore')
     def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
-        from backend.services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
         from consts.const import VectorDatabaseType, DATAMATE_URL
 
         # Setup mocks
@@ -5674,10 +5217,10 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_datamate_core.assert_called_once_with(
             base_url="https://datamate.example.com")
 
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.knowledge_base.common.tenant_config_manager')
     def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
         """get_vector_db_core raises ValueError when DATAMATE type with tenant_id but no URL configured."""
-        from backend.services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
         from consts.const import VectorDatabaseType
 
         # Setup mock to return None (no URL configured)
@@ -5694,7 +5237,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
     def test_get_vector_db_core_datamate_no_tenant_id(self):
         """get_vector_db_core raises ValueError when DATAMATE type without tenant_id."""
-        from backend.services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
         from consts.const import VectorDatabaseType
 
         # Execute and Assert
@@ -5707,14 +5250,14 @@ class TestRethrowOrPlain(unittest.TestCase):
 
     def test_rethrow_or_plain_parses_error_code(self):
         """_rethrow_or_plain rethrows JSON error_code payloads unchanged."""
-        from backend.services.vectordatabase_service import _rethrow_or_plain
+        from management.services.knowledge_base.service import _rethrow_or_plain
 
         with self.assertRaises(Exception) as exc:
             _rethrow_or_plain(Exception('{"error_code":123,"detail":"boom"}'))
 
         self.assertIn("error_code", str(exc.exception))
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_check_kb_exist_exclude_index_name_matches(self, mock_get_knowledge):
         """Test that KB is available when exclude_index_name matches the found record's index_name."""
         # Setup: knowledge_name exists in tenant, but exclude_index_name matches
@@ -5741,7 +5284,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         # Should return available because we're excluding this specific index
         self.assertEqual(result["status"], "available")
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_check_kb_exist_exclude_index_name_does_not_match(self, mock_get_knowledge):
         """Test that KB is exists_in_tenant when exclude_index_name does not match."""
         # Setup: knowledge_name exists in tenant with different index_name
@@ -5765,7 +5308,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
     def test_rethrow_or_plain_non_json_string(self):
         """_rethrow_or_plain should re-raise plain string message when not valid JSON."""
-        from backend.services.vectordatabase_service import _rethrow_or_plain
+        from management.services.knowledge_base.service import _rethrow_or_plain
 
         plain_message = "This is a plain error message without JSON"
 
@@ -5777,7 +5320,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
     def test_rethrow_or_plain_json_without_error_code(self):
         """_rethrow_or_plain should re-raise plain string when JSON has no error_code."""
-        from backend.services.vectordatabase_service import _rethrow_or_plain
+        from management.services.knowledge_base.service import _rethrow_or_plain
 
         json_message = '{"detail": "some error", "status": 500}'
 
@@ -5798,9 +5341,9 @@ class TestRethrowOrPlain(unittest.TestCase):
         }
         mock_get_redis.return_value = mock_redis
 
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value={"files": []}) as mock_list_files, \
-                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
             async def run_test():
                 return await ElasticSearchService.full_delete_knowledge_base(
@@ -5836,14 +5379,14 @@ class TestRethrowOrPlain(unittest.TestCase):
         }
 
         # delete_file returns success for first, failure for second
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
-                patch('backend.services.vectordatabase_service.resolve_storage_reference',
+                patch('management.services.knowledge_base.management.resolve_storage_reference',
                       side_effect=lambda value: SimpleNamespace(
                           bucket_name="nexent", object_name=value
                       )), \
-                patch('backend.services.vectordatabase_service.delete_file') as mock_delete_file, \
-                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                patch('management.services.knowledge_base.management.delete_file') as mock_delete_file, \
+                patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
             mock_delete_file.side_effect = [
                 {"success": True},
@@ -5868,9 +5411,9 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_delete_index.assert_awaited_once_with(
             "kb-2", mock_vdb_core, "user-2")
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model')
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_create_index_failure(
         self, mock_create_record, mock_get_model, mock_get_embedding
     ):
@@ -5904,7 +5447,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("Failed to create index", str(exc.exception))
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_raises_on_exception(self, mock_create_record):
         """create_knowledge_base wraps unexpected errors."""
         mock_create_record.return_value = {
@@ -5926,8 +5469,8 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         self.assertIn("Error creating knowledge base", str(exc.exception))
 
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
     def test_index_documents_default_batch_without_tenant(self, mock_get_record, mock_update_last_doc):
         """index_documents defaults embedding batch size to 10 when tenant is missing."""
         mock_get_record.return_value = None
@@ -5953,10 +5496,10 @@ class TestRethrowOrPlain(unittest.TestCase):
         _, kwargs = self.mock_vdb_core.vectorize_documents.call_args
         self.assertEqual(kwargs["embedding_batch_size"], 10)
 
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.management.tenant_config_manager')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_redis_service')
     def test_index_documents_updates_final_progress(self, mock_get_redis, mock_get_record, mock_tenant_cfg, mock_update_last_doc):
         """index_documents sends final progress update to Redis when task_id is provided."""
         mock_get_record.return_value = {"tenant_id": "tenant-1"}
@@ -5985,10 +5528,10 @@ class TestRethrowOrPlain(unittest.TestCase):
         last_call = mock_redis.save_progress_info.call_args_list[-1]
         self.assertEqual(last_call[0], ("task-xyz", 2, 2))
 
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.management.get_redis_service')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.tenant_config_manager')
     def test_index_documents_progress_init_and_final_errors(self, mock_tenant_cfg, mock_get_record, mock_get_redis, mock_update_last_doc):
         """index_documents should continue when progress save fails during init and final updates."""
         mock_get_record.return_value = {"tenant_id": "tenant-1"}
@@ -6018,7 +5561,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         # two attempts to save progress (init and final)
         self.assertEqual(mock_redis.save_progress_info.call_count, 2)
 
-    @patch('backend.services.vectordatabase_service.get_all_files_status')
+    @patch('management.services.knowledge_base.management.get_all_files_status')
     def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_files_status):
         """list_files handles invalid timestamps, progress from get_all_files_status, and error info."""
         # ES file with invalid timestamp and chunk_count from aggregation
@@ -6064,7 +5607,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertEqual(file_info["total_chunk_num"], 5)
         self.assertIsInstance(file_info["create_time"], int)
 
-    @patch('backend.services.vectordatabase_service.get_all_files_status')
+    @patch('management.services.knowledge_base.management.get_all_files_status')
     def test_list_files_warning_and_progress_error_branches(self, mock_get_files_status):
         """list_files: chunk_count from aggregation, progress from get_all_files_status, error handling."""
         # ES file - chunk_count from aggregation (no longer uses count())
@@ -6121,7 +5664,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             f for f in result["files"] if f["path_or_url"] == "file-es")
         self.assertEqual(es_file["chunk_count"], 1)
 
-    @patch('backend.services.vectordatabase_service.get_all_files_status', return_value={})
+    @patch('management.services.knowledge_base.management.get_all_files_status', return_value={})
     def test_list_files_with_chunks_updates_chunk_count(self, mock_get_files_status):
         """list_files include_chunks: chunk_count from aggregation, no extra count() calls."""
         self.mock_vdb_core.get_documents_detail.return_value = [
@@ -6200,8 +5743,8 @@ class TestRethrowOrPlain(unittest.TestCase):
             self.assertTrue(any("error" in msg for msg in messages))
 
     # Tests for get_rerank_model function
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.model.resolver.get_model_records')
+    @patch('management.services.model.resolver.tenant_config_manager')
     def test_get_rerank_model_with_specific_model_name_found(
         self, mock_tenant_config, mock_get_records
     ):
@@ -6224,12 +5767,12 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+            with patch('management.services.model.resolver.build_adapter_fresh') as mock_build:
                 mock_adapter = MagicMock()
                 mock_build.return_value = mock_adapter
 
                 # Execute
-                from backend.services.vectordatabase_service import get_rerank_model
+                from management.services.model.resolver import get_rerank_model
                 result = get_rerank_model("tenant-123", "Alibaba-NLP/gte-rerank-v2")
 
                 # Assert
@@ -6250,8 +5793,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.model.resolver.get_model_records')
+    @patch('management.services.model.resolver.tenant_config_manager')
     def test_get_rerank_model_with_specific_model_name_not_found(
         self, mock_tenant_config, mock_get_records
     ):
@@ -6280,12 +5823,12 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+            with patch('management.services.model.resolver.build_adapter_fresh') as mock_build:
                 mock_adapter = MagicMock()
                 mock_build.return_value = mock_adapter
 
                 # Execute
-                from backend.services.vectordatabase_service import get_rerank_model
+                from management.services.model.resolver import get_rerank_model
                 result = get_rerank_model("tenant-123", "nonexistent-model")
 
                 # Assert
@@ -6309,8 +5852,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.model.resolver.get_model_records')
+    @patch('management.services.model.resolver.tenant_config_manager')
     def test_get_rerank_model_with_specific_model_name_exception(
         self, mock_tenant_config, mock_get_records
     ):
@@ -6331,12 +5874,12 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+            with patch('management.services.model.resolver.build_adapter_fresh') as mock_build:
                 mock_adapter = MagicMock()
                 mock_build.return_value = mock_adapter
 
                 # Execute
-                from backend.services.vectordatabase_service import get_rerank_model
+                from management.services.model.resolver import get_rerank_model
                 result = get_rerank_model("tenant-123", "some-model")
 
                 # Assert
@@ -6357,7 +5900,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.model.resolver.tenant_config_manager')
     def test_get_rerank_model_default_rerank_type(self, mock_tenant_config):
         """Test get_rerank_model with default rerank model when model_type is rerank."""
         # Setup
@@ -6374,12 +5917,12 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+            with patch('management.services.model.resolver.build_adapter_fresh') as mock_build:
                 mock_adapter = MagicMock()
                 mock_build.return_value = mock_adapter
 
                 # Execute
-                from backend.services.vectordatabase_service import get_rerank_model
+                from management.services.model.resolver import get_rerank_model
                 result = get_rerank_model("tenant-123")
 
                 # Assert
@@ -6402,7 +5945,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.model.resolver.tenant_config_manager')
     def test_get_rerank_model_non_rerank_type_returns_none(self, mock_tenant_config):
         """Test get_rerank_model returns None when model_type is not rerank."""
         # Setup
@@ -6419,7 +5962,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         try:
             # Execute
-            from backend.services.vectordatabase_service import get_rerank_model
+            from management.services.model.resolver import get_rerank_model
             result = get_rerank_model("tenant-123")
 
             # Assert
@@ -6427,7 +5970,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.model.resolver.tenant_config_manager')
     def test_get_rerank_model_empty_config(self, mock_tenant_config):
         """Test get_rerank_model returns None when model config is empty."""
         # Setup
@@ -6438,7 +5981,7 @@ class TestRethrowOrPlain(unittest.TestCase):
 
         try:
             # Execute
-            from backend.services.vectordatabase_service import get_rerank_model
+            from management.services.model.resolver import get_rerank_model
             result = get_rerank_model("tenant-123")
 
             # Assert
@@ -6446,8 +5989,8 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_model_records')
-    @patch('backend.services.vectordatabase_service.tenant_config_manager')
+    @patch('management.services.model.resolver.get_model_records')
+    @patch('management.services.model.resolver.tenant_config_manager')
     def test_get_rerank_model_with_model_name_no_repo(
         self, mock_tenant_config, mock_get_records
     ):
@@ -6470,12 +6013,12 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.get_rerank_model_patcher.stop()
 
         try:
-            with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+            with patch('management.services.model.resolver.build_adapter_fresh') as mock_build:
                 mock_adapter = MagicMock()
                 mock_build.return_value = mock_adapter
 
                 # Execute
-                from backend.services.vectordatabase_service import get_rerank_model
+                from management.services.model.resolver import get_rerank_model
                 result = get_rerank_model("tenant-123", "gte-rerank-v2")
 
                 # Assert
@@ -6495,7 +6038,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         finally:
             self.get_rerank_model_patcher.start()
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_create_chunk_embedding_exception_without_explicit_model_is_tolerated(
         self, mock_get_knowledge_record
     ):
@@ -6507,7 +6050,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         }
         self.mock_get_embedding.side_effect = RuntimeError("embedding failed")
 
-        from backend.services.vectordatabase_service import ChunkCreateRequest
+        from management.services.knowledge_base.service import ChunkCreateRequest
         chunk_request = ChunkCreateRequest(
             content="abc",
             title="t",
@@ -6525,12 +6068,12 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.mock_vdb_core.create_chunk.assert_called_once()
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_update_chunk_minimal_payload_still_updates(self, mock_get_knowledge_record):
         """update_chunk without business fields still sends update_time/updated_by payload."""
         mock_get_knowledge_record.return_value = None
         self.mock_vdb_core.update_chunk.return_value = {"id": "c1"}
-        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        from management.services.knowledge_base.service import ChunkUpdateRequest
         empty_req = ChunkUpdateRequest()
 
         result = ElasticSearchService.update_chunk(
@@ -6547,7 +6090,7 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_update_chunk_core_error_is_wrapped(self):
         """update_chunk should wrap core exceptions with consistent message."""
         self.mock_vdb_core.update_chunk.side_effect = RuntimeError("core failed")
-        from backend.services.vectordatabase_service import ChunkUpdateRequest
+        from management.services.knowledge_base.service import ChunkUpdateRequest
         req = ChunkUpdateRequest(content="new-content")
 
         with self.assertRaises(Exception) as ctx:
@@ -6578,12 +6121,12 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         # Patch get_embedding_model for tests that might use it indirectly
         self.get_embedding_model_patcher = patch(
-            'backend.services.vectordatabase_service.get_embedding_model')
+            'management.services.knowledge_base.management.get_embedding_model_by_id')
         self.mock_get_embedding = self.get_embedding_model_patcher.start()
 
         # Patch get_rerank_model
         self.get_rerank_model_patcher = patch(
-            'backend.services.vectordatabase_service.get_rerank_model')
+            'management.services.model.resolver.get_rerank_model')
         self.mock_get_rerank = self.get_rerank_model_patcher.start()
 
     def tearDown(self):
@@ -6591,105 +6134,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         self.get_embedding_model_patcher.stop()
         self.get_rerank_model_patcher.stop()
 
-    # Tests for _get_embedding_model_display_name (lines 80-99)
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    def test_get_embedding_model_display_name_with_none_model_id(self, mock_get_model):
-        """
-        Test _get_embedding_model_display_name when model_id is None.
-
-        This test verifies that:
-        1. When model_id is None, the function returns empty string
-        2. get_model_by_model_id is not called
-        """
-        from backend.services.vectordatabase_service import _get_embedding_model_display_name
-
-        result = _get_embedding_model_display_name(None, "tenant-1")
-
-        self.assertEqual(result, "")
-        mock_get_model.assert_not_called()
-
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    def test_get_embedding_model_display_name_model_found(self, mock_get_model):
-        """
-        Test _get_embedding_model_display_name when model is found.
-
-        This test verifies that:
-        1. When model is found, display_name is returned
-        2. get_model_by_model_id is called with correct parameters
-        """
-        from backend.services.vectordatabase_service import _get_embedding_model_display_name
-
-        mock_get_model.return_value = {
-            "display_name": "text-embedding-3-small",
-            "model_id": 123
-        }
-
-        result = _get_embedding_model_display_name(123, "tenant-1")
-
-        self.assertEqual(result, "text-embedding-3-small")
-        mock_get_model.assert_called_once_with(123, "tenant-1")
-
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    def test_get_embedding_model_display_name_model_not_found(self, mock_get_model):
-        """
-        Test _get_embedding_model_display_name when model is not found.
-
-        This test verifies that:
-        1. When model is not found (returns None), empty string is returned
-        2. get_model_by_model_id is called
-        """
-        from backend.services.vectordatabase_service import _get_embedding_model_display_name
-
-        mock_get_model.return_value = None
-
-        result = _get_embedding_model_display_name(999, "tenant-1")
-
-        self.assertEqual(result, "")
-        mock_get_model.assert_called_once_with(999, "tenant-1")
-
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    def test_get_embedding_model_display_name_model_without_display_name(self, mock_get_model):
-        """
-        Test _get_embedding_model_display_name when model has no display_name field.
-
-        This test verifies that:
-        1. When model dict exists but has no display_name, empty string is returned
-        2. get_model_by_model_id is called
-        """
-        from backend.services.vectordatabase_service import _get_embedding_model_display_name
-
-        mock_get_model.return_value = {
-            "model_id": 123,
-            "model_name": "test-model"
-        }
-
-        result = _get_embedding_model_display_name(123, "tenant-1")
-
-        self.assertEqual(result, "")
-        mock_get_model.assert_called_once_with(123, "tenant-1")
-
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    def test_get_embedding_model_display_name_exception(self, mock_get_model):
-        """
-        Test _get_embedding_model_display_name when exception occurs.
-
-        This test verifies that:
-        1. When get_model_by_model_id throws exception, empty string is returned
-        2. Exception is logged
-        """
-        from backend.services.vectordatabase_service import _get_embedding_model_display_name
-
-        mock_get_model.side_effect = Exception("Database connection failed")
-
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
-            result = _get_embedding_model_display_name(123, "tenant-1")
-
-            self.assertEqual(result, "")
-            mock_logger.warning.assert_called_once()
-            self.assertIn("Failed to get display_name", mock_logger.warning.call_args[0][0])
-
     # Tests for get_embedding_model_by_index_name (lines 110-182)
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_get_embedding_model_by_index_name_kb_not_found(self, mock_get_knowledge):
         """
         Test get_embedding_model_by_index_name when knowledge base is not found.
@@ -6698,7 +6144,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When knowledge base doesn't exist, returns error status
         2. Error message indicates knowledge base not found
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_index_name
+        from management.services.knowledge_base.common import get_embedding_model_by_index_name
 
         mock_get_knowledge.return_value = None
 
@@ -6710,8 +6156,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         self.assertEqual(metadata["needs_update"], False)
         self.assertIn("not found", metadata["message"])
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_get_embedding_model_by_index_name_model_id_valid(self, mock_get_knowledge, mock_get_model_by_id):
         """
         Test get_embedding_model_by_index_name when model_id exists and model is valid.
@@ -6720,7 +6166,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When model_id exists and model is found, returns ok status
         2. Model instance and model_id are returned correctly
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_index_name
+        from management.services.knowledge_base.common import get_embedding_model_by_index_name
 
         mock_get_knowledge.return_value = {
             "index_name": "kb-index",
@@ -6740,8 +6186,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         self.assertEqual(metadata["needs_update"], False)
         self.assertEqual(metadata["message"], "Embedding model found")
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_get_embedding_model_by_index_name_model_id_invalid(self, mock_get_knowledge, mock_get_model_by_id):
         """
         Test get_embedding_model_by_index_name when model_id exists but model is not found.
@@ -6750,7 +6196,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When model_id exists but model not found, returns needs_config status
         2. Guidance message for user to select a model
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_index_name
+        from management.services.knowledge_base.common import get_embedding_model_by_index_name
 
         mock_get_knowledge.return_value = {
             "index_name": "kb-index",
@@ -6761,7 +6207,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         mock_get_model_by_id.return_value = (None, None)
 
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.knowledge_base.common.logger') as mock_logger:
             model, model_id, metadata = get_embedding_model_by_index_name("tenant-1", "kb-index")
 
             self.assertIsNone(model)
@@ -6771,8 +6217,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             self.assertIn("Please select a model", metadata["message"])
             mock_logger.warning.assert_called()
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_get_embedding_model_by_index_name_no_model_id_with_name(self, mock_get_knowledge, mock_get_model_by_id):
         """
         Test get_embedding_model_by_index_name when no model_id but has embedding_model_name (legacy data).
@@ -6781,7 +6227,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When model_id is None/0 but embedding_model_name exists (legacy), returns needs_config
         2. Warning is logged about legacy data needing explicit configuration
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_index_name
+        from management.services.knowledge_base.common import get_embedding_model_by_index_name
 
         mock_get_knowledge.return_value = {
             "index_name": "kb-index",
@@ -6792,7 +6238,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         mock_get_model_by_id.return_value = (None, None)
 
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.knowledge_base.common.logger') as mock_logger:
             model, model_id, metadata = get_embedding_model_by_index_name("tenant-1", "kb-index")
 
             self.assertIsNone(model)
@@ -6803,8 +6249,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             warning_msg = mock_logger.warning.call_args[0][0]
             self.assertIn("has embedding_model_name", warning_msg)
 
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_get_embedding_model_by_index_name_no_model_at_all(self, mock_get_knowledge, mock_get_model_by_id):
         """
         Test get_embedding_model_by_index_name when no model configured at all.
@@ -6813,7 +6259,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When both model_id and embedding_model_name are None, returns needs_config
         2. Error is logged
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_index_name
+        from management.services.knowledge_base.common import get_embedding_model_by_index_name
 
         mock_get_knowledge.return_value = {
             "index_name": "kb-index",
@@ -6824,7 +6270,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         mock_get_model_by_id.return_value = (None, None)
 
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.knowledge_base.common.logger') as mock_logger:
             model, model_id, metadata = get_embedding_model_by_index_name("tenant-1", "kb-index")
 
             self.assertIsNone(model)
@@ -6834,7 +6280,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             error_msg = mock_logger.error.call_args[0][0]
             self.assertIn("no embedding model configured", error_msg)
 
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_knowledge_record')
     def test_get_embedding_model_by_index_name_exception(self, mock_get_knowledge):
         """
         Test get_embedding_model_by_index_name when exception occurs.
@@ -6843,11 +6289,11 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When exception occurs, returns error status with exception message
         2. Exception is logged as warning
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_index_name
+        from management.services.knowledge_base.common import get_embedding_model_by_index_name
 
         mock_get_knowledge.side_effect = Exception("Database error")
 
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.knowledge_base.common.logger') as mock_logger:
             model, model_id, metadata = get_embedding_model_by_index_name("tenant-1", "kb-index")
 
             self.assertIsNone(model)
@@ -6857,8 +6303,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             mock_logger.warning.assert_called()
 
     # Tests for get_embedding_model_by_id (lines 338-383)
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
+    @patch('management.services.model.resolver.get_model_by_model_id')
+    @patch('management.services.model.resolver.build_adapter_fresh')
     def test_get_embedding_model_by_id_embedding_type(self, mock_build, mock_get_model):
         """
         Test get_embedding_model_by_id with embedding model type.
@@ -6868,7 +6314,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         2. Correct parameters are passed to build_adapter_fresh
         3. Model instance and model_id are returned
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_id
+        from management.services.model.resolver import get_embedding_model_by_id
 
         mock_get_model.return_value = {
             "model_id": 123,
@@ -6904,8 +6350,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             None,
         )
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
+    @patch('management.services.model.resolver.get_model_by_model_id')
+    @patch('management.services.model.resolver.build_adapter_fresh')
     def test_get_embedding_model_by_id_multi_embedding_type(self, mock_build, mock_get_model):
         """
         Test get_embedding_model_by_id with multi_embedding model type.
@@ -6914,7 +6360,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When model_type is 'multi_embedding', the adapter is built via build_adapter_fresh
         2. Correct parameters are passed to build_adapter_fresh
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_id
+        from management.services.model.resolver import get_embedding_model_by_id
 
         mock_get_model.return_value = {
             "model_id": 456,
@@ -6949,13 +6395,13 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             None,
         )
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
+    @patch('management.services.model.resolver.get_model_by_model_id')
+    @patch('management.services.model.resolver.build_adapter_fresh')
     def test_get_embedding_model_by_id_uses_declared_embedding_type(
         self, mock_build, mock_get_model
     ):
         """Endpoint shape cannot override a model record declared as text embedding."""
-        from backend.services.vectordatabase_service import get_embedding_model_by_id
+        from management.services.model.resolver import get_embedding_model_by_id
 
         mock_get_model.return_value = {
             "model_id": 61,
@@ -6991,13 +6437,13 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             None,
         )
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.build_adapter_fresh')
+    @patch('management.services.model.resolver.get_model_by_model_id')
+    @patch('management.services.model.resolver.build_adapter_fresh')
     def test_get_embedding_model_by_id_dashscope_multi_embedding(
         self, mock_build, mock_get_model
     ):
         """Test that a DashScope model selected by ID is built via the adapter registry."""
-        from backend.services.vectordatabase_service import get_embedding_model_by_id
+        from management.services.model.resolver import get_embedding_model_by_id
 
         mock_get_model.return_value = {
             "model_id": 48,
@@ -7033,7 +6479,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             None,
         )
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.model.resolver.get_model_by_model_id')
     def test_get_embedding_model_by_id_model_not_found(self, mock_get_model):
         """
         Test get_embedding_model_by_id when model is not found.
@@ -7042,11 +6488,11 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When model is not found (returns None), returns (None, None)
         2. Warning is logged
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_id
+        from management.services.model.resolver import get_embedding_model_by_id
 
         mock_get_model.return_value = None
 
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.model.resolver.logger') as mock_logger:
             model, model_id = get_embedding_model_by_id("tenant-1", 999)
 
             self.assertIsNone(model)
@@ -7055,7 +6501,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             warning_msg = mock_logger.warning.call_args[0][0]
             self.assertIn("not found", warning_msg)
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.model.resolver.get_model_by_model_id')
     def test_get_embedding_model_by_id_wrong_model_type(self, mock_get_model):
         """
         Test get_embedding_model_by_id when model type is not embedding/multi_embedding.
@@ -7064,7 +6510,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When model_type is not valid, returns (None, None)
         2. Warning is logged about wrong model type
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_id
+        from management.services.model.resolver import get_embedding_model_by_id
 
         mock_get_model.return_value = {
             "model_id": 789,
@@ -7072,7 +6518,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             "model_name": "rerank-model"
         }
 
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.model.resolver.logger') as mock_logger:
             model, model_id = get_embedding_model_by_id("tenant-1", 789)
 
             self.assertIsNone(model)
@@ -7081,7 +6527,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             warning_msg = mock_logger.warning.call_args[0][0]
             self.assertIn("not an embedding model", warning_msg)
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.model.resolver.get_model_by_model_id')
     def test_get_embedding_model_by_id_exception(self, mock_get_model):
         """
         Test get_embedding_model_by_id when exception occurs.
@@ -7090,11 +6536,11 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         1. When exception occurs, returns (None, None)
         2. Warning is logged with exception message
         """
-        from backend.services.vectordatabase_service import get_embedding_model_by_id
+        from management.services.model.resolver import get_embedding_model_by_id
 
         mock_get_model.side_effect = Exception("Database connection failed")
 
-        with patch('backend.services.vectordatabase_service.logger') as mock_logger:
+        with patch('management.services.model.resolver.logger') as mock_logger:
             model, model_id = get_embedding_model_by_id("tenant-1", 123)
 
             self.assertIsNone(model)
@@ -7102,8 +6548,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
             mock_logger.warning.assert_called_once()
 
     # Tests for update_embedding_model (lines 725-793)
-    @patch('backend.services.vectordatabase_service.update_embedding_model_by_index_name')
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.update_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
     def test_update_embedding_model_success(self, mock_get_model, mock_update):
         """
         Test update_embedding_model when update succeeds.
@@ -7135,7 +6581,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         mock_get_model.assert_called_once_with(123, "tenant-1")
         mock_update.assert_called_once()
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
     def test_update_embedding_model_model_not_found(self, mock_get_model):
         """
         Test update_embedding_model when model is not found.
@@ -7156,7 +6602,7 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         self.assertIn("not found", str(context.exception))
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
     def test_update_embedding_model_wrong_model_type(self, mock_get_model):
         """
         Test update_embedding_model when model type is not embedding/multi_embedding.
@@ -7182,8 +6628,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         self.assertIn("not an embedding model", str(context.exception))
         self.assertIn("Please select an embedding model", str(context.exception))
 
-    @patch('backend.services.vectordatabase_service.update_embedding_model_by_index_name')
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.update_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
     def test_update_embedding_model_database_update_failed(self, mock_get_model, mock_update):
         """
         Test update_embedding_model when database update fails.
@@ -7210,8 +6656,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         self.assertIn("Failed to update embedding model", str(context.exception))
 
-    @patch('backend.services.vectordatabase_service.update_embedding_model_by_index_name')
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.update_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
     def test_update_embedding_model_exception(self, mock_get_model, mock_update):
         """
         Test update_embedding_model when exception occurs.
@@ -7238,8 +6684,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
 
         self.assertIn("Failed to update embedding model", str(context.exception))
 
-    @patch('backend.services.vectordatabase_service.update_embedding_model_by_index_name')
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.update_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
     def test_update_embedding_model_multi_embedding_type(self, mock_get_model, mock_update):
         """
         Test update_embedding_model with multi_embedding model type.
@@ -7268,8 +6714,8 @@ class TestNewEmbeddingModelMethods(unittest.TestCase):
         self.assertEqual(result["model_id"], 789)
         self.assertEqual(result["model_name"], "jina-embeddings-v2")
 
-    @patch('backend.services.vectordatabase_service.update_embedding_model_by_index_name')
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.update_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
     def test_update_embedding_model_without_user_id(self, mock_get_model, mock_update):
         """
         Test update_embedding_model when user_id is not provided.
@@ -7309,10 +6755,10 @@ class TestCoverageImprovement(unittest.TestCase):
         self.mock_vdb_core.embedding_dim = 768
 
     # Tests for _update_progress (lines 54-80)
-    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('management.services.knowledge_base.common.get_redis_service')
     def test_update_progress_save_failure(self, mock_get_redis):
         """Test _update_progress when save_progress_info returns False (line 69-76)."""
-        from backend.services.vectordatabase_service import _update_progress
+        from management.services.knowledge_base.service import _update_progress
         mock_redis = MagicMock()
         mock_redis.is_task_cancelled.return_value = False
         mock_redis.save_progress_info.return_value = False
@@ -7321,24 +6767,14 @@ class TestCoverageImprovement(unittest.TestCase):
         _update_progress("task-1", 5, 10)
         mock_redis.save_progress_info.assert_called_once_with("task-1", 5, 10)
 
-    @patch('backend.services.vectordatabase_service.get_redis_service')
+    @patch('management.services.knowledge_base.common.get_redis_service')
     def test_update_progress_redis_exception(self, mock_get_redis):
         """Test _update_progress when get_redis_service raises (line 77-79)."""
-        from backend.services.vectordatabase_service import _update_progress
+        from management.services.knowledge_base.service import _update_progress
         mock_get_redis.side_effect = Exception("Redis connection failed")
         # Should not raise, just logs warning
         _update_progress("task-1", 5, 10)
 
-    # Tests for _get_embedding_model_display_name exception branch (line 99-100)
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    def test_get_embedding_model_display_name_db_exception(self, mock_get_model):
-        """Test _get_embedding_model_display_name when get_model_by_model_id raises (line 99-100)."""
-        from backend.services.vectordatabase_service import _get_embedding_model_display_name
-        mock_get_model.side_effect = Exception("Database error")
-        result = _get_embedding_model_display_name(123, "tenant-1")
-        self.assertEqual(result, "")
-
-    # Tests for full_delete_knowledge_base - list_files exception (lines 453-457)
     @patch('services.redis_service.get_redis_service')
     def test_full_delete_knowledge_base_list_files_exception(self, mock_get_redis):
         """Test full_delete_knowledge_base when list_files raises (lines 453-457)."""
@@ -7349,9 +6785,9 @@ class TestCoverageImprovement(unittest.TestCase):
         }
         mock_get_redis.return_value = mock_redis
 
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, side_effect=Exception("ES error")) as mock_list_files, \
-                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
             async def run_test():
                 return await ElasticSearchService.full_delete_knowledge_base(
@@ -7380,11 +6816,11 @@ class TestCoverageImprovement(unittest.TestCase):
 
         files_payload = {"files": [{"path_or_url": "obj-1", "source_type": "minio"}]}
 
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
-                patch('backend.services.vectordatabase_service.delete_file',
+                patch('management.services.knowledge_base.management.delete_file',
                       side_effect=Exception("MinIO connection failed")) as mock_delete_file, \
-                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
             async def run_test():
                 return await ElasticSearchService.full_delete_knowledge_base(
@@ -7404,9 +6840,9 @@ class TestCoverageImprovement(unittest.TestCase):
     # The actual code path for skipping is covered by the document transformation logic.
 
     # Tests for index_documents - progress save returns False (lines 1169-1170)
-    @patch('backend.services.vectordatabase_service.get_redis_service')
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.common.get_redis_service')
+    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
     def test_index_documents_progress_init_save_failure(self, mock_update, mock_get_record, mock_get_redis):
         """Test index_documents handles save_progress_info returning False (lines 1169-1170)."""
         mock_get_record.return_value = {"tenant_id": "tenant-1"}
@@ -7439,7 +6875,7 @@ class TestCoverageImprovement(unittest.TestCase):
         ]
         mock_vdb_core.client.count.side_effect = Exception("Count query failed")
         # Return a file that's still being processed (not in ES yet)
-        with patch('backend.services.vectordatabase_service.get_all_files_status',
+        with patch('management.services.knowledge_base.management.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7461,7 +6897,7 @@ class TestCoverageImprovement(unittest.TestCase):
         ]
         mock_vdb_core.client.count.return_value = {"count": 1}
         mock_vdb_core.multi_search.side_effect = Exception("Msearch failed")
-        with patch('backend.services.vectordatabase_service.get_all_files_status',
+        with patch('management.services.knowledge_base.management.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7494,7 +6930,7 @@ class TestCoverageImprovement(unittest.TestCase):
                 {"hits": {"hits": [{"_source": {"id": "1", "title": "t", "content": "c"}}]}}
             ]
         }
-        with patch('backend.services.vectordatabase_service.get_all_files_status',
+        with patch('management.services.knowledge_base.management.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7514,7 +6950,7 @@ class TestCoverageImprovement(unittest.TestCase):
              "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 5}
         ]
         mock_vdb_core.client.count.side_effect = Exception("Count failed")
-        with patch('backend.services.vectordatabase_service.get_all_files_status',
+        with patch('management.services.knowledge_base.management.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7526,7 +6962,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(len(result["files"]), 1)
 
     # Tests for change_summary exception (lines 1705-1706)
-    @patch('backend.services.vectordatabase_service.update_knowledge_record')
+    @patch('management.services.knowledge_base.service.update_knowledge_record')
     def test_change_summary_exception(self, mock_update):
         """Test change_summary handles exception from update_knowledge_record (lines 1705-1706)."""
         mock_update.side_effect = Exception("Database error")
@@ -7539,7 +6975,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Database error", str(ctx.exception))
 
     # Tests for get_summary exception (lines 1727-1729)
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_get_summary_exception(self, mock_get_record):
         """Test get_summary handles exception (lines 1727-1729)."""
         mock_get_record.side_effect = Exception("Database error")
@@ -7548,7 +6984,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Database error", str(ctx.exception))
 
     # Tests for create_chunk exception (lines 1858-1861)
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_create_chunk_vdb_exception(self, mock_get_record):
         """Test create_chunk handles exception from vdb_core.create_chunk (lines 1858-1861)."""
         mock_get_record.return_value = {"embedding_model_id": 1, "tenant_id": "tenant-1"}
@@ -7597,10 +7033,10 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("ES error", str(ctx.exception))
 
     # Tests for search_hybrid - KnowledgeBaseNeedsModelConfigError (line 1955, 1962)
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_needs_model_config_error(self, mock_get_model):
         """Test search_hybrid raises KnowledgeBaseNeedsModelConfigError (lines 1955, 1962)."""
-        from backend.services.vectordatabase_service import (
+        from management.services.knowledge_base.service import (
             KnowledgeBaseNeedsModelConfigError, get_embedding_model_by_index_name
         )
         mock_get_model.return_value = (None, None, {"status": "needs_config"})
@@ -7615,7 +7051,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(ctx.exception.index_name, "test-index")
 
     # Tests for search_hybrid - generic ValueError from get_embedding_model_by_index_name (line 1996)
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_model_error_status(self, mock_get_model):
         """Test search_hybrid handles error status from get_embedding_model_by_index_name (line 1996)."""
         # Note: When status is "error", it doesn't raise ValueError.
@@ -7632,7 +7068,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("embedding model", str(ctx.exception).lower())
 
     # Tests for search_hybrid - exception (line 1996)
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_vdb_exception(self, mock_get_model):
         """Test search_hybrid handles exception from vdb_core (line 1996)."""
         mock_model = MagicMock()
@@ -7661,10 +7097,10 @@ class TestCoverageImprovement(unittest.TestCase):
 
         files_payload = {"files": [{"filename": "orphan.txt"}]}  # No path_or_url
 
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
-                patch('backend.services.vectordatabase_service.delete_file') as mock_delete_file, \
-                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                patch('management.services.knowledge_base.management.delete_file') as mock_delete_file, \
+                patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
             async def run_test():
                 return await ElasticSearchService.full_delete_knowledge_base(
@@ -7691,9 +7127,9 @@ class TestCoverageImprovement(unittest.TestCase):
         }
         mock_get_redis.return_value = mock_redis
 
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value={"files": []}), \
-                patch('backend.services.vectordatabase_service.ElasticSearchService.delete_index',
+                patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, side_effect=Exception("Fatal error")) as mock_delete_index:
             async def run_test():
                 return await ElasticSearchService.full_delete_knowledge_base(
@@ -7708,7 +7144,7 @@ class TestCoverageImprovement(unittest.TestCase):
             self.assertIn("Fatal error", str(ctx.exception))
 
     # Tests for create_index - no model_id provided (line 572)
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_index_no_model_id(self, mock_create_record):
         """Test create_index when model_id is None (line 572)."""
         mock_create_record.return_value = {"index_name": "test-index"}
@@ -7735,9 +7171,9 @@ class TestCoverageImprovement(unittest.TestCase):
     async def test_delete_index_list_files_exception_continues(self):
         """Test delete_index continues when list_files raises (lines 818-820)."""
         self.mock_vdb_core.delete_index.return_value = True
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, side_effect=Exception("List files failed")), \
-                patch('backend.services.vectordatabase_service.delete_knowledge_record', return_value=True):
+                patch('management.services.knowledge_base.management.delete_knowledge_record', return_value=True):
             result = await ElasticSearchService.delete_index(
                 index_name="test-index",
                 vdb_core=self.mock_vdb_core,
@@ -7748,9 +7184,9 @@ class TestCoverageImprovement(unittest.TestCase):
         self.mock_vdb_core.delete_index.assert_called_once_with("test-index")
 
     # Tests for list_indices - empty user_group_ids (line 939)
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_empty_both_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices backward compat when both kb and user groups are empty (line 939)."""
         mock_user_tenant.return_value = {
@@ -7779,9 +7215,9 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["count"], 1)
 
     # Tests for list_indices - creator permission (line 951)
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
     def test_list_indices_creator_permission_granted(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices grants CREATOR permission when user is creator (line 951)."""
         mock_user_tenant.return_value = {
@@ -7830,7 +7266,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Index name is required", str(ctx.exception))
 
     # Tests for index_documents - index creation exception (lines 1078-1079)
-    @patch('backend.services.vectordatabase_service.ElasticSearchService.create_index')
+    @patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.create_index')
     def test_index_documents_index_creation_failure(self, mock_create_index):
         """Test index_documents handles exception from create_index (lines 1078-1079)."""
         mock_create_index.side_effect = Exception("Index creation failed")
@@ -7861,7 +7297,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core.multi_search.return_value = {
             "responses": [{"error": "Search failed"}]
         }
-        with patch('backend.services.vectordatabase_service.get_all_files_status',
+        with patch('management.services.knowledge_base.management.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7886,13 +7322,13 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Connection lost", str(ctx.exception))
 
     # Tests for create_chunk - knowledge_record exception (lines 1812-1813)
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
     def test_create_chunk_knowledge_record_exception(self, mock_get_record):
         """Test create_chunk handles exception when getting knowledge record (lines 1812-1813)."""
         mock_get_record.side_effect = Exception("DB error")
         self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
         from consts.model import ChunkCreateRequest
-        with patch('backend.services.vectordatabase_service.get_embedding_model_by_id',
+        with patch('management.services.knowledge_base.common.get_embedding_model_by_id',
                    return_value=(MagicMock(), 1)):
             result = ElasticSearchService.create_chunk(
                 index_name="test-index",
@@ -7907,8 +7343,8 @@ class TestCoverageImprovement(unittest.TestCase):
         self.mock_vdb_core.create_chunk.assert_called_once()
 
     # Tests for create_chunk - embedding generation exception (lines 1829-1830)
-    @patch('backend.services.vectordatabase_service.get_knowledge_record')
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_knowledge_record')
+    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
     def test_create_chunk_embedding_exception(self, mock_get_model, mock_get_record):
         """Test create_chunk handles exception when generating embedding (lines 1829-1830)."""
         mock_get_record.return_value = {"embedding_model_id": 1, "tenant_id": "tenant-1"}
@@ -7946,7 +7382,7 @@ class TestCoverageImprovement(unittest.TestCase):
             self.assertIn("No update fields supplied", str(ctx.exception))
 
     # Tests for list_indices - no user tenant (line 879)
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
     def test_list_indices_no_user_tenant(self, mock_user_tenant):
         """Test list_indices returns empty when user has no tenant (line 879)."""
         mock_user_tenant.return_value = None
@@ -7962,30 +7398,13 @@ class TestCoverageImprovement(unittest.TestCase):
 
     # ===== Coverage improvement: remaining uncovered branches =====
 
-    # Tests for _is_multimodal_by_model_id - exception branch (lines 118-124)
-    def test_is_multimodal_by_model_id_exception(self):
-        """Test _is_multimodal_by_model_id returns False when get_model_by_model_id raises."""
-        from backend.services.vectordatabase_service import _is_multimodal_by_model_id
-        with patch('backend.services.vectordatabase_service.get_model_by_model_id',
-                   side_effect=Exception("DB error")):
-            result = _is_multimodal_by_model_id(model_id=42, tenant_id="tenant-1")
-        self.assertEqual(result, False)
-
-    # Tests for _normalize_model_type - "embedding" branch (line 314)
-    def test_normalize_model_type_embedding(self):
-        """Test _normalize_model_type normalizes 'embedding' correctly."""
-        from backend.services.vectordatabase_service import _normalize_model_type
-        result = _normalize_model_type("embedding")
-        self.assertEqual(result, "embedding")
-
-    # Tests for _create_embedding_model - multi_embedding dispatch via build_adapter_fresh
     def test_create_embedding_model_dashscope(self):
         """Test _create_embedding_model builds a dashscope multi_embedding adapter via build_adapter_fresh."""
-        from backend.services.vectordatabase_service import _create_embedding_model
-        with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+        from management.services.model.resolver import create_embedding_model
+        with patch('management.services.model.resolver.build_adapter_fresh') as mock_build:
             mock_adapter = MagicMock()
             mock_build.return_value = mock_adapter
-            result = _create_embedding_model({
+            result = create_embedding_model({
                 "model_name": "bge-m3",
                 "model_type": "multi_embedding",
                 "model_factory": "dashscope",
@@ -8012,11 +7431,11 @@ class TestCoverageImprovement(unittest.TestCase):
 
     def test_create_embedding_model_siliconflow(self):
         """Siliconflow multi-embedding models are built via build_adapter_fresh with the multiEmbedding slot."""
-        from backend.services.vectordatabase_service import _create_embedding_model
-        with patch('backend.services.vectordatabase_service.build_adapter_fresh') as mock_build:
+        from management.services.model.resolver import create_embedding_model
+        with patch('management.services.model.resolver.build_adapter_fresh') as mock_build:
             mock_adapter = MagicMock()
             mock_build.return_value = mock_adapter
-            result = _create_embedding_model({
+            result = create_embedding_model({
                 "model_name": "Qwen/Qwen3-VL-Embedding-8B",
                 "model_type": "multi_embedding",
                 "model_factory": "silicon",
@@ -8042,8 +7461,8 @@ class TestCoverageImprovement(unittest.TestCase):
         )
 
     # Tests for create_knowledge_base model ID validation
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_stores_selected_model_id(
         self, mock_create_record, mock_get_model
     ):
@@ -8075,7 +7494,7 @@ class TestCoverageImprovement(unittest.TestCase):
         knowledge_data = mock_create_record.call_args[0][0]
         self.assertEqual(knowledge_data["embedding_model_id"], 1)
 
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_requires_model_id(self, mock_create_record):
         with self.assertRaisesRegex(ValueError, "embedding_model_id is required"):
             ElasticSearchService.create_knowledge_base(
@@ -8088,8 +7507,8 @@ class TestCoverageImprovement(unittest.TestCase):
 
         mock_create_record.assert_not_called()
 
-    @patch('backend.services.vectordatabase_service.get_model_by_model_id')
-    @patch('backend.services.vectordatabase_service.create_knowledge_record')
+    @patch('management.services.knowledge_base.management.get_model_by_model_id')
+    @patch('management.services.knowledge_base.management.create_knowledge_record')
     def test_create_knowledge_base_rejects_non_embedding_model(
         self, mock_create_record, mock_get_model
     ):
@@ -8124,10 +7543,10 @@ class TestCoverageImprovement(unittest.TestCase):
                 {"path_or_url": "bucket/file2.pdf", "source_type": "minio"},
             ]
         }
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload), \
-                patch('backend.services.vectordatabase_service.delete_file', mock_delete_file), \
-                patch('backend.services.vectordatabase_service.delete_knowledge_record', return_value=True):
+                patch('management.services.knowledge_base.management.delete_file', mock_delete_file), \
+                patch('management.services.knowledge_base.management.delete_knowledge_record', return_value=True):
             result = await ElasticSearchService.delete_index(
                 index_name="test-index",
                 vdb_core=self.mock_vdb_core,
@@ -8142,12 +7561,12 @@ class TestCoverageImprovement(unittest.TestCase):
         """Test delete_index logs MINIO error but continues (lines 869-871)."""
         self.mock_vdb_core.delete_index.return_value = True
         files_payload = {"files": [{"path_or_url": "bucket/bad.txt", "source_type": "minio"}]}
-        with patch('backend.services.vectordatabase_service.ElasticSearchService.list_files',
+        with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload), \
-                patch('backend.services.vectordatabase_service.delete_file',
+                patch('management.services.knowledge_base.management.delete_file',
                       side_effect=Exception("MinIO error")), \
-                patch('backend.services.vectordatabase_service.delete_knowledge_record', return_value=True), \
-                patch('backend.services.vectordatabase_service.logger') as mock_logger:
+                patch('management.services.knowledge_base.management.delete_knowledge_record', return_value=True), \
+                patch('management.services.knowledge_base.management.logger') as mock_logger:
             result = await ElasticSearchService.delete_index(
                 index_name="test-index",
                 vdb_core=self.mock_vdb_core,
@@ -8158,11 +7577,11 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_logger.error.assert_called()
 
     # Tests for list_indices - ASSET_OWNER record with SU/ADMIN/SPEED/DEV (lines 975-978)
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
-    @patch('backend.services.vectordatabase_service.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
+    @patch('management.services.knowledge_base.management.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
     def test_list_indices_asset_owner_with_su_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices ASSET_OWNER record gets READ permission when SU (lines 975-978)."""
         mock_user_tenant.return_value = {"user_role": "SU", "tenant_id": "tenant-1"}
@@ -8190,12 +7609,12 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
 
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
-    @patch('backend.services.vectordatabase_service.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
+    @patch('management.services.knowledge_base.management.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_asset_owner_with_dev_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices ASSET_OWNER record gets READ permission when DEV (lines 975-978)."""
         mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
@@ -8223,11 +7642,11 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
 
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
-    @patch('backend.services.vectordatabase_service.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
+    @patch('management.services.knowledge_base.management.ASSET_OWNER_TENANT_ID', new="asset_owner_tenant_id")
     def test_list_indices_asset_owner_with_speed_role(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices ASSET_OWNER record gets READ permission when SPEED (lines 975-978)."""
         mock_user_tenant.return_value = {"user_role": "SPEED", "tenant_id": "tenant-1"}
@@ -8256,10 +7675,10 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]["permission"], "READ_ONLY")
 
     # Tests for list_indices - PRIVATE permission (lines 1021-1022)
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_private_permission_hidden(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices excludes KB when ingroup_permission is PRIVATE (lines 1021-1022)."""
         mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
@@ -8285,10 +7704,10 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["indices"], [])
 
     # Tests for list_indices - group intersection scenario (lines 1001, 1013, 1016)
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_both_empty_groups_backward_compat(self, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices backward compat when both kb and user groups are empty (line 999-1001)."""
         mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
@@ -8313,11 +7732,11 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["indices"][0], "legacy-kb")
 
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_user_is_creator_gets_creator_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices grants CREATOR permission when user is the creator (line 1011-1013)."""
         mock_user_tenant.return_value = {"user_role": "USER", "tenant_id": "tenant-1"}
@@ -8347,11 +7766,11 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["indices_info"][0]["permission"], "CREATOR")
 
-    @patch('backend.services.vectordatabase_service.get_user_tenant_by_user_id')
-    @patch('backend.services.vectordatabase_service.query_group_ids_by_user')
-    @patch('backend.services.vectordatabase_service.get_knowledge_info_by_tenant_id')
-    @patch('backend.services.vectordatabase_service.update_model_name_by_index_name')
-    @patch('backend.services.vectordatabase_service.IS_SPEED_MODE', new=False)
+    @patch('management.services.knowledge_base.management.get_user_tenant_by_user_id')
+    @patch('management.services.knowledge_base.management.query_group_ids_by_user')
+    @patch('management.services.knowledge_base.management.get_knowledge_info_by_tenant_id')
+    @patch('management.services.knowledge_base.management.update_model_name_by_index_name')
+    @patch('management.services.knowledge_base.management.IS_SPEED_MODE', new=False)
     def test_list_indices_non_creator_edit_permission(self, mock_update_model, mock_get_info, mock_group_ids, mock_user_tenant):
         """Test list_indices grants EDIT permission when user is not creator but ingroup_permission is EDIT (line 1014-1016)."""
         mock_user_tenant.return_value = {"user_role": "DEV", "tenant_id": "tenant-1"}
@@ -8382,7 +7801,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(result["indices_info"][0]["permission"], "EDIT")
 
     # Tests for index_documents - skip non-dict items (lines 1156-1158)
-    @patch('backend.services.vectordatabase_service.update_last_doc_update_time')
+    @patch('management.services.knowledge_base.management.update_last_doc_update_time')
     def test_index_documents_skips_non_dict_items(self, mock_update_last_doc):
         """Test index_documents skips non-dictionary items in data list (lines 1156-1158)."""
         mock_embedding = MagicMock()
@@ -8391,9 +7810,9 @@ class TestCoverageImprovement(unittest.TestCase):
         self.mock_vdb_core.check_index_exists.return_value = True
         self.mock_vdb_core.vectorize_documents.return_value = 1
 
-        with patch('backend.services.vectordatabase_service.get_knowledge_record',
+        with patch('management.services.knowledge_base.management.get_knowledge_record',
                    return_value={"tenant_id": "tenant-1"}), \
-                patch('backend.services.vectordatabase_service.tenant_config_manager') as mock_tcm:
+                patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tcm:
             mock_tcm.get_model_config.return_value = {"chunk_batch": 10}
             result = ElasticSearchService.index_documents(
                 embedding_model=mock_embedding,
@@ -8413,7 +7832,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertEqual(len(documents_passed), 1)
 
     # Tests for index_documents - image bytes fetch exception and raise (lines 1206-1214)
-    @patch('backend.services.vectordatabase_service.get_file_stream')
+    @patch('management.services.knowledge_base.management.get_file_stream')
     def test_index_documents_image_fetch_exception_and_raise(self, mock_get_file):
         """Test index_documents logs and re-raises exception when fetching image bytes fails (lines 1206-1214)."""
         mock_embedding = MagicMock()
@@ -8423,11 +7842,11 @@ class TestCoverageImprovement(unittest.TestCase):
         self.mock_vdb_core.vectorize_documents.return_value = 1
         mock_get_file.side_effect = Exception("MinIO unavailable")
 
-        with patch('backend.services.vectordatabase_service.get_knowledge_record',
+        with patch('management.services.knowledge_base.management.get_knowledge_record',
                    return_value={"tenant_id": "tenant-1"}), \
-                patch('backend.services.vectordatabase_service.tenant_config_manager.get_model_config',
+                patch('management.services.knowledge_base.management.tenant_config_manager.get_model_config',
                       return_value={"chunk_batch": 10}), \
-                patch('backend.services.vectordatabase_service.logger') as mock_logger:
+                patch('management.services.knowledge_base.management.logger') as mock_logger:
             with self.assertRaises(Exception) as ctx:
                 ElasticSearchService.index_documents(
                     embedding_model=mock_embedding,
@@ -8455,8 +7874,8 @@ class TestCoverageImprovement(unittest.TestCase):
         async def mock_get_files(index_name):
             return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
 
-        with patch('backend.services.vectordatabase_service.get_all_files_status', mock_get_files), \
-                patch('backend.services.vectordatabase_service.get_file_size',
+        with patch('management.services.knowledge_base.management.get_all_files_status', mock_get_files), \
+                patch('management.services.knowledge_base.management.get_file_size',
                       side_effect=Exception("Storage error")):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -8479,8 +7898,8 @@ class TestCoverageImprovement(unittest.TestCase):
         async def mock_get_files(index_name):
             return {"failed_file.txt": {"state": "PROCESS_FAILED", "latest_task_id": "task-42", "source_type": "minio"}}
 
-        with patch('backend.services.vectordatabase_service.get_all_files_status', mock_get_files), \
-                patch('backend.services.vectordatabase_service.get_redis_service') as mock_get_redis:
+        with patch('management.services.knowledge_base.management.get_all_files_status', mock_get_files), \
+                patch('management.services.knowledge_base.common.get_redis_service') as mock_get_redis:
             mock_redis_instance = MagicMock()
             mock_redis_instance.get_error_info.side_effect = Exception("Redis error")
             mock_get_redis.return_value = mock_redis_instance
@@ -8508,7 +7927,7 @@ class TestCoverageImprovement(unittest.TestCase):
         async def mock_get_files(index_name):
             return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
 
-        with patch('backend.services.vectordatabase_service.get_all_files_status', mock_get_files):
+        with patch('management.services.knowledge_base.management.get_all_files_status', mock_get_files):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=True,
@@ -8525,7 +7944,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core = MagicMock()
         mock_vdb_core.get_documents_detail.side_effect = Exception("Elasticsearch unavailable")
 
-        with patch('backend.services.vectordatabase_service.get_all_files_status',
+        with patch('management.services.knowledge_base.management.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             with self.assertRaises(Exception) as ctx:
                 await ElasticSearchService.list_files(
@@ -8536,7 +7955,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Elasticsearch unavailable", str(ctx.exception))
 
     # Tests for search_hybrid - outer exception (lines 2038-2043)
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_outer_exception(self, mock_get_model):
         """Test search_hybrid handles unexpected exceptions (lines 2038-2043)."""
         mock_model = MagicMock()
@@ -8554,7 +7973,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Error executing hybrid search", str(ctx.exception))
 
     # Tests for search_hybrid - KnowledgeBaseNeedsModelConfigError (lines 1998-2004)
-    @patch('backend.services.vectordatabase_service.get_embedding_model_by_index_name')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_needs_config_raises(self, mock_get_model):
         """Test search_hybrid raises KnowledgeBaseNeedsModelConfigError when model not configured."""
         mock_get_model.return_value = (None, None, {"status": "needs_config"})
@@ -8570,6 +7989,9 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("embedding model", str(ctx.exception).lower())
 
 
+import management.services.knowledge_base.permission as kb_permission
+
+
 def _patch_kb_permission_context(
     monkeypatch,
     record,
@@ -8577,7 +7999,7 @@ def _patch_kb_permission_context(
     user_group_ids=None,
     speed_mode=False,
 ):
-    import backend.services.vectordatabase_service as vdb_service
+    import management.services.knowledge_base.permission as vdb_service
 
     monkeypatch.setattr(vdb_service, "get_knowledge_record", lambda _filters: record)
     monkeypatch.setattr(
@@ -8638,7 +8060,7 @@ def test_resolve_knowledge_base_permission_speed_mode_uses_record_tenant_when_us
         speed_mode=True,
     )
     monkeypatch.setattr(
-        "backend.services.vectordatabase_service.ResourceAccessControl.check",
+        "management.services.knowledge_base.permission.ResourceAccessControl.check",
         lambda resource, **kwargs: SimpleNamespace(permission_label="EDIT"),
     )
 
@@ -8867,7 +8289,7 @@ def test_create_knowledge_base_forces_user_to_private_without_groups(monkeypatch
         "model_type": "embedding",
     }
     monkeypatch.setattr(
-        "backend.services.vectordatabase_service.get_model_by_model_id",
+        "management.services.knowledge_base.management.get_model_by_model_id",
         lambda model_id, tenant_id: model,
     )
     record = {
@@ -8877,11 +8299,11 @@ def test_create_knowledge_base_forces_user_to_private_without_groups(monkeypatch
     }
     create_record = MagicMock(return_value=record)
     monkeypatch.setattr(
-        "backend.services.vectordatabase_service.create_knowledge_record",
+        "management.services.knowledge_base.management.create_knowledge_record",
         create_record,
     )
     monkeypatch.setattr(
-        "backend.services.vectordatabase_service._create_embedding_model",
+        "management.services.knowledge_base.management.create_embedding_model",
         lambda _model: object(),
     )
     vdb_core = MagicMock()
@@ -8908,7 +8330,7 @@ def test_create_knowledge_base_forces_user_to_private_without_groups(monkeypatch
 
 def test_update_knowledge_base_user_rejects_shared_record(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.vectordatabase_service.get_knowledge_record",
+        "management.services.knowledge_base.management.get_knowledge_record",
         lambda _filters: {"ingroup_permission": "EDIT"},
     )
 
@@ -8924,9 +8346,9 @@ def test_update_knowledge_base_user_rejects_shared_record(monkeypatch):
 @pytest.mark.parametrize("permission", ["EDIT", "CREATOR"])
 def test_require_knowledge_base_edit_permission_allows_editors(monkeypatch, permission):
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
-        staticmethod(lambda **_kwargs: permission),
+        staticmethod(lambda *_args, **_kwargs: permission),
     )
 
     assert (
@@ -8937,9 +8359,9 @@ def test_require_knowledge_base_edit_permission_allows_editors(monkeypatch, perm
 
 def test_require_knowledge_base_edit_permission_rejects_read_only(monkeypatch):
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
-        staticmethod(lambda **_kwargs: "READ_ONLY"),
+        staticmethod(lambda *_args, **_kwargs: "READ_ONLY"),
     )
 
     with pytest.raises(PermissionError, match="No permission"):
@@ -8955,9 +8377,9 @@ def test_require_knowledge_base_edit_permission_rejects_read_only(monkeypatch):
 def test_require_knowledge_base_read_permission_allows_readers(monkeypatch, permission):
     """User with any non-None permission level can read the knowledge base."""
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
-        staticmethod(lambda **_kwargs: permission),
+        staticmethod(lambda *_args, **_kwargs: permission),
     )
 
     assert (
@@ -8969,9 +8391,9 @@ def test_require_knowledge_base_read_permission_allows_readers(monkeypatch, perm
 def test_require_knowledge_base_read_permission_rejects_no_permission(monkeypatch):
     """User with None permission cannot read the knowledge base."""
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
-        staticmethod(lambda **_kwargs: None),
+        staticmethod(lambda *_args, **_kwargs: None),
     )
 
     with pytest.raises(PermissionError, match="No permission"):
@@ -8992,7 +8414,7 @@ def test_filter_accessible_indices_preserves_order(monkeypatch):
         return permissions.get(index_name)
 
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
         staticmethod(mock_resolve),
     )
@@ -9012,9 +8434,9 @@ def test_filter_accessible_indices_empty_input():
 def test_filter_accessible_indices_all_accessible(monkeypatch):
     """When all indices are accessible, all are returned."""
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
-        staticmethod(lambda **_kw: "READ_ONLY"),
+        staticmethod(lambda *_args, **_kw: "READ_ONLY"),
     )
 
     result = ElasticSearchService.filter_accessible_indices(
@@ -9026,9 +8448,9 @@ def test_filter_accessible_indices_all_accessible(monkeypatch):
 def test_filter_accessible_indices_none_accessible(monkeypatch):
     """When no indices are accessible, empty list is returned."""
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
-        staticmethod(lambda **_kw: None),
+        staticmethod(lambda *_args, **_kw: None),
     )
 
     result = ElasticSearchService.filter_accessible_indices(
@@ -9046,7 +8468,7 @@ def test_filter_accessible_indices_handles_missing_kb_gracefully(monkeypatch):
         return "READ_ONLY"
 
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
         staticmethod(mock_resolve),
     )
@@ -9066,7 +8488,7 @@ def test_filter_accessible_indices_handles_unexpected_exception(monkeypatch):
         return "READ_ONLY"
 
     monkeypatch.setattr(
-        ElasticSearchService,
+        kb_permission,
         "resolve_knowledge_base_permission",
         staticmethod(mock_resolve),
     )
@@ -9078,33 +8500,14 @@ def test_filter_accessible_indices_handles_unexpected_exception(monkeypatch):
 
 
 def test_create_embedding_model_rejects_invalid_model_type():
-    from backend.services.vectordatabase_service import _create_embedding_model
+    from management.services.model.resolver import create_embedding_model
 
     with pytest.raises(ValueError, match="Invalid model_type 'chat'"):
-        _create_embedding_model({"model_name": "not-an-embedding", "model_type": "chat"})
+        create_embedding_model({"model_name": "not-an-embedding", "model_type": "chat"})
 
 
-def test_get_embedding_model_returns_none_when_default_record_is_not_embedding(monkeypatch):
-    import backend.services.vectordatabase_service as vdb_service
-
-    monkeypatch.setattr(
-        vdb_service,
-        "get_model_records",
-        lambda *_args, **_kwargs: [{"model_id": 1, "model_type": "chat"}],
-    )
-
-    assert vdb_service.get_embedding_model("tenant-1") == (None, None)
 
 
-def test_get_embedding_model_returns_none_when_lookup_raises(monkeypatch):
-    import backend.services.vectordatabase_service as vdb_service
-
-    def raise_lookup(*_args, **_kwargs):
-        raise RuntimeError("model registry unavailable")
-
-    monkeypatch.setattr(vdb_service, "get_model_records", raise_lookup)
-
-    assert vdb_service.get_embedding_model("tenant-1") == (None, None)
 
 
 if __name__ == '__main__':

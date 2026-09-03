@@ -59,6 +59,8 @@ sys.modules.setdefault("database.knowledge_db", MagicMock())
 sys.modules.setdefault("database.model_management_db", MagicMock())
 sys.modules.setdefault("database.remote_mcp_db", MagicMock())
 sys.modules.setdefault("database.tool_db", MagicMock())
+sys.modules.setdefault("services.model_gateway_service", MagicMock())
+sys.modules.setdefault("utils.config_utils", MagicMock())
 
 
 class _SkillZipEntryMock:
@@ -158,7 +160,7 @@ _agent_service_mock.export_agent_dict_for_repository_impl = AsyncMock(return_val
     "mcp_info": [],
 })
 _agent_service_mock.list_all_agent_info_impl = AsyncMock(return_value=[])
-sys.modules["services.agent_service"] = _agent_service_mock
+sys.modules["management.services.agent.service"] = _agent_service_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["services.notification_service"] = _notification_service_mock
@@ -2279,7 +2281,7 @@ async def test_import_agent_from_repository_increments_downloads():
         "import_agent_impl",
         new_callable=AsyncMock,
         return_value={1: 100},
-    ), patch.object(
+    ) as mock_import, patch.object(
         ars,
         "increment_agent_repository_downloads",
         return_value=1,
@@ -2291,6 +2293,7 @@ async def test_import_agent_from_repository_increments_downloads():
         )
 
     mock_increment.assert_called_once_with(42)
+    assert mock_import.call_args.kwargs["resolve_name_conflicts"] is True
     assert result == {1: 100}
 
 
@@ -2368,6 +2371,7 @@ async def test_import_agent_from_repository_passes_skill_resolutions():
     mock_import.assert_called_once()
     call_kwargs = mock_import.call_args[1]
     assert call_kwargs["skill_resolutions"] == skill_resolutions
+    assert call_kwargs["resolve_name_conflicts"] is True
 
 
 @pytest.mark.asyncio

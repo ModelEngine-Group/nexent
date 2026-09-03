@@ -684,8 +684,6 @@ class ModelConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    appName: str
-    appDescription: str
     iconType: str
     iconKey: Optional[str] = "search"
     customIconUrl: Optional[str] = None
