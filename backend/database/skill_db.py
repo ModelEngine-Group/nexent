@@ -14,6 +14,19 @@ from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger(__name__)
 
+SKILL_DESCRIPTION_MAX_LENGTH = 1000
+
+
+def _normalize_skill_description(value: Any) -> str:
+    """Normalize a skill description to the database column limit."""
+    description = "" if value is None else str(value)
+    if len(description) > SKILL_DESCRIPTION_MAX_LENGTH:
+        logger.warning(
+            "Skill description exceeds %s characters and will be truncated",
+            SKILL_DESCRIPTION_MAX_LENGTH,
+        )
+    return description[:SKILL_DESCRIPTION_MAX_LENGTH]
+
 
 def _params_value_for_db(raw: Any) -> Any:
     """Strip UI/YAML comment metadata, then JSON round-trip for the DB JSON column."""
@@ -427,7 +440,7 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         skill = SkillInfo(
             skill_name=skill_data["name"],
             tenant_id=tenant_id,
-            skill_description=skill_data.get("description", ""),
+            skill_description=_normalize_skill_description(skill_data.get("description", "")),
             skill_tags=skill_data.get("tags", []),
             skill_content=skill_data.get("content", ""),
             config_schemas=_params_value_for_db(
@@ -765,7 +778,7 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
             if skill_name in existing_dict:
                 existing = existing_dict[skill_name]
                 # Unconditionally overwrite all fields on every scan (same as tools)
-                existing.skill_description = skill_data.get("description", "")
+                existing.skill_description = _normalize_skill_description(skill_data.get("description", ""))
                 existing.skill_tags = skill_data.get("tags", [])
                 existing.skill_content = skill_data.get("content", "")
                 existing.config_schemas = _params_value_for_db(
@@ -777,7 +790,7 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
                 new_skill = SkillInfo(
                     skill_name=skill_name,
                     tenant_id=tenant_id,
-                    skill_description=skill_data.get("description", ""),
+                    skill_description=_normalize_skill_description(skill_data.get("description", "")),
                     skill_tags=skill_data.get("tags", []),
                     skill_content=skill_data.get("content", ""),
                     config_schemas=_params_value_for_db(

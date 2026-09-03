@@ -73,26 +73,19 @@ def build_authorized_context_input(
 # =============================================================================
 
 
-def _build_header_text(
-    app_name: str,
-    app_description: str,
-    user_id: str,
-    language: str = "zh",
-    priority: int = 100,
-) -> str:
+def _build_header_text(language: str = "zh") -> str:
     """Build the header prompt section.
 
     Section: "### 基本信息" / "### Basic Information"
-    Content: Agent identity and app name/description.  User identity is
-    request-scoped data and must not enter the managed stable prefix.
+    Content: Static Nexent identity and description.
     Note: Current time is intentionally excluded from the system prompt so the
     static system prefix can hit the LLM KV/prompt cache across requests. The
     current time is injected on the user-message side instead (see CoreAgent.run).
     """
     if language == "zh":
-        content = f"### 基本信息\n你是{app_name}，{app_description}\n当回答时间相关问题时，请使用用户消息中 [Current time: ...] 标记的时间，该时间为用户本地时间。"
+        content = "### 基本信息\n你是 Nexent，Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。\n当回答时间相关问题时，请使用用户消息中 [Current time: ...] 标记的时间，该时间为用户本地时间。"
     else:
-        content = f"### Basic Information\nYou are {app_name}, {app_description}\nWhen answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time."
+        content = "### Basic Information\nYou are Nexent. Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multimodal Q&A, retrieval, data analysis, and processing capabilities.\nWhen answering time-related questions, use the time from the [Current time: ...] marker in the user message, which represents the user's local time."
 
     return content
 
@@ -168,6 +161,7 @@ def _build_execution_flow_text(
         else:
             lines.append("   - 根据格式规范正确调用工具")
         lines.append("   - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码")
+        lines.append("   - 每个模型执行轮次最多输出一个'<code>...</code>'代码块；如需调用多个工具，请将调用写在同一个代码块内，并等待本轮执行结果后再生成下一轮代码")
         lines.append("   - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。")
         lines.append("")
         lines.append("3. 自验证：")
@@ -237,6 +231,7 @@ def _build_execution_flow_text(
         else:
             lines.append("   - Call tools correctly according to format specifications")
         lines.append("   - To distinguish between code execution and displaying user code, use '<code>code</code>' for executing code and '<DISPLAY:language_type>code</DISPLAY>' for displaying code")
+        lines.append("   - Output at most one executable '<code>...</code>' block per model step. Put multiple tool calls inside that one block when needed, then wait for its execution result before producing the next block.")
         lines.append("   - Note that executed code is not visible to users. If users need to see the code, use '<DISPLAY:language_type>code</DISPLAY>' for displaying code.")
         lines.append("")
         lines.append("3. Self-verification:")
@@ -307,7 +302,7 @@ def _build_code_norms_text(
     """
     if language == "zh":
         lines = ["### python代码规范"]
-        lines.append("1. 如果认为是需要执行的代码，使用'<code>代码</code>'格式；如果是不需要执行仅用于展示的代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'格式，其中语言类型例如python、java、javascript等；")
+        lines.append("1. 如果认为是需要执行的代码，使用'<code>代码</code>'格式，并且每个执行轮次最多输出一个'<code>...</code>'代码块；如果需要多个工具调用，将它们写在同一个代码块中。如果是不需要执行仅用于展示的代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'格式，其中语言类型例如python、java、javascript等；")
         lines.append("2. 只使用已定义的变量，变量将在多次调用之间持续保持；")
         lines.append("3. 使用\"print()\"函数让下一次的模型调用看到对应变量信息；")
         lines.append("4. 正确使用工具/助手的入参，使用关键字参数，不要用字典形式；")
@@ -321,7 +316,7 @@ def _build_code_norms_text(
         lines.append("12. 不要放弃！你负责解决任务，而不是提供解决方向。")
     else:
         lines = ["### Python Code Specifications"]
-        lines.append("1. If it is considered to be code that needs to be executed, use '<code>code</code>'. If the code does not need to be executed for display only, use '<DISPLAY:language_type>code</DISPLAY>', where language_type can be python, java, javascript, etc;")
+        lines.append("1. If code needs to be executed, use '<code>code</code>' and output at most one executable '<code>...</code>' block per step; place multiple tool calls inside that single block when needed. For display-only code, use '<DISPLAY:language_type>code</DISPLAY>', where language_type can be python, java, javascript, etc;")
         lines.append("2. Only use defined variables, variables will persist between multiple calls;")
         lines.append("3. Use \"print()\" function to let the next model call see corresponding variable information;")
         lines.append("4. Use tool/agent input parameters correctly, use keyword arguments, not dictionary format;")
@@ -414,9 +409,6 @@ def build_context_inputs(
     duty: Optional[str] = None,
     constraint: Optional[str] = None,
     few_shots: Optional[str] = None,
-    app_name: Optional[str] = None,
-    app_description: Optional[str] = None,
-    user_id: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
@@ -462,10 +454,8 @@ def build_context_inputs(
                 metadata={"authority": authority},
             ))
 
-    if include_app_context and app_name and app_description and user_id:
-        add_system("header", _build_header_text(
-            app_name, app_description, user_id, language
-        ), 100, "tenant")
+    if include_app_context:
+        add_system("header", _build_header_text(language), 100, "platform")
 
     if memory_tool_policy:
         add_system("memory_tool_policy", memory_tool_policy, 90, "platform")
@@ -640,21 +630,3 @@ def build_context_inputs(
     if few_shots:
         add_system("footer", _build_footer_text(few_shots, language), 10)
     return inputs
-
-
-def build_app_context_string(
-    app_name: str,
-    app_description: str,
-    user_id: str,
-) -> str:
-    """Build app context string for template injection.
-
-    Args:
-        app_name: Application name
-        app_description: Application description
-        user_id: Current user ID
-
-    Returns:
-        Formatted app context string
-    """
-    return f"Application: {app_name}\nDescription: {app_description}\nCurrent user: {user_id}"

@@ -43,6 +43,16 @@ cd nexent
 bash deploy.sh k8s
 ```
 
+默认流程使用两个独立 Helm release：先安装 `nexent-infrastructure`（Elasticsearch、PostgreSQL、Redis、MinIO），等待四个组件就绪并初始化 Elasticsearch API Key 后，再首次安装应用侧 `nexent`。因此应用 Pod 不会因补写 API Key 再次滚动。可使用 `--release-scope all|infrastructure|nexent` 选择完整流程或单独操作一侧：
+
+```bash
+bash deploy.sh k8s --release-scope all
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
+```
+
+仅部署 `nexent` 时，脚本会先确认基础 release 存在且四个组件均已就绪；仅卸载基础 release 时，如果 `nexent` 仍存在则拒绝执行。检测到旧版单一 `nexent` release 仍管理基础组件时，脚本会直接报错；当前版本只支持全新双 release 部署，不执行自动迁移。
+
 执行此命令后，系统会通过 Bash TUI 选择配置选项。可使用方向键或 `j/k` 移动，空格切换多选项，回车确认，`b`/Backspace 返回上一步，`q` 退出。
 
 **组件组合:**
@@ -225,8 +235,14 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 请在仓库根目录使用统一卸载入口：
 
 ```bash
-# 删除 Helm release；交互模式会询问是否删除 namespace 和本地数据
+# 依次删除 nexent 和 nexent-infrastructure；交互模式会询问是否删除 namespace 和本地数据
 bash uninstall.sh k8s
+
+# 仅卸载应用 release
+bash uninstall.sh k8s --release-scope nexent --keep-namespace
+
+# 仅卸载基础 release（要求应用 release 已不存在）
+bash uninstall.sh k8s --release-scope infrastructure --keep-namespace
 
 # 仅清理 Helm release 状态，适合修复卡住的发布
 bash uninstall.sh k8s clean
@@ -248,6 +264,10 @@ bash uninstall.sh k8s delete-all
 ```bash
 # 交互式部署
 bash deploy.sh k8s
+
+# 仅升级基础或应用 release
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
 
 # 非交互式部署默认组件
 bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general

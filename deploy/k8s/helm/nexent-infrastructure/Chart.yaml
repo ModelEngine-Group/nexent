@@ -1,0 +1,27 @@
+apiVersion: v2
+name: nexent-infrastructure
+description: Infrastructure services for the Nexent AI platform
+type: application
+version: 0.1.0
+appVersion: "latest"
+
+dependencies:
+  - name: nexent-infrastructure-common
+    version: 0.1.0
+    repository: "file://./charts/nexent-infrastructure-common"
+  - name: nexent-elasticsearch
+    version: 0.1.0
+    repository: "file://./charts/nexent-elasticsearch"
+    condition: nexent-elasticsearch.enabled
+  - name: nexent-postgresql
+    version: 0.1.0
+    repository: "file://./charts/nexent-postgresql"
+    condition: nexent-postgresql.enabled
+  - name: nexent-redis
+    version: 0.1.0
+    repository: "file://./charts/nexent-redis"
+    condition: nexent-redis.enabled
+  - name: nexent-minio
+    version: 0.1.0
+    repository: "file://./charts/nexent-minio"
+    condition: nexent-minio.enabled

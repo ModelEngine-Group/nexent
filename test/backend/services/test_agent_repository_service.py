@@ -2100,7 +2100,7 @@ async def test_import_agent_from_repository_increments_downloads():
         "import_agent_impl",
         new_callable=AsyncMock,
         return_value={1: 100},
-    ), patch.object(
+    ) as mock_import, patch.object(
         ars,
         "increment_agent_repository_downloads",
         return_value=1,
@@ -2112,6 +2112,7 @@ async def test_import_agent_from_repository_increments_downloads():
         )
 
     mock_increment.assert_called_once_with(42)
+    assert mock_import.call_args.kwargs["resolve_name_conflicts"] is True
     assert result == {1: 100}
 
 
@@ -2189,6 +2190,7 @@ async def test_import_agent_from_repository_passes_skill_resolutions():
     mock_import.assert_called_once()
     call_kwargs = mock_import.call_args[1]
     assert call_kwargs["skill_resolutions"] == skill_resolutions
+    assert call_kwargs["resolve_name_conflicts"] is True
 
 
 @pytest.mark.asyncio

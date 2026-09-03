@@ -11,6 +11,7 @@ import { useConfig } from "@/hooks/useConfig";
 import { extractColorsFromUri } from "@/lib/avatar";
 import log from "@/lib/logger";
 import { chatConfig } from "@/const/chatConfig";
+import { APP_DISPLAY_DESCRIPTION, APP_DISPLAY_NAME } from "@/const/modelConfig";
 import { FilePreview } from "@/types/chat";
 import {
   getFileExtension,
@@ -786,7 +787,7 @@ export function ChatInput({
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t("chatInput.sendMessageTo", {
-            appName: appConfig.appName,
+            appName: APP_DISPLAY_NAME,
           })}
           className="px-5 pb-3 pt-0 text-xl resize-none bg-slate-100 border-0 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 w-full"
           rows={1}
@@ -984,7 +985,7 @@ export function ChatInput({
             <div className="h-16 w-16 rounded-full overflow-hidden mb-4 ring-2 ring-offset-2 ring-slate-100">
               <img
                 src={avatarUrl}
-                alt={appConfig.appName}
+                alt={APP_DISPLAY_NAME}
                 className="h-full w-full object-cover"
               />
             </div>
@@ -1008,12 +1009,12 @@ export function ChatInput({
                   })(),
                 }}
               >
-                {t("chatInput.helloIm", { appName: appConfig.appName })}
+                {t("chatInput.helloIm", { appName: APP_DISPLAY_NAME })}
               </h1>
             )}
             {!agentGreeting && (
               <p className="text-left text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-                {appConfig.appDescription ? t("project.config.description") : t("chatInput.introMessage")}
+                {APP_DISPLAY_DESCRIPTION}
               </p>
             )}
           </div>
