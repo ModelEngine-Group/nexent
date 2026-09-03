@@ -1555,6 +1555,7 @@ class TestPoolManagerLogic:
         )
         bridge_installer = MagicMock(side_effect=AssertionError("owner bridge installation"))
         monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
         monkeypatch.setattr(pm, "_build_system_docker_executor", lambda *args: owner)
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", bridge_installer)
 
