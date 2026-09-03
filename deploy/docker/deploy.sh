@@ -1052,7 +1052,12 @@ prepare_directory_and_data() {
 
   # Copy only the explicitly selected official agent profiles. The compose
   # file mounts this directory read-only into nexent-config.
-  if [ -d "$DOCKER_ASSETS_DIR/official-agents" ] && [ -n "$OFFICIAL_AGENT_PROFILES" ]; then
+  OFFICIAL_AGENT_PROFILES="${DEPLOYMENT_OFFICIAL_AGENT_PROFILES:-${OFFICIAL_AGENT_PROFILES:-}}"
+  if [ -n "$OFFICIAL_AGENT_PROFILES" ] && [ -z "${DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR:-}" ]; then
+    deployment_prepare_official_agent_catalog || true
+  fi
+  local official_agent_source_root="${DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR:-$DOCKER_ASSETS_DIR/official-agents}"
+  if [ -d "$official_agent_source_root" ] && [ -n "$OFFICIAL_AGENT_PROFILES" ]; then
     mkdir -p "$NEXENT_USER_DIR/official-agents"
     local official_profile official_source official_target
     IFS=',' read -r -a official_profiles <<< "$OFFICIAL_AGENT_PROFILES"
@@ -1062,7 +1067,7 @@ prepare_directory_and_data() {
       case "$official_profile" in
         *[!a-zA-Z0-9_-]*) echo "   ⚠️ Invalid official agent profile: $official_profile"; continue ;;
       esac
-      official_source="$DOCKER_ASSETS_DIR/official-agents/$official_profile"
+      official_source="$official_agent_source_root/$official_profile"
       official_target="$NEXENT_USER_DIR/official-agents/$official_profile"
       if [ -d "$official_source" ]; then
         mkdir -p "$official_target"
@@ -1110,7 +1115,7 @@ deploy_core_services() {
 }
 
 sync_official_agents_after_deploy() {
-  local profiles="${OFFICIAL_AGENT_PROFILES:-}"
+  local profiles="${DEPLOYMENT_OFFICIAL_AGENT_PROFILES:-${OFFICIAL_AGENT_PROFILES:-}}"
   [ -n "$profiles" ] || return 0
 
   echo "🤖 Synchronizing official agent bundles ($profiles)..."

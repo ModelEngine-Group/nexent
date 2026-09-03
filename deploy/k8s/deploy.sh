@@ -438,7 +438,7 @@ render_k8s_runtime_config_values() {
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
     printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
     printf '    officialAgentsPath: %s\n' "$(yaml_quote "$(env_or_default OFFICIAL_AGENTS_PATH "/mnt/nexent/official-agents")")"
-    printf '    officialAgentProfiles: %s\n' "$(yaml_quote "$(env_or_default OFFICIAL_AGENT_PROFILES "")")"
+    printf '    officialAgentProfiles: %s\n' "$(yaml_quote "${DEPLOYMENT_OFFICIAL_AGENT_PROFILES:-$(env_or_default OFFICIAL_AGENT_PROFILES "")}")"
     printf '    marketBackend: %s\n' "$(yaml_quote "$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
@@ -742,7 +742,7 @@ wait_for_deployment_ready() {
 }
 
 sync_official_agents_after_deploy() {
-    local profiles="${OFFICIAL_AGENT_PROFILES:-}"
+    local profiles="${DEPLOYMENT_OFFICIAL_AGENT_PROFILES:-${OFFICIAL_AGENT_PROFILES:-}}"
     [ -n "$profiles" ] || return 0
 
     echo "Synchronizing official agent bundles ($profiles)..."

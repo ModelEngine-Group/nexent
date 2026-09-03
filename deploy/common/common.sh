@@ -6,6 +6,8 @@
 
 DEPLOYMENT_SCHEMA_VERSION="1"
 DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process,supabase"
+DEPLOYMENT_OFFICIAL_AGENT_REPO_URL_DEFAULT="https://gitcode.com/ModelEngine/AgentsHub"
+DEPLOYMENT_OFFICIAL_AGENT_REPO_REF_DEFAULT="main"
 DEPLOYMENT_PORT_POLICY_DEFAULT="development"
 DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
 DEPLOYMENT_REGISTRY_PROFILE_DEFAULT="general"
@@ -14,6 +16,8 @@ DEPLOYMENT_MONITORING_PROVIDER_DEFAULT="otlp"
 DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT="Nexent@123"
 
 DEPLOYMENT_COMPONENTS=""
+DEPLOYMENT_OFFICIAL_AGENT_PROFILES=""
+DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR=""
 DEPLOYMENT_PORT_POLICY=""
 DEPLOYMENT_IMAGE_SOURCE=""
 DEPLOYMENT_REGISTRY_PROFILE=""
@@ -799,6 +803,7 @@ deployment_init_defaults() {
   DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT"
   DEPLOYMENT_APP_VERSION="${APP_VERSION:-latest}"
   DEPLOYMENT_MONITORING_PROVIDER="$DEPLOYMENT_MONITORING_PROVIDER_DEFAULT"
+  DEPLOYMENT_OFFICIAL_AGENT_PROFILES=""
   DEPLOYMENT_USE_LOCAL_CONFIG="false"
   DEPLOYMENT_RECONFIGURE="false"
   DEPLOYMENT_ROTATE_SECRETS="false"
@@ -810,7 +815,7 @@ deployment_init_defaults() {
   DEPLOYMENT_DOCKER_PORTS=""
   unset DEPLOYMENT_COMPONENTS_EXPLICIT DEPLOYMENT_PORT_POLICY_EXPLICIT DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT
   unset DEPLOYMENT_IMAGE_REGISTRY_PREFIX_EXPLICIT
-  unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT
+  unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT DEPLOYMENT_OFFICIAL_AGENT_PROFILES_EXPLICIT
 }
 
 deployment_parse_common_args() {
@@ -842,6 +847,11 @@ deployment_parse_common_args() {
         ;;
       --monitoring-provider)
         DEPLOYMENT_MONITORING_PROVIDER="$2"
+        shift 2
+        ;;
+      --official-agent-profiles)
+        DEPLOYMENT_OFFICIAL_AGENT_PROFILES="$2"
+        DEPLOYMENT_OFFICIAL_AGENT_PROFILES_EXPLICIT="true"
         shift 2
         ;;
       --use-local-config)
@@ -941,6 +951,10 @@ deployment_load_config_file() {
           ;;
         monitoringProvider)
           DEPLOYMENT_MONITORING_PROVIDER="$value"
+          loaded_config_value="true"
+          ;;
+        officialAgentProfiles)
+          DEPLOYMENT_OFFICIAL_AGENT_PROFILES="$value"
           loaded_config_value="true"
           ;;
       esac
@@ -1495,6 +1509,52 @@ deployment_tui_select_image_source() {
 
 }
 
+deployment_prepare_official_agent_catalog() {
+  local repo_url="${OFFICIAL_AGENTS_REPO_URL:-$DEPLOYMENT_OFFICIAL_AGENT_REPO_URL_DEFAULT}"
+  local repo_ref="${OFFICIAL_AGENTS_REPO_REF:-$DEPLOYMENT_OFFICIAL_AGENT_REPO_REF_DEFAULT}"
+  local source_dir="${DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR:-${TMPDIR:-/tmp}/nexent/official-agents-source}"
+  mkdir -p "$(dirname "$source_dir")"
+  if [ -d "$source_dir/.git" ]; then
+    git -C "$source_dir" fetch --depth 1 origin "$repo_ref" >/dev/null 2>&1 || return 1
+    git -C "$source_dir" checkout -q -B "$repo_ref" FETCH_HEAD || return 1
+  else
+    rm -rf "$source_dir"
+    git clone --depth 1 --branch "$repo_ref" "$repo_url" "$source_dir" >/dev/null 2>&1 || return 1
+  fi
+  DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR="$source_dir"
+  export DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR
+}
+
+deployment_tui_multiselect_official_agents() {
+  [ -t 0 ] || return 0
+  [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ] || return 0
+  [ -z "${DEPLOYMENT_OFFICIAL_AGENT_PROFILES_EXPLICIT:-}" ] || return 0
+  if ! deployment_prepare_official_agent_catalog; then
+    deployment_warn "Unable to fetch official agent catalog; no official agents selected."
+    DEPLOYMENT_OFFICIAL_AGENT_PROFILES=""
+    return 0
+  fi
+  local profiles=() profile selection
+  while IFS= read -r profile; do
+    [ -n "$profile" ] && profiles+=("$profile")
+  done < <(find "$DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort)
+  [ "${#profiles[@]}" -gt 0 ] || return 0
+  echo ""
+  echo "Select official agent categories (comma-separated, empty to skip):"
+  printf '  %s\n' "${profiles[@]}"
+  read -r selection
+  DEPLOYMENT_OFFICIAL_AGENT_PROFILES=""
+  local item valid
+  IFS=',' read -r -a requested <<< "$selection"
+  for item in "${requested[@]}"; do
+    item="$(deployment_trim "$item")"
+    [ -n "$item" ] || continue
+    valid=false
+    for profile in "${profiles[@]}"; do [ "$item" = "$profile" ] && valid=true; done
+    [ "$valid" = true ] && DEPLOYMENT_OFFICIAL_AGENT_PROFILES="$(deployment_join_csv "$DEPLOYMENT_OFFICIAL_AGENT_PROFILES" "$item")"
+  done
+}
+
 deployment_tui_step_should_run() {
   local step="$1"
   [ -t 0 ] || return 1
@@ -1512,6 +1572,9 @@ deployment_tui_step_should_run() {
     3)
       deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ -z "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
       ;;
+    4)
+      [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ] && [ -z "${DEPLOYMENT_OFFICIAL_AGENT_PROFILES_EXPLICIT:-}" ]
+      ;;
     *)
       return 1
       ;;
@@ -1521,7 +1584,7 @@ deployment_tui_step_should_run() {
 deployment_tui_next_step() {
   local step="$1"
   step=$((step + 1))
-  while [ "$step" -lt 4 ]; do
+  while [ "$step" -lt 5 ]; do
     if deployment_tui_step_should_run "$step"; then
       printf '%s' "$step"
       return 0
@@ -1562,7 +1625,7 @@ deployment_run_tui_configuration() {
     step="$(deployment_tui_next_step "$step")"
   fi
 
-  while [ "$step" -lt 4 ]; do
+  while [ "$step" -lt 5 ]; do
     case "$step" in
       0)
         deployment_ensure_required_components
@@ -1580,6 +1643,10 @@ deployment_run_tui_configuration() {
         ;;
       3)
         deployment_tui_select_monitoring_provider
+        result=$?
+        ;;
+      4)
+        deployment_tui_multiselect_official_agents
         result=$?
         ;;
       *)
@@ -2260,6 +2327,7 @@ deployment_persist_local_config() {
     printf 'imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
     printf 'imageRegistryPrefix: "%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     printf 'monitoringProvider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
+    printf 'officialAgentProfiles: "%s"\n' "$DEPLOYMENT_OFFICIAL_AGENT_PROFILES"
   } > "$output_file"
 }
 
