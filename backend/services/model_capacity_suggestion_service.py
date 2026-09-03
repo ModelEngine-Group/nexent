@@ -134,8 +134,13 @@ HOST_PROVIDER_PATTERNS = (
 SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
 
 
+# Keep these imports behind the service call boundary. This module is also
+# loaded by lightweight model-management/bootstrap environments that expose a
+# partial ``nexent.core`` package; importing the SDK matcher at module scope
+# breaks those environments before suggestion matching is requested. These
+# adapters delegate directly to the SDK and intentionally contain no matching
+# logic of their own.
 def _parse_model_identity(model_name: str, provider: Optional[str] = None) -> Any:
-    """Load the SDK matcher only when suggestion matching is requested."""
     from nexent.core.models.model_identity import parse_model_identity
 
     return parse_model_identity(model_name, provider)
