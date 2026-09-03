@@ -10,13 +10,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from consts.model import AgentRepositorySnapshot, SkillZipEntry
+from pydantic import BaseModel
+
+from consts.model import AgentRepositorySnapshot
 
 logger = logging.getLogger("official_agent_bundle_service")
 
 MAX_BUNDLE_BYTES = 100 * 1024 * 1024
 MAX_BUNDLE_FILES = 1_000
 MAX_BUNDLE_FILE_BYTES = 20 * 1024 * 1024
+
+
+class _BundleSkillZipEntry(BaseModel):
+    skill_name: str
+    skill_zip_base64: str
 
 
 @dataclass(frozen=True)
@@ -78,23 +85,27 @@ def _read_bundle_json(extract_dir: Path) -> dict[str, Any]:
 
 def _snapshot_from_json(data: dict[str, Any]) -> AgentRepositorySnapshot:
     payload = data.get("snapshot") if isinstance(data.get("snapshot"), dict) else data
+    AgentRepositorySnapshot.model_rebuild(
+        force=True,
+        _types_namespace={"SkillZipEntry": _BundleSkillZipEntry},
+    )
     return AgentRepositorySnapshot.model_validate(payload)
 
 
-def _load_skill_entries(extract_dir: Path, snapshot: AgentRepositorySnapshot) -> list[SkillZipEntry]:
+def _load_skill_entries(extract_dir: Path, snapshot: AgentRepositorySnapshot) -> list[_BundleSkillZipEntry]:
     declared = {
         skill_name
         for agent in snapshot.agent_info.values()
         for skill_name in (agent.skill_names or [])
         if skill_name
     }
-    entries: list[SkillZipEntry] = []
+    entries: list[_BundleSkillZipEntry] = []
     for skill_name in sorted(declared):
         if Path(skill_name).name != skill_name:
             raise ValueError(f"unsafe official skill name: {skill_name}")
         path = extract_dir / "skills" / f"{skill_name}.zip"
         if path.is_file():
-            entries.append(SkillZipEntry(skill_name=skill_name, skill_zip_base64=__import__("base64").b64encode(path.read_bytes()).decode("ascii")))
+            entries.append(_BundleSkillZipEntry(skill_name=skill_name, skill_zip_base64=__import__("base64").b64encode(path.read_bytes()).decode("ascii")))
     return entries
 
 
