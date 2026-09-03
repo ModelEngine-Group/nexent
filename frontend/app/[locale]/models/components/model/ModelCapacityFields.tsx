@@ -1,7 +1,13 @@
 import { Alert, AutoComplete, Button, Input, Space, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
-import type { CapacitySuggestion } from "@/types/modelConfig";
+import type {
+  CapacityFieldMetadata,
+  CapacitySuggestion,
+  ProfileMatchMetadata,
+  TokenCountProbeMetadata,
+} from "@/types/modelConfig";
+import { buildCamelCapacityPayload } from "@/lib/modelCapacityPayload";
 
 // W11 spec L767-790. Common token-count presets surfaced as a fallback
 // preset selector when no catalog suggestion populates the field. The
@@ -37,12 +43,7 @@ const OUTPUT_RESERVE_PRESET_OPTIONS = [
 ];
 
 export type CapacitySource =
-  | "operator"
-  | "profile"
-  | "provider_candidate"
-  | "legacy"
-  | "unknown"
-  | string;
+  "operator" | "profile" | "provider_candidate" | "legacy" | "unknown" | string;
 
 export interface ModelCapacityFormState {
   contextWindowTokens: string;
@@ -60,6 +61,14 @@ interface ModelCapacityFieldsProps {
   validationError?: string | null;
   capacitySource?: CapacitySource | null;
   capabilityProfileVersion?: string | null;
+  capacityFieldMetadata?: CapacityFieldMetadata | null;
+  canonicalModelId?: string | null;
+  tokenizerMatchMetadata?: ProfileMatchMetadata | null;
+  tokenCountProbeMetadata?: TokenCountProbeMetadata | null;
+  onReviewAutomaticUpdate?: () => void;
+  reviewingAutomaticUpdate?: boolean;
+  onProbeTokenCount?: () => void;
+  probingTokenCount?: boolean;
   /**
    * 'add' shows a flat panel with the four user-facing fields
    * (context_window, max_input, max_output, tokenizer) and supports required
@@ -80,12 +89,9 @@ interface ModelCapacityFieldsProps {
    */
   legacyMaxTokensCandidate?: number;
   /**
-   * When true (default), the context_window/max_output inputs render a gray
-   * placeholder showing the value the save handler would substitute if the
-   * field were left empty. Pass false in bulk-apply broadcast mode where
-   * empty means "do not broadcast this field"; showing a default-value hint
-   * there would be misleading. Tied to `buildCapacityPayload`'s
-   * `applyDefaults` option -- callers should pass matching booleans.
+   * When true (default), context_window/max_output inputs render gray
+   * estimated-value placeholders. Placeholders are never serialized. Pass
+   * false in bulk-apply mode where even a visual estimate is misleading.
    */
   applyDefaultsOnEmpty?: boolean;
   /** Currently accepted suggestion, used to detect fuzzy canonicalization mismatch */
@@ -141,12 +147,7 @@ export const validateCapacityForm = (
   value: ModelCapacityFormState,
   requiredFields: Array<keyof ModelCapacityFormState> = []
 ): string | null => {
-  const numericValues = [
-    value.contextWindowTokens,
-    value.maxInputTokens,
-    value.maxOutputTokens,
-    value.defaultOutputReserveTokens,
-  ];
+  const numericValues = [value.contextWindowTokens, value.maxOutputTokens];
   if (!numericValues.every(isPositiveIntegerOrEmpty)) {
     return "model.dialog.capacity.error.positiveInteger";
   }
@@ -158,34 +159,14 @@ export const validateCapacityForm = (
   }
 
   const contextWindowTokens = toOptionalPositiveInt(value.contextWindowTokens);
-  const maxInputTokens = toOptionalPositiveInt(value.maxInputTokens);
   const maxOutputTokens = toOptionalPositiveInt(value.maxOutputTokens);
-  const defaultOutputReserveTokens = toOptionalPositiveInt(
-    value.defaultOutputReserveTokens
-  );
 
   if (
     contextWindowTokens !== undefined &&
     maxOutputTokens !== undefined &&
-    maxOutputTokens > contextWindowTokens
+    maxOutputTokens >= contextWindowTokens
   ) {
     return "model.dialog.capacity.error.outputExceedsWindow";
-  }
-
-  if (
-    contextWindowTokens !== undefined &&
-    maxInputTokens !== undefined &&
-    maxInputTokens > contextWindowTokens
-  ) {
-    return "model.dialog.capacity.error.inputExceedsWindow";
-  }
-
-  if (
-    maxOutputTokens !== undefined &&
-    defaultOutputReserveTokens !== undefined &&
-    defaultOutputReserveTokens > maxOutputTokens
-  ) {
-    return "model.dialog.capacity.error.reserveExceedsOutput";
   }
 
   return null;
@@ -196,41 +177,10 @@ export const hasCapacityValues = (value: ModelCapacityFormState): boolean =>
 
 export const buildCapacityPayload = (
   value: ModelCapacityFormState,
-  options?: { applyDefaults?: boolean }
+  _options?: { applyDefaults?: boolean }
 ) => {
-  // applyDefaults=true (default): single-row write paths (add/edit single,
-  //   batch top-defaults, batch per-row gear, per-row gear in delete dialog).
-  //   When the user leaves context_window/max_output empty, substitute the
-  //   defaults so the bare-capacity gates and badge see a populated row.
-  // applyDefaults=false: bulk-apply broadcast mode in ProviderConfigEditDialog
-  //   ("修改配置"). Empty inputs mean "don't broadcast this value", preserving
-  //   each row's existing capacity. We must NOT substitute defaults here.
-  const applyDefaults = options?.applyDefaults !== false;
-  const hasValues = hasCapacityValues(value);
-  if (!hasValues && !applyDefaults) return {};
-
-  const contextWindowTokens =
-    toOptionalPositiveInt(value.contextWindowTokens) ??
-    (applyDefaults ? DEFAULT_CONTEXT_WINDOW_TOKENS : undefined);
-  const maxOutputTokens =
-    toOptionalPositiveInt(value.maxOutputTokens) ??
-    (applyDefaults ? DEFAULT_MAX_OUTPUT_TOKENS : undefined);
-
-  return {
-    contextWindowTokens,
-    maxInputTokens: toOptionalPositiveInt(value.maxInputTokens),
-    maxOutputTokens,
-    // Mirror max_output_tokens into the deprecated max_tokens column so
-    // legacy readers stay consistent. W1 step 4 makes them aliases server-side;
-    // keeping both columns populated avoids a brittle dependency on the
-    // Pydantic validator firing on every code path.
-    ...(maxOutputTokens !== undefined ? { maxTokens: maxOutputTokens } : {}),
-    defaultOutputReserveTokens: toOptionalPositiveInt(
-      value.defaultOutputReserveTokens
-    ),
-    tokenizerFamily: value.tokenizerFamily.trim() || undefined,
-    capacitySource: "operator",
-  };
+  void _options;
+  return buildCamelCapacityPayload(value);
 };
 
 export const capacityFormFromModel = (model: {
@@ -272,7 +222,14 @@ export const ModelCapacityFields = ({
   validationError,
   capacitySource,
   capabilityProfileVersion,
-  formMode = "edit",
+  capacityFieldMetadata,
+  canonicalModelId,
+  tokenizerMatchMetadata,
+  tokenCountProbeMetadata,
+  onReviewAutomaticUpdate,
+  reviewingAutomaticUpdate = false,
+  onProbeTokenCount,
+  probingTokenCount = false,
   requiredFields = [],
   suggestion,
   onUseSuggestion,
@@ -311,15 +268,11 @@ export const ModelCapacityFields = ({
 
   const source = capacitySource || "";
   const sourceColor = SOURCE_COLORS[source] || "default";
-  const hasValues = hasCapacityValues(value);
   const hasSuggestion = Boolean(suggestion?.suggestions);
   const requiredSet = new Set<keyof ModelCapacityFormState>(requiredFields);
-  const isAddMode = formMode === "add";
 
-  // Per-field default-value hints. Rendered as native input placeholders
-  // (gray text) only when the parent opts into default substitution. The
-  // gray text is purely a UX nudge -- the form state stays "" until the
-  // user types, and `buildCapacityPayload` does the substitution at save.
+  // Per-field estimates rendered as native input placeholders. They are
+  // never serialized unless the operator explicitly enters or selects them.
   const defaultPlaceholders: Partial<
     Record<keyof ModelCapacityFormState, string>
   > = applyDefaultsOnEmpty
@@ -349,6 +302,14 @@ export const ModelCapacityFields = ({
     presetOptions?: { value: string; label: string }[]
   ) => {
     const showPreset = presetOptions && !fieldHasSuggestion(field);
+    const provenance = capacityFieldMetadata?.fields[field];
+    const sourceLabels: Record<string, string> = {
+      catalog: "Automatic",
+      provider: "Provider",
+      operator: "Manual",
+      legacy: "Legacy",
+      unknown: "Unknown",
+    };
     const inputControl = showPreset ? (
       <AutoComplete
         className="w-full"
@@ -385,6 +346,27 @@ export const ModelCapacityFields = ({
           {requiredSet.has(field) && (
             <span className="text-red-500 ml-1">*</span>
           )}
+          {provenance?.source && (
+            <Tag
+              className="ml-2"
+              color={
+                provenance.source === "catalog"
+                  ? "green"
+                  : provenance.source === "operator"
+                    ? "blue"
+                    : provenance.source === "provider"
+                      ? "gold"
+                      : provenance.source === "legacy"
+                        ? "orange"
+                        : "default"
+              }
+            >
+              {t(`model.dialog.capacity.fieldSource.${provenance.source}`, {
+                defaultValue:
+                  sourceLabels[provenance.source] || provenance.source,
+              })}
+            </Tag>
+          )}
         </label>
         {inputControl}
       </div>
@@ -410,11 +392,56 @@ export const ModelCapacityFields = ({
         </div>
       )}
 
+      {(canonicalModelId ||
+        tokenizerMatchMetadata ||
+        tokenCountProbeMetadata) && (
+        <div className="rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600 space-y-1">
+          {canonicalModelId && <div>Model identity: {canonicalModelId}</div>}
+          {tokenizerMatchMetadata && (
+            <div>
+              Tokenizer:{" "}
+              {tokenizerMatchMetadata.autoApplicable ? "Exact" : "Estimated"}
+              {tokenizerMatchMetadata.reason
+                ? ` · ${tokenizerMatchMetadata.reason}`
+                : ""}
+            </div>
+          )}
+          {tokenCountProbeMetadata && (
+            <div>
+              Count endpoint: {tokenCountProbeMetadata.status} ·{" "}
+              {tokenCountProbeMetadata.reason}
+            </div>
+          )}
+          <Space size={6} wrap>
+            {onReviewAutomaticUpdate && (
+              <Button
+                size="small"
+                onClick={onReviewAutomaticUpdate}
+                loading={reviewingAutomaticUpdate}
+                disabled={disabled}
+              >
+                Review automatic update
+              </Button>
+            )}
+            {onProbeTokenCount && (
+              <Button
+                size="small"
+                onClick={onProbeTokenCount}
+                loading={probingTokenCount}
+                disabled={disabled}
+              >
+                Test token count
+              </Button>
+            )}
+          </Space>
+        </div>
+      )}
+
       {showLegacyMaxTokensPrompt ? (
         <Alert
           type="warning"
           showIcon
-          message={t("model.dialog.capacity.legacyMaxTokensHint", {
+          title={t("model.dialog.capacity.legacyMaxTokensHint", {
             maxTokens: legacyMaxTokensCandidate,
           })}
           description={
@@ -460,7 +487,7 @@ export const ModelCapacityFields = ({
         <Alert
           type={hasSuggestion ? "success" : "info"}
           showIcon
-          message={
+          title={
             hasSuggestion
               ? t("model.dialog.capacity.suggestion.found")
               : t("model.dialog.capacity.suggestion.notFound")
@@ -524,24 +551,9 @@ export const ModelCapacityFields = ({
           CONTEXT_WINDOW_PRESET_OPTIONS
         )}
         {renderNumberInput(
-          "maxInputTokens",
-          "model.dialog.capacity.maxInputTokens",
-          "model.dialog.capacity.maxInputTokens.tooltip"
-        )}
-        {renderNumberInput(
           "maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens",
           "model.dialog.capacity.maxOutputTokens.tooltip",
-          OUTPUT_RESERVE_PRESET_OPTIONS
-        )}
-        {/* defaultOutputReserveTokens is rendered in both add and edit modes
-            so newly added rows do not silently fall back to the SDK default at
-            runtime. Tokenizer renders full-width below in both modes for the
-            same consistency reason. */}
-        {renderNumberInput(
-          "defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens",
-          "model.dialog.capacity.defaultOutputReserveTokens.tooltip",
           OUTPUT_RESERVE_PRESET_OPTIONS
         )}
       </div>
@@ -555,7 +567,7 @@ export const ModelCapacityFields = ({
           adapters registered yet, so all families resolve to estimated). */}
 
       {validationError && (
-        <Alert type="error" showIcon message={t(validationError)} />
+        <Alert type="error" showIcon title={t(validationError)} />
       )}
     </div>
   );
