@@ -1258,24 +1258,29 @@ class OpenAIModel(OpenAIServerModel):
                     json.dumps(record.to_dict(), ensure_ascii=False),
                 )
             record._usage_event_emitted = True
+        usage_span_attributes = {
+            "usage.call_id": record.call_id,
+            "usage.source": record.source,
+            "usage.status": record.status,
+            "usage.input_tokens": record.usage.input_tokens,
+            "usage.output_tokens": record.usage.output_tokens,
+            "usage.total_tokens": record.usage.total_tokens,
+            "usage.fresh_input_tokens": record.usage.fresh_input_tokens,
+            "usage.cache_read_tokens": record.usage.cache_read_tokens,
+            "usage.cache_write_tokens": record.usage.cache_write_tokens,
+            "usage.reasoning_tokens": record.usage.reasoning_tokens,
+            "usage.visible_output_tokens": record.usage.visible_output_tokens,
+            "usage.quality_reasons": json.dumps(record.quality.reasons),
+            **{
+                f"context.composition.{name}": value
+                for name, value in record.context_composition["segments"].items()
+            },
+        }
         self._monitoring.set_span_attributes(
             **{
-                "usage.call_id": record.call_id,
-                "usage.source": record.source,
-                "usage.status": record.status,
-                "usage.input_tokens": record.usage.input_tokens,
-                "usage.output_tokens": record.usage.output_tokens,
-                "usage.total_tokens": record.usage.total_tokens,
-                "usage.fresh_input_tokens": record.usage.fresh_input_tokens,
-                "usage.cache_read_tokens": record.usage.cache_read_tokens,
-                "usage.cache_write_tokens": record.usage.cache_write_tokens,
-                "usage.reasoning_tokens": record.usage.reasoning_tokens,
-                "usage.visible_output_tokens": record.usage.visible_output_tokens,
-                "usage.quality_reasons": json.dumps(record.quality.reasons),
-                **{
-                    f"context.composition.{name}": value
-                    for name, value in record.context_composition["segments"].items()
-                },
+                key: value
+                for key, value in usage_span_attributes.items()
+                if value is not None
             }
         )
 

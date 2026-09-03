@@ -589,6 +589,13 @@ def test_call_normal_operation(openai_model_instance):
         assert call_usage.usage.total_tokens == 15
         assert call_usage.to_dict()["schema_version"] == 3
         assert tuple(openai_model_instance.provider_call_usages) == result.provider_call_usages
+        usage_attributes = next(
+            call.kwargs
+            for call in openai_model_instance._monitoring.set_span_attributes.call_args_list
+            if "usage.call_id" in call.kwargs
+        )
+        assert all(value is not None for value in usage_attributes.values())
+        assert "usage.fresh_input_tokens" not in usage_attributes
 
         # Verify observer calls
         openai_model_instance.observer.add_model_new_token.assert_any_call(
