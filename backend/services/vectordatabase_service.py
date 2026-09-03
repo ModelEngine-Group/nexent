@@ -41,7 +41,8 @@ from consts.const import (
     PERMISSION_READ,
     VectorDatabaseType,
 )
-from consts.exceptions import DuplicateError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, DuplicateError
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
@@ -257,6 +258,16 @@ _QUOTA_LIMIT_UNSET = object()
 _SKIP_INDEX_SOURCE_CLEANUP: ContextVar[bool] = ContextVar(
     "skip_index_source_cleanup", default=False
 )
+
+# A knowledge base cannot be removed while ingestion still owns a file.  The
+# delete-requested state is intentionally excluded: it means the single-file
+# deletion flow has already taken ownership of that file's cleanup.
+KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES = frozenset({
+    "UPLOADING",
+    "UPLOADED",
+    "PROCESSING",
+    "FORWARDING",
+})
 
 
 def get_vector_db_core(
@@ -639,6 +650,12 @@ class ElasticSearchService:
         """
         logger.debug(
             f"Starting full deletion process for knowledge base (index): {index_name}")
+
+        # Check the durable lifecycle table before mutating any external
+        # system.  This closes the race where a processing task can recreate
+        # data after the index/source cleanup has started.
+        ElasticSearchService._assert_knowledge_base_delete_allowed(index_name)
+
         try:
             minio_cleanup = await ElasticSearchService._delete_kb_source_objects(
                 index_name=index_name,
@@ -700,6 +717,63 @@ class ElasticSearchService:
             logger.error(
                 f"Error during full deletion of index '{index_name}': {str(e)}", exc_info=True)
             raise e
+
+    @staticmethod
+    def _assert_knowledge_base_delete_allowed(index_name: str) -> None:
+        """Raise an EDS conflict when files are still being ingested.
+
+        Lifecycle rows are the durable source of truth for this precondition.
+        ``DELETE_REQUESTED`` and ``DELETED`` rows are deliberately ignored:
+        they are already owned by the deletion path and must not block a
+        broader knowledge-base deletion.
+        """
+        try:
+            lifecycle_rows = list_file_records(
+                index_name=index_name,
+                include_hidden=True,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to read lifecycle records before deleting knowledge base '%s'",
+                index_name,
+            )
+            raise AppException(
+                ErrorCode.SYSTEM_DATABASE_ERROR,
+                details={
+                    "operation": "knowledge_base_delete_guard",
+                    "index_name": index_name,
+                },
+            ) from exc
+
+        blocking_files = []
+        for row in lifecycle_rows:
+            status = str(row.get("status") or "").upper()
+            if status not in KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES:
+                continue
+            blocking_files.append({
+                "file_id": row.get("file_id"),
+                "file_name": (
+                    row.get("original_filename")
+                    or row.get("object_name")
+                    or row.get("file_id")
+                    or "unknown"
+                ),
+                "status": status,
+            })
+
+        if blocking_files:
+            logger.info(
+                "Blocking deletion of knowledge base '%s': %d file(s) are still being processed",
+                index_name,
+                len(blocking_files),
+            )
+            raise AppException(
+                ErrorCode.KNOWLEDGE_DELETE_BLOCKED,
+                details={
+                    "index_name": index_name,
+                    "blocking_files": blocking_files,
+                },
+            )
 
     @staticmethod
     async def _delete_kb_source_objects(

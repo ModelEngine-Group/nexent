@@ -153,6 +153,9 @@ async def delete_index(
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
         return result
+    except AppException:
+        # Preserve the EDS code/details for the common application handler.
+        raise
     except HTTPException:
         raise
     except Exception as e:

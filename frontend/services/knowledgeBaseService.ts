@@ -2,7 +2,7 @@
 
 import i18n from "i18next";
 
-import { API_ENDPOINTS, ApiError } from "./api";
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import {
@@ -1184,7 +1184,7 @@ class KnowledgeBaseService {
   async deleteKnowledgeBase(id: string): Promise<void> {
     try {
       // Use REST-style DELETE request to delete index
-      const response = await fetch(
+      const response = await fetchWithErrorHandling(
         API_ENDPOINTS.knowledgeBase.indexDetail(id),
         {
           method: "DELETE",

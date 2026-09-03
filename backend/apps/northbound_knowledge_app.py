@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID, VectorDatabaseType
 from consts.exceptions import (
+    AppException,
     LimitExceededError,
     UnauthorizedError,
 )
@@ -173,6 +174,9 @@ async def delete_index(
         return await ElasticSearchService.full_delete_knowledge_base(
             index_name, vdb_core, ctx.user_id
         )
+    except AppException:
+        # Preserve the EDS code/details for northbound clients.
+        raise
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while deleting index")
         raise HTTPException(
