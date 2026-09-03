@@ -15,6 +15,7 @@ DEFAULT_INCLUDE_SOURCE="false"
 DEFAULT_INCLUDE_SANDBOX="true"
 DEFAULT_TARGET="all"
 DEFAULT_COMPRESS="false"
+DEFAULT_OFFICIAL_AGENT_PROFILES=""
 
 VERSION=""
 PLATFORM=""
@@ -23,6 +24,7 @@ INCLUDE_SOURCE=""
 INCLUDE_SANDBOX=""
 TARGET=""
 COMPRESS=""
+OFFICIAL_AGENT_PROFILES=""
 PACKAGE_NAME=""
 DRY_RUN="false"
 COMMON_ARGS=()
@@ -59,7 +61,7 @@ show_help() {
     echo "                           默认：$DEFAULT_INCLUDE_SANDBOX"
     echo "  --target TARGET         docker、k8s 或 all"
     echo "                           默认：$DEFAULT_TARGET"
-    echo "  --compress BOOL         构建后是否创建 zip 压缩包（true 或 false）"
+  echo "  --compress BOOL         构建后是否创建 zip 压缩包（true 或 false）"
     echo "                           默认：$DEFAULT_COMPRESS"
     echo "  --package-name NAME     最终 zip 包名称（可省略 .zip 后缀）"
     echo "                           默认：根据目标、平台和版本自动生成"
@@ -69,7 +71,8 @@ show_help() {
     echo "  --image-registry-prefix PREFIX"
     echo "                           使用指定镜像仓库前缀拉取和打包镜像"
     echo "  --defaults              复用保存配置或内置默认值并跳过交互界面"
-    echo "  --config                进入交互式部署配置界面"
+  echo "  --config                进入交互式部署配置界面"
+  echo "  --official-agent-profiles LIST  打包的官方智能体 profile，例如 medical,finance"
     echo "  --dry-run               只展示执行计划，不执行实际操作"
     echo "  --help                  显示帮助信息"
     echo ""
@@ -108,6 +111,7 @@ show_help() {
   echo "                           Pull and package images with this registry prefix"
   echo "  --defaults              Use saved config or built-in defaults and skip TUI"
   echo "  --config                Open the interactive deployment configuration"
+  echo "  --official-agent-profiles LIST  Official agent profiles, e.g. medical,finance"
   echo "  --dry-run               Show execution plan without actual operations"
   echo "  --help                  Show this help message"
   echo ""
@@ -148,6 +152,10 @@ parse_args() {
         ;;
       --compress)
         COMPRESS="$2"
+        shift 2
+        ;;
+      --official-agent-profiles)
+        OFFICIAL_AGENT_PROFILES="$2"
         shift 2
         ;;
       --package-name)
@@ -193,6 +201,7 @@ parse_args() {
   INCLUDE_SANDBOX="${INCLUDE_SANDBOX:-$DEFAULT_INCLUDE_SANDBOX}"
   TARGET="${TARGET:-$DEFAULT_TARGET}"
   COMPRESS="${COMPRESS:-$DEFAULT_COMPRESS}"
+  OFFICIAL_AGENT_PROFILES="${OFFICIAL_AGENT_PROFILES:-$DEFAULT_OFFICIAL_AGENT_PROFILES}"
   PACKAGE_NAME="${PACKAGE_NAME%.zip}"
 
   if [[ "$PLATFORM" != "amd64" && "$PLATFORM" != "arm64" ]]; then
@@ -663,6 +672,7 @@ copy_deployment_bundle() {
   fi
 
   rm -f "$OUTPUT_DIR/deploy/env/.env" "$OUTPUT_DIR/deploy/env/.env.bak" "$OUTPUT_DIR/deploy/env/monitoring.env" "$OUTPUT_DIR/deploy/docker/.env.generated" "$OUTPUT_DIR/deploy/docker/deploy.options" "$OUTPUT_DIR/deploy/k8s/deploy.options"
+  prepare_official_agent_assets
   rm -f "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-runtime-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-secrets-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent/generated-persistence-values.yaml"
   case "$TARGET" in
     docker) rm -rf "$OUTPUT_DIR/deploy/k8s" ;;
@@ -675,6 +685,30 @@ copy_deployment_bundle() {
   find "$OUTPUT_DIR/deploy" -type f -name '*.sh' -exec chmod +x {} \; 2>/dev/null || true
 
   echo "✅ Deployment bundle copied"
+}
+
+prepare_official_agent_assets() {
+  local assets_dir="$OUTPUT_DIR/deploy/docker/assets/official-agents"
+  [ -d "$assets_dir" ] || return 0
+  local selected profile
+  IFS=',' read -r -a selected <<< "$OFFICIAL_AGENT_PROFILES"
+  for profile in "$assets_dir"/*; do
+    [ -d "$profile" ] || continue
+    local name="$(basename "$profile")"
+    local keep=false
+    local configured
+    for configured in "${selected[@]}"; do
+      configured="$(echo "$configured" | xargs)"
+      if [ "$configured" = "$name" ]; then keep=true; break; fi
+    done
+    if [ "$keep" != true ]; then
+      rm -rf "$profile"
+    fi
+  done
+  cat > "$OUTPUT_DIR/deploy/env/official-agents.env" <<EOF
+OFFICIAL_AGENT_PROFILES=$OFFICIAL_AGENT_PROFILES
+OFFICIAL_AGENTS_PATH=/mnt/nexent/official-agents
+EOF
 }
 
 create_manifest() {
