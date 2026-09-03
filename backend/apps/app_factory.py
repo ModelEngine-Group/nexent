@@ -3,26 +3,11 @@ FastAPI application factory with common configurations and exception handlers.
 """
 import logging
 
+from apps.health_app import install_health_contract
+from consts.exceptions import AppException, QuotaExceededError, TokenExpiredError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
-from apps.health_app import install_health_contract
-from consts.error_code import ERROR_CODE_HTTP_STATUS, ErrorCode
-from consts.exceptions import (
-    AppException,
-    DuplicateError,
-    ForbiddenError,
-    LimitExceededError,
-    NotFoundException,
-    QuotaExceededError,
-    SignatureValidationError,
-    TagManagementConflictError,
-    TokenExpiredError,
-    UnauthorizedError,
-    ValidationError,
-)
-
 
 logger = logging.getLogger(__name__)
 
@@ -144,11 +129,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     # the real error from the client.
     try:
         from ext_components.aidp.consts.aidp_exceptions import (
+            AidpGroupValidationError,
+            AidpKbConflictError,
             AidpKbNotFoundError,
             AidpKbPermissionDeniedError,
-            AidpKbConflictError,
             AidpKbSyncError,
-            AidpGroupValidationError,
         )
 
         @app.exception_handler(AidpKbNotFoundError)
@@ -202,55 +187,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     except ImportError:
         # AIDP subsystem not installed in this deployment; safe to skip
         logger.debug("AIDP exception classes not available, skipping AIDP exception handlers")
-
-    # ---- Legacy domain exceptions ----
-    # These are plain Exception subclasses that predate the AppException framework.
-    # The exceptions.py docstring states the handler "automatically maps legacy
-    # exception class names to ErrorCode", but that inference was never wired up,
-    # so unauthenticated/forbidden requests surfaced as HTTP 500 instead of
-    # 401/403. Register explicit handlers mapping each class to its ErrorCode
-    # and HTTP status (defined in consts.error_code.ERROR_CODE_HTTP_STATUS) so
-    # clients receive the correct status and a stable error body.
-
-    _LEGACY_EXCEPTION_TO_CODE = {
-        UnauthorizedError: ErrorCode.COMMON_UNAUTHORIZED,          # 401
-        ForbiddenError: ErrorCode.COMMON_FORBIDDEN,                  # 403
-        LimitExceededError: ErrorCode.COMMON_RATE_LIMIT_EXCEEDED,    # 429
-        ValidationError: ErrorCode.COMMON_VALIDATION_ERROR,           # 400
-        NotFoundException: ErrorCode.COMMON_RESOURCE_NOT_FOUND,       # 404
-        DuplicateError: ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,    # 409
-        TagManagementConflictError: ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS,  # 409
-    }
-
-    def _register_legacy_handler(exc_cls, error_code, http_status):
-        @app.exception_handler(exc_cls)
-        async def _legacy_handler(request, exc, _ec=error_code, _hs=http_status):
-            logger.warning("Legacy exception %s: %s", exc_cls.__name__, exc)
-            return JSONResponse(
-                status_code=_hs,
-                content={
-                    "code": _ec.value,
-                    "message": str(exc),
-                    "details": getattr(exc, "details", None) or None,
-                },
-            )
-        return _legacy_handler
-
-    for _exc_cls, _error_code in _LEGACY_EXCEPTION_TO_CODE.items():
-        _register_legacy_handler(_exc_cls, _error_code, ERROR_CODE_HTTP_STATUS[_error_code])
-
-    # SignatureValidationError is an authn failure -> 401 with token-invalid code.
-    @app.exception_handler(SignatureValidationError)
-    async def signature_validation_handler(request, exc):
-        logger.warning("SignatureValidationError: %s", exc)
-        return JSONResponse(
-            status_code=401,
-            content={
-                "code": ErrorCode.COMMON_TOKEN_INVALID.value,
-                "message": str(exc),
-                "details": None,
-            },
-        )
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request, exc):

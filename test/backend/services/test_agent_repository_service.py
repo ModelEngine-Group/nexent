@@ -47,6 +47,9 @@ _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.search_version_by_version_no = MagicMock()
 sys.modules["database.agent_version_db"] = _agent_version_db_mock
 
+_tag_management_db_mock = MagicMock()
+sys.modules["database.tag_management_db"] = _tag_management_db_mock
+
 # Additional DB mocks required because agent_repository_service imports
 # repository_import_precheck → skill_service, which depends on these modules.
 sys.modules.setdefault("database.skill_db", MagicMock())
@@ -338,7 +341,6 @@ def test_list_repository_listings_filters_all_matching_structured_tags():
 
 
 def test_tag_predicate_helpers_delegate_to_authorized_resource_filter(monkeypatch):
-    tag_db_module = types.ModuleType("database.tag_management_db")
     calls = []
 
     class TagManagementDB:
@@ -347,8 +349,7 @@ def test_tag_predicate_helpers_delegate_to_authorized_resource_filter(monkeypatc
             calls.append((tenant_id, resource_type, resource_ids, predicates))
             return [resource_ids[-1]]
 
-    tag_db_module.TagManagementDB = TagManagementDB
-    monkeypatch.setitem(sys.modules, "database.tag_management_db", tag_db_module)
+    monkeypatch.setattr(ars, "TagManagementDB", TagManagementDB)
 
     assert ars._find_agent_ids_matching_any_tag_predicate(
         "tenant_a", [1, 2], ["first", "second"]

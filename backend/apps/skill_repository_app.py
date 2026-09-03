@@ -3,15 +3,13 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
-from starlette.responses import JSONResponse
-
 from consts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
 from consts.model import (
     SkillRepositoryInstallRequest,
     SkillRepositoryListingCreateRequest,
     TagAssignmentFilter,
 )
+from fastapi import APIRouter, Body, Header, HTTPException, Query
 from services.skill_repository_service import (
     count_my_editable_skills_impl,
     create_skill_repository_listing_impl,
@@ -23,6 +21,7 @@ from services.skill_repository_service import (
     list_skill_repository_tag_stats_impl,
     update_skill_repository_status_impl,
 )
+from starlette.responses import JSONResponse
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -123,6 +122,15 @@ async def list_skill_repository_tag_stats_api(authorization: str = Header(None))
     except ForbiddenError as e:
         logger.warning(f"Forbidden skill repository tag-stat access: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
+    except Exception as e:
+        logger.error(
+            "Failed to list skill repository tag statistics: %s",
+            e,
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list skill repository tag statistics",
+        ) from e
 
 
 @skill_repository_router.get("/mine")

@@ -14,9 +14,11 @@ from consts.agent_repository import (
 )
 from consts.exceptions import UnauthorizedError
 from consts.model import AgentRepositorySnapshot, SkillResolution
-from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from consts.notification import (
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_AGENT_REPOSITORY,
+)
 from database.agent_db import search_agent_info_by_agent_id
-from database.agent_version_db import search_version_by_version_no
 from database.agent_repository_db import (
     fetch_draft_agent_mine_metadata,
     get_agent_repository_by_agent_id,
@@ -30,6 +32,8 @@ from database.agent_repository_db import (
     update_agent_repository_by_id,
     update_agent_repository_status_by_id,
 )
+from database.agent_version_db import search_version_by_version_no
+from database.tag_management_db import TagManagementDB
 from database.user_tenant_db import get_user_tenant_by_user_id
 from services.agent_service import (
     collect_skill_zip_entries,
@@ -143,8 +147,6 @@ def _find_agent_ids_matching_any_tag_predicate(
     if not agent_ids or not predicates:
         return set()
 
-    from database.tag_management_db import TagManagementDB
-
     resource_ids = [str(agent_id) for agent_id in agent_ids]
     matched_ids: set[str] = set()
     for predicate in predicates:
@@ -167,8 +169,6 @@ def _filter_agent_ids_by_tag_predicates(
     """Return visible agents matching all selected structured tag predicates."""
     if not agent_ids or not predicates:
         return set()
-
-    from database.tag_management_db import TagManagementDB
 
     return set(
         TagManagementDB.filter_authorized_resource_ids(
@@ -437,8 +437,6 @@ def _merge_agent_tag_values(
     """Merge canonical agent assignments with publisher-owned listing tags."""
 
     try:
-        from database.tag_management_db import TagManagementDB
-
         structured = (
             TagManagementDB.list_resource_assignment_display_values_by_ids(
                 tenant_id,
@@ -510,8 +508,6 @@ async def list_my_editable_agents_impl(
 
     all_agents = await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
     if tag_predicates:
-        from database.tag_management_db import TagManagementDB
-
         agent_ids_for_filter = [
             str(agent["agent_id"])
             for agent in all_agents

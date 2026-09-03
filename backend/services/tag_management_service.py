@@ -3,11 +3,7 @@
 import logging
 from uuid import uuid4
 
-try:
-    from consts.const import TAG_DOCUMENT_PROJECTION_ENABLED
-except ImportError:
-    TAG_DOCUMENT_PROJECTION_ENABLED = False
-
+from consts.const import TAG_DOCUMENT_PROJECTION_ENABLED
 from consts.exceptions import (
     TagManagementConflictError,
     TagManagementNotFoundError,
@@ -17,11 +13,9 @@ from database.tag_management_db import TagManagementDB
 from services.tag_resource_adapters import (
     DEFAULT_TAG_RESOURCE_ADAPTER_REGISTRY,
     AuthenticatedCaller,
-    KNOWLEDGE_CONTENT_LIBRARY_CODE,
     ResourceReference,
     _encode_document_resource_id,
 )
-
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 logger = logging.getLogger(__name__)
@@ -423,6 +417,7 @@ class TagManagementService:
                     }
                 )
             else:
+                # Bulk updates report each successful target alongside partial failures.
                 outcomes.append(
                     {
                         "resource_id": target.resource_id,
@@ -500,7 +495,9 @@ class TagManagementService:
             projection_status = None
             if state is not None:
                 try:
-                    from services.tag_document_projection import document_projection_status_dict
+                    from services.tag_document_projection import (
+                        document_projection_status_dict,
+                    )
 
                     projection_status = document_projection_status_dict(state)
                 except Exception as error:  # noqa: BLE001 - never fail the batch for one row

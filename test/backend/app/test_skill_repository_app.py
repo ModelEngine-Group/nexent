@@ -187,6 +187,29 @@ def test_list_skill_repository_tag_stats_api(mocker, mock_auth_header):
     mock_stats.assert_called_once_with("tenant-1")
 
 
+@pytest.mark.asyncio
+async def test_list_skill_repository_tag_stats_api_converts_unexpected_errors_to_http_500(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch("apps.skill_repository_app.ensure_skill_repository_access")
+    mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_tag_stats_impl",
+        side_effect=RuntimeError("database unavailable"),
+    )
+
+    with pytest.raises(app_module.HTTPException) as error:
+        await app_module.list_skill_repository_tag_stats_api(
+            mock_auth_header["Authorization"]
+        )
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Failed to list skill repository tag statistics"
+
+
 def test_list_my_editable_skills_api_passes_filters(mocker, mock_auth_header):
     mocker.patch(
         "apps.skill_repository_app.get_current_user_id",

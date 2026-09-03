@@ -110,14 +110,29 @@ def test_no_value_tag_definition_accepts_an_empty_value_list_and_rejects_values(
         )
 
 
-def test_run_maps_not_found_validation_and_conflict_to_http_schemas():
+def test_create_definition_maps_not_found_validation_and_conflict_to_http_schemas(monkeypatch):
+    install_auth(monkeypatch)
+    request = TagDefinitionCreateRequest(
+        definition_key="color", definition_name="Color", selection_mode="single_select", initial_values=["Red"]
+    )
+
+    monkeypatch.setattr(
+        tag_app.TagManagementService,
+        "create_definition",
+        lambda *args: (_ for _ in ()).throw(TagManagementNotFoundError("Tag value not found")),
+    )
     with pytest.raises(HTTPException) as not_found:
-        tag_app._run(lambda: (_ for _ in ()).throw(TagManagementNotFoundError("Tag value not found")))
+        tag_app.create_tag_definition(1, request, AUTHORIZATION)
     assert not_found.value.status_code == 404
     assert not_found.value.detail == "Tag value not found"
 
+    monkeypatch.setattr(
+        tag_app.TagManagementService,
+        "create_definition",
+        lambda *args: (_ for _ in ()).throw(ValidationError("invalid request")),
+    )
     with pytest.raises(HTTPException) as bad_request:
-        tag_app._run(lambda: (_ for _ in ()).throw(ValidationError("invalid request")))
+        tag_app.create_tag_definition(1, request, AUTHORIZATION)
     assert bad_request.value.status_code == 400
     assert bad_request.value.detail == "invalid request"
 
@@ -125,8 +140,13 @@ def test_run_maps_not_found_validation_and_conflict_to_http_schemas():
         "Tag value capacity exceeded",
         {"limit": 1000, "current_count": 1000, "scope": "value"},
     )
+    monkeypatch.setattr(
+        tag_app.TagManagementService,
+        "create_definition",
+        lambda *args: (_ for _ in ()).throw(conflict),
+    )
     with pytest.raises(HTTPException) as conflict_error:
-        tag_app._run(lambda: (_ for _ in ()).throw(conflict))
+        tag_app.create_tag_definition(1, request, AUTHORIZATION)
     assert conflict_error.value.status_code == 409
     assert conflict_error.value.detail == {
         "message": "Tag value capacity exceeded",
