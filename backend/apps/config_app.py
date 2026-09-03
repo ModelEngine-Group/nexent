@@ -79,6 +79,19 @@ async def sync_default_prompt_template_on_startup():
 
 
 @app.on_event("startup")
+async def sync_official_agents_on_startup():
+    """Refresh platform-level official repository listings after app startup."""
+    from consts.const import OFFICIAL_AGENT_PROFILES
+    if not OFFICIAL_AGENT_PROFILES:
+        return
+    try:
+        from services.official_agent_sync_service import sync_official_agents
+        await sync_official_agents()
+    except Exception:
+        logger.exception("Failed to synchronize official agent bundles")
+
+
+@app.on_event("startup")
 async def start_dreaming_scheduler():
     from services.memory_dreaming_scheduler import dreaming_scheduler
     await dreaming_scheduler.start()

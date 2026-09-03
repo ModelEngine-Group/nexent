@@ -13,6 +13,7 @@ from consts.agent_repository import (
     VALID_REPOSITORY_STATUSES,
 )
 from consts.exceptions import UnauthorizedError
+from consts.const import OFFICIAL_AGENT_PROFILES, OFFICIAL_AGENT_TENANT_ID
 from consts.model import AgentRepositorySnapshot, SkillResolution
 from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 from database.agent_db import search_agent_info_by_agent_id
@@ -103,6 +104,7 @@ def _to_summary_item(
         "icon": record.get("icon"),
         "downloads": downloads,
         "content": record.get("content"),
+        "is_official": record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID,
     }
 
 
@@ -154,6 +156,12 @@ def list_agent_repository_listings_impl(
         status=status,
         agent_id=agent_id,
     )
+    if OFFICIAL_AGENT_PROFILES and (status is None or status == STATUS_SHARED):
+        records.extend(list_agent_repository_summaries(
+            publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
+            status=STATUS_SHARED,
+            agent_id=agent_id,
+        ))
     if search and search.strip():
         records = [
             record
@@ -541,6 +549,11 @@ def get_agent_repository_listing_detail_impl(
         agent_repository_id,
         tenant_id,
     )
+    if not record and OFFICIAL_AGENT_PROFILES:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            OFFICIAL_AGENT_TENANT_ID,
+        )
     if not record:
         raise ValueError("Repository listing not found")
 
@@ -569,6 +582,7 @@ def get_agent_repository_listing_detail_impl(
         "model_name": root_agent.get("model_name"),
         "duty_prompt": root_agent.get("duty_prompt"),
         "tools": _extract_tool_names(root_agent),
+        "is_official": record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID,
     }
 
 
@@ -672,6 +686,11 @@ def update_agent_repository_status_impl(
         agent_repository_id,
         tenant_id,
     )
+    if not record and OFFICIAL_AGENT_PROFILES:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            OFFICIAL_AGENT_TENANT_ID,
+        )
     if not record:
         raise ValueError("Repository listing not found")
 
