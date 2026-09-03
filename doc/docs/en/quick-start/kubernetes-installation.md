@@ -43,6 +43,16 @@ Run the deployment script:
 bash deploy.sh k8s
 ```
 
+The default flow uses two independent Helm releases. It installs `nexent-infrastructure` (Elasticsearch, PostgreSQL, Redis, and MinIO), waits for all four services, initializes the Elasticsearch API key, and only then installs the application-side `nexent` release for the first time. Application Pods therefore do not roll a second time to receive the key. Use `--release-scope all|infrastructure|nexent` for the complete flow or either release independently:
+
+```bash
+bash deploy.sh k8s --release-scope all
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
+```
+
+The `nexent` scope requires an existing, healthy infrastructure release. Infrastructure-only uninstall is rejected while the Nexent release exists. If a legacy single `nexent` release still owns infrastructure resources, deployment stops because automatic migration is not supported; this version supports fresh dual-release installations only.
+
 After running the command, the script opens Bash TUI menus for configuration. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
 
 **Deployment Components:**
@@ -219,8 +229,14 @@ Helm uninstall does not delete local hostPath data by default. Use `bash deploy/
 Use the root uninstall entrypoint from the repository root:
 
 ```bash
-# Remove Helm release; prompts before deleting namespace or local data in interactive shells
+# Remove nexent first, then nexent-infrastructure
 bash uninstall.sh k8s
+
+# Remove only the application release
+bash uninstall.sh k8s --release-scope nexent --keep-namespace
+
+# Remove only infrastructure (the application release must already be absent)
+bash uninstall.sh k8s --release-scope infrastructure --keep-namespace
 
 # Clean only Helm release state, useful for stuck releases
 bash uninstall.sh k8s clean
@@ -242,6 +258,10 @@ bash uninstall.sh k8s delete-all
 ```bash
 # Deploy with interactive prompts
 bash deploy.sh k8s
+
+# Upgrade only infrastructure or only the application release
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
 
 # Non-interactive deployment with the default component set
 bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general

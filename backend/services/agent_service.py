@@ -1686,6 +1686,9 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     # Filter out deleted models (delete_flag='Y' in model_record_t)
     model_ids = agent_info.get("model_ids") or []
     valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
+
+    # Check if any configured models have been deleted
+    deleted_model_ids = set(model_ids) - set(valid_model_ids)
     agent_info["model_ids"] = valid_model_ids
 
     model_names: List[str] = []
@@ -1728,6 +1731,12 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         tenant_id=tenant_id,
         agent_info=agent_info
     )
+
+    # Add MODEL_DELETED reason if any configured models have been deleted
+    if deleted_model_ids:
+        unavailable_reasons.append(AgentUnavailableReason.MODEL_DELETED)
+        is_available = False
+
     agent_info["is_available"] = is_available
     agent_info["unavailable_reasons"] = unavailable_reasons
 
@@ -2416,7 +2425,8 @@ async def import_agent_impl(
     agent_info: ExportAndImportDataFormat,
     authorization: str = Header(None),
     force_import: bool = False,
-    skill_name_to_id: Optional[Dict[str, int]] = None
+    skill_name_to_id: Optional[Dict[str, int]] = None,
+    resolve_name_conflicts: bool = False,
 ):
     """
     Import agent using DFS.
@@ -2449,7 +2459,8 @@ async def import_agent_impl(
                     need_import_agent_id)],
                 tenant_id=tenant_id,
                 user_id=user_id,
-                skip_duplicate_regeneration=force_import
+                skip_duplicate_regeneration=force_import,
+                resolve_name_conflicts=resolve_name_conflicts,
             )
             mapping_agent_id[need_import_agent_id] = new_agent_id
 
@@ -2474,7 +2485,8 @@ async def import_agent_by_agent_id(
     import_agent_info: ExportAndImportAgentInfo,
     tenant_id: str,
     user_id: str,
-    skip_duplicate_regeneration: bool = False
+    skip_duplicate_regeneration: bool = False,
+    resolve_name_conflicts: bool = False,
 ):
     tool_list = []
 
@@ -2535,6 +2547,29 @@ async def import_agent_by_agent_id(
 
     agent_name = import_agent_info.name
     agent_display_name = import_agent_info.display_name
+
+    if resolve_name_conflicts:
+        agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
+        if _check_agent_name_duplicate(
+            agent_name,
+            tenant_id=tenant_id,
+            agents_cache=agents_cache,
+        ):
+            agent_name = _generate_unique_agent_name_with_suffix(
+                agent_name,
+                tenant_id=tenant_id,
+                agents_cache=agents_cache,
+            )
+        if _check_agent_display_name_duplicate(
+            agent_display_name,
+            tenant_id=tenant_id,
+            agents_cache=agents_cache,
+        ):
+            agent_display_name = _generate_unique_display_name_with_suffix(
+                agent_display_name,
+                tenant_id=tenant_id,
+                agents_cache=agents_cache,
+            )
 
     # create a new agent - use current user's groups instead of imported group_ids
     user_group_ids = _get_user_group_ids(user_id, tenant_id)
@@ -4197,6 +4232,7 @@ async def import_agent_with_skills_impl(
     authorization: str,
     force_import: bool = False,
     skill_resolutions: Optional[List[SkillResolution]] = None,
+    resolve_name_conflicts: bool = False,
 ):
     """Import an agent with skills bundled from a ZIP export.
 
@@ -4276,7 +4312,8 @@ async def import_agent_with_skills_impl(
 
     agent_id_mapping = await import_agent_impl(
         agent_info, authorization, force_import,
-        skill_name_to_id=skill_name_to_id
+        skill_name_to_id=skill_name_to_id,
+        resolve_name_conflicts=resolve_name_conflicts,
     )
 
     for imported_agent in agent_info.agent_info.values():

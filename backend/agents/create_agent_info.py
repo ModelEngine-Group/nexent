@@ -758,12 +758,23 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="RunSkillScriptTool",
                 name="run_skill_script",
-                description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
-                inputs='{"skill_name": "str", "script_path": "str", "params": "str"}',
+                description=(
+                    "Execute an enabled skill's bundled script, or a generated Python/Node.js "
+                    "script in the current run workspace, inside the Docker sandbox. For "
+                    "workspace scripts written as bare filenames by the code executor, pass "
+                    "script_path='outputs/<filename>'. Ordinary agent code must not use "
+                    "subprocess, os.system, or shell calls for system commands; use a "
+                    "skill-bundled wrapper or a shell-free language API."
+                ),
+                inputs=(
+                    '{"skill_name": "str", "script_path": "str", '
+                    '"params": "str", "source": "str"}'
+                ),
                 output_type="string",
                 params={
                     "local_skills_dir": CONTAINER_SKILLS_PATH,
                     "workspace_path": file_context.get("workspace_path"),
+                    "authorized_skill_names": sorted(skill_config_values),
                 },
                 source="builtin",
                 usage="builtin",
@@ -797,7 +808,10 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="WriteSkillFileTool",
                 name="write_skill_file",
-                description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
+                description=(
+                    "Edit an installed tenant-scoped skill file. This does not create files in "
+                    "the current run workspace or outputs directory."
+                ),
                 inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
@@ -1062,13 +1076,6 @@ async def create_agent_config(
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
 
-    # Get app information
-    default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
-    app_name = tenant_config_manager.get_app_config(
-        'APP_NAME', tenant_id=tenant_id) or "Nexent"
-    app_description = tenant_config_manager.get_app_config(
-        'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
-
     # Memory list population: in the new Memory system this is performed by
     # the backend's ``memory_context_service`` via the
     # ``MemoryService.search_memory`` facade. The legacy
@@ -1302,11 +1309,6 @@ async def create_agent_config(
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
-        "APP_NAME": app_name,
-        "APP_DESCRIPTION": app_description,
-        "memory_list": memory_list,
-        "knowledge_base_summary": knowledge_base_summary,
-        "user_id": user_id,
     }
     # AgentInfo stores model_ids (a list); pick the first for the primary model lookup
     agent_model_ids = agent_info.get("model_ids")
@@ -1364,9 +1366,6 @@ async def create_agent_config(
         duty=duty_prompt,
         constraint=constraint_prompt,
         few_shots=few_shots_prompt,
-        app_name=app_name,
-        app_description=app_description,
-        user_id=user_id,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,

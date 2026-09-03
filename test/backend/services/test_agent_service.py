@@ -7,6 +7,10 @@ from contextlib import contextmanager
 from unittest.mock import ANY, patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
 
+imghdr_mock = types.ModuleType("imghdr")
+imghdr_mock.what = MagicMock(return_value=None)
+sys.modules["imghdr"] = imghdr_mock
+
 import pytest
 from fastapi.responses import StreamingResponse
 from fastapi import Request
@@ -7970,7 +7974,13 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Track import order and relationship creation
     imported_ids = []
 
-    async def fake_import_agent_by_agent_id(import_agent_info, tenant_id, user_id, skip_duplicate_regeneration=False):
+    async def fake_import_agent_by_agent_id(
+        import_agent_info,
+        tenant_id,
+        user_id,
+        skip_duplicate_regeneration=False,
+        resolve_name_conflicts=False,
+    ):
         # Assign synthetic new IDs based on source id
         new_id = 100 + import_agent_info.agent_id
         imported_ids.append(import_agent_info.agent_id)
@@ -9107,6 +9117,78 @@ async def test_get_agent_info_impl_with_unavailable_agent(
 
     assert result["is_available"] is False
     assert result["unavailable_reasons"] == ["tool_unavailable"]
+
+
+@pytest.mark.asyncio
+@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
+@patch('backend.services.agent_service.create_agent')
+@patch('backend.services.agent_service.query_all_tools')
+@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
+async def test_import_agent_by_agent_id_resolves_name_and_display_name_conflicts_for_repository_copy(
+    mock_query_agents,
+    mock_resolve_model,
+    mock_query_all_tools,
+    mock_create_agent,
+    mock_create_tool,
+):
+    mock_query_agents.side_effect = [
+        [{
+            "agent_id": 1,
+            "name": "duplicate_name",
+            "display_name": "Duplicate Display",
+        }],
+        [{
+            "agent_id": 2,
+            "name": "existing_agent",
+            "display_name": "Existing Agent",
+        }],
+    ]
+    mock_query_all_tools.return_value = []
+    mock_resolve_model.side_effect = [[1], [2], [1], [2]]
+    mock_create_agent.return_value = {"agent_id": 456}
+
+    agent_info = ExportAndImportAgentInfo(
+        agent_id=123,
+        name="duplicate_name",
+        display_name="Duplicate Display",
+        description="Test",
+        business_description="Test business",
+        max_steps=5,
+        provide_run_summary=True,
+        duty_prompt="",
+        constraint_prompt="",
+        few_shots_prompt="",
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+        model_id=1,
+        model_name="Model1",
+        business_logic_model_id=2,
+        business_logic_model_name="Model2",
+    )
+
+    await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        resolve_name_conflicts=True,
+    )
+
+    created_agent = mock_create_agent.call_args.kwargs["agent_info"]
+    assert created_agent["name"] == "duplicate_name_1"
+    assert created_agent["display_name"] == "Duplicate Display_1"
+
+    await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        resolve_name_conflicts=True,
+    )
+
+    created_agent = mock_create_agent.call_args.kwargs["agent_info"]
+    assert created_agent["name"] == "duplicate_name"
+    assert created_agent["display_name"] == "Duplicate Display"
 
 
 @pytest.mark.asyncio
@@ -18131,10 +18213,13 @@ def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_gro
 
 def test_inject_user_timezone_time_with_valid_timezone():
     """Should prepend [Current time: ...] when X-User-Timezone header is present."""
-    from unittest.mock import MagicMock
+    from datetime import timezone
+    from unittest.mock import MagicMock, patch
+
     request = MagicMock()
     request.headers = {"x-user-timezone": "Asia/Shanghai"}
-    result = _inject_user_timezone_time("What time is it?", request)
+    with patch("zoneinfo.ZoneInfo", return_value=timezone.utc):
+        result = _inject_user_timezone_time("What time is it?", request)
     assert result.startswith("[Current time:")
     assert "What time is it?" in result
 
@@ -18494,6 +18579,7 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
         (b"x" * (agent_service.AGENT_ICON_MAX_BYTES + 1), "Agent icon must not exceed 2 MB"),
         (b"not an image", "Agent icon must be a PNG, JPEG, GIF, or WebP image"),
     ],
+    ids=["empty", "oversized", "invalid-image"],
 )
 async def test_upload_agent_icon_impl_rejects_invalid_content(content, message):
     with pytest.raises(ValueError, match=message):
@@ -18812,3 +18898,66 @@ async def test_run_agent_stream_metadata_version_conflict(
 
     assert exc_info.value.error_code == agent_service.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
     assert exc_info.value.details == {"current_version": 7}
+
+
+def test_check_single_model_availability_loads_missing_cache_entry(mocker):
+    model_cache = {}
+    get_model = mocker.patch.object(agent_service, "get_model_by_model_id", return_value=None)
+
+    reasons = agent_service._check_single_model_availability(
+        model_id=31,
+        tenant_id="tenant-id",
+        model_cache=model_cache,
+        reason_key="model_unavailable",
+    )
+
+    assert reasons == ["model_unavailable"]
+    assert model_cache == {31: None}
+    get_model.assert_called_once_with(31, "tenant-id")
+
+
+def test_check_single_model_availability_reuses_cached_model(mocker):
+    status_enum = types.SimpleNamespace(
+        AVAILABLE=types.SimpleNamespace(value="available"),
+        get_value=lambda value: value,
+    )
+    mocker.patch.object(agent_service, "ModelConnectStatusEnum", status_enum)
+    get_model = mocker.patch.object(agent_service, "get_model_by_model_id")
+    model_cache = {31: {"connect_status": "available"}}
+
+    reasons = agent_service._check_single_model_availability(
+        model_id=31,
+        tenant_id="tenant-id",
+        model_cache=model_cache,
+        reason_key="model_unavailable",
+    )
+
+    assert reasons == []
+    get_model.assert_not_called()
+
+
+def test_collect_model_availability_marks_models_not_configured():
+    reasons = agent_service._collect_model_availability_reasons(
+        agent={"model_ids": []},
+        tenant_id="tenant-id",
+        model_cache={},
+    )
+
+    assert reasons == [agent_service.AgentUnavailableReason.MODEL_NOT_CONFIGURED]
+
+
+def test_is_agent_running_reflects_manager_lookup(mocker):
+    get_run_info = mocker.patch.object(
+        agent_service.agent_run_manager,
+        "get_agent_run_info",
+        return_value={"status": "running"},
+    )
+
+    assert agent_service.is_agent_running(44, "user-id") is True
+    get_run_info.assert_called_once_with(44, "user-id")
+
+
+def test_is_agent_running_returns_false_when_run_is_missing(mocker):
+    mocker.patch.object(agent_service.agent_run_manager, "get_agent_run_info", return_value=None)
+
+    assert agent_service.is_agent_running(44, "user-id") is False

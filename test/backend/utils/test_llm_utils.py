@@ -162,6 +162,35 @@ class TestCallLLMForSystemPrompt:
             timeout_seconds=None,
         )
 
+    def test_call_llm_for_system_prompt_removes_prepared_stream(self, mocker: MockFixture):
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+
+        mock_get_model_by_id.return_value = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+            "model_factory": "qwen",
+        }
+
+        mock_llm_instance = mock_adapter.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_llm_instance._prepare_completion_kwargs.return_value = {
+            "stream": False,
+            "temperature": 0.3,
+        }
+
+        result = call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert result == "Generated prompt"
+        mock_llm_instance.client.chat.completions.create.assert_called_once_with(
+            stream=True,
+            temperature=0.3,
+        )
+
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
         from consts.error_code import ErrorCode
         from consts.exceptions import AppException
