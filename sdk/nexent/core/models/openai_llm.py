@@ -26,6 +26,10 @@ from .capacity_budget import (
     compute_w2_fingerprint,
 )
 from .capacity_resolver import derive_output_protection_tokens
+from .feature_capability import (
+    apply_reasoning_request_policy,
+    resolve_effective_feature_policy,
+)
 from ..utils.observer import MessageObserver, ProcessType
 from .prompt_cache import (
     apply_cache_directives,
@@ -147,6 +151,9 @@ class OpenAIModel(OpenAIServerModel):
         self.feature_capabilities: Optional[Dict[str, Any]] = kwargs.pop(
             "feature_capabilities", None
         )
+        self.feature_preferences: Optional[Dict[str, Any]] = kwargs.pop(
+            "feature_preferences", None
+        )
         self.provider_usage_profile: Optional[Dict[str, Any]] = kwargs.pop(
             "provider_usage_profile", None
         )
@@ -177,6 +184,7 @@ class OpenAIModel(OpenAIServerModel):
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
         self.last_response_diagnostics = None
+        self.last_effective_feature_policy = None
         self.provider_call_usages: list[ProviderCallUsage] = []
         self.turn_provider_call_usages: list[ProviderCallUsage] = []
         self._provider_usage_turn_id: Optional[str] = None
@@ -440,29 +448,37 @@ class OpenAIModel(OpenAIServerModel):
 
         completion_kwargs["stream_options"] = {"include_usage": True}
 
-        # Provider-specific extras (e.g. Qwen3 chat_template_kwargs) - only
-        # set when the caller actually supplied something so default OpenAI
-        # behaviour is unchanged for everyone else.
-        reasoning_supported = (
-            (self.feature_capabilities or {}).get("reasoning", {}).get("supported")
-            is True
-        )
-        if not reasoning_supported:
-            completion_kwargs.pop("reasoning_effort", None)
         if self.extra_body:
-            safe_extra_body = dict(self.extra_body)
-            if not reasoning_supported:
-                safe_extra_body.pop("enable_thinking", None)
-                safe_extra_body.pop("reasoning", None)
-                template_kwargs = safe_extra_body.get("chat_template_kwargs")
-                if isinstance(template_kwargs, dict) and "enable_thinking" in template_kwargs:
-                    safe_extra_body["chat_template_kwargs"] = {
-                        key: value
-                        for key, value in template_kwargs.items()
-                        if key != "enable_thinking"
-                    }
-            if safe_extra_body:
-                completion_kwargs["extra_body"] = safe_extra_body
+            completion_kwargs["extra_body"] = dict(self.extra_body)
+        runtime_feature_capabilities = dict(self.feature_capabilities or {})
+        runtime_cache_capability = runtime_feature_capabilities.get("prompt_cache")
+        runtime_cache_capability = (
+            dict(runtime_cache_capability)
+            if isinstance(runtime_cache_capability, dict)
+            else {}
+        )
+        if runtime_cache_capability.get("supported") is None and self.prompt_cache:
+            cache_mode = str(self.prompt_cache.get("mode") or "unknown")
+            runtime_cache_capability = {
+                "supported": bool(
+                    self.prompt_cache.get(
+                        "enabled",
+                        cache_mode not in {"unknown", "none", "disabled", ""},
+                    )
+                ),
+                "mode": cache_mode,
+                "metrics_available": self.prompt_cache.get("metrics_available"),
+            }
+            runtime_feature_capabilities["prompt_cache"] = runtime_cache_capability
+        effective_feature_policy = resolve_effective_feature_policy(
+            runtime_feature_capabilities,
+            self.feature_preferences,
+        )
+        self.last_effective_feature_policy = effective_feature_policy
+        completion_kwargs = apply_reasoning_request_policy(
+            completion_kwargs,
+            effective_feature_policy,
+        )
 
         trusted_budget_snapshot = (
             safe_input_budget_snapshot or self.safe_input_budget_snapshot
@@ -485,9 +501,10 @@ class OpenAIModel(OpenAIServerModel):
         ):
             completion_kwargs["max_tokens"] = self.max_output_tokens
 
+        cache_enabled = effective_feature_policy["prompt_cache"]["enabled"] is True
         selected_cache_profile = resolve_prompt_cache_profile(
             self.model_factory or "unknown", self.prompt_cache
-        )
+        ) if cache_enabled else None
         # Provider protocol decisions depend only on the approved provider/model
         # capability profile.  Context partitioning and ordering are owned by
         # ContextManager and are intentionally opaque to this adapter.
@@ -526,6 +543,15 @@ class OpenAIModel(OpenAIServerModel):
                 ),
                 "llm.reasoning.request_style": str(
                     reasoning_profile.get("request_style") or "unknown"
+                ),
+                "llm.reasoning.effective_enabled": bool(
+                    effective_feature_policy["reasoning"]["enabled"]
+                ),
+                "llm.reasoning.effective_effort": str(
+                    effective_feature_policy["reasoning"].get("effort") or ""
+                ),
+                "llm.feature.policy_source": str(
+                    effective_feature_policy.get("source") or "nexent_default"
                 ),
                 "llm.prompt_cache.mode": cache_advice.mode,
                 "llm.prompt_cache.supported": cache_advice.supported,
