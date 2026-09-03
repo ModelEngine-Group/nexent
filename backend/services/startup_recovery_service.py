@@ -103,8 +103,8 @@ def recover_northbound_tasks() -> dict[str, int]:
     return result
 
 
-def fail_interrupted_uploads(cutoff: datetime) -> int:
-    """Fail uploads that predate a safe startup cutoff and remove partial objects."""
+def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int:
+    """Fail old uploads owned by a restarted service and remove partial objects."""
     from database.attachment_db import delete_file
     from database.client import minio_client
     from database.knowledge_file_lifecycle_db import (
@@ -113,7 +113,10 @@ def fail_interrupted_uploads(cutoff: datetime) -> int:
     )
 
     failed = 0
-    for record in list_uploading_files_created_before(cutoff):
+    for record in list_uploading_files_created_before(
+        cutoff,
+        upload_owner_service,
+    ):
         claimed = transition_file_record(
             record["file_id"],
             status="FAILED",
@@ -162,15 +165,23 @@ def fail_interrupted_uploads(cutoff: datetime) -> int:
     return failed
 
 
-async def schedule_interrupted_upload_cleanup() -> None:
-    """Clean old uploads now, then recheck pre-start rows after the grace period."""
+async def schedule_interrupted_upload_cleanup(upload_owner_service: str) -> None:
+    """Clean this service's old uploads now and again after the grace period."""
     startup_time = datetime.utcnow()
     immediate_cutoff = startup_time - timedelta(seconds=UPLOAD_RECOVERY_GRACE_SECONDS)
-    await asyncio.to_thread(fail_interrupted_uploads, immediate_cutoff)
+    await asyncio.to_thread(
+        fail_interrupted_uploads,
+        immediate_cutoff,
+        upload_owner_service,
+    )
 
     async def _delayed_cleanup() -> None:
         await asyncio.sleep(UPLOAD_RECOVERY_GRACE_SECONDS)
-        await asyncio.to_thread(fail_interrupted_uploads, startup_time)
+        await asyncio.to_thread(
+            fail_interrupted_uploads,
+            startup_time,
+            upload_owner_service,
+        )
 
     task = asyncio.create_task(_delayed_cleanup())
     _upload_cleanup_tasks.add(task)

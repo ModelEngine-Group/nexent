@@ -249,7 +249,7 @@ class TestConfigAppRouterConfiguration:
         assert config_app.app.lifespan is config_app.config_lifespan
         recover_config_tasks.assert_called_once_with()
         start_evaluation_maintenance.assert_called_once_with()
-        schedule_upload_cleanup.assert_awaited_once_with()
+        schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
         sync_defaults.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()

@@ -56,6 +56,7 @@ from consts.const import (
     ENABLE_AIDP_KNOWLEDGE,
     IS_SPEED_MODE,
 )
+from consts.task_recovery import CONFIG_SERVICE_NAME
 from services.prompt_template_service import sync_system_default_prompt_template
 
 logger = logging.getLogger("base_app")
@@ -69,7 +70,7 @@ async def recover_config_tasks_on_startup():
 
     await asyncio.to_thread(recover_config_tasks)
     start_eval_maintenance()
-    await schedule_interrupted_upload_cleanup()
+    await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
 
 
 async def sync_default_prompt_template_on_startup():

@@ -22,6 +22,7 @@ from consts.exceptions import (
     UnsupportedFileTypeException,
 )
 from consts.model import ProcessParams
+from consts.task_recovery import CONFIG_SERVICE_NAME
 from services.file_management_service import (
     check_file_access,
     delete_file_impl,
@@ -137,6 +138,7 @@ async def upload_files(
             index_name,
             user_id,
             uploader_tenant_id=tenant_id,
+            upload_owner_service=CONFIG_SERVICE_NAME,
         )
         errors, uploaded_file_paths, uploaded_filenames = upload_result
         quota_status = getattr(upload_result, "quota_status", None)

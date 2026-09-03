@@ -7,6 +7,8 @@ import types
 from datetime import datetime
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _install_storage_import_stubs() -> None:
     """Keep database tests independent from the SDK's optional model stack."""
@@ -75,6 +77,7 @@ def test_create_file_records_uses_one_transaction_for_the_whole_batch(monkeypatc
             "knowledge_id": 10,
             "index_name": "kb-1",
             "original_filename": "a.pdf",
+            "upload_owner_service": "nexent-config",
         },
         {
             "file_id": "fid-2",
@@ -89,6 +92,12 @@ def test_create_file_records_uses_one_transaction_for_the_whole_batch(monkeypatc
     session.add_all.assert_called_once_with(rows)
     session.add.assert_not_called()
     session.flush.assert_called_once_with()
+    assert lifecycle_model.call_args_list[0].kwargs[
+        "upload_owner_service"
+    ] == "nexent-config"
+    assert lifecycle_model.call_args_list[1].kwargs[
+        "upload_owner_service"
+    ] is None
 
 
 def test_create_file_records_returns_empty_for_empty_batch(monkeypatch):
@@ -241,9 +250,11 @@ def test_fail_interrupted_file_tasks_reuses_failed_state(monkeypatch):
     assert forwarding.status == "FAILED"
     assert forwarding.error_stage == "FORWARD"
     assert forwarding.version == 5
+    recovery_filter = query.filter.call_args.args[1]
+    assert "forward_task_id IS NOT NULL" in str(recovery_filter)
 
 
-def test_list_uploading_files_created_before_uses_cutoff(monkeypatch):
+def test_list_uploading_files_created_before_scopes_recovery_to_owner(monkeypatch):
     session = MagicMock()
     query = session.query.return_value
     query.filter.return_value = query
@@ -252,10 +263,36 @@ def test_list_uploading_files_created_before_uses_cutoff(monkeypatch):
     monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
     monkeypatch.setattr(lifecycle_db, "as_dict", lambda value: {"file_id": value.file_id})
 
-    rows = lifecycle_db.list_uploading_files_created_before(datetime(2026, 9, 1))
+    rows = lifecycle_db.list_uploading_files_created_before(
+        datetime(2026, 9, 1),
+        "nexent-config",
+    )
 
     assert rows == [{"file_id": "uploading"}]
     query.order_by.assert_called_once()
+    owner_filter = next(
+        argument
+        for argument in query.filter.call_args.args
+        if getattr(argument.left, "name", None) == "upload_owner_service"
+    )
+    assert owner_filter.right.value == "nexent-config"
+
+
+@pytest.mark.parametrize("upload_owner_service", [None, ""])
+def test_list_uploading_files_created_before_rejects_missing_owner(
+    monkeypatch,
+    upload_owner_service,
+):
+    session = MagicMock()
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+
+    with pytest.raises(ValueError, match="upload_owner_service is required"):
+        lifecycle_db.list_uploading_files_created_before(
+            datetime(2026, 9, 1),
+            upload_owner_service,
+        )
+
+    session.query.assert_not_called()
 
 
 def test_transition_file_record_updates_allowed_fields_and_version(monkeypatch):

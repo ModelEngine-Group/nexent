@@ -321,7 +321,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
             )
 
         recover_northbound_tasks.assert_called_once_with()
-        schedule_upload_cleanup.assert_awaited_once_with()
+        schedule_upload_cleanup.assert_awaited_once_with("nexent-northbound")
 
     def test_lifespan_runs_startup_recovery(self):
         recover_on_startup = AsyncMock()

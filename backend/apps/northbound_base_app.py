@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.app_factory import create_app
+from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from .northbound_app import router as northbound_router
 from .northbound_knowledge_app import router as northbound_knowledge_router
 
@@ -49,7 +50,7 @@ async def recover_northbound_tasks_on_startup():
     )
 
     await asyncio.to_thread(recover_northbound_tasks)
-    await schedule_interrupted_upload_cleanup()
+    await schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME)
 
 
 @asynccontextmanager

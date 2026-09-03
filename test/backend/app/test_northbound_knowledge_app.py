@@ -634,6 +634,7 @@ class TestIndexManagement:
 class TestUploadAndDownload:
     def test_upload_success_returns_created_payload(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
+        file_mgmt_module.upload_files_impl.reset_mock()
         file_mgmt_module.upload_files_impl.return_value = (
             [], ["docs/guide.txt"], ["guide.txt"]
         )
@@ -647,6 +648,9 @@ class TestUploadAndDownload:
 
         assert response.status_code == 201
         assert response.json()["process_tasks"] == {"status": "queued"}
+        assert file_mgmt_module.upload_files_impl.await_args.kwargs[
+            "upload_owner_service"
+        ] == "nexent-northbound"
 
     def test_upload_processing_error_returns_detail(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX

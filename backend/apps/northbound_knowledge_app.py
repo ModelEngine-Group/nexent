@@ -12,6 +12,7 @@ from consts.exceptions import (
     UnauthorizedError,
 )
 from consts.model import HybridSearchRequest, ProcessParams
+from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from database.knowledge_db import get_index_name_by_knowledge_name
 from services.file_management_service import (
     upload_files_impl,
@@ -460,7 +461,13 @@ async def upload_files(
             )
 
         errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(
-            destination, file, None, index_name, ctx.user_id, uploader_tenant_id=ctx.tenant_id
+            destination,
+            file,
+            None,
+            index_name,
+            ctx.user_id,
+            uploader_tenant_id=ctx.tenant_id,
+            upload_owner_service=NORTHBOUND_SERVICE_NAME,
         )
 
         if uploaded_file_paths:

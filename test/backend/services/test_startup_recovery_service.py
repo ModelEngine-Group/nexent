@@ -173,7 +173,14 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
         transition_file_record=transition,
     )
 
-    assert startup_recovery_service.fail_interrupted_uploads(cutoff) == 1
+    assert startup_recovery_service.fail_interrupted_uploads(
+        cutoff,
+        "nexent-config",
+    ) == 1
+    list_uploads = sys.modules[
+        "database.knowledge_file_lifecycle_db"
+    ].list_uploading_files_created_before
+    list_uploads.assert_called_once_with(cutoff, "nexent-config")
     delete_object.assert_called_once_with("knowledge/a.pdf", "files")
     first_update = transition.call_args_list[0]
     assert first_update.args == ("claimed",)
@@ -213,7 +220,10 @@ def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
         transition_file_record=transition,
     )
 
-    assert startup_recovery_service.fail_interrupted_uploads(cutoff) == 1
+    assert startup_recovery_service.fail_interrupted_uploads(
+        cutoff,
+        "nexent-northbound",
+    ) == 1
     assert transition.call_count == 2
     failure = transition.call_args_list[1]
     assert failure.args == ("failed",)
@@ -233,7 +243,9 @@ async def test_schedule_interrupted_upload_cleanup_checks_now_and_after_grace(
     monkeypatch.setattr(startup_recovery_service, "UPLOAD_RECOVERY_GRACE_SECONDS", 0)
     startup_recovery_service._upload_cleanup_tasks.clear()
 
-    await startup_recovery_service.schedule_interrupted_upload_cleanup()
+    await startup_recovery_service.schedule_interrupted_upload_cleanup(
+        "nexent-config"
+    )
     pending = list(startup_recovery_service._upload_cleanup_tasks)
     if pending:
         await asyncio.gather(*pending)
@@ -243,3 +255,7 @@ async def test_schedule_interrupted_upload_cleanup_checks_now_and_after_grace(
         fail_uploads.call_args_list[0].args[0]
         <= fail_uploads.call_args_list[1].args[0]
     )
+    assert [call_args.args[1] for call_args in fail_uploads.call_args_list] == [
+        "nexent-config",
+        "nexent-config",
+    ]

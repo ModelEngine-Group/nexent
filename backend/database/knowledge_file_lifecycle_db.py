@@ -38,6 +38,7 @@ def create_file_record(
     bucket_name: Optional[str] = None,
     object_name: Optional[str] = None,
     file_size: Optional[int] = None,
+    upload_owner_service: Optional[str] = None,
     status: str = "UPLOADING",
     stage: str = "UPLOAD",
     created_by: Optional[str] = None,
@@ -52,6 +53,7 @@ def create_file_record(
         bucket_name=bucket_name,
         object_name=object_name,
         file_size=file_size,
+        upload_owner_service=upload_owner_service,
         status=status,
         stage=stage,
         created_by=created_by,
@@ -82,6 +84,7 @@ def create_file_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any
                 bucket_name=record.get("bucket_name"),
                 object_name=record.get("object_name"),
                 file_size=record.get("file_size"),
+                upload_owner_service=record.get("upload_owner_service"),
                 status=record.get("status", "UPLOADING"),
                 stage=record.get("stage", "UPLOAD"),
                 created_by=record.get("created_by"),
@@ -180,14 +183,21 @@ def fail_interrupted_file_tasks() -> List[Dict[str, Any]]:
         return recovered
 
 
-def list_uploading_files_created_before(cutoff: datetime) -> List[Dict[str, Any]]:
-    """Return upload placeholders created before a container startup cutoff."""
+def list_uploading_files_created_before(
+    cutoff: datetime,
+    upload_owner_service: str,
+) -> List[Dict[str, Any]]:
+    """Return old uploads owned by the service that is being restarted."""
+    if not upload_owner_service:
+        raise ValueError("upload_owner_service is required for upload recovery")
+
     with get_db_session() as session:
         rows = (
             session.query(KnowledgeFileLifecycle)
             .filter(
                 KnowledgeFileLifecycle.status == "UPLOADING",
                 KnowledgeFileLifecycle.delete_flag == "N",
+                KnowledgeFileLifecycle.upload_owner_service == upload_owner_service,
                 KnowledgeFileLifecycle.create_time < cutoff,
             )
             .order_by(KnowledgeFileLifecycle.create_time.asc())
