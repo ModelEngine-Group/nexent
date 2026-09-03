@@ -5,10 +5,6 @@ from enum import Enum
 from typing import Any, Mapping, Optional
 
 from consts.const import CAPACITY_SUGGESTION_ENABLED
-from nexent.core.models.model_identity import (
-    identities_are_safe_aliases,
-    parse_model_identity,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +134,19 @@ HOST_PROVIDER_PATTERNS = (
 SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
 
 
+def _parse_model_identity(model_name: str, provider: Optional[str] = None) -> Any:
+    """Load the SDK matcher only when suggestion matching is requested."""
+    from nexent.core.models.model_identity import parse_model_identity
+
+    return parse_model_identity(model_name, provider)
+
+
+def _identities_are_safe_aliases(left: Any, right: Any) -> bool:
+    from nexent.core.models.model_identity import identities_are_safe_aliases
+
+    return identities_are_safe_aliases(left, right)
+
+
 def pick_provider_from_base_url(base_url: Optional[str]) -> Optional[str]:
     # Match the entire lower-cased base_url, mirroring the frontend
     # detectProviderFromUrl helper. Substring `in` check, first hit wins.
@@ -166,7 +175,7 @@ def normalize_model_name(model_name: str) -> str:
     """Compatibility helper returning the separator-aware canonical path."""
     if not model_name.strip():
         return ""
-    return parse_model_identity(model_name).canonical_id
+    return _parse_model_identity(model_name).canonical_id
 
 
 def _normalize_catalog_exact_name(model_name: str) -> str:
@@ -233,13 +242,13 @@ def _unique_final_segment_match(
     catalog: Mapping[ProfileKey, CapabilityProfileLike],
     provider: str,
 ) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
-    requested = parse_model_identity(model_name, provider)
+    requested = _parse_model_identity(model_name, provider)
     matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
     for key, profile in _provider_catalog(catalog, provider).items():
         catalog_model = key[1]
         final_segment = catalog_model.split("/")[-1]
-        candidate = parse_model_identity(final_segment, provider)
-        if identities_are_safe_aliases(requested, candidate):
+        candidate = _parse_model_identity(final_segment, provider)
+        if _identities_are_safe_aliases(requested, candidate):
             matches.append((key, profile))
 
     if len(matches) == 1:
@@ -252,10 +261,10 @@ def _fuzzy_catalog_match(
     catalog: Mapping[ProfileKey, CapabilityProfileLike],
     provider: str,
 ) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
-    requested = parse_model_identity(model_name, provider)
+    requested = _parse_model_identity(model_name, provider)
     matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
     for key, profile in _provider_catalog(catalog, provider).items():
-        candidate = parse_model_identity(key[1], provider)
+        candidate = _parse_model_identity(key[1], provider)
         if requested.canonical_id == candidate.canonical_id:
             matches.append((key, profile))
 
@@ -270,20 +279,22 @@ def _explicit_alias_match(
     catalog: Mapping[ProfileKey, CapabilityProfileLike],
     provider: str,
 ) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
-    requested = parse_model_identity(model_name, provider)
+    requested = _parse_model_identity(model_name, provider)
     matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
     for key, profile in _provider_catalog(catalog, provider).items():
         exclusions = getattr(profile, "exclusions", ()) or ()
         if any(
-            identities_are_safe_aliases(
-                requested, parse_model_identity(exclusion, provider)
+            _identities_are_safe_aliases(
+                requested, _parse_model_identity(exclusion, provider)
             )
             for exclusion in exclusions
         ):
             continue
         aliases = getattr(profile, "aliases", ()) or ()
         if any(
-            identities_are_safe_aliases(requested, parse_model_identity(alias, provider))
+            _identities_are_safe_aliases(
+                requested, _parse_model_identity(alias, provider)
+            )
             for alias in aliases
         ):
             matches.append((key, profile))
