@@ -21,10 +21,19 @@ Support for EXA, Tavily, Linkup web search, IMAP/SMTP email functionality, and M
 Integrated STT & TTS voice services, support for image understanding and processing, and long context models.
 
 ### 📊 Powerful Data Processing Capabilities
-Processing 20+ document formats with intelligent chunking strategies and memory streaming processing.
+Processing multiple document formats (currently 17 extensions supported) with intelligent chunking strategies and memory streaming processing.
 
 ### 🔍 Vector Database Integration
 Enterprise-grade Elasticsearch vector search with hybrid search and large-scale optimization support.
+
+### 🌉 Gateway Adapter Architecture
+LLM/Embedding/Rerank/VLM models are integrated through `AdapterRegistry` with unified registration by `(factory, modality)`, and transport-layer parameters are configurable (`core/gateway/registry.py`, `transport.py`).
+
+### 🧠 Memory & Dreaming
+Three-tier Tenant/User/Agent memory + proactive memory tools + Dreaming memory consolidation (`memory/dreaming/`).
+
+### 🏁 Benchmark
+Built-in `agent_runner`, `acon_eval`, and `eventqa_eval` evaluation scaffolds plus a general-purpose evaluation comparison harness.
 
 For detailed features and usage instructions, please refer to **[Features Explained](./features)** and **[Basic Usage Guide](./basic-usage)**.
 

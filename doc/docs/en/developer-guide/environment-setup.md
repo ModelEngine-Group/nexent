@@ -12,7 +12,7 @@ Use this guide to prepare your environment before developing with Nexent. It sep
 - Node.js 18+
 - Docker & Docker Compose
 - `uv` (Python package manager)
-- `pnpm` (Node.js package manager)
+- `pnpm` (Node.js package manager, installed with Node.js)
 
 ## 🧑‍💻 Full-Stack Nexent Development
 
@@ -35,11 +35,11 @@ Infrastructure mode launches PostgreSQL, Redis, Elasticsearch, and MinIO. The sc
 # Run inside the backend directory
 cd backend
 uv sync --all-extras
-uv pip install ../sdk
+uv pip install -e "../sdk[dev]"
 ```
 
 :::: tip Notes
-`--all-extras` installs every optional dependency (data processing, testing, etc.). After syncing, install the local SDK package.
+`--all-extras` installs every optional dependency (`data-process` for data processing, `test` for testing, etc.). Afterwards, install the local SDK package in editable mode (the `dev` extra includes tooling such as ruff, pytest, unstructured, and OpenTelemetry).
 ::::
 
 #### Optional: Accelerate with Mirror Sources
@@ -49,15 +49,15 @@ If downloads are slow, use domestic mirrors:
 ```bash
 # Tsinghua mirror
 uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install ../sdk --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Alibaba Cloud mirror
 uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --default-index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # Multiple mirrors (recommended)
 uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
 ```
 
 :::: info Mirror Source Reference
@@ -88,21 +88,22 @@ source .venv/bin/activate
 ```
 
 :::: warning Important Notes
-On Windows, activate the environment with `source .venv/Scripts/activate`.
+On Windows PowerShell, use `.venv\Scripts\Activate.ps1`; in Git Bash, use `source .venv/Scripts/activate`.
 ::::
 
 Start the backend services from the project root, in order:
 
 ```bash
 # Always run from project root with environment variables loaded
-source .env && python backend/mcp_service.py
-source .env && python backend/data_process_service.py
-source .env && python backend/config_service.py
-source .env && python backend/runtime_service.py
+source deploy/env/.env && python backend/mcp_service.py
+source deploy/env/.env && python backend/data_process_service.py
+source deploy/env/.env && python backend/config_service.py
+source deploy/env/.env && python backend/runtime_service.py
+source deploy/env/.env && python backend/northbound_service.py
 ```
 
 :::: warning Important Notes
-Each command must run from the project root and be prefixed with `source .env`. Ensure databases, Redis, Elasticsearch, and MinIO (from infrastructure mode) are healthy first.
+Each command must run from the project root and be prefixed with `source deploy/env/.env`. Ensure databases, Redis, Elasticsearch, and MinIO (from infrastructure mode) are healthy first.
 ::::
 
 ## 🧰 SDK-Only Development

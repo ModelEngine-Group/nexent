@@ -12,7 +12,7 @@ bash deploy/images/build.sh
 # Build selected images with a fixed version tag
 bash build.sh \
   --images main,web,mcp,data-process,terminal \
-  --version v2.2.1 \
+  --version v2.5.0 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
   --push
@@ -26,10 +26,10 @@ bash build.sh \
   --load
 
 # Build one or more explicit images when needed
-bash build.sh --web --docs --version v2.2.1 --dry-run
+bash build.sh --web --docs --version v2.5.0 --dry-run
 
 # Build without Docker cache
-bash build.sh --web --version v2.2.1 --no-cache
+bash build.sh --web --version v2.5.0 --no-cache
 ```
 
 The root `build.sh` forwards image builds to `deploy/images/build.sh`. Use `bash build.sh --package ...` to forward to the offline package builder. When run in a terminal without arguments, `build.sh` prompts for images, image version (`latest` or root `VERSION`), and image source. The interactive defaults are images `main,web` and version `latest`. Use `--interactive` to force the same prompts.
@@ -49,6 +49,36 @@ Image options:
 - `--mcp` builds `nexent-mcp`
 - `--terminal` builds `nexent-ubuntu-terminal`
 - `--docs` builds `nexent-docs`
+- `--sandbox` builds `nexent-sandbox`
+
+The following diagram shows the actual build flow of `deploy/images/build.sh`:
+
+```mermaid
+flowchart TD
+    A["Run bash build.sh"] --> B{"Argument form"}
+    B -->|"No arguments, interactive terminal"| C["Interactively choose images, version, and registry<br/>defaults to main,web and latest"]
+    B -->|"With arguments"| D["Parse the --images list or single image options"]
+    C --> E["Determine registry and build arguments"]
+    D --> E
+    E --> F{"Registry selection"}
+    F -->|"general"| G["Image tags start with nexent/"]
+    F -->|"mainland"| H["Inject mainland build mirrors<br/>web image automatically adds --no-cache"]
+    G --> I["Build each selected image"]
+    H --> I
+    I --> J["main uses main/Dockerfile<br/>builds nexent"]
+    I --> K["web uses web/Dockerfile<br/>docs uses docs/Dockerfile"]
+    I --> L["mcp uses mcp/Dockerfile<br/>sandbox uses sandbox/Dockerfile"]
+    I --> M["data-process uses data-process/Dockerfile<br/>cpu or gpu variant<br/>model-assets prepared automatically before build"]
+    I --> N["terminal uses terminal/Dockerfile<br/>slim or conda variant"]
+    J --> O{"Output mode"}
+    K --> O
+    L --> O
+    M --> O
+    N --> O
+    O -->|"--push"| P["Push to image registry<br/>mainland pushes to ccr.ccs.tencentyun.com/nexent-hub"]
+    O -->|"--load"| Q["Load into local Docker"]
+    O -->|"Default"| R["Local build only"]
+```
 
 ```bash
 # 🛠️ Create and use a new builder instance that supports multi-architecture builds
@@ -56,11 +86,11 @@ docker buildx create --name nexent_builder --use
 
 # 🚀 build application for multiple architectures
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
 
 # 📊 build data_process for multiple architectures
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
 
 # 🌐 build web frontend for multiple architectures
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
@@ -75,8 +105,8 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexen
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
 
 # 💻 build Ubuntu Terminal for multiple architectures
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
 ```
 
 ### 💻 Local Development Build
@@ -107,12 +137,14 @@ docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles
 # 🔗 Build MCP Server image (current architecture only)
 docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile .
 
-# 💻 Build OpenSSH Server image (current architecture only)
+# 💻 Build OpenSSH Server image (default slim variant, current architecture only)
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 
-# 💻 Build OpenSSH Server image with Conda (current architecture only)
+# 💻 Build OpenSSH Server image with Conda (conda variant, current architecture only)
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/images/dockerfiles/terminal/Dockerfile --build-arg TERMINAL_VARIANT=conda .
 ```
+
+Here, `CONFIGURED_BASE_PATH` is used to deploy the frontend under a reverse proxy subpath.
 
 ### 🧹 Clean up Docker resources
 
@@ -182,6 +214,7 @@ All images include:
 - `nexent/nexent-docs` - Vitepress documentation site
 - `nexent/nexent-mcp` - MCP server proxy service
 - `nexent/nexent-ubuntu-terminal` - OpenSSH development server container
+- `nexent/nexent-sandbox` - Agent Python code sandbox runtime
 
 ## 📚 Documentation Image Standalone Deployment
 
@@ -253,7 +286,7 @@ On an internet-connected machine, build an offline package containing both Docke
 ```bash
 bash build.sh --package \
   --target all \
-  --version v2.2.1 \
+  --version v2.5.0 \
   --platform amd64 \
   --components infrastructure,application,data-process,supabase \
   --image-source general \
@@ -290,6 +323,8 @@ bash build.sh --package \
 `local-latest` reuses local Nexent application images instead of pulling those `latest` images again. The builder produces image tar files, deployment resources, `manifest.yaml`, and `checksums.txt`. It does not copy the packaging host's `deploy/env/.env`, `deploy/env/monitoring.env`, or `deploy.options`.
 
 With `--compress true`, the builder creates `nexent-offline-<target>-<platform>-<version>.zip` next to the output directory. You can also manually run [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml) in GitHub Actions. The workflow publishes separate `nexent-<version>-<platform>.zip` artifacts for AMD64 and ARM64 with a default retention period of 30 days.
+
+In addition, the offline deployment package supports configuring the compressed artifact and image registry prefix, and supports uploading to Huawei OBS by name in CI scenarios. The MinIO image source has switched to Quay.
 
 For package download and installation instructions, see:
 

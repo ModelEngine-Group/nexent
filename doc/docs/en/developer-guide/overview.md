@@ -9,8 +9,7 @@ nexent/
 ├── frontend/          # Frontend application (Next.js + TypeScript)
 ├── backend/           # Backend services (FastAPI + Python)
 ├── sdk/              # Python SDK
-├── docker/           # Docker deployment configuration
-├── make/             # Build scripts
+├── deploy/           # Deployment configuration (Docker Compose, K8s, SQL, environment templates)
 ├── test/             # Test code
 └── assets/           # Static resources
 ```
@@ -18,10 +17,10 @@ nexent/
 ## 🛠️ Technology Stack
 
 ### Frontend Tech Stack
-- **Framework**: Next.js 14 (App Router)
+- **Framework**: Next.js 15 (App Router)
 - **Language**: TypeScript
 - **UI Library**: React + Tailwind CSS
-- **State Management**: React Hooks
+- **State Management**: React Hooks + zustand
 - **Internationalization**: react-i18next
 - **HTTP Client**: Fetch API
 
@@ -53,7 +52,7 @@ Review that guide first, then return here for module-specific details.
 ## 🔧 Development Module Guide
 
 ### 🎨 Frontend Development
-- **Tech Stack**: Next.js 14 + TypeScript + React + Tailwind CSS
+- **Tech Stack**: Next.js 15 + TypeScript + React + Tailwind CSS
 - **Core Features**: User interface, real-time chat, configuration management, internationalization
 - **Details**: See [Frontend Overview](../frontend/overview.md)
 

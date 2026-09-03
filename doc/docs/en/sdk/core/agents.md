@@ -32,6 +32,18 @@ CoreAgent implements the ReAct framework's think-act-observe loop:
 3. **Observe**: Collect execution results and logs
 4. **Repeat**: Continue thinking and executing based on observation results until task completion
 
+### 🧩 Context Management
+Context management and compression are enabled via `AgentConfig.context_manager_config` (corresponding to `ContextManagerConfig`, see core/agents/context/config.py). Based on it, NexentAgent builds a `ContextManager` and a `ManagedContextRuntime`, which automatically compress long-conversation history and record metrics; the context runtime supports adaptive compression based on ContextItems, where compression output is a Markdown summary and executable output is rejected.
+
+### 🗺️ Planning Agent
+Supports plan-first-then-execute: CreatePlanTool / UpdatePlanStepTool generate and maintain a plan todo list (plan_repo.py), working with ParallelExecutorTool to concurrently dispatch multiple sub-agents.
+
+### 📦 Sandbox
+Code execution uses the local LocalPythonExecutor by default (no sandbox). After configuring `SandboxConfig` (core/agents/sandbox.py) via `AgentConfig.sandbox_policy` / `AgentRunInfo.sandbox_config`, Docker/WASM-level sandbox isolation can be enabled; `scope` supports `session` (default: one container per run, destroyed when the run ends) and `system` (a system-level shared persistent container, with an independent kernel per run).
+
+### 🛡️ Guardrail Safety Screening
+Built-in input/output content safety checkpoints (guardrail checkpoints) can block sensitive content.
+
 ### 📡 MessageObserver - Streaming Message Processing
 Core implementation of the message observer pattern for handling Agent's streaming output:
 
@@ -40,7 +52,7 @@ Core implementation of the message observer pattern for handling Agent's streami
 - **Multi-language Support**: Supports Chinese and English output formats
 - **Unified Interface**: Provides unified processing for messages from different sources
 
-ProcessType enumeration defines the following processing stages:
+Common processing stages of the ProcessType enumeration include (see `nexent.core.utils.observer.ProcessType` for the full definition):
 - `STEP_COUNT`: Current execution step
 - `MODEL_OUTPUT_THINKING`: Model thinking process output
 - `MODEL_OUTPUT_CODE`: Model code generation output
@@ -55,6 +67,39 @@ ProcessType enumeration defines the following processing stages:
 
 Core usage examples now live in [Basic Usage](../basic-usage#using-agent_run-recommended-for-streaming), including both `CoreAgent.run` and the streaming `agent_run` helper. This page focuses on module concepts (architecture, MessageObserver, patterns) rather than code walkthroughs.
 
+### Agent Run Sequence Diagram
+
+The following diagram shows the real call chain of `agent_run` (based on core/agents/run_agent.py, nexent_agent.py, core_agent.py):
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant AR as agent_run async generator
+    participant TH as agent_run_thread thread
+    participant NA as NexentAgent
+    participant CA as CoreAgent
+    participant LLM as OpenAIModel
+    participant TL as Tools
+    participant OB as MessageObserver
+
+    U->>AR: Pass in AgentRunInfo
+    AR->>TH: Start background thread
+    TH->>NA: create_single_agent builds CoreAgent
+    TH->>NA: agent_run_with_observer starts execution
+    NA->>CA: run streams step-by-step execution
+    loop Each ReAct step
+        CA->>LLM: generate produces thinking and code
+        LLM-->>OB: MODEL_OUTPUT_THINKING and MODEL_OUTPUT_CODE
+        CA->>CA: Parse code and send PARSE
+        CA->>TL: Execute python_interpreter or real tools
+        TL-->>OB: EXECUTION_LOGS, SEARCH_CONTENT, etc.
+        CA->>CA: Observe results and decide next step
+    end
+    CA-->>OB: Output FINAL_ANSWER
+    OB-->>AR: Cache message JSON strings
+    AR-->>U: Yield event stream item by item
+```
+
 ## 🛠️ Tool Integration
 
 ### Custom Tool Development
@@ -62,7 +107,7 @@ Core usage examples now live in [Basic Usage](../basic-usage#using-agent_run-rec
 Nexent implements tool systems based on [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol/python-sdk).
 
 #### Developing New Tools:
-1. Implement logic in `backend/mcp_service/local_mcp_service.py`
+1. Implement logic in `backend/tool_collection/mcp/local_mcp_service.py`
 2. Register with `@mcp.tool()` decorator
 3. Restart MCP service
 
