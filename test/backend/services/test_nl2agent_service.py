@@ -21,6 +21,7 @@ from services.nl2agent_service import (
     _load_installed_resource_catalog,
     _normalize_skill_config,
     _normalize_tool_config,
+    _rank_resource_catalog,
     _redact_installation_snapshot,
     _resource_similarity,
     build_nl2agent_run_info,
@@ -63,6 +64,35 @@ def _basic_draft_fields(**overrides):
     }
     values.update(overrides)
     return AgentDraftFields(**values)
+
+
+def test_resource_search_does_not_cover_specific_requirement_with_generic_query_tool():
+    result = _rank_resource_catalog(
+        requirements=[
+            ResourceRequirement(
+                requirement_id="ticket_query",
+                query="Query 12306 train tickets",
+                search_terms=["query", "12306", "train tickets"],
+            )
+        ],
+        catalog=[
+            {
+                "candidate_ref": "tool:127",
+                "resource_type": "tool",
+                "source": "LOCAL_TOOL",
+                "name": "terminal",
+                "description": "Run generic query commands through an SSH terminal.",
+                "names": ["terminal"],
+                "labels": ["query", "shell"],
+                "descriptions": ["Run generic query commands through an SSH terminal."],
+                "interfaces": ["command", "host"],
+                "installed": True,
+                "quality": 1.0,
+            }
+        ],
+    )
+
+    assert result.uncovered_requirement_ids == ["ticket_query"]
 
 
 def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():

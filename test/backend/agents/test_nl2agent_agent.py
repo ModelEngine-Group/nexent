@@ -169,6 +169,8 @@ def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
     assert 'subtype="resource_gap_resolution"' in prompt
     assert "resource_gap_resolution" in prompt
     assert "skill_created" in prompt
+    if language == "en":
+        assert "Do not infer coverage from fuzzy candidates" in prompt
 
 
 @pytest.mark.parametrize(
