@@ -61,7 +61,7 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
-from management.services.skill.service import SkillService, generate_available_copy_skill_name
+from management.services.skill.service import SkillService
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -71,6 +71,7 @@ from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_NAME,
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
+from utils.skill_import_utils import generate_available_copy_skill_name
 from services.conversation_management_service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     save_message_unit,  # noqa: F401 - retained as a compatibility re-export

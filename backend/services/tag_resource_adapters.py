@@ -244,7 +244,7 @@ def _get_elasticsearch_service() -> Any:
     if ElasticSearchService is not None:
         return ElasticSearchService
 
-    from services.vectordatabase_service import ElasticSearchService as service
+    from management.services.knowledge_base.service import ElasticSearchService as service
 
     return service
 
@@ -260,7 +260,7 @@ async def _resolve_provider_document(
 
     normalized_provider = provider.strip().lower()
     if normalized_provider == LOCAL_DOCUMENT_PROVIDER:
-        from services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
 
         files = await _get_elasticsearch_service().list_files(
             knowledge_base_id,

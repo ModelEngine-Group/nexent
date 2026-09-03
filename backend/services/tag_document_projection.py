@@ -64,7 +64,7 @@ class LocalElasticsearchDocumentProjectionProvider:
     def _core(self) -> Any:
         if self._vdb_core is not None:
             return self._vdb_core
-        from services.vectordatabase_service import get_vector_db_core
+        from management.services.knowledge_base.service import get_vector_db_core
 
         return get_vector_db_core()
 

@@ -1,7 +1,8 @@
 import pytest
 from consts.exceptions import McpNotFoundError
-from services import agent_service, remote_mcp_service
-from services.skill_service import SkillService
+from management.services.agent import management as agent_service
+from management.services.skill.service import SkillService
+from services import remote_mcp_service
 from services.tag_management_service import TagManagementService
 from services.tag_resource_adapters import _encode_document_resource_id
 
@@ -64,12 +65,14 @@ def test_skill_delete_cleans_up_the_tenant_scoped_stable_skill_id(monkeypatch):
     service = object.__new__(SkillService)
     service.tenant_id = "tenant-a"
     monkeypatch.setattr(SkillService, "_local_skills_dir", lambda *args: "/tmp/skills")
-    monkeypatch.setattr("services.skill_service.os.path.exists", lambda path: False)
+    monkeypatch.setattr("management.services.skill.service.os.path.exists", lambda path: False)
     monkeypatch.setattr(
-        "services.skill_service.skill_db.get_skill_by_name",
+        "management.services.skill.service.skill_db.get_skill_by_name",
         lambda skill_name, tenant_id: {"skill_id": 11, "tenant_id": tenant_id},
     )
-    monkeypatch.setattr("services.skill_service.skill_db.delete_skill", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        "management.services.skill.service.skill_db.delete_skill", lambda *args, **kwargs: True
+    )
     cleanup_calls = []
     monkeypatch.setattr(
         TagManagementService,
@@ -85,9 +88,11 @@ def test_skill_delete_without_a_same_tenant_record_does_not_clean_up(monkeypatch
     service = object.__new__(SkillService)
     service.tenant_id = "tenant-a"
     monkeypatch.setattr(SkillService, "_local_skills_dir", lambda *args: "/tmp/skills")
-    monkeypatch.setattr("services.skill_service.os.path.exists", lambda path: False)
-    monkeypatch.setattr("services.skill_service.skill_db.get_skill_by_name", lambda *args: None)
-    monkeypatch.setattr("services.skill_service.skill_db.delete_skill", lambda *args, **kwargs: False)
+    monkeypatch.setattr("management.services.skill.service.os.path.exists", lambda path: False)
+    monkeypatch.setattr("management.services.skill.service.skill_db.get_skill_by_name", lambda *args: None)
+    monkeypatch.setattr(
+        "management.services.skill.service.skill_db.delete_skill", lambda *args, **kwargs: False
+    )
     cleanup_calls = []
     monkeypatch.setattr(
         TagManagementService,

@@ -428,7 +428,7 @@ def test_retry_pending_projections_attempts_due_rows(monkeypatch):
 
 
 def test_hybrid_search_applies_document_tag_predicates(monkeypatch):
-    from services.vectordatabase_service import ElasticSearchService
+    from management.services.knowledge_base.service import ElasticSearchService
 
     def fake_predicates(tenant_id, provider, knowledge_base_id, predicates):
         return [_encode_document_resource_id("local", knowledge_base_id, "docs/a.pdf")]
@@ -437,7 +437,7 @@ def test_hybrid_search_applies_document_tag_predicates(monkeypatch):
         TagManagementService, "filter_document_ids_by_predicates", fake_predicates
     )
     monkeypatch.setattr(
-        "services.vectordatabase_service.get_embedding_model_by_index_name",
+        "management.services.knowledge_base.service.get_embedding_model_by_index_name",
         lambda *args, **kwargs: (object(), 1, {"status": "ok"}),
     )
 
@@ -469,10 +469,10 @@ def test_hybrid_search_applies_document_tag_predicates(monkeypatch):
 
 
 def test_hybrid_search_without_predicates_keeps_all_results(monkeypatch):
-    from services.vectordatabase_service import ElasticSearchService
+    from management.services.knowledge_base.service import ElasticSearchService
 
     monkeypatch.setattr(
-        "services.vectordatabase_service.get_embedding_model_by_index_name",
+        "management.services.knowledge_base.service.get_embedding_model_by_index_name",
         lambda *args, **kwargs: (object(), 1, {"status": "ok"}),
     )
 
@@ -638,7 +638,7 @@ def test_provider_core_falls_back_to_vector_db(monkeypatch):
         return FakeCore()
 
     monkeypatch.setattr(
-        "services.vectordatabase_service.get_vector_db_core", fake_get_vector_db_core
+        "management.services.knowledge_base.service.get_vector_db_core", fake_get_vector_db_core
     )
 
     provider = LocalElasticsearchDocumentProjectionProvider()
