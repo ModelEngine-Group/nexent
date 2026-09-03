@@ -50,7 +50,7 @@ export default function Homepage() {
     return true;
   };
 
-  const navigateToChat = () => navigateWithPermissionCheck("/chat");
+  const navigateToChat = () => navigateWithPermissionCheck("/newchat");
   const navigateToAgent = () => navigateWithPermissionCheck("/agents");
   const navigateToRepository = () => navigateWithPermissionCheck("/agent-space");
   const canShowQuickAction = (route: string) =>

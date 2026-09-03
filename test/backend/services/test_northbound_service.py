@@ -167,9 +167,9 @@ runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = Async
 sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 
 # Mock agent_service
-agent_service_mod = types.ModuleType("services.agent_service")
+agent_service_mod = types.ModuleType("management.services.agent.service")
 agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
-sys.modules["services.agent_service"] = agent_service_mod
+sys.modules["management.services.agent.service"] = agent_service_mod
 
 # Mock runtime forwarding service
 runtime_proxy_mod = types.ModuleType("services.runtime_proxy_service")
@@ -181,8 +181,14 @@ sys.modules["services.runtime_proxy_service"] = runtime_proxy_mod
 conv_mgmt_mod = types.ModuleType("services.conversation_management_service")
 conv_mgmt_mod.save_conversation_user = MagicMock()
 conv_mgmt_mod.create_new_conversation = MagicMock(return_value={"conversation_id": 123})
+conv_mgmt_mod.generate_conversation_title_service = AsyncMock(return_value="Generated title")
 conv_mgmt_mod.update_conversation_title = MagicMock()
 sys.modules["services.conversation_management_service"] = conv_mgmt_mod
+
+# Mock model_management_service
+model_mgmt_mod = types.ModuleType("services.model_management_service")
+model_mgmt_mod.list_models_for_tenant = AsyncMock(return_value=[])
+sys.modules["services.model_management_service"] = model_mgmt_mod
 
 # Mock agent_version_service
 agent_version_mod = types.ModuleType("services.agent_version_service")
@@ -197,13 +203,18 @@ knowledge_scope_service_mod.AIDP_TOOL_CLASS = "AidpSearchTool"
 knowledge_scope_service_mod.get_agent_knowledge_capabilities = MagicMock()
 sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_mod
 
-vectordatabase_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordatabase_service_mod = types.ModuleType("management.services.knowledge_base.service")
 vectordatabase_service_mod.ElasticSearchService = MagicMock()
 vectordatabase_service_mod.ElasticSearchService.filter_accessible_indices = MagicMock(
     return_value=[]
 )
-vectordatabase_service_mod._is_multimodal_by_model_id = MagicMock(return_value=False)
-sys.modules["services.vectordatabase_service"] = vectordatabase_service_mod
+sys.modules["management.services.knowledge_base.service"] = vectordatabase_service_mod
+
+model_resolver_mod = types.ModuleType("management.services.model.resolver")
+model_resolver_mod.get_model_descriptor = MagicMock(
+    return_value=types.SimpleNamespace(is_multimodal=False)
+)
+sys.modules["management.services.model.resolver"] = model_resolver_mod
 
 # Mock file_management_service
 file_mgmt_mod = types.ModuleType("services.file_management_service")
@@ -217,6 +228,7 @@ services_package.agent_service = agent_service_mod
 services_package.runtime_proxy_service = runtime_proxy_mod
 services_package.agent_version_service = agent_version_mod
 services_package.conversation_management_service = conv_mgmt_mod
+services_package.model_management_service = model_mgmt_mod
 services_package.file_management_service = file_mgmt_mod
 services_package.runtime_state_service = runtime_state_service_mod
 services_package.knowledge_scope_service = knowledge_scope_service_mod
@@ -597,6 +609,11 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+
+        async def response_chunks():
+            yield b"data: {\"type\": \"final_answer\", \"content\": \"ok\"}\n\n"
+
+        mock_response.body_iterator = response_chunks()
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
@@ -616,6 +633,11 @@ class TestStartStreamingChat:
                 user_id=ctx.user_id,
                 agent_id=1,
             )
+
+            chunks = [chunk async for chunk in mock_response.body_iterator]
+            assert b'"type": "conversation_created"' in chunks[0]
+            assert b'"conversation_id": 123' in chunks[0]
+            assert chunks[1].startswith(b"data: {\"type\": \"final_answer\"")
 
     async def test_start_streaming_chat_allows_unpublished_agent(self):
         """Use the resolved agent ID even when it has no published version."""
@@ -976,6 +998,49 @@ class TestListConversations:
 
         token_db_mod.get_latest_usage_metadata.assert_not_called()
         assert result["message"] == "success"
+
+
+@pytest.mark.asyncio
+class TestNorthboundModelAndGeneratedTitleServices:
+    async def test_list_configured_models_uses_context_tenant(self):
+        ctx = MockNorthboundContext(tenant_id="tenant-models")
+        models = [{"model_id": 7, "display_name": "Main model"}]
+        model_mgmt_mod.list_models_for_tenant.reset_mock(side_effect=True)
+        model_mgmt_mod.list_models_for_tenant.return_value = models
+
+        result = await ns.list_configured_models(ctx)
+
+        assert result == {
+            "message": "success",
+            "data": models,
+            "requestId": "req-123",
+        }
+        model_mgmt_mod.list_models_for_tenant.assert_awaited_once_with("tenant-models")
+
+    async def test_generate_conversation_title_uses_context_identity(self):
+        ctx = MockNorthboundContext(user_id="user-title", tenant_id="tenant-title")
+        conv_mgmt_mod.generate_conversation_title_service.reset_mock(side_effect=True)
+        conv_mgmt_mod.generate_conversation_title_service.return_value = "Generated title"
+
+        result = await ns.generate_conversation_title(
+            ctx=ctx,
+            conversation_id=42,
+            question="Summarize this conversation",
+            language="en",
+        )
+
+        assert result == {
+            "message": "success",
+            "data": "Generated title",
+            "requestId": "req-123",
+        }
+        conv_mgmt_mod.generate_conversation_title_service.assert_awaited_once_with(
+            conversation_id=42,
+            question="Summarize this conversation",
+            user_id="user-title",
+            tenant_id="tenant-title",
+            language="en",
+        )
 
 
 @pytest.mark.asyncio

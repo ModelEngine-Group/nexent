@@ -58,12 +58,13 @@ from .agent_draft_permission_service import (
     ResourceBindingError,
     require_agent_draft_edit,
 )
-from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
+from management.services.knowledge_base.service import get_embedding_model_by_index_name
+from management.services.model.resolver import get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
 from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from services.vectordatabase_service import get_vector_db_core
+from management.services.knowledge_base.service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
@@ -708,7 +709,9 @@ async def get_tool_from_remote_mcp_server(
                                      params=[],
                                      source=ToolSourceEnum.MCP.value,
                                      inputs=str(input_schema["properties"]),
-                                     output_type="string",
+                                     # MCP results may contain text, structured data, images, audio, or files.
+                                     # "object" matches the runtime adapter and avoids advertising every result as text.
+                                     output_type="object",
                                      class_name=sanitized_tool_name,
                                      usage=mcp_server_name,
                                      origin_name=tool.name,

@@ -44,6 +44,7 @@ export default defineConfig({
         sidebar: [
           {
             text: "Overview",
+            collapsed: false,
             items: [
               { text: "Overview", link: "/en/getting-started/overview" },
               { text: "Key Features", link: "/en/getting-started/features" },
@@ -54,42 +55,41 @@ export default defineConfig({
             ],
           },
           {
-            text: "Quick Start",
+            text: "Deployment & Upgrade",
+            collapsed: false,
             items: [
               {
                 text: "Installation & Deployment",
-                link: "/en/quick-start/installation",
-              },
-              {
-                text: "Kubernetes Installation & Deployment",
-                link: "/en/quick-start/kubernetes-installation",
+                items: [
+                  {
+                    text: "Docker",
+                    link: "/en/quick-start/installation",
+                  },
+                  {
+                    text: "Kubernetes",
+                    link: "/en/quick-start/kubernetes-installation",
+                  },
+                ],
               },
               {
                 text: "Upgrade Guide",
-                link: "/en/quick-start/upgrade-guide",
-              },
-              {
-                text: "Kubernetes Upgrade Guide",
-                link: "/en/quick-start/kubernetes-upgrade-guide",
+                items: [
+                  {
+                    text: "Docker",
+                    link: "/en/quick-start/upgrade-guide",
+                  },
+                  {
+                    text: "Kubernetes",
+                    link: "/en/quick-start/kubernetes-upgrade-guide",
+                  },
+                ],
               },
               { text: "FAQ", link: "/en/quick-start/faq" },
             ],
           },
           {
-            text: "Developer Guide",
-            items: [
-              {
-                text: "Overview",
-                link: "/en/developer-guide/overview",
-              },
-              {
-                text: "Environment Preparation",
-                link: "/en/developer-guide/environment-setup",
-              },
-            ],
-          },
-          {
             text: "User Guide",
+            collapsed: false,
             items: [
               { text: "Home Page", link: "/en/user-guide/home-page" },
               { text: "Start Chat", link: "/en/user-guide/start-chat" },
@@ -110,6 +110,14 @@ export default defineConfig({
                     text: "Agent Configuration",
                     link: "/en/user-guide/agent-development/agent-configuration",
                     items: [
+                      {
+                        text: "Add External A2A Agents",
+                        link: "/en/user-guide/agent-development/a2a-external",
+                      },
+                      {
+                        text: "Publish as A2A Agent",
+                        link: "/en/user-guide/agent-development/a2a-publish",
+                      },
                       {
                         text: "Local Tools",
                         link: "/en/user-guide/local-tools/",
@@ -146,7 +154,122 @@ export default defineConfig({
             ],
           },
           {
+            text: "Developer Guide",
+            collapsed: false,
+            items: [
+              {
+                text: "Developer Guide",
+                items: [
+                  { text: "Overview", link: "/en/developer-guide/overview" },
+                  { text: "Environment Setup", link: "/en/developer-guide/environment-setup" },
+                ],
+              },
+              {
+                text: "Frontend Development",
+                items: [
+                  { text: "Overview", link: "/en/frontend/overview" },
+                ],
+              },
+              {
+                text: "Backend Development",
+                items: [
+                  { text: "Overview", link: "/en/backend/overview" },
+                  { text: "API Reference", link: "/en/backend/api-reference" },
+                  {
+                    text: "Tools Integration",
+                    items: [
+                      {
+                        text: "Nexent Tools",
+                        link: "/en/backend/tools/nexent-native",
+                      },
+                      {
+                        text: "LangChain Tools",
+                        link: "/en/backend/tools/langchain",
+                      },
+                      { text: "MCP Tools", link: "/en/backend/tools/mcp" },
+                    ],
+                  },
+                  {
+                    text: "Prompt Development",
+                    link: "/en/backend/prompt-development",
+                  },
+                  {
+                    text: "Version Management",
+                    link: "/en/backend/version-management",
+                  },
+                ],
+              },
+              {
+                text: "Documentation Development",
+                items: [
+                  { text: "Docs Development Guide", link: "/en/docs-development" },
+                ],
+              },
+              {
+                text: "Container Build & Containerized Development",
+                items: [
+                  { text: "Docker Build", link: "/en/deployment/docker-build" },
+                  { text: "Dev Container", link: "/en/deployment/devcontainer" },
+                ],
+              },
+              {
+                text: "Testing",
+                items: [
+                  { text: "Overview", link: "/en/testing/overview" },
+                  { text: "Backend Testing", link: "/en/testing/backend" },
+                ],
+              },
+            ],
+          },
+          {
+            text: "Third-Party Integration",
+            collapsed: false,
+            items: [
+              {
+                text: "Integration Overview",
+                link: "/en/integration/",
+              },
+              {
+                text: "Integration-In (Inbound)",
+                link: "/en/integration/integration-in/overview",
+                items: [
+                  {
+                    text: "MCP Service Integration",
+                    link: "/en/integration/integration-in/mcp",
+                  },
+                  {
+                    text: "Skill Integration",
+                    link: "/en/integration/integration-in/skills",
+                  },
+                  {
+                    text: "Agent Integration",
+                    link: "/en/integration/integration-in/agents",
+                  },
+                ],
+              },
+              {
+                text: "Integration-Out (Outbound)",
+                link: "/en/integration/integration-out/overview",
+                items: [
+                  {
+                    text: "Agent Export",
+                    link: "/en/integration/integration-out/agents-export",
+                  },
+                  {
+                    text: "Agent Publishing",
+                    link: "/en/integration/integration-out/agents-publish",
+                  },
+                  {
+                    text: "Northbound API",
+                    link: "/en/integration/integration-out/northbound-api",
+                  },
+                ],
+              },
+            ],
+          },
+          {
             text: "SDK Documentation",
+            collapsed: false,
             items: [
               { text: "Overview", link: "/en/sdk/overview" },
               { text: "Basic Usage", link: "/en/sdk/basic-usage" },
@@ -165,71 +288,8 @@ export default defineConfig({
             ],
           },
           {
-            text: "Frontend Development",
-            items: [{ text: "Overview", link: "/en/frontend/overview" }],
-          },
-          {
-            text: "Backend Development",
-            items: [
-              { text: "Overview", link: "/en/backend/overview" },
-              { text: "API Reference", link: "/en/backend/api-reference" },
-              {
-                text: "Tools Integration",
-                items: [
-                  {
-                    text: "Nexent Tools",
-                    link: "/en/backend/tools/nexent-native",
-                  },
-                  {
-                    text: "LangChain Tools",
-                    link: "/en/backend/tools/langchain",
-                  },
-                  { text: "MCP Tools", link: "/en/backend/tools/mcp" },
-                ],
-              },
-              {
-                text: "Prompt Development",
-                link: "/en/backend/prompt-development",
-              },
-              {
-                text: "Version Management",
-                link: "/en/backend/version-management",
-              },
-            ],
-          },
-          {
-            text: "Documentation Development",
-            items: [
-              { text: "Docs Development Guide", link: "/en/docs-development" },
-            ],
-          },
-          {
-            text: "Container Build & Containerized Development",
-            items: [
-              { text: "Docker Build", link: "/en/deployment/docker-build" },
-              { text: "Dev Container", link: "/en/deployment/devcontainer" },
-            ],
-          },
-          {
-            text: "MCP Ecosystem",
-            items: [
-              { text: "Overview", link: "/en/mcp-ecosystem/overview" },
-              {
-                text: "MCP Recommendations",
-                link: "/en/mcp-ecosystem/mcp-recommendations",
-              },
-              { text: "Use Cases", link: "/en/mcp-ecosystem/use-cases" },
-            ],
-          },
-          {
-            text: "Testing",
-            items: [
-              { text: "Overview", link: "/en/testing/overview" },
-              { text: "Backend Testing", link: "/en/testing/backend" },
-            ],
-          },
-          {
             text: "Community",
+            collapsed: false,
             items: [
               { text: "Contributing", link: "/en/contributing" },
               {
@@ -264,6 +324,7 @@ export default defineConfig({
         sidebar: [
           {
             text: "概览",
+            collapsed: false,
             items: [
               { text: "项目概览", link: "/zh/getting-started/overview" },
               { text: "核心特性", link: "/zh/getting-started/features" },
@@ -274,39 +335,41 @@ export default defineConfig({
             ],
           },
           {
-            text: "快速开始",
+            text: "部署与升级",
+            collapsed: false,
             items: [
-              { text: "安装部署", link: "/zh/quick-start/installation" },
               {
-                text: "Kubernetes 安装与部署",
-                link: "/zh/quick-start/kubernetes-installation",
+                text: "安装部署",
+                items: [
+                  {
+                    text: "Docker",
+                    link: "/zh/quick-start/installation",
+                  },
+                  {
+                    text: "Kubernetes",
+                    link: "/zh/quick-start/kubernetes-installation",
+                  },
+                ],
               },
               {
-                text: "升级指导",
-                link: "/zh/quick-start/upgrade-guide",
-              },
-              {
-                text: "Kubernetes 升级指南",
-                link: "/zh/quick-start/kubernetes-upgrade-guide",
+                text: "升级指南",
+                items: [
+                  {
+                    text: "Docker",
+                    link: "/zh/quick-start/upgrade-guide",
+                  },
+                  {
+                    text: "Kubernetes",
+                    link: "/zh/quick-start/kubernetes-upgrade-guide",
+                  },
+                ],
               },
               { text: "常见问题", link: "/zh/quick-start/faq" },
             ],
           },
           {
-            text: "开发者指南",
-            items: [
-              {
-                text: "概览",
-                link: "/zh/developer-guide/overview",
-              },
-              {
-                text: "环境准备",
-                link: "/zh/developer-guide/environment-setup",
-              },
-            ],
-          },
-          {
             text: "用户指南",
+            collapsed: false,
             items: [
               { text: "首页", link: "/zh/user-guide/home-page" },
               { text: "开始问答", link: "/zh/user-guide/start-chat" },
@@ -327,6 +390,14 @@ export default defineConfig({
                     text: "智能体配置",
                     link: "/zh/user-guide/agent-development/agent-configuration",
                     items: [
+                      {
+                        text: "添加外部 A2A Agent",
+                        link: "/zh/user-guide/agent-development/a2a-external",
+                      },
+                      {
+                        text: "发布为 A2A Agent",
+                        link: "/zh/user-guide/agent-development/a2a-publish",
+                      },
                       {
                         text: "本地工具",
                         link: "/zh/user-guide/local-tools/",
@@ -350,26 +421,6 @@ export default defineConfig({
                     text: "MCP仓库",
                     link: "/zh/user-guide/resource-repository/mcp-repository",
                   },
-                  {
-                    text: "Skill仓库",
-                    link: "/zh/user-guide/resource-repository/skill-repository",
-                    items: [
-                      {
-                        text: "官方技能",
-                        link: "/zh/user-guide/resource-repository/official-skills",
-                        items: [
-                          {
-                            text: "create-docx",
-                            link: "/zh/user-guide/resource-repository/create-docx",
-                          },
-                        ],
-                      },
-                      {   
-                        text: "自定义文件生成技能",
-                        link: "/zh/user-guide/resource-repository/custom-file-generation-skill",
-                      }
-                    ],
-                  },
                 ],
               },
               {
@@ -379,7 +430,116 @@ export default defineConfig({
             ],
           },
           {
+            text: "开发者指南",
+            collapsed: false,
+            items: [
+              {
+                text: "开发者指南",
+                items: [
+                  { text: "概览", link: "/zh/developer-guide/overview" },
+                  { text: "环境准备", link: "/zh/developer-guide/environment-setup" },
+                ],
+              },
+              {
+                text: "前端开发",
+                items: [
+                  { text: "概览", link: "/zh/frontend/overview" },
+                ],
+              },
+              {
+                text: "后端开发",
+                items: [
+                  { text: "概览", link: "/zh/backend/overview" },
+                  { text: "API 文档", link: "/zh/backend/api-reference" },
+                  {
+                    text: "工具集成",
+                    items: [
+                      {
+                        text: "Nexent 工具",
+                        link: "/zh/backend/tools/nexent-native",
+                      },
+                      {
+                        text: "LangChain 工具",
+                        link: "/zh/backend/tools/langchain",
+                      },
+                      { text: "MCP 工具", link: "/zh/backend/tools/mcp" },
+                    ],
+                  },
+                  { text: "提示词开发", link: "/zh/backend/prompt-development" },
+                  { text: "版本管理", link: "/zh/backend/version-management" },
+                ],
+              },
+              {
+                text: "文档开发",
+                items: [
+                  { text: "开发指南", link: "/zh/docs-development" },
+                ],
+              },
+              {
+                text: "容器构建与容器化开发",
+                items: [
+                  { text: "镜像构建", link: "/zh/deployment/docker-build" },
+                  { text: "容器开发", link: "/zh/deployment/devcontainer" },
+                ],
+              },
+              {
+                text: "测试",
+                items: [
+                  { text: "概览", link: "/zh/testing/overview" },
+                  { text: "后端测试", link: "/zh/testing/backend" },
+                ],
+              },
+            ],
+          },
+          {
+            text: "第三方集成",
+            collapsed: false,
+            items: [
+              {
+                text: "集成概览",
+                link: "/zh/integration/",
+              },
+              {
+                text: "资源接入指南",
+                link: "/zh/integration/integration-in/overview",
+                items: [
+                  {
+                    text: "MCP 服务接入",
+                    link: "/zh/integration/integration-in/mcp",
+                  },
+                  {
+                    text: "Skill 技能接入",
+                    link: "/zh/integration/integration-in/skills",
+                  },
+                  {
+                    text: "Agent 智能体接入",
+                    link: "/zh/integration/integration-in/agents",
+                  },
+                ],
+              },
+              {
+                text: "导出与发布指南",
+                link: "/zh/integration/integration-out/overview",
+                items: [
+                  {
+                    text: "Agent 导出",
+                    link: "/zh/integration/integration-out/agents-export",
+                  },
+                  {
+                    text: "Agent 发布",
+                    link: "/zh/integration/integration-out/agents-publish",
+                  },
+                  {
+                    text: "调用 Agent 北向 API",
+                    link: "/zh/integration/integration-out/northbound-api",
+                  },
+                ],
+              },
+            ],
+          },
+          {
             text: "SDK 文档",
+            collapsed: false,
             items: [
               { text: "概览", link: "/zh/sdk/overview" },
               { text: "基本使用", link: "/zh/sdk/basic-usage" },
@@ -399,63 +559,8 @@ export default defineConfig({
             ],
           },
           {
-            text: "前端开发",
-            items: [{ text: "概览", link: "/zh/frontend/overview" }],
-          },
-          {
-            text: "后端开发",
-            items: [
-              { text: "概览", link: "/zh/backend/overview" },
-              { text: "API 文档", link: "/zh/backend/api-reference" },
-              {
-                text: "工具集成",
-                items: [
-                  {
-                    text: "Nexent 工具",
-                    link: "/zh/backend/tools/nexent-native",
-                  },
-                  {
-                    text: "LangChain 工具",
-                    link: "/zh/backend/tools/langchain",
-                  },
-                  { text: "MCP 工具", link: "/zh/backend/tools/mcp" },
-                ],
-              },
-              { text: "提示词开发", link: "/zh/backend/prompt-development" },
-              { text: "版本管理", link: "/zh/backend/version-management" },
-            ],
-          },
-          {
-            text: "文档开发",
-            items: [{ text: "开发指南", link: "/zh/docs-development" }],
-          },
-          {
-            text: "容器构建与容器化开发",
-            items: [
-              { text: "镜像构建", link: "/zh/deployment/docker-build" },
-              { text: "容器开发", link: "/zh/deployment/devcontainer" },
-            ],
-          },
-          {
-            text: "MCP 生态系统",
-            items: [
-              { text: "概览", link: "/zh/mcp-ecosystem/overview" },
-              {
-                text: "MCP 推荐",
-                link: "/zh/mcp-ecosystem/mcp-recommendations",
-              },
-              { text: "用例场景", link: "/zh/mcp-ecosystem/use-cases" },
-            ],
-          },
-          {
-            text: "测试",
-            items: [
-              { text: "概览", link: "/zh/testing/overview" },
-              { text: "后端测试", link: "/zh/testing/backend" },
-            ],
-          },
-          {
             text: "社区",
+            collapsed: false,
             items: [
               { text: "贡献指南", link: "/zh/contributing" },
               { text: "开源纪念墙", link: "/zh/opensource-memorial-wall" },

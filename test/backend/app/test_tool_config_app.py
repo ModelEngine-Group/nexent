@@ -1343,3 +1343,65 @@ def test_update_tool_info_passthrough_http_exception(mock_update_tool_info, mock
 
     assert response.status_code == 409
     assert response.json()["detail"] == "conflict"
+
+
+class TestTokenExpiredMapping:
+    """Every tool config endpoint maps an expired token to 401."""
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_list_tools_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/list")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_search_tool_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/search", json={"agent_id": 123, "tool_id": 456})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_update_tool_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/update",
+            json={
+                "agent_id": 123,
+                "tool_id": 456,
+                "params": {"key": "value"},
+                "enabled": True,
+            },
+        )
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_load_last_tool_config_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/load_config/123")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_list_openapi_services_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/openapi_services")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('apps.tool_config_app.get_current_user_id')
+    def test_update_tool_labels_token_expired(self, mock_get_user_id):
+        from consts.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.put(
+            "/tool/labels", json={"tool_id": 1, "labels": ["database"]})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED

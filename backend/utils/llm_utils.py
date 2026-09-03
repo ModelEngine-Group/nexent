@@ -135,6 +135,10 @@ def call_llm_for_system_prompt(
                 temperature=0.3,
                 top_p=0.95,
             )
+            # The evaluator consumes the response as a stream. Remove any
+            # construction-time stream value before forcing the call-level
+            # streaming mode, otherwise Python receives duplicate keywords.
+            completion_kwargs.pop("stream", None)
             current_request = llm.client.chat.completions.create(stream=True, **completion_kwargs)
             token_join: List[str] = []
             is_thinking = False

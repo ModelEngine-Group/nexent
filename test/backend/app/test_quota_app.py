@@ -617,9 +617,9 @@ class TestQuotaRoleHelpers:
 
     def test_manageable_indices_only_include_edit_permissions(self):
         with patch(
-            "services.vectordatabase_service.get_vector_db_core"
+            "management.services.knowledge_base.service.get_vector_db_core"
         ), patch(
-            "services.vectordatabase_service.ElasticSearchService.list_indices",
+            "management.services.knowledge_base.service.ElasticSearchService.list_indices",
             return_value={
                 "index_permissions": {
                     "editable": "EDIT",
@@ -634,9 +634,9 @@ class TestQuotaRoleHelpers:
             }
 
         with patch(
-            "services.vectordatabase_service.get_vector_db_core"
+            "management.services.knowledge_base.service.get_vector_db_core"
         ), patch(
-            "services.vectordatabase_service.ElasticSearchService.list_indices",
+            "management.services.knowledge_base.service.ElasticSearchService.list_indices",
             return_value=[],
         ):
             assert quota_app._get_manageable_index_names("tenant", "user") == set()
@@ -1356,3 +1356,56 @@ class TestPersonalCapacityAPI:
 
         assert response.status_code == 500
         assert "Error getting personal KB capacity" in response.json()["message"]
+
+
+class TestTokenExpiredMapping:
+    """Every quota endpoint maps an expired token to 401."""
+
+    @pytest.mark.parametrize(
+        "method,url,payload",
+        [
+            ("get", "/api/tenants/test-tenant/quota", None),
+            ("put", "/api/tenants/test-tenant/quota", {"hard_limit_gb": 50}),
+            ("delete", "/api/tenants/test-tenant/quota", None),
+            ("get", "/api/tenants/test-tenant/quota/usage", None),
+        ],
+    )
+    def test_tenant_quota_endpoints_token_expired(self, client, method, url, payload):
+        from consts.exceptions import TokenExpiredError
+
+        with patch(
+            "apps.quota_app.get_current_user_id",
+            side_effect=TokenExpiredError("expired"),
+        ):
+            kwargs = {}
+            if payload is not None:
+                kwargs["json"] = payload
+            response = getattr(client, method)(url, **kwargs)
+
+        assert response.status_code == 401
+
+    @pytest.mark.parametrize(
+        "method,url,payload",
+        [
+            ("get", "/api/platform/quota/overview", None),
+            ("put", "/api/platform/quota/capacity", {"capacity_gb": 100}),
+            ("delete", "/api/platform/quota/capacity", None),
+            ("put", "/api/platform/quota/tenants/target-tenant", {"hard_limit_gb": 100}),
+            ("delete", "/api/platform/quota/tenants/target-tenant", None),
+        ],
+    )
+    def test_platform_quota_endpoints_token_expired(self, client, method, url, payload):
+        from consts.exceptions import TokenExpiredError
+
+        with patch(
+            "apps.quota_app._require_platform_quota_manager", return_value="SU"
+        ), patch(
+            "apps.quota_app.get_current_user_id",
+            side_effect=TokenExpiredError("expired"),
+        ):
+            kwargs = {}
+            if payload is not None:
+                kwargs["json"] = payload
+            response = getattr(client, method)(url, **kwargs)
+
+        assert response.status_code == 401

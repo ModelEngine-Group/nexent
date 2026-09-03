@@ -13,7 +13,6 @@ import type {
   HealthcheckMcpServicePayload,
   McpContainerConfigPayload,
   McpContainerServerEntry,
-  RegistryMcpCard,
   CommunityMcpCard,
   McpTagStat,
   McpServiceItem,
@@ -26,8 +25,6 @@ export type McpToolsApiResult<T> = {
   success: boolean;
   data: T;
 };
-
-export type { RegistryMcpCard as RegistryMcpCard } from "@/types/mcpTools";
 
 type ApiEnvelope<T = unknown> = {
   status: string;
@@ -42,7 +39,7 @@ type ApiEnvelope<T = unknown> = {
 type AddContainerMcpToolPayload = {
   name: string;
   description?: string;
-  tags: string[];
+  tags?: string[];
   source: McpSource;
   authorization_token?: string;
   registry_json?: Record<string, unknown>;
@@ -65,48 +62,6 @@ const parseJson = async <T = ApiEnvelope>(response: Response): Promise<T> => {
 
 type HealthcheckPayload = {
   health_status: McpHealthStatus;
-};
-
-export const fetchRegistryMcpCards = async (params: {
-  search?: string;
-  cursor?: string | null;
-  version?: string;
-  updatedSince?: string;
-  includeDeleted?: boolean;
-  source?: string;
-}) => {
-  const query = new URLSearchParams();
-  query.set("limit", "30");
-  if (params.search?.trim()) {
-    query.set("search", params.search.trim());
-  }
-  if (params.version?.trim()) {
-    query.set("version", params.version.trim());
-  }
-  if (params.updatedSince?.trim()) {
-    query.set("updated_since", params.updatedSince.trim());
-  }
-  query.set("include_deleted", params.includeDeleted ? "true" : "false");
-  if (params.cursor) {
-    query.set("cursor", params.cursor);
-  }
-  if (params.source) {
-    query.set("source", params.source);
-  }
-
-  const result = await listRegistryMcpTools(query);
-  const payload = result.data;
-
-  return {
-    success: true,
-    data: {
-      items: payload.items,
-      nextCursor: payload.nextCursor ?? null,
-    },
-  } as McpToolsApiResult<{
-    items: RegistryMcpCard[];
-    nextCursor: string | null;
-  }>;
 };
 
 export const fetchCommunityMcpCards = async (params: {
@@ -274,7 +229,9 @@ export const addContainerMcpToolService = async (
     });
     if (!response.ok) {
       const errorBody = await parseJson<{ detail?: string }>(response);
-      throw new Error(errorBody.detail || `Request failed (${response.status})`);
+      throw new Error(
+        errorBody.detail || `Request failed (${response.status})`
+      );
     }
     const data = await parseJson<ApiEnvelope>(response);
     if (data.status !== "success") {
@@ -308,7 +265,7 @@ type ContainerMcpDeploymentResult = {
  */
 export const addContainerMcpToolServiceStream = async (
   payload: AddContainerMcpToolPayload,
-  onContainerStarted: (result: ContainerMcpDeploymentResult) => void,
+  onContainerStarted: (result: ContainerMcpDeploymentResult) => void
 ): Promise<ContainerMcpDeploymentResult> => {
   const response = await fetchWithAuth(API_ENDPOINTS.mcp.addFromConfigStream, {
     method: "POST",
@@ -337,7 +294,9 @@ export const addContainerMcpToolServiceStream = async (
         } else if (message.status === "success") {
           return message.data || {};
         } else if (message.status === "error") {
-          throw new Error(message.detail || "Failed to add container MCP service");
+          throw new Error(
+            message.detail || "Failed to add container MCP service"
+          );
         }
       }
     }
@@ -397,34 +356,6 @@ export const listMcpTools = async (params?: { tag?: string }) => {
   return { success: true, data: items } as McpToolsApiResult<McpServiceItem[]>;
 };
 
-export const listRegistryMcpTools = async (query: URLSearchParams) => {
-  try {
-    const response = await fetchWithAuth(
-      `${API_ENDPOINTS.mcpTools.registryList}?${query.toString()}`
-    );
-    const data = await parseJson<{
-      servers?: RegistryMcpCard[];
-      metadata?: { nextCursor?: string | null };
-    }>(response);
-    if (!data || !Array.isArray(data.servers)) {
-      throw new Error("Failed to load registry mcp list");
-    }
-    return {
-      success: true,
-      data: {
-        items: data.servers,
-        nextCursor: data.metadata?.nextCursor ?? null,
-      },
-    } as McpToolsApiResult<{
-      items: RegistryMcpCard[];
-      nextCursor: string | null;
-    }>;
-  } catch (error) {
-    log.error("listRegistryMcpTools failed", error);
-    throw error;
-  }
-};
-
 type CommunityMcpListPayload = {
   search?: string;
   tag?: string;
@@ -438,19 +369,20 @@ type CommunityMcpReviewListPayload = CommunityMcpListPayload & {
   status?: string;
 };
 
-export const listCommunityMcpTools = async (payload: CommunityMcpListPayload) => {
+export const listCommunityMcpTools = async (
+  payload: CommunityMcpListPayload
+) => {
   try {
     const response = await fetchWithAuth(
       buildCommunityMcpListUrl(API_ENDPOINTS.mcpTools.communityList, payload)
     );
-    const data =
-      await parseJson<
-        ApiEnvelope<{
-          items: CommunityMcpCard[];
-          nextCursor: string | null;
-          total?: number;
-        }>
-      >(response);
+    const data = await parseJson<
+      ApiEnvelope<{
+        items: CommunityMcpCard[];
+        nextCursor: string | null;
+        total?: number;
+      }>
+    >(response);
     if (data.status !== "success") {
       throw new Error("Failed to load community mcp list");
     }
@@ -486,7 +418,10 @@ export const listCommunityMcpReviewTools = async (
 ) => {
   try {
     const response = await fetchWithAuth(
-      buildCommunityMcpListUrl(API_ENDPOINTS.mcpTools.communityReviewList, payload)
+      buildCommunityMcpListUrl(
+        API_ENDPOINTS.mcpTools.communityReviewList,
+        payload
+      )
     );
     const data =
       await parseJson<
@@ -517,7 +452,8 @@ const buildCommunityMcpListUrl = (
   if (payload.status) query.set("status", payload.status);
   if (payload.cursor) query.set("cursor", payload.cursor);
   if (typeof payload.page === "number") query.set("page", String(payload.page));
-  if (typeof payload.limit === "number") query.set("limit", String(payload.limit));
+  if (typeof payload.limit === "number")
+    query.set("limit", String(payload.limit));
 
   const queryString = query.toString();
   return queryString ? `${endpoint}?${queryString}` : endpoint;
@@ -618,8 +554,7 @@ export const publishCommunityMcpTool = async (
         body: JSON.stringify(payload),
       }
     );
-    const data =
-      await parseJson<ApiEnvelope<{ review_id: number }>>(response);
+    const data = await parseJson<ApiEnvelope<{ review_id: number }>>(response);
     if (data.status !== "success") {
       throw new Error("Failed to publish community mcp");
     }
@@ -712,8 +647,14 @@ export const addMcpToolService = async (payload: AddMcpServicePayload) => {
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
-      const errorBody = await parseJson<{ detail?: string; message?: string }>(response);
-      throw new Error(errorBody.detail || errorBody.message || `Request failed (${response.status})`);
+      const errorBody = await parseJson<{ detail?: string; message?: string }>(
+        response
+      );
+      throw new Error(
+        errorBody.detail ||
+          errorBody.message ||
+          `Request failed (${response.status})`
+      );
     }
     const data = await parseJson<ApiEnvelope>(response);
     if (data.status !== "success") {
@@ -824,14 +765,13 @@ export const testMcpConnectionService = async (
   payload: TestConnectionPayload
 ): Promise<McpToolsApiResult<TestConnectionResult>> => {
   try {
-    const response = await fetchWithAuth(
-      API_ENDPOINTS.mcp.testConnection,
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }
+    const response = await fetchWithAuth(API_ENDPOINTS.mcp.testConnection, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    const data = await parseJson<{ success: boolean; error?: string }>(
+      response
     );
-    const data = await parseJson<{ success: boolean; error?: string }>(response);
     return {
       success: true,
       data: { success: data.success, error: data.error },

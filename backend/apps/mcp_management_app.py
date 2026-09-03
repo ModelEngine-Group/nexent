@@ -13,7 +13,6 @@ from consts.exceptions import (
     UnauthorizedError,
 )
 from consts.model import (
-    RegistryListQuery,
     CommunityListRequest,
     CommunityPublishRequest,
     CommunityReviewActionRequest,
@@ -28,7 +27,6 @@ from services.mcp_management_service import (
     change_mcp_market_status,
     list_community_mcp_review_services,
     list_my_community_mcp_services,
-    list_registry_mcp_services,
     publish_community_mcp_service,
     reject_community_mcp_service,
     update_community_mcp_service,
@@ -39,40 +37,6 @@ from utils.auth_utils import get_current_user_info
 
 router = APIRouter(prefix="/mcp-tools")
 logger = logging.getLogger("mcp_management_app")
-
-
-# ---------------------------------------------------------------------------
-# Registry Endpoints (MCP Registry - external service)
-# ---------------------------------------------------------------------------
-
-@router.get("/registry/list")
-async def list_registry_mcp_services_api(
-    query: RegistryListQuery = Depends(),
-    authorization: Optional[str] = Header(None),
-    http_request: Request = None,
-):
-    """List MCP services from the official MCP Registry."""
-    try:
-        get_current_user_info(authorization, http_request)
-        data = await list_registry_mcp_services(
-            search=query.search,
-            include_deleted=query.include_deleted,
-            updated_since=query.updated_since,
-            version=query.version,
-            cursor=query.cursor,
-            limit=query.limit,
-        )
-        return JSONResponse(status_code=HTTPStatus.OK, content=data)
-    except UnauthorizedError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Failed to list MCP registry services: {exc}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to list MCP registry services",
-        )
 
 
 # ---------------------------------------------------------------------------

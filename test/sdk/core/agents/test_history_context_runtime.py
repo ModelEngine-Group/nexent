@@ -9,6 +9,19 @@ from nexent.core.agents.context.evidence import ContextEvidenceCollector
 from nexent.core.context_runtime.contracts import ContextEvidence
 
 
+def _rendered_text(messages):
+    texts = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else message.content
+        if isinstance(content, str):
+            texts.append(content)
+        else:
+            texts.extend(
+                part.get("text", "") for part in content or () if isinstance(part, dict)
+            )
+    return "\n".join(texts)
+
+
 class _SystemPrompt:
     def __init__(self, system_prompt):
         self.system_prompt = system_prompt
@@ -191,9 +204,15 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
     )
     rendered = str(result.messages)
     positions = [rendered.index(marker) for marker in (
-        "CURRENT TASK", "CURRENT PLAN", "reasoning 1", "reasoning 2",
+        "CURRENT TASK", "CURRENT PLAN", "observation 1", "observation 2",
     )]
     assert positions == sorted(positions)
+    assert '<completed_action_history read_only="true">' in rendered
+    assert "Calling tools:" not in rendered
+    assert "Observation:" not in rendered
+
+    assert "reasoning 1" not in rendered
+    assert "reasoning 2" not in rendered
     assert result.evidence.item_representations == (
         ("current_task:0", "raw"), ("current_planning:0", "raw"),
         ("current_action:0", "raw"), ("current_action:1", "raw"),
@@ -202,6 +221,13 @@ def test_projects_planning_and_multiple_actions_in_stable_run_order(monkeypatch)
 
 def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+    monkeypatch.setattr(
+        ActionStep,
+        "to_messages",
+        lambda _step: (_ for _ in ()).throw(
+            AssertionError("current action history must use neutral structured rendering")
+        ),
+    )
     tool_call = ToolCall(name="python_interpreter", arguments="print('ok')", id="call_1")
     action = ActionStep(
         step_number=1, timing=Timing(start_time=0), tool_calls=[tool_call],
@@ -215,10 +241,29 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
 
     projected = manager._project_current_run(memory, 0)
     action_item = next(item for item in projected if item.type.value == "current_action")
+    assert "messages" not in action_item.content
     assert action_item.content["tool_calls"] == [{
         "name": "python_interpreter", "arguments": "print('ok')", "id": "call_1",
     }]
     json.dumps(action_item.content)
+
+    run = manager.prepare_run_context(memory, "", [])
+    result = manager.assemble_final_context(
+        model=None, memory=memory, current_run_start_idx=0, run_context=run,
+    )
+    rendered = _rendered_text(result.messages)
+    assert "tool: python_interpreter" in rendered
+    assert "print('ok')" in rendered
+    assert "outcome:\nok" in rendered
+    assert "recorded_result:\ndone" in rendered
+    assert "Calling tools:" not in rendered
+    assert "Observation:" not in rendered
+
+    summary_rendered = _rendered_text(manager.render_memory_messages(memory))
+    assert "tool: python_interpreter" in summary_rendered
+    assert "outcome:\nok" in summary_rendered
+    assert "Calling tools:" not in summary_rendered
+    assert "Observation:" not in summary_rendered
 
 
 def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):

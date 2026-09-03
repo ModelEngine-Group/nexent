@@ -6,6 +6,7 @@ from fastapi import APIRouter, Header, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from consts.model import GlobalConfig
+from consts.exceptions import TokenExpiredError
 from services.config_sync_service import save_config_impl, load_config_impl
 from utils.auth_utils import get_current_user_id, get_current_user_info
 
@@ -25,6 +26,9 @@ async def save_config(config: GlobalConfig, authorization: Optional[str] = Heade
             content={"message": "Configuration saved successfully",
                      "status": "saved"}
         )
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to save configuration: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
@@ -48,6 +52,9 @@ async def load_config(authorization: Optional[str] = Header(None), request: Requ
             status_code=HTTPStatus.OK,
             content={"config": config}
         )
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to load configuration: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,

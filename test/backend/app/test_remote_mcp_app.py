@@ -39,7 +39,7 @@ sys.modules['services.mcp_container_service'] = _mcp_container_svc_stub
 # (docker SDK, jieba, mcpadapt, …).
 sys.modules['services.tool_configuration_service'] = MagicMock()
 sys.modules['services.file_management_service'] = MagicMock()
-sys.modules['services.vectordatabase_service'] = MagicMock()
+sys.modules['management.services.knowledge_base.service'] = MagicMock()
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()
@@ -357,6 +357,23 @@ class TestAddFromConfig:
         assert resp.status_code == HTTPStatus.OK
         assert "internal upload details" not in resp.text
         assert '"detail": "Failed to upload and start MCP container"' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
+    def test_upload_image_stream_returns_name_conflict(self, mock_upload, mock_auth):
+        mock_auth.return_value = ("uid", "auth-tenant", "en")
+        mock_upload.side_effect = MCPNameIllegal("MCP service name already exists")
+
+        resp = client.post(
+            "/mcp/upload-image/stream",
+            files={"file": ("test.tar", b"tar-data", "application/x-tar")},
+            data={"port": "8080", "service_name": "svc"},
+            headers=AUTH_HEADER,
+        )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "error"' in resp.text
+        assert '"detail": "MCP service name already exists"' in resp.text
 
 
 # ============================================================================

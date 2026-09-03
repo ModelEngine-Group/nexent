@@ -17,14 +17,14 @@ import type {
   RemoteThreadListAdapter,
   ThreadHistoryAdapter,
 } from "@assistant-ui/react";
+
 import {
   CONVERSATION_PAGE_SIZE,
   conversationService,
 } from "@/services/conversationService";
-import {
-  getConversationDateBoundaries,
-  newChatConversationViewport,
-} from "@/lib/conversationViewport";
+import { getConversationDateBoundaries } from "@/lib/conversationViewport";
+import { toMessageCreatedAt } from "@/lib/messageDate";
+
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
@@ -990,14 +990,19 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // requires `metadata.custom` to be present on every message, so we
       // always include the field and only set the token bucket when we have
       // historical step data.
+      const createdAt = toMessageCreatedAt(msg.create_time);
       const metadata = {
-        custom: stepTokenCounts.length > 0 ? { stepTokenCounts } : {},
+        custom: {
+          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
+        },
       };
 
       messages.push({
         id: messageId,
         role: msg.role,
         content,
+        ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }
           : {}),
@@ -1097,6 +1102,8 @@ const toRemoteThreadMetadata = (
       : {}),
   };
 };
+
+const INITIAL_CONVERSATION_PAGE_SIZE = 30;
 
 const parseConversationListOffset = (after: string | undefined): number => {
   if (after === undefined) return 0;
@@ -1255,6 +1262,12 @@ export const setServerConversationIdState = (
   serverConversationIdState = state;
 };
 
+let pendingThreadOperationId: string | undefined;
+
+export const setPendingThreadOperationId = (threadId: string | undefined) => {
+  pendingThreadOperationId = threadId;
+};
+
 const MAX_TITLE_WAIT_MS = 5_000;
 const TITLE_POLL_INTERVAL_MS = 50;
 
@@ -1274,13 +1287,21 @@ const waitForServerConversationId = async (
   // reliable than the active-thread registry while the sidebar is switching.
   if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
 
-  // Fast path: the ref is already populated for a new thread after its first
-  // agent run has returned the server-side conversation ID.
+  // New threads use an empty remoteId until they are reloaded from the
+  // backend. The sidebar captures the local ID before calling rename/delete,
+  // because assistant-ui may switch the active thread as part of that action.
   const readNow = (): string | undefined => {
+    if (pendingThreadOperationId) {
+      const fromPendingThread = idsRef.current.get(pendingThreadOperationId);
+      if (isValidConversationId(fromPendingThread)) return fromPendingThread;
+    }
+
     const activeThreadId = getActiveThreadId();
     if (!activeThreadId) return undefined;
-    const fromRef = idsRef.current.get(activeThreadId);
-    return isValidConversationId(fromRef) ? fromRef : undefined;
+    const fromActiveThread = idsRef.current.get(activeThreadId);
+    return isValidConversationId(fromActiveThread)
+      ? fromActiveThread
+      : undefined;
   };
 
   const immediate = readNow();
@@ -1301,24 +1322,16 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   unstable_Provider: createHistoryProvider(),
 
   async list({ after } = {}): Promise<RemoteThreadListResponse> {
-    if (after === undefined) {
-      newChatConversationViewport.reset();
-      return { threads: [], nextCursor: "0" };
-    }
-
     const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
     const offset = parseConversationListOffset(after);
     const limit =
-      offset === 0
-        ? newChatConversationViewport.takePageLimit()
-        : CONVERSATION_PAGE_SIZE;
+      offset === 0 ? INITIAL_CONVERSATION_PAGE_SIZE : CONVERSATION_PAGE_SIZE;
     const data = await conversationService.getList({
       offset,
       limit,
       todayStartMs,
       weekStartMs,
     });
-    newChatConversationViewport.setMetadata(data.metadata);
     const nextOffset = offset + data.items.length;
 
     return {
@@ -1340,19 +1353,6 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     // doing so would create a second, empty conversation that the agent
     // run never reuses (see commit history for details).
     //
-    // We return an empty-string `remoteId` rather than `undefined` because
-    // the assistant-ui `RemoteThreadListAdapter["initialize"]` contract
-    // requires a string. The empty string is a safe placeholder: the page
-    // resolves `activeConversationId` with priority
-    // `serverConversationIdsRef → remoteId → activeThreadId`, so as soon as
-    // the adapter captures the server id from the response header the page
-    // starts using the real id instead of this placeholder.
-    //
-    // `generateTitle` follows the same priority chain: it consults the page's
-    // `serverConversationIdsRef` via `waitForServerConversationId` before
-    // falling back to the raw `remoteId`, so a brand-new thread no longer
-    // triggers a `conversation_id: 0` request (which would silently fail on
-    // the backend's `WHERE conversation_id = 0` filter).
     return {
       remoteId: "",
       externalId: "",
@@ -1409,8 +1409,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
 
     return toRemoteThreadMetadata({
       conversation_id: Number(detail.conversation_id),
-      conversation_title:
-        detail.conversation_title ?? "Untitled conversation",
+      conversation_title: detail.conversation_title ?? "Untitled conversation",
       agent_id: detail.agent_id,
       create_time: detail.create_time,
       update_time: detail.create_time,

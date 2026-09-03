@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Form,
+  Button,
   Input,
   Row,
   Col,
@@ -26,6 +27,11 @@ import {
 import { API_ENDPOINTS } from "@/services/api";
 import { fetchWithAuth } from "@/lib/auth";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import ResourceTagChips from "@/components/tag/ResourceTagChips";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 
 export default function AgentInfo() {
   const { t } = useTranslation("common");
@@ -33,25 +39,29 @@ export default function AgentInfo() {
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
 
-  const updateValidatedDraft = (
+  const updateDraftValue = (
     field: "display_name" | "name" | "description",
     value: string
   ) => {
     form.setFieldValue(field, value);
-    void form
-      .validateFields([field])
-      .then(() => {
-        if (form.getFieldValue(field) === value) {
-          updateDraft({ [field]: value } as AgentDraftPatch);
-        }
-      })
-      .catch(() => undefined);
+    updateDraft({ [field]: value } as AgentDraftPatch);
   };
 
   const agentId = useAgentStore((state) => state.agentId);
+  const isReadOnly = useAgentReadOnly();
   const [uploading, setUploading] = useState(false);
   const [iconLoadError, setIconLoadError] = useState(false);
   const [iconVersion, setIconVersion] = useState(0);
+  const [assignTagsOpen, setAssignTagsOpen] = useState(false);
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const [tagPreviewRefreshKey, setTagPreviewRefreshKey] = useState(0);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions, refresh: refreshTagDefinitions } =
+    useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
   const DefaultIcon = getAgentIcon({
     id: String(agentId ?? 0),
     agent_id: agentId ?? 0,
@@ -77,10 +87,13 @@ export default function AgentInfo() {
       try {
         const formData = new FormData();
         formData.append("file", file);
-        const response = await fetchWithAuth(API_ENDPOINTS.agent.icon(currentAgentId), {
-          method: "POST",
-          body: formData,
-        });
+        const response = await fetchWithAuth(
+          API_ENDPOINTS.agent.icon(currentAgentId),
+          {
+            method: "POST",
+            body: formData,
+          }
+        );
         const data = await response.json();
         setIconLoadError(false);
         setIconVersion(Date.now());
@@ -106,6 +119,7 @@ export default function AgentInfo() {
                 label={t("agent.displayName")}
                 className="mb-3"
                 name="display_name"
+                validateTrigger={["onChange", "onBlur"]}
                 rules={[
                   {
                     required: true,
@@ -117,11 +131,14 @@ export default function AgentInfo() {
                       max: AGENT_NAME_MAX_LENGTH,
                     }),
                   },
-                  createAgentNameConflictValidator(
-                    t,
-                    "display_name",
-                    agentId ?? undefined
-                  ),
+                  {
+                    ...createAgentNameConflictValidator(
+                      t,
+                      "display_name",
+                      agentId ?? undefined
+                    ),
+                    validateTrigger: "onBlur",
+                  },
                 ]}
               >
                 <Input
@@ -129,7 +146,7 @@ export default function AgentInfo() {
                   maxLength={AGENT_NAME_MAX_LENGTH}
                   showCount
                   onChange={(event) =>
-                    updateValidatedDraft("display_name", event.target.value)
+                    updateDraftValue("display_name", event.target.value)
                   }
                 />
               </Form.Item>
@@ -139,7 +156,7 @@ export default function AgentInfo() {
                 label={t("agent.name")}
                 className="mb-3"
                 name="name"
-                
+                validateTrigger={["onChange", "onBlur"]}
                 rules={[
                   {
                     required: true,
@@ -155,13 +172,18 @@ export default function AgentInfo() {
                     validator: (_, value: string) =>
                       !value || isValidAgentName(value)
                         ? Promise.resolve()
-                        : Promise.reject(new Error(t("agent.validation.namePattern"))),
+                        : Promise.reject(
+                            new Error(t("agent.validation.namePattern"))
+                          ),
                   },
-                  createAgentNameConflictValidator(
-                    t,
-                    "name",
-                    agentId ?? undefined
-                  ),
+                  {
+                    ...createAgentNameConflictValidator(
+                      t,
+                      "name",
+                      agentId ?? undefined
+                    ),
+                    validateTrigger: "onBlur",
+                  },
                 ]}
               >
                 <Input
@@ -169,7 +191,7 @@ export default function AgentInfo() {
                   maxLength={AGENT_NAME_MAX_LENGTH}
                   showCount
                   onChange={(event) =>
-                    updateValidatedDraft("name", event.target.value)
+                    updateDraftValue("name", event.target.value)
                   }
                 />
               </Form.Item>
@@ -221,11 +243,42 @@ export default function AgentInfo() {
               placeholder={t("agent.descriptionPlaceholder")}
               rows={3}
               onChange={(event) =>
-                updateValidatedDraft("description", event.target.value)
+                updateDraftValue("description", event.target.value)
               }
               showCount
               maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
             />
+          </Form.Item>
+          <Form.Item
+            label={t("tagManagement.title.assignTags")}
+            className="mb-0 mt-3"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+                {agentId !== null ? (
+                  <ResourceTagChips
+                    resourceType="agent"
+                    resourceId={String(agentId)}
+                    max={4}
+                    refreshKey={tagPreviewRefreshKey}
+                    singleLine
+                    emptyText={
+                      <span className="text-sm text-slate-400">—</span>
+                    }
+                  />
+                ) : (
+                  <span className="text-sm text-slate-400">—</span>
+                )}
+              </div>
+              <Button
+                type="link"
+                size="small"
+                disabled={agentId === null || isReadOnly}
+                onClick={() => setAssignTagsOpen(true)}
+              >
+                {t("tagManagement.action.editTags")}
+              </Button>
+            </div>
           </Form.Item>
         </Col>
 
@@ -236,7 +289,11 @@ export default function AgentInfo() {
               {t("agent.icon")}
             </div>
             <AntdUpload {...uploadProps}>
-              <div className="relative group cursor-pointer" role="button" tabIndex={0}>
+              <div
+                className="relative group cursor-pointer"
+                role="button"
+                tabIndex={0}
+              >
                 <Avatar
                   size={72}
                   src={iconSource}
@@ -248,11 +305,14 @@ export default function AgentInfo() {
                   className={`border-2 border-dashed border-gray-300 ${iconSource ? "" : "!bg-primary/10 !text-primary"}`}
                 />
                 <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-                  {uploading ? <Spin size="small" /> : <Upload size={18} className="text-white" />}
+                  {uploading ? (
+                    <Spin size="small" />
+                  ) : (
+                    <Upload size={18} className="text-white" />
+                  )}
                 </div>
               </div>
             </AntdUpload>
-
 
             <div className="mt-2 text-xs text-gray-400 text-center">
               {t("agent.iconHint")}
@@ -260,6 +320,28 @@ export default function AgentInfo() {
           </Flex>
         </Col>
       </Row>
+      <ResourceTagAssignmentModal
+        open={assignTagsOpen}
+        onClose={() => {
+          setAssignTagsOpen(false);
+          setTagPreviewRefreshKey((current) => current + 1);
+        }}
+        resourceType="agent"
+        resourceId={String(agentId ?? "")}
+        definitions={tagDefinitions ?? []}
+        canEdit={agentId !== null && !isReadOnly}
+        onManageDefinitions={() => setTagManagementOpen(true)}
+      />
+      <TagDefinitionManagementModal
+        open={tagManagementOpen}
+        onClose={() => {
+          setTagManagementOpen(false);
+          void refreshTagDefinitions();
+        }}
+        bucketId={defaultTagLibrary?.bucket_id ?? 0}
+        bucketName={defaultTagLibrary?.bucket_name ?? ""}
+        canManage={!isReadOnly}
+      />
     </div>
   );
 }

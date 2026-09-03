@@ -1132,13 +1132,14 @@ export default function ToolConfigModal({
     }
   }, [knowledgeBases, selectedKbIds]);
 
-  // Filter selected KB IDs to the current accessible list. For AIDP, an
-  // successfully loaded empty list is meaningful: the current user cannot
-  // read any of the KBs saved by the agent creator.
+  // Filter selected KB IDs to the current accessible list. For managed
+  // knowledge tools, a loaded empty list means no saved KB remains readable.
   useEffect(() => {
     const canValidateSelection =
       knowledgeBases.length > 0 ||
-      ((toolKbType === "aidp_search" || toolKbType === "ind_aidp_search") &&
+      ((isKnowledgeBaseSearchTool ||
+        toolKbType === "aidp_search" ||
+        toolKbType === "ind_aidp_search") &&
         isKbListLoaded);
 
     if (selectedKbIds.length > 0 && canValidateSelection) {
@@ -1156,18 +1157,26 @@ export default function ToolConfigModal({
         });
         setSelectedKbDisplayNames(displayNames);
 
-        if (toolKbType === "aidp_search") {
+        if (
+          isKnowledgeBaseSearchTool ||
+          toolKbType === "aidp_search" ||
+          toolKbType === "ind_aidp_search"
+        ) {
           setTestPanelKbIds(validKbIds);
           setTestPanelKbDisplayNames(displayNames);
           const fieldIndex = currentParams.findIndex(
-            (p) => p.name === "kds_list"
+            (p) =>
+              p.name ===
+              (isKnowledgeBaseSearchTool ? "index_names" : "kds_list")
           );
           if (fieldIndex !== -1) {
             form.setFieldValue(`param_${fieldIndex}`, validKbIds);
           }
           setCurrentParams((prevParams) => {
             const prevFieldIndex = prevParams.findIndex(
-              (p) => p.name === "kds_list"
+              (p) =>
+                p.name ===
+                (isKnowledgeBaseSearchTool ? "index_names" : "kds_list")
             );
             if (prevFieldIndex === -1) return prevParams;
             const updatedParams = [...prevParams];
@@ -1183,6 +1192,7 @@ export default function ToolConfigModal({
   }, [
     knowledgeBases,
     isKbListLoaded,
+    isKnowledgeBaseSearchTool,
     toolKbType,
     selectedKbIds,
     currentParams,
@@ -2018,6 +2028,8 @@ export default function ToolConfigModal({
         const currentValue = form.getFieldValue(fieldName);
         return (
           <Select
+            showSearch
+            optionFilterProp="label"
             placeholder={t("toolConfig.input.string.placeholder", {
               name: param.description,
             })}

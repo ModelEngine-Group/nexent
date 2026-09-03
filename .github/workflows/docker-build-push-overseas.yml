@@ -23,10 +23,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [main, web, data-process, mcp, terminal, sandbox]
+        image: [main, web, data-process, mcp, terminal, sandbox, sandbox-full]
     steps:
-      - name: Free disk space for data-process
-        if: matrix.image == 'data-process'
+      - name: Free disk space for large images
+        if: matrix.image == 'data-process' || matrix.image == 'sandbox-full'
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
 
       - name: Checkout code
@@ -69,3 +69,14 @@ jobs:
             --version "${{ steps.version.outputs.value }}" \
             --registry general \
             --push
+
+  build-offline-package:
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
+    needs: build-and-push
+    uses: ./.github/workflows/build-offline-package.yml
+    with:
+      version: ${{ github.ref_name }}
+      image_source: general
+      include_source: false
+      upload_to_obs: true
+    secrets: inherit

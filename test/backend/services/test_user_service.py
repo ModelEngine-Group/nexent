@@ -434,6 +434,26 @@ class TestGetUsers:
 
         mock_group_db.assert_called_once_with(["user_a", "user_b"])
 
+    def test_get_users_with_filters_passes_filter_arguments(self):
+        """Test that resource filters are forwarded to the database layer."""
+        from backend.services import user_service
+
+        user_service.get_users_by_tenant_id.return_value = {
+            "users": [], "total": 0
+        }
+
+        result = get_users(
+            "tenant123", 1, 20, "created_at", "desc",
+            search="alice", roles=["ADMIN"], group_ids=[7]
+        )
+
+        assert result["users"] == []
+        user_service.get_users_by_tenant_id.assert_called_once_with(
+            tenant_id="tenant123", page=1, page_size=20,
+            sort_by="created_at", sort_order="desc", search="alice",
+            roles=["ADMIN"], group_ids=[7]
+        )
+
 
 @pytest.mark.asyncio
 class TestUpdateUser:
@@ -777,14 +797,14 @@ class TestDeleteUserAndCleanup:
         mock_get_admin.return_value = mock_admin
 
     def _install_fake_vdb(self, mocker, delete_side_effect=None):
-        fake_vdb = types.ModuleType("services.vectordatabase_service")
+        fake_vdb = types.ModuleType("management.services.knowledge_base.service")
         fake_vdb.get_vector_db_core = MagicMock(return_value="vdb-core")
         fake_vdb.ElasticSearchService = MagicMock()
         fake_vdb.ElasticSearchService.full_delete_knowledge_base = AsyncMock(
             side_effect=delete_side_effect
         )
         mocker.patch.dict(
-            sys.modules, {"services.vectordatabase_service": fake_vdb}
+            sys.modules, {"management.services.knowledge_base.service": fake_vdb}
         )
         return fake_vdb
 
@@ -909,6 +929,23 @@ class TestCoverageGaps:
             requester_role="SU",
         ) == {"users": [], "total": 0}
         mock_get_users.assert_called_once_with("tenant-2", 1, 20, "created_at", "desc")
+
+    def test_requester_forwards_resource_filters(self, mocker):
+        """Test that authorized requests with filters use the filtered call path."""
+        mock_get_users = mocker.patch(
+            "backend.services.user_service.get_users",
+            return_value={"users": [], "total": 0},
+        )
+
+        result = get_users_for_requester(
+            "tenant-1", 1, 20, "created_at", "desc",
+            search="alice", requester_tenant_id="tenant-1", requester_role="ADMIN",
+        )
+
+        assert result == {"users": [], "total": 0}
+        mock_get_users.assert_called_once_with(
+            "tenant-1", 1, 20, "created_at", "desc", "alice", None, None
+        )
 
     @pytest.mark.asyncio
     async def test_superuser_can_update_any_user(self, mocker):

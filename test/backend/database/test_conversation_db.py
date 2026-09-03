@@ -124,6 +124,8 @@ class ConversationMessage:
     status = MagicMock(name="ConversationMessage.status")
     minio_files = MagicMock(name="ConversationMessage.minio_files")
     opinion_flag = MagicMock(name="ConversationMessage.opinion_flag")
+    create_time = MagicMock(name="ConversationMessage.create_time")
+    update_time = MagicMock(name="ConversationMessage.update_time")
     created_by = MagicMock(name="ConversationMessage.created_by")
 
 
@@ -207,8 +209,10 @@ from backend.database.conversation_db import (
     create_source_image,
     create_source_search,
     delete_conversation,
+    delete_conversations_batch,
     delete_source_image,
     delete_source_search,
+    fail_streaming_assistant_messages,
     get_conversation,
     get_conversation_history,
     get_historical_context,
@@ -244,6 +248,50 @@ from consts.exceptions import (
     ConversationNotFoundError,
     RuntimeMetadataVersionConflict,
 )
+
+
+def test_fail_streaming_assistant_messages_returns_runtime_identities(
+    monkeypatch, mock_session_ctx
+):
+    """Startup recovery fails only the rows it locked as streaming."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = [
+        SimpleNamespace(message_id=7, conversation_id=11, created_by="user-1"),
+        SimpleNamespace(message_id=8, conversation_id=12, created_by="user-2"),
+    ]
+    query.update.return_value = 2
+    session.query.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    rows = fail_streaming_assistant_messages()
+
+    assert rows == [
+        {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},
+        {"message_id": 8, "conversation_id": 12, "user_id": "user-2"},
+    ]
+    updates = query.update.call_args.args[0]
+    assert updates["status"] == "failed"
+    assert query.with_for_update.called
+
+
+def test_fail_streaming_assistant_messages_returns_empty_without_rows(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = []
+    session.query.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    assert fail_streaming_assistant_messages() == []
+    query.update.assert_not_called()
 
 
 @pytest.fixture(autouse=True)
@@ -342,6 +390,70 @@ def test_delete_conversation_noop(monkeypatch, mock_session_ctx):
 
     assert ok is False
     assert session.execute.call_count == 5
+
+
+# =============================================================================
+# Tests for delete_conversations_batch
+# =============================================================================
+
+
+def test_delete_conversations_batch_success(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns owned ids and cascades 5 updates."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = [(101,), (102,)]
+    session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([101, 102, 999], user_id="user-1")
+
+    assert deleted == [101, 102]
+    # 1 ownership SELECT + 5 cascade UPDATEs
+    assert session.execute.call_count == 6
+
+
+def test_delete_conversations_batch_none_owned(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns [] when no requested id belongs to the user."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = []
+    session.execute.return_value = select_result
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([999], user_id="user-1")
+
+    assert deleted == []
+    # Only the ownership SELECT, no cascade UPDATEs
+    assert session.execute.call_count == 1
+
+
+def test_delete_conversations_batch_empty_input(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch returns [] without hitting the DB when input is empty."""
+    session, ctx = mock_session_ctx
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([], user_id="user-1")
+
+    assert deleted == []
+    session.execute.assert_not_called()
+
+
+def test_delete_conversations_batch_without_user_id(monkeypatch, mock_session_ctx):
+    """delete_conversations_batch skips updated_by tracking when user_id is absent."""
+    session, ctx = mock_session_ctx
+    select_result = MagicMock()
+    select_result.all.return_value = [(101,), (102,)]
+    session.execute.side_effect = [select_result] + [MagicMock() for _ in range(5)]
+
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    deleted = delete_conversations_batch([101, 102])
+
+    assert deleted == [101, 102]
+    # 1 ownership SELECT + 5 cascade UPDATEs
+    assert session.execute.call_count == 6
 
 
 # =============================================================================
@@ -2694,6 +2806,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
         status="completed",
         minio_files=None,
         opinion_flag=None,
+        create_time=1700000000123.0,
         units=None,
     )
 
@@ -2724,6 +2837,7 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
                 "status": record.status,
                 "minio_files": record.minio_files,
                 "opinion_flag": record.opinion_flag,
+                "create_time": record.create_time,
                 "units": getattr(record, 'units', None),
             }
         elif hasattr(record, 'conversation_id'):
@@ -2738,12 +2852,16 @@ def test_get_conversation_history_with_messages(monkeypatch, mock_session_ctx):
     monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
     monkeypatch.setattr("backend.database.conversation_db.as_dict", as_dict_side_effect)
 
+    sa_mod.func.extract.reset_mock()
+
     result = get_conversation_history(1)
 
     assert result is not None
     assert result['conversation_id'] == 1
     assert result['conversation_title'] == "Test Chat"
     assert result['agent_id'] == 9
+    assert result['message_records'][0]['create_time'] == 1700000000123
+    assert call('epoch', ConversationMessage.create_time) in sa_mod.func.extract.call_args_list
 
 
 def test_create_message_units_creates_all_units_with_user_id(monkeypatch):

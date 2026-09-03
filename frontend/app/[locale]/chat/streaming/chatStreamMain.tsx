@@ -19,6 +19,7 @@ import { ChatStreamFinalMessage } from "./chatStreamFinalMessage";
 import { TaskWindow } from "./taskWindow";
 import { transformMessagesToTaskMessages } from "./messageTransformer";
 import { TokenMetrics } from "@/types/chat";
+import { formatMessageDate, shouldShowDateSeparator } from "@/lib/messageDate";
 
 const getHistorySummaryMessages = (
   message: ChatMessageType
@@ -74,7 +75,7 @@ export function ChatStreamMain({
   selectedModelId,
   onModelSelect,
 }: ChatStreamMainProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // Animation variants for ChatInput
   const chatInputVariants = {
     initial: {
@@ -144,7 +145,10 @@ export function ChatStreamMain({
       if (message.role === MESSAGE_ROLES.USER) {
         groups.push({
           key: message.id || `user-${index}`,
-          userMessageId: typeof message.message_id === "number" ? message.message_id : undefined,
+          userMessageId:
+            typeof message.message_id === "number"
+              ? message.message_id
+              : undefined,
           messages: [{ message, index }],
         });
         return;
@@ -154,7 +158,10 @@ export function ChatStreamMain({
       if (currentGroup) {
         currentGroup.messages.push({ message, index });
       } else {
-        groups.push({ key: message.id || `message-${index}`, messages: [{ message, index }] });
+        groups.push({
+          key: message.id || `message-${index}`,
+          messages: [{ message, index }],
+        });
       }
     });
 
@@ -165,39 +172,66 @@ export function ChatStreamMain({
     message: ChatMessageType,
     index: number,
     shareSelected = false
-  ) => (
-    <>
-      <ChatStreamFinalMessage
-        message={message}
-        onSelectMessage={onSelectMessage}
-        isSelected={message.id === selectedMessageId}
-        searchResultsCount={message?.searchResults?.length || 0}
-        imagesCount={message?.images?.length || 0}
-        onImageClick={onImageClick}
-        onOpinionChange={onOpinionChange}
-        readOnly={readOnly}
-        index={index}
-        currentConversationId={currentConversationId}
-        onCitationHover={onCitationHover}
-        shareSelected={shareSelected}
-      />
-      {message.role === MESSAGE_ROLES.ASSISTANT &&
-        getHistorySummaryMessages(message).length > 0 && (
-          <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
-            <TaskWindow messages={getHistorySummaryMessages(message)} isStreaming={false} />
+  ) => {
+    const createTime = message.databaseCreateTime;
+    const previousCreateTime =
+      processedMessages.finalMessages[index - 1]?.databaseCreateTime;
+    const dateLabel = shouldShowDateSeparator(createTime, previousCreateTime)
+      ? formatMessageDate(createTime, i18n.resolvedLanguage ?? i18n.language)
+      : undefined;
+
+    return (
+      <>
+        {dateLabel && (
+          <div
+            role="separator"
+            aria-label={dateLabel}
+            className="my-4 flex w-full items-center gap-3 px-2 text-xs text-gray-500"
+          >
+            <span className="h-px flex-1 bg-gray-200" aria-hidden />
+            <time dateTime={createTime!.toISOString()}>{dateLabel}</time>
+            <span className="h-px flex-1 bg-gray-200" aria-hidden />
           </div>
         )}
-      {message.role === MESSAGE_ROLES.USER &&
-        processedMessages.conversationGroups.has(message.id!) && (
-          <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
-            <TaskWindow
-              messages={processedMessages.conversationGroups.get(message.id!) || []}
-              isStreaming={isStreaming && lastUserMessageIdRef.current === message.id}
-            />
-          </div>
-        )}
-    </>
-  );
+        <ChatStreamFinalMessage
+          message={message}
+          onSelectMessage={onSelectMessage}
+          isSelected={message.id === selectedMessageId}
+          searchResultsCount={message?.searchResults?.length || 0}
+          imagesCount={message?.images?.length || 0}
+          onImageClick={onImageClick}
+          onOpinionChange={onOpinionChange}
+          readOnly={readOnly}
+          index={index}
+          currentConversationId={currentConversationId}
+          onCitationHover={onCitationHover}
+          shareSelected={shareSelected}
+        />
+        {message.role === MESSAGE_ROLES.ASSISTANT &&
+          getHistorySummaryMessages(message).length > 0 && (
+            <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+              <TaskWindow
+                messages={getHistorySummaryMessages(message)}
+                isStreaming={false}
+              />
+            </div>
+          )}
+        {message.role === MESSAGE_ROLES.USER &&
+          processedMessages.conversationGroups.has(message.id!) && (
+            <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+              <TaskWindow
+                messages={
+                  processedMessages.conversationGroups.get(message.id!) || []
+                }
+                isStreaming={
+                  isStreaming && lastUserMessageIdRef.current === message.id
+                }
+              />
+            </div>
+          )}
+      </>
+    );
+  };
 
   // Extract latest token metrics from the most recent assistant step
   const latestMetrics = useMemo<TokenMetrics | null>(() => {
@@ -480,7 +514,8 @@ export function ChatStreamMain({
                 ? shareMessageGroups.map((group) => {
                     const shareSelected =
                       group.userMessageId !== undefined &&
-                      (selectedShareMessageIds?.has(group.userMessageId) ?? false);
+                      (selectedShareMessageIds?.has(group.userMessageId) ??
+                        false);
                     return (
                       <div
                         key={group.key}
@@ -494,14 +529,20 @@ export function ChatStreamMain({
                           <div className="absolute -left-7 top-3 z-10">
                             <Checkbox
                               checked={shareSelected}
-                              onChange={() => onToggleShareMessage?.(group.userMessageId!)}
+                              onChange={() =>
+                                onToggleShareMessage?.(group.userMessageId!)
+                              }
                             />
                           </div>
                         )}
                         <div className="flex flex-col gap-2">
                           {group.messages.map(({ message, index }) => (
                             <div key={message.id || index}>
-                              {renderFinalMessage(message, index, shareSelected)}
+                              {renderFinalMessage(
+                                message,
+                                index,
+                                shareSelected
+                              )}
                             </div>
                           ))}
                         </div>
@@ -509,20 +550,24 @@ export function ChatStreamMain({
                     );
                   })
                 : processedMessages.finalMessages.map((message, index) => (
-                    <div key={message.id || index} className="flex flex-col gap-2 relative">
+                    <div
+                      key={message.id || index}
+                      className="flex flex-col gap-2 relative"
+                    >
                       {shareMode &&
                         message.role === MESSAGE_ROLES.USER &&
                         typeof message.message_id === "number" && (
                           <div className="absolute left-0 top-2 z-10">
-                        <Checkbox
-                          checked={
-                            selectedShareMessageIds?.has(message.message_id) ||
-                            false
-                          }
-                          onChange={() =>
-                            onToggleShareMessage?.(message.message_id!)
-                          }
-                        />
+                            <Checkbox
+                              checked={
+                                selectedShareMessageIds?.has(
+                                  message.message_id
+                                ) || false
+                              }
+                              onChange={() =>
+                                onToggleShareMessage?.(message.message_id!)
+                              }
+                            />
                           </div>
                         )}
                       {renderFinalMessage(message, index)}

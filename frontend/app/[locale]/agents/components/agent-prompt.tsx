@@ -61,7 +61,7 @@ export default function AgentPrompt() {
     return (llmModels ?? []).map((m) => ({
       value: m.id,
       label: m.displayName ?? m.name,
-      model_name: m.name,
+      displayName: m.displayName ?? m.name,
     }));
   }, [llmModels]);
 
@@ -128,14 +128,14 @@ export default function AgentPrompt() {
               onChange={(values: number[]) => {
                 const model_names = values.map((id) => {
                   const option = modelOptions.find((opt) => opt.value === id);
-                  return option?.model_name ?? "";
+                  return option?.displayName ?? "";
                 });
                 const primaryModel = modelOptions.find(
                   (option) => option.value === values[0]
                 );
                 updateAgent({
                   model_ids: values,
-                  model: primaryModel?.model_name ?? "",
+                  model: primaryModel?.displayName ?? "",
                   model_names,
                 });
               }}

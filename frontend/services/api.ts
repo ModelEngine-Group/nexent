@@ -54,8 +54,9 @@ export const API_ENDPOINTS = {
     rename: `${API_BASE_URL}/conversation/rename`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     knowledgeScope: (id: number) =>
-       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
+      `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    batchDelete: `${API_BASE_URL}/conversation/batch-delete`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
     // TODO: Remove this endpoint
     sources: `${API_BASE_URL}/conversation/sources`,
@@ -87,8 +88,8 @@ export const API_ENDPOINTS = {
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
     getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
-    stop: (conversationId: number) =>
-      `${API_BASE_URL}/agent/stop/${conversationId}`,
+    stop: (runId: string | number) =>
+      `${API_BASE_URL}/agent/stop/${encodeURIComponent(String(runId))}`,
     export: `${API_BASE_URL}/agent/export`,
     import: `${API_BASE_URL}/agent/import`,
     checkSkills: `${API_BASE_URL}/agent/check_skills`,
@@ -470,8 +471,7 @@ export const API_ENDPOINTS = {
     install: `${API_BASE_URL}/skills/install`,
   },
   mcpTools: {
-    // Community and Registry endpoints remain under /mcp-tools prefix
-    registryList: `${API_BASE_URL}/mcp-tools/registry/list`,
+    // Community endpoints remain under /mcp-tools prefix
     communityList: `${API_BASE_URL}/mcp-tools/community/list`,
     communityPublish: `${API_BASE_URL}/mcp-tools/community/publish`,
     communityUpdate: `${API_BASE_URL}/mcp-tools/community/update`,
@@ -550,6 +550,16 @@ export const API_ENDPOINTS = {
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
       }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
+      }
+      if (params?.tag_predicates?.length) {
+        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+      }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },
@@ -573,11 +583,21 @@ export const API_ENDPOINTS = {
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+      }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/agent/tags`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>
@@ -606,6 +626,10 @@ export const API_ENDPOINTS = {
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+      }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       if (params?.sort_by_update_time) {
         queryParams.append("sort_by_update_time", "true");
       }
@@ -629,12 +653,16 @@ export const API_ENDPOINTS = {
       if (params?.new_skill_padding) {
         queryParams.append("new_skill_padding", "true");
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
     mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/skill/tags`,
     install: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}/install`,
     updateStatus: (skillRepositoryId: number) =>

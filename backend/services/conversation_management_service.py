@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+
+from utils.time_context_utils import strip_current_time_prefix
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +19,7 @@ from database.conversation_db import (
     create_source_image,
     create_source_search,
     delete_conversation,
+    delete_conversations_batch,
     get_conversation,
     get_conversation_history,
     get_historical_context,
@@ -270,11 +273,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     # Strip the [Current time: ...] prefix before persisting so historical
     # messages do not show the time marker. The prefix is injected by
     # run_agent_stream for the LLM call only.
-    raw_query = request.query
-    if raw_query and raw_query.startswith("[Current time:"):
-        close_idx = raw_query.find("]", len("[Current time:"))
-        if close_idx >= 0:
-            raw_query = raw_query[close_idx + 1:].lstrip("\n").strip()
+    raw_query = strip_current_time_prefix(request.query)
 
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
@@ -616,6 +615,50 @@ def delete_conversation_service(conversation_id: int, user_id: str) -> bool:
         raise Exception(str(e))
 
 
+def delete_conversations_batch_service(conversation_ids: List[int], user_id: str) -> Dict[str, Any]:
+    """
+    Batch-delete conversations owned by the user.
+
+    Cancels automation runs and soft-deletes automation tasks bound to each
+    conversation before removing the conversations. Cleanup is best-effort:
+    per-conversation failures are logged but do not block deletion.
+
+    Args:
+        conversation_ids: Conversation IDs to delete
+        user_id: User ID (ownership filter)
+
+    Returns:
+        Dict with deleted_count and failed_ids (ids the user does not own or
+        that were already deleted)
+    """
+    try:
+        try:
+            from services.agent_automation.facade import agent_automation_facade
+            for conversation_id in conversation_ids:
+                try:
+                    agent_automation_facade.on_conversation_deleted(conversation_id, user_id)
+                except Exception as automation_error:
+                    logging.warning(
+                        "Failed to cleanup automation task for conversation %s: %s",
+                        conversation_id,
+                        automation_error,
+                    )
+        except Exception as automation_error:
+            logging.warning(
+                "Failed to setup automation cleanup for batch delete: %s",
+                automation_error,
+            )
+
+        deleted_ids = delete_conversations_batch(conversation_ids, user_id)
+        deleted_set = set(deleted_ids)
+        failed_ids = [cid for cid in conversation_ids if cid not in deleted_set]
+
+        return {"deleted_count": len(deleted_ids), "failed_ids": failed_ids}
+    except Exception as e:
+        logging.exception("Failed to batch delete conversations")
+        raise RuntimeError(str(e))
+
+
 def _build_streaming_message(message_records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Build streaming state from the latest assistant message with status='streaming'.
@@ -730,6 +773,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': message_content,
                     'message_id': message_id,
+                    'create_time': msg.get('create_time'),
                     'opinion_flag': None
                 }
 
@@ -812,6 +856,7 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'role': role,
                     'message': processed_units,
                     'message_id': message_id,
+                    'create_time': msg.get('create_time'),
                     'opinion_flag': msg['opinion_flag']
                 }
 

@@ -186,7 +186,8 @@ export interface ChatMessageType {
   message_id?: number;
   content: string;
   opinion_flag?: string;
-  timestamp: Date;
+  timestamp?: Date;
+  databaseCreateTime?: Date;
   sources?: {
     id: string;
     title: string;
@@ -350,6 +351,7 @@ export interface ApiMessage {
   message: ApiMessageItem[];
   message_id: number;
   message_index?: number;
+  create_time?: number | null;
   opinion_flag?: string;
   picture?: string[];
   search?: SearchResultItem[];

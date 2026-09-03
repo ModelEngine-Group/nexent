@@ -36,7 +36,10 @@ import { Can } from "@/components/permission/Can";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
 import ContainerPortField from "./shared/ContainerPortField";
-import TagEditor from "./shared/TagEditor";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import ResourceTagChips from "@/components/tag/ResourceTagChips";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import JsonPreviewModal from "./shared/JsonPreviewModal";
 import PublishConfirmModal from "./PublishConfirmModal";
 
@@ -84,7 +87,16 @@ export default function McpServiceDetailModal({
   const [deploymentType, setDeploymentType] = useState<McpDeploymentType>(
     McpDeploymentType.REMOTE_LINK
   );
-  const [draftTags, setDraftTags] = useState<string[]>([]);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [tagPreviewRefreshKey, setTagPreviewRefreshKey] = useState(0);
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: assignDefinitions, refresh: refreshAssignDefinitions } =
+    useTagDefinitions(defaultLibrary?.bucket_id ?? null);
   const [containerPort, setContainerPort] = useState<number | undefined>();
 
   const detail = useMcpServiceDetail({ selectedService, onClose });
@@ -118,7 +130,6 @@ export default function McpServiceDetailModal({
       source: draft.source,
     });
     setDeploymentType(nextDeploymentType);
-    setDraftTags(draft.tags ?? []);
     setContainerPort(draft.containerPort);
     form.setFieldsValue({
       name: draft.name,
@@ -151,16 +162,6 @@ export default function McpServiceDetailModal({
   const isReadOnly = selectedService?.permission === "READ_ONLY";
   const hasRegistryJson = Boolean(draft.registryJson);
   const hasConfigJson = Boolean(draft.configJson);
-
-  const addTag = (tag: string) => {
-    const next = tag.trim();
-    if (!next || draftTags.includes(next)) return;
-    setDraftTags((prev) => [...prev, next]);
-  };
-
-  const removeTag = (index: number) => {
-    setDraftTags((prev) => prev.filter((_, i) => i !== index));
-  };
 
   const handleSave = async () => {
     if (isUnsupported || isReadOnly) return;
@@ -216,7 +217,6 @@ export default function McpServiceDetailModal({
       authorizationToken: values.authorizationToken ?? "",
       customHeaders: parsedCustomHeaders,
       configJson: parsedConfigJson,
-      tags: draftTags,
     };
     detail.setDraft(nextDraft);
     const ok = await detail.save(nextDraft);
@@ -511,6 +511,16 @@ export default function McpServiceDetailModal({
     <>
       <Modal
         open
+        title={
+          <div>
+            <div className="text-xl font-semibold leading-7 text-slate-900">
+              {t("mcpTools.detail.editTitle")}
+            </div>
+            <div className="mt-1 text-sm font-normal text-slate-500">
+              {t("mcpTools.detail.editSubtitle")}
+            </div>
+          </div>
+        }
         footer={null}
         closable
         centered
@@ -520,15 +530,6 @@ export default function McpServiceDetailModal({
         styles={mcpToolsModalChromeStyles()}
       >
         <div className="bg-white">
-          <div className="border-b border-slate-100 px-6 py-5">
-            <h2 className="text-2xl font-semibold text-slate-900">
-              {t("mcpTools.detail.editTitle")}
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              {t("mcpTools.detail.editSubtitle")}
-            </p>
-          </div>
-
           <Form
             form={form}
             layout="vertical"
@@ -868,9 +869,17 @@ export default function McpServiceDetailModal({
                   name="group_ids"
                   label={t("tenantResources.knowledgeBase.groupNames")}
                   className="mb-0"
+                  help={
+                    isApi ? (
+                      <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
+                        {t("mcpTools.detail.groupPermissionUnsupported")}
+                      </span>
+                    ) : undefined
+                  }
                 >
                   <Select
                     mode="multiple"
+                    showSearch={{ optionFilterProp: "label" }}
                     placeholder={t("tenantResources.knowledgeBase.groupNames")}
                     disabled={isReadOnly || isApi}
                     value={
@@ -942,23 +951,30 @@ export default function McpServiceDetailModal({
                 </Can>
               </div>
             </Can>
-            {isApi ? (
-              <p className="text-xs text-slate-400 -mt-3">
-                {t("mcpTools.detail.groupPermissionUnsupported")}
-              </p>
-            ) : null}
-
-            <div className="flex flex-col gap-4">
-              <TagEditor
-                title={t("mcpTools.detail.tags")}
-                titleClassName="mb-1 block text-sm font-medium text-slate-700"
-                tags={draftTags}
-                onAddTag={(tag) => addTag(tag || "")}
-                onRemoveTag={removeTag}
-                removeAriaKey="mcpTools.detail.removeTagAria"
-                placeholderKey="mcpTools.detail.tagInputPlaceholder"
-              />
-            </div>
+            <Form.Item label={t("mcpTools.detail.tags")} className="mb-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+                  <ResourceTagChips
+                    resourceType="mcp_service"
+                    resourceId={String(selectedService.mcpId)}
+                    max={4}
+                    refreshKey={tagPreviewRefreshKey}
+                    singleLine
+                    emptyText={
+                      <span className="text-sm text-slate-400">—</span>
+                    }
+                  />
+                </div>
+                <Button
+                  type="link"
+                  size="small"
+                  disabled={isReadOnly}
+                  onClick={() => setAssignOpen(true)}
+                >
+                  {t("tagManagement.action.editTags")}
+                </Button>
+              </div>
+            </Form.Item>
           </Form>
 
           <div className="flex flex-col gap-y-3 border-t border-slate-100 bg-white px-6 py-4">
@@ -1035,6 +1051,30 @@ export default function McpServiceDetailModal({
           containerId={draft.containerId}
         />
       ) : null}
+
+      <ResourceTagAssignmentModal
+        open={assignOpen}
+        onClose={() => {
+          setAssignOpen(false);
+          setTagPreviewRefreshKey((current) => current + 1);
+        }}
+        resourceType="mcp_service"
+        resourceId={String(selectedService.mcpId)}
+        definitions={assignDefinitions ?? []}
+        canEdit={!isReadOnly}
+        onManageDefinitions={() => setTagManagementOpen(true)}
+      />
+
+      <TagDefinitionManagementModal
+        open={tagManagementOpen}
+        onClose={() => {
+          setTagManagementOpen(false);
+          void refreshAssignDefinitions();
+        }}
+        bucketId={defaultLibrary?.bucket_id ?? 0}
+        bucketName={defaultLibrary?.bucket_name ?? ""}
+        canManage={!isReadOnly}
+      />
 
       <PublishConfirmModal
         open={publishConfirmOpen}

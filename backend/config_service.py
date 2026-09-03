@@ -14,17 +14,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from apps.config_app import app
-from services.evaluation_maintenance import start as start_eval_maintenance
 from utils.logging_utils import configure_elasticsearch_logging, configure_logging
 
 
 configure_logging(logging.INFO)
 configure_elasticsearch_logging()
 logger = logging.getLogger("config_service")
-
-# Start background maintenance scheduler (reap stale runs + aged cleanup)
-start_eval_maintenance()
-
 
 if __name__ == "__main__":
     logger.info("Starting server initialization...")

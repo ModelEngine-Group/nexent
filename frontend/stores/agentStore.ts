@@ -7,6 +7,11 @@ import {
   updateToolConfig,
 } from "@/services/agentConfigService";
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
+import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
+  isAidpManagedKnowledgeTool,
+  isManagedKnowledgeTool,
+} from "@/lib/managedKnowledgeTools";
 
 export type AgentDraft = Pick<
   Agent,
@@ -18,6 +23,7 @@ export type AgentDraft = Pick<
   | "model"
   | "model_ids"
   | "model_names"
+  | "unavailable_reasons"
   | "max_step"
   | "requested_output_tokens"
   | "is_main_agent"
@@ -106,6 +112,7 @@ const toDraft = (agent: Agent): AgentDraft => ({
   model: agent.model || "",
   model_ids: agent.model_ids || [],
   model_names: agent.model_names || [],
+  unavailable_reasons: agent.unavailable_reasons || [],
   max_step: agent.max_step,
   requested_output_tokens: agent.requested_output_tokens ?? null,
   is_main_agent: agent.is_main_agent ?? true,
@@ -291,7 +298,10 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools
-          .filter((tool) => tool.is_available !== false)
+          .filter(
+            (tool) =>
+              tool.is_available !== false || isManagedKnowledgeTool(tool)
+          )
           .map((tool) => Number(tool.id))
           .filter(Number.isFinite),
       }
@@ -338,6 +348,12 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
 const toToolParams = (tool: Tool): Record<string, unknown> =>
   (tool.initParams ?? []).reduce<Record<string, unknown>>(
     (params, parameter) => {
+      if (
+        isAidpManagedKnowledgeTool(tool) &&
+        AIDP_NON_PERSISTED_PARAM_NAMES.has(parameter.name)
+      ) {
+        return params;
+      }
       if (parameter.value !== undefined && parameter.value !== null) {
         params[parameter.name] = parameter.value;
       }
@@ -373,6 +389,9 @@ async function persistToolChanges(
   );
 
   for (const tool of currentTools) {
+    if (tool.is_available === false) {
+      continue;
+    }
     const savedTool = savedToolsById.get(Number(tool.id));
     if (savedTool && areToolParamsEqual(tool, savedTool)) {
       continue;
@@ -392,6 +411,9 @@ async function persistToolChanges(
   for (const tool of savedTools) {
     const toolId = Number(tool.id);
     if (currentToolIds.has(toolId)) {
+      continue;
+    }
+    if (tool.is_available === false) {
       continue;
     }
 

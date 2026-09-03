@@ -3,7 +3,7 @@
 import type { FC } from "react";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Thread } from "./thread";
+import { Thread, type WelcomeSuggestion } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
@@ -16,6 +16,8 @@ import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
   generatedTitle?: string;
+  welcomeTitle?: string;
+  welcomeSuggestions?: readonly WelcomeSuggestion[];
   conversationId?: number;
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
@@ -58,6 +60,8 @@ const AgentsLoadingState: FC = () => {
 
 export const Chat: FC<ChatProps> = ({
   generatedTitle,
+  welcomeTitle,
+  welcomeSuggestions,
   conversationId,
   isLoadingAgents = false,
   selectedAgent,
@@ -101,6 +105,8 @@ export const Chat: FC<ChatProps> = ({
     <Thread
       agent={selectedAgent}
       generatedTitle={generatedTitle}
+      welcomeTitle={welcomeTitle}
+      welcomeSuggestions={welcomeSuggestions}
       conversationId={conversationId}
       onBack={onBack}
       chatMode={chatMode}

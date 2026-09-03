@@ -117,6 +117,12 @@ class UnauthorizedError(Exception):
     pass
 
 
+class TokenExpiredError(UnauthorizedError):
+    """Raised when the caller's session/JWT/access token is missing, invalid, or expired."""
+
+    pass
+
+
 class ForbiddenError(Exception):
     """Raised when an authenticated user lacks permission."""
 
@@ -332,6 +338,20 @@ class PlatformQuotaConflictError(Exception):
         super().__init__(message)
         self.error = error
         self.details = details
+
+
+class TagManagementConflictError(Exception):
+    """Raised when tag management would violate an active binding or capacity rule."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+class TagManagementNotFoundError(NotFoundException):
+    """Raised for absent or cross-tenant tag-management identifiers."""
+
+    pass
 
 
 class OAuthProviderError(Exception):

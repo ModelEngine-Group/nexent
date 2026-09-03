@@ -1,3 +1,9 @@
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "nexent-northbound must remain single-replica for startup task recovery" -}}
+{{- end -}}
+{{- if ne .Values.strategy.type "Recreate" -}}
+{{- fail "nexent-northbound strategy.type must be Recreate for startup task recovery" -}}
+{{- end -}}
 {{- $global := default dict .Values.global -}}
 {{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
@@ -53,6 +59,26 @@ spec:
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 5013
+            initialDelaySeconds: 5
+            periodSeconds: 5
           volumeMounts:
             - name: nexent-sql-files
               mountPath: /opt/nexent/sql

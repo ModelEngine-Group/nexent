@@ -69,6 +69,7 @@ def _coerce_choice(raw: str, valid: set, default: str, label: str) -> str:
 
 class AidpSearchTool(Tool):
     name = "aidp_search"
+    is_user_selectable: bool = False
     description = (
         "Performs a multimodal search on AIDP knowledge bases using FusionSearch. "
         "Returns text, table, and image chunks with title and text content. "

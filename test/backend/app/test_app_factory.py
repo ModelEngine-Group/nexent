@@ -4,8 +4,9 @@ Unit tests for app_factory module.
 Tests the create_app function and register_exception_handlers function
 for FastAPI application factory with common configurations and exception handlers.
 """
-import sys
 import os
+import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -101,6 +102,15 @@ class TestCreateApp:
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
+
+    def test_create_app_uses_lifespan_context(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = create_app(lifespan=lifespan)
+
+        assert app.router.lifespan_context is lifespan
 
 
 class TestRegisterExceptionHandlers:
@@ -909,3 +919,23 @@ class TestGenericHandlerAppExceptionDelegation:
         body = __import__("json").loads(response.body)
         assert body["message"] == "Delegated error"
         assert body["code"] == ErrorCode.COMMON_VALIDATION_ERROR.value
+
+    def test_token_expired_exception_handler(self):
+        """Test TokenExpiredError handler returns 401 with TOKEN_EXPIRED code."""
+        from consts.exceptions import TokenExpiredError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-token-expired")
+        def raise_token_expired():
+            raise TokenExpiredError("expired")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-token-expired")
+
+        assert response.status_code == 401
+        assert response.json() == {
+            "message": "Session expired, please log in again",
+            "code": "TOKEN_EXPIRED",
+        }

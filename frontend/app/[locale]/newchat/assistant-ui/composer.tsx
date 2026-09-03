@@ -496,6 +496,7 @@ export const Composer: FC<ComposerProps> = ({
 // two branches declaratively based on `thread.isRunning`.
 const ComposerSendOrCancel: FC = () => {
   const { t } = useTranslation();
+  const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
   return (
     <>
@@ -515,7 +516,12 @@ const ComposerSendOrCancel: FC = () => {
       <AuiIf condition={(s) => !s.thread.isRunning}>
         <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
           <ComposerPrimitive.Send asChild>
-            <Button size="icon" className="size-8 rounded-full ml-2">
+            <Button
+              size="icon"
+              className="size-8 rounded-full ml-2"
+              disabled={!hasText}
+              aria-label={t("chat.composer.send")}
+            >
               <ArrowUp className="size-5" />
             </Button>
           </ComposerPrimitive.Send>

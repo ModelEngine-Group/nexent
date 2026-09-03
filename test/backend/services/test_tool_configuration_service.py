@@ -204,7 +204,7 @@ sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
-# Mock nexent.core.utils.observer before services.skill_service is imported
+# Mock nexent.core.utils.observer before management.services.skill.service is imported
 nexent_core_utils = _create_package_mock('nexent.core.utils')
 sys.modules['nexent.core.utils'] = nexent_core_utils
 nexent_core_utils_observer = types.ModuleType('nexent.core.utils.observer')
@@ -421,10 +421,14 @@ services_modules = {
     },
 }
 for service_name, attrs in services_modules.items():
-    service_module = types.ModuleType(f'services.{service_name}')
+    module_name = (
+        'management.services.knowledge_base.service'
+        if service_name == 'vectordatabase_service' else f'services.{service_name}'
+    )
+    service_module = types.ModuleType(module_name)
     for attr_name, attr_value in attrs.items():
         setattr(service_module, attr_name, attr_value)
-    sys.modules[f'services.{service_name}'] = service_module
+    sys.modules[module_name] = service_module
     # Expose on parent package for patch resolution
     setattr(sys.modules['services'], service_name, service_module)
 
@@ -457,12 +461,20 @@ services_modules = {
     },
 }
 for service_name, attrs in services_modules.items():
-    service_module = types.ModuleType(f'services.{service_name}')
+    module_name = (
+        'management.services.knowledge_base.service'
+        if service_name == 'vectordatabase_service' else f'services.{service_name}'
+    )
+    service_module = types.ModuleType(module_name)
     for attr_name, attr_value in attrs.items():
         setattr(service_module, attr_name, attr_value)
-    sys.modules[f'services.{service_name}'] = service_module
+    sys.modules[module_name] = service_module
     # Expose on parent package for patch resolution
     setattr(sys.modules['services'], service_name, service_module)
+
+model_resolver_module = types.ModuleType("management.services.model.resolver")
+model_resolver_module.get_rerank_model = MagicMock()
+sys.modules["management.services.model.resolver"] = model_resolver_module
 
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402
@@ -580,8 +592,8 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 # Patch tool_configuration_service imports to avoid triggering actual imports during patch
 # Note: These patches use the import path as seen in tool_configuration_service.py
 # NOTE: get_llm_model is NOT patched here because TestGetLlmModel tests it directly
-patch('services.vectordatabase_service.get_embedding_model', MagicMock()).start()
-patch('services.vectordatabase_service.get_vector_db_core', MagicMock()).start()
+patch('management.services.knowledge_base.service.get_embedding_model', MagicMock()).start()
+patch('management.services.knowledge_base.service.get_vector_db_core', MagicMock()).start()
 patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock()).start()
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
@@ -1424,6 +1436,7 @@ class TestGetToolFromRemoteMcpServer:
         assert result[0].name == "test_tool_1"
         assert result[0].description == "Test tool 1 description"
         assert result[0].source == ToolSourceEnum.MCP.value
+        assert result[0].output_type == "object"
         assert result[0].usage == "test_server"
         assert result[1].name == "test_tool_2"
         assert result[1].description == "Test tool 2 description"

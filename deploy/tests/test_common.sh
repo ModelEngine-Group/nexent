@@ -84,6 +84,7 @@ write_full_config() {
     echo '  - terminal'
     echo 'portPolicy: "development"'
     echo 'imageSource: "local-latest"'
+    echo 'sandboxMode: "full"'
   } > "$file"
 }
 
@@ -102,6 +103,14 @@ assert_contains "$ZH_DEPLOY_HELP" "--defaults" "deploy wrapper help should docum
 EN_DEPLOY_HELP="$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
 assert_contains "$EN_DEPLOY_HELP" "Usage:" "DEPLOYMENT_LANG should force English deploy wrapper help"
 assert_contains "$EN_DEPLOY_HELP" "--defaults" "English deploy wrapper help should document defaults mode"
+DOCKER_DEPLOY_HELP="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../docker/deploy.sh" --help)"
+assert_contains "$DOCKER_DEPLOY_HELP" "--sandbox-mode MODE" "Docker deploy help should document sandbox mode selection"
+DOCKER_DEPLOY_CONTENT="$(cat "$SCRIPT_DIR/../docker/deploy.sh")"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'DEPLOYMENT_SANDBOX_MODE_SELECTION_ENABLED="true"' "Docker deployment should enable the Sandbox selection step"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'if [ "$DEPLOYMENT_SANDBOX_MODE" = "disabled" ]' "disabled Sandbox mode should skip image pulling"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'update_env_var "NEXENT_SANDBOX_DEFAULT_LEVEL"' "Docker deployment should persist the selected execution level"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'current_image" = "$NEXENT_SANDBOX_IMAGE"' "Docker deployment should retain a matching fixed Sandbox container"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'docker rm -f "$container_name"' "Docker deployment should replace a stale fixed Sandbox container"
 
 ZH_ROOT_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../../deploy.sh" --help)"
 assert_contains "$ZH_ROOT_DEPLOY_HELP" "用法：" "root deploy help should follow Chinese locale"
@@ -139,6 +148,7 @@ assert_contains "$(cat /tmp/nexent-image-build-zh-invalid.log)" "未知选项：
 APP_VERSION="latest"
 deployment_prepare_config --app-version latest
 assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "default components should include data-process and supabase"
+assert_eq "lightweight" "$DEPLOYMENT_SANDBOX_MODE" "the lightweight Sandbox should be enabled by default"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "default docker services should include data-process"
 assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase-db" "default helm charts should include supabase db"
 deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
@@ -158,6 +168,29 @@ fi
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "3000" "production should expose web"
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5013" "production should expose northbound"
 
+unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
+deployment_prepare_config --components infrastructure,application --image-source general --sandbox-mode full --app-version v2.2.0
+deployment_apply_image_source
+assert_eq "docker" "$NEXENT_SANDBOX_DEFAULT_LEVEL" "full Sandbox mode should enable Docker isolation"
+assert_eq "nexent/nexent-sandbox-full:v2.2.0" "$NEXENT_SANDBOX_IMAGE" "full Sandbox mode should select the full image"
+FULL_SANDBOX_DOCKER_ENV="$TMP_DIR/full-sandbox-docker.env"
+deployment_render_docker_env "$FULL_SANDBOX_DOCKER_ENV"
+assert_contains "$(cat "$FULL_SANDBOX_DOCKER_ENV")" 'NEXENT_SANDBOX_DEFAULT_LEVEL="docker"' "Docker env should enable Docker isolation for full Sandbox mode"
+
+unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
+deployment_prepare_config --components infrastructure,application --image-source general --sandbox-mode disabled --app-version v2.2.0
+deployment_apply_image_source
+assert_eq "local" "$NEXENT_SANDBOX_DEFAULT_LEVEL" "disabled Sandbox mode should use local execution"
+assert_eq "nexent/nexent-sandbox:v2.2.0" "$NEXENT_SANDBOX_IMAGE" "disabled mode should retain a valid lightweight image reference"
+
+if deployment_prepare_config --sandbox-mode unsupported --app-version latest 2>"$TMP_DIR/invalid-sandbox-mode.log"; then
+  echo "FAIL: unsupported Sandbox mode should fail validation"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/invalid-sandbox-mode.log")" "Unsupported sandbox mode: unsupported" "invalid Sandbox mode should explain supported values"
+
+unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
+deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
 deployment_apply_image_source
 PRODUCTION_HELM_VALUES="$TMP_DIR/production-generated-values.yaml"
 deployment_render_helm_values "$PRODUCTION_HELM_VALUES"
@@ -222,6 +255,7 @@ APP_VERSION="v2.2.2"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG"
 assert_eq "v2.2.2" "$DEPLOYMENT_APP_VERSION" "local config appVersion should not override current VERSION"
 assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "local config should still load saved components while ignoring appVersion"
+assert_eq "full" "$DEPLOYMENT_SANDBOX_MODE" "local config should restore the selected Sandbox mode"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --version v2.2.3
 assert_eq "v2.2.3" "$DEPLOYMENT_APP_VERSION" "explicit --version should override current VERSION"
 APP_VERSION="latest"
@@ -389,7 +423,7 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "heartbeatIntervalSeconds: \"300\"" "common values should default the CAS heartbeat interval to five minutes"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh-image" "openssh deployment should include ssh image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-env" "openssh deployment should include env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-env" "minio deployment should include env rollout annotation"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-env" "minio deployment should include env rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase auth deployment should include supabase secret rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" ".Values.initImage.repository" "supabase auth init container should use configurable image repository"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "image: postgres:15-alpine" "supabase auth init container should not hardcode postgres image"
@@ -401,7 +435,7 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/dep
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/deployment.yaml")" "checksum/nexent-env" "supabase kong deployment should not use full env rollout annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web:" "web deployment should not keep component-named env checksum annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh:" "openssh deployment should not keep component-named env checksum annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-minio" "minio deployment should not keep component-named env checksum annotation"
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-minio" "minio deployment should not keep component-named env checksum annotation"
 
 ENV_CHECKSUM_A="$TMP_DIR/env-checksum-a.env"
 cat > "$ENV_CHECKSUM_A" <<'ENV'
@@ -706,6 +740,7 @@ if grep -q 'appVersion' "$LOCAL_CONFIG"; then
   exit 1
 fi
 assert_contains "$(cat "$LOCAL_CONFIG")" 'imageRegistryPrefix: "registry.local/nexent"' "persisted local config should include image registry prefix"
+assert_contains "$(cat "$LOCAL_CONFIG")" 'sandboxMode: "' "persisted local config should include the Sandbox mode"
 
 DEPLOY_OPTIONS_FILE="$TMP_DIR/deploy.options"
 deployment_init_defaults
@@ -737,18 +772,19 @@ fi
 
 deployment_tui_step_should_run() {
   case "$1" in
-    0|1|2)
+    0|1|2|3)
       return 0
       ;;
-    3)
+    4)
       return 1
       ;;
   esac
   return 1
 }
 assert_eq "1" "$(deployment_tui_next_step 0)" "TUI next step should advance to the next runnable step"
-assert_eq "4" "$(deployment_tui_next_step 2)" "TUI next step should skip non-runnable monitoring provider"
-assert_eq "2" "$(deployment_tui_previous_step 3)" "TUI previous step should skip non-runnable steps"
+assert_eq "3" "$(deployment_tui_next_step 2)" "TUI should select Sandbox mode immediately after image source"
+assert_eq "5" "$(deployment_tui_next_step 3)" "TUI next step should skip non-runnable monitoring provider"
+assert_eq "3" "$(deployment_tui_previous_step 4)" "TUI previous step should return to Sandbox mode"
 
 assert_eq "$(sed -n '1p' "$SCRIPT_DIR/../../VERSION")" "$(deployment_read_version "")" "deployment version should come from root VERSION"
 assert_eq "v-test" "$(deployment_read_version "v-test")" "explicit deployment version should win"

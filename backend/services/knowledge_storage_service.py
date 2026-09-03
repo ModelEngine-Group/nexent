@@ -140,7 +140,7 @@ def resolve_storage_object_access(
 
     # Import lazily to avoid the existing vectordatabase_service -> this
     # module import relationship during application startup.
-    from services.vectordatabase_service import ElasticSearchService
+    from management.services.knowledge_base.service import ElasticSearchService
 
     try:
         knowledge_permission = ElasticSearchService.resolve_knowledge_base_permission(

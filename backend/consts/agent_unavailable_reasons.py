@@ -16,6 +16,7 @@ class AgentUnavailableReason:
     # Model issues
     MODEL_NOT_CONFIGURED = "model_not_configured"
     MODEL_UNAVAILABLE = "model_unavailable"
+    MODEL_DELETED = "model_deleted"
 
     # Tool issues
     TOOL_UNAVAILABLE = "tool_unavailable"
@@ -33,6 +34,7 @@ class AgentUnavailableReason:
             cls.DUPLICATE_DISPLAY_NAME,
             cls.MODEL_NOT_CONFIGURED,
             cls.MODEL_UNAVAILABLE,
+            cls.MODEL_DELETED,
             cls.TOOL_UNAVAILABLE,
             cls.ALL_TOOLS_DISABLED,
             cls.AGENT_NOT_FOUND,

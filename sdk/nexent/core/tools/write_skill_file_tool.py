@@ -12,7 +12,10 @@ class WriteSkillFileTool(Tool):
     """Tool for writing skill files to local storage."""
 
     name = "write_skill_file"
-    description = "Write content to a file within a tenant-scoped skill directory."
+    description = (
+        "Edit an installed tenant-scoped skill file. This does not write to the current "
+        "run workspace or outputs directory."
+    )
     inputs = {
         "skill_name": {"type": "string", "description": "Name of the target skill."},
         "file_path": {"type": "string", "description": "Path relative to the skill root."},

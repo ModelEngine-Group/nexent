@@ -375,11 +375,32 @@ def test_complete_answer_that_names_tool_is_not_misclassified():
     ) is False
 
 
+@pytest.mark.parametrize(
+    "output",
+    [
+        (
+            "思考：工具调用成功。根据策略，我需要用 `final_answer` 返回工具结果。\n\n"
+            "最终回答：\n定时任务提案已生成，请核对任务内容和执行时间后确认创建。"
+        ),
+        (
+            "Analysis: The tool call succeeded, so I will use `final_answer` to return the result.\n\n"
+            "Final answer:\nThe scheduled-task proposal is ready for confirmation."
+        ),
+    ],
+)
+def test_complete_explicit_final_answer_is_not_misclassified(output):
+    assert core_agent_module._looks_like_incomplete_action_output(
+        output,
+        available_tool_names={"final_answer", "create_scheduled_task_proposal"},
+    ) is False
+
+
 def test_length_truncated_non_code_output_is_not_a_final_answer():
     assert core_agent_module._looks_like_incomplete_action_output(
         "这是一个尚未完成的回答",
         finish_reason="length",
     ) is True
+
 
 def test_parse_code_blobs_run_format():
     """Test parse_code_blobs with <code>...</code> pattern (new format)."""
@@ -3196,6 +3217,35 @@ def test_wrap_tool_for_observer_emits_unique_ids_for_same_name_calls(monkeypatch
     ]
 
 
+def test_wrap_tool_for_observer_maps_positional_values_to_input_names(monkeypatch):
+    observer = MagicMock()
+    observer.tool_call_context.return_value.__enter__.return_value = None
+    tool = type(
+        "RunSkillTool",
+        (),
+        {
+            "name": "run_skill_script",
+            "inputs": {"skill_name": {}, "script_path": {}, "params": {}},
+        },
+    )()
+    tool.forward = lambda skill_name, script_path, params=None: "ok"
+    monkeypatch.setattr(core_agent_module.uuid, "uuid4", lambda: "call-1")
+
+    core_agent_module._wrap_tool_for_observer(tool, observer, "agent")
+    result = tool.forward(
+        "sandbox-execution-probe",
+        "scripts/check_execution_env.py",
+        {"compact": True},
+    )
+
+    assert result == "ok"
+    assert observer.add_message.call_args.kwargs["tool_arguments"] == {
+        "skill_name": "sandbox-execution-probe",
+        "script_path": "scripts/check_execution_env.py",
+        "params": {"compact": True},
+    }
+
+
 def test_known_tool_names_combines_mapping_containers_and_ignores_invalid_ones():
     """Collect stringified keys from tools and managed agents only."""
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
@@ -3350,6 +3400,9 @@ def test_managed_agent_call_injects_workspace_instructions(tmp_path):
     assert "current working directory" in managed_task
     assert "Never prefix a relative output path" in managed_task
     assert "pass the same bare relative path" in managed_task
+    assert "use its permanent s3_url in Markdown" in managed_task
+    assert "Never use a local path or presigned_url" in managed_task
+    assert "only call .save() on PIL images" in managed_task
 
 
 def test_run_with_metadata_injects_untrusted_metadata_block():

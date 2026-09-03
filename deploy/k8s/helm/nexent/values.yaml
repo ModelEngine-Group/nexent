@@ -17,7 +17,7 @@ global:
       existingClaim: "nexent-skills"
   deploymentVersion: "full"
   deploymentComponents:
-    infrastructure: true
+    infrastructure: false
     application: true
     data-process: true
     supabase: true
@@ -85,14 +85,6 @@ nexent-common:
       sslVerify: "true"
       caBundle: ""
 
-nexent-elasticsearch:
-  enabled: true
-nexent-postgresql:
-  enabled: true
-nexent-redis:
-  enabled: true
-nexent-minio:
-  enabled: true
 nexent-config:
   enabled: true
   replicaCount: 1

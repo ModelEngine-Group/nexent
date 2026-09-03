@@ -12,13 +12,14 @@ from consts.error_code import ErrorCode
 from consts.exceptions import (
     AppException,
     DuplicateError,
+    TokenExpiredError,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
-from services.vectordatabase_service import (
+from management.services.model.resolver import get_embedding_model_by_id
+from management.services.knowledge_base.service import (
     ElasticSearchService,
-    get_embedding_model_by_id,
     get_vector_db_core,
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
@@ -73,6 +74,9 @@ async def check_knowledge_base_exist(
 
         user_id, tenant_id = get_current_user_id(authorization)
         return check_knowledge_base_exist_impl(knowledge_name=knowledge_name, vdb_core=vdb_core, user_id=user_id, tenant_id=tenant_id)
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error checking knowledge base existence for '{knowledge_name}': {str(e)}", exc_info=True)
@@ -134,6 +138,9 @@ def create_new_index(
     except (TypeError, ValueError) as e:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
@@ -152,12 +159,23 @@ async def delete_index(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
+        from services.tag_management_service import TagManagementService
+
+        TagManagementService.cleanup_resource_assignments(
+            tenant_id, "knowledge_base", index_name, user_id
+        )
+        TagManagementService.cleanup_document_assignments_for_knowledge_base(
+            tenant_id, "local", index_name, user_id
+        )
         return result
     except AppException:
         # Preserve the EDS code/details for the common application handler.
         raise
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error during API call to delete index '{index_name}': {str(e)}", exc_info=True)
@@ -216,6 +234,9 @@ async def update_index(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating index '{index_name}': {str(exc)}", exc_info=True)
@@ -263,6 +284,9 @@ async def update_summary_frequency_endpoint(
             )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error updating summary frequency")
         raise HTTPException(
@@ -350,6 +374,9 @@ def get_embedding_model_status(
 
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting embedding model status for '{index_name}': {e}", exc_info=True)
@@ -402,6 +429,9 @@ def update_embedding_model(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             f"Error updating embedding model for '{index_name}': {exc}", exc_info=True)
@@ -470,6 +500,9 @@ def get_list_indices(
         return ElasticSearchService.list_indices(
             pattern, include_stats, tenant_id, user_id, vdb_core, **pagination_args
         )
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error get index: {str(e)}")
@@ -558,6 +591,9 @@ def create_index_documents(
         raise
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -586,6 +622,9 @@ async def get_index_files(
         }
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error indexing documents: {error_msg}")
@@ -649,6 +688,11 @@ async def delete_documents(
         )
 
         if scope == "full":
+            from services.tag_management_service import TagManagementService
+
+            TagManagementService.cleanup_document_assignments(
+                tenant_id, "local", index_name, path_or_url, user_id
+            )
             try:
                 redis_service = get_redis_service()
                 redis_cleanup_result = redis_service.delete_document_records(
@@ -694,6 +738,9 @@ async def delete_documents(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -802,6 +849,9 @@ async def get_document_error_info(
         }
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error(
             f"Error getting error info for document {path_or_url}: {str(e)}")
@@ -864,6 +914,9 @@ def get_index_chunks(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         error_msg = str(e)
         raise HTTPException(
@@ -897,6 +950,9 @@ def create_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error creating chunk for index %s: %s", index_name, exc, exc_info=True
@@ -936,6 +992,9 @@ def update_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error updating chunk %s for index %s: %s",
@@ -974,6 +1033,9 @@ def delete_chunk(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(
             "Error deleting chunk %s for index %s: %s",
@@ -1010,14 +1072,17 @@ async def hybrid_search(
                 index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
             )
             resolved_index_names.append(resolved_name)
-        result = ElasticSearchService.search_hybrid(
-            index_names=resolved_index_names,
-            query=payload.query,
-            tenant_id=tenant_id,
-            top_k=payload.top_k,
-            weight_accurate=payload.weight_accurate,
-            vdb_core=vdb_core,
-        )
+        search_kwargs = {
+            "index_names": resolved_index_names,
+            "query": payload.query,
+            "tenant_id": tenant_id,
+            "top_k": payload.top_k,
+            "weight_accurate": payload.weight_accurate,
+            "vdb_core": vdb_core,
+        }
+        if payload.tag_predicates:
+            search_kwargs["tag_predicates"] = payload.tag_predicates
+        result = ElasticSearchService.search_hybrid(**search_kwargs)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except KnowledgeBaseNeedsModelConfigError as exc:
         # Return a specific error that frontend can detect to show the config dialog
@@ -1036,6 +1101,9 @@ async def hybrid_search(
     except HTTPException:
         # Re-raise HTTP exceptions (e.g. 403 from permission check) as-is
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.error(f"Hybrid search failed: {exc}", exc_info=True)
         raise HTTPException(

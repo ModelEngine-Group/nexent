@@ -146,9 +146,6 @@ data:
   MONITORING_TRACE_MAX_CHARS: {{ default .Values.config.telemetry.traceMaxChars $monitoring.traceMaxChars | quote }}
   MONITORING_TRACE_MAX_ITEMS: {{ default .Values.config.telemetry.traceMaxItems $monitoring.traceMaxItems | quote }}
 
-  # Market Backend Address
-  MARKET_BACKEND: {{ .Values.config.marketBackend | quote }}
-
   # Skip proxy
   skip_proxy: {{ .Values.config.skipProxy | quote }}
   UMASK: {{ .Values.config.umask | quote }}

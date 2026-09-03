@@ -13,10 +13,12 @@ from consts.agent_repository import (
     VALID_REPOSITORY_STATUSES,
 )
 from consts.exceptions import UnauthorizedError
-from consts.model import AgentRepositorySnapshot
-from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from consts.model import AgentRepositorySnapshot, SkillResolution
+from consts.notification import (
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_AGENT_REPOSITORY,
+)
 from database.agent_db import search_agent_info_by_agent_id
-from database.agent_version_db import search_version_by_version_no
 from database.agent_repository_db import (
     fetch_draft_agent_mine_metadata,
     get_agent_repository_by_agent_id,
@@ -30,8 +32,10 @@ from database.agent_repository_db import (
     update_agent_repository_by_id,
     update_agent_repository_status_by_id,
 )
+from database.agent_version_db import search_version_by_version_no
+from database.tag_management_db import TagManagementDB
 from database.user_tenant_db import get_user_tenant_by_user_id
-from services.agent_service import (
+from management.services.agent.service import (
     collect_skill_zip_entries,
     export_agent_dict_for_repository_impl,
     import_agent_impl,
@@ -134,6 +138,48 @@ def _matches_repository_listing_search_filter(record: dict, search: str) -> bool
     )
 
 
+def _find_agent_ids_matching_any_tag_predicate(
+    tenant_id: str,
+    agent_ids: Collection[int],
+    predicates: Collection[Any],
+) -> set[str]:
+    """Return visible agents matching any structured tag predicate."""
+    if not agent_ids or not predicates:
+        return set()
+
+    resource_ids = [str(agent_id) for agent_id in agent_ids]
+    matched_ids: set[str] = set()
+    for predicate in predicates:
+        matched_ids.update(
+            TagManagementDB.filter_authorized_resource_ids(
+                tenant_id,
+                "agent",
+                resource_ids,
+                [predicate],
+            )
+        )
+    return matched_ids
+
+
+def _filter_agent_ids_by_tag_predicates(
+    tenant_id: str,
+    agent_ids: Collection[str],
+    predicates: Collection[Any],
+) -> set[str]:
+    """Return visible agents matching all selected structured tag predicates."""
+    if not agent_ids or not predicates:
+        return set()
+
+    return set(
+        TagManagementDB.filter_authorized_resource_ids(
+            tenant_id,
+            "agent",
+            list(agent_ids),
+            list(predicates),
+        )
+    )
+
+
 def list_agent_repository_listings_impl(
     tenant_id: str,
     *,
@@ -142,6 +188,9 @@ def list_agent_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    search_tag_predicates: Optional[list] = None,
+    tag_predicates: Optional[list] = None,
+    tag: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List repository listings for the caller tenant with optional status filter."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
@@ -154,11 +203,43 @@ def list_agent_repository_listings_impl(
         status=status,
         agent_id=agent_id,
     )
+    if tag_predicates:
+        record_agent_ids = [
+            str(record["agent_id"])
+            for record in records
+            if record.get("agent_id") is not None
+        ]
+        matched_agent_ids = _filter_agent_ids_by_tag_predicates(
+            tenant_id,
+            record_agent_ids,
+            tag_predicates,
+        )
+        records = [
+            record
+            for record in records
+            if str(record.get("agent_id")) in matched_agent_ids
+        ]
+    search_matched_agent_ids = _find_agent_ids_matching_any_tag_predicate(
+        tenant_id,
+        [
+            int(record["agent_id"])
+            for record in records
+            if record.get("agent_id") is not None
+        ],
+        search_tag_predicates or [],
+    )
     if search and search.strip():
         records = [
             record
             for record in records
             if _matches_repository_listing_search_filter(record, search)
+            or str(record.get("agent_id")) in search_matched_agent_ids
+        ]
+    if tag and tag.strip():
+        records = [
+            record
+            for record in records
+            if tag.strip() in (record.get("tags") or [])
         ]
     total = len(records)
     start = (page - 1) * page_size
@@ -186,6 +267,23 @@ def list_agent_repository_listings_impl(
             "total_pages": (total + page_size - 1) // page_size if total else 0,
         },
     }
+
+
+def list_agent_repository_tag_stats_impl(tenant_id: str) -> List[Dict[str, Any]]:
+    """Return shared repository tags and their listing counts for one tenant."""
+    counts: Dict[str, int] = {}
+    for record in list_agent_repository_summaries(
+        publisher_tenant_id=tenant_id,
+        status=STATUS_SHARED,
+    ):
+        for raw_tag in record.get("tags") or []:
+            tag = str(raw_tag).strip()
+            if tag:
+                counts[tag] = counts.get(tag, 0) + 1
+    return [
+        {"tag": tag, "count": count}
+        for tag, count in sorted(counts.items(), key=lambda item: item[0].lower())
+    ]
 
 
 def _normalize_listing_tags(tags: Any) -> List[str]:
@@ -313,14 +411,56 @@ def _compute_mine_ownership_counts(
     }
 
 
-def _matches_mine_search_filter(agent: dict, search: str) -> bool:
-    """Return whether an agent matches a case-insensitive name/description search."""
+def _matches_mine_search_filter(
+    agent: dict,
+    search: str,
+    tags: Collection[str] = (),
+) -> bool:
+    """Match a mine agent by name, description, or visible tag value."""
     query = search.strip().lower()
     if not query:
         return True
     name = str(agent.get("display_name") or agent.get("name") or "").lower()
     description = str(agent.get("description") or "").lower()
-    return query in name or query in description
+    return (
+        query in name
+        or query in description
+        or any(query in str(tag).lower() for tag in tags)
+    )
+
+
+def _merge_agent_tag_values(
+    agent_ids: Collection[int],
+    tenant_id: str,
+    repository_records: Collection[Dict[str, Any]],
+) -> Dict[int, List[str]]:
+    """Merge canonical agent assignments with publisher-owned listing tags."""
+
+    try:
+        structured = (
+            TagManagementDB.list_resource_assignment_display_values_by_ids(
+                tenant_id,
+                "agent",
+                [str(agent_id) for agent_id in agent_ids],
+            )
+        )
+    except Exception as error:  # noqa: BLE001 - repository search keeps legacy fallback
+        logger.warning("Failed to load structured agent tags for search: %s", error)
+        structured = {}
+    merged: Dict[int, List[str]] = {
+        int(agent_id): list(structured.get(str(agent_id), []))
+        for agent_id in agent_ids
+    }
+    for record in repository_records:
+        record_agent_id = record.get("agent_id")
+        if record_agent_id is None:
+            continue
+        target = merged.setdefault(int(record_agent_id), [])
+        for value in record.get("tags") or []:
+            normalized = str(value).strip()
+            if normalized and normalized not in target:
+                target.append(normalized)
+    return merged
 
 
 def _paginate_mine_agents_with_optional_padding(
@@ -355,6 +495,8 @@ async def list_my_editable_agents_impl(
     search: Optional[str] = None,
     new_agent_padding: bool = False,
     agent_id: Optional[int] = None,
+    tag_predicates: Optional[list] = None,
+    search_tag_predicates: Optional[list] = None,
 ) -> Dict[str, Any]:
     """List visible draft agents for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -365,13 +507,51 @@ async def list_my_editable_agents_impl(
         )
 
     all_agents = await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
+    if tag_predicates:
+        agent_ids_for_filter = [
+            str(agent["agent_id"])
+            for agent in all_agents
+            if agent.get("agent_id") is not None
+        ]
+        matched_ids = set(
+            TagManagementDB.filter_authorized_resource_ids(
+                tenant_id,
+                "agent",
+                agent_ids_for_filter,
+                tag_predicates,
+            )
+        )
+        all_agents = [
+            agent
+            for agent in all_agents
+            if str(agent.get("agent_id")) in matched_ids
+        ]
     agent_ids = [
         int(agent["agent_id"])
         for agent in all_agents
         if agent.get("agent_id") is not None
     ]
+    search_matched_agent_ids = _find_agent_ids_matching_any_tag_predicate(
+        tenant_id,
+        agent_ids,
+        search_tag_predicates or [],
+    )
     meta_by_id = fetch_draft_agent_mine_metadata(tenant_id, agent_ids)
     counts = _compute_mine_ownership_counts(all_agents, meta_by_id, user_id)
+
+    repository_records_for_search: List[Dict[str, Any]] = []
+    tags_by_agent_id: Dict[int, List[str]] = {}
+    if search and search.strip() and agent_ids:
+        repository_records_for_search = list_agent_repository_by_agent_ids(
+            agent_ids,
+            statuses=_MY_AGENT_REPOSITORY_STATUSES,
+            publisher_tenant_id=tenant_id,
+        )
+        tags_by_agent_id = _merge_agent_tag_values(
+            agent_ids,
+            tenant_id,
+            repository_records_for_search,
+        )
 
     filtered_agents = []
     for agent in all_agents:
@@ -391,7 +571,12 @@ async def list_my_editable_agents_impl(
         filtered_agents = [
             (agent, meta)
             for agent, meta in filtered_agents
-            if _matches_mine_search_filter(agent, search)
+            if _matches_mine_search_filter(
+                agent,
+                search,
+                tags_by_agent_id.get(int(agent["agent_id"]), []),
+            )
+            or str(agent["agent_id"]) in search_matched_agent_ids
         ]
 
     if agent_id is not None:
@@ -405,6 +590,7 @@ async def list_my_editable_agents_impl(
         new_agent_padding
         and normalized_ownership == OWNERSHIP_ALL
         and not (search and search.strip())
+        and not tag_predicates
         and agent_id is None
     )
     paged_entries, total = _paginate_mine_agents_with_optional_padding(
@@ -421,17 +607,32 @@ async def list_my_editable_agents_impl(
 
     repository_by_agent_id: Dict[int, List[Dict[str, Any]]] = {}
     if paged_agent_ids:
-        repository_records = list_agent_repository_by_agent_ids(
-            paged_agent_ids,
-            statuses=_MY_AGENT_REPOSITORY_STATUSES,
-            publisher_tenant_id=tenant_id,
-        )
+        if repository_records_for_search:
+            paged_id_set = set(paged_agent_ids)
+            repository_records = [
+                record
+                for record in repository_records_for_search
+                if record.get("agent_id") is not None
+                and int(record["agent_id"]) in paged_id_set
+            ]
+        else:
+            repository_records = list_agent_repository_by_agent_ids(
+                paged_agent_ids,
+                statuses=_MY_AGENT_REPOSITORY_STATUSES,
+                publisher_tenant_id=tenant_id,
+            )
         for record in repository_records:
             record_agent_id = record.get("agent_id")
             if record_agent_id is None:
                 continue
             repository_by_agent_id.setdefault(int(record_agent_id), []).append(
                 _to_repository_info_item(record)
+            )
+        if not tags_by_agent_id:
+            tags_by_agent_id = _merge_agent_tag_values(
+                paged_agent_ids,
+                tenant_id,
+                repository_records,
             )
 
     download_totals = _get_agent_download_totals(paged_agent_ids)
@@ -455,6 +656,7 @@ async def list_my_editable_agents_impl(
                 ),
                 "permission": agent.get("permission"),
                 "downloads": download_totals.get(entry_agent_id, 0),
+                "tags": tags_by_agent_id.get(entry_agent_id, []),
                 "repository_info": repository_by_agent_id.get(entry_agent_id, []),
             }
         )
@@ -1045,6 +1247,7 @@ async def import_agent_from_repository_impl(
     agent_repository_id: int,
     tenant_id: str,
     authorization: str,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     record = get_agent_repository_by_id(
@@ -1064,9 +1267,15 @@ async def import_agent_from_repository_impl(
             snapshot,
             snapshot.skills,
             authorization,
+            skill_resolutions=skill_resolutions,
+            resolve_name_conflicts=True,
         )
     else:
-        result = await import_agent_impl(snapshot, authorization)
+        result = await import_agent_impl(
+            snapshot,
+            authorization,
+            resolve_name_conflicts=True,
+        )
 
     affected = increment_agent_repository_downloads(agent_repository_id)
     if affected == 0:

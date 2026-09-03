@@ -2167,8 +2167,10 @@ def test_forward_large_chunks_uses_chord_batches(monkeypatch):
     class _Sig:
         def __init__(self, kwargs):
             self.kwargs = kwargs
+            self.queue = None
 
-        def set(self, **_kw):
+        def set(self, **kw):
+            self.queue = kw.get("queue")
             return self
 
     captured = {"group_sigs": None}
@@ -2217,6 +2219,77 @@ def test_forward_large_chunks_uses_chord_batches(monkeypatch):
     assert len(captured["group_sigs"]) == 2
     assert all(sig.kwargs.get("large_mode")
                is True for sig in captured["group_sigs"])
+    assert all(sig.queue == "forward_part_q" for sig in captured["group_sigs"])
+
+
+def test_forward_large_chunks_routes_aggregate_to_dedicated_queue(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *args, **kwargs: 0)
+
+    class _RedisSvc:
+        def save_progress_info(self, *args, **kwargs):
+            return True
+
+        def is_task_cancelled(self, *args, **kwargs):
+            return False
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: _RedisSvc())
+
+    captured = {}
+
+    class _Sig:
+        def __init__(self, kwargs):
+            self.kwargs = kwargs
+            self.queue = None
+
+        def set(self, **kwargs):
+            self.queue = kwargs.get("queue")
+            return self
+
+    monkeypatch.setattr(tasks, "forward_part", types.SimpleNamespace(
+        s=lambda **kwargs: _Sig(kwargs)))
+    monkeypatch.setattr(tasks, "aggregate_forward_parts", types.SimpleNamespace(
+        s=lambda **kwargs: _Sig(kwargs)))
+
+    def _fake_group(signatures):
+        captured["parts"] = list(signatures)
+        return captured["parts"]
+
+    def _fake_chord(group_tasks):
+        def _runner(callback):
+            captured["callback"] = callback
+            total = sum(len(sig.kwargs["chunks"]) for sig in group_tasks)
+            return types.SimpleNamespace(get=lambda: {
+                "success": True,
+                "total_indexed": total,
+                "total_submitted": total,
+            })
+        return _runner
+
+    @contextmanager
+    def _fake_allow_join_result():
+        yield
+
+    monkeypatch.setattr(tasks, "group", _fake_group)
+    monkeypatch.setattr(tasks, "chord", _fake_chord)
+    monkeypatch.setattr(tasks, "allow_join_result", _fake_allow_join_result)
+    monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **kwargs: {
+        "success": True,
+        "total_indexed": len(kwargs["chunks"]),
+        "total_submitted": len(kwargs["chunks"]),
+    })
+
+    out = tasks.forward(
+        FakeSelf("forward-aggregate-queue"),
+        processed_data={"chunks": [{"content": f"c-{i}", "metadata": {}} for i in range(70)]},
+        index_name="idx",
+        source="/big.txt",
+        source_type="local",
+        file_id="file-1",
+    )
+
+    assert out["chunks_stored"] == 70
+    assert captured["callback"].queue == "forward_aggregate_q"
 
 
 def test_process_sync_unsupported_raises_and_updates_state(monkeypatch):

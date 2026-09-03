@@ -53,15 +53,13 @@ from database.agent_evaluation_db import (
     update_agent_evaluation_status,
 )
 from database.client import get_db_session
-from database.db_models import AgentEvaluation, ModelRecord
+from database.db_models import ModelRecord
 from database.evaluation_set_db import (
-    create_evaluation_set,
     get_evaluation_set_cases_all,
-    insert_evaluation_set_cases,
-    update_evaluation_set_case_count,
+    materialize_virtual_evaluation_set_for_run,
 )
 from database.evaluator_db import get_evaluator
-from services.agent_service import prepare_agent_run
+from management.services.agent.service import prepare_agent_run
 from services.evaluation_set_service import resolve_latest_published_version_no
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template
@@ -71,6 +69,26 @@ from utils.thread_utils import pool
 _QUERY_FORMAT_ERR_MSG = "AI returned invalid format for test queries"
 
 logger = logging.getLogger(__name__)
+
+# Loaded lazily when an evaluation case starts.  Several pure-logic tests
+# intentionally stub the SDK dependency graph and do not provide the runtime
+# agent manager package.
+agent_run_manager = None
+
+
+def _dispatch_agent_evaluation_run(
+    agent_evaluation_id: int,
+    user_id: str,
+    tenant_id: str,
+) -> dict:
+    """Lazily import the config-to-runtime proxy to keep service imports light."""
+    from services.runtime_proxy_service import dispatch_agent_evaluation_run
+
+    return dispatch_agent_evaluation_run(
+        agent_evaluation_id=agent_evaluation_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -400,47 +418,73 @@ async def _run_agent_to_final_answer(
     query: str,
     version_no: int,
     history: list[dict[str, Any]] | None = None,
+    conversation_id: int | None = None,
 ) -> tuple[str, list[dict]]:
     """Run agent once; return (final_answer_text, [all_observer_events])."""
+    run_conversation_id = conversation_id if conversation_id is not None else 0
     agent_request = AgentRequest(
         query=query,
-        conversation_id=0,
+        conversation_id=run_conversation_id,
         history=history,
         minio_files=None,
         agent_id=agent_id,
         version_no=version_no,
         is_debug=True,
     )
-    agent_run_info, _memory_context = await prepare_agent_run(
-        agent_request=agent_request,
-        user_id=user_id,
-        tenant_id=tenant_id,
-        allow_memory_search=False,
-    )
-    final_answer_parts: list[str] = []
-    runtime_events: list[dict] = []
-    async for chunk in agent_run(agent_run_info):
-        try:
-            data = json.loads(chunk)
-            if isinstance(data, dict):
-                runtime_events.append(data)
-                if data.get("type") == "final_answer":
-                    content = data.get("content")
-                    if isinstance(content, str):
-                        final_answer_parts.append(content)
-        except Exception:
-            logger.debug(
-                "Failed to parse observer chunk: %r", chunk[:200], exc_info=True
+    agent_run_info = None
+    terminal_status = "failed"
+    try:
+        run_manager = agent_run_manager
+        if run_manager is None:
+            from agents.agent_run_manager import agent_run_manager as run_manager
+
+        agent_run_info, _memory_context = await prepare_agent_run(
+            agent_request=agent_request,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            allow_memory_search=False,
+        )
+        final_answer_parts: list[str] = []
+        runtime_events: list[dict] = []
+        async for chunk in agent_run(agent_run_info):
+            try:
+                data = json.loads(chunk)
+                if isinstance(data, dict):
+                    runtime_events.append(data)
+                    if data.get("type") == "final_answer":
+                        content = data.get("content")
+                        if isinstance(content, str):
+                            final_answer_parts.append(content)
+            except Exception:
+                logger.debug(
+                    "Failed to parse observer chunk: %r", chunk[:200], exc_info=True
+                )
+        remaining = agent_run_info.observer.get_cached_message()
+        for msg in remaining:
+            try:
+                data = json.loads(msg)
+                if isinstance(data, dict):
+                    runtime_events.append(data)
+            except Exception:
+                logger.debug("Failed to parse straggler observer message", exc_info=True)
+        terminal_status = "completed"
+        return "".join(final_answer_parts).strip(), runtime_events
+    finally:
+        if agent_run_info is not None:
+            run_manager.unregister_agent_run(
+                run_conversation_id,
+                user_id,
+                status=terminal_status,
+                agent_run_info=agent_run_info,
             )
-    remaining = agent_run_info.observer.get_cached_message()
-    for msg in remaining:
-        try:
-            data = json.loads(msg)
-            if isinstance(data, dict):
-                runtime_events.append(data)
-        except Exception:
-            logger.debug("Failed to parse straggler observer message", exc_info=True)
-    return "".join(final_answer_parts).strip(), runtime_events
+
+
+def _evaluation_conversation_id(agent_evaluation_id: int, case_id: int) -> int:
+    """Return a stable, evaluation-only conversation key for run management."""
+    # Evaluation runs do not represent user conversations.  A reserved
+    # negative integer keeps each case isolated while preserving the existing
+    # integer AgentRequest contract.
+    return -((int(agent_evaluation_id) << 64) | int(case_id))
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1172,11 +1216,10 @@ def create_agent_evaluation_run_impl(
         created_by=user_id,
     )
     _run_in_background(
-        execute_agent_evaluation_run,
-        tenant_id,
-        user_id,
+        _dispatch_agent_evaluation_run,
         run["agent_evaluation_id"],
-        judge_model_id,
+        user_id,
+        tenant_id,
         tenant_id=tenant_id,
         user_id=user_id,
         agent_evaluation_id=run["agent_evaluation_id"],
@@ -1318,6 +1361,7 @@ async def _evaluate_query(
     context_window: int = 4096,
     history: list[dict[str, Any]] | None = None,
     expected: str = "",
+    conversation_id: int | None = None,
 ) -> tuple[str, list[dict] | None, dict, dict]:
     """Run agent + score with evaluators. Returns (answer, events, scores, reasons)."""
     answer_text, events = await _run_agent_to_final_answer(
@@ -1327,6 +1371,7 @@ async def _evaluate_query(
         query=query,
         version_no=agent_version_no,
         history=history,
+        conversation_id=conversation_id,
     )
     if evaluators:
         score, reason = _score_with_evaluators(
@@ -1469,6 +1514,9 @@ def _execute_single_case(
                 context_window=context_window,
                 history=history if history else None,
                 expected=expected_answer,
+                conversation_id=_evaluation_conversation_id(
+                    run["agent_evaluation_id"], case_id
+                ),
             )
         )
         predict = {"answer": answer_text}
@@ -1586,28 +1634,16 @@ def _setup_no_set_and_execute(
         # Create virtual evaluation set
         timestamp = datetime.now().strftime("%m-%d %H:%M")
         set_name = f"[No-Set] {timestamp}-{uuid.uuid4().hex[:4]}"
-        set_meta = create_evaluation_set(
-            tenant_id=tenant_id,
-            name=set_name,
-            description=None,
-            source_filename="__no_set_virtual__",
-            created_by=user_id,
-        )
-        evaluation_set_id = set_meta["evaluation_set_id"]
-
-        # Insert cases
         cases = [
             {"inputs": {"query": q.strip()}, "label": {"answer": ""}, "order_no": i}
             for i, q in enumerate(queries)
         ]
-        insert_evaluation_set_cases(
+        evaluation_set_id = materialize_virtual_evaluation_set_for_run(
             tenant_id=tenant_id,
-            evaluation_set_id=evaluation_set_id,
+            name=set_name,
             cases=cases,
             created_by=user_id,
-        )
-        update_evaluation_set_case_count(
-            evaluation_set_id, len(cases), updated_by=user_id
+            agent_evaluation_id=agent_evaluation_id,
         )
         set_cases = get_evaluation_set_cases_all(
             evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
@@ -1621,24 +1657,12 @@ def _setup_no_set_and_execute(
             created_by=user_id,
         )
 
-        # Update the run with correct evaluation_set_id and total
-        with get_db_session() as session:
-            session.query(AgentEvaluation).filter(
-                AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
-                AgentEvaluation.tenant_id == tenant_id,
-            ).update(
-                {
-                    "evaluation_set_id": evaluation_set_id,
-                    "progress_total": len(cases),
-                    "status": EvalRunStatus.RUNNING,
-                },
-                synchronize_session=False,
-            )
-            session.commit()
-
-        # Execute
-        execute_agent_evaluation_run(
-            tenant_id, user_id, agent_evaluation_id, judge_model_id
+        # Execute in the runtime process, which owns the shared workspace
+        # volume mounted by the sandbox container.
+        _dispatch_agent_evaluation_run(
+            agent_evaluation_id=agent_evaluation_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
         )
     except Exception:
         logger.exception("No-set setup failed for run %d", agent_evaluation_id)
@@ -1716,6 +1740,7 @@ def execute_agent_evaluation_run(
     agent_evaluation_id: int,
     judge_model_id: int | None = None,
 ):
+    run: dict[str, Any] = {}
     try:
         update_agent_evaluation_status(
             agent_evaluation_id=agent_evaluation_id,

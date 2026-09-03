@@ -126,9 +126,9 @@ if _services_pkg is None or not hasattr(_services_pkg, "__path__"):
     _services_pkg.__path__ = [str(_BACKEND_DIR / "services")]
     sys.modules["services"] = _services_pkg
 
-_agent_service_module = types.ModuleType("services.agent_service")
+_agent_service_module = types.ModuleType("management.services.agent.service")
 _agent_service_module.prepare_agent_run = MagicMock()
-sys.modules["services.agent_service"] = _agent_service_module
+sys.modules["management.services.agent.service"] = _agent_service_module
 _services_pkg.agent_service = _agent_service_module
 
 # database package and its submodules touched at import time
@@ -146,6 +146,9 @@ _evaluation_set_db_mock.soft_delete_evaluation_set = MagicMock()
 # ---- 补齐 agent_evaluation_service.py import 的所有函数（L56-L61）----
 _evaluation_set_db_mock.create_evaluation_set = MagicMock(return_value={"evaluation_set_id": 1})
 _evaluation_set_db_mock.get_evaluation_set_cases_all = MagicMock(return_value=[])
+_evaluation_set_db_mock.materialize_virtual_evaluation_set_for_run = MagicMock(
+    return_value=1
+)
 _evaluation_set_db_mock.insert_evaluation_set_cases = MagicMock(return_value=0)
 _evaluation_set_db_mock.update_evaluation_set_case_count = MagicMock()
 _evaluation_set_db_mock.hard_delete_evaluation_set = MagicMock()
@@ -829,6 +832,70 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
         )
     )
     assert result[0] == "hello world"
+
+
+def test_evaluation_conversation_ids_are_isolated_and_stable(service_module):
+    first = service_module._evaluation_conversation_id(10, 20)
+    second = service_module._evaluation_conversation_id(10, 21)
+
+    assert first < 0
+    assert first == service_module._evaluation_conversation_id(10, 20)
+    assert first != second
+
+
+def test_dispatch_agent_evaluation_run_uses_runtime_proxy(service_module, monkeypatch):
+    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    dispatch = MagicMock(return_value={"accepted": True})
+    runtime_proxy.dispatch_agent_evaluation_run = dispatch
+    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+
+    result = service_module._dispatch_agent_evaluation_run(7, "u1", "t1")
+
+    assert result == {"accepted": True}
+    dispatch.assert_called_once_with(
+        agent_evaluation_id=7,
+        user_id="u1",
+        tenant_id="t1",
+    )
+
+
+def test_run_agent_to_final_answer_releases_registered_run_on_error(service_module):
+    import asyncio
+
+    service_module.AgentRequest = MagicMock()
+    run_info = MagicMock(name="run_info")
+    service_module.prepare_agent_run = AsyncMock(
+        return_value=(run_info, MagicMock(name="memory_ctx"))
+    )
+
+    async def _failing_agent_run(_run_info):
+        raise RuntimeError("agent failed")
+        yield  # pragma: no cover
+
+    service_module.agent_run = _failing_agent_run
+    unregister = MagicMock()
+    service_module.agent_run_manager = MagicMock()
+    service_module.agent_run_manager.unregister_agent_run = unregister
+
+    async def invoke_failing_run():
+        return await service_module._run_agent_to_final_answer(
+            agent_id=1,
+            tenant_id="t1",
+            user_id="u1",
+            query="q",
+            version_no=1,
+            conversation_id=-123,
+        )
+
+    with pytest.raises(RuntimeError, match="agent failed"):
+        asyncio.run(invoke_failing_run())
+
+    unregister.assert_called_once_with(
+        -123,
+        "u1",
+        status="failed",
+        agent_run_info=run_info,
+    )
 
 
 def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module):
@@ -2236,16 +2303,14 @@ class TestSetupNoSetAndExecute:
 
         service_module.get_db_session = _gs
         service_module._generate_test_queries = MagicMock(return_value=["q1", "q2"])
-        service_module.create_evaluation_set = MagicMock(
-            return_value={"evaluation_set_id": 7}
+        service_module.materialize_virtual_evaluation_set_for_run = MagicMock(
+            return_value=7
         )
-        service_module.insert_evaluation_set_cases = MagicMock()
-        service_module.update_evaluation_set_case_count = MagicMock()
         service_module.get_evaluation_set_cases_all = MagicMock(
             return_value=[{"evaluation_set_case_id": 1}]
         )
         service_module.create_agent_evaluation_cases = MagicMock()
-        service_module.execute_agent_evaluation_run = MagicMock()
+        service_module._dispatch_agent_evaluation_run = MagicMock()
         return sessions
 
     def test_success_judge_is_llm(self, service_module):
@@ -2257,13 +2322,19 @@ class TestSetupNoSetAndExecute:
         # Judge model is itself an LLM -> used as-is for generation.
         assert service_module._generate_test_queries.call_args.kwargs["model_id"] == 99
         assert service_module._generate_test_queries.call_args.kwargs["query_count"] == 5
-        service_module.create_evaluation_set.assert_called_once()
-        service_module.execute_agent_evaluation_run.assert_called_once_with("t1", "u1", 10, 99)
-        # Second session (run update) wrote set id + total.
-        assert len(sessions) == 2
-        update_kw = sessions[-1].updates[-1][0][0]
-        assert update_kw["evaluation_set_id"] == 7
-        assert update_kw["progress_total"] == 2
+        service_module.materialize_virtual_evaluation_set_for_run.assert_called_once()
+        service_module._dispatch_agent_evaluation_run.assert_called_once_with(
+            agent_evaluation_id=10,
+            user_id="u1",
+            tenant_id="t1",
+        )
+        # The virtual set and run link are now committed in one DB transaction.
+        assert len(sessions) == 1
+        materialize_kw = (
+            service_module.materialize_virtual_evaluation_set_for_run.call_args.kwargs
+        )
+        assert materialize_kw["agent_evaluation_id"] == 10
+        assert len(materialize_kw["cases"]) == 2
 
     def test_judge_not_llm_falls_back_to_newest_llm(self, service_module):
         models = [
@@ -2293,12 +2364,12 @@ class TestSetupNoSetAndExecute:
 
         service_module.get_db_session = _flaky_gs
         service_module._generate_test_queries = MagicMock(return_value=["q1"])
-        service_module.create_evaluation_set = MagicMock(return_value={"evaluation_set_id": 1})
-        service_module.insert_evaluation_set_cases = MagicMock()
-        service_module.update_evaluation_set_case_count = MagicMock()
+        service_module.materialize_virtual_evaluation_set_for_run = MagicMock(
+            return_value=1
+        )
         service_module.get_evaluation_set_cases_all = MagicMock(return_value=[])
         service_module.create_agent_evaluation_cases = MagicMock()
-        service_module.execute_agent_evaluation_run = MagicMock()
+        service_module._dispatch_agent_evaluation_run = MagicMock()
         service_module._setup_no_set_and_execute("t1", "u1", 1, 2, 99, [1], {}, 5, "zh", 10)
         assert service_module._generate_test_queries.call_args.kwargs["model_id"] == 99
 

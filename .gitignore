@@ -41,6 +41,10 @@ deploy/k8s/helm/nexent/generated-values.yaml
 deploy/k8s/helm/nexent/generated-runtime-values.yaml
 deploy/k8s/helm/nexent/generated-secrets-values.yaml
 deploy/k8s/helm/nexent/generated-persistence-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-runtime-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-secrets-values.yaml
+deploy/k8s/helm/nexent-infrastructure/generated-persistence-values.yaml
 offline-package/
 
 frontend_standalone/
@@ -67,6 +71,7 @@ logs/
 devspace.yaml
 deploy/k8s/helm/**/*.tgz
 deploy/k8s/helm/nexent/Chart.lock
+deploy/k8s/helm/nexent-infrastructure/Chart.lock
 
 MAC_DEVELOPMENT_GUIDE.md
 data/

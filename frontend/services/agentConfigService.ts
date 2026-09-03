@@ -117,6 +117,14 @@ export const fetchTools = async () => {
           value: param.default,
           description: param.description,
           description_zh: param.description_zh,
+          // Bind Pydantic Field constraints (ge/le/gt/lt/...) so the
+          // config modal can validate non-required numeric params.
+          constraints:
+            param.constraints &&
+            typeof param.constraints === "object" &&
+            Object.keys(param.constraints).length > 0
+              ? param.constraints
+              : undefined,
         };
       }),
     }));

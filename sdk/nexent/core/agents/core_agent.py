@@ -215,6 +215,9 @@ _ACTION_INTENT_RE = re.compile(
     r"|(?:我(?:将|需要|先)|接下来|下一步|i\s+(?:will|need\s+to|should)\b|next\b).{0,240})"
     r"(?:调用|使用|检索|搜索|call|use|search|invoke)"
 )
+_EXPLICIT_FINAL_ANSWER_RE = re.compile(
+    r"(?is)(?:^|\n)\s*(?:最终回答|final\s+answer)\s*[:：]\s*\S"
+)
 
 
 def _looks_like_invalid_action_output(text: Any) -> bool:
@@ -263,6 +266,8 @@ def _looks_like_incomplete_action_output(
         return True
     if _looks_like_invalid_action_output(text):
         return True
+    if _EXPLICIT_FINAL_ANSWER_RE.search(text):
+        return False
 
     normalized = text.casefold()
     mentioned_tool = any(
@@ -337,6 +342,17 @@ def _coerce_observer_arguments(arguments: Any) -> Any:
     if isinstance(arguments, (list, tuple)):
         return type(arguments)(_coerce_observer_arguments(v) for v in arguments)
     return str(arguments)
+
+
+def _observer_call_arguments(tool: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
+    """Map positional tool values to declared input names for observer events."""
+    arguments = dict(kwargs)
+    declared_inputs = getattr(tool, "inputs", None)
+    input_names = list(declared_inputs) if isinstance(declared_inputs, dict) else []
+    for index, value in enumerate(args):
+        name = input_names[index] if index < len(input_names) else f"arg{index}"
+        arguments.setdefault(name, value)
+    return _coerce_observer_arguments(arguments)
 
 
 def _collect_call_arguments(call_node: "ast.Call") -> Dict[str, Any]:
@@ -450,7 +466,7 @@ def _wrap_tool_for_observer(
             ProcessType.TOOL,
             "",
             tool_name=tool_name,
-            tool_arguments=_coerce_observer_arguments(kwargs),
+            tool_arguments=_observer_call_arguments(tool, args, kwargs),
             tool_call_id=tool_call_id,
         )
         with observer.tool_call_context(tool_call_id):
@@ -1218,7 +1234,12 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 "with 'outputs/', because that would create an outputs/outputs directory. "
                 "Uploaded input files are under "
                 f"{os.path.join(self.workspace_path, 'inputs')}. When calling upload_to_s3, "
-                "pass the same bare relative path used to create the file, or its absolute path."
+                "pass the same bare relative path used to create the file, or its absolute path. "
+                "Before linking a generated file or image in the final answer, call upload_to_s3 "
+                "and use its permanent s3_url in Markdown. Never use a local path or presigned_url "
+                "in the final answer. MCP image and chart tools may return either a PIL image or a "
+                "string URL/data URI/text result. Inspect the runtime type first: only call .save() "
+                "on PIL images; materialize string results into an output file before upload_to_s3."
             )
         template_state = {
             key: value for key, value in self.state.items() if key != "metadata"

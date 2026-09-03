@@ -57,7 +57,8 @@ export interface CreateGroupResponse {
 export async function listGroups(
   tenantId: string,
   page?: number,
-  pageSize?: number
+  pageSize?: number,
+  search?: string
 ): Promise<{ groups: Group[]; total: number; totalPages?: number }> {
   try {
     const requestBody: any = {
@@ -71,6 +72,7 @@ export async function listGroups(
       requestBody.page = page;
       requestBody.page_size = pageSize;
     }
+    if (search?.trim()) requestBody.search = search.trim();
 
     // Use backend's /groups/list endpoint with tenant_id in request body
     const response = await fetchWithAuth(API_ENDPOINTS.groups.list, {
@@ -97,12 +99,9 @@ export async function listGroups(
  */
 export async function getGroup(groupId: number): Promise<Group> {
   try {
-    const response = await fetchWithAuth(
-      API_ENDPOINTS.groups.detail(groupId),
-      {
-        method: "GET",
-      }
-    );
+    const response = await fetchWithAuth(API_ENDPOINTS.groups.detail(groupId), {
+      method: "GET",
+    });
 
     const result: GroupDetailResponse = await response.json();
     return result.data;
@@ -226,12 +225,9 @@ export async function removeUserFromGroup(
   userId: string
 ): Promise<void> {
   try {
-    await fetchWithAuth(
-      API_ENDPOINTS.groups.removeMember(groupId, userId),
-      {
-        method: "DELETE",
-      }
-    );
+    await fetchWithAuth(API_ENDPOINTS.groups.removeMember(groupId, userId), {
+      method: "DELETE",
+    });
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -246,7 +242,11 @@ export async function removeUserFromGroup(
 export async function updateGroupMembers(
   groupId: number,
   userIds: string[]
-): Promise<{ added_count: number; removed_count: number; total_members: number }> {
+): Promise<{
+  added_count: number;
+  removed_count: number;
+  total_members: number;
+}> {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.groups.members(groupId),
@@ -269,7 +269,9 @@ export async function updateGroupMembers(
 /**
  * Get tenant's default group ID
  */
-export async function getTenantDefaultGroupId(tenantId: string): Promise<number | null> {
+export async function getTenantDefaultGroupId(
+  tenantId: string
+): Promise<number | null> {
   try {
     const response = await fetchWithAuth(
       API_ENDPOINTS.groups.default(tenantId),

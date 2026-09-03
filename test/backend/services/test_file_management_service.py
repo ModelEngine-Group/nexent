@@ -45,7 +45,7 @@ services_stub = types.ModuleType('services')
 services_stub.__path__ = []  # Mark as package
 sys.modules.setdefault('services', services_stub)
 
-vdb_stub = types.ModuleType('services.vectordatabase_service')
+vdb_stub = types.ModuleType('management.services.knowledge_base.service')
 
 
 class _StubElasticSearchService:
@@ -64,7 +64,7 @@ def _stub_get_vector_db_core():
 
 vdb_stub.ElasticSearchService = _StubElasticSearchService
 vdb_stub.get_vector_db_core = _stub_get_vector_db_core
-sys.modules['services.vectordatabase_service'] = vdb_stub
+sys.modules['management.services.knowledge_base.service'] = vdb_stub
 setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
 knowledge_storage_stub = types.ModuleType('services.knowledge_storage_service')
@@ -576,12 +576,20 @@ class TestUploadFilesImpl:
                 ])) as upload_mock, \
                 patch.dict(sys.modules, {"services.quota_service": quota_module}):
             result = await upload_files_impl(
-                destination="minio", file=[mock_file], folder="folder", index_name="kb-1", user_id="user-1"
+                destination="minio",
+                file=[mock_file],
+                folder="folder",
+                index_name="kb-1",
+                user_id="user-1",
+                upload_owner_service="nexent-config",
             )
 
         assert result.file_records[0]["file_id"] == "fid-1"
         assert result[1] == ["folder/a.txt"]
         create_records.assert_called_once()
+        assert create_records.call_args.args[0][0][
+            "upload_owner_service"
+        ] == "nexent-config"
         upload_mock.assert_awaited_once()
         transition_record.assert_called()
         assert {item[1].get("status") for item in transitions} >= {"UPLOADED"}

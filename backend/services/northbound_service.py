@@ -34,7 +34,7 @@ from consts.model import AgentRequest, ToolParamsRequest
 from database.knowledge_db import get_knowledge_info_by_tenant_id
 from database.conversation_db import get_conversation_list, get_conversation_messages
 from database.token_db import get_latest_usage_metadata, log_token_usage
-from services.agent_service import (
+from management.services.agent.service import (
     get_agent_by_name_impl,
 )
 from services.runtime_proxy_service import forward_agent_run, forward_agent_stop
@@ -45,15 +45,15 @@ from services.knowledge_scope_service import (
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
-from services.vectordatabase_service import (
-    ElasticSearchService,
-    _is_multimodal_by_model_id,
-)
+from management.services.knowledge_base.service import ElasticSearchService
+from management.services.model.resolver import get_model_descriptor
 from services.conversation_management_service import (
     save_conversation_user,
     create_new_conversation,
+    generate_conversation_title_service,
     update_conversation_title as update_conversation_title_service,
 )
+from services.model_management_service import list_models_for_tenant
 from utils.runtime_metadata_utils import (
     runtime_metadata_hash,
     validate_runtime_metadata,
@@ -383,6 +383,7 @@ async def start_streaming_chat(
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None
 ) -> StreamingResponse:
+    new_conversation_data: Optional[Dict[str, Any]] = None
     try:
         if metadata is not None:
             try:
@@ -405,12 +406,12 @@ async def start_streaming_chat(
         latest_version_no = agent_info["latest_version_no"]
         if conversation_id is None:
             logging.info("No conversation_id provided, creating a new conversation")
-            new_conversation = create_new_conversation(
+            new_conversation_data = create_new_conversation(
                 title="New Conversation",
                 user_id=ctx.user_id,
                 agent_id=agent_id,
             )
-            conversation_id = new_conversation["conversation_id"]
+            conversation_id = new_conversation_data["conversation_id"]
             logging.info(f"Created new conversation with id: {conversation_id}")
 
         internal_conversation_id = conversation_id
@@ -499,6 +500,17 @@ async def start_streaming_chat(
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
     response.headers["X-Accel-Buffering"] = "no"
+
+    if new_conversation_data is not None:
+        original_body_iterator = response.body_iterator
+
+        async def body_iterator_with_conversation_created():
+            yield ("data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": conversation_id}}, ensure_ascii=False) + "\n\n").encode("utf-8")
+            async for chunk in original_body_iterator:
+                yield chunk
+
+        response.body_iterator = body_iterator_with_conversation_created()
+
     return response
 
 
@@ -538,6 +550,12 @@ async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
 
     # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
+
+
+async def list_configured_models(ctx: NorthboundContext) -> Dict[str, Any]:
+    """List the models configured for the authenticated tenant."""
+    models = await list_models_for_tenant(ctx.tenant_id)
+    return {"message": "success", "data": models, "requestId": ctx.request_id}
 
 
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
@@ -714,10 +732,9 @@ async def get_agent_knowledge_bases_for_northbound(
                 "name": str(record.get("knowledge_name") or record["index_name"]),
                 "embedding_model": str(record.get("embedding_model_name") or ""),
                 "embedding_model_id": record.get("embedding_model_id"),
-                "is_multimodal": _is_multimodal_by_model_id(
-                    record.get("embedding_model_id"),
-                    agent_tenant_id,
-                ),
+                "is_multimodal": get_model_descriptor(
+                    record.get("embedding_model_id"), agent_tenant_id
+                ).is_multimodal,
             }
             for record in records
             if str(record.get("index_name") or "") in accessible_indices
@@ -839,3 +856,20 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
+
+
+async def generate_conversation_title(
+    ctx: NorthboundContext,
+    conversation_id: int,
+    question: str,
+    language: str,
+) -> Dict[str, Any]:
+    """Generate and persist a conversation title from the user's question."""
+    title = await generate_conversation_title_service(
+        conversation_id=conversation_id,
+        question=question,
+        user_id=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        language=language,
+    )
+    return {"message": "success", "data": title, "requestId": ctx.request_id}

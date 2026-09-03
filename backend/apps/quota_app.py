@@ -15,6 +15,7 @@ from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import (
     AppException,
     PlatformQuotaConflictError,
+    TokenExpiredError,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from permissions.depends import authenticate, require
@@ -87,7 +88,7 @@ def _require_platform_quota_manager(authorization: Optional[str]) -> str:
 
 def _get_manageable_index_names(tenant_id: str, user_id: str) -> set[str]:
     """Return KB index names the current user can manage."""
-    from services.vectordatabase_service import (
+    from management.services.knowledge_base.service import (
         ElasticSearchService,
         get_vector_db_core,
     )
@@ -148,6 +149,9 @@ def get_tenant_quota(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error getting tenant quota for %s", tenant_id)
         raise HTTPException(
@@ -242,6 +246,9 @@ def update_tenant_quota(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error updating tenant quota for %s", tenant_id)
         raise HTTPException(
@@ -280,6 +287,9 @@ def delete_tenant_quota(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error deleting tenant quota for %s", tenant_id)
         raise HTTPException(
@@ -323,6 +333,9 @@ def get_tenant_quota_usage(
         return JSONResponse(status_code=HTTPStatus.OK, content=usage)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error getting usage for tenant %s", tenant_id)
         raise HTTPException(
@@ -352,6 +365,9 @@ def get_platform_overview(
         return JSONResponse(status_code=HTTPStatus.OK, content=overview)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error getting platform overview")
         raise HTTPException(
@@ -385,6 +401,9 @@ def set_platform_capacity(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error setting platform capacity")
         raise HTTPException(
@@ -412,6 +431,9 @@ def delete_platform_capacity(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error deleting platform capacity")
         raise HTTPException(
@@ -454,6 +476,9 @@ def set_tenant_hard_quota(
         return _platform_quota_conflict_response(exc)
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error setting tenant hard quota for %s", tenant_id)
         raise HTTPException(
@@ -485,6 +510,9 @@ def delete_tenant_hard_quota(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as exc:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except Exception as exc:
         logger.exception("Error deleting tenant hard quota for %s", tenant_id)
         raise HTTPException(

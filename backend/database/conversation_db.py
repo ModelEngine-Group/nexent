@@ -25,6 +25,7 @@ class MessageRecord(TypedDict):
     message_id: int
     message_index: int
     role: str
+    create_time: Optional[int]
     type: Optional[str]
     content: Optional[str]
     opinion_flag: Optional[str]
@@ -515,6 +516,53 @@ def update_conversation_message_status(message_id: int, status: str,
                    ConversationMessage.delete_flag == 'N')
             .values(update_data)
         )
+
+
+def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
+    """Mark assistant messages left streaming by a stopped runtime as failed.
+
+    Returns the affected runtime identities so the caller can finish the
+    corresponding short-lived Redis state with the existing runtime-state API.
+    The conditional update makes repeated startup recovery idempotent.
+    """
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                ConversationMessage.message_id,
+                ConversationMessage.conversation_id,
+                ConversationMessage.created_by,
+            )
+            .filter(
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.status == "streaming",
+                ConversationMessage.delete_flag == "N",
+            )
+            .with_for_update()
+            .all()
+        )
+        if not rows:
+            return []
+
+        message_ids = [int(row.message_id) for row in rows]
+        session.query(ConversationMessage).filter(
+            ConversationMessage.message_id.in_(message_ids),
+            ConversationMessage.status == "streaming",
+            ConversationMessage.delete_flag == "N",
+        ).update(
+            {
+                "status": "failed",
+                "update_time": func.current_timestamp(),
+            },
+            synchronize_session=False,
+        )
+        return [
+            {
+                "message_id": int(row.message_id),
+                "conversation_id": int(row.conversation_id),
+                "user_id": row.created_by,
+            }
+            for row in rows
+        ]
 
 
 def update_conversation_message_content(message_id: int, content: str,
@@ -1045,6 +1093,89 @@ def delete_conversation(conversation_id: int, user_id: Optional[str] = None) -> 
         return conversation_result.rowcount > 0
 
 
+def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[str] = None) -> List[int]:
+    """
+    Soft-delete multiple conversations owned by the user (cascading).
+
+    Only conversations whose created_by matches user_id are affected. Child
+    rows cascade by conversation_id for the validated set only, so a caller
+    passing ids it does not own cannot touch another user's data.
+
+    Args:
+        conversation_ids: Conversation IDs to delete
+        user_id: Owner filter (created_by) and audit value for updated_by
+
+    Returns:
+        List of conversation IDs that were actually deleted
+    """
+    with get_db_session() as session:
+        ids = [int(i) for i in conversation_ids]
+        if not ids:
+            return []
+
+        # Ownership boundary: resolve requested ids that belong to the user.
+        # Only this set is cascaded below, enforcing tenant isolation.
+        owned_rows = session.execute(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id.in_(ids),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N'
+            )
+        ).all()
+        owned_ids = [row[0] for row in owned_rows]
+        if not owned_ids:
+            return []
+
+        update_data = {
+            "delete_flag": 'Y',
+            "update_time": func.current_timestamp()
+        }
+        if user_id:
+            update_data = add_update_tracking(update_data, user_id)
+
+        # 1. Mark the owned conversations as deleted
+        session.execute(
+            update(ConversationRecord).where(
+                ConversationRecord.conversation_id.in_(owned_ids),
+                ConversationRecord.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 2. Mark related messages as deleted
+        session.execute(
+            update(ConversationMessage).where(
+                ConversationMessage.conversation_id.in_(owned_ids),
+                ConversationMessage.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 3. Mark message units as deleted
+        session.execute(
+            update(ConversationMessageUnit).where(
+                ConversationMessageUnit.conversation_id.in_(owned_ids),
+                ConversationMessageUnit.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 4. Mark search sources as deleted
+        session.execute(
+            update(ConversationSourceSearch).where(
+                ConversationSourceSearch.conversation_id.in_(owned_ids),
+                ConversationSourceSearch.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        # 5. Mark image sources as deleted
+        session.execute(
+            update(ConversationSourceImage).where(
+                ConversationSourceImage.conversation_id.in_(owned_ids),
+                ConversationSourceImage.delete_flag == 'N'
+            ).values(update_data)
+        )
+
+        return owned_ids
+
+
 def soft_delete_all_conversations_by_user(user_id: str) -> int:
     """
     Soft-delete all conversations and related records created by a user.
@@ -1213,6 +1344,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationMessage.status,
             ConversationMessage.minio_files,
             ConversationMessage.opinion_flag,
+            (func.extract('epoch', ConversationMessage.create_time)
+             * 1000).label('create_time'),
             subquery.label('units')
         ).where(
             ConversationMessage.conversation_id == conversation_id,
@@ -1243,6 +1376,9 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
         message_list = []
         for record in message_records:
             message_data = as_dict(record)
+
+            if message_data.get('create_time') is not None:
+                message_data['create_time'] = int(message_data['create_time'])
 
             # Ensure units field is empty list instead of None, then sort by unit_index
             if message_data['units'] is None:

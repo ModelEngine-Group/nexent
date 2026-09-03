@@ -10,10 +10,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CHART_DIR="$SCRIPT_DIR/helm/nexent"
-COMMON_VALUES="$CHART_DIR/charts/nexent-common/values.yaml"
+APPLICATION_CHART_DIR="$SCRIPT_DIR/helm/nexent"
+INFRASTRUCTURE_CHART_DIR="$SCRIPT_DIR/helm/nexent-infrastructure"
+CHART_DIR="$APPLICATION_CHART_DIR"
+COMMON_VALUES="$APPLICATION_CHART_DIR/charts/nexent-common/values.yaml"
 NAMESPACE="nexent"
-RELEASE_NAME="nexent"
+APPLICATION_RELEASE_NAME="nexent"
+INFRASTRUCTURE_RELEASE_NAME="nexent-infrastructure"
+RELEASE_SCOPE="all"
 DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
 
@@ -21,13 +25,19 @@ VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
 K8S_ROOT="$SCRIPT_DIR"
 CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
 DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
-GENERATED_VALUES="$CHART_DIR/generated-values.yaml"
-GENERATED_RUNTIME_VALUES="$CHART_DIR/generated-runtime-values.yaml"
-GENERATED_SECRETS_VALUES="$CHART_DIR/generated-secrets-values.yaml"
-GENERATED_PERSISTENCE_VALUES="$CHART_DIR/generated-persistence-values.yaml"
+GENERATED_VALUES="$APPLICATION_CHART_DIR/generated-values.yaml"
+GENERATED_RUNTIME_VALUES="$APPLICATION_CHART_DIR/generated-runtime-values.yaml"
+GENERATED_SECRETS_VALUES="$APPLICATION_CHART_DIR/generated-secrets-values.yaml"
+GENERATED_PERSISTENCE_VALUES="$APPLICATION_CHART_DIR/generated-persistence-values.yaml"
+INFRASTRUCTURE_GENERATED_VALUES="$INFRASTRUCTURE_CHART_DIR/generated-values.yaml"
+INFRASTRUCTURE_GENERATED_RUNTIME_VALUES="$INFRASTRUCTURE_CHART_DIR/generated-runtime-values.yaml"
+INFRASTRUCTURE_GENERATED_SECRETS_VALUES="$INFRASTRUCTURE_CHART_DIR/generated-secrets-values.yaml"
+INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES="$INFRASTRUCTURE_CHART_DIR/generated-persistence-values.yaml"
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 SQL_INIT_FILE="$DEPLOY_ROOT/sql/init.sql"
 SUPABASE_SQL_DIR="$DEPLOY_ROOT/sql/supabase"
+OFFICIAL_SKILLS_SOURCE_DIR="$DEPLOY_ROOT/docker/assets/official-skills-zip"
+OFFICIAL_SKILLS_TARGET_DIR="/mnt/nexent/official-skills-zip"
 
 if [ -f "$DEPLOYMENT_COMMON" ]; then
     # shellcheck source=/dev/null
@@ -141,6 +151,10 @@ while [[ $# -gt 0 ]]; do
       K8S_WAIT_TIMEOUT_SECONDS="$2"
       shift 2
       ;;
+    --release-scope)
+      RELEASE_SCOPE="$2"
+      shift 2
+      ;;
     --rotate-secrets|--refresh-es-key)
       shift
       ;;
@@ -149,6 +163,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$RELEASE_SCOPE" in
+  all|infrastructure|nexent) ;;
+  *)
+    echo "Error: --release-scope must be all, infrastructure, or nexent."
+    exit 1
+    ;;
+esac
 
 cd "$SCRIPT_DIR"
 if [ "$COMMAND" != "help" ]; then
@@ -193,12 +215,14 @@ apply_deployment_common_config() {
             ;;
     esac
 
-    deployment_apply_image_source
-    deployment_prepare_monitoring_env k8s || return 1
-    deployment_render_helm_values "$GENERATED_VALUES"
-    render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
-    render_persistence_values "$GENERATED_PERSISTENCE_VALUES"
+    validate_persistence_mode || return 1
     deployment_print_summary k8s
+    echo "Helm release scope: $RELEASE_SCOPE"
+    case "$RELEASE_SCOPE" in
+      all) echo "Helm releases: $INFRASTRUCTURE_RELEASE_NAME -> $APPLICATION_RELEASE_NAME" ;;
+      infrastructure) echo "Helm release: $INFRASTRUCTURE_RELEASE_NAME" ;;
+      nexent) echo "Helm release: $APPLICATION_RELEASE_NAME (requires $INFRASTRUCTURE_RELEASE_NAME)" ;;
+    esac
 }
 
 
@@ -275,30 +299,32 @@ render_shared_storage_persistence_values() {
   } >> "$output_file"
 }
 
-render_persistence_values() {
-  local output_file="$1"
+validate_persistence_mode() {
   case "$PERSISTENCE_MODE" in
     local|dynamic|existing) ;;
     *)
       echo "Unsupported persistence mode: $PERSISTENCE_MODE"
       echo "Use local, dynamic, or existing."
-      exit 1
+      return 1
       ;;
   esac
+}
 
-  {
-    echo "# Generated persistence overrides"
-  } > "$output_file"
+render_persistence_values() {
+  validate_persistence_mode || exit 1
 
-  render_shared_storage_persistence_values "$output_file"
-  render_one_persistence_values "$output_file" "nexent-elasticsearch" "nexent-elasticsearch" "20Gi"
-  render_one_persistence_values "$output_file" "nexent-postgresql" "nexent-postgresql" "10Gi"
-  render_one_persistence_values "$output_file" "nexent-redis" "nexent-redis" "5Gi"
-  render_one_persistence_values "$output_file" "nexent-minio" "nexent-minio" "20Gi"
-  render_one_persistence_values "$output_file" "nexent-supabase-db" "nexent-supabase-db" "10Gi"
+  echo "# Generated application persistence overrides" > "$GENERATED_PERSISTENCE_VALUES"
+  render_shared_storage_persistence_values "$GENERATED_PERSISTENCE_VALUES"
+  render_one_persistence_values "$GENERATED_PERSISTENCE_VALUES" "nexent-supabase-db" "nexent-supabase-db" "10Gi"
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
-    render_monitoring_persistence_values "$output_file"
+    render_monitoring_persistence_values "$GENERATED_PERSISTENCE_VALUES"
   fi
+
+  echo "# Generated infrastructure persistence overrides" > "$INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES"
+  render_one_persistence_values "$INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES" "nexent-elasticsearch" "nexent-elasticsearch" "20Gi"
+  render_one_persistence_values "$INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES" "nexent-postgresql" "nexent-postgresql" "10Gi"
+  render_one_persistence_values "$INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES" "nexent-redis" "nexent-redis" "5Gi"
+  render_one_persistence_values "$INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES" "nexent-minio" "nexent-minio" "20Gi"
 }
 
 yaml_quote() {
@@ -341,10 +367,6 @@ render_yaml_literal_file() {
 sql_files_checksum() {
   local payload=""
   local file rel checksum
-  if [ -f "$SQL_INIT_FILE" ]; then
-    checksum="$(deployment_sha256_file "$SQL_INIT_FILE")"
-    payload="${payload}init.sql:${checksum}"$'\n'
-  fi
   if [ -d "$DEPLOY_ROOT/sql/migrations" ]; then
     while IFS= read -r file; do
       [ -n "$file" ] || continue
@@ -362,6 +384,23 @@ sql_files_checksum() {
     done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
   fi
   deployment_sha256_string "$payload"
+}
+
+render_infrastructure_runtime_values() {
+  local output_file="$1"
+  if [ ! -f "$SQL_INIT_FILE" ]; then
+    echo "Error: SQL init file not found: $SQL_INIT_FILE"
+    exit 1
+  fi
+
+  {
+    echo "global:"
+    echo "  rolloutChecksums:"
+    printf '    sql: %s\n' "$(yaml_quote "$(deployment_sha256_file "$SQL_INIT_FILE")")"
+    echo "nexent-infrastructure-common:"
+    echo "  sqlFiles:"
+    render_yaml_literal_file "init" "$SQL_INIT_FILE" 4 6
+  } > "$output_file"
 }
 
 render_k8s_runtime_config_values() {
@@ -394,7 +433,6 @@ render_k8s_runtime_config_values() {
     done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "nexent-common:"
     echo "  sqlFiles:"
-    render_yaml_literal_file "init" "$SQL_INIT_FILE" 4 6
     echo "    migrations:"
     while IFS= read -r file; do
       [ -n "$file" ] || continue
@@ -437,7 +475,6 @@ render_k8s_runtime_config_values() {
     printf '    skipProxy: %s\n' "$(yaml_quote "$(env_or_default skip_proxy "true")")"
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
     printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
-    printf '    marketBackend: %s\n' "$(yaml_quote "$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
     echo "    voiceService:"
@@ -703,11 +740,16 @@ update_values_yaml() {
   deployment_apply_image_source
   deployment_prepare_monitoring_env k8s || exit 1
   deployment_render_helm_values "$GENERATED_VALUES"
+  deployment_render_helm_values "$INFRASTRUCTURE_GENERATED_VALUES"
   render_k8s_runtime_config_values "$GENERATED_RUNTIME_VALUES"
-  render_persistence_values "$GENERATED_PERSISTENCE_VALUES"
-  echo "Generated Helm values: $GENERATED_VALUES"
-  echo "Generated Helm runtime values: $GENERATED_RUNTIME_VALUES"
-  echo "Generated Helm persistence values: $GENERATED_PERSISTENCE_VALUES"
+  render_infrastructure_runtime_values "$INFRASTRUCTURE_GENERATED_RUNTIME_VALUES"
+  render_persistence_values
+  echo "Generated application Helm values: $GENERATED_VALUES"
+  echo "Generated infrastructure Helm values: $INFRASTRUCTURE_GENERATED_VALUES"
+  echo "Generated application runtime values: $GENERATED_RUNTIME_VALUES"
+  echo "Generated infrastructure runtime values: $INFRASTRUCTURE_GENERATED_RUNTIME_VALUES"
+  echo "Generated application persistence values: $GENERATED_PERSISTENCE_VALUES"
+  echo "Generated infrastructure persistence values: $INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES"
   echo ""
   echo "--------------------------------"
   echo ""
@@ -722,8 +764,8 @@ ensure_namespace() {
     fi
 }
 
-helm_upgrade_release() {
-    helm upgrade --install nexent "$CHART_DIR" \
+helm_upgrade_application_release() {
+    helm upgrade --install "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
         --namespace "$NAMESPACE" \
         -f "$GENERATED_VALUES" \
         -f "$GENERATED_RUNTIME_VALUES" \
@@ -734,9 +776,242 @@ helm_upgrade_release() {
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
 }
 
+helm_upgrade_infrastructure_release() {
+    helm upgrade --install "$INFRASTRUCTURE_RELEASE_NAME" "$INFRASTRUCTURE_CHART_DIR" \
+        --namespace "$NAMESPACE" \
+        -f "$INFRASTRUCTURE_GENERATED_VALUES" \
+        -f "$INFRASTRUCTURE_GENERATED_RUNTIME_VALUES" \
+        -f "$INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES" \
+        -f "$INFRASTRUCTURE_GENERATED_SECRETS_VALUES"
+}
+
 wait_for_deployment_ready() {
     local deployment="$1"
     kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
+}
+
+release_scope_includes_infrastructure() {
+    [ "$RELEASE_SCOPE" = "all" ] || [ "$RELEASE_SCOPE" = "infrastructure" ]
+}
+
+release_scope_includes_nexent() {
+    [ "$RELEASE_SCOPE" = "all" ] || [ "$RELEASE_SCOPE" = "nexent" ]
+}
+
+validate_official_skills_source() {
+    local archive
+    local archive_count=0
+
+    if [ ! -d "$OFFICIAL_SKILLS_SOURCE_DIR" ]; then
+        echo "Error: official skills directory not found: $OFFICIAL_SKILLS_SOURCE_DIR"
+        return 1
+    fi
+
+    for archive in "$OFFICIAL_SKILLS_SOURCE_DIR"/*.zip; do
+        [ -f "$archive" ] || continue
+        if [ ! -r "$archive" ]; then
+            echo "Error: official skill archive is not readable: $archive"
+            return 1
+        fi
+        archive_count=$((archive_count + 1))
+    done
+
+    if [ "$archive_count" -eq 0 ]; then
+        echo "Error: no official skill archives found in $OFFICIAL_SKILLS_SOURCE_DIR"
+        return 1
+    fi
+}
+
+official_skills_source_manifest() {
+    (
+        cd "$OFFICIAL_SKILLS_SOURCE_DIR" || exit 1
+        sha256sum ./*.zip | LC_ALL=C sort
+    )
+}
+
+find_ready_config_pod() {
+    local ready_pods
+
+    ready_pods=$(kubectl get pods -n "$NAMESPACE" \
+        -l app=nexent-config \
+        --field-selector=status.phase=Running \
+        --sort-by=.metadata.creationTimestamp \
+        -o 'jsonpath={range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}' \
+        2>/dev/null) || return 1
+    printf '%s\n' "$ready_pods" | sed -n '$p'
+}
+
+sync_official_skills_to_workspace() {
+    local config_pod
+    local expected_manifest
+    local actual_manifest
+    local staging_dir="/mnt/nexent/.official-skills-zip.staging"
+    local backup_dir="/mnt/nexent/.official-skills-zip.backup"
+
+    config_pod=$(find_ready_config_pod)
+    if [ -z "$config_pod" ]; then
+        echo "Error: no Ready nexent-config pod is available for official skills synchronization."
+        return 1
+    fi
+
+    expected_manifest=$(official_skills_source_manifest) || {
+        echo "Error: failed to calculate the official skills source manifest."
+        return 1
+    }
+
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+        set -e
+        staging_dir="$1"
+        target_dir="$2"
+        backup_dir="$3"
+        rm -rf "$staging_dir"
+        if [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; then
+            if [ -e "$target_dir" ] || [ -L "$target_dir" ]; then
+                rm -rf "$backup_dir"
+            else
+                mv "$backup_dir" "$target_dir"
+            fi
+        fi
+        mkdir -p "$staging_dir"
+    ' _ "$staging_dir" "$OFFICIAL_SKILLS_TARGET_DIR" "$backup_dir"; then
+        echo "Error: failed to prepare the official skills staging directory."
+        return 1
+    fi
+
+    if ! kubectl cp "$OFFICIAL_SKILLS_SOURCE_DIR/." \
+        "$NAMESPACE/$config_pod:$staging_dir"; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to copy official skills to the workspace PVC."
+        return 1
+    fi
+
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+        find "$1" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name "*.zip" \) -exec rm -rf {} +
+        chmod 0755 "$1"
+        chmod 0644 "$1"/*.zip
+    ' _ "$staging_dir"; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to set permissions on the copied official skills."
+        return 1
+    fi
+
+    actual_manifest=$(kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c \
+        'cd "$1" && sha256sum ./*.zip | LC_ALL=C sort' \
+        _ "$staging_dir") || {
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to calculate the copied official skills manifest."
+        return 1
+    }
+
+    if [ "$actual_manifest" != "$expected_manifest" ]; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" "$backup_dir" >/dev/null 2>&1 || true
+        echo "Error: copied official skills failed SHA-256 verification."
+        return 1
+    fi
+
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -- sh -c '
+        set -e
+        staging_dir="$1"
+        target_dir="$2"
+        backup_dir="$3"
+        rm -rf "$backup_dir"
+        if [ -e "$target_dir" ] || [ -L "$target_dir" ]; then
+            mv "$target_dir" "$backup_dir"
+        fi
+        if mv "$staging_dir" "$target_dir"; then
+            rm -rf "$backup_dir" || true
+        else
+            if [ -e "$backup_dir" ] || [ -L "$backup_dir" ]; then
+                mv "$backup_dir" "$target_dir"
+            fi
+            exit 1
+        fi
+    ' _ "$staging_dir" "$OFFICIAL_SKILLS_TARGET_DIR" "$backup_dir"; then
+        kubectl exec -n "$NAMESPACE" "$config_pod" -- rm -rf "$staging_dir" >/dev/null 2>&1 || true
+        echo "Error: failed to activate the copied official skills; the previous version was preserved."
+        return 1
+    fi
+
+    echo "Official skills synchronized to $OFFICIAL_SKILLS_TARGET_DIR ($config_pod)."
+}
+
+helm_release_exists() {
+    local release_name="$1"
+    helm status "$release_name" --namespace "$NAMESPACE" >/dev/null 2>&1
+}
+
+reject_legacy_single_release() {
+    local manifest
+    if ! helm_release_exists "$APPLICATION_RELEASE_NAME"; then
+        return 0
+    fi
+
+    if ! manifest="$(helm get manifest "$APPLICATION_RELEASE_NAME" --namespace "$NAMESPACE" 2>/dev/null)"; then
+        echo "Error: unable to inspect the existing '$APPLICATION_RELEASE_NAME' release for legacy infrastructure ownership."
+        return 1
+    fi
+    if printf '%s\n' "$manifest" | grep -Eq '^[[:space:]]*name:[[:space:]]+nexent-elasticsearch[[:space:]]*$'; then
+        echo "Error: the existing '$APPLICATION_RELEASE_NAME' release still manages infrastructure resources."
+        echo "Automatic migration from the legacy single release is not supported; use a fresh deployment."
+        return 1
+    fi
+}
+
+require_infrastructure_release() {
+    if helm_release_exists "$INFRASTRUCTURE_RELEASE_NAME"; then
+        return 0
+    fi
+    echo "Error: infrastructure release '$INFRASTRUCTURE_RELEASE_NAME' does not exist in namespace '$NAMESPACE'."
+    echo "Deploy it first with --release-scope infrastructure or --release-scope all."
+    return 1
+}
+
+wait_for_infrastructure_ready() {
+    local deployment
+    for deployment in nexent-elasticsearch nexent-postgresql nexent-redis nexent-minio; do
+        echo "  Waiting for $deployment..."
+        if ! wait_for_deployment_ready "$deployment"; then
+            echo "Error: $deployment did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
+            return 1
+        fi
+        echo "  $deployment is ready."
+    done
+}
+
+wait_for_nexent_ready() {
+    local deployments=""
+    local deployment
+
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        deployments="nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web"
+    fi
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
+        deployments="$deployments nexent-data-process"
+    fi
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+        deployments="$deployments nexent-supabase-kong nexent-supabase-auth nexent-supabase-db"
+    fi
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
+        deployments="$deployments nexent-openssh"
+    fi
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
+        deployments="$deployments nexent-otel-collector"
+        case "$DEPLOYMENT_MONITORING_PROVIDER" in
+            phoenix) deployments="$deployments nexent-phoenix" ;;
+            grafana) deployments="$deployments nexent-tempo nexent-grafana" ;;
+            zipkin) deployments="$deployments nexent-zipkin" ;;
+            langfuse) deployments="$deployments nexent-langfuse-postgres nexent-langfuse-clickhouse nexent-langfuse-minio nexent-langfuse-redis nexent-langfuse-web nexent-langfuse-worker" ;;
+        esac
+    fi
+
+    for deployment in $deployments; do
+        echo "  Waiting for $deployment..."
+        if ! wait_for_deployment_ready "$deployment"; then
+            echo "Error: $deployment did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
+            return 1
+        fi
+        echo "  $deployment is ready."
+    done
 }
 
 recreate_legacy_nexent_secret_for_helm_management() {
@@ -823,8 +1098,9 @@ decode_base64() {
 
 get_existing_secret_value() {
     local key="$1"
+    local secret_name="${2:-nexent-secrets}"
     local encoded_value
-    encoded_value=$(kubectl get secret nexent-secrets -n "$NAMESPACE" -o jsonpath="{.data.${key}}" 2>/dev/null || true)
+    encoded_value=$(kubectl get secret "$secret_name" -n "$NAMESPACE" -o jsonpath="{.data.${key}}" 2>/dev/null || true)
     if [ -z "$encoded_value" ]; then
         return 1
     fi
@@ -857,8 +1133,8 @@ load_existing_minio_secrets() {
     local existing_access_key
     local existing_secret_key
 
-    existing_access_key="$(get_existing_secret_value "MINIO_ACCESS_KEY")" || return 1
-    existing_secret_key="$(get_existing_secret_value "MINIO_SECRET_KEY")" || return 1
+    existing_access_key="$(get_existing_secret_value "MINIO_ACCESS_KEY" "nexent-infrastructure-secrets")" || return 1
+    existing_secret_key="$(get_existing_secret_value "MINIO_SECRET_KEY" "nexent-infrastructure-secrets")" || return 1
 
     if [ -z "$existing_access_key" ] || [ -z "$existing_secret_key" ]; then
         return 1
@@ -1031,7 +1307,6 @@ render_runtime_secret_values() {
         deployment_render_image_rollout_checksums
         echo "nexent-common:"
         echo "  secrets:"
-        printf '    elasticPassword: %s\n' "$(yaml_quote "$(env_or_default ELASTIC_PASSWORD "nexent@2025")")"
         printf '    elasticsearchApiKey: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_API_KEY "")")"
         printf '    postgresPassword: %s\n' "$(yaml_quote "$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")")"
         echo "    minio:"
@@ -1055,6 +1330,26 @@ render_runtime_secret_values() {
     } > "$GENERATED_SECRETS_VALUES"
 }
 
+render_infrastructure_secret_values() {
+    local infrastructure_secret_checksum
+    infrastructure_secret_checksum="$(deployment_sha256_string "elastic=$(env_or_default ELASTIC_PASSWORD "nexent@2025")|postgres=$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")|minioRoot=$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")|minioAccess=${MINIO_ACCESS_KEY}|minioSecret=${MINIO_SECRET_KEY}")"
+
+    {
+        echo "global:"
+        echo "  rolloutChecksums:"
+        printf '    env: %s\n' "$(yaml_quote "$infrastructure_secret_checksum")"
+        echo "nexent-infrastructure-common:"
+        echo "  secrets:"
+        printf '    elasticPassword: %s\n' "$(yaml_quote "$(env_or_default ELASTIC_PASSWORD "nexent@2025")")"
+        printf '    postgresPassword: %s\n' "$(yaml_quote "$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")")"
+        echo "    minio:"
+        printf '      rootUser: %s\n' "$(yaml_quote "$(env_or_default MINIO_ROOT_USER "nexent")")"
+        printf '      rootPassword: %s\n' "$(yaml_quote "$(env_or_default MINIO_ROOT_PASSWORD "nexent@4321")")"
+        printf '      accessKey: %s\n' "$(yaml_quote "$MINIO_ACCESS_KEY")"
+        printf '      secretKey: %s\n' "$(yaml_quote "$MINIO_SECRET_KEY")"
+    } > "$INFRASTRUCTURE_GENERATED_SECRETS_VALUES"
+}
+
 apply() {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "正在使用 Helm 部署 Nexent..."
@@ -1064,12 +1359,27 @@ apply() {
 
     # Step 1: Select deployment components, port policy and image source.
     apply_deployment_common_config
+
+    # Step 2: Render release-specific values with image tags and persistence settings.
+    update_values_yaml
+    if release_scope_includes_nexent && deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        validate_official_skills_source || exit 1
+    fi
     persist_deploy_options
 
-    # Step 2: Render generated values with image tags from selected environment
-    update_values_yaml
+    reject_legacy_single_release || exit 1
 
-    # Step 3: Generate MinIO Access Key and Secret Key
+    if [ "$RELEASE_SCOPE" = "infrastructure" ] && [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" = "true" ]; then
+        echo "Error: --refresh-es-key requires --release-scope all or --release-scope nexent."
+        exit 1
+    fi
+    if [ "$RELEASE_SCOPE" = "infrastructure" ] && [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] && helm_release_exists "$APPLICATION_RELEASE_NAME"; then
+        echo "Error: rotating infrastructure credentials while the Nexent release exists is unsafe."
+        echo "Use --release-scope all so application credentials are updated in the same deployment."
+        exit 1
+    fi
+
+    # Step 3: Generate or reuse stable MinIO credentials for both releases.
     echo "=========================================="
     echo "  MinIO Access Key/Secret Key Setup"
     echo "=========================================="
@@ -1093,14 +1403,70 @@ apply() {
         echo "Access Key: $MINIO_ACCESS_KEY"
         echo "Secret Key: $MINIO_SECRET_KEY (saved in generated Helm values)"
     else
-        echo "MinIO credentials already exist in chart defaults"
+        echo "MinIO credentials already exist"
         echo "Access Key: $MINIO_ACCESS_KEY"
     fi
     echo ""
 
-    # Step 4: Generate Supabase secrets (only for full version)
-    generate_supabase_secrets
+    # Step 4: Clean up stale PVs owned by the selected release scope.
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+        echo "正在检查残留 PersistentVolumes..."
+    else
+        echo "Checking for stale PersistentVolumes..."
+    fi
+    local stale_pvs=""
+    if release_scope_includes_infrastructure; then
+        stale_pvs="nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv"
+    fi
+    if release_scope_includes_nexent; then
+        stale_pvs="$stale_pvs nexent-workspace-pv nexent-skills-pv"
+        if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+            stale_pvs="$stale_pvs nexent-supabase-db-pv"
+        fi
+    fi
+    for pv in $stale_pvs; do
+        pv_status=$(kubectl get pv "$pv" -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+        if [ "$pv_status" = "Released" ]; then
+            echo "  Cleaning up stale PV: $pv"
+            kubectl delete pv "$pv" --ignore-not-found=true || true
+        fi
+    done
 
+    ensure_namespace
+
+    # Step 5: Install or upgrade infrastructure and wait for all four dependencies.
+    if release_scope_includes_infrastructure; then
+        render_infrastructure_secret_values
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "正在部署基础设施 Helm release '$INFRASTRUCTURE_RELEASE_NAME'..."
+        else
+            echo "Deploying infrastructure Helm release '$INFRASTRUCTURE_RELEASE_NAME'..."
+        fi
+        helm_upgrade_infrastructure_release
+    else
+        require_infrastructure_release || exit 1
+    fi
+
+    if release_scope_includes_infrastructure || [ "$RELEASE_SCOPE" = "nexent" ]; then
+        echo "Waiting for Elasticsearch, PostgreSQL, Redis, and MinIO..."
+        if ! wait_for_infrastructure_ready; then
+            echo "Infrastructure is not ready; the Nexent release was not installed or upgraded."
+            exit 1
+        fi
+    fi
+
+    if [ "$RELEASE_SCOPE" = "infrastructure" ]; then
+        persist_deploy_options
+        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+            echo "基础设施 release 部署完成。"
+        else
+            echo "Infrastructure release deployed successfully."
+        fi
+        return 0
+    fi
+
+    # Step 6: Prepare application-only secrets after infrastructure is healthy.
+    generate_supabase_secrets
     if [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] && [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ]; then
         if [ -n "${ELASTICSEARCH_API_KEY:-}" ]; then
             echo "Using ELASTICSEARCH_API_KEY from deploy/env/.env."
@@ -1109,24 +1475,39 @@ apply() {
         fi
     fi
 
-    render_runtime_secret_values
+    echo ""
+    echo "=========================================="
+    echo "  Elasticsearch Initialization"
+    echo "=========================================="
+    local es_key_output_file
+    es_key_output_file="$(mktemp "${TMPDIR:-/tmp}/nexent-es-key.XXXXXX")"
+    if ! ROOT_ENV_FILE="$ROOT_ENV_FILE" \
+        ELASTICSEARCH_API_KEY_OUTPUT_FILE="$es_key_output_file" \
+        ELASTICSEARCH_API_KEY="${ELASTICSEARCH_API_KEY:-}" \
+        NEXENT_ES_INIT_TIMEOUT_SECONDS="$K8S_WAIT_TIMEOUT_SECONDS" \
+        DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" \
+        DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" \
+        bash "$SCRIPT_DIR/init-elasticsearch.sh"; then
+        rm -f "$es_key_output_file"
+        echo "Error: Elasticsearch API key initialization failed; the Nexent release was not installed or upgraded."
+        exit 1
+    fi
+    if [ ! -s "$es_key_output_file" ]; then
+        rm -f "$es_key_output_file"
+        echo "Error: Elasticsearch API key initialization returned an empty key."
+        exit 1
+    fi
+    ELASTICSEARCH_API_KEY="$(cat "$es_key_output_file")"
+    rm -f "$es_key_output_file"
 
-    # Step 5: Configure Terminal tool (OpenSSH) only when selected.
+    # Step 7: Configure the optional terminal before rendering the application Secret.
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         ENABLE_OPENSSH="true"
         if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
             echo "将启用终端工具。"
-        else
-            echo "Terminal tool will be enabled."
-        fi
-
-        # Ask for SSH credentials
-        echo ""
-        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-            echo "SSH 凭据配置："
             read -p "SSH 用户名（默认：nexent）：" ssh_username
         else
-            echo "SSH credentials configuration:"
+            echo "Terminal tool will be enabled."
             read -p "SSH Username (default: nexent): " ssh_username
         fi
         SSH_USERNAME="${ssh_username:-nexent}"
@@ -1139,171 +1520,36 @@ apply() {
         SSH_PASSWORD="${ssh_password:-nexent@2025}"
     else
         ENABLE_OPENSSH="false"
-        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-            echo "终端工具已禁用。"
-        else
-            echo "Terminal tool disabled."
-        fi
-    fi
-    echo ""
-
-    # Step 6: Clean up stale PVs
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-        echo "正在检查残留 PersistentVolumes..."
-    else
-        echo "Checking for stale PersistentVolumes..."
-    fi
-    for pv in nexent-workspace-pv nexent-skills-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv; do
-        pv_status=$(kubectl get pv $pv -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
-        if [ "$pv_status" = "Released" ]; then
-            echo "  Cleaning up stale PV: $pv"
-            kubectl delete pv $pv --ignore-not-found=true || true
-        fi
-    done
-
-    # Clean up supabase PV if exists
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-        for pv in nexent-supabase-db-pv; do
-            pv_status=$(kubectl get pv $pv -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
-            if [ "$pv_status" = "Released" ]; then
-                echo "  Cleaning up stale PV: $pv"
-                kubectl delete pv $pv --ignore-not-found=true || true
-            fi
-        done
+        SSH_USERNAME="${SSH_USERNAME:-nexent}"
+        SSH_PASSWORD="${SSH_PASSWORD:-nexent@2025}"
     fi
 
-    # Step 7: Deploy using Helm
-    ensure_namespace
+    render_runtime_secret_values
     recreate_legacy_nexent_secret_for_helm_management
+
+    # Step 8: Install or upgrade the application release exactly once.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-        echo "正在部署 Helm chart..."
+        echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
     else
-        echo "Deploying Helm chart..."
+        echo "Deploying application Helm release '$APPLICATION_RELEASE_NAME'..."
     fi
-    helm_upgrade_release
+    helm_upgrade_application_release
 
-    # Step 9: Wait for Elasticsearch to be ready and initialize API key
-    echo ""
-    echo "=========================================="
-    echo "  Elasticsearch Initialization"
-    echo "=========================================="
-    local deploy_success=true
-
-    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-        echo "正在等待 Elasticsearch deployment 就绪..."
-    else
-        echo "Waiting for Elasticsearch deployment to be ready..."
-    fi
-    sleep 5
-    if wait_for_deployment_ready "nexent-elasticsearch"; then
-        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-            echo "Elasticsearch deployment 已就绪。"
-        else
-            echo "Elasticsearch deployment is ready."
-        fi
-
-        # Initialize Elasticsearch API key only when it is missing, invalid, or explicitly refreshed.
-        INIT_ES_SCRIPT="$SCRIPT_DIR/init-elasticsearch.sh"
-        if [ -f "$INIT_ES_SCRIPT" ]; then
-            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                echo "正在运行 Elasticsearch 初始化脚本..."
-            else
-                echo "Running Elasticsearch initialization script..."
-            fi
-            local es_key_before
-            local es_key_after
-            local es_key_output_file
-            es_key_before="$(get_existing_secret_value "ELASTICSEARCH_API_KEY" || true)"
-            es_key_output_file="$(mktemp "${TMPDIR:-/tmp}/nexent-es-key.XXXXXX")"
-            if ROOT_ENV_FILE="$ROOT_ENV_FILE" ELASTICSEARCH_API_KEY_OUTPUT_FILE="$es_key_output_file" DEPLOYMENT_REFRESH_ES_KEY="${DEPLOYMENT_REFRESH_ES_KEY:-false}" DEPLOYMENT_ROTATE_SECRETS="${DEPLOYMENT_ROTATE_SECRETS:-false}" bash "$INIT_ES_SCRIPT"; then
-                if [ -s "$es_key_output_file" ]; then
-                    es_key_after="$(cat "$es_key_output_file")"
-                else
-                    es_key_after="$es_key_before"
-                fi
-                rm -f "$es_key_output_file"
-                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                    echo "Elasticsearch API key 初始化成功。"
-                else
-                    echo "Elasticsearch API key initialized successfully."
-                fi
-
-                if [ "$es_key_before" != "$es_key_after" ]; then
-                    echo ""
-                    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                        echo "ELASTICSEARCH_API_KEY 已更新；正在刷新 Helm values 并滚动受影响的后端服务..."
-                    else
-                        echo "ELASTICSEARCH_API_KEY updated; refreshing Helm values and rolling affected backend services..."
-                    fi
-                    ELASTICSEARCH_API_KEY="$es_key_after"
-                    render_runtime_secret_values
-                    helm_upgrade_release
-
-                    local backend_services="config runtime mcp northbound"
-                    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process" && backend_services="$backend_services data-process"
-
-                    echo ""
-                    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                        echo "正在等待后端服务就绪..."
-                    else
-                        echo "Waiting for backend services to be ready..."
-                    fi
-                    sleep 5
-                    for svc in $backend_services; do
-                        echo "  Waiting for nexent-$svc..."
-                        if wait_for_deployment_ready "nexent-$svc"; then
-                            echo "  nexent-$svc is ready."
-                        else
-                            echo "  Error: nexent-$svc did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
-                            deploy_success=false
-                        fi
-                    done
-                else
-                    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                        echo "ELASTICSEARCH_API_KEY 未变化；无需滚动后端服务。"
-                    else
-                        echo "ELASTICSEARCH_API_KEY unchanged; backend rollout is not needed."
-                    fi
-                fi
-            else
-                rm -f "$es_key_output_file"
-                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                    echo "错误：Elasticsearch 初始化脚本执行失败。"
-                else
-                    echo "Error: Elasticsearch initialization script failed."
-                fi
-                deploy_success=false
-            fi
-        else
-            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                echo "错误：未找到 init-elasticsearch.sh：$INIT_ES_SCRIPT"
-            else
-                echo "Error: init-elasticsearch.sh not found at $INIT_ES_SCRIPT"
-            fi
-            deploy_success=false
-        fi
-    else
-        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-            echo "错误：nexent-elasticsearch 未能在 ${K8S_WAIT_TIMEOUT_SECONDS}s 内就绪。"
-        else
-            echo "Error: nexent-elasticsearch did not become ready within ${K8S_WAIT_TIMEOUT_SECONDS}s."
-        fi
-        deploy_success=false
-    fi
-
-    if [ "$deploy_success" = false ]; then
-        echo ""
-        echo "=========================================="
-        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-            echo "  部署失败！"
-        else
-            echo "  Deployment Failed!"
-        fi
-        echo "=========================================="
+    echo "Waiting for selected Nexent workloads..."
+    if ! wait_for_nexent_ready; then
+        echo "Error: one or more Nexent workloads failed to become ready."
         exit 1
     fi
 
-    # Step 10: Create super admin user (only for full deployment)
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        echo "Synchronizing official skills to the workspace PVC..."
+        if ! sync_official_skills_to_workspace; then
+            echo "Error: official skills synchronization failed."
+            exit 1
+        fi
+    fi
+
+    # Step 9: Create the super admin user when Supabase is selected.
     CREATE_SUADMIN_SCRIPT="$SCRIPT_DIR/create-suadmin.sh"
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
         if [ -f "$CREATE_SUADMIN_SCRIPT" ]; then
@@ -1311,37 +1557,19 @@ apply() {
             echo "=========================================="
             echo "  Super Admin User Creation"
             echo "=========================================="
-            if bash "$CREATE_SUADMIN_SCRIPT"; then
-                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                    echo "超级管理员创建完成。"
-                else
-                    echo "Super admin user creation completed."
-                fi
-            else
-                if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                    echo "错误：超级管理员创建失败，部署已终止。"
-                else
-                    echo "Error: Super admin user creation failed. Deployment aborted."
-                fi
+            if ! bash "$CREATE_SUADMIN_SCRIPT"; then
+                echo "Error: Super admin user creation failed. Deployment aborted."
                 exit 1
             fi
         else
-            if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-                echo "错误：未找到 create-suadmin.sh：$CREATE_SUADMIN_SCRIPT"
-            else
-                echo "Error: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
-            fi
+            echo "Error: create-suadmin.sh not found at $CREATE_SUADMIN_SCRIPT"
             exit 1
         fi
     fi
 
-    # Save deployment options for future use
+    # Save deployment options and prepare local helper images.
     persist_deploy_options
-
-    # Step 11: Pull MCP image after persisting deployment options
     pull_mcp_image
-
-    # Step 12: Pull sandbox image for agent sandbox runs
     pull_sandbox_image
 
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1367,6 +1595,7 @@ print_usage() {
         echo "使用 Helm 部署 Nexent K8s 资源。"
         echo ""
         echo "选项："
+        echo "  --release-scope SCOPE     all、infrastructure 或 nexent（默认：all）"
         echo "  --components LIST          要部署的组件"
         echo "  --port-policy POLICY       development 或 production"
         echo "  --image-source SOURCE      general、mainland 或 local-latest"
@@ -1386,6 +1615,11 @@ print_usage() {
         echo "  --config                   进入交互式部署配置界面"
         echo "  --help, -h                 显示帮助信息"
         echo ""
+        echo "示例："
+        echo "  bash deploy.sh --release-scope all"
+        echo "  bash deploy.sh --release-scope infrastructure"
+        echo "  bash deploy.sh --release-scope nexent"
+        echo ""
         echo "卸载：bash uninstall.sh"
         return
     fi
@@ -1395,6 +1629,7 @@ print_usage() {
     echo "Deploy Nexent K8s resources using Helm."
     echo ""
     echo "Options:"
+    echo "  --release-scope SCOPE     all, infrastructure, or nexent (default: all)"
     echo "  --components LIST          Components to deploy"
     echo "  --port-policy POLICY       development or production"
     echo "  --image-source SOURCE      general, mainland, or local-latest"
@@ -1413,6 +1648,11 @@ print_usage() {
     echo "  --refresh-es-key           Force recreation of ELASTICSEARCH_API_KEY"
     echo "  --config                   Open the interactive deployment configuration"
     echo "  --help, -h                 Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  bash deploy.sh --release-scope all"
+    echo "  bash deploy.sh --release-scope infrastructure"
+    echo "  bash deploy.sh --release-scope nexent"
     echo ""
     echo "Uninstall: bash uninstall.sh"
 }

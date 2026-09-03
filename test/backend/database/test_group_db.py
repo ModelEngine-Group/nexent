@@ -333,6 +333,36 @@ def test_get_groups_by_tenant_success_with_pagination(monkeypatch, mock_session)
     mock_paginated_offset.limit.assert_called_once_with(10)
 
 
+def test_query_groups_by_tenant_with_search(monkeypatch, mock_session):
+    """Test applying a group-name search before counting and pagination."""
+    session, _ = mock_session
+    count_query = MagicMock()
+    count_query.filter.return_value.count.return_value = 1
+    result_query = MagicMock()
+    filtered = MagicMock()
+    ordered = MagicMock()
+    offset = MagicMock()
+    limit = MagicMock()
+    limit.all.return_value = [MockTenantGroupInfo(group_id=1, group_name="Engineering")]
+    offset.limit.return_value = limit
+    ordered.offset.return_value = offset
+    filtered.order_by.return_value = ordered
+    result_query.filter.return_value = filtered
+    session.query = MagicMock(side_effect=[count_query, result_query])
+
+    context = MagicMock()
+    context.__enter__.return_value = session
+    context.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: context)
+    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", 1, 10, search="eng")
+
+    assert result["total"] == 1
+    assert result["groups"][0]["group_name"] == "Engineering"
+    assert count_query.filter.call_args.args[-1] is not None
+
+
 def test_get_groups_by_tenant_success_without_pagination(monkeypatch, mock_session):
     """Test retrieving groups by tenant without pagination (returns all data)"""
     session, query = mock_session

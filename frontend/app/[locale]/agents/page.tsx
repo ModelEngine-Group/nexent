@@ -10,11 +10,12 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch, Tag, Tour } from "antd";
+import { Button, Spin, Switch, Tag, Tour } from "antd";
 import {
   History,
   Maximize2,
   Minimize2,
+  Pencil,
   RefreshCw,
   Sparkles,
   X,
@@ -25,7 +26,10 @@ import AgentSelectorHeader from "./agent-selector-header";
 import AgentConfig from "./agent-config";
 import AgentVersion from "./agent-version";
 import AgentDebugPanel from "./agent-debug";
-import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
+import {
+  Nl2AgentChatPanel,
+  type Nl2AgentChatPanelHandle,
+} from "../newchat/assistant-ui/nl2agent-chat-panel";
 import {
   Nl2AgentFlowProvider,
   useNl2AgentFlow,
@@ -110,6 +114,7 @@ function AgentSetupContent() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
   const generationPanelRef = useRef<HTMLElement>(null);
   const configPanelRef = useRef<HTMLElement>(null);
   const actionAreaRef = useRef<HTMLDivElement>(null);
@@ -123,7 +128,9 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const { agentInfo } = useAgentInfo(currentAgentId);
+  const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
+    currentAgentId
+  );
   const { total } = useAgentVersionList(currentAgentId);
   const { agentVersionDetail } = useAgentVersionDetail(
     currentAgentId,
@@ -131,11 +138,14 @@ function AgentSetupContent() {
   );
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
   const {
-    isComposerDisabled,
+    agentId: flowAgentId,
     completionSyncFailed,
+    isComposerDisabled,
+    isFormLocked,
     markCompletionSynced,
     markCompletionSyncFailed,
     markGenerationCompleted,
+    markGenerationStopped,
     markPromptGenerationFailed,
     requestConfigFocus,
     resetFlow,
@@ -147,6 +157,13 @@ function AgentSetupContent() {
     requestedAgentId > 0 &&
     requestedAgentId !== currentAgentId;
   const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
+  const canManualUnlock =
+    !isNl2AgentUnavailable &&
+    flowAgentId === currentAgentId &&
+    !isRequestedAgentLoading &&
+    (isFormLocked || isComposerDisabled);
+  const showOptimizationSuggestions =
+    !isRequestedAgentLoading && !isNl2AgentUnavailable;
 
   useEffect(() => {
     resetFlow(currentAgentId);
@@ -193,9 +210,7 @@ function AgentSetupContent() {
 
   const synchronizeCompletion = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId, {
-        section: "conversation_guide",
-      }).then((synchronized) => {
+      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
         if (synchronized) markCompletionSynced(agentId);
         else markCompletionSyncFailed(agentId);
       });
@@ -227,6 +242,17 @@ function AgentSetupContent() {
     ]
   );
 
+  const handleGenerationStopped = useCallback(
+    (agentId: number) => markGenerationStopped(agentId),
+    [markGenerationStopped]
+  );
+
+  const handleManualUnlock = useCallback(() => {
+    if (!canManualUnlock || currentAgentId === null) return;
+    nl2AgentChatPanelRef.current?.cancelRun();
+    markGenerationStopped(currentAgentId);
+  }, [canManualUnlock, currentAgentId, markGenerationStopped]);
+
   const retryCompletionSync = useCallback(() => {
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
   }, [currentAgentId, synchronizeCompletion]);
@@ -242,6 +268,22 @@ function AgentSetupContent() {
     setAgentTourCurrent(0);
     setIsAgentTourPending(true);
   }, []);
+
+  const handleAgentPublished = useCallback(() => {
+    if (currentAgentId === null) return;
+
+    void Promise.all([
+      refetchAgentInfo(),
+      queryClient.invalidateQueries({
+        queryKey: ["agentVersions", currentAgentId],
+      }),
+    ]).catch((error) => {
+      log.warn("[AgentVersion] Failed to refresh version information", {
+        agentId: currentAgentId,
+        error,
+      });
+    });
+  }, [currentAgentId, queryClient, refetchAgentInfo]);
 
   useEffect(() => {
     if (
@@ -274,172 +316,194 @@ function AgentSetupContent() {
         />
       </div>
 
-      <main className="flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
-        <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
-          {isGenerationVisible && (
-            <PanelCard
-              panelRef={generationPanelRef}
-              title={t("agent.page.panel.nl2agent")}
-              className={isDebugVisible ? "flex-1" : "flex-[1]"}
-              rightAction={
-                <button
-                  type="button"
-                  aria-label={t("agent.page.panel.nl2agent.closeAria")}
-                  onClick={() => setIsGenerationVisible(false)}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+      <main className="relative flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
+        <div
+          className="flex min-w-0 min-h-0 flex-1 flex-row gap-4"
+          style={{ visibility: isRequestedAgentLoading ? "hidden" : "visible" }}
+        >
+          <PanelCard
+            panelRef={generationPanelRef}
+            title={t("agent.page.panel.nl2agent")}
+            className={
+              isGenerationVisible ? (isDebugVisible ? "flex-1" : "flex-[1]") : "hidden"
+            }
+            rightAction={
+              <button
+                type="button"
+                aria-label={t("agent.page.panel.nl2agent.closeAria")}
+                onClick={() => setIsGenerationVisible(false)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <X size={18} />
+              </button>
+            }
+          >
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {isNl2AgentUnavailable ? (
+                <div
+                  className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+                  role="status"
                 >
-                  <X size={18} />
-                </button>
-              }
-            >
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                {isNl2AgentUnavailable ? (
-                  <div
-                    className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                    role="status"
-                  >
+                  {t(
+                    "nl2agent.unavailable",
+                    "Create or select an editable Agent first."
+                  )}
+                </div>
+              ) : null}
+              {completionSyncFailed ? (
+                <div
+                  className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
+                  role="alert"
+                >
+                  <span>
                     {t(
-                      "nl2agent.unavailable",
-                      "Create or select an editable Agent first."
+                      "nl2agent.completion.syncFailed",
+                      "The Agent was generated, but the form could not be refreshed."
                     )}
-                  </div>
-                ) : null}
-                {completionSyncFailed ? (
-                  <div
-                    className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                    role="alert"
+                  </span>
+                  <Button
+                    icon={<RefreshCw size={14} />}
+                    onClick={retryCompletionSync}
+                    size="small"
                   >
-                    <span>
-                      {t(
-                        "nl2agent.completion.syncFailed",
-                        "The Agent was generated, but the form could not be refreshed."
-                      )}
-                    </span>
-                    <Button
-                      icon={<RefreshCw size={14} />}
-                      onClick={retryCompletionSync}
-                      size="small"
-                    >
-                      {t("nl2agent.completion.retry", "Retry")}
-                    </Button>
-                  </div>
-                ) : null}
-                <Nl2AgentChatPanel
-                  key={sessionGeneration}
-                  agentId={currentAgentId}
-                  disabled={
-                    isComposerDisabled ||
-                    isRequestedAgentLoading ||
-                    isNl2AgentUnavailable
-                  }
-                  onStateEvent={handleStateEvent}
-                />
-              </div>
-            </PanelCard>
-          )}
+                    {t("nl2agent.completion.retry", "Retry")}
+                  </Button>
+                </div>
+              ) : null}
+              <Nl2AgentChatPanel
+                ref={nl2AgentChatPanelRef}
+                key={sessionGeneration}
+                agentId={currentAgentId}
+                showOptimizationSuggestions={showOptimizationSuggestions}
+                disabled={
+                  isComposerDisabled ||
+                  isRequestedAgentLoading ||
+                  isNl2AgentUnavailable
+                }
+                onStateEvent={handleStateEvent}
+                onStopped={handleGenerationStopped}
+              />
+            </div>
+          </PanelCard>
 
           <PanelCard
             panelRef={configPanelRef}
             title={t("agent.page.panel.config")}
             className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
             leftAction={
-              currentAgentId !== null &&
-              agentInfo?.current_version_no !== 0 &&
-              total > 0 ? (
-                <div className="flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-gray-700">
-                  <History size={16} />
-                  <Tag
-                    color="cyan"
-                    variant="outlined"
-                    className="cursor-pointer rounded-md font-mono text-sm"
-                    onClick={() => setIsShowVersionManagePanel(true)}
-                  >
-                    {agentVersionDetail?.version.version_name}
+              currentAgentId !== null ? (
+                <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-gray-700">
+                  <Tag color="orange" className="rounded-md text-sm">
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                      <Pencil size={12} aria-hidden="true" />
+                      {t("agent.version.draftStatus")}
+                    </span>
                   </Tag>
-                  <span className="text-xs text-gray-500">
-                    / {t("agent.version.totalVersions", { count: total })}
-                  </span>
+                 
                 </div>
               ) : null
             }
             rightAction={
-              <Button
-                icon={<Sparkles size={16} />}
-                onClick={() => setIsGenerationVisible((visible) => !visible)}
-                type={isGenerationVisible ? "primary" : "default"}
-              >
-                {t("agent.page.panel.nl2agent")}
-              </Button>
+              <div className="flex items-center gap-2">
+                {agentInfo?.current_version_no && total > 0 ? (
+                  <div className="flex items-center gap-1">
+                    <History size={16} />
+                    {t("agent.version.current")}:
+                    <Tag
+                      color="cyan"
+                      variant="outlined"
+                      className="cursor-pointer rounded-md font-mono text-sm"
+                      onClick={() => setIsShowVersionManagePanel(true)}
+                    >
+                      {agentVersionDetail?.version.version_name ||
+                        `V${agentInfo.current_version_no}`}
+                    </Tag>
+                    <span className="text-xs text-gray-500">
+                      / {t("agent.version.totalVersions", { count: total })}
+                    </span>
+                  </div>
+                ) : null}
+                <Button
+                  icon={<Sparkles size={16} />}
+                  onClick={() => setIsGenerationVisible((visible) => !visible)}
+                  type={isGenerationVisible ? "primary" : "default"}
+                >
+                  {t("agent.page.panel.nl2agent")}
+                </Button>
+              </div>
             }
           >
             <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
               <AgentConfig
                 actionAreaRef={actionAreaRef}
+                canManualUnlock={canManualUnlock}
+                onManualUnlock={handleManualUnlock}
                 onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
+                onPublished={handleAgentPublished}
               />
             </div>
           </PanelCard>
 
-          {isDebugVisible && (
-            <PanelCard
-              title={t("agent.page.panel.debug")}
-              className={isDebugFullscreen ? "flex-[2]" : "flex-1"}
-              leftAction={
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <span>{t("agent.debug.compareMode")}</span>
-                  <Switch
-                    checked={isCompareMode}
-                    onChange={setIsCompareMode}
-                    size="small"
-                  />
-                </div>
-              }
-              rightAction={
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label={
-                      isDebugFullscreen
-                        ? "Restore debug panel size"
-                        : "Maximize debug panel"
-                    }
-                    onClick={() => {
-                      if (isDebugFullscreen) {
-                        setIsDebugFullscreen(false);
-                        return;
-                      }
-
-                      setIsGenerationVisible(false);
-                      setIsShowVersionManagePanel(false);
-                      setIsDebugFullscreen(true);
-                    }}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                  >
-                    {isDebugFullscreen ? (
-                      <Minimize2 size={18} />
-                    ) : (
-                      <Maximize2 size={18} />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={t("agent.page.panel.debug.closeAria")}
-                    onClick={() => {
-                      setIsDebugVisible(false);
-                      setIsDebugFullscreen(false);
-                    }}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-              }
-            >
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentDebugPanel isCompareMode={isCompareMode} />
+          <PanelCard
+            title={t("agent.page.panel.debug")}
+            className={
+              isDebugVisible ? (isDebugFullscreen ? "flex-[2]" : "flex-1") : "hidden"
+            }
+            leftAction={
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span>{t("agent.debug.compareMode")}</span>
+                <Switch
+                  checked={isCompareMode}
+                  onChange={setIsCompareMode}
+                  size="small"
+                />
               </div>
-            </PanelCard>
-          )}
+            }
+            rightAction={
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={
+                    isDebugFullscreen
+                      ? "Restore debug panel size"
+                      : "Maximize debug panel"
+                  }
+                  onClick={() => {
+                    if (isDebugFullscreen) {
+                      setIsDebugFullscreen(false);
+                      return;
+                    }
+
+                    setIsGenerationVisible(false);
+                    setIsShowVersionManagePanel(false);
+                    setIsDebugFullscreen(true);
+                  }}
+                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  {isDebugFullscreen ? (
+                    <Minimize2 size={18} />
+                  ) : (
+                    <Maximize2 size={18} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("agent.page.panel.debug.closeAria")}
+                  onClick={() => {
+                    setIsDebugVisible(false);
+                    setIsDebugFullscreen(false);
+                  }}
+                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            }
+          >
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <AgentDebugPanel isCompareMode={isCompareMode} />
+            </div>
+          </PanelCard>
 
           {isShowVersionManagePanel && (
             <PanelCard
@@ -462,6 +526,15 @@ function AgentSetupContent() {
             </PanelCard>
           )}
         </div>
+        {isRequestedAgentLoading ? (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-gray-50"
+            role="status"
+          >
+            <Spin size="large" />
+            <span className="text-sm text-gray-500">{t("common.loading")}</span>
+          </div>
+        ) : null}
       </main>
       <Tour
         open={isAgentTourOpen}

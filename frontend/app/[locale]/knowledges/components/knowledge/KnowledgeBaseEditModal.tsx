@@ -228,6 +228,7 @@ export function KnowledgeBaseEditModal({
           >
             <Select
               mode="multiple"
+              showSearch={{ optionFilterProp: "label" }}
               placeholder={
                 isGroupSelectDisabled
                   ? t("knowledgeBase.create.permission.groupPlaceholder")

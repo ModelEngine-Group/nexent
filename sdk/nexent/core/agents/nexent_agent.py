@@ -53,6 +53,17 @@ def get_local_python_authorized_imports() -> List[str]:
 
 logger = logging.getLogger(__name__)
 
+_WORKSPACE_UPLOAD_EXCLUDED_DIRS = {
+    ".cache",
+    ".npm",
+    ".parcel-cache",
+    ".pnpm-store",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+}
+
 
 def cleanup_run_workspace(
     workspace_path: str | None,
@@ -258,6 +269,7 @@ class NexentAgent:
         self._workspace_uploads: List[Dict[str, Any]] = []
         self._workspace_uploaded_paths: set[str] = set()
         self._sandbox_executors: List[Any] = []
+        self._sandbox_skill_runners: List[Any] = []
 
         self.agent = None
 
@@ -519,6 +531,7 @@ class NexentAgent:
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 observer=self.observer,
+                authorized_skill_names=params.get("authorized_skill_names"),
             )
             if params.get("workspace_path"):
                 kwargs["workspace_path"] = params["workspace_path"]
@@ -771,7 +784,7 @@ class NexentAgent:
             # nested execution deadlocks; session containers can still be shared.
             python_executor = None
             if self.sandbox_config is not None:
-                from .sandbox import build_python_executor, SandboxLevel
+                from .sandbox import SandboxLevel, build_python_executor
                 has_managed = bool(
                     agent_config.managed_agents
                     or getattr(agent_config, "external_a2a_agents", [])
@@ -808,6 +821,30 @@ class NexentAgent:
                             "Agent tree received multiple session sandbox containers"
                         )
                 self._sandbox_executors.append(python_executor)
+                if self.sandbox_config.level != SandboxLevel.LOCAL:
+                    from .sandbox import SandboxSkillScriptRunner
+
+                    configured_timeout = getattr(self.sandbox_config, "timeout_seconds", None)
+                    skill_timeout = (
+                        max(1, int(configured_timeout))
+                        if isinstance(configured_timeout, (int, float))
+                        and not isinstance(configured_timeout, bool)
+                        else 300
+                    )
+                    script_runner = SandboxSkillScriptRunner(
+                        python_executor,
+                        timeout_seconds=skill_timeout,
+                        workspace_path=self.workspace_path,
+                        network_enabled=not self.sandbox_config.network_disabled,
+                    )
+                    for tool in tool_list:
+                        bind_backend = getattr(tool, "bind_execution_backend", None)
+                        if callable(bind_backend) and _tool_name(tool) == "run_skill_script":
+                            bind_backend(
+                                script_runner,
+                                on_complete=lambda _result: self._pull_file_workspace_from_sandbox(),
+                            )
+                    self._sandbox_skill_runners.append(script_runner)
                 # Eager warm-up for remote executors (skip for LOCAL which is instant).
                 if self.sandbox_config.level != SandboxLevel.LOCAL:
                     try:
@@ -1183,6 +1220,18 @@ class NexentAgent:
             "The code executor already runs in that outputs directory. Use bare relative "
             "paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an "
             "outputs/outputs directory.\n"
+            "Exception: run_skill_script(source='workspace') resolves script_path from the "
+            "run workspace root. If code writes a generated script as bare 'build.js', call "
+            "run_skill_script with script_path='outputs/build.js'. The generated script itself "
+            "still writes output artifacts with bare filenames because its CWD is outputs.\n"
+            "Direct subprocess, os.system, and shell calls for system commands are blocked by "
+            "the code executor. Use run_skill_script with a skill-bundled wrapper, or use a "
+            "shell-free Python/Node.js API instead. When sandbox networking is enabled, only a "
+            "shell-free argv call to sys.executable -m pip install is permitted for dependency "
+            "installation.\n"
+            "For skill-creator output packages, create the new skill under outputs/<new-skill> "
+            "with normal code-executor file APIs; write_skill_file edits installed tenant skills "
+            "and does not create files in this run workspace.\n"
             "Files created there are uploaded to MinIO automatically when the run finishes."
         )
         if file_lines:
@@ -1388,7 +1437,9 @@ class NexentAgent:
             if not path.is_file():
                 continue
             relative = path.relative_to(workspace)
-            if relative.parts and relative.parts[0] == "inputs":
+            if relative.parts and relative.parts[0] in {"inputs", "skills"}:
+                continue
+            if any(part in _WORKSPACE_UPLOAD_EXCLUDED_DIRS for part in relative.parts[:-1]):
                 continue
             normalized = os.path.normcase(os.path.abspath(str(path)))
             if normalized in uploaded_paths:
@@ -1554,6 +1605,10 @@ class NexentAgent:
             return
 
         scope = getattr(self, "_sandbox_scope", None)
+
+        for runner in self._sandbox_skill_runners:
+            runner.cleanup()
+        self._sandbox_skill_runners.clear()
 
         # Sync outputs to MinIO before destroying the container.
         if (

@@ -2,7 +2,7 @@
 User service layer - handles user-related business logic
 """
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from database.user_tenant_db import (
     get_users_by_tenant_id, update_user_tenant_role, get_user_tenant_by_user_id,
@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
-              sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
+              sort_by: str = "created_at", sort_order: str = "desc",
+              search: Optional[str] = None, roles: Optional[List[str]] = None,
+              group_ids: Optional[List[int]] = None) -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
@@ -36,7 +38,19 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
         Dict[str, Any]: Dictionary containing users list and pagination info
     """
     # Get user-tenant relationships from database with pagination and sorting
-    result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
+    if search or roles or group_ids:
+        result = get_users_by_tenant_id(
+            tenant_id=tenant_id,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            search=search,
+            roles=roles,
+            group_ids=group_ids,
+        )
+    else:
+        result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
 
     # Batch fetch group names for all users in a single query
     tenant_user_ids = [r["user_id"] for r in result["users"]]
@@ -74,6 +88,9 @@ def get_users_for_requester(
     page_size: Optional[int] = 20,
     sort_by: str = "created_at",
     sort_order: str = "desc",
+    search: Optional[str] = None,
+    roles: Optional[List[str]] = None,
+    group_ids: Optional[List[int]] = None,
     *,
     requester_tenant_id: str,
     requester_role: str,
@@ -88,6 +105,13 @@ def get_users_for_requester(
     else:
         raise ForbiddenError("Not authorized to list users for this tenant")
 
+    # Keep the legacy call shape when no filters are supplied. Besides avoiding
+    # unnecessary arguments, this preserves compatibility with callers that
+    # mock the pre-filter signature.
+    if search or roles or group_ids:
+        return get_users(
+            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
+        )
     return get_users(tenant_id, page, page_size, sort_by, sort_order)
 
 
@@ -173,7 +197,7 @@ async def _delete_private_knowledge_bases(user_id: str, tenant_id: str) -> Optio
     if not private_kbs:
         return None
 
-    from services.vectordatabase_service import (
+    from management.services.knowledge_base.service import (
         ElasticSearchService,
         get_vector_db_core,
     )

@@ -166,7 +166,7 @@ stable-prefix 和 hard-budget 检查。P 超过 hard budget 而失败属于新�
 ## Prompt/Tool assembly 的使用边界
 
 - `--agent-config` 负责构造实际 duty/constraint、Agent version、显式工具和其他运行参数；
-- `zh` 时 Benchmark 会和生产一样自动使用中文默认 `APP_DESCRIPTION`，无需手动 export；
+- Benchmark 与生产使用相同的 Nexent 固定身份描述；
 - trace 中的 `system_prompt` 使用生产 renderer，`### Available Resources` 应展示实际工具
   及其描述/schema。
 

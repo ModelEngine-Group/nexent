@@ -9,7 +9,7 @@ import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import (
@@ -39,6 +39,7 @@ from services.agent_draft_permission_service import (
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
+    INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
@@ -46,9 +47,11 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     RecommendResourcesOutput,
     RecommendedResource,
     ResourceCandidate,
+    ResourceInstallationOption,
     ResourceRequirement,
     ResourceSearchOutput,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
+    UNINSTALLED_RESOURCE_SOURCES,
 )
 from utils.auth_utils import get_current_user_id
 from utils.config_utils import tenant_config_manager
@@ -62,6 +65,8 @@ MAX_RECOMMENDATIONS = 5
 MAX_BINDING_CANDIDATES = 12
 STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
+UNINSTALLED_SOURCE_PAGE_SIZE = 100
+MAX_INTERNAL_SOURCE_ITEMS = 300
 AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
@@ -418,7 +423,7 @@ async def _load_installed_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.skill_service import SkillService
+    from management.services.skill.service import SkillService
     from services.tool_configuration_service import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
@@ -438,7 +443,6 @@ async def _load_installed_resource_catalog(
         if (
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or tool.get("is_available") is not True
-            or tool.get("is_user_selectable") is False
             or name in internal_names
         ):
             continue
@@ -464,7 +468,10 @@ async def _load_installed_resource_catalog(
                 "inputs": inputs,
             }),
             "config": _normalize_tool_config(tool.get("params")),
+            "form_kind": "TOOL_CONFIG",
             "inputs": inputs,
+            "installed": True,
+            "quality": 1.0,
         })
 
     for skill in skills:
@@ -489,7 +496,10 @@ async def _load_installed_resource_catalog(
                 "tool_ids": skill.get("tool_ids"),
             }),
             "config": _normalize_skill_config(skill),
+            "form_kind": "SKILL_CONFIG",
             "inputs": {},
+            "installed": True,
+            "quality": 1.0,
         })
     return catalog
 
@@ -532,36 +542,48 @@ def _score_resource_requirement(
         ),
         default=0,
     )
+    installed_bonus = 0.03 if resource.get("installed") else 0.0
+    quality_bonus = 0.02 * max(
+        0.0, min(1.0, float(resource.get("quality") or 0.0))
+    )
     if requirement.resource_name_hint:
-        score = 0.65 * capability_score + 0.30 * name_score + 0.05
+        score = (
+            0.65 * capability_score
+            + 0.30 * name_score
+            + installed_bonus
+            + quality_bonus
+        )
     else:
-        score = 0.82 * capability_score + 0.13 * name_score + 0.05
+        score = (
+            0.82 * capability_score
+            + 0.13 * name_score
+            + installed_bonus
+            + quality_bonus
+        )
     return min(1.0, score)
 
 
-async def search_installed_resources_impl(
+def _rank_resource_catalog(
     *,
     requirements: list[ResourceRequirement],
-    tenant_id: str,
-    user_id: str,
+    catalog: list[dict[str, Any]],
 ) -> ResourceSearchOutput:
-    """Search and rank installed resources visible to the current user."""
+    """Rank one normalized catalog and return a compact coverage set."""
 
-    catalog = await _load_installed_resource_catalog(
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
     scored: list[dict[str, Any]] = []
     strong_requirement_ids: set[str] = set()
     for resource in catalog:
         relationships = {
-            requirement.requirement_id: _score_resource_requirement(requirement, resource)
+            requirement.requirement_id: _score_resource_requirement(
+                requirement, resource
+            )
             for requirement in requirements
         }
         matched_ids = [
             requirement.requirement_id
             for requirement in requirements
-            if relationships[requirement.requirement_id] >= MINIMUM_RESOURCE_SCORE
+            if relationships[requirement.requirement_id]
+            >= MINIMUM_RESOURCE_SCORE
         ]
         if not matched_ids:
             continue
@@ -613,7 +635,8 @@ async def search_installed_resources_impl(
             item
             for item in scored
             if item["candidate"].candidate_ref not in selected_refs
-            and item["relationships"][requirement.requirement_id] >= MINIMUM_RESOURCE_SCORE
+            and item["relationships"][requirement.requirement_id]
+            >= MINIMUM_RESOURCE_SCORE
         ]
         alternatives.sort(key=lambda item: (
             -item["relationships"][requirement.requirement_id],
@@ -632,13 +655,391 @@ async def search_installed_resources_impl(
         if requirement.requirement_id not in strong_requirement_ids
     ]
     return ResourceSearchOutput(
-        candidates=[item["candidate"] for item in selected[:MAX_BINDING_CANDIDATES]],
+        candidates=[
+            item["candidate"]
+            for item in selected[:MAX_BINDING_CANDIDATES]
+        ],
         uncovered_requirement_ids=uncovered,
     )
 
 
+async def search_installed_resources_impl(
+    *,
+    requirements: list[ResourceRequirement],
+    tenant_id: str,
+    user_id: str,
+) -> ResourceSearchOutput:
+    """Search and rank installed resources visible to the current user."""
+
+    catalog = await _load_installed_resource_catalog(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return _rank_resource_catalog(
+        requirements=requirements,
+        catalog=catalog,
+    )
+
+
+def _redact_installation_snapshot(value: Any, *, parent_key: str = "") -> Any:
+    """Remove persisted credentials while preserving a serializable form shape."""
+
+    normalized_parent = parent_key.casefold().replace("_", "")
+    if isinstance(value, dict):
+        secret_object = value.get("isSecret") is True
+        is_env_context = normalized_parent in {
+            "env",
+            "environment",
+            "environmentvariables",
+        }
+        is_header_context = normalized_parent in {
+            "headers",
+            "customheaders",
+        }
+        is_field_descriptor = any(
+            key in value
+            for key in (
+                "name",
+                "key",
+                "value",
+                "default",
+                "isRequired",
+                "isSecret",
+            )
+        )
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).casefold().replace("_", "")
+            is_secret_key = (
+                normalized_key != "issecret"
+                and any(
+                    marker in normalized_key
+                    for marker in ("password", "secret", "token", "apikey")
+                )
+            ) or normalized_key == "authorization"
+            if (
+                (is_env_context or is_header_context)
+                and not is_field_descriptor
+                and not isinstance(item, (dict, list))
+            ):
+                redacted[str(key)] = ""
+            elif (
+                (
+                    is_secret_key
+                    or is_env_context
+                    or is_header_context
+                    or secret_object
+                )
+                and normalized_key
+                in {"value", "default", "authorization"}
+            ):
+                redacted[str(key)] = ""
+            elif is_secret_key and not isinstance(item, (dict, list)):
+                redacted[str(key)] = ""
+            else:
+                redacted[str(key)] = _redact_installation_snapshot(
+                    item, parent_key=str(key)
+                )
+        return redacted
+    if isinstance(value, list):
+        return [
+            _redact_installation_snapshot(item, parent_key=parent_key)
+            for item in value
+        ]
+    if normalized_parent in {"env", "environment", "environmentvariables"}:
+        return ""
+    return value
+
+
+async def _load_internal_uninstalled_resource_catalog(
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    from services.mcp_management_service import list_community_mcp_services
+    from services.skill_repository_service import (
+        list_skill_repository_listings_impl,
+    )
+    from management.services.skill.service import get_official_skills_with_status
+
+    catalog: list[dict[str, Any]] = []
+    for skill in get_official_skills_with_status(tenant_id=tenant_id):
+        name = str(skill.get("name") or "").strip()
+        if skill.get("status") != "installable" or not name:
+            continue
+        option = ResourceInstallationOption(
+            option_id="official",
+            label="Install",
+            form_kind="SKILL_CONFIG",
+            config=[],
+        )
+        catalog.append({
+            "candidate_ref": f"nexent_official_skill:{quote(name, safe='')}",
+            "resource_type": "skill",
+            "source": "NEXENT_OFFICIAL_SKILL",
+            "name": name,
+            "description": _collapse_whitespace(
+                str(skill.get("description") or "")
+            ),
+            "names": [name],
+            "labels": [],
+            "descriptions": [str(skill.get("description") or "")],
+            "interfaces": [],
+            "installed": False,
+            "quality": 1.0,
+            "form_kind": option.form_kind,
+            "config": option.config,
+            "installation_options": [option],
+            "default_option_id": option.option_id,
+        })
+
+    repository_items: list[dict[str, Any]] = []
+    page = 1
+    while len(repository_items) < MAX_INTERNAL_SOURCE_ITEMS:
+        result = list_skill_repository_listings_impl(
+            tenant_id,
+            user_id=user_id,
+            status="shared",
+            page=page,
+            page_size=UNINSTALLED_SOURCE_PAGE_SIZE,
+        )
+        items = result.get("items") if isinstance(result, dict) else []
+        if not isinstance(items, list) or not items:
+            break
+        repository_items.extend(
+            item for item in items if isinstance(item, dict)
+        )
+        pagination = result.get("pagination") or {}
+        if page >= int(pagination.get("total_pages") or page):
+            break
+        page += 1
+    for item in repository_items[:MAX_INTERNAL_SOURCE_ITEMS]:
+        repository_id = item.get("skill_repository_id") or item.get("id")
+        name = str(item.get("name") or "").strip()
+        if not isinstance(repository_id, int) or repository_id <= 0 or not name:
+            continue
+        config = [{
+            "name": "target_name",
+            "type": "string",
+            "required": False,
+            "value": "",
+            "description": "Optional installed Skill name",
+        }]
+        option = ResourceInstallationOption(
+            option_id="repository",
+            label="Install a copy",
+            form_kind="SKILL_CONFIG",
+            config=config,
+        )
+        catalog.append({
+            "candidate_ref": f"tenant_skill_repository:{repository_id}",
+            "resource_type": "skill",
+            "source": "TENANT_SKILL_REPOSITORY",
+            "name": name,
+            "description": _collapse_whitespace(
+                str(item.get("description") or "")
+            ),
+            "names": [name],
+            "labels": _normalize_labels(item.get("tags")),
+            "descriptions": [
+                str(item.get("description") or ""),
+                str(item.get("content") or "")[:4000],
+            ],
+            "interfaces": [],
+            "installed": False,
+            "quality": 1.0,
+            "form_kind": option.form_kind,
+            "config": option.config,
+            "installation_options": [option],
+            "default_option_id": option.option_id,
+        })
+
+    community_items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while len(community_items) < MAX_INTERNAL_SOURCE_ITEMS:
+        result = await list_community_mcp_services(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            cursor=cursor,
+            limit=UNINSTALLED_SOURCE_PAGE_SIZE,
+        )
+        items = result.get("items") if isinstance(result, dict) else []
+        if not isinstance(items, list) or not items:
+            break
+        community_items.extend(item for item in items if isinstance(item, dict))
+        next_cursor = result.get("nextCursor")
+        if not isinstance(next_cursor, str) or not next_cursor:
+            break
+        cursor = next_cursor
+    for item in community_items[:MAX_INTERNAL_SOURCE_ITEMS]:
+        market_id = item.get("marketId") or item.get("communityId")
+        name = str(item.get("name") or "").strip()
+        transport_type = str(item.get("transportType") or "").casefold()
+        if not isinstance(market_id, int) or market_id <= 0 or not name:
+            continue
+        if transport_type == "container":
+            if not isinstance(item.get("configJson"), dict):
+                continue
+            form_kind = "MCP_CONTAINER"
+        else:
+            server_url = str(item.get("serverUrl") or "").strip()
+            if not server_url.lower().startswith(("http://", "https://")):
+                continue
+            form_kind = "MCP_REMOTE"
+        draft = {
+            "name": name,
+            "description": str(item.get("description") or ""),
+            "transportType": transport_type or "url",
+            "serverUrl": str(item.get("serverUrl") or ""),
+            "authorizationToken": "",
+            "customHeaders": "",
+            "containerConfigJson": json.dumps(
+                _redact_installation_snapshot(item.get("configJson") or {}),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            "containerPort": item.get("containerPort"),
+            "tags": _normalize_labels(item.get("tags")),
+            "version": item.get("version"),
+            "registryJson": _redact_installation_snapshot(
+                item.get("registryJson") or {}
+            ),
+            "marketId": market_id,
+        }
+        option = ResourceInstallationOption(
+            option_id="repository",
+            label="Install",
+            form_kind=form_kind,
+            config=draft,
+        )
+        catalog.append({
+            "candidate_ref": f"tenant_mcp_repository:{market_id}",
+            "resource_type": "mcp_server",
+            "source": "TENANT_MCP_REPOSITORY",
+            "name": name,
+            "description": _collapse_whitespace(
+                str(item.get("description") or "")
+            ),
+            "names": [name],
+            "labels": _normalize_labels(item.get("tags")),
+            "descriptions": [
+                str(item.get("description") or ""),
+                str(item.get("content") or "")[:4000],
+            ],
+            "interfaces": _flatten_resource_text({
+                "server": item.get("serverUrl"),
+                "config": item.get("configJson"),
+                "registry": item.get("registryJson"),
+            }),
+            "installed": False,
+            "quality": 1.0,
+            "form_kind": option.form_kind,
+            "config": option.config,
+            "installation_options": [option],
+            "default_option_id": option.option_id,
+        })
+    return catalog
+
+
+async def search_uninstalled_resources_impl(
+    *,
+    requirements: list[ResourceRequirement],
+    exclude_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> ResourceSearchOutput:
+    """Search and rank tenant-visible installable resources."""
+
+    catalog = await _load_internal_uninstalled_resource_catalog(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    excluded = set(exclude_refs)
+    return _rank_resource_catalog(
+        requirements=requirements,
+        catalog=[
+            item for item in catalog if item["candidate_ref"] not in excluded
+        ],
+    )
+
+
+def _verified_resource_candidate(
+    actual: dict[str, Any],
+    supplied: ResourceCandidate,
+) -> ResourceCandidate:
+    if (
+        supplied.resource_type != actual["resource_type"]
+        or supplied.source != actual["source"]
+    ):
+        raise Nl2AgentResourceError("invalid_candidates")
+    return ResourceCandidate(
+        candidate_ref=actual["candidate_ref"],
+        resource_type=actual["resource_type"],
+        source=actual["source"],
+        name=actual["name"],
+        description=actual["description"],
+        requirement_ids=supplied.requirement_ids,
+        score=supplied.score,
+    )
+
+
+def _recommended_resource(
+    *,
+    actual: dict[str, Any],
+    supplied: ResourceCandidate,
+    recommended_refs: set[str],
+    is_bound: bool = False,
+) -> RecommendedResource:
+    return RecommendedResource(
+        candidate=_verified_resource_candidate(actual, supplied),
+        recommendation=(
+            "recommended"
+            if supplied.candidate_ref in recommended_refs
+            else "optional"
+        ),
+        is_bound=is_bound,
+        form_kind=actual.get("form_kind") or (
+            "TOOL_CONFIG"
+            if actual["resource_type"] == "tool"
+            else "SKILL_CONFIG"
+        ),
+        config=actual["config"],
+        installation_options=actual.get("installation_options") or [],
+        default_option_id=actual.get("default_option_id"),
+    )
+
+
+async def recommend_uninstalled_resources_impl(
+    *,
+    candidates: list[ResourceCandidate],
+    recommended_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> RecommendResourcesOutput:
+    """Resolve installable candidates against their current source records."""
+
+    internal_catalog = await _load_internal_uninstalled_resource_catalog(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    by_ref = {item["candidate_ref"]: item for item in internal_catalog}
+    recommended = set(recommended_refs)
+    resources: list[RecommendedResource] = []
+    for supplied in candidates:
+        actual = by_ref.get(supplied.candidate_ref)
+        if actual is None:
+            raise Nl2AgentResourceError("resource_not_visible")
+        resources.append(_recommended_resource(
+            actual=actual,
+            supplied=supplied,
+            recommended_refs=recommended,
+        ))
+    return RecommendResourcesOutput(resources=resources)
+
+
 async def recommend_installed_resources_impl(
     *,
+    agent_id: int,
     candidates: list[ResourceCandidate],
     recommended_refs: list[str],
     tenant_id: str,
@@ -651,41 +1052,57 @@ async def recommend_installed_resources_impl(
         user_id=user_id,
     )
     by_ref = {item["candidate_ref"]: item for item in catalog}
+    bound_tool_refs = {
+        f"tool:{instance['tool_id']}"
+        for instance in query_all_enabled_tool_instances(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            version_no=0,
+        )
+        if isinstance(instance.get("tool_id"), int)
+    }
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
         if actual is None:
             raise Nl2AgentResourceError("resource_not_visible")
-        if (
-            supplied.resource_type != actual["resource_type"]
-            or supplied.source != actual["source"]
-        ):
-            raise Nl2AgentResourceError("invalid_candidates")
-        verified_candidate = ResourceCandidate(
-            candidate_ref=actual["candidate_ref"],
-            resource_type=actual["resource_type"],
-            source=actual["source"],
-            name=actual["name"],
-            description=actual["description"],
-            requirement_ids=supplied.requirement_ids,
-            score=supplied.score,
-        )
-        resources.append(RecommendedResource(
-            candidate=verified_candidate,
-            recommendation=(
-                "recommended"
-                if supplied.candidate_ref in recommended
-                else "optional"
-            ),
-            form_kind=(
-                "TOOL_CONFIG"
-                if actual["resource_type"] == "tool"
-                else "SKILL_CONFIG"
-            ),
-            config=actual["config"],
+        resources.append(_recommended_resource(
+            actual=actual,
+            supplied=supplied,
+            recommended_refs=recommended,
+            is_bound=supplied.candidate_ref in bound_tool_refs,
         ))
     return RecommendResourcesOutput(resources=resources)
+
+
+async def recommend_resources_impl(
+    *,
+    agent_id: int,
+    candidates: list[ResourceCandidate],
+    recommended_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> RecommendResourcesOutput:
+    """Dispatch a homogeneous candidate set to its trusted source resolver."""
+
+    sources = {candidate.source for candidate in candidates}
+    if sources and sources.issubset(INSTALLED_RESOURCE_SOURCES):
+        return await recommend_installed_resources_impl(
+            agent_id=agent_id,
+            candidates=candidates,
+            recommended_refs=recommended_refs,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    if sources and sources.issubset(UNINSTALLED_RESOURCE_SOURCES):
+        return await recommend_uninstalled_resources_impl(
+            candidates=candidates,
+            recommended_refs=recommended_refs,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    raise Nl2AgentResourceError("invalid_candidates")
 
 
 def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:

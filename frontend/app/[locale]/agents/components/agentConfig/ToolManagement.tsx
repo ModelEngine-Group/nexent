@@ -10,7 +10,9 @@ import { useConfig } from "@/hooks/useConfig";
 import { ChevronRight, Settings, X, AlertTriangle } from "lucide-react";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import { TOOL_SOURCE_TYPES } from "@/const/agentConfig";
+import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import ToolConfigModal from "./tool/ToolConfigModal";
+import { useMergedToolParams } from "./tool/useMergedToolParams";
 import {
   TOOLS_REQUIRING_EMBEDDING,
   TOOLS_REQUIRING_IMAGE_UNDERSTANDING,
@@ -20,7 +22,6 @@ import {
   getToolLabels,
   mergeCanonicalTool,
 } from "./tool/utils";
-import log from "@/lib/logger";
 
 // --- Local tool helpers (not in utils) ---
 
@@ -110,6 +111,7 @@ export default function ToolManagement({
   // the user-facing selected-tools list.
   const visibleSelectedTools = useMemo(() => {
     return selectedTools.filter((tool) => {
+      if (isManagedKnowledgeTool(tool)) return false;
       const canonicalTool = availableTools.find(
         (availableTool: Tool) => String(availableTool.id) === String(tool.id)
       );
@@ -120,42 +122,7 @@ export default function ToolManagement({
   // --- Group by source → category ---
   const grouped = groupToolsBySource(visibleSelectedTools);
 
-  const mergeParams = useCallback(
-    async (tool: Tool, forceFetch?: boolean): Promise<ToolParam[]> => {
-      const params = tool.initParams || [];
-      // If tool already has stored params in the agent config store, the user's
-      // unsaved modifications are already reflected in those params — skip the
-      // API call to avoid overwriting them with stale server data.
-      const hasStoredParams = params.some(
-        (p) => p.value !== undefined && p.value !== null && p.value !== ""
-      );
-      if (!forceFetch && hasStoredParams) {
-        return params;
-      }
-      if (!currentAgentId) return params;
-      try {
-        const { searchToolConfig } =
-          await import("@/services/agentConfigService");
-        const instance = await searchToolConfig(
-          parseInt(tool.id),
-          currentAgentId
-        );
-        if (instance.success && instance.data) {
-          return params.map((p) => ({
-            ...p,
-            value:
-              instance.data?.params?.[p.name] !== undefined
-                ? instance.data.params[p.name]
-                : p.value,
-          }));
-        }
-      } catch (err) {
-        log.error("mergeParams:", err);
-      }
-      return params;
-    },
-    [currentAgentId]
-  );
+  const mergeParams = useMergedToolParams(currentAgentId);
 
   const openConfig = useCallback(
     async (tool: Tool) => {
@@ -170,6 +137,7 @@ export default function ToolManagement({
         : tool;
       const toolToUse = mergeCanonicalTool(configuredTool, availableTools);
       const merged = await mergeParams(toolToUse);
+      if (!merged) return;
       setConfigTool(toolToUse);
       setConfigParams(merged);
       setModalOpen(true);

@@ -11,6 +11,8 @@ import pytest
 # Keep these utility tests isolated from database and file-service import chains.
 # The functions are patched at their import site by individual tests below.
 attachment_db = types.ModuleType("database.attachment_db")
+attachment_db._build_mcp_presigned_url = MagicMock(side_effect=lambda url: f"/proxy?url={url}")
+attachment_db.get_file_url = MagicMock()
 attachment_db.upload_fileobj = MagicMock()
 sys.modules["database.attachment_db"] = attachment_db
 
@@ -67,7 +69,7 @@ class TestSerialization:
             "role": "tool",
         }
 
-    def test_transforms_fallback_fields(self):
+    def test_transforms_only_permanent_file_fields(self):
         assert agent_stream_utils.transform_skill_files_to_standard_format(
             [{"name": "a.txt", "size": 3, "preview_url": "/preview"}]
         ) == [
@@ -77,10 +79,35 @@ class TestSerialization:
                 "type": "file",
                 "size": 3,
                 "url": "",
-                "presigned_url": "/preview",
                 "description": "",
             }
         ]
+
+    def test_enriches_response_metadata_with_presigned_url_without_mutating_input(self):
+        uploads = [{"object_name": "outputs/chart.png", "url": "s3://nexent/outputs/chart.png"}]
+
+        with patch.object(
+            agent_stream_utils,
+            "get_file_url",
+            return_value={"success": True, "url": "https://minio/signed"},
+        ), patch.object(
+            agent_stream_utils,
+            "_build_mcp_presigned_url",
+            return_value="https://api/file/fetch?signed",
+        ):
+            result = agent_stream_utils.enrich_file_uploads_with_presigned_urls(uploads)
+
+        assert "presigned_url" not in uploads[0]
+        assert result[0]["presigned_url"] == "https://api/file/fetch?signed"
+
+    def test_preserves_existing_presigned_url(self):
+        uploads = [{"object_name": "outputs/chart.png", "presigned_url": "existing"}]
+
+        with patch.object(agent_stream_utils, "get_file_url") as get_file_url:
+            result = agent_stream_utils.enrich_file_uploads_with_presigned_urls(uploads)
+
+        assert result[0]["presigned_url"] == "existing"
+        get_file_url.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -120,7 +147,6 @@ async def test_process_uploads_success_and_string_payload(tmp_path):
         "success": True,
         "object_name": "skill-files/user-1/result.txt",
         "url": "/result.txt",
-        "presigned_url": "/signed-result.txt",
         "file_size": 6,
     }
 
@@ -135,13 +161,12 @@ async def test_process_uploads_success_and_string_payload(tmp_path):
         "file_name": "result.txt",
         "absolute_path": str(file_path),
         "object_name": "skill-files/user-1/result.txt",
-        "preview_url": "/signed-result.txt",
         "url": "/result.txt",
-        "presigned_url": "/signed-result.txt",
         "mime_type": "text/plain",
         "file_size": 6,
     }]
     assert upload.call_args.kwargs["prefix"] == "skill-files/user-1"
+    assert upload.call_args.kwargs["generate_presigned_url"] is False
     assert not file_path.exists()
 
 

@@ -231,10 +231,11 @@ sys.modules['database.a2a_agent_db'] = a2a_agent_db_stub
 database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['database.knowledge_db'] = MagicMock()
 sys.modules['database.knowledge_db'].get_knowledge_name_map_by_index_names = MagicMock()
-sys.modules['services.vectordatabase_service'] = MagicMock()
+sys.modules['management.services.knowledge_base.service'] = MagicMock()
+sys.modules['management.services.model.resolver'] = MagicMock()
 # Configure ElasticSearchService.filter_accessible_indices as a pass-through so that
 # existing tests (which don't explicitly mock this permission filter) still work correctly.
-sys.modules['services.vectordatabase_service'].ElasticSearchService.filter_accessible_indices.side_effect = \
+sys.modules['management.services.knowledge_base.service'].ElasticSearchService.filter_accessible_indices.side_effect = \
     lambda index_names, **kwargs: list(index_names)
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
@@ -271,8 +272,8 @@ sys.modules['services.tool_configuration_service'] = _create_stub_module(
     "services.tool_configuration_service",
     initialize_tools_on_startup=AsyncMock(),
 )
-sys.modules['services.agent_service'] = _create_stub_module(
-    "services.agent_service",
+sys.modules['management.services.agent.service'] = _create_stub_module(
+    "management.services.agent.service",
     build_sandbox_policy=MagicMock(return_value=None),
     get_sandbox_minio_client=MagicMock(return_value=None),
 )
@@ -595,8 +596,8 @@ class TestGetSkillsForTemplate:
         mock_skill1 = {"name": "skill1", "description": "desc1"}
         mock_skill2 = {"name": "skill2", "description": "desc2"}
 
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2]
             mock_skill_service.return_value = mock_instance
@@ -623,8 +624,8 @@ class TestGetSkillsForTemplate:
         mock_skill2 = {"description": "desc2"}  # Missing name
         mock_skill3 = {}  # Missing both
 
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2, mock_skill3]
             mock_skill_service.return_value = mock_instance
@@ -643,8 +644,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_empty_list(self):
         """Test case when no skills are enabled"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = []
             mock_skill_service.return_value = mock_instance
@@ -659,8 +660,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_exception_handling(self):
         """Test case for exception handling when SkillService fails"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_skill_service.side_effect = Exception("Service unavailable")
 
             with patch('backend.agents.create_agent_info.logger') as mock_logger:
@@ -676,8 +677,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_with_version_no(self):
         """Test case with specific version number"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [
                 {"name": "v2_skill", "description": "version 2 skill"}
@@ -777,7 +778,7 @@ class TestGetSkillScriptTools:
             # RunSkillScriptTool
             assert '"skill_name": "str"' in calls[0][1]['inputs']
             assert '"script_path": "str"' in calls[0][1]['inputs']
-            assert '"params": "dict"' in calls[0][1]['inputs']
+            assert '"params": "str"' in calls[0][1]['inputs']
 
             # ReadSkillMdTool
             assert '"skill_name": "str"' in calls[1][1]['inputs']
@@ -2714,7 +2715,7 @@ class TestCreateAgentConfig:
         """
         services_pkg = types.ModuleType("services")
         services_pkg.__path__ = []
-        skill_service_mod = types.ModuleType("services.skill_service")
+        skill_service_mod = types.ModuleType("management.services.skill.service")
         skill_service_mod.SkillService = MagicMock(
             return_value=MagicMock(get_enabled_skills_for_agent=MagicMock(return_value=[]))
         )
@@ -2749,7 +2750,7 @@ class TestCreateAgentConfig:
             ) as mock_logger,
             patch.dict(sys.modules, {
                 'services': services_pkg,
-                'services.skill_service': skill_service_mod,
+                'management.services.skill.service': skill_service_mod,
                 'services.memory_record_service': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),

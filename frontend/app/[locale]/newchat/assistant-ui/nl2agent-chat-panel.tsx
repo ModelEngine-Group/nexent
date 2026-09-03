@@ -1,12 +1,18 @@
 "use client";
 
-import { useMemo, type FC } from "react";
+import { forwardRef, useImperativeHandle, useMemo } from "react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
+import {
+  MessageSquareIcon,
+  SparklesIcon,
+  WrenchIcon,
+  ZapIcon,
+} from "lucide-react";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
@@ -18,6 +24,7 @@ import {
   type Nl2AgentStateEvent,
 } from "../adapter/remote-chat-model-adapter";
 import { Chat } from "./chat";
+import type { WelcomeSuggestion } from "./thread";
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -32,14 +39,28 @@ const NL2AGENT_DISPLAY_BASE: Agent = {
 export interface Nl2AgentChatPanelProps {
   agentId?: number | null;
   disabled?: boolean;
+  showOptimizationSuggestions?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
+  onStopped?: (agentId: number) => void;
 }
 
-export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
-  agentId = null,
-  disabled = false,
-  onStateEvent,
-}) => {
+export interface Nl2AgentChatPanelHandle {
+  cancelRun: () => void;
+}
+
+export const Nl2AgentChatPanel = forwardRef<
+  Nl2AgentChatPanelHandle,
+  Nl2AgentChatPanelProps
+>(function Nl2AgentChatPanel(
+  {
+    agentId = null,
+    disabled = false,
+    showOptimizationSuggestions = false,
+    onStateEvent,
+    onStopped,
+  },
+  ref
+) {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
   const adapters = useMemo(
@@ -60,14 +81,22 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
               runtimeMode: "nl2agent",
               agentId,
               onNl2AgentState: onStateEvent,
+              onNl2AgentStopped: onStopped,
             },
           },
         });
       },
     }),
-    [agentId, onStateEvent]
+    [agentId, onStateEvent, onStopped]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
+  useImperativeHandle(
+    ref,
+    () => ({
+      cancelRun: () => runtime.thread.cancelRun(),
+    }),
+    [runtime]
+  );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
   const nl2AgentDisplay: Agent = {
@@ -75,6 +104,44 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
     display_name: assistantTitle,
     description: t("nl2agent.assistant.description"),
   };
+  const welcomeSuggestions = useMemo<readonly WelcomeSuggestion[] | undefined>(
+    () =>
+      showOptimizationSuggestions
+        ? [
+            {
+              id: "optimize-prompts",
+              icon: SparklesIcon,
+              title: t("nl2agent.optimization.prompt.title"),
+              description: t("nl2agent.optimization.prompt.description"),
+              prompt: t("nl2agent.optimization.prompt.input"),
+            },
+            {
+              id: "recommend-tools",
+              icon: WrenchIcon,
+              title: t("nl2agent.optimization.tools.title"),
+              description: t("nl2agent.optimization.tools.description"),
+              prompt: t("nl2agent.optimization.tools.input"),
+            },
+            {
+              id: "recommend-skills",
+              icon: ZapIcon,
+              title: t("nl2agent.optimization.skills.title"),
+              description: t("nl2agent.optimization.skills.description"),
+              prompt: t("nl2agent.optimization.skills.input"),
+            },
+            {
+              id: "optimize-conversation-guide",
+              icon: MessageSquareIcon,
+              title: t("nl2agent.optimization.conversation.title"),
+              description: t(
+                "nl2agent.optimization.conversation.description"
+              ),
+              prompt: t("nl2agent.optimization.conversation.input"),
+            },
+          ]
+        : undefined,
+    [showOptimizationSuggestions, t]
+  );
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -83,6 +150,7 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
           <Chat
             selectedAgent={nl2AgentDisplay}
             generatedTitle={assistantTitle}
+            welcomeSuggestions={welcomeSuggestions}
             isLoadingAgents={false}
             showModelSelector={false}
             showConversationTitle={false}
@@ -93,4 +161,4 @@ export const Nl2AgentChatPanel: FC<Nl2AgentChatPanelProps> = ({
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
-};
+});

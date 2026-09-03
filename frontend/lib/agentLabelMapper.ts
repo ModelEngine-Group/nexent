@@ -14,6 +14,7 @@ export const UNAVAILABLE_REASON_I18N_MAP: Record<string, string> = {
   duplicate_display_name: "agent.unavailableReasons.duplicate_display_name",
   tool_unavailable: "agent.unavailableReasons.tool_unavailable",
   model_unavailable: "agent.unavailableReasons.model_unavailable",
+  model_deleted: "agent.unavailableReasons.model_deleted",
   all_tools_disabled: "agent.unavailableReasons.all_tools_disabled",
   model_not_configured: "agent.unavailableReasons.model_not_configured",
   agent_not_found: "agent.unavailableReasons.agent_not_found",

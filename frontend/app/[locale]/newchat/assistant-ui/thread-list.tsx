@@ -5,7 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Button, message } from "antd";
+import { Checkbox, message } from "antd";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import {
   AuiIf,
@@ -20,32 +20,25 @@ import {
   PencilIcon,
   TrashIcon,
   Clock,
+  ArrowDownIcon,
   CheckIcon,
   XIcon,
+  Repeat2Icon,
 } from "lucide-react";
 import {
   Fragment,
+  createContext,
   useCallback,
-  useEffect,
+  useContext,
   useMemo,
-  useRef,
   useState,
-  useSyncExternalStore,
-  type RefObject,
+  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
+import { conversationService } from "@/services/conversationService";
 import type { FC } from "react";
-import {
-  isConversationListNearBottom,
-  shouldContinueConversationPageLoading,
-  shouldLoadNextConversationPage,
-} from "@/lib/conversationLoadPolicy";
-import {
-  calculateConversationViewport,
-  getConversationViewportGroupCounts,
-  newChatConversationViewport,
-} from "@/lib/conversationViewport";
+import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -75,236 +68,277 @@ const ConversationStatusIndicator: FC<{
   return null;
 };
 
+interface BatchSelectionValue {
+  batchMode: boolean;
+  selectedIds: Set<string>;
+  toggle: (id: string) => void;
+  selectAllVisible: () => void;
+  clear: () => void;
+  enter: () => void;
+  exit: () => void;
+  deleteSelected: () => void;
+}
+
+const BatchSelectionContext = createContext<BatchSelectionValue | null>(null);
+
+// Safe hook: returns null outside a provider so list items render normally
+// (no batch UI) when the sidebar is not wrapped in BatchSelectionProvider.
+const useBatchSelection = (): BatchSelectionValue | null =>
+  useContext(BatchSelectionContext);
+
+export const BatchSelectionProvider: FC<{
+  children: ReactNode;
+  onNewConversation?: () => void | Promise<void>;
+}> = ({ children, onNewConversation }) => {
+  const { t } = useTranslation();
+  const aui = useAui();
+  const { confirm } = useConfirmModal();
+  const threadIds = useAuiState((s) => s.threads.threadIds);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+
+  const toggle = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(() => new Set(threadIds));
+  }, [threadIds]);
+
+  const clear = useCallback(() => setSelectedIds(new Set()), []);
+
+  const enter = useCallback(() => {
+    setSelectedIds(new Set());
+    setBatchMode(true);
+  }, []);
+
+  const exit = useCallback(() => {
+    setBatchMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const deleteSelected = useCallback(() => {
+    const itemsById = new Map(
+      (threadItems as ReadonlyArray<{ id: string; remoteId?: string }>).map(
+        (it) => [it.id, it]
+      )
+    );
+    const conversationIds: number[] = [];
+    for (const id of selectedIds) {
+      const remoteId = itemsById.get(id)?.remoteId;
+      const num = Number(remoteId);
+      if (remoteId && Number.isInteger(num) && num > 0) {
+        conversationIds.push(num);
+      }
+    }
+    if (conversationIds.length === 0) return;
+
+    // Detect whether the currently active conversation is in the delete set.
+    // If so, the main panel must switch to a fresh thread after reload,
+    // otherwise it would keep pointing at a now-deleted conversation.
+    const activeRemoteId = mainThreadId
+      ? itemsById.get(mainThreadId)?.remoteId
+      : undefined;
+    const activeConversationId = Number(activeRemoteId);
+    const activeDeleted =
+      !!activeRemoteId &&
+      Number.isInteger(activeConversationId) &&
+      activeConversationId > 0 &&
+      conversationIds.includes(activeConversationId);
+
+    confirm({
+      title: t("chat.threadList.delete"),
+      content: t("chat.threadList.batchConfirmDeletionDescription"),
+      onOk: async () => {
+        try {
+          const result = await conversationService.deleteBatch(conversationIds);
+          await aui.threads.reload();
+          if (result?.failed_ids?.length) {
+            message.warning(
+              t("chat.threadList.batchDeletePartial", {
+                failed: result.failed_ids.length,
+                total: conversationIds.length,
+              })
+            );
+          }
+          if (activeDeleted) {
+            await onNewConversation?.();
+          }
+          setBatchMode(false);
+          setSelectedIds(new Set());
+        } catch (error) {
+          log.error("[ThreadList] Failed to batch delete:", error);
+          message.error(t("chatInterface.deleteFailed"));
+          throw error;
+        }
+      },
+    });
+  }, [
+    selectedIds,
+    threadItems,
+    mainThreadId,
+    confirm,
+    t,
+    aui,
+    onNewConversation,
+  ]);
+
+  const value = useMemo<BatchSelectionValue>(
+    () => ({
+      batchMode,
+      selectedIds,
+      toggle,
+      selectAllVisible,
+      clear,
+      enter,
+      exit,
+      deleteSelected,
+    }),
+    [
+      batchMode,
+      selectedIds,
+      toggle,
+      selectAllVisible,
+      clear,
+      enter,
+      exit,
+      deleteSelected,
+    ]
+  );
+
+  return (
+    <BatchSelectionContext.Provider value={value}>
+      {children}
+    </BatchSelectionContext.Provider>
+  );
+};
+
+export const BatchSidebarFooter: FC<{ onSwitchToLegacy: () => void }> = ({
+  onSwitchToLegacy,
+}) => {
+  const { t } = useTranslation();
+  const {
+    batchMode,
+    selectedIds,
+    enter,
+    exit,
+    selectAllVisible,
+    deleteSelected,
+  } = useBatchSelection()!;
+
+  if (batchMode) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+          <span>
+            {t("chat.threadList.selectedCount", { count: selectedIds.size })}
+          </span>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={exit}
+          >
+            {t("chat.threadList.cancel")}
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="flex h-9 flex-1 items-center justify-center rounded-lg border px-3 text-sm hover:bg-muted"
+            onClick={selectAllVisible}
+          >
+            {t("chat.threadList.selectAll")}
+          </button>
+          <button
+            type="button"
+            className="flex h-9 flex-1 items-center justify-center rounded-lg border border-destructive/30 px-3 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            disabled={selectedIds.size === 0}
+            onClick={deleteSelected}
+          >
+            {t("chat.threadList.delete")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
+        onClick={enter}
+      >
+        <CheckIcon className="size-4 shrink-0" />
+        <span>{t("chat.threadList.batchManage")}</span>
+      </button>
+      <button
+        type="button"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
+        onClick={onSwitchToLegacy}
+      >
+        <Repeat2Icon className="size-4 shrink-0" />
+        <span>{t("chat.sidebar.switchToLegacy")}</span>
+      </button>
+    </div>
+  );
+};
+
 interface ThreadListProps {
   generatedTitles?: ReadonlyMap<string, string>;
-  scrollContainerRef: RefObject<HTMLDivElement>;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
   generatedTitles,
-  scrollContainerRef,
 }) => {
   const { t } = useTranslation();
-  const aui = useAui();
-  const hasMore = useAuiState((s) => s.threads.hasMore);
-  const threadCount = useAuiState((s) => s.threads.threadIds.length);
-  const conversationMetadata = useSyncExternalStore(
-    newChatConversationViewport.subscribe,
-    newChatConversationViewport.getSnapshot,
-    newChatConversationViewport.getSnapshot
-  );
-  const isLoadingRef = useRef(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const measurementRowRef = useRef<HTMLDivElement>(null);
-  const measurementHeaderRef = useRef<HTMLDivElement>(null);
-  const touchStartYRef = useRef<number | null>(null);
-  const previousScrollTopRef = useRef(0);
-  const continueLoadingRef = useRef(false);
-  const paginationStateRef = useRef({ hasMore, threadCount });
-  const [totalVirtualHeight, setTotalVirtualHeight] = useState(0);
-  const [rowHeight, setRowHeight] = useState(36);
-  const [headerHeight, setHeaderHeight] = useState(32);
-  const [renderedHeaderCount, setRenderedHeaderCount] = useState(0);
-  paginationStateRef.current = { hasMore, threadCount };
-
-  // Placeholder for completed set - currently not used since status only has completed/running
   const completedConversations = useMemo(() => new Set<string>(), []);
-
-  useEffect(() => {
-    if (conversationMetadata?.total === 0) {
-      setTotalVirtualHeight(0);
-      return;
-    }
-    let cancelled = false;
-    void document.fonts.ready.then(() => {
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        const container = scrollContainerRef.current;
-        const measuredRow = measurementRowRef.current;
-        const measuredHeader = measurementHeaderRef.current;
-        if (!container || !measuredRow || !measuredHeader) return;
-        const nextRowHeight = measuredRow.getBoundingClientRect().height;
-        const nextHeaderHeight = measuredHeader.getBoundingClientRect().height;
-        const viewport = calculateConversationViewport({
-          containerHeight: container.clientHeight,
-          rowHeight: nextRowHeight,
-          groupHeaderHeight: nextHeaderHeight,
-          contentPadding: 16,
-          groupCounts: getConversationViewportGroupCounts(conversationMetadata),
-        });
-        setRowHeight(nextRowHeight);
-        setHeaderHeight(nextHeaderHeight);
-        setTotalVirtualHeight(viewport.totalHeight);
-        if (threadCount > 0 || isLoadingRef.current || !hasMore) return;
-        newChatConversationViewport.resolveInitialLimit(viewport.initialLimit);
-        isLoadingRef.current = true;
-        void aui.threads
-          .loadMore()
-          .catch((error) =>
-            log.error("Failed to load initial conversations", error)
-          )
-          .finally(() => {
-            isLoadingRef.current = false;
-          });
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [aui, conversationMetadata, hasMore, scrollContainerRef, threadCount]);
-
-  useEffect(() => {
-    setRenderedHeaderCount(
-      contentRef.current?.querySelectorAll(
-        '[data-slot="aui_thread-list-group-label"]'
-      ).length ?? 0
-    );
-  }, [threadCount]);
-
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    let cancelled = false;
-
-    const requestNextPage = (hasDownwardUserIntent: boolean) => {
-      if (hasDownwardUserIntent) continueLoadingRef.current = true;
-      const paginationState = paginationStateRef.current;
-      const isNearLoadedBoundary = isConversationListNearBottom(
-        contentRef.current?.scrollHeight ?? container.scrollHeight,
-        container.scrollTop,
-        container.clientHeight
-      );
-      if (
-        !shouldLoadNextConversationPage({
-          hasMore: paginationState.hasMore,
-          isLoading: isLoadingRef.current,
-          isNearBottom: isNearLoadedBoundary,
-          hasDownwardUserIntent: continueLoadingRef.current,
-        })
-      ) {
-        if (!paginationState.hasMore || !isNearLoadedBoundary) {
-          continueLoadingRef.current = false;
-        }
-        return;
-      }
-      const loadedBefore = paginationState.threadCount;
-      isLoadingRef.current = true;
-      void aui.threads.loadMore().finally(() => {
-        isLoadingRef.current = false;
-        requestAnimationFrame(() => {
-          if (cancelled) return;
-          const latestState = paginationStateRef.current;
-          const shouldContinue = shouldContinueConversationPageLoading({
-            hasMore: latestState.hasMore,
-            loadedBefore,
-            loadedAfter: latestState.threadCount,
-            isNearLoadedBoundary: isConversationListNearBottom(
-              contentRef.current?.scrollHeight ?? container.scrollHeight,
-              container.scrollTop,
-              container.clientHeight
-            ),
-          });
-          continueLoadingRef.current = shouldContinue;
-          if (shouldContinue) requestNextPage(true);
-        });
-      });
-    };
-    const handleWheel = (event: WheelEvent) =>
-      requestNextPage(event.isTrusted && event.deltaY > 0);
-    const handleScroll = (event: Event) => {
-      requestNextPage(
-        event.isTrusted &&
-          container.scrollTop > previousScrollTopRef.current
-      );
-      previousScrollTopRef.current = container.scrollTop;
-    };
-    const handleTouchStart = (event: TouchEvent) => {
-      touchStartYRef.current = event.touches[0]?.clientY ?? null;
-    };
-    const handleTouchMove = (event: TouchEvent) => {
-      const currentY = event.touches[0]?.clientY;
-      const startY = touchStartYRef.current;
-      requestNextPage(
-        event.isTrusted &&
-          currentY !== undefined &&
-          startY !== null &&
-          currentY < startY
-      );
-      touchStartYRef.current = currentY ?? null;
-    };
-    const handleKeyDown = (event: KeyboardEvent) =>
-      requestNextPage(
-        event.isTrusted && ["ArrowDown", "PageDown", "End"].includes(event.key)
-      );
-    container.addEventListener("wheel", handleWheel, { passive: true });
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-    container.addEventListener("touchmove", handleTouchMove, { passive: true });
-    container.addEventListener("keydown", handleKeyDown);
-    return () => {
-      cancelled = true;
-      container.removeEventListener("wheel", handleWheel);
-      container.removeEventListener("scroll", handleScroll);
-      container.removeEventListener("touchstart", handleTouchStart);
-      container.removeEventListener("touchmove", handleTouchMove);
-      container.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [aui, scrollContainerRef]);
+  const isLoading = useAuiState((s) => s.threads.isLoading);
+  const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
+  const hasMore = useAuiState((s) => s.threads.hasMore);
 
   return (
     <div className="flex flex-col p-2">
-      <div
-        aria-hidden="true"
-        className="fixed invisible pointer-events-none -z-10"
+      <AuiIf condition={(s) => s.threads.isLoading}>
+        <ThreadListSkeleton />
+      </AuiIf>
+      <AuiIf
+        condition={(s) =>
+          !s.threads.isLoading && s.threads.threadIds.length === 0
+        }
       >
-        <div
-          ref={measurementRowRef}
-          className="flex h-9 items-center rounded-lg px-3 text-sm"
-        >
-          Conversation
-        </div>
-        <div
-          ref={measurementHeaderRef}
-          className="px-3 pt-3 pb-1 text-xs font-medium"
-        >
-          {t("chat.threadList.today")}
-        </div>
-      </div>
-      <div ref={contentRef} className="flex flex-col">
-        <AuiIf condition={(s) => s.threads.isLoading}>
-          <ThreadListSkeleton />
-        </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            !s.threads.isLoading && s.threads.threadIds.length === 0
-          }
-        >
-          <ThreadListEmpty />
-        </AuiIf>
-        <AuiIf
-          condition={(s) =>
-            !s.threads.isLoading && s.threads.threadIds.length > 0
-          }
-        >
-          <ThreadListItems
-            completedConversations={completedConversations}
-            generatedTitles={generatedTitles}
-          />
-        </AuiIf>
-      </div>
-      <div
-        aria-hidden="true"
-        className="shrink-0 w-full"
-        style={{
-          height: Math.max(
-            0,
-            totalVirtualHeight -
-              threadCount * rowHeight -
-              renderedHeaderCount * headerHeight -
-              16
-          ),
-        }}
-      />
+        <ThreadListEmpty />
+      </AuiIf>
+      <AuiIf
+        condition={(s) =>
+          !s.threads.isLoading && s.threads.threadIds.length > 0
+        }
+      >
+        <ThreadListItems
+          completedConversations={completedConversations}
+          generatedTitles={generatedTitles}
+        />
+      </AuiIf>
+      <ThreadListPrimitive.LoadMore
+        disabled={!hasMore || isLoading || isLoadingMore}
+        className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {hasMore ? <ArrowDownIcon className="size-3.5" /> : null}
+        <span>
+          {isLoading || isLoadingMore
+            ? t("chat.threadList.loadingMore")
+            : hasMore
+              ? t("chat.threadList.loadMore")
+              : t("chat.threadList.allLoaded")}
+        </span>
+      </ThreadListPrimitive.LoadMore>
     </div>
   );
 };
@@ -337,7 +371,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
 
   const groups = useThreadListGroups();
 
-
   const GroupedThreadListItem = useMemo<FC>(
     () => () => (
       <ThreadListItem
@@ -345,7 +378,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         generatedTitles={generatedTitles}
       />
     ),
-    [completedConversations, generatedTitles],
+    [completedConversations, generatedTitles]
   );
 
   if (!groups) {
@@ -399,7 +432,7 @@ type ThreadListGroup = {
 // using the day boundaries of the user's local timezone.
 const dateGroupLabel = (
   date: Date | undefined,
-  startOfToday: number,
+  startOfToday: number
 ): string => {
   if (!date || date.getTime() >= startOfToday) return "chat.threadList.today";
   if (date.getTime() >= startOfToday - 7 * DAY_IN_MS) {
@@ -416,10 +449,12 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
 
   return useMemo<ThreadListGroup[] | null>(() => {
     const itemsById = new Map(
-      (threadItems as ReadonlyArray<{
-        id: string;
-        custom?: { lastMessageAt?: string };
-      }>).map((item) => [item.id, item]),
+      (
+        threadItems as ReadonlyArray<{
+          id: string;
+          custom?: { lastMessageAt?: string };
+        }>
+      ).map((item) => [item.id, item])
     );
     const dates: (Date | undefined)[] = threadIds.map((id) => {
       const raw = itemsById.get(id)?.custom?.lastMessageAt;
@@ -431,7 +466,7 @@ const useThreadListGroups = (): ThreadListGroup[] | null => {
     const startOfToday = new Date(
       now.getFullYear(),
       now.getMonth(),
-      now.getDate(),
+      now.getDate()
     ).getTime();
 
     const time = (index: number) =>
@@ -510,20 +545,31 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   const { t } = useTranslation();
   const { confirm } = useConfirmModal();
   const [isEditing, setIsEditing] = useState(false);
+  const batch = useBatchSelection();
+  const batchMode = batch?.batchMode ?? false;
+  const selectedIds = batch?.selectedIds;
+  const toggle = batch?.toggle;
   const threadListItem = aui.threadListItem;
   const thread = threadListItem.getState();
-  const title = generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
+  const title =
+    generatedTitles?.get(thread.id) ?? thread.title ?? t("chat.thread.newChat");
 
-  const handleRename = useCallback(async (newTitle: string) => {
-    try {
-      await threadListItem.rename(newTitle);
-      log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
-      setIsEditing(false);
-    } catch (error) {
-      log.error("[ThreadList] Failed to rename thread:", error);
-      message.error(t("chat.threadList.renameFailed"));
-    }
-  }, [threadListItem, t]);
+  const handleRename = useCallback(
+    async (newTitle: string) => {
+      setPendingThreadOperationId(thread.id);
+      try {
+        await threadListItem.rename(newTitle);
+        log.log(`[ThreadList] Renamed thread to "${newTitle}"`);
+        setIsEditing(false);
+      } catch (error) {
+        log.error("[ThreadList] Failed to rename thread:", error);
+        message.error(t("chat.threadList.renameFailed"));
+      } finally {
+        setPendingThreadOperationId(undefined);
+      }
+    },
+    [thread.id, threadListItem, t]
+  );
 
   const handleRenameClick = useCallback(() => {
     setIsEditing(true);
@@ -538,6 +584,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       title: t("chat.threadList.delete"),
       content: t("chat.threadList.confirmDeletionDescription"),
       onOk: async () => {
+        setPendingThreadOperationId(thread.id);
         try {
           await threadListItem.delete();
           await aui.threads.reload();
@@ -545,41 +592,62 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           log.error("[ThreadList] Failed to delete thread:", error);
           message.error(t("chatInterface.deleteFailed"));
           throw error;
+        } finally {
+          setPendingThreadOperationId(undefined);
         }
       },
     });
   }, [aui, confirm, t, threadListItem]);
 
-  return (
-    <>
-      {isEditing ? (
+  const renderMainContent = () => {
+    if (isEditing) {
+      return (
         <InlineRenameEditor
           currentTitle={title}
           onRename={handleRename}
           onCancel={handleCancelRename}
         />
-      ) : (
-        <>
-          <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
-            <div className="flex min-w-0 flex-1 items-center text-left">
-              <ConversationStatusIndicatorWrapper
-                completedConversations={completedConversations}
-              />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {title}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-80 break-words">
-                  {title}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </ThreadListItemPrimitive.Trigger>
-        </>
-      )}
-      {!isEditing && (
+      );
+    }
+    if (batchMode) {
+      return (
+        <button
+          type="button"
+          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors hover:bg-muted ${
+            selectedIds?.has(thread.id) ? "bg-accent" : ""
+          }`}
+          onClick={() => toggle?.(thread.id)}
+        >
+          <Checkbox checked={selectedIds?.has(thread.id) ?? false} />
+          <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+        </button>
+      );
+    }
+    return (
+      <ThreadListItemPrimitive.Trigger className="flex min-w-0 flex-1 justify-start px-3 text-left text-sm">
+        <div className="flex min-w-0 flex-1 items-center text-left">
+          <ConversationStatusIndicatorWrapper
+            completedConversations={completedConversations}
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="min-w-0 flex-1 truncate text-left">
+                {title}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-80 break-words">
+              {title}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </ThreadListItemPrimitive.Trigger>
+    );
+  };
+
+  return (
+    <>
+      {renderMainContent()}
+      {!isEditing && !batchMode && (
         <ThreadListItemMorePrimitive.Root>
           <ThreadListItemMorePrimitive.Trigger className="mr-2 size-7 rounded-md opacity-0 group-hover/item:opacity-100">
             <MoreHorizontalIcon className="size-4" />
@@ -619,10 +687,7 @@ const ConversationStatusIndicatorWrapper: FC<{
   const isRunning = status === "running" || status === "streaming";
 
   return (
-    <ConversationStatusIndicator
-      isStreaming={isRunning}
-      isCompleted={false}
-    />
+    <ConversationStatusIndicator isStreaming={isRunning} isCompleted={false} />
   );
 };
 
@@ -643,7 +708,7 @@ const InlineRenameEditor: FC<{
         onCancel();
       }
     },
-    [title, currentTitle, onRename, onCancel],
+    [title, currentTitle, onRename, onCancel]
   );
 
   const handleKeyDown = useCallback(
@@ -652,13 +717,13 @@ const InlineRenameEditor: FC<{
         onCancel();
       }
     },
-    [onCancel],
+    [onCancel]
   );
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex min-w-0 flex-1 items-center gap-1 px-3"
+      className="flex min-w-0 flex-1 items-center gap-1 px-3 overflow-hidden"
     >
       <input
         type="text"
@@ -673,21 +738,20 @@ const InlineRenameEditor: FC<{
           }
         }}
         autoFocus
-        className="flex-1 bg-background border border-input rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        className="shrink min-w-0 flex-1 rounded border border-input px-2 py-1 text-sm outline-none focus:border-ring"
       />
-      <button
-        type="submit"
-        className="p-1 hover:bg-accent rounded"
-      >
-        <CheckIcon className="size-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="p-1 hover:bg-accent rounded"
-      >
-        <XIcon className="size-4" />
-      </button>
+      <div className="flex shrink-0 gap-1">
+        <button type="submit" className="p-1 hover:bg-accent rounded">
+          <CheckIcon className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="p-1 hover:bg-accent rounded"
+        >
+          <XIcon className="size-4" />
+        </button>
+      </div>
     </form>
   );
 };

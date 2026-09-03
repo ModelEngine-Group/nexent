@@ -55,7 +55,8 @@ def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[st
 
 
 def query_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
-                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
+                           sort_by: str = "created_at", sort_order: str = "desc",
+                           search: Optional[str] = None) -> Dict[str, Any]:
     """
     Query groups for a tenant with pagination and sorting
 
@@ -70,17 +71,18 @@ def query_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: O
         Dict[str, Any]: Dictionary containing groups list and total count
     """
     with get_db_session() as session:
-        # Get total count
-        total = session.query(TenantGroupInfo).filter(
+        filters = [
             TenantGroupInfo.tenant_id == tenant_id,
             TenantGroupInfo.delete_flag == "N"
-        ).count()
+        ]
+        if search and search.strip():
+            filters.append(TenantGroupInfo.group_name.ilike(f"%{search.strip()}%"))
+
+        # Count after filtering, before pagination.
+        total = session.query(TenantGroupInfo).filter(*filters).count()
 
         # Build base query
-        query = session.query(TenantGroupInfo).filter(
-            TenantGroupInfo.tenant_id == tenant_id,
-            TenantGroupInfo.delete_flag == "N"
-        )
+        query = session.query(TenantGroupInfo).filter(*filters)
 
         # Add sorting
         if sort_by == "created_at":

@@ -255,13 +255,14 @@ def test_model_config_hierarchy():
     """Test ModelConfig, AppConfig, and GlobalConfig hierarchy"""
     # Build a complete config
     app_config = model_consts.AppConfig(
-        appName="TestApp",
-        appDescription="Test Description",
+        appName="Legacy App",
+        appDescription="Legacy description",
         iconType="icon",
         modelEngineEnabled=True
     )
-    assert app_config.appName == "TestApp"
     assert app_config.modelEngineEnabled is True
+    assert "appName" not in app_config.model_dump()
+    assert "appDescription" not in app_config.model_dump()
 
     # Single model config
     single_model = model_consts.SingleModelConfig(
@@ -720,19 +721,6 @@ def test_community_list_request():
     assert req.search == "search term"
     assert req.tag == "ai"
     assert req.limit == 50
-
-
-def test_registry_list_query():
-    """Test RegistryListQuery with strip validators"""
-    req = model_consts.RegistryListQuery(
-        search="  test  ",
-        version="  v1  ",
-        limit=25
-    )
-    assert req.search == "test"
-    assert req.version == "v1"
-    assert req.limit == 25
-    assert req.include_deleted is False
 
 
 def test_capacity_bare_model():

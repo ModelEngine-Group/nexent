@@ -225,6 +225,7 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
             >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
                 disabled={ingroupPermission === "PRIVATE"}
                 options={groupOptions}

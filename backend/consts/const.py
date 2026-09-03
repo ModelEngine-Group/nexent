@@ -61,6 +61,14 @@ AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
 AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
     os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
 )
+
+# Unified tag document retrieval projection rollout flag. When enabled, document
+# assignments are projected to retrieval providers and tracked in the
+# document_tag_projection ledger; canonical assignments are never rolled back
+# when a provider rejects or delays a projection.
+TAG_DOCUMENT_PROJECTION_ENABLED = os.getenv(
+    "TAG_DOCUMENT_PROJECTION_ENABLED", "true"
+).lower() in ("true", "1", "yes", "on")
 AGENT_AUTOMATION_LEASE_SECONDS = int(
     os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
 )
@@ -233,11 +241,6 @@ ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in (
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
-DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
-DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
-DEFAULT_APP_NAME_ZH = "Nexent 智能体"
-DEFAULT_APP_NAME_EN = "Nexent Agent"
-
 # Minio Configuration
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
@@ -263,6 +266,9 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 RUNTIME_STATE_REDIS_URL = os.getenv("RUNTIME_STATE_REDIS_URL") or REDIS_URL
 RUNTIME_STREAM_TTL_SECONDS = int(os.getenv("RUNTIME_STREAM_TTL_SECONDS", "86400"))
 RUNTIME_STREAM_MAX_LEN = int(os.getenv("RUNTIME_STREAM_MAX_LEN", "10000"))
+RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES = int(
+    os.getenv("RUNTIME_STREAM_LOCAL_REPLAY_MAX_BYTES", str(8 * 1024 * 1024))
+)
 RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
@@ -317,10 +323,17 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 # Worker Configuration
 RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
-QUEUES = os.getenv("QUEUES", "process_q,process_part_q,forward_q")
+QUEUES = os.getenv(
+    "QUEUES",
+    "process_q,process_part_q,forward_q,forward_part_q,forward_aggregate_q",
+)
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
-WORKER_CONCURRENCY = DP_PART_PROCESSOR_COUNT + 1
+# The data-process service sets a queue-specific value for each child worker.
+# Keep the historical default when the variable is not provided.
+WORKER_CONCURRENCY = int(
+    os.getenv("WORKER_CONCURRENCY", str(DP_PART_PROCESSOR_COUNT + 1))
+)
 RAY_WARM_ACTOR_POOL_SIZE_PART = int(
     os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
 RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
@@ -511,8 +524,6 @@ MODEL_CONFIG_MAPPING = {
     "tts": "TTS_ID"
 }
 
-APP_NAME = "APP_NAME"
-APP_DESCRIPTION = "APP_DESCRIPTION"
 ICON_TYPE = "ICON_TYPE"
 ICON_KEY = "ICON_KEY"
 AVATAR_URI = "AVATAR_URI"
@@ -710,7 +721,7 @@ NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
 )
 """Docker named volume shared by the runtime and the system-scoped sandbox."""
 
-NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
+NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "2048"))
 
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
 
@@ -755,6 +766,11 @@ STREAMABLE_CONTENT_TYPES = frozenset([
     "tool",
     "execution_logs",
 ])
+
+# LLM Model Configuration
+LLM_INCLUDE_LOGPROBS = os.getenv("LLM_INCLUDE_LOGPROBS", "false").lower() == "true"
+"""When True, adds logprobs=true to every chat.completions.create request body,
+enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"

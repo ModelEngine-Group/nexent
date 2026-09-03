@@ -43,6 +43,7 @@ from backend.apps.conversation_management_app import (
     list_conversations_endpoint,
     rename_conversation_endpoint,
     delete_conversation_endpoint,
+    delete_conversations_batch_endpoint,
     get_conversation_history_endpoint,
     get_sources_endpoint,
     generate_conversation_title_endpoint,
@@ -65,6 +66,7 @@ def conversation_mocks():
             patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
             patch('backend.apps.conversation_management_app.logging') as mock_logging, \
             patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
+            patch('backend.apps.conversation_management_app.delete_conversations_batch_service') as mock_delete_batch, \
             patch('backend.apps.conversation_management_app.get_conversation_history_service') as mock_history_service, \
             patch('backend.apps.conversation_management_app.get_sources_service') as mock_sources_service, \
             patch('backend.apps.conversation_management_app.generate_conversation_title_service') as mock_generate_title_service, \
@@ -79,6 +81,7 @@ def conversation_mocks():
             'rename_conversation': mock_rename_conv,
             'logging': mock_logging,
             'delete_conversation': mock_delete_conv,
+            'delete_conversations_batch': mock_delete_batch,
             'history_service': mock_history_service,
             'sources_service': mock_sources_service,
             'generate_title_service': mock_generate_title_service,
@@ -375,6 +378,70 @@ async def test_delete_conversation_failure(conversation_mocks):
     conversation_mocks['logging'].error.assert_called_once()
 
 
+# delete_conversations_batch_endpoint
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_success(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
+
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['delete_conversations_batch'].return_value = {
+        "deleted_count": 2,
+        "failed_ids": [],
+    }
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2, 3]
+
+    result = await delete_conversations_batch_endpoint(
+        request_obj, authorization=mock_auth_header)
+
+    assert result.code == 0
+    assert result.data["deleted_count"] == 2
+    conversation_mocks['delete_conversations_batch'].assert_called_once_with(
+        [1, 2, 3], "user_id")
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_failure(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
+
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['delete_conversations_batch'].side_effect = Exception(
+        "batch delete error")
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_conversations_batch_endpoint(
+            request_obj, authorization=mock_auth_header)
+
+    assert exc_info.value.status_code == 500
+    conversation_mocks['logging'].exception.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_token_expired(conversation_mocks):
+    """Expired token on batch delete maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_conversations_batch_endpoint(
+            request_obj, authorization="Bearer x")
+
+    assert exc_info.value.status_code == 401
+
+
 # get_conversation_history_endpoint
 
 
@@ -559,3 +626,73 @@ async def test_get_message_id_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+# TokenExpiredError -> 401 mapping
+
+
+@pytest.mark.asyncio
+async def test_conversation_endpoints_token_expired(conversation_mocks):
+    """Every conversation management endpoint maps an expired token to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    request_obj = MagicMock()
+    request_obj.title = "t"
+    request_obj.name = "n"
+    request_obj.conversation_id = 1
+    request_obj.question = "q"
+
+    error = TokenExpiredError("expired")
+    cases = [
+        (create_new_conversation_endpoint, (request_obj,), {"authorization": "Bearer x"}),
+        (list_conversations_endpoint, (), {"today_start_ms": 0, "week_start_ms": 0, "authorization": "Bearer x"}),
+        (rename_conversation_endpoint, (request_obj,), {"authorization": "Bearer x"}),
+        (delete_conversation_endpoint, (1,), {"authorization": "Bearer x"}),
+        (get_conversation_history_endpoint, (1,), {"authorization": "Bearer x"}),
+        (get_sources_endpoint, ({"conversation_id": 1, "message_id": 2},), {"authorization": "Bearer x"}),
+    ]
+
+    for endpoint, args, kwargs in cases:
+        conversation_mocks['get_current_user_id'].side_effect = error
+        with pytest.raises(HTTPException) as exc_info:
+            await endpoint(*args, **kwargs)
+        assert exc_info.value.status_code == 401
+        conversation_mocks['get_current_user_id'].reset_mock()
+
+
+@pytest.mark.asyncio
+async def test_generate_conversation_title_token_expired(conversation_mocks):
+    """Expired token on title generation maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    request_obj = MagicMock()
+    request_obj.conversation_id = 1
+    request_obj.question = "q"
+
+    conversation_mocks['get_user_info'].side_effect = TokenExpiredError(
+        "expired")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_conversation_title_endpoint(
+            request_obj, MagicMock(), authorization="Bearer x")
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_update_conversation_knowledge_scope_token_expired(conversation_mocks):
+    """Expired token on knowledge-scope update maps to 401."""
+    from backend.apps.conversation_management_app import update_conversation_knowledge_scope_endpoint
+    from consts.exceptions import TokenExpiredError
+
+    request_obj = MagicMock()
+    request_obj.scope = None
+
+    conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await update_conversation_knowledge_scope_endpoint(
+            1, request_obj, authorization="Bearer x")
+
+    assert exc_info.value.status_code == 401

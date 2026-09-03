@@ -1088,7 +1088,7 @@ def aggregate_store_chunks(
     }
 
 
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward_part', queue='forward_q')
+@app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward_part', queue='forward_part_q')
 @trace_knowledge_operation("knowledge.forward.batch", "forward.batch")
 def forward_part(
         self,
@@ -1210,14 +1210,19 @@ def forward_part(
         )
 
 
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.aggregate_forward_parts', queue='forward_q')
+@app.task(
+    bind=True,
+    base=LoggingTask,
+    name='data_process.tasks.aggregate_forward_parts',
+    queue='forward_aggregate_q',
+)
 @trace_knowledge_operation("knowledge.forward.aggregate", "forward.aggregate")
 def aggregate_forward_parts(
         self,
         parts_results: List[Dict[str, Any]],
         source: Optional[str] = None,
         index_name: Optional[str] = None,
-        original_filename: Optional[str] = None
+        original_filename: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Aggregate forward_part results.
@@ -2058,13 +2063,13 @@ def forward(
                     total_batches=total_batches,
                     # If request was split into multiple groups, force all groups to use large path.
                     large_mode=True,
-                ).set(queue='forward_q') for idx, batch in enumerate(batches)
+                ).set(queue='forward_part_q') for idx, batch in enumerate(batches)
             )
             callback = aggregate_forward_parts.s(
                 source=original_source,
                 index_name=original_index_name,
-                original_filename=original_filename
-            ).set(queue='forward_q')
+                original_filename=original_filename,
+            ).set(queue='forward_aggregate_q')
             result = chord(group_tasks)(callback)
             with allow_join_result():
                 es_result = result.get()

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.consts.model import AgentRequest
-from backend.services import agent_service
+from management.services.agent import run as agent_service
 
 
 @pytest.mark.asyncio

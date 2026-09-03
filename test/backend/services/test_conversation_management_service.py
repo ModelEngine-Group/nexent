@@ -758,6 +758,7 @@ class TestConversationManagementService(unittest.TestCase):
                     "message_index": 0,
                     "role": "user",
                     "message_content": "What is AI?",
+                    "create_time": 1680307200123,
                     "minio_files": [],
                     "units": []
                 },
@@ -766,6 +767,7 @@ class TestConversationManagementService(unittest.TestCase):
                     "message_index": 1,
                     "role": "assistant",
                     "message_content": "AI stands for Artificial Intelligence.",
+                    "create_time": 1680307204567,
                     "units": [],
                     "opinion_flag": None
                 }
@@ -795,10 +797,12 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(user_message["role"], "user")
         self.assertEqual(user_message["message"], "What is AI?")
         self.assertEqual(user_message["message_index"], 0)
+        self.assertEqual(user_message["create_time"], 1680307200123)
 
         assistant_message = result[0]["message"][1]
         self.assertEqual(assistant_message["role"], "assistant")
         self.assertEqual(assistant_message["message_index"], 1)
+        self.assertEqual(assistant_message["create_time"], 1680307204567)
         # Contains final_answer unit
         self.assertEqual(len(assistant_message["message"]), 1)
         self.assertEqual(
@@ -1443,6 +1447,95 @@ class TestDeleteConversationService(unittest.TestCase):
         with self.assertRaises(Exception) as ctx:
             delete_conversation_service(123, "user-1")
         self.assertIn("DB error", str(ctx.exception))
+
+
+class TestDeleteConversationsBatchService(unittest.TestCase):
+    """Test delete_conversations_batch_service function."""
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_success(self, mock_delete_batch):
+        """Returns deleted_count and failed_ids when some ids are not owned."""
+        mock_delete_batch.return_value = [101, 102]
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+
+        result = delete_conversations_batch_service([101, 102, 999], "user-1")
+
+        self.assertEqual(result["deleted_count"], 2)
+        self.assertEqual(result["failed_ids"], [999])
+        mock_delete_batch.assert_called_once_with([101, 102, 999], "user-1")
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_none_owned(self, mock_delete_batch):
+        """Returns 0 deleted and all ids as failed when none owned."""
+        mock_delete_batch.return_value = []
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+
+        result = delete_conversations_batch_service([999], "user-1")
+
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertEqual(result["failed_ids"], [999])
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_db_exception_propagates(self, mock_delete_batch):
+        """Should re-raise exception from database layer."""
+        mock_delete_batch.side_effect = Exception("DB error")
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+
+        with self.assertRaises(RuntimeError) as ctx:
+            delete_conversations_batch_service([101], "user-1")
+        self.assertIn("DB error", str(ctx.exception))
+
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_invokes_automation_hook_per_id(self, mock_delete_batch):
+        """on_conversation_deleted is called for each requested conversation id."""
+        mock_delete_batch.return_value = [101, 102]
+        calls = []
+
+        class _Facade:
+            def on_conversation_deleted(self, conversation_id, user_id):
+                calls.append((conversation_id, user_id))
+
+        facade_module = types.ModuleType("services.agent_automation.facade")
+        facade_module.agent_automation_facade = _Facade()
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+        with patch.dict(sys.modules, {"services.agent_automation.facade": facade_module}):
+            result = delete_conversations_batch_service([101, 102, 999], "user-1")
+
+        self.assertEqual(calls, [(101, "user-1"), (102, "user-1"), (999, "user-1")])
+        self.assertEqual(result, {"deleted_count": 2, "failed_ids": [999]})
+        mock_delete_batch.assert_called_once_with([101, 102, 999], "user-1")
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_automation_error_does_not_block(self, mock_delete_batch):
+        """A failing automation cleanup is logged but does not block deletion."""
+        mock_delete_batch.return_value = [101]
+
+        class _Facade:
+            def on_conversation_deleted(self, conversation_id, user_id):
+                raise RuntimeError("automation boom")
+
+        facade_module = types.ModuleType("services.agent_automation.facade")
+        facade_module.agent_automation_facade = _Facade()
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+        with patch.dict(sys.modules, {"services.agent_automation.facade": facade_module}):
+            result = delete_conversations_batch_service([101, 102], "user-1")
+
+        self.assertEqual(result, {"deleted_count": 1, "failed_ids": [102]})
+        mock_delete_batch.assert_called_once_with([101, 102], "user-1")
+
+    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    def test_batch_delete_automation_import_failure_does_not_block(self, mock_delete_batch):
+        """If the automation facade cannot be imported, deletion still proceeds."""
+        mock_delete_batch.return_value = [101]
+        facade_module = types.ModuleType("services.agent_automation.facade")
+        # No agent_automation_facade attribute -> `from ... import` raises AttributeError
+        from backend.services.conversation_management_service import delete_conversations_batch_service
+        with patch.dict(sys.modules, {"services.agent_automation.facade": facade_module}):
+            result = delete_conversations_batch_service([101], "user-1")
+
+        self.assertEqual(result, {"deleted_count": 1, "failed_ids": []})
+        mock_delete_batch.assert_called_once_with([101], "user-1")
 
 
 class TestBuildStreamingMessage(unittest.TestCase):
