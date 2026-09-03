@@ -52,7 +52,7 @@ test = [
     "pytest",
     "pytest-cov",
     "coverage",
-    "langfuse==2.60.10",
+    "langfuse==4.14.5",
     "unittest2",
     "mock",
     "pytest-asyncio",
