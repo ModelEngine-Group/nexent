@@ -15,7 +15,7 @@ export default function AgentRunPolicy() {
     <div className="w-full">
       <Row gutter={[16, 0]}>
         {/* Max Steps */}
-        <Col xs={24} sm={12}>
+        <Col xs={24}>
           <Form.Item
             name="max_step"
             label={t("agent.runPolicy.maxStep")}
@@ -30,29 +30,6 @@ export default function AgentRunPolicy() {
             />
             <span className="ant-form-text pl-2">
               {t("agent.runPolicy.maxStepUnit")}
-            </span>
-          </Form.Item>
-        </Col>
-
-        {/* Output Reserve */}
-        <Col xs={24} sm={12}>
-          <Form.Item
-            name="requested_output_tokens"
-            label={t("agent.requestedOutputTokens")}
-            className="mb-3"
-          >
-            <InputNumber
-              min={128}
-              max={32768}
-              step={128}
-              className="w-full"
-              value={editedAgent.requested_output_tokens ?? 4096}
-              onChange={(val) =>
-                updateAgent({ requested_output_tokens: val ?? 4096 })
-              }
-            />
-            <span className="ant-form-tex pl-2" >
-              tokens
             </span>
           </Form.Item>
         </Col>

@@ -1,4 +1,4 @@
- import { resourcesCustom } from "@/app/i18n";
+import { resourcesCustom } from "@/app/i18n";
 
 // Chat related configuration
 export const chatConfig = {
@@ -33,7 +33,11 @@ export const chatConfig = {
 
   // File limit configuration
   maxFileCount: 50,
-  maxFileSize: (Number((resourcesCustom?.zh?.custom as any)?.['FILE_UPLOAD_SIZE_LIMIT']) || 10) * 1024 * 1024, // Maximum 10MB - 100MB per file
+  maxFileSize:
+    (Number((resourcesCustom?.zh?.custom as any)?.["FILE_UPLOAD_SIZE_LIMIT"]) ||
+      10) *
+    1024 *
+    1024, // Maximum 10MB - 100MB per file
 
   // Supported image file extensions
   imageExtensions: ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"],
@@ -149,6 +153,7 @@ export const chatConfig = {
     PREPROCESS: "preprocess" as const,
     FILES: "files" as const,
     HISTORY_SUMMARY: "history_summary" as const,
+    CONTEXT_BUDGET: "context_budget" as const,
   },
 
   // Content type constants for last content type tracking
@@ -183,8 +188,7 @@ export const chatConfig = {
 
 // Type definitions for better type safety
 export type Opinion =
-  | (typeof chatConfig.opinion)[keyof typeof chatConfig.opinion]
-  | null;
+  (typeof chatConfig.opinion)[keyof typeof chatConfig.opinion] | null;
 export type MessageType =
   (typeof chatConfig.messageTypes)[keyof typeof chatConfig.messageTypes];
 export type ContentType =

@@ -7,6 +7,7 @@ import time
 import uuid
 import threading
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 from textwrap import dedent
 from typing import Any, Optional, List, Dict
@@ -262,8 +263,6 @@ def _looks_like_incomplete_action_output(
     """
     if not isinstance(text, str) or not text.strip():
         return False
-    if finish_reason == "length":
-        return True
     if _looks_like_invalid_action_output(text):
         return True
     if _EXPLICIT_FINAL_ANSWER_RE.search(text):
@@ -613,6 +612,67 @@ class CoreAgent(CodeAgent):
             tools.extend(list(iterable or ()))
         return tools
 
+    def _activate_emergency_archive_tool(self, *, hard_budget: int) -> Any:
+        """Expose the run-local recall tool and authorize it in the live executor.
+
+        ``run()`` sends an initial tool snapshot to the Python executor before
+        the first model step. Emergency archive mode can activate later, while
+        rebuilding an overflowing request, so updating ``self.tools`` alone
+        would leave the executor unable to call the newly visible tool.
+        """
+        archive_tool = self.context_runtime.context_manager.activate_emergency_archive(
+            hard_budget=hard_budget
+        )
+        if not isinstance(self.tools, dict):
+            raise TypeError("Agent tool registry must be a dictionary")
+        self.tools.setdefault(archive_tool.name, archive_tool)
+        self._guardrail_wrap_tools()
+        self._wrap_visible_tool_events()
+        executor = getattr(self, "python_executor", None)
+        if executor is not None:
+            executor.send_tools({**self.tools, **self.managed_agents})
+        return archive_tool
+
+    def _emit_archive_recall_budget_update(self) -> None:
+        """Persist post-execution recall counters for the active recovery step."""
+        manager = getattr(self.context_runtime, "context_manager", None)
+        archive_tool = getattr(manager, "archive_tool", None)
+        archive = getattr(archive_tool, "archive", None)
+        evidence = getattr(self.model, "last_context_evidence", None)
+        preflight = getattr(self.model, "last_final_request_preflight", None)
+        if archive is None or evidence is None or preflight is None:
+            return
+        invocations = int(getattr(archive, "recall_invocations", 0) or 0)
+        if invocations <= int(getattr(evidence, "recall_invocation_count", 0) or 0):
+            return
+        updated = replace(
+            evidence,
+            recall_invocation_count=invocations,
+            recalled_tokens=int(getattr(archive, "recalled_tokens", 0) or 0),
+        )
+        self.model.last_context_evidence = updated
+        from .context_budget_event import build_context_budget_event
+
+        event = build_context_budget_event(
+            preflight,
+            updated,
+            step_number=self.step_number,
+            recovery_state="recovered",
+            recovery={
+                "trigger": "provider_overflow",
+                "phase": "archive",
+                "attempt": int(getattr(preflight, "retry_ordinal", 2) or 2),
+                "maximum_attempts": 2,
+                "compression_target": int(getattr(preflight, "hard_budget", 0) or 0),
+                "provisional_capacity": bool(getattr(self.model, "_using_provisional_capacity", False)),
+            },
+        )
+        self.observer.add_message(
+            self.agent_name,
+            ProcessType.CONTEXT_BUDGET,
+            json.dumps(event, ensure_ascii=False),
+        )
+
     def _guardrail_wrap_tools(self) -> None:
         """Wrap each tool's forward() to screen resolved args before execution (checkpoint ③).
 
@@ -783,10 +843,18 @@ Additional Args:
         """Stop before the provider call when safe compaction cannot fit input."""
         evidence = final_context.evidence
         if evidence.over_hard_budget is True:
-            raise ValueError(
-                "Context input remains over the model hard budget after compaction: "
+            reason = getattr(
+                evidence, "budget_failure_reason", None
+            ) or "final_request_over_hard_budget"
+            error = ValueError(
+                f"{reason}: Context input remains over the model hard budget after compaction: "
                 f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
             )
+            error.context_rebuild_over_budget = True
+            error.failure_reason = reason
+            error.actual = evidence.final_token_estimate
+            error.hard_budget = evidence.hard_budget
+            raise error
 
     def _emit_history_summary_event(self) -> None:
         payload = self.context_runtime.consume_history_summary_event()
@@ -815,6 +883,8 @@ Additional Args:
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
+        self.model.last_context_evidence = final_context.evidence
+        self.model.context_budget_step_number = self.step_number
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
         # is already the compressed payload, so use the ContextManager's raw
@@ -858,8 +928,36 @@ Additional Args:
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
         try:
-            chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=stop_sequences, **additional_args)
+            model_call_args = dict(additional_args)
+            rebuild_allowed = guardrail_engine is None or decision.effective_action == "pass"
+            if (
+                rebuild_allowed
+            ):
+                def rebuild_context(target_tokens: int, *, emergency_archive: bool = False):
+                    if emergency_archive:
+                        self._activate_emergency_archive_tool(hard_budget=target_tokens)
+                    rebuilt = self.context_runtime.prepare_step(
+                        model=self.model,
+                        memory=self.memory,
+                        current_run_start_idx=self._history_step_count,
+                        tools=self._context_tools(),
+                        target_input_budget_tokens=target_tokens,
+                        emergency_archive=emergency_archive,
+                    )
+                    get_monitoring_manager().record_final_context_evidence(
+                        rebuilt.evidence, step_number=self.step_number
+                    )
+                    self._ensure_context_within_hard_budget(rebuilt)
+                    return rebuilt
+
+                model_call_args["context_rebuild"] = rebuild_context
+            chat_message: ChatMessage = self.model(
+                input_messages,
+                stop_sequences=stop_sequences,
+                usage_purpose="main_agent",
+                usage_turn_id=getattr(self, "_usage_turn_id", None),
+                **model_call_args,
+            )
             memory_step.model_output_message = chat_message
             model_output = chat_message.content
             memory_step.token_usage = chat_message.token_usage
@@ -1014,6 +1112,7 @@ Additional Args:
                 "Last output from code snippet:\n" + truncated_output,
             )
         memory_step.observations = observation
+        self._emit_archive_recall_budget_update()
 
         verification_controller = getattr(self, "verification_controller", None)
         if verification_controller:
@@ -1555,6 +1654,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         self._emit_history_summary_event()
         self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
+        self.model.last_context_evidence = final_context.evidence
+        self.model.context_budget_step_number = self.step_number
 
         # Create the final memory step with error
         final_memory_step = ActionStep(
@@ -1573,7 +1674,34 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             # Use streaming call (model.__call__) to generate final answer
             # This will trigger observer.add_model_new_token() and
             # observer.add_model_reasoning_content() in OpenAIModel
-            chat_message: ChatMessage = self.model(messages)
+            model_call_args = {}
+            if self.context_runtime.context_manager is not None:
+                def rebuild_final_context(target_tokens: int, *, emergency_archive: bool = False):
+                    if emergency_archive:
+                        self._activate_emergency_archive_tool(hard_budget=target_tokens)
+                    rebuilt = self.context_runtime.prepare_final_answer(
+                        model=self.model,
+                        memory=self.memory,
+                        current_run_start_idx=self._history_step_count,
+                        tools=self._context_tools(),
+                        task=task,
+                        final_answer_templates=self.prompt_templates,
+                        target_input_budget_tokens=target_tokens,
+                        emergency_archive=emergency_archive,
+                    )
+                    get_monitoring_manager().record_final_context_evidence(
+                        rebuilt.evidence, step_number=self.step_number
+                    )
+                    self._ensure_context_within_hard_budget(rebuilt)
+                    return rebuilt
+
+                model_call_args["context_rebuild"] = rebuild_final_context
+            chat_message: ChatMessage = self.model(
+                messages,
+                usage_purpose="final_answer",
+                usage_turn_id=getattr(self, "_usage_turn_id", None),
+                **model_call_args,
+            )
 
             # Update role and content from the completed message
             role = chat_message.role

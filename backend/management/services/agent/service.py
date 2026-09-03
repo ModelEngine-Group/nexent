@@ -582,12 +582,11 @@ def _validate_requested_output_tokens_for_agent(
     request: AgentInfoRequest,
     tenant_id: str,
 ) -> None:
+    """Deprecated compatibility validator; runtime no longer calls this path."""
     requested_output_tokens = request.requested_output_tokens
     if requested_output_tokens is None:
         return
 
-    # Validate against every configured model — the user can switch models at
-    # chat time, so requested_output_tokens must not exceed any model's limit.
     model_ids = list(request.model_ids or [])
     if not model_ids and request.agent_id is not None:
         try:
@@ -598,14 +597,7 @@ def _validate_requested_output_tokens_for_agent(
             )
             model_ids = list(existing_agent.get("model_ids") or [])
         except Exception as exc:
-            logger.warning(
-                "Could not resolve existing agent models for requested_output_tokens validation: %s",
-                exc,
-            )
-
-    if not model_ids:
-        return
-
+            logger.warning("Could not resolve existing agent models: %s", exc)
     for model_id in model_ids:
         model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
         max_output_tokens = model_info.get("max_output_tokens") if model_info else None
@@ -615,10 +607,8 @@ def _validate_requested_output_tokens_for_agent(
             )
             raise AppException(
                 ErrorCode.COMMON_PARAMETER_INVALID,
-                (
-                    f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
-                    f"max_output_tokens ({max_output_tokens}) of model '{model_display}'"
-                ),
+                f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
+                f"max_output_tokens ({max_output_tokens}) of model '{model_display}'",
             )
 
 
@@ -628,7 +618,11 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "example_questions cannot exceed 6 items")
 
-    _validate_requested_output_tokens_for_agent(request, tenant_id)
+    # These fields remain accepted for rolling-client compatibility, but the
+    # automatic context policy is the only policy persisted for new updates.
+    request.requested_output_tokens = None
+    request.context_policy = None
+    request.enable_context_manager = True
 
     prompt_template_id, prompt_template_name = get_prompt_template_summary(
         template_id=request.prompt_template_id,
@@ -654,13 +648,11 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
                 "prompt_template_id": prompt_template_id,
                 "prompt_template_name": prompt_template_name,
                 "max_steps": request.max_steps,
-                "requested_output_tokens": request.requested_output_tokens,
                 "is_main_agent": request.is_main_agent if request.is_main_agent is not None else True,
                 "provide_run_summary": request.provide_run_summary,
                 "allow_chat_metadata": request.allow_chat_metadata if request.allow_chat_metadata is not None else False,
                 "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                 "verification_config": request.verification_config,
-                "context_policy": request.context_policy,
                 "duty_prompt": request.duty_prompt,
                 "constraint_prompt": request.constraint_prompt,
                 "few_shots_prompt": request.few_shots_prompt,

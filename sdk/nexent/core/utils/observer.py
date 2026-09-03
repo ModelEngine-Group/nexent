@@ -41,6 +41,9 @@ class ProcessType(Enum):
     OTHER = "other"  # temporary other fields
     TOKEN_COUNT = "token_count"  # record the number of tokens used in each step
     HISTORY_SUMMARY = "history_summary"  # newly-created context compression checkpoint
+    CONTEXT_BUDGET = "context_budget"  # content-free P3 final request budget snapshot
+    LLM_USAGE = "llm_usage"  # P7 normalized usage for one physical provider call
+    TURN_USAGE = "turn_usage"  # P7 deterministic user-turn usage summary
 
     SEARCH_CONTENT = "search_content"  # search content in tool
     PICTURE_WEB = "picture_web"  # record the image after联网搜索
@@ -230,6 +233,9 @@ class MessageObserver:
             ProcessType.SEARCH_CONTENT: default_transformer,
             ProcessType.TOKEN_COUNT: TokenCountTransformer(),
             ProcessType.HISTORY_SUMMARY: default_transformer,
+            ProcessType.CONTEXT_BUDGET: default_transformer,
+            ProcessType.LLM_USAGE: default_transformer,
+            ProcessType.TURN_USAGE: default_transformer,
             ProcessType.PICTURE_WEB: default_transformer,
             ProcessType.AGENT_FINISH: default_transformer,
             ProcessType.CARD: default_transformer,

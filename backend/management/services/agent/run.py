@@ -804,10 +804,8 @@ async def prepare_agent_run(
         "is_debug": agent_request.is_debug,
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
-        "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,
-        "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
     runtime_knowledge_context = getattr(agent_request, "_runtime_knowledge_context", None)
@@ -1756,4 +1754,3 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:
     return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
-
