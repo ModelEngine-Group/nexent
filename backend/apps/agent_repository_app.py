@@ -251,12 +251,13 @@ async def import_agent_from_repository_api(
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         await import_agent_from_repository_impl(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
             skill_resolutions=skill_resolutions,
+            user_id=user_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={})
     except UnauthorizedError as e:

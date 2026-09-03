@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
 from consts.agent_repository import (
@@ -1041,6 +1042,21 @@ def check_repository_import_precheck_impl(
     if record.get("status") != STATUS_SHARED:
         raise ValueError("Repository listing is not available for import")
 
+    if record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID:
+        # Official dependencies are resolved from the mounted bundle at import
+        # time. The generic precheck cannot validate its logical KB names as
+        # tenant index names, so leave the dependency decision to the official
+        # installer (which can return needs_model and reuse existing resources).
+        return {
+            "agent_repository_id": agent_repository_id,
+            "display_name": str(record.get("display_name") or record.get("name") or "Agent"),
+            "total_count": 0,
+            "available_count": 0,
+            "percent": 100,
+            "has_abnormal": False,
+            "items": [],
+        }
+
     agent_info_json = record.get("agent_info_json")
     if not isinstance(agent_info_json, dict):
         raise ValueError("Repository listing has no agent snapshot")
@@ -1065,6 +1081,7 @@ async def import_agent_from_repository_impl(
     tenant_id: str,
     authorization: str,
     skill_resolutions: Optional[List[SkillResolution]] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     record = get_agent_repository_by_id(
@@ -1073,6 +1090,41 @@ async def import_agent_from_repository_impl(
     )
     if not record:
         raise ValueError("Repository listing not found")
+
+    # Official listings are templates backed by a mounted bundle. Their
+    # knowledge bases, skills and MCP servers must be prepared in the target
+    # tenant before the normal agent snapshot is imported. Ordinary listings
+    # continue through the existing import path below.
+    if record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID:
+        from services.official_agent_service import install_official_agents
+
+        content = str(record.get("content") or "")
+        match = re.search(r"Official Nexent agent bundle:\s*(\S+)", content)
+        bundle_name = match.group(1) if match else str(record.get("name") or "")
+        results = await install_official_agents(
+            [bundle_name],
+            tenant_id=tenant_id,
+            user_id=user_id or "repository-import",
+            authorization=authorization,
+        )
+        item = results[0] if results else None
+        if item is None:
+            raise ValueError("Official agent installation returned no result")
+        if item.status == "needs_model":
+            raise ValueError(item.message or "Official agent requires model configuration")
+        if item.status == "failed":
+            raise ValueError(item.message or "Official agent installation failed")
+        if item.status == "not_found":
+            raise ValueError(item.message or "Official agent bundle not found")
+
+        affected = increment_agent_repository_downloads(agent_repository_id)
+        if affected == 0:
+            logger.warning(
+                "Failed to increment repository downloads after official import "
+                "(agent_repository_id=%s)",
+                agent_repository_id,
+            )
+        return {record.get("agent_id"): item.agent_id} if item.agent_id else {}
 
     agent_info_json = record.get("agent_info_json")
     if not isinstance(agent_info_json, dict):

@@ -2416,7 +2416,9 @@ async def import_agent_impl(
     agent_info: ExportAndImportDataFormat,
     authorization: str = Header(None),
     force_import: bool = False,
-    skill_name_to_id: Optional[Dict[str, int]] = None
+    skill_name_to_id: Optional[Dict[str, int]] = None,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ):
     """
     Import agent using DFS.
@@ -2427,7 +2429,8 @@ async def import_agent_impl(
         The backend import logic only consumes the tools that already
         exist for the current tenant.
     """
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+    if user_id is None or tenant_id is None:
+        user_id, tenant_id, _ = get_current_user_info(authorization)
     agent_id = agent_info.agent_id
 
     agent_stack = deque([agent_id])
@@ -4299,6 +4302,87 @@ async def import_agent_with_skills_impl(
                 version_no=0
             )
 
+    return agent_id_mapping
+
+
+async def _create_skills_for_install(
+    skills: List[SkillZipEntry],
+    tenant_id: str,
+    user_id: str,
+    reuse_existing_skills: bool = False,
+) -> Dict[str, int]:
+    """Create or reuse tenant skills for the official-agent installer.
+
+    This small helper intentionally delegates skill creation to the same
+    ``SkillService`` used by ordinary imports while allowing official bundles
+    to reuse an existing tenant skill by name.
+    """
+    skill_name_to_zip = {
+        entry.skill_name: entry.skill_zip_base64 for entry in skills
+    }
+    existing = {
+        item.get("name"): item.get("skill_id")
+        for item in skill_db.list_skills(tenant_id)
+        if item.get("name")
+    }
+    duplicates = list(set(skill_name_to_zip) & set(existing))
+    if duplicates and not reuse_existing_skills:
+        raise SkillDuplicateError(duplicates)
+
+    service = SkillService(tenant_id=tenant_id)
+    result: Dict[str, int] = {}
+    for skill_name, encoded_zip in skill_name_to_zip.items():
+        if reuse_existing_skills and skill_name in existing:
+            result[skill_name] = existing[skill_name]
+            continue
+        created = service.create_skill_from_zip_bytes(
+            zip_bytes=base64.b64decode(encoded_zip),
+            skill_name=skill_name,
+            source="导入",
+            user_id=user_id,
+            tenant_id=tenant_id,
+            skip_duplicate_check=True,
+        )
+        result[skill_name] = created["skill_id"]
+    return result
+
+
+async def _import_agent_with_skill_links(
+    agent_info: ExportAndImportDataFormat,
+    skill_name_to_id: Dict[str, int],
+    authorization: str,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+):
+    """Import an agent tree and link tenant-level skills to its agents."""
+    agent_id_mapping = await import_agent_impl(
+        agent_info,
+        authorization,
+        skill_name_to_id=skill_name_to_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    if user_id is None or tenant_id is None:
+        user_id, tenant_id, _ = get_current_user_info(authorization)
+    for imported_agent in agent_info.agent_info.values():
+        new_agent_id = agent_id_mapping.get(imported_agent.agent_id)
+        if not new_agent_id:
+            continue
+        for skill_name in imported_agent.skill_names or []:
+            skill_id = skill_name_to_id.get(skill_name)
+            if skill_id is None:
+                continue
+            skill_db.create_or_update_skill_by_skill_info(
+                skill_info=SkillInstanceInfoRequest(
+                    skill_id=skill_id,
+                    agent_id=new_agent_id,
+                    enabled=True,
+                    version_no=0,
+                ),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                version_no=0,
+            )
     return agent_id_mapping
 
 

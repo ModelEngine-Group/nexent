@@ -177,13 +177,45 @@ def load_official_bundles(base_dir: str | Path, profiles: Iterable[str]) -> list
         if not profile_dir.is_dir():
             logger.warning("Official agent profile directory not found: %s", profile_dir)
             continue
-        for path in sorted(profile_dir.glob("*.zip")):
+        bundle_paths = list(profile_dir.rglob("*.zip"))
+        bundle_dirs = [
+            path.parent
+            for path in profile_dir.rglob("agent.json")
+            if path.is_file()
+        ]
+        for path in sorted(bundle_paths):
             try:
                 bundle = _load_zip_bundle(profile, path)
                 if bundle is None:
                     continue
             except (OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
                 logger.warning("Skipping official agent bundle %s: %s", path, exc)
+                continue
+            if bundle.name in seen_names:
+                raise ValueError(f"duplicate official agent bundle: {bundle.name}")
+            seen_names.add(bundle.name)
+            bundles.append(bundle)
+        for bundle_dir in sorted(bundle_dirs):
+            try:
+                data = _read_bundle_json(bundle_dir)
+                snapshot = _snapshot_from_json(data)
+                skills = _load_skill_entries(bundle_dir, snapshot)
+                if skills:
+                    snapshot = snapshot.model_copy(update={"skills": skills})
+                kb_docs = _load_kb_documents(bundle_dir, data)
+                bundle = OfficialAgentBundle(
+                    profile=profile,
+                    name=bundle_dir.name,
+                    snapshot=snapshot,
+                    display_name=data.get("display_name"),
+                    description=data.get("description"),
+                    tags=data.get("tags"),
+                    icon=data.get("icon"),
+                    bundle_path=bundle_dir,
+                    knowledge_base_documents=kb_docs,
+                )
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                logger.warning("Skipping official agent bundle %s: %s", bundle_dir, exc)
                 continue
             if bundle.name in seen_names:
                 raise ValueError(f"duplicate official agent bundle: {bundle.name}")
