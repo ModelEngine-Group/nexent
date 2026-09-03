@@ -215,6 +215,29 @@ def test_update_model_record(monkeypatch):
     session.execute.assert_called_once()
 
 
+def test_fail_detecting_models_on_startup(monkeypatch):
+    """Interrupted checks reuse the existing unavailable state."""
+    mock_result = MagicMock(rowcount=3)
+    mock_stmt = MagicMock()
+    mock_stmt.where.return_value = mock_stmt
+    mock_stmt.values.return_value = mock_stmt
+    mock_update = MagicMock(return_value=mock_stmt)
+    monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
+
+    session = MagicMock()
+    session.execute.return_value = mock_result
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.model_management_db.get_db_session", lambda: mock_ctx
+    )
+
+    assert model_mgmt_db.fail_detecting_models_on_startup() == 3
+    assert mock_stmt.values.call_args.kwargs["connect_status"] == "unavailable"
+    session.execute.assert_called_once_with(mock_stmt)
+
+
 def test_delete_model_record(monkeypatch):
     """Test delete_model_record function (covers lines 99-119)"""
     mock_result = MagicMock()

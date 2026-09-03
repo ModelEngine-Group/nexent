@@ -125,6 +125,7 @@ class ConversationMessage:
     minio_files = MagicMock(name="ConversationMessage.minio_files")
     opinion_flag = MagicMock(name="ConversationMessage.opinion_flag")
     create_time = MagicMock(name="ConversationMessage.create_time")
+    update_time = MagicMock(name="ConversationMessage.update_time")
     created_by = MagicMock(name="ConversationMessage.created_by")
 
 
@@ -211,6 +212,7 @@ from backend.database.conversation_db import (
     delete_conversations_batch,
     delete_source_image,
     delete_source_search,
+    fail_streaming_assistant_messages,
     get_conversation,
     get_conversation_history,
     get_historical_context,
@@ -246,6 +248,50 @@ from consts.exceptions import (
     ConversationNotFoundError,
     RuntimeMetadataVersionConflict,
 )
+
+
+def test_fail_streaming_assistant_messages_returns_runtime_identities(
+    monkeypatch, mock_session_ctx
+):
+    """Startup recovery fails only the rows it locked as streaming."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = [
+        SimpleNamespace(message_id=7, conversation_id=11, created_by="user-1"),
+        SimpleNamespace(message_id=8, conversation_id=12, created_by="user-2"),
+    ]
+    query.update.return_value = 2
+    session.query.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    rows = fail_streaming_assistant_messages()
+
+    assert rows == [
+        {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},
+        {"message_id": 8, "conversation_id": 12, "user_id": "user-2"},
+    ]
+    updates = query.update.call_args.args[0]
+    assert updates["status"] == "failed"
+    assert query.with_for_update.called
+
+
+def test_fail_streaming_assistant_messages_returns_empty_without_rows(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = []
+    session.query.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    assert fail_streaming_assistant_messages() == []
+    query.update.assert_not_called()
 
 
 @pytest.fixture(autouse=True)

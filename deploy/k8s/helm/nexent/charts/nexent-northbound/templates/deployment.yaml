@@ -1,3 +1,9 @@
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "nexent-northbound must remain single-replica for startup task recovery" -}}
+{{- end -}}
+{{- if ne .Values.strategy.type "Recreate" -}}
+{{- fail "nexent-northbound strategy.type must be Recreate for startup task recovery" -}}
+{{- end -}}
 {{- $global := default dict .Values.global -}}
 {{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
