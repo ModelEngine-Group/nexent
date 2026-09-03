@@ -3995,7 +3995,6 @@
   "quota.actualUsage": "Actual Usage",
   "quota.sourceFileUsage": "Source File Usage",
   "quota.esPhysicalIndex": "ES Physical Index",
-  "quota.esPhysicalUnavailable": "Unavailable",
   "quota.usage": "Usage",
   "quota.status": "Status",
   "quota.saveSuccess": "Quota settings saved successfully",

@@ -731,14 +731,12 @@ class TestPlatformQuota:
                 {
                     "total_bytes": 10 * GB,
                     "es_physical_bytes": 2 * GB,
-                    "es_stats_available": True,
                     "warning_enabled": True,
                     "tenant_warning_level": "normal",
                 },
                 {
                     "total_bytes": 5 * GB,
                     "es_physical_bytes": 3 * GB,
-                    "es_stats_available": True,
                     "warning_enabled": True,
                     "tenant_warning_level": "normal",
                 },
@@ -749,7 +747,6 @@ class TestPlatformQuota:
             result = QuotaService.get_platform_overview()
 
         assert result["total_es_physical_bytes"] == 5 * GB
-        assert result["es_stats_available"] is True
         assert [tenant["es_physical_bytes"] for tenant in result["tenants"]] == [2 * GB, 3 * GB]
 
 
@@ -1911,7 +1908,7 @@ def test_personal_storage_stats_strict_allows_invalid_es_detail(quota_service, d
             [{"knowledge_id": 1, "index_name": "kb-a"}], strict=True
         )
     assert result["stats"] == {"kb-a": 0}
-    assert result["es_stats_available"] is False
+    assert result["details"]["kb-a"]["store_size_bytes"] == 0
 
 
 def test_personal_storage_stats_strict_source_query_failure_is_unavailable(quota_service):

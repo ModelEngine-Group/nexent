@@ -442,7 +442,6 @@ class QuotaService:
             "es_physical_readable": _bytes_to_readable(
                 user_usage.get("es_physical_bytes")
             ),
-            "es_stats_available": usage_data.get("es_stats_available"),
             "quota_bytes": quota_bytes,
             "quota_readable": _bytes_to_readable(quota_bytes),
             "quota_source": quota_source,
@@ -487,7 +486,6 @@ class QuotaService:
             and not (exclude_datamate and kb.get("knowledge_sources") == "datamate")
         ]
         indices_detail: Dict[str, Any] = {}
-        es_stats_available = not index_names
 
         if include_es and index_names:
             try:
@@ -498,26 +496,20 @@ class QuotaService:
                 indices_detail = (
                     raw_indices_detail if isinstance(raw_indices_detail, dict) else {}
                 )
-                es_stats_available = isinstance(raw_indices_detail, dict)
             except AppException:
                 # ES is an optional observability source. Preserve the source
                 # ledger result even when its adapter reports an application
                 # error, including during strict quota checks.
-                es_stats_available = False
                 logger.warning(
                     "Failed to query ES index stats for storage observability",
                     exc_info=True,
                 )
             except Exception as exc:
-                es_stats_available = False
                 logger.warning(
                     "Failed to query ES index stats for storage observability: %s",
                     exc,
                     exc_info=True,
                 )
-        elif include_es:
-            es_stats_available = True
-
         knowledge_ids = [
             kb.get("knowledge_id")
             for kb in kb_list
@@ -556,16 +548,12 @@ class QuotaService:
             is_datamate = kb.get("knowledge_sources") == "datamate"
             if include_es and not (exclude_datamate and is_datamate):
                 detail = raw_detail if isinstance(raw_detail, dict) else {}
-                if not isinstance(raw_detail, dict) or "error" in detail:
-                    es_stats_available = False
                 base_info = (
                     detail.get("base_info")
                     if isinstance(detail.get("base_info"), dict)
                     else {}
                 )
                 store_size = base_info.get("store_size")
-                if not self._is_valid_store_size(store_size):
-                    es_stats_available = False
                 es_bytes = self._parse_store_size(store_size)
                 doc_count = base_info.get("doc_count", 0) or 0
                 chunk_count = base_info.get("chunk_count", 0) or 0
@@ -600,9 +588,7 @@ class QuotaService:
             "stats": stats,
             "details": details,
             "total_es_bytes": sum(item["store_size_bytes"] for item in details.values()),
-            "total_source_bytes": sum(item["source_size_bytes"] for item in details.values()),
             "total_bytes": sum(stats.values()),
-            "es_stats_available": es_stats_available if include_es else None,
         }
 
     def _get_personal_usage_data(
@@ -632,11 +618,7 @@ class QuotaService:
             "stats": storage_stats["stats"],
             "details": storage_stats["details"],
             "total_bytes": storage_stats.get("total_bytes", 0),
-            "total_source_bytes": storage_stats.get(
-                "total_source_bytes", storage_stats.get("total_bytes", 0)
-            ),
             "total_es_bytes": storage_stats.get("total_es_bytes", 0),
-            "es_stats_available": storage_stats.get("es_stats_available"),
         }
 
     def _aggregate_personal_storage_by_user(
@@ -659,20 +641,15 @@ class QuotaService:
             item["total_bytes"] += usage_data["stats"].get(
                 kb.get("index_name", ""), 0
             )
-            if usage_data.get("es_stats_available") is True:
-                detail = usage_data.get("details", {}).get(
-                    kb.get("index_name", ""), {}
-                )
-                item["es_physical_bytes"] = item.get("es_physical_bytes", 0) + int(
-                    detail.get("store_size_bytes", 0) or 0
-                )
-            else:
-                item["es_physical_bytes"] = None
+            detail = usage_data.get("details", {}).get(kb.get("index_name", ""), {})
+            item["es_physical_bytes"] = item.get("es_physical_bytes", 0) + int(
+                detail.get("store_size_bytes", 0) or 0
+            )
 
         for user_id in user_ids or set():
             grouped.setdefault(
                 user_id,
-                {"kbs": [], "kb_count": 0, "total_bytes": 0, "es_physical_bytes": None},
+                {"kbs": [], "kb_count": 0, "total_bytes": 0, "es_physical_bytes": 0},
             )
 
         return grouped
@@ -821,7 +798,6 @@ class QuotaService:
                 "store_size_bytes": detail.get("store_size_bytes", 0),
                 "es_physical_size": detail.get("store_size"),
                 "es_physical_size_bytes": detail.get("store_size_bytes", 0),
-                "es_stats_available": usage_data.get("es_stats_available"),
                 "source_size": detail.get("source_size"),
                 "source_size_bytes": detail.get("source_size_bytes", 0),
                 "total_size": detail.get("total_size"),
@@ -868,21 +844,10 @@ class QuotaService:
             "kb_count": len(kb_list),
             "total_bytes": usage_data["total_bytes"],
             "total_readable": _bytes_to_readable(usage_data["total_bytes"]),
-            "total_source_bytes": usage_data["total_source_bytes"],
-            "total_source_readable": _bytes_to_readable(
-                usage_data["total_source_bytes"]
-            ),
-            "total_es_physical_bytes": (
+            "total_es_physical_bytes": usage_data["total_es_bytes"],
+            "total_es_physical_readable": _bytes_to_readable(
                 usage_data["total_es_bytes"]
-                if usage_data.get("es_stats_available") is True
-                else None
             ),
-            "total_es_physical_readable": (
-                _bytes_to_readable(usage_data["total_es_bytes"])
-                if usage_data.get("es_stats_available") is True
-                else None
-            ),
-            "es_stats_available": usage_data.get("es_stats_available"),
             "allocated_quota_bytes": allocated_quota_bytes,
             "allocated_quota_readable": _bytes_to_readable(
                 allocated_quota_bytes
@@ -1178,7 +1143,6 @@ class QuotaService:
 
         breakdown = []
         total_es_bytes = storage_stats.get("total_es_bytes", 0)
-        es_stats_available = storage_stats.get("es_stats_available")
         total_files = 0
 
         for kb in kb_list:
@@ -1212,15 +1176,8 @@ class QuotaService:
                 "soft_quota_readable": _bytes_to_readable(soft_quota_bytes),
                 "actual_bytes": kb_actual_bytes,
                 "actual_readable": _bytes_to_readable(kb_actual_bytes),
-                "es_physical_bytes": (
-                    kb_es_bytes if es_stats_available is True else None
-                ),
-                "es_physical_readable": (
-                    _bytes_to_readable(kb_es_bytes)
-                    if es_stats_available is True
-                    else None
-                ),
-                "es_stats_available": es_stats_available,
+                "es_physical_bytes": kb_es_bytes,
+                "es_physical_readable": _bytes_to_readable(kb_es_bytes),
                 "usage_pct": kb_usage_pct,
                 "file_count": kb_file_count,
                 "kb_warning_level": kb_warning_level,
@@ -1252,17 +1209,8 @@ class QuotaService:
         result = {
             "total_bytes": total_bytes,
             "total_readable": _bytes_to_readable(total_bytes),
-            "total_source_bytes": total_bytes,
-            "total_source_readable": _bytes_to_readable(total_bytes),
-            "es_physical_bytes": (
-                total_es_bytes if es_stats_available is True else None
-            ),
-            "es_physical_readable": (
-                _bytes_to_readable(total_es_bytes)
-                if es_stats_available is True
-                else None
-            ),
-            "es_stats_available": es_stats_available,
+            "es_physical_bytes": total_es_bytes,
+            "es_physical_readable": _bytes_to_readable(total_es_bytes),
             "kb_count": len(kb_list),
             "file_count": total_files,
             "hard_limit_bytes": hard_limit_bytes,
@@ -1410,7 +1358,6 @@ class QuotaService:
                     "total_readable": usage.get("total_readable"),
                     "es_physical_bytes": usage.get("es_physical_bytes"),
                     "es_physical_readable": usage.get("es_physical_readable"),
-                    "es_stats_available": usage.get("es_stats_available"),
                 },
                 "kb_level": {
                     "usage_pct": kb_usage_pct,
@@ -1575,7 +1522,6 @@ class QuotaService:
         total_allocated_bytes = 0
         total_actual_bytes = 0
         total_es_physical_bytes = 0
-        es_stats_available = True
 
         for tid in tenant_ids:
             # Get hard limit for this tenant
@@ -1588,8 +1534,7 @@ class QuotaService:
             try:
                 usage = service.get_usage(force_refresh=True)
                 actual_bytes = usage.get("total_bytes", 0)
-                tenant_es_bytes = usage.get("es_physical_bytes")
-                tenant_es_available = usage.get("es_stats_available")
+                tenant_es_bytes = usage.get("es_physical_bytes", 0) or 0
                 warning_enabled = usage.get("warning_enabled", True)
                 warning_level = (
                     usage.get("tenant_warning_level", "normal")
@@ -1601,14 +1546,10 @@ class QuotaService:
                 actual_bytes = 0
                 warning_enabled = False
                 warning_level = "normal"
-                tenant_es_bytes = None
-                tenant_es_available = False
+                tenant_es_bytes = 0
 
             total_actual_bytes += actual_bytes
-            if tenant_es_available is not True or tenant_es_bytes is None:
-                es_stats_available = False
-            else:
-                total_es_physical_bytes += tenant_es_bytes
+            total_es_physical_bytes += tenant_es_bytes
 
             usage_pct = None
             if hard_limit_bytes and hard_limit_bytes > 0:
@@ -1627,15 +1568,8 @@ class QuotaService:
                 "hard_limit_readable": _bytes_to_readable(hard_limit_bytes),
                 "actual_bytes": actual_bytes,
                 "actual_readable": _bytes_to_readable(actual_bytes),
-                "es_physical_bytes": (
-                    tenant_es_bytes if tenant_es_available is True else None
-                ),
-                "es_physical_readable": (
-                    _bytes_to_readable(tenant_es_bytes)
-                    if tenant_es_available is True
-                    else None
-                ),
-                "es_stats_available": tenant_es_available,
+                "es_physical_bytes": tenant_es_bytes,
+                "es_physical_readable": _bytes_to_readable(tenant_es_bytes),
                 "usage_pct": usage_pct,
                 "warning_level": warning_level,
                 "warning_enabled": warning_enabled,
@@ -1661,15 +1595,8 @@ class QuotaService:
             "total_allocated_readable": _bytes_to_readable(total_allocated_bytes),
             "total_actual_bytes": total_actual_bytes,
             "total_actual_readable": _bytes_to_readable(total_actual_bytes),
-            "total_es_physical_bytes": (
-                total_es_physical_bytes if es_stats_available else None
-            ),
-            "total_es_physical_readable": (
-                _bytes_to_readable(total_es_physical_bytes)
-                if es_stats_available
-                else None
-            ),
-            "es_stats_available": es_stats_available,
+            "total_es_physical_bytes": total_es_physical_bytes,
+            "total_es_physical_readable": _bytes_to_readable(total_es_physical_bytes),
             "tenant_count": len(tenants),
             "oversubscription_ratio": oversubscription_ratio,
             "remaining_allocatable_bytes": remaining_allocatable_bytes,

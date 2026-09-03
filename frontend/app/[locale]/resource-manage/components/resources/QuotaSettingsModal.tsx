@@ -321,10 +321,7 @@ export function QuotaSettingsModal({
       title: t("quota.esPhysicalIndex", "ES Physical Index"),
       dataIndex: "es_physical_readable",
       key: "es_physical",
-      render: (val: string | null, record: KBQuotaStatus) =>
-        record.es_stats_available === false
-          ? t("quota.esPhysicalUnavailable", "Unavailable")
-          : val || "0 B",
+      render: (val: string | null) => val || "0 B",
     },
     {
       title: t("quota.usage", "Usage"),
@@ -549,9 +546,7 @@ export function QuotaSettingsModal({
             </Text>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
-              {usageData.es_stats_available === false
-                ? t("quota.esPhysicalUnavailable", "Unavailable")
-                : usageData.es_physical_readable || "0 B"}
+              {usageData.es_physical_readable || "0 B"}
             </Text>
             <Progress
               percent={usageData.usage_pct ?? 0}
@@ -609,9 +604,7 @@ export function QuotaSettingsModal({
             {usageData.soft_allocated_readable || "0 B"},{" "}
             {t("quota.actual", "actual")}: {usageData.total_readable || "0 B"},{" "}
             {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
-            {usageData.es_stats_available === false
-              ? t("quota.esPhysicalUnavailable", "Unavailable")
-              : usageData.es_physical_readable || "0 B"}
+            {usageData.es_physical_readable || "0 B"}
             {usageData.oversubscription_ratio != null &&
               usageData.oversubscription_ratio > 1 && (
                 <Tooltip

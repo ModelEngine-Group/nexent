@@ -467,9 +467,7 @@ export default function KnowledgeList({
         const indexName = record.index_name || record.id;
         const quotaData = indexName ? quotaMap.get(indexName) : undefined;
         const displaySize =
-          quotaData?.es_stats_available === false
-            ? t("quota.esPhysicalUnavailable")
-            : (quotaData?.es_physical_readable ?? (record.store_size || "—"));
+          quotaData?.es_physical_readable ?? (record.store_size || "—");
         return <span style={{ color: "#666" }}>{displaySize}</span>;
       },
     },

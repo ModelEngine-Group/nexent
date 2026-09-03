@@ -426,9 +426,7 @@ export function PlatformQuotaPanel({
           </Text>
           <Text type="secondary" style={{ display: "block", fontSize: 11 }}>
             {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
-            {record.es_stats_available === false
-              ? t("quota.esPhysicalUnavailable", "Unavailable")
-              : record.es_physical_readable || "0 B"}
+            {record.es_physical_readable || "0 B"}
           </Text>
         </div>
       ),
@@ -498,9 +496,7 @@ export function PlatformQuotaPanel({
                     {t("quota.esPhysicalIndex", "ES Physical Index")}
                   </Text>
                   <Text strong style={{ fontSize: 20 }}>
-                    {data?.es_stats_available === false
-                      ? t("quota.esPhysicalUnavailable", "Unavailable")
-                      : data?.total_es_physical_readable || "0 B"}
+                    {data?.total_es_physical_readable || "0 B"}
                   </Text>
                 </Space>
               </Col>

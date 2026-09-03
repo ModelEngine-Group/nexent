@@ -381,11 +381,9 @@ function KbDetailModal({ kb, onClose }: KbDetailModalProps) {
     {
       label: t("tenantResources.personalCapacity.esPhysicalSizeLabel"),
       value:
-        kb.es_stats_available === false
-          ? t("quota.esPhysicalUnavailable")
-          : kb.es_physical_size ||
-            kb.store_size ||
-            formatBytes(kb.es_physical_size_bytes ?? kb.store_size_bytes),
+        kb.es_physical_size ||
+        kb.store_size ||
+        formatBytes(kb.es_physical_size_bytes ?? kb.store_size_bytes),
     },
     {
       label: t("tenantResources.personalCapacity.documents"),
@@ -735,10 +733,7 @@ export default function PersonalKnowledgeBaseCapacity({
       {
         key: "es-usage",
         label: t("tenantResources.personalCapacity.esPhysicalSize"),
-        value:
-          summary?.es_stats_available === false
-            ? t("quota.esPhysicalUnavailable")
-            : summary?.total_es_physical_readable || "0 B",
+        value: summary?.total_es_physical_readable || "0 B",
       },
       {
         key: "allocated",
@@ -982,13 +977,9 @@ export default function PersonalKnowledgeBaseCapacity({
       key: "es_physical_size",
       width: 130,
       render: (value: string | null, record: PersonalKnowledgeBaseItem) =>
-        record.es_stats_available === false
-          ? t("quota.esPhysicalUnavailable")
-          : value ||
-            record.store_size ||
-            formatBytes(
-              record.es_physical_size_bytes ?? record.store_size_bytes
-            ),
+        value ||
+        record.store_size ||
+        formatBytes(record.es_physical_size_bytes ?? record.store_size_bytes),
     },
     {
       title: t("tenantResources.personalCapacity.kbQuota"),

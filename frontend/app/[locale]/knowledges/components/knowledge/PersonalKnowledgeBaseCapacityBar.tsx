@@ -91,9 +91,7 @@ export default function PersonalKnowledgeBaseCapacityBar() {
       />
       <div className="mt-1 text-right text-[11px] text-gray-400">
         {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
-        {capacity.es_stats_available === false
-          ? t("quota.esPhysicalUnavailable", "Unavailable")
-          : capacity.es_physical_readable || "0 B"}
+        {capacity.es_physical_readable || "0 B"}
       </div>
     </div>
   );
