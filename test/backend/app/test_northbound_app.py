@@ -12,7 +12,10 @@ from fastapi.testclient import TestClient
 from io import BytesIO
 
 # Import from conftest (which sets up mocks automatically)
-from apps.northbound_app import router
+# Agent management is outside the HTTP boundary exercised in this module.
+with pytest.MonkeyPatch.context() as import_mocks:
+    import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
+    from apps.northbound_app import router
 from consts.exceptions import (
     ConversationNotFoundError,
     ForbiddenError,

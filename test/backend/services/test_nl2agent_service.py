@@ -1,5 +1,7 @@
 import asyncio
 import json
+import sys
+import types
 from threading import Event
 from unittest.mock import AsyncMock, MagicMock
 
@@ -41,6 +43,18 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceRequirement,
 )
 from utils.http_client_utils import create_httpx_client
+
+
+@pytest.fixture
+def skill_repository(monkeypatch):
+    """Provide the listing boundary without initializing repository mutations."""
+    import services
+
+    module = types.ModuleType("services.skill_repository_service")
+    module.list_skill_repository_listings_impl = MagicMock()
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(services, "skill_repository_service", module, raising=False)
+    return module
 
 
 def _basic_draft_fields(**overrides):
@@ -690,7 +704,7 @@ def test_resource_config_normalization_is_frontend_safe():
 
 @pytest.mark.asyncio
 async def test_search_internal_uninstalled_resources_aggregates_sources_and_excludes_refs(
-    mocker,
+    mocker, skill_repository,
 ):
     mocker.patch(
         "management.services.skill.service.get_official_skills_with_status",
@@ -870,7 +884,7 @@ def test_installation_snapshot_redacts_nested_secret_shapes():
 
 
 @pytest.mark.asyncio
-async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker):
+async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker, skill_repository):
     mocker.patch(
         "management.services.skill.service.get_official_skills_with_status",
         return_value=[

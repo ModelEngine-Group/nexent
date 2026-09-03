@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import os
 import sys
 import types
 from datetime import datetime, timezone
@@ -51,6 +52,19 @@ def test_ac002_prepend_time_compatibility(monkeypatch, query, zone, expected):
 def test_ac002_strip_time_compatibility(monkeypatch, query, expected):
     module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
     assert module.strip_current_time_prefix(query) == expected
+
+
+def _project_python_files(root):
+    """Scan project sources without descending into local Python environments."""
+    for directory, subdirectories, filenames in os.walk(root):
+        subdirectories[:] = [
+            name for name in subdirectories
+            if name not in {".venv", "venv", "__pycache__"}
+            and not (Path(directory) / name / "pyvenv.cfg").is_file()
+        ]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                yield Path(directory) / filename
 
 
 def test_ac002_preview_key_matches_existing_contract(monkeypatch):
@@ -435,7 +449,7 @@ def test_ac017_repository_has_no_flat_management_service_references():
     checked_roots = (ROOT / "backend", ROOT / "sdk", ROOT / "test")
     stale_references = []
     for checked_root in checked_roots:
-        for path in checked_root.rglob("*.py"):
+        for path in _project_python_files(checked_root):
             content = path.read_text(encoding="utf-8-sig")
             for stale_prefix in stale_prefixes:
                 if stale_prefix in content:

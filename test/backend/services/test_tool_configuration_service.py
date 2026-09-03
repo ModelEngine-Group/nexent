@@ -421,10 +421,14 @@ services_modules = {
     },
 }
 for service_name, attrs in services_modules.items():
-    service_module = types.ModuleType(f'services.{service_name}')
+    module_name = (
+        'management.services.knowledge_base.service'
+        if service_name == 'vectordatabase_service' else f'services.{service_name}'
+    )
+    service_module = types.ModuleType(module_name)
     for attr_name, attr_value in attrs.items():
         setattr(service_module, attr_name, attr_value)
-    sys.modules[f'services.{service_name}'] = service_module
+    sys.modules[module_name] = service_module
     # Expose on parent package for patch resolution
     setattr(sys.modules['services'], service_name, service_module)
 
@@ -457,12 +461,20 @@ services_modules = {
     },
 }
 for service_name, attrs in services_modules.items():
-    service_module = types.ModuleType(f'services.{service_name}')
+    module_name = (
+        'management.services.knowledge_base.service'
+        if service_name == 'vectordatabase_service' else f'services.{service_name}'
+    )
+    service_module = types.ModuleType(module_name)
     for attr_name, attr_value in attrs.items():
         setattr(service_module, attr_name, attr_value)
-    sys.modules[f'services.{service_name}'] = service_module
+    sys.modules[module_name] = service_module
     # Expose on parent package for patch resolution
     setattr(sys.modules['services'], service_name, service_module)
+
+model_resolver_module = types.ModuleType("management.services.model.resolver")
+model_resolver_module.get_rerank_model = MagicMock()
+sys.modules["management.services.model.resolver"] = model_resolver_module
 
 # Load actual backend modules so that patch targets resolve correctly
 import importlib  # noqa: E402

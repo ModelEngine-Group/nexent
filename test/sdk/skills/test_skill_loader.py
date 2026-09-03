@@ -643,10 +643,10 @@ class TestSkillLoaderFileEncoding:
         skill_file.write_bytes(b"\x80")
         detection = MagicMock()
         detection.best.return_value = None
-        mocker.patch.object(module, "from_bytes", return_value=detection)
+        mocker.patch.object(sys.modules["nexent.skills.text_codec"], "from_bytes", return_value=detection)
 
         with pytest.raises(UnicodeDecodeError, match="Unable to detect"):
-            module._read_skill_text(skill_file)
+            SkillLoader.load(str(skill_file))
 
 
 if __name__ == "__main__":

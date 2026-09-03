@@ -208,8 +208,13 @@ vectordatabase_service_mod.ElasticSearchService = MagicMock()
 vectordatabase_service_mod.ElasticSearchService.filter_accessible_indices = MagicMock(
     return_value=[]
 )
-vectordatabase_service_mod._is_multimodal_by_model_id = MagicMock(return_value=False)
 sys.modules["management.services.knowledge_base.service"] = vectordatabase_service_mod
+
+model_resolver_mod = types.ModuleType("management.services.model.resolver")
+model_resolver_mod.get_model_descriptor = MagicMock(
+    return_value=types.SimpleNamespace(is_multimodal=False)
+)
+sys.modules["management.services.model.resolver"] = model_resolver_mod
 
 # Mock file_management_service
 file_mgmt_mod = types.ModuleType("services.file_management_service")

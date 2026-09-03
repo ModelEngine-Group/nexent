@@ -3,11 +3,6 @@ Unit tests for backend.apps.agent_app module.
 
 Tests all agent management API endpoints including runtime and configuration operations.
 """
-from apps.agent_app import (
-    agent_config_router,
-    agent_runtime_router,
-    nl2agent_run_api,
-)
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
@@ -136,8 +131,15 @@ sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['services.conversation_management_service'] = MagicMock()
 sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.agent_version_service'] = MagicMock()
+sys.modules['services.prompt_service'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
+from apps.agent_app import (
+    agent_config_router,
+    agent_runtime_router,
+    nl2agent_run_api,
+)
+
 
 
 # Create FastAPI apps for runtime and config routers
