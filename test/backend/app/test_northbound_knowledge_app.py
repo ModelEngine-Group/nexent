@@ -49,7 +49,7 @@ redis_service_module = types.ModuleType("services.redis_service")
 redis_service_module.get_redis_service = MagicMock()
 sys.modules["services.redis_service"] = redis_service_module
 
-vectordb_service_module = types.ModuleType("services.vectordatabase_service")
+vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
 
 
 class KnowledgeBaseNeedsModelConfigError(Exception):
@@ -108,7 +108,7 @@ vectordb_service_module.KnowledgeBaseNeedsModelConfigError = (
     KnowledgeBaseNeedsModelConfigError
 )
 vectordb_service_module.get_vector_db_core = MagicMock()
-sys.modules["services.vectordatabase_service"] = vectordb_service_module
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_module
 
 database_pkg = types.ModuleType("database")
 database_pkg.__path__ = [os.path.join(backend_dir, "database")]

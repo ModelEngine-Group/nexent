@@ -72,7 +72,7 @@ async def resolve_agent_capabilities(
 ) -> CapabilityResolution:
     """Resolve capabilities from the same assembly path used by normal agent runs."""
     from agents.create_agent_info import create_agent_config
-    from services.skill_service import SkillService
+    from management.services.skill.service import SkillService
 
     agent_config = await create_agent_config(
         agent_id=agent_id,

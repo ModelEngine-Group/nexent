@@ -126,9 +126,9 @@ if _services_pkg is None or not hasattr(_services_pkg, "__path__"):
     _services_pkg.__path__ = [str(_BACKEND_DIR / "services")]
     sys.modules["services"] = _services_pkg
 
-_agent_service_module = types.ModuleType("services.agent_service")
+_agent_service_module = types.ModuleType("management.services.agent.service")
 _agent_service_module.prepare_agent_run = MagicMock()
-sys.modules["services.agent_service"] = _agent_service_module
+sys.modules["management.services.agent.service"] = _agent_service_module
 _services_pkg.agent_service = _agent_service_module
 
 # database package and its submodules touched at import time

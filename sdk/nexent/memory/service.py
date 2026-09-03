@@ -8,7 +8,7 @@ Architecture constraints:
 - The SDK layer **must not** depend on PostgreSQL, Elasticsearch or any
   other database/storage implementation.
 - All persistence and vector retrieval for internal memory is delegated to
-  the backend layer (see ``backend/services/vectordatabase_service.py``).
+  the backend layer (see ``backend/management/services/knowledge_base/service.py``).
 - This facade is therefore intentionally thin: it validates inputs against
   the access policy, computes idempotency keys, optionally generates
   embeddings via an injected embedding model, builds the protocol-level

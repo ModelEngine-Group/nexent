@@ -19,7 +19,7 @@ def _load_runner_with_stubs(monkeypatch):
     consts_model.MessageRequest = _Payload
     consts_model.MessageUnit = _Payload
 
-    agent_service = types.ModuleType("services.agent_service")
+    agent_service = types.ModuleType("management.services.agent.service")
 
     async def fail_run_agent_background(*args, **kwargs):
         raise AssertionError("Agent should not run when automation capabilities are unavailable.")
@@ -35,7 +35,7 @@ def _load_runner_with_stubs(monkeypatch):
     conversation_service.update_unit_content = lambda *args, **kwargs: None
 
     monkeypatch.setitem(sys.modules, "consts.model", consts_model)
-    monkeypatch.setitem(sys.modules, "services.agent_service", agent_service)
+    monkeypatch.setitem(sys.modules, "management.services.agent.service", agent_service)
     monkeypatch.setitem(sys.modules, "services.conversation_management_service", conversation_service)
     sys.modules.pop("services.agent_automation.runner", None)
     runner_module = importlib.import_module("services.agent_automation.runner")
