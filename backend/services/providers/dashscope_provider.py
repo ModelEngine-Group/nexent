@@ -7,6 +7,7 @@ from services.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
+    _extract_feature_capability_hints_from_raw,
 )
 
 
@@ -38,7 +39,9 @@ DASHSCOPE_VIDEO_UNDERSTANDING_KEYWORDS = ("omni", "video-understanding", "video-
 
 
 def _extract_capacity_hints(raw: Dict) -> Dict:
-    return _extract_capacity_hints_from_raw(raw, nested_keys=("inference_metadata",))
+    return _extract_capacity_hints_from_raw(
+        raw, nested_keys=("model_info", "inference_metadata")
+    )
 
 
 def _modality_set(value) -> set:
@@ -169,6 +172,7 @@ class DashScopeModelProvider(AbstractModelProvider):
                     "max_tokens": DEFAULT_LLM_MAX_TOKENS
                 }
                 cleaned_model.update(_extract_capacity_hints(model_obj))
+                cleaned_model.update(_extract_feature_capability_hints_from_raw(model_obj))
                # 1. Embedding
                 if 'embedding' in m_id.lower() or '向量' in desc:
                     cleaned_model.update({"model_tag": "embedding", "model_type": "embedding"})

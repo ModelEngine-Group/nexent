@@ -1,11 +1,14 @@
 import logging
-import re
 import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping, Optional
 
 from consts.const import CAPACITY_SUGGESTION_ENABLED
+from nexent.core.models.model_identity import (
+    identities_are_safe_aliases,
+    parse_model_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +163,10 @@ def _normalize_provider(provider: Optional[str]) -> Optional[str]:
 
 
 def normalize_model_name(model_name: str) -> str:
-    return re.sub(r"[-_./\s]+", "", model_name.strip().lower())
+    """Compatibility helper returning the separator-aware canonical path."""
+    if not model_name.strip():
+        return ""
+    return parse_model_identity(model_name).canonical_id
 
 
 def _normalize_catalog_exact_name(model_name: str) -> str:
@@ -196,7 +202,9 @@ def _result_from_profile(
         suggested_provider=provider,
         canonical_model_name=model_name,
         capability_profile_version=profile.capability_profile_version,
-        capacity_source_on_accept="operator",
+        capacity_source_on_accept=(
+            "profile" if getattr(profile, "auto_applicable", False) else "operator"
+        ),
     )
 
 
@@ -225,12 +233,13 @@ def _unique_final_segment_match(
     catalog: Mapping[ProfileKey, CapabilityProfileLike],
     provider: str,
 ) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
-    requested = normalize_model_name(model_name)
+    requested = parse_model_identity(model_name, provider)
     matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
     for key, profile in _provider_catalog(catalog, provider).items():
         catalog_model = key[1]
         final_segment = catalog_model.split("/")[-1]
-        if normalize_model_name(final_segment) == requested:
+        candidate = parse_model_identity(final_segment, provider)
+        if identities_are_safe_aliases(requested, candidate):
             matches.append((key, profile))
 
     if len(matches) == 1:
@@ -243,16 +252,42 @@ def _fuzzy_catalog_match(
     catalog: Mapping[ProfileKey, CapabilityProfileLike],
     provider: str,
 ) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
-    requested = normalize_model_name(model_name)
+    requested = parse_model_identity(model_name, provider)
     matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
     for key, profile in _provider_catalog(catalog, provider).items():
-        if normalize_model_name(key[1]) == requested:
+        candidate = parse_model_identity(key[1], provider)
+        if requested.canonical_id == candidate.canonical_id:
             matches.append((key, profile))
 
     if len(matches) == 1:
         return matches[0]
 
     return _unique_final_segment_match(model_name, catalog, provider)
+
+
+def _explicit_alias_match(
+    model_name: str,
+    catalog: Mapping[ProfileKey, CapabilityProfileLike],
+    provider: str,
+) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
+    requested = parse_model_identity(model_name, provider)
+    matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
+    for key, profile in _provider_catalog(catalog, provider).items():
+        exclusions = getattr(profile, "exclusions", ()) or ()
+        if any(
+            identities_are_safe_aliases(
+                requested, parse_model_identity(exclusion, provider)
+            )
+            for exclusion in exclusions
+        ):
+            continue
+        aliases = getattr(profile, "aliases", ()) or ()
+        if any(
+            identities_are_safe_aliases(requested, parse_model_identity(alias, provider))
+            for alias in aliases
+        ):
+            matches.append((key, profile))
+    return matches[0] if len(matches) == 1 else None
 
 
 def _unique_catalog_provider_for_model(
@@ -375,6 +410,16 @@ def _suggest_capacity_inner(
             normalized_exact_key[0],
             normalized_exact_key[1],
             active_catalog[normalized_exact_key],
+            CapacitySuggestionMatchKind.CATALOG_EXACT,
+        )
+
+    alias_match = _explicit_alias_match(clean_model_name, active_catalog, provider)
+    if alias_match:
+        alias_key, profile = alias_match
+        return _result_from_profile(
+            alias_key[0],
+            alias_key[1],
+            profile,
             CapacitySuggestionMatchKind.CATALOG_EXACT,
         )
 

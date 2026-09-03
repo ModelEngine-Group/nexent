@@ -4,6 +4,8 @@ from typing import Any, Dict, Iterable, List
 
 import aiohttp
 
+from nexent.core.models.feature_capability import extract_provider_feature_candidate
+
 logger = logging.getLogger("model_provider")
 
 
@@ -88,6 +90,12 @@ def _extract_capacity_hints_from_raw(raw: Dict, nested_keys: Iterable[str] = ())
     if hints:
         hints["capacity_source"] = "provider_candidate"
     return hints
+
+
+def _extract_feature_capability_hints_from_raw(raw: Dict) -> Dict:
+    """Return only normalized, allow-listed feature capability extensions."""
+    candidate = extract_provider_feature_candidate(raw)
+    return {"feature_capability_candidate": candidate} if candidate else {}
 
 
 # =============================================================================

@@ -10,13 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from .capacity_resolver import ModelCapacitySnapshot
 
 
-W2_RESOLVER_VERSION = "1.0.0"
+W2_RESOLVER_VERSION = "1.1.0"
 W2_FINGERPRINT_SCHEMA_VERSION = 1
 
 
 OutputReserveSource = Literal["model_default", "agent", "request"]
 UncertaintyReserveBasis = Literal[
-    "context_window_10pct", "approved_profile", "none"
+    "provider_input_limit_10pct", "approved_profile", "none"
 ]
 SoftLimitRatioSource = Literal["code_default", "tenant_config"]
 BudgetFieldSource = Literal[
@@ -104,7 +104,7 @@ class CapacityReservePolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     soft_limit_ratio: float = Field(
-        default=0.8,
+        default=1.0,
         gt=0,
         le=1,
         description="Ratio of hard safe input budget where proactive compaction begins.",
@@ -228,28 +228,16 @@ class SafeInputBudgetCalculator:
         requested_output_tokens: Optional[int] = None,
         output_reserve_source: OutputReserveSource = "model_default",
     ) -> SafeInputBudgetSnapshot:
-        effective_output_tokens = (
-            requested_output_tokens
-            if requested_output_tokens is not None
-            else capacity_snapshot.requested_output_tokens
-        )
-        effective_output_source: OutputReserveSource = output_reserve_source
-        if requested_output_tokens is None:
-            effective_output_source = "model_default"
+        # Protection is resolved once by W1 from model capacity. Legacy
+        # model/Agent/request overrides remain accepted at compatibility
+        # boundaries but may not change runtime behavior.
+        effective_output_tokens = capacity_snapshot.requested_output_tokens
+        effective_output_source: OutputReserveSource = "model_default"
 
         if effective_output_tokens <= 0:
             raise InvalidReservePolicy(
                 "requested_output_tokens must be a positive integer"
             )
-
-        if request_overrides and request_overrides.requested_output_tokens is not None:
-            if request_overrides.requested_output_tokens < effective_output_tokens:
-                raise InvalidReservePolicy(
-                    "per-request requested_output_tokens may not lower the "
-                    "resolved model or agent output reserve"
-                )
-            effective_output_tokens = request_overrides.requested_output_tokens
-            effective_output_source = "request"
 
         if (
             capacity_snapshot.max_output_tokens is not None
@@ -267,7 +255,11 @@ class SafeInputBudgetCalculator:
         )
 
         uncertainty_reserve_tokens, uncertainty_reserve_basis, warnings = (
-            self._uncertainty_reserve(capacity_snapshot, reserve_policy)
+            self._uncertainty_reserve(
+                capacity_snapshot,
+                reserve_policy,
+                provider_input_limit=provider_input_limit,
+            )
         )
 
         if uncertainty_reserve_tokens > provider_input_limit:
@@ -360,26 +352,9 @@ class SafeInputBudgetCalculator:
         self,
         capacity_snapshot: ModelCapacitySnapshot,
         reserve_policy: CapacityReservePolicy,
+        *,
+        provider_input_limit: int,
     ) -> tuple[int, UncertaintyReserveBasis, list[str]]:
-        unknown_required_behavior = self._UNKNOWN_CAPABILITIES_REQUIRING_RESERVE.intersection(
-            capacity_snapshot.unknown_capabilities
-        )
-
-        if reserve_policy.approved_profile_reserve_tokens is not None:
-            return (
-                reserve_policy.approved_profile_reserve_tokens,
-                "approved_profile",
-                [],
-            )
-
-        if not unknown_required_behavior:
-            return 0, "none", []
-
-        if capacity_snapshot.context_window_tokens is None:
-            raise UncertaintyReserveBasisUnknown(
-                "context_window_tokens is required for the unified 10 percent "
-                "uncertainty reserve"
-            )
-
-        reserve = math.ceil(capacity_snapshot.context_window_tokens * 0.10)
-        return reserve, "context_window_10pct", ["uncertainty_reserve_active"]
+        # Counting uncertainty affects observability confidence, not a second
+        # hidden input limit. Provider overflow responses remain authoritative.
+        return 0, "none", []
