@@ -25,11 +25,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceCandidate,
     ResourceGapResolutionPayload,
     ResourceRequirement,
+    ResourceSearchOutput,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     SearchInstalledResourcesInput,
     build_nl2a_wrapper,
+    get_resource_gap_requirements,
 )
 
 
@@ -440,6 +442,31 @@ def test_resource_gap_resolution_wrapper_preserves_original_requirements():
     resolution = ResourceGapResolutionPayload.model_validate(payload)
     assert resolution.agent_id == 42
     assert resolution.requirements == [requirement]
+
+
+def test_resource_gap_requires_a_requirement_uncovered_by_both_searches():
+    train_ticket = ResourceRequirement(
+        requirement_id="train_ticket",
+        query="Query 12306 train tickets",
+    )
+    weather = ResourceRequirement(
+        requirement_id="weather",
+        query="Query weather",
+    )
+
+    gaps = get_resource_gap_requirements(
+        requirements=[train_ticket, weather],
+        installed=ResourceSearchOutput(
+            candidates=[],
+            uncovered_requirement_ids=["train_ticket"],
+        ),
+        installable=ResourceSearchOutput(
+            candidates=[],
+            uncovered_requirement_ids=["train_ticket", "weather"],
+        ),
+    )
+
+    assert gaps == [train_ticket]
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():

@@ -223,6 +223,24 @@ class ResourceSearchOutput(BaseModel):
     uncovered_requirement_ids: list[str]
 
 
+def get_resource_gap_requirements(
+    *,
+    requirements: list[ResourceRequirement],
+    installed: ResourceSearchOutput,
+    installable: ResourceSearchOutput,
+) -> list[ResourceRequirement]:
+    """Return requirements not covered by installed or installable resources."""
+
+    uncovered_by_both = set(installed.uncovered_requirement_ids) & set(
+        installable.uncovered_requirement_ids
+    )
+    return [
+        requirement
+        for requirement in requirements
+        if requirement.requirement_id in uncovered_by_both
+    ]
+
+
 class RecommendResourcesInput(BaseModel):
     """Frozen input for resolving selected candidates into card data (PR2)."""
 
@@ -903,7 +921,10 @@ async def search_uninstalled_resources(
             AgentDraftEditError,
             require_agent_draft_edit,
         )
-        from services.nl2agent_service import search_uninstalled_resources_impl
+        from services.nl2agent_service import (
+            search_installed_resources_impl,
+            search_uninstalled_resources_impl,
+        )
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
@@ -918,6 +939,22 @@ async def search_uninstalled_resources(
             tenant_id=tenant_id,
             user_id=user_id,
         )
+        installed = await search_installed_resources_impl(
+            requirements=payload.requirements,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        gap_requirements = get_resource_gap_requirements(
+            requirements=payload.requirements,
+            installed=installed,
+            installable=result,
+        )
+        if gap_requirements:
+            return build_nl2a_wrapper(
+                subtype="resource_gap_resolution",
+                agent_id=resolved_agent_id,
+                requirements=gap_requirements,
+            )
         return result.model_dump(mode="json")
     except AgentDraftEditError as exc:
         return _dump_resource_tool_error(exc.code, retryable=False)
