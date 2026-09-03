@@ -3,7 +3,7 @@ import logging
 from http import HTTPStatus
 from typing import Optional
 
-from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
@@ -34,6 +34,8 @@ from consts.exceptions import (
     UnauthorizedError,
     ValidationError,
 )
+from permissions.depends import require
+from permissions.models import CurrentUser
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
 from services.agent_service import (
@@ -83,6 +85,7 @@ from utils.auth_utils import (
 
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
+require_agent_create_permission = require("agent:create")
 logger = logging.getLogger("agent_app")
 
 
@@ -197,6 +200,7 @@ async def nl2agent_run_api(
     nl2agent_request: NL2AgentRunRequest,
     http_request: Request,
     authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_agent_create_permission),
 ):
     """Run one non-persistent NL2Agent turn."""
 
@@ -341,6 +345,11 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
     try:
         result = await update_agent_info_impl(request, authorization)
         return result or {}
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
@@ -472,6 +481,11 @@ async def delete_agent_api(
         effective_tenant_id = tenant_id or auth_tenant_id
         await delete_agent_impl(request.agent_id, effective_tenant_id, user_id)
         return {}
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
         logger.error(f"Agent delete error: {str(e)}")
         raise HTTPException(
@@ -497,6 +511,11 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
                 }
             )
         return ConversationResponse(code=0, message="success", data=result)
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
         logger.error(f"Agent export error: {str(e)}")
         raise HTTPException(

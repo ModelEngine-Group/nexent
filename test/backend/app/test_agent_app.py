@@ -7,6 +7,7 @@ from apps.agent_app import (
     agent_config_router,
     agent_runtime_router,
     nl2agent_run_api,
+    require_agent_create_permission,
 )
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
@@ -143,6 +144,7 @@ sys.modules['services.agent_version_service'] = MagicMock()
 # Create FastAPI apps for runtime and config routers
 runtime_app = FastAPI()
 runtime_app.include_router(agent_runtime_router)
+runtime_app.dependency_overrides[require_agent_create_permission] = lambda: None
 runtime_client = TestClient(runtime_app)
 
 config_app = FastAPI()

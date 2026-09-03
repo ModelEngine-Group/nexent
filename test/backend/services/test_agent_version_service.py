@@ -182,6 +182,34 @@ from backend.services.agent_version_service import (
 )
 
 
+def test_publish_rejects_platform_managed_system_agent(monkeypatch):
+    monkeypatch.setattr(agent_version_service_module, "is_system_agent", lambda *_: True)
+
+    with pytest.raises(ValueError, match="managed by the platform"):
+        publish_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="user1",
+        )
+
+
+def test_publish_allows_internal_system_agent_sync(monkeypatch):
+    monkeypatch.setattr(agent_version_service_module, "is_system_agent", lambda *_: True)
+    monkeypatch.setattr(
+        agent_version_service_module,
+        "query_agent_draft",
+        lambda *_: (None, [], []),
+    )
+
+    with pytest.raises(ValueError, match="Agent draft not found"):
+        publish_version_impl(
+            agent_id=1,
+            tenant_id="tenant1",
+            user_id="system",
+            allow_system=True,
+        )
+
+
 @pytest.fixture
 def mock_agent_draft():
     """Mock agent draft data"""

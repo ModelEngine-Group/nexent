@@ -4,7 +4,7 @@ import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -15,6 +15,8 @@ from consts.model import (
     SkillInstanceInfoRequest,
     SkillUpdateRequest,
 )
+from permissions.depends import require
+from permissions.models import CurrentUser
 from services.asset_owner_visibility import can_view_skill
 from services.agent_draft_permission_service import (
     AgentDraftEditError,
@@ -38,6 +40,7 @@ _NOT_FOUND_TEXT = "not found"
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
+require_skill_create_permission = require("skill:create")
 
 
 def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], tenant_id: str):
@@ -741,7 +744,8 @@ async def delete_skill(
 @skill_creator_router.post("/nl2skill/run")
 async def nl2skill_run_api(
     request: NL2SkillRunRequest,
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_skill_create_permission),
 ):
     """Run one non-persistent, multi-turn NL2Skill conversation turn."""
     try:

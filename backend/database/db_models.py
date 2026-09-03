@@ -639,6 +639,17 @@ class AgentInfo(TableBase):
     version_no = Column(Integer, default=0, nullable=False, primary_key=True,
                         doc="Version number. 0 = draft/editing state, >=1 = published snapshot")
     name = Column(String(100), doc="Agent name")
+    system_key = Column(
+        String(100),
+        doc="Stable platform-owned Agent key; NULL for user-created Agents",
+    )
+    agent_origin = Column(
+        String(20),
+        default="USER",
+        nullable=False,
+        server_default=text("'USER'"),
+        doc="Agent ownership origin: USER or SYSTEM",
+    )
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     author = Column(String(100), doc="Agent author")

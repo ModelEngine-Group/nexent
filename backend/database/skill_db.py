@@ -35,7 +35,13 @@ def _params_value_for_db(raw: Any) -> Any:
     return json.loads(json.dumps(strip_params_comments_for_db(raw), default=str))
 
 
-def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: str, version_no: int = 0):
+def create_or_update_skill_by_skill_info(
+    skill_info,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Create or update a SkillInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -49,9 +55,16 @@ def create_or_update_skill_by_skill_info(skill_info, tenant_id: str, user_id: st
     Returns:
         Created or updated SkillInstance object
     """
+    from database.agent_db import is_system_agent
+
     skill_info_dict = skill_info.__dict__ if hasattr(
         skill_info, '__dict__') else skill_info
     skill_info_dict = skill_info_dict.copy()
+    if (
+        not allow_system
+        and is_system_agent(skill_info_dict.get("agent_id"), tenant_id) is True
+    ):
+        raise ValueError("System Agent is managed by the platform")
     skill_info_dict.setdefault("tenant_id", tenant_id)
     skill_info_dict.setdefault("user_id", user_id)
     skill_info_dict.setdefault("version_no", version_no)

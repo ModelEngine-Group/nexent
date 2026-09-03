@@ -61,6 +61,34 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         return agent.agent_id
 
 
+def search_system_agent(
+    tenant_id: str,
+    system_key: str,
+    version_no: int = 0,
+) -> Optional[dict]:
+    """Return one active platform-owned Agent for the tenant and key."""
+    with get_db_session() as session:
+        agent = session.query(AgentInfo).filter(
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.system_key == system_key,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.version_no == version_no,
+            AgentInfo.delete_flag != "Y",
+        ).first()
+        return as_dict(agent) if agent else None
+
+
+def is_system_agent(agent_id: int, tenant_id: str) -> bool:
+    """Return whether an Agent identity is owned and protected by the platform."""
+    with get_db_session() as session:
+        return session.query(AgentInfo.agent_id).filter(
+            AgentInfo.agent_id == agent_id,
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.agent_origin == "SYSTEM",
+            AgentInfo.delete_flag != "Y",
+        ).first() is not None
+
+
 def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0):
     """
     Search blank sub agent by main agent id.
@@ -220,6 +248,8 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "agent_id": new_agent.agent_id,
             "tenant_id": new_agent.tenant_id,
             "name": new_agent.name,
+            "system_key": getattr(new_agent, "system_key", None),
+            "agent_origin": getattr(new_agent, "agent_origin", "USER"),
             "display_name": new_agent.display_name,
             "description": new_agent.description,
             "author": new_agent.author,
@@ -255,7 +285,13 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         return result
 
 
-def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
+def update_agent(
+    agent_id,
+    agent_info,
+    user_id,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Update an existing agent in the database.
     Default version_no=0 updates the draft version.
@@ -278,6 +314,8 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
         ).first()
         if not agent:
             raise ValueError("ag_tenant_agent_t Agent not found")
+        if getattr(agent, "agent_origin", "USER") == "SYSTEM" and not allow_system:
+            raise ValueError("System Agent is managed by the platform")
 
         agent_data = dict(agent_info.__dict__)
         fields_set = getattr(agent_info, "model_fields_set", None)

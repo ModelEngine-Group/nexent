@@ -38,6 +38,7 @@ from consts.const import (
 )
 from consts.exceptions import ForbiddenError, NotFoundException, ValidationError, UserRegistrationException
 from services.skill_service import install_skills_from_zip_for_tenant
+from services.system_agent_provider import ensure_workbench_main_agent
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +289,20 @@ def create_tenant(
             except Exception as e:
                 logger.warning(
                     f"Failed to install skills by IDs for tenant {tenant_id}: {e}")
+
+        try:
+            ensure_workbench_main_agent(
+                tenant_id=tenant_id,
+                user_id=created_by or "system",
+            )
+        except Exception as e:
+            # Tenant creation remains recoverable because Workbench runtime also
+            # calls the provider lazily before using the system Agent.
+            logger.warning(
+                "Failed to provision workbench_main for tenant %s: %s",
+                tenant_id,
+                e,
+            )
 
         tenant_info = {
             "tenant_id": tenant_id,

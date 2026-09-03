@@ -121,6 +121,17 @@ consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
 consts_const_mock.APP_VERSION = "v2.0.2"
 consts_const_mock.STREAMABLE_CONTENT_TYPES = frozenset(["text/event-stream"])
 
+# Keep permission dependencies inert in endpoint tests that exercise legacy
+# authentication and stream behavior rather than RBAC itself.
+permissions_mock = types.ModuleType("permissions")
+permissions_depends_mock = types.ModuleType("permissions.depends")
+permissions_models_mock = types.ModuleType("permissions.models")
+permissions_depends_mock.require = lambda _permission: (lambda: None)
+permissions_models_mock.CurrentUser = object
+sys.modules["permissions"] = permissions_mock
+sys.modules["permissions.depends"] = permissions_depends_mock
+sys.modules["permissions.models"] = permissions_models_mock
+
 class SkillException(Exception):
     pass
 consts_exceptions_mock.SkillException = SkillException
@@ -176,6 +187,7 @@ class MockSkillResponse(BaseModel):
 class MockNL2SkillRunRequest(BaseModel):
     query: str
     history: Optional[List[Dict[str, str]]] = None
+    minio_files: Optional[List[Dict[str, Any]]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     complexity: str = "complicated"
     language: Optional[str] = None

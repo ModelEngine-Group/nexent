@@ -472,6 +472,7 @@ class NL2SkillRunRequest(BaseModel):
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
+    minio_files: Optional[List[Dict[str, Any]]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     complexity: Literal["simple", "complicated"] = "complicated"
     language: Optional[Literal["zh", "en"]] = None

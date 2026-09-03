@@ -61,6 +61,7 @@ from database.agent_db import (
     delete_agent_relationship,
     delete_related_agent,
     insert_related_agent,
+    is_system_agent,
     query_all_agent_info_by_tenant_id,
     query_sub_agent_relations,
     query_sub_agents_id_list,
@@ -199,6 +200,8 @@ async def upload_agent_icon_impl(
     user_id: str,
 ) -> dict:
     """Validate, store, and attach a user-supplied image to an editable agent."""
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent is managed by the platform")
     if not content:
         raise ValueError("Agent icon file is empty")
     if len(content) > AGENT_ICON_MAX_BYTES:
@@ -1836,6 +1839,12 @@ def _validate_requested_output_tokens_for_agent(
 async def update_agent_info_impl(request: AgentInfoRequest, authorization: str = Header(None)):
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
+    if (
+        request.agent_id is not None
+        and is_system_agent(request.agent_id, tenant_id) is True
+    ):
+        raise ForbiddenError("System Agent is managed by the platform")
+
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "example_questions cannot exceed 6 items")
 
@@ -2126,6 +2135,9 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         tenant_id: Tenant ID
         user_id: User ID performing the deletion
     """
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent is managed by the platform")
+
     try:
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
@@ -2143,6 +2155,9 @@ async def _export_agent_dict_core(
     version_no: int = 0,
 ) -> dict:
     """Build ExportAndImportDataFormat dict for an agent tree at the given version."""
+    if is_system_agent(root_agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent cannot be exported")
+
     export_agent_dict = {}
     search_list: deque = deque([(root_agent_id, version_no)])
     visited: set = set()
@@ -2666,6 +2681,8 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
         enriched_agents: list[dict] = []
 
         for agent in agent_list:
+            if agent.get("agent_origin") == "SYSTEM" or agent.get("system_key"):
+                continue
             if not agent["enabled"]:
                 continue
 

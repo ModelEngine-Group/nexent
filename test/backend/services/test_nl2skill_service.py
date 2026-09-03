@@ -181,6 +181,56 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
 
 
 @pytest.mark.asyncio
+async def test_build_nl2skill_run_info_adds_uploaded_files_to_request(mocker):
+    captured: dict = {}
+
+    def fake_template(**kwargs):
+        captured.update(kwargs)
+        return {"system_prompt": "system", "user_prompt": kwargs["user_request"]}
+
+    mocker.patch.object(
+        nl2skill_service,
+        "get_skill_creation_simple_prompt_template",
+        side_effect=fake_template,
+    )
+    mocker.patch.object(
+        nl2skill_service,
+        "create_model_config_list",
+        new_callable=AsyncMock,
+        return_value=[SimpleNamespace(cite_name="main_model", model_name="primary")],
+    )
+    mocker.patch.object(
+        nl2skill_service,
+        "_resolve_model_for_nl2skill",
+        return_value=("main_model", "primary", {}),
+    )
+    mocker.patch.object(
+        nl2skill_service,
+        "AgentRunInfo",
+        side_effect=lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
+    result = await build_nl2skill_run_info(
+        NL2SkillRunRequest(
+            query="Create a parser for this file",
+            minio_files=[
+                {
+                    "name": "sample.csv",
+                    "url": "s3://bucket/sample.csv",
+                    "presigned_url": "https://example.test/sample.csv",
+                }
+            ],
+        ),
+        tenant_id="tenant",
+        language="en",
+    )
+
+    assert "sample.csv" in captured["user_request"]
+    assert "s3://bucket/sample.csv" in captured["user_request"]
+    assert result.query == captured["user_request"]
+
+
+@pytest.mark.asyncio
 async def test_build_nl2skill_run_info_requires_at_least_one_model(mocker):
     mocker.patch.object(nl2skill_service, "get_skill_creation_simple_prompt_template", return_value={})
     mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[])
