@@ -39,6 +39,8 @@ from .memory_record_service import (
     get_memory_record_service,
 )
 from .memory_retrieval_service import get_memory_retrieval_service
+from .memory_external_provider_service import get_memory_external_provider_service
+from .memory_ingestion_event_service import MemoryIngestionEventService
 
 
 logger = logging.getLogger("memory_backend_adapter")
@@ -103,11 +105,6 @@ async def _backend_store_hook(
 
 def _build_ingestion_event_service():
     """Lazily construct a MemoryIngestionEventService for transparent proxy."""
-    from services.memory_external_provider_service import (
-        get_memory_external_provider_service,
-    )
-    from services.memory_ingestion_event_service import MemoryIngestionEventService
-
     provider_service = get_memory_external_provider_service()
     return MemoryIngestionEventService(
         provider_service._config_service,
@@ -119,10 +116,6 @@ async def _fanout_external_ingest(
     payload: Dict[str, Any], result: Dict[str, Any]
 ) -> None:
     """Fan-out a store event to all enabled external providers."""
-    from services.memory_external_provider_service import (
-        get_memory_external_provider_service,
-    )
-
     tenant_id = payload["tenant_id"]
     provider_service = get_memory_external_provider_service()
     enabled = provider_service._config_service.get_enabled_providers(tenant_id)

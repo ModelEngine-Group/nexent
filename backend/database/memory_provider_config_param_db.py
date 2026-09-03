@@ -1,3 +1,4 @@
+import logging
 from typing import Dict
 
 from .client import get_db_session
@@ -31,7 +32,6 @@ def upsert_params(provider_config_id: int, params: Dict[str, str]) -> bool:
             session.commit()
             return True
         except Exception as e:
-            import logging
             logging.error(f"Failed to upsert params for provider_config_id={provider_config_id}: {e}", exc_info=True)
             session.rollback()
             return False

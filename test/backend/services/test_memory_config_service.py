@@ -127,6 +127,11 @@ utils_memory_utils = types.ModuleType("utils.memory_utils")
 utils_memory_utils.build_memory_config = lambda tenant_id: {}
 sys.modules["utils.memory_utils"] = utils_memory_utils
 
+from backend.services.memory_config_service import (
+    get_external_provider_top_k,
+    set_external_provider_top_k,
+)
+
 
 class TestMemoryConfigService(unittest.TestCase):
     def setUp(self):
@@ -137,8 +142,6 @@ class TestMemoryConfigService(unittest.TestCase):
     # ------------------------------- helpers -------------------------------
     @patch("backend.services.memory_config_service.get_user_configs")
     def test_get_external_provider_top_k(self, get_configs):
-        from backend.services.memory_config_service import get_external_provider_top_k
-
         get_configs.return_value = {"EXTERNAL_PROVIDER_TOP_K": "12"}
         self.assertEqual(get_external_provider_top_k(self.user_id), 12)
         get_configs.return_value = {"EXTERNAL_PROVIDER_TOP_K": "invalid"}
@@ -146,8 +149,6 @@ class TestMemoryConfigService(unittest.TestCase):
 
     @patch("backend.services.memory_config_service._update_single_config")
     def test_set_external_provider_top_k(self, update_config):
-        from backend.services.memory_config_service import set_external_provider_top_k
-
         update_config.return_value = True
         self.assertTrue(set_external_provider_top_k(self.user_id, 10))
         update_config.assert_called_once_with(

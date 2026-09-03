@@ -14,6 +14,8 @@ from typing import Any, Callable, Optional, Dict, List
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
+from nexent.core.models import OpenAIModel
+from nexent.memory.models import MemoryIngestUnit
 from jinja2 import Template
 
 from agents.agent_run_manager import AgentRunAlreadyActiveError, agent_run_manager
@@ -75,6 +77,7 @@ from database.agent_db import (
 )
 from database import a2a_agent_db
 from database.conversation_db import (
+    get_units_by_message,
     resolve_conversation_runtime_metadata,
 )
 from utils.runtime_metadata_utils import (
@@ -135,6 +138,11 @@ from services.conversation_management_service import (
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
 from services.memory_config_service import build_memory_context
+from services.fa_memory_extractor import FaMemoryExtractor
+from services.memory_backend_adapter import (
+    _build_ingestion_event_service,
+    build_memory_service_for_fa_extraction,
+)
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
@@ -147,7 +155,7 @@ from utils.agent_stream_utils import (
     serialize_stream_unit_content as _serialize_stream_unit_content,
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
 )
-from utils.config_utils import tenant_config_manager
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.context_utils import build_authorized_context_input
 from utils.prompt_template_utils import get_prompt_generate_prompt_template
 from utils.llm_utils import call_llm_for_system_prompt
@@ -1494,15 +1502,8 @@ async def _stream_agent_chunks(
             and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
         ):
             try:
-                from services.fa_memory_extractor import FaMemoryExtractor
-                from services.memory_backend_adapter import build_memory_service_for_fa_extraction
-
                 async def _run_fa_extraction():
                     try:
-                        from utils.config_utils import tenant_config_manager, get_model_name_from_config
-                        from consts.const import MODEL_CONFIG_MAPPING
-                        from nexent.core.models import OpenAIModel
-
                         config = tenant_config_manager.get_model_config(
                             key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
                         )
@@ -1527,7 +1528,6 @@ async def _stream_agent_chunks(
                             def __init__(self, model):
                                 self._model = model
                             async def chat(self, messages):
-                                import asyncio
                                 result = await asyncio.to_thread(self._model.generate, messages)
                                 if hasattr(result, "content"):
                                     return result.content if isinstance(result.content, str) else str(result.content)
@@ -1568,10 +1568,6 @@ async def _stream_agent_chunks(
         ):
             async def _per_turn_supplement():
                 try:
-                    from database.conversation_db import get_units_by_message
-                    from nexent.memory.models import MemoryIngestUnit
-                    from services.memory_backend_adapter import _build_ingestion_event_service
-
                     units = get_units_by_message(streaming_message_id)
                     if not units:
                         return

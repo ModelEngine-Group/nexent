@@ -370,6 +370,16 @@ sys.modules['nexent.core.models.rerank_model'] = rerank_module
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
+memory_models_module = types.ModuleType("nexent.memory.models")
+memory_models_module.MemoryIngestUnit = MagicMock
+sys.modules['nexent.memory.models'] = memory_models_module
+fa_memory_extractor_module = types.ModuleType("services.fa_memory_extractor")
+fa_memory_extractor_module.FaMemoryExtractor = MagicMock
+sys.modules['services.fa_memory_extractor'] = fa_memory_extractor_module
+memory_backend_adapter_module = types.ModuleType("services.memory_backend_adapter")
+memory_backend_adapter_module._build_ingestion_event_service = MagicMock
+memory_backend_adapter_module.build_memory_service_for_fa_extraction = MagicMock
+sys.modules['services.memory_backend_adapter'] = memory_backend_adapter_module
 sys.modules['utils.str_utils'] = MagicMock()
 sys.modules['utils.str_utils'].convert_list_to_string = mock_convert_list_to_string
 sys.modules['utils.str_utils'].convert_string_to_list = lambda s: s.split(",") if s else []

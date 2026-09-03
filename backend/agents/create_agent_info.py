@@ -32,6 +32,7 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.sandbox import SandboxConfig
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
@@ -43,6 +44,7 @@ from services.vectordatabase_service import (
     get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
+from services.memory_external_provider_service import get_memory_external_provider_service
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
@@ -98,10 +100,6 @@ def _get_external_provider_service_for_search():
     """Resolve the external provider service only when the search kill switch is on."""
     if not EXTERNAL_MEMORY_SEARCH_ENABLED:
         return None
-    from services.memory_external_provider_service import (
-        get_memory_external_provider_service,
-    )
-
     return get_memory_external_provider_service()
 
 
@@ -1174,11 +1172,6 @@ async def create_agent_config(
                 try:
                     external_results = None
                     try:
-                        from nexent.memory.models import (
-                            ExternalMemoryItem,
-                            MemorySearchRequest,
-                        )
-
                         provider_service = _get_external_provider_service_for_search()
                         if provider_service is not None:
                             top_k = memory_context.user_config.external_provider_top_k
@@ -1190,7 +1183,7 @@ async def create_agent_config(
                                 top_k,
                             )
 
-                            search_request = MemorySearchRequest(
+                            search_request = memory_models.MemorySearchRequest(
                                 query=last_user_query or "",
                                 tenant_id=str(memory_context.tenant_id or ""),
                                 user_id=str(memory_context.user_id or ""),
@@ -1209,7 +1202,7 @@ async def create_agent_config(
 
                             if ext_search_results:
                                 external_results = [
-                                    ExternalMemoryItem(
+                                    memory_models.ExternalMemoryItem(
                                         id=str(r.memory_id or r.external_id or ""),
                                         content=r.content,
                                         score=r.score,

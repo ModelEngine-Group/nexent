@@ -174,6 +174,8 @@ memory_service.MemoryService = MemoryService
 # ---------------------------------------------------------------------------
 record_service_mod = types.ModuleType("services.memory_record_service")
 retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
+external_provider_service_mod = types.ModuleType("services.memory_external_provider_service")
+ingestion_event_service_mod = types.ModuleType("services.memory_ingestion_event_service")
 
 record_service_mod.get_memory_record_service = MagicMock(
     name="get_memory_record_service"
@@ -186,11 +188,21 @@ record_service_mod._resolve_tenant_embedding_model_info = MagicMock(
 retrieval_service_mod.get_memory_retrieval_service = MagicMock(
     name="get_memory_retrieval_service"
 )
+external_provider_service_mod.get_memory_external_provider_service = MagicMock(
+    name="get_memory_external_provider_service"
+)
+ingestion_event_service_mod.MemoryIngestionEventService = MagicMock(
+    name="MemoryIngestionEventService"
+)
 
 sys.modules["services.memory_record_service"] = record_service_mod
 sys.modules["services.memory_retrieval_service"] = retrieval_service_mod
 sys.modules["backend.services.memory_record_service"] = record_service_mod
 sys.modules["backend.services.memory_retrieval_service"] = retrieval_service_mod
+sys.modules["services.memory_external_provider_service"] = external_provider_service_mod
+sys.modules["backend.services.memory_external_provider_service"] = external_provider_service_mod
+sys.modules["services.memory_ingestion_event_service"] = ingestion_event_service_mod
+sys.modules["backend.services.memory_ingestion_event_service"] = ingestion_event_service_mod
 
 
 from backend.services import memory_backend_adapter
@@ -352,12 +364,10 @@ def test_build_memory_service_for_fa_extraction_returns_memory_service():
 def test_fanout_external_ingest_skips_without_enabled_providers(monkeypatch):
     provider_service = MagicMock()
     provider_service._config_service.get_enabled_providers.return_value = []
-    provider_module = types.ModuleType("services.memory_external_provider_service")
-    provider_module.get_memory_external_provider_service = MagicMock(
-        return_value=provider_service
-    )
-    monkeypatch.setitem(
-        sys.modules, "services.memory_external_provider_service", provider_module
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "get_memory_external_provider_service",
+        MagicMock(return_value=provider_service),
     )
 
     asyncio.get_event_loop().run_until_complete(
@@ -372,26 +382,21 @@ def test_fanout_external_ingest_skips_without_enabled_providers(monkeypatch):
 
 def test_build_ingestion_event_service_uses_shared_provider_config(monkeypatch):
     provider_service = MagicMock()
-    provider_module = types.ModuleType("services.memory_external_provider_service")
-    provider_module.get_memory_external_provider_service = MagicMock(
-        return_value=provider_service
+    constructor = MagicMock()
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "get_memory_external_provider_service",
+        MagicMock(return_value=provider_service),
     )
-    ingestion_module = types.ModuleType("services.memory_ingestion_event_service")
-    ingestion_module.MemoryIngestionEventService = MagicMock()
-    monkeypatch.setitem(
-        sys.modules, "services.memory_external_provider_service", provider_module
-    )
-    monkeypatch.setitem(
-        sys.modules, "services.memory_ingestion_event_service", ingestion_module
-    )
+    monkeypatch.setattr(memory_backend_adapter, "MemoryIngestionEventService", constructor)
 
     result = memory_backend_adapter._build_ingestion_event_service()
 
-    ingestion_module.MemoryIngestionEventService.assert_called_once_with(
+    constructor.assert_called_once_with(
         provider_service._config_service,
         provider_service,
     )
-    assert result is ingestion_module.MemoryIngestionEventService.return_value
+    assert result is constructor.return_value
 
 
 def test_fanout_external_ingest_sends_agent_unit_to_all_enabled(monkeypatch):
@@ -400,12 +405,10 @@ def test_fanout_external_ingest_sends_agent_unit_to_all_enabled(monkeypatch):
         {"provider_name": "mem0"},
         {"provider_name": "partner"},
     ]
-    provider_module = types.ModuleType("services.memory_external_provider_service")
-    provider_module.get_memory_external_provider_service = MagicMock(
-        return_value=provider_service
-    )
-    monkeypatch.setitem(
-        sys.modules, "services.memory_external_provider_service", provider_module
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "get_memory_external_provider_service",
+        MagicMock(return_value=provider_service),
     )
     ingestion_service = MagicMock()
     ingestion_service.send_ingest_all_enabled = AsyncMock(

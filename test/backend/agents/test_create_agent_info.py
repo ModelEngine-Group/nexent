@@ -261,6 +261,10 @@ sys.modules['services.model_gateway_service'] = _create_stub_module(
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
 )
 sys.modules['services.memory_config_service'] = MagicMock()
+sys.modules['services.memory_external_provider_service'] = _create_stub_module(
+    "services.memory_external_provider_service",
+    get_memory_external_provider_service=MagicMock(return_value=None),
+)
 # Extend services hierarchy with additional stubs
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
@@ -281,6 +285,9 @@ sys.modules['nexent.memory.memory_service'] = MagicMock()
 # Build top-level nexent module to avoid importing the real package
 nexent_module = _create_stub_module("nexent", MessageObserver=mock_message_observer)
 sys.modules['nexent'] = nexent_module
+sys.modules['nexent.memory'] = _create_stub_module("nexent.memory")
+sys.modules['nexent.memory.models'] = _create_stub_module("nexent.memory.models")
+sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
@@ -531,11 +538,7 @@ from backend.agents.create_agent_info import (
 
 def test_ac_p3_25_external_search_switch_skips_provider_factory(monkeypatch):
     factory = MagicMock()
-    provider_module = types.ModuleType("services.memory_external_provider_service")
-    provider_module.get_memory_external_provider_service = factory
-    monkeypatch.setitem(
-        sys.modules, "services.memory_external_provider_service", provider_module
-    )
+    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
     monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", False)
 
     assert _get_external_provider_service_for_search() is None
@@ -545,11 +548,7 @@ def test_ac_p3_25_external_search_switch_skips_provider_factory(monkeypatch):
 def test_ac_p3_25_external_search_switch_uses_provider_factory(monkeypatch):
     service = object()
     factory = MagicMock(return_value=service)
-    provider_module = types.ModuleType("services.memory_external_provider_service")
-    provider_module.get_memory_external_provider_service = factory
-    monkeypatch.setitem(
-        sys.modules, "services.memory_external_provider_service", provider_module
-    )
+    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
     monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", True)
 
     assert _get_external_provider_service_for_search() is service

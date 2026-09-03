@@ -14,6 +14,7 @@ from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Union
 
 from database import memory_provider_config_db
+from consts import const as consts
 from nexent.memory.models import (
     MemoryIngestRequest,
     MemoryIngestResult,
@@ -548,9 +549,7 @@ def get_memory_external_provider_service() -> MemoryExternalProviderService:
     """Return the process-wide external provider service used by Agent runtime."""
     global _provider_service
     if _provider_service is None:
-        from consts.const import MEMORY_PROVIDER_PLUGINS_DIR
-
-        plugin_loader = PluginLoader(MEMORY_PROVIDER_PLUGINS_DIR)
+        plugin_loader = PluginLoader(consts.MEMORY_PROVIDER_PLUGINS_DIR)
         plugin_loader.load_all()
         config_service = MemoryProviderConfigService(plugin_loader)
         _provider_service = MemoryExternalProviderService(

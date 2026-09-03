@@ -191,11 +191,19 @@ index_svc_mod.get_memory_index_service = MagicMock()
 index_svc_mod.reset_memory_index_service = MagicMock()
 vector_db_svc_mod = types.ModuleType("services.vectordatabase_service")
 vector_db_svc_mod.get_vector_db_core = MagicMock(return_value=MagicMock())
+external_provider_svc_mod = types.ModuleType("services.memory_external_provider_service")
+external_provider_svc_mod.get_memory_external_provider_service = MagicMock()
+ingestion_event_svc_mod = types.ModuleType("services.memory_ingestion_event_service")
+ingestion_event_svc_mod.MemoryIngestionEventService = MagicMock
 sys.modules["services"] = services_pkg
 sys.modules["services.memory_record_service"] = record_svc_mod
 sys.modules["services.memory_retrieval_service"] = retrieval_svc_mod
 sys.modules["services.memory_index_service"] = index_svc_mod
 sys.modules["services.vectordatabase_service"] = vector_db_svc_mod
+sys.modules["services.memory_external_provider_service"] = external_provider_svc_mod
+sys.modules["services.memory_ingestion_event_service"] = ingestion_event_svc_mod
+sys.modules["backend.services.memory_external_provider_service"] = external_provider_svc_mod
+sys.modules["backend.services.memory_ingestion_event_service"] = ingestion_event_svc_mod
 
 database_pkg = types.ModuleType("database")
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
@@ -204,6 +212,7 @@ database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 sys.modules["database"] = database_pkg
 
 from backend.services.memory_context_service import MemoryContextService
+from backend.services import memory_backend_adapter
 
 
 @pytest.fixture
@@ -304,8 +313,6 @@ async def test_build_context_search_disabled(mock_retrieval):
 async def test_backend_store_hook_external_ingest_called():
     sys.modules["nexent.memory.models"].MemoryLayer = MemoryLayer
     sys.modules["nexent.memory.models"].MemoryIngestUnit = MemoryIngestUnit
-    from backend.services import memory_backend_adapter
-
     mock_record_service = MagicMock()
     mock_record_service.create_memory.return_value = {"memory_id": 1}
 
@@ -323,8 +330,6 @@ async def test_backend_store_hook_external_ingest_called():
 async def test_backend_store_hook_external_ingest_has_no_deployment_switch():
     sys.modules["nexent.memory.models"].MemoryLayer = MemoryLayer
     sys.modules["nexent.memory.models"].MemoryIngestUnit = MemoryIngestUnit
-    from backend.services import memory_backend_adapter
-
     mock_record_service = MagicMock()
     mock_record_service.create_memory.return_value = {"memory_id": 1}
 
@@ -342,8 +347,6 @@ async def test_backend_store_hook_external_ingest_has_no_deployment_switch():
 async def test_backend_store_hook_ingest_failure_doesnt_break():
     sys.modules["nexent.memory.models"].MemoryLayer = MemoryLayer
     sys.modules["nexent.memory.models"].MemoryIngestUnit = MemoryIngestUnit
-    from backend.services import memory_backend_adapter
-
     mock_record_service = MagicMock()
     mock_record_service.create_memory.return_value = {"memory_id": 1}
 

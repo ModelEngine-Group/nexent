@@ -7,6 +7,7 @@ Run with: pytest --run-integration -v
 
 import sys
 import types
+from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -45,22 +46,22 @@ _memory_pkg.__path__ = []
 _memory_models = types.ModuleType("nexent.memory.models")
 
 
-class _ProviderErrorCode:
-    UNAUTHORIZED = types.SimpleNamespace(value="unauthorized")
-    FORBIDDEN = types.SimpleNamespace(value="forbidden")
-    UNKNOWN = types.SimpleNamespace(value="unknown")
-    INVALID_PAYLOAD = types.SimpleNamespace(value="invalid_payload")
-    TIMEOUT = types.SimpleNamespace(value="timeout")
-    PROVIDER_ERROR = types.SimpleNamespace(value="provider_error")
-    RATE_LIMITED = types.SimpleNamespace(value="rate_limited")
-    PARTIAL_ACCEPTANCE = types.SimpleNamespace(value="partial_acceptance")
-    UNSUPPORTED_UNIT_TYPE = types.SimpleNamespace(value="unsupported_unit_type")
+class _ProviderErrorCode(str, Enum):
+    UNAUTHORIZED = "unauthorized"
+    FORBIDDEN = "forbidden"
+    UNKNOWN = "unknown"
+    INVALID_PAYLOAD = "invalid_payload"
+    TIMEOUT = "timeout"
+    PROVIDER_ERROR = "provider_error"
+    RATE_LIMITED = "rate_limited"
+    PARTIAL_ACCEPTANCE = "partial_acceptance"
+    UNSUPPORTED_UNIT_TYPE = "unsupported_unit_type"
 
 
-class _ProviderErrorSeverity:
-    NON_RETRYABLE = types.SimpleNamespace(value="non_retryable")
-    RETRYABLE = types.SimpleNamespace(value="retryable")
-    DEGRADABLE = types.SimpleNamespace(value="degradable")
+class _ProviderErrorSeverity(str, Enum):
+    NON_RETRYABLE = "non_retryable"
+    RETRYABLE = "retryable"
+    DEGRADABLE = "degradable"
 
 
 class _MemorySearchRequest:
@@ -241,6 +242,8 @@ _auth_utils.get_current_user_id = MagicMock(return_value=("test-user", "test-ten
 sys.modules["utils.auth_utils"] = _auth_utils
 
 from apps import memory_provider_app
+from backend.memory_provider_plugins.mem0.provider import Mem0Provider
+from backend.services.memory_external_provider_service import MemoryExternalProviderService
 
 pytestmark = pytest.mark.integration
 
@@ -423,8 +426,6 @@ def test_mem0_plugin_list(client, mem0_available):
 @pytest.mark.asyncio
 async def test_mem0_search_returns_external_results(client, mem0_available):
     """Write to Mem0 then verify build_context() retrieves external results."""
-    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-
     provider = Mem0Provider({
         "api_key": "test-integration-key",
         "base_url": MEM0_BASE_URL,
@@ -464,8 +465,6 @@ async def test_mem0_search_returns_external_results(client, mem0_available):
 @pytest.mark.asyncio
 async def test_mem0_search_falls_back_to_user_scope(client, mem0_available):
     """Agent-scoped search can retrieve memories previously stored user-only."""
-    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-
     provider = Mem0Provider({
         "api_key": "test-integration-key",
         "base_url": MEM0_BASE_URL,
@@ -503,8 +502,6 @@ async def test_mem0_search_falls_back_to_user_scope(client, mem0_available):
 @pytest.mark.asyncio
 async def test_mem0_ingest_sends_units(client, mem0_available):
     """Verify send_ingest() delivers data to Mem0."""
-    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-
     provider = Mem0Provider({
         "api_key": "test-integration-key",
         "base_url": MEM0_BASE_URL,
@@ -559,8 +556,6 @@ async def test_mem0_ingest_sends_units(client, mem0_available):
 @pytest.mark.asyncio
 async def test_mem0_transparent_proxy_search(client, mem0_available):
     """Verify agent pre-search auto-merges external results from Mem0."""
-    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-
     provider = Mem0Provider({
         "api_key": "test-integration-key",
         "base_url": MEM0_BASE_URL,
@@ -600,7 +595,6 @@ async def test_mem0_transparent_proxy_search(client, mem0_available):
     mock_plugin_loader = MagicMock()
     mock_plugin_loader.build_provider.return_value = provider
 
-    from backend.services.memory_external_provider_service import MemoryExternalProviderService
     real_service = MemoryExternalProviderService.__new__(MemoryExternalProviderService)
     real_service._plugin_loader = mock_plugin_loader
     real_service._config_service = mock_service
@@ -628,8 +622,6 @@ async def test_mem0_transparent_proxy_search(client, mem0_available):
 @pytest.mark.asyncio
 async def test_mem0_transparent_proxy_store(client, mem0_available):
     """Verify StoreMemoryTool path auto-sends data to Mem0."""
-    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-
     provider = Mem0Provider({
         "api_key": "test-integration-key",
         "base_url": MEM0_BASE_URL,
@@ -654,7 +646,6 @@ async def test_mem0_transparent_proxy_store(client, mem0_available):
     mock_plugin_loader = MagicMock()
     mock_plugin_loader.build_provider.return_value = provider
 
-    from backend.services.memory_external_provider_service import MemoryExternalProviderService
     real_service = MemoryExternalProviderService.__new__(MemoryExternalProviderService)
     real_service._plugin_loader = mock_plugin_loader
     real_service._config_service = mock_config_service
@@ -704,8 +695,6 @@ async def test_mem0_transparent_proxy_store(client, mem0_available):
 @pytest.mark.asyncio
 async def test_mem0_per_turn_supplement(client, mem0_available):
     """Verify completing a turn sends non-final_answer units to Mem0."""
-    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-
     provider = Mem0Provider({
         "api_key": "test-integration-key",
         "base_url": MEM0_BASE_URL,
@@ -814,8 +803,6 @@ def test_mem0_provider_error_handling(client, mem0_available):
 @pytest.mark.asyncio
 async def test_mem0_degraded_ingest(client, mem0_available):
     """Verify unsupported unit_type triggers degraded retry."""
-    from backend.memory_provider_plugins.mem0.provider import Mem0Provider
-
     provider = Mem0Provider({
         "api_key": "test-integration-key",
         "base_url": MEM0_BASE_URL,
@@ -858,7 +845,6 @@ async def test_mem0_degraded_ingest(client, mem0_available):
     mock_plugin_loader = MagicMock()
     mock_plugin_loader.build_provider.return_value = provider
 
-    from backend.services.memory_external_provider_service import MemoryExternalProviderService
     real_service = MemoryExternalProviderService.__new__(MemoryExternalProviderService)
     real_service._plugin_loader = mock_plugin_loader
     real_service._config_service = mock_config_service
