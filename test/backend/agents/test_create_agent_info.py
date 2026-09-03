@@ -232,6 +232,7 @@ database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['database.knowledge_db'] = MagicMock()
 sys.modules['database.knowledge_db'].get_knowledge_name_map_by_index_names = MagicMock()
 sys.modules['management.services.knowledge_base.service'] = MagicMock()
+sys.modules['management.services.model.resolver'] = MagicMock()
 # Configure ElasticSearchService.filter_accessible_indices as a pass-through so that
 # existing tests (which don't explicitly mock this permission filter) still work correctly.
 sys.modules['management.services.knowledge_base.service'].ElasticSearchService.filter_accessible_indices.side_effect = \

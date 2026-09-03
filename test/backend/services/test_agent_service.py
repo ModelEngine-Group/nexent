@@ -18339,64 +18339,174 @@ async def test_run_agent_stream_metadata_version_conflict(
     assert exc_info.value.details == {"current_version": 7}
 
 
-def test_check_single_model_availability_loads_missing_cache_entry(mocker):
-    model_cache = {}
-    get_model = mocker.patch.object(agent_service, "get_model_by_model_id", return_value=None)
+@pytest.fixture
+def rebase_import_context(mocker):
+    """Isolate persistence while retaining real import orchestration and naming rules."""
+    from management.services.agent import management, naming
 
-    reasons = agent_service._check_single_model_availability(
-        model_id=31,
-        tenant_id="tenant-id",
-        model_cache=model_cache,
-        reason_key="model_unavailable",
+    catalog = []
+    mocker.patch.object(management, "get_current_user_info", return_value=("user", "tenant", "en"))
+    query = mocker.patch.object(
+        management, "query_all_agent_info_by_tenant_id", side_effect=lambda tenant: list(catalog)
+    )
+    mocker.patch.object(management, "query_all_tools", return_value=[])
+    mocker.patch.object(management, "_resolve_model_ids_with_fallback", return_value=[])
+    mocker.patch.object(management, "_get_user_group_ids", return_value="")
+    mocker.patch.object(management, "publish_version_impl", new_callable=AsyncMock)
+    relations = mocker.patch.object(management, "insert_related_agent")
+    llm = mocker.patch.object(naming, "call_llm_for_system_prompt")
+
+    def create_agent(agent_info, **kwargs):
+        record = {**agent_info, "agent_id": len(catalog) + 1}
+        catalog.append(record)
+        return record
+
+    create = mocker.patch.object(management, "create_agent", side_effect=create_agent)
+    payload = ExportAndImportAgentInfo(
+        agent_id=1, name="copy", display_name="Copy", description="test", business_description="test",
+        max_steps=5, provide_run_summary=False, enabled=True, tools=[], managed_agents=[],
+        model_ids=[], model_names=[],
+    )
+    return types.SimpleNamespace(
+        service=management, catalog=catalog, payload=payload, query=query, create=create,
+        relations=relations, llm=llm,
     )
 
-    assert reasons == ["model_unavailable"]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing,expected", [
+    ([], ("copy", "Copy")),
+    ([{"name": "copy", "display_name": "Other"}], ("copy_1", "Copy")),
+    ([{"name": "other", "display_name": "Copy"}], ("copy", "Copy_1")),
+    ([{"name": "copy", "display_name": "Copy"}], ("copy_1", "Copy_1")),
+    ([{"name": "copy", "display_name": "Copy"}, {"name": "copy_1", "display_name": "Copy_2"}],
+     ("copy_2", "Copy_1")),
+])
+async def test_ac019_repository_copy_resolves_each_name_independently(rebase_import_context, existing, expected):
+    ctx = rebase_import_context
+    ctx.catalog.extend(existing)
+    await ctx.service.import_agent_by_agent_id(ctx.payload, "tenant", "user", resolve_name_conflicts=True)
+    assert (ctx.catalog[-1]["name"], ctx.catalog[-1]["display_name"]) == expected
+    ctx.query.assert_called_once_with("tenant")
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac019_ordinary_import_keeps_names_by_default(rebase_import_context):
+    ctx = rebase_import_context
+    ctx.catalog.append({"name": "copy", "display_name": "Copy"})
+    await ctx.service.import_agent_by_agent_id(ctx.payload, "tenant", "user")
+    assert (ctx.catalog[-1]["name"], ctx.catalog[-1]["display_name"]) == ("copy", "Copy")
+    ctx.query.assert_not_called()
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac019_repeated_dfs_copies_see_names_created_by_previous_agents(rebase_import_context):
+    ctx = rebase_import_context
+    ctx.catalog.append({"name": "copy", "display_name": "Copy"})
+    ctx.payload.managed_agents = [2]
+    child = ctx.payload.model_copy(update={"agent_id": 2, "managed_agents": []})
+    snapshot = types.SimpleNamespace(agent_id=1, agent_info={"1": ctx.payload, "2": child})
+    for _ in range(2):
+        mapping = await ctx.service.import_agent_impl(snapshot, "Bearer token", resolve_name_conflicts=True)
+        assert mapping[1] > mapping[2]
+    assert [record["name"] for record in ctx.catalog] == ["copy", "copy_1", "copy_2", "copy_3", "copy_4"]
+    assert [record["display_name"] for record in ctx.catalog] == ["Copy", "Copy_1", "Copy_2", "Copy_3", "Copy_4"]
+    assert ctx.relations.call_count == 2
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac019_suffix_exhaustion_prevents_agent_creation(rebase_import_context):
+    ctx = rebase_import_context
+    ctx.catalog.extend({"name": value} for value in ["copy", *(f"copy_{index}" for index in range(1, 101))])
+    with pytest.raises(ValueError, match="max attempts"):
+        await ctx.service.import_agent_by_agent_id(ctx.payload, "tenant", "user", resolve_name_conflicts=True)
+    ctx.create.assert_not_called()
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolve_conflicts", [False, True])
+async def test_ac019_skill_bundle_preserves_naming_flag_and_skill_binding(rebase_import_context, mocker, resolve_conflicts):
+    ctx = rebase_import_context
+    ctx.catalog.append({"name": "copy", "display_name": "Copy"})
+    ctx.payload.skill_names = ["SkillA"]
+    mocker.patch.object(ctx.service.skill_db, "list_skills", return_value=[])
+    skill_service = mocker.patch.object(ctx.service, "SkillService").return_value
+    skill_service.create_skill_from_zip_bytes.return_value = {"skill_id": 7}
+    bind = mocker.patch.object(ctx.service.skill_db, "create_or_update_skill_by_skill_info")
+    snapshot = types.SimpleNamespace(agent_id=1, agent_info={"1": ctx.payload})
+    result = await ctx.service.import_agent_with_skills_impl(
+        snapshot, [types.SimpleNamespace(skill_name="SkillA", skill_zip_base64="eA==")], "Bearer token",
+        resolve_name_conflicts=resolve_conflicts,
+    )
+    assert result == {1: 2}
+    assert ctx.catalog[-1]["name"] == ("copy_1" if resolve_conflicts else "copy")
+    assert ctx.catalog[-1]["display_name"] == ("Copy_1" if resolve_conflicts else "Copy")
+    assert bind.call_args.kwargs["skill_info"].skill_id == 7
+    assert bind.call_args.kwargs["skill_info"].agent_id == 2
+    ctx.llm.assert_not_called()
+
+
+def test_check_single_model_availability_loads_missing_cache_entry(mocker):
+    from management.services.model import resolver
+
+    model_cache = {}
+    get_model = mocker.patch.object(resolver, "get_model_by_model_id", return_value=None)
+
+    model = resolver.resolve_model_record(31, "tenant-id", model_cache)
+
+    assert not resolver.is_model_available(model)
     assert model_cache == {31: None}
     get_model.assert_called_once_with(31, "tenant-id")
 
 
 def test_check_single_model_availability_reuses_cached_model(mocker):
+    from management.services.model import resolver
+
     status_enum = types.SimpleNamespace(
         AVAILABLE=types.SimpleNamespace(value="available"),
         get_value=lambda value: value,
     )
-    mocker.patch.object(agent_service, "ModelConnectStatusEnum", status_enum)
-    get_model = mocker.patch.object(agent_service, "get_model_by_model_id")
+    mocker.patch.object(resolver, "ModelConnectStatusEnum", status_enum)
+    get_model = mocker.patch.object(resolver, "get_model_by_model_id")
     model_cache = {31: {"connect_status": "available"}}
 
-    reasons = agent_service._check_single_model_availability(
-        model_id=31,
-        tenant_id="tenant-id",
-        model_cache=model_cache,
-        reason_key="model_unavailable",
-    )
+    model = resolver.resolve_model_record(31, "tenant-id", model_cache)
 
-    assert reasons == []
+    assert resolver.is_model_available(model)
     get_model.assert_not_called()
 
 
-def test_collect_model_availability_marks_models_not_configured():
-    reasons = agent_service._collect_model_availability_reasons(
-        agent={"model_ids": []},
+def test_collect_model_availability_marks_models_not_configured(mocker):
+    from management.services.agent import read
+
+    mocker.patch.object(read, "search_tools_for_sub_agent", return_value=[])
+    available, reasons = read.check_agent_availability(
+        agent_id=1,
+        agent_info={"model_ids": []},
         tenant_id="tenant-id",
         model_cache={},
     )
 
-    assert reasons == [agent_service.AgentUnavailableReason.MODEL_NOT_CONFIGURED]
+    assert available is False
+    assert reasons == [read.AgentUnavailableReason.MODEL_NOT_CONFIGURED]
 
 
 def test_is_agent_running_reflects_manager_lookup(mocker):
     get_run_info = mocker.patch.object(
-        agent_service.agent_run_manager,
+        agent_run_service.agent_run_manager,
         "get_agent_run_info",
         return_value={"status": "running"},
     )
 
-    assert agent_service.is_agent_running(44, "user-id") is True
+    assert agent_run_service.is_agent_running(44, "user-id") is True
     get_run_info.assert_called_once_with(44, "user-id")
 
 
 def test_is_agent_running_returns_false_when_run_is_missing(mocker):
-    mocker.patch.object(agent_service.agent_run_manager, "get_agent_run_info", return_value=None)
+    mocker.patch.object(agent_run_service.agent_run_manager, "get_agent_run_info", return_value=None)
 
-    assert agent_service.is_agent_running(44, "user-id") is False
+    assert agent_run_service.is_agent_running(44, "user-id") is False
