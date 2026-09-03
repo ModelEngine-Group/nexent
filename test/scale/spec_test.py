@@ -508,6 +508,187 @@ class TestMaxMemoriesPerAgent(BaseTestCase):
         return created_ids
 
 
+# ─── 功能测试 (核心接口验证) ──────────────────────────────────────
+
+class TestHybridSearch(BaseTestCase):
+    """Test knowledge base hybrid search (BM25 + kNN + embedding)."""
+    name = "hybrid_search"
+    target = 200
+
+    def run(self) -> list:
+        from utils import get_embedding_model_id, TIMEOUT_SLOW
+        emb_id = get_embedding_model_id()
+
+        kb_name = f"scale_search_{RUN_ID}"
+        try:
+            resp = api_post(f"/indices/{kb_name}", json_body={"embedding_model_id": emb_id}, timeout=TIMEOUT_SLOW)
+            index_name = resp.get("id", kb_name)
+        except Exception as e:
+            logger.warning("Create search KB failed: %s", str(e)[:80])
+            return []
+
+        time.sleep(5)
+
+        docs = [
+            {"content": f"Test document {i}: Nexent platform supports multi-tenant architecture with tenant ID {i}.", "metadata": {"source": f"doc{i}"}}
+            for i in range(10)
+        ]
+        try:
+            api_post(f"/indices/{index_name}/documents", json_body=docs, timeout=TIMEOUT_SLOW)
+            time.sleep(2)
+        except Exception as e:
+            logger.warning("Index documents failed: %s", str(e)[:80])
+
+        queries = [
+            "How many tenants does Nexent support?",
+            "What is the multi-tenant architecture?",
+            "Describe the platform features.",
+            "What documents are available?",
+            "Search for tenant information.",
+        ]
+        success = []
+        for i in range(self.target):
+            q = queries[i % len(queries)]
+            try:
+                resp = api_post("/indices/search/hybrid", json_body={
+                    "index_names": [index_name], "query": q, "top_k": 5,
+                }, timeout=TIMEOUT_SLOW)
+                if isinstance(resp, dict) and resp.get("message") != "error":
+                    success.append(i + 1)
+                time.sleep(0.5)
+            except Exception as e:
+                logger.warning("Search %d failed: %s", i, str(e)[:80])
+        return success
+
+
+class TestDocumentIndexing(BaseTestCase):
+    """Test document indexing (embedding generation + ES bulk write)."""
+    name = "document_indexing"
+    target = 100
+
+    def run(self) -> list:
+        from utils import get_embedding_model_id, TIMEOUT_SLOW
+        emb_id = get_embedding_model_id()
+
+        kb_name = f"scale_index_{RUN_ID}"
+        try:
+            resp = api_post(f"/indices/{kb_name}", json_body={"embedding_model_id": emb_id}, timeout=TIMEOUT_SLOW)
+            index_name = resp.get("id", kb_name)
+        except Exception as e:
+            logger.warning("Create index KB failed: %s", str(e)[:80])
+            return []
+
+        time.sleep(5)
+
+        success = []
+        for i in range(self.target):
+            docs = [
+                {"content": f"Document batch {i}: This is a test document about Nexent platform feature {i}. " * 5, "metadata": {"batch": str(i)}}
+            ]
+            try:
+                resp = api_post(f"/indices/{index_name}/documents", json_body=docs, timeout=TIMEOUT_SLOW)
+                if isinstance(resp, dict):
+                    success.append(i + 1)
+                time.sleep(1)
+            except Exception as e:
+                logger.warning("Index batch %d failed: %s", i, str(e)[:80])
+        return success
+
+
+class TestFileUpload(BaseTestCase):
+    """Test file upload to MinIO storage."""
+    name = "file_upload"
+    target = 200
+
+    def run(self) -> list:
+        from utils import get_session, BASE_URL
+        session = get_session()
+
+        success = []
+        for i in range(self.target):
+            import io
+            content = f"Test file {i} for scale testing. " * 20
+            files = {"file": (f"scale_file_{RUN_ID}_{i:04d}.txt", io.BytesIO(content.encode()), "text/plain")}
+            data = {"destination": "minio", "folder": f"knowledge_base/scale_upload_{RUN_ID}"}
+            try:
+                resp = session.post(f"{BASE_URL}/file/upload", files=files, data=data, timeout=60)
+                if resp.status_code < 400:
+                    success.append(i + 1)
+                time.sleep(0.3)
+            except Exception as e:
+                logger.warning("Upload %d failed: %s", i, str(e)[:80])
+        return success
+
+
+class TestDataProcessTask(BaseTestCase):
+    """Test data processing pipeline (upload -> process -> index in ES)."""
+    name = "data_process_task"
+    target = 30
+
+    def run(self) -> list:
+        from utils import get_embedding_model_id, upload_text_to_kb, TIMEOUT_SLOW
+        emb_id = get_embedding_model_id()
+
+        kb_name = f"scale_task_{RUN_ID}"
+        try:
+            resp = api_post(f"/indices/{kb_name}", json_body={"embedding_model_id": emb_id}, timeout=TIMEOUT_SLOW)
+            index_name = resp.get("id", kb_name)
+        except Exception as e:
+            logger.warning("Create task KB failed: %s", str(e)[:80])
+            return []
+
+        text_content = """
+Nexent is a zero-code platform for auto-generating AI agents.
+It supports multi-tenant architecture with up to 100 tenants.
+Each tenant can have up to 10000 users and 1000 agents.
+The platform uses Elasticsearch for knowledge base storage.
+Agents can be configured with MCP tools, skills, and knowledge bases.
+"""
+
+        success = []
+        for i in range(self.target):
+            try:
+                ok = upload_text_to_kb(index_name, f"{text_content}\nBatch {i}: Additional test content for indexing pipeline.")
+                if ok:
+                    success.append(i + 1)
+                time.sleep(5)
+            except Exception as e:
+                logger.warning("Task %d failed: %s", i, str(e)[:80])
+
+        time.sleep(10)
+        return success
+
+
+class TestMemorySearch(BaseTestCase):
+    """Test memory record search (embedding + kNN)."""
+    name = "memory_search"
+    target = 200
+
+    def run(self) -> list:
+        from utils import create_memory_record, TIMEOUT_SLOW
+
+        success = []
+        for i in range(self.target):
+            queries = [
+                "What is Nexent?",
+                "How many tenants are supported?",
+                "What is the rate limit?",
+                "Describe the agent system.",
+                "What databases are used?",
+            ]
+            q = queries[i % len(queries)]
+            try:
+                resp = api_post("/memory/records/search", json_body={
+                    "query": q, "top_k": 5,
+                }, timeout=TIMEOUT_SLOW)
+                if isinstance(resp, dict):
+                    success.append(i + 1)
+                time.sleep(0.5)
+            except Exception as e:
+                logger.warning("Memory search %d failed: %s", i, str(e)[:80])
+        return success
+
+
 # ─── 测试注册表 (新增用例只需在此注册) ───────────────────────────
 
 TEST_REGISTRY = [
@@ -523,6 +704,11 @@ TEST_REGISTRY = [
     {"class": TestMaxMcpsPerTenant, "requires": []},
     {"class": TestMaxSkillsPerTenant, "requires": []},
     {"class": TestMaxMemoriesPerAgent, "requires": ["agent_ids"]},
+    {"class": TestHybridSearch, "requires": []},
+    {"class": TestDocumentIndexing, "requires": []},
+    {"class": TestFileUpload, "requires": []},
+    {"class": TestDataProcessTask, "requires": []},
+    {"class": TestMemorySearch, "requires": []},
 ]
 
 
