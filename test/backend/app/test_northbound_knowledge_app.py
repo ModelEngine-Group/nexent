@@ -617,6 +617,26 @@ class TestIndexManagement:
         assert response.json() == {"status": "success"}
         mock_delete.assert_awaited_once()
 
+    def test_delete_index_preserves_eds_blocking_error(self, client, mock_northbound_context):
+        """Northbound callers receive the lifecycle guard's structured error."""
+        mock_northbound_context.return_value = ASSET_CTX
+        details = {
+            "index_name": "kb1",
+            "blocking_files": [
+                {"file_id": "file-1", "file_name": "report.pdf", "status": "PROCESSING"}
+            ],
+        }
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.full_delete_knowledge_base",
+            new_callable=AsyncMock,
+            side_effect=AppException("060109", details=details),
+        ):
+            with pytest.raises(AppException) as raised:
+                client.delete("/nb/v1/knowledge/indices/kb1")
+
+        assert raised.value.error_code == "060109"
+        assert raised.value.details == details
+
     @pytest.mark.parametrize(
         ("exception", "status_code"),
         [

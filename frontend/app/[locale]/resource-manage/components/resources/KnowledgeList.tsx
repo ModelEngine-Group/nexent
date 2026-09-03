@@ -589,87 +589,93 @@ export default function KnowledgeList({
 
       {kbView === "shared" && (
         <>
-      {/* Header: Quota Management button + Inline overview bar (SU + ADMIN) */}
-      <div className="flex items-center justify-between gap-4 mb-2 px-1">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Input.Search
-            allowClear
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder={t("tenantResources.knowledgeBase.searchPlaceholder")}
-            className="shrink-0"
-            style={{ width: 192, flex: "0 0 192px" }}
-          />
-          <Select
-            mode="multiple"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            value={groupFilters}
-            onChange={setGroupFilters}
-            options={groups.map((group) => ({
-              label: group.group_name,
-              value: group.group_id,
-            }))}
-            placeholder={t("tenantResources.knowledgeBase.filterGroup")}
-            className="shrink-0"
-            style={{ width: 176, flex: "0 0 176px" }}
-          />
-          {canManageQuota && tenantUsagePct != null && tenantTotalReadable && (
-            <div
-              role="button"
-              tabIndex={0}
-              className="flex min-w-0 max-w-[420px] flex-1 cursor-pointer items-center gap-2"
-              onClick={() => setQuotaModalVisible(true)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setQuotaModalVisible(true);
-                }
-              }}
-            >
-              <span className="whitespace-nowrap text-sm text-gray-600">
-                {t("quota.tenantUsage", "Tenant Usage")}:
-              </span>
-              <Progress
-                percent={Math.min(tenantUsagePct, 100)}
-                size="small"
-                strokeColor={getProgressColor(quotaUsage?.tenant_warning_level)}
-                format={() => ""}
-                style={{ flex: 1, minWidth: 60, marginBottom: 0 }}
+          {/* Header: Quota Management button + Inline overview bar (SU + ADMIN) */}
+          <div className="flex items-center justify-between gap-4 mb-2 px-1">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <Input.Search
+                allowClear
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder={t(
+                  "tenantResources.knowledgeBase.searchPlaceholder"
+                )}
+                className="shrink-0"
+                style={{ width: 192, flex: "0 0 192px" }}
               />
-              <span className="whitespace-nowrap text-sm text-gray-500">
-                {tenantTotalReadable}
-                {tenantHardLimitReadable
-                  ? ` / ${tenantHardLimitReadable}`
-                  : ""}{" "}
-                ({Math.round(tenantUsagePct)}%)
-              </span>
+              <Select
+                mode="multiple"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                value={groupFilters}
+                onChange={setGroupFilters}
+                options={groups.map((group) => ({
+                  label: group.group_name,
+                  value: group.group_id,
+                }))}
+                placeholder={t("tenantResources.knowledgeBase.filterGroup")}
+                className="shrink-0"
+                style={{ width: 176, flex: "0 0 176px" }}
+              />
+              {canManageQuota &&
+                tenantUsagePct != null &&
+                tenantTotalReadable && (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="flex min-w-0 max-w-[420px] flex-1 cursor-pointer items-center gap-2"
+                    onClick={() => setQuotaModalVisible(true)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setQuotaModalVisible(true);
+                      }
+                    }}
+                  >
+                    <span className="whitespace-nowrap text-sm text-gray-600">
+                      {t("quota.tenantUsage", "Tenant Usage")}:
+                    </span>
+                    <Progress
+                      percent={Math.min(tenantUsagePct, 100)}
+                      size="small"
+                      strokeColor={getProgressColor(
+                        quotaUsage?.tenant_warning_level
+                      )}
+                      format={() => ""}
+                      style={{ flex: 1, minWidth: 60, marginBottom: 0 }}
+                    />
+                    <span className="whitespace-nowrap text-sm text-gray-500">
+                      {tenantTotalReadable}
+                      {tenantHardLimitReadable
+                        ? ` / ${tenantHardLimitReadable}`
+                        : ""}{" "}
+                      ({Math.round(tenantUsagePct)}%)
+                    </span>
+                  </div>
+                )}
             </div>
-          )}
-        </div>
-        {canManageQuota && (
-          <Button
-            type="primary"
-            icon={<SettingOutlined className="h-4 w-4" />}
-            onClick={() => setQuotaModalVisible(true)}
-          >
-            {userRole === "SU"
-              ? t("quota.allocateStorage", "Allocate Storage")
-              : t("quota.quotaManagement", "Quota Management")}
-          </Button>
-       )}
-      </div>
+            {canManageQuota && (
+              <Button
+                type="primary"
+                icon={<SettingOutlined className="h-4 w-4" />}
+                onClick={() => setQuotaModalVisible(true)}
+              >
+                {userRole === "SU"
+                  ? t("quota.allocateStorage", "Allocate Storage")
+                  : t("quota.quotaManagement", "Quota Management")}
+              </Button>
+            )}
+          </div>
 
-      <Table
-        columns={columns}
-        dataSource={filteredKnowledgeBases}
-        loading={isLoading}
-        rowKey="id"
-        pagination={{ pageSize: 10 }}
-        className="flex-1 [&_.ant-table]:h-full"
-        scroll={{ y: "calc(100vh - 560px)" }}
-      />
+          <Table
+            columns={columns}
+            dataSource={filteredKnowledgeBases}
+            loading={isLoading}
+            rowKey="id"
+            pagination={{ pageSize: 10 }}
+            className="flex-1 [&_.ant-table]:h-full"
+            scroll={{ y: "calc(100vh - 560px)" }}
+          />
 
           {/* Edit Knowledge Base Modal */}
           <KnowledgeBaseEditModal

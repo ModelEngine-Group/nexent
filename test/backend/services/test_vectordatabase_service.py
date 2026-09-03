@@ -5174,9 +5174,16 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.mock_rerank = MagicMock()
         self.mock_get_rerank.return_value = self.mock_rerank
 
+        self.list_lifecycle_patcher = patch(
+            'management.services.knowledge_base.management.list_file_records',
+            return_value=[],
+        )
+        self.list_lifecycle_patcher.start()
+
     def tearDown(self):
         self.get_embedding_model_patcher.stop()
         self.get_rerank_model_patcher.stop()
+        self.list_lifecycle_patcher.stop()
 
     def test_rethrow_or_plain_rethrows_json_error_code(self):
         """_rethrow_or_plain should re-raise JSON payload when error_code present."""
@@ -5873,7 +5880,7 @@ class TestRethrowOrPlain(unittest.TestCase):
                     "tenant-123",
                 )
         finally:
-        self.get_rerank_model_patcher.start()
+            self.get_rerank_model_patcher.start()
 
     @patch('management.services.model.resolver.get_model_records')
     @patch('management.services.model.resolver.tenant_config_manager')
@@ -6835,6 +6842,14 @@ class TestCoverageImprovement(unittest.TestCase):
         self.mock_vdb_core = MagicMock()
         self.mock_vdb_core.embedding_model = MagicMock()
         self.mock_vdb_core.embedding_dim = 768
+        self.list_lifecycle_patcher = patch(
+            'management.services.knowledge_base.management.list_file_records',
+            return_value=[],
+        )
+        self.list_lifecycle_patcher.start()
+
+    def tearDown(self):
+        self.list_lifecycle_patcher.stop()
 
     # Tests for _update_progress (lines 54-80)
     @patch('management.services.knowledge_base.common.get_redis_service')
