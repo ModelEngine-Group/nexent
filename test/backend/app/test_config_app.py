@@ -162,6 +162,7 @@ class TestConfigAppRouterConfiguration:
             "apps.memory_long_term_app": {"router": APIRouter()},
             "apps.memory_dreaming_app": {"router": APIRouter()},
             "apps.memory_provider_app": {"router": APIRouter()},
+            "apps.tag_management_app": {"router": APIRouter()},
             "apps.quota_app": {
                 "tenant_quota_router": APIRouter(),
                 "platform_quota_router": APIRouter(),

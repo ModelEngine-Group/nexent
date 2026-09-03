@@ -121,7 +121,7 @@ COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.delete_flag IS 'Soft
 INSERT INTO nexent.role_permission_t (
     role_permission_id, user_role, permission_category, permission_type, permission_subtype
 ) VALUES
-    (1118, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'CREATE'),
+    (1122, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'CREATE'),
     (1119, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'READ'),
     (1120, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'UPDATE'),
     (1121, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'DELETE'),

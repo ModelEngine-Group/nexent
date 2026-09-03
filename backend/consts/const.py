@@ -61,6 +61,14 @@ AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
 AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
     os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
 )
+
+# Unified tag document retrieval projection rollout flag. When enabled, document
+# assignments are projected to retrieval providers and tracked in the
+# document_tag_projection ledger; canonical assignments are never rolled back
+# when a provider rejects or delays a projection.
+TAG_DOCUMENT_PROJECTION_ENABLED = os.getenv(
+    "TAG_DOCUMENT_PROJECTION_ENABLED", "true"
+).lower() in ("true", "1", "yes", "on")
 AGENT_AUTOMATION_LEASE_SECONDS = int(
     os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
 )
