@@ -63,10 +63,6 @@ export interface SkillOperationResult {
   message?: string;
 }
 
-export type SkillCreatedCallback = (
-  createdSkill: unknown
-) => void | Promise<void>;
-
 /**
  * Callback for stream processing final answer
  */
@@ -250,7 +246,7 @@ export async function fetchSkillsList(
 export const submitSkillForm = async (
   values: SkillData,
   _allSkills: SkillListItem[],
-  onSuccess: SkillCreatedCallback,
+  onSuccess: () => void | Promise<void>,
   onCancel: () => void,
   t: (key: string) => string,
   options: { mode?: "create" | "edit"; skillId?: number } = { mode: "create" }
@@ -287,7 +283,7 @@ export const submitSkillForm = async (
           ? t("skillManagement.message.updateSuccess")
           : t("skillManagement.message.createSuccess")
       );
-      await onSuccess(result.data);
+      await onSuccess();
       onCancel();
       return true;
     } else {
@@ -308,7 +304,7 @@ export const submitSkillFromFile = async (
   skillName: string,
   file: File,
   allSkills: SkillListItem[],
-  onSuccess: SkillCreatedCallback,
+  onSuccess: () => void,
   onCancel: () => void,
   t: (key: string) => string
 ): Promise<boolean> => {
@@ -317,7 +313,7 @@ export const submitSkillFromFile = async (
 
     if (result.success) {
       message.success(t("skillManagement.message.createSuccess"));
-      await onSuccess(result.data);
+      onSuccess();
       onCancel();
       return true;
     } else {
