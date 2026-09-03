@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from typing import List, Optional, Any, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Dynamically determine the backend path and add it to sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +49,7 @@ class SearchRequest(BaseModel):
 class HybridSearchRequest(SearchRequest):
     weight_accurate: float = 0.5
     weight_semantic: float = 0.5
+    tag_predicates: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class IndexingResponse(BaseModel):
@@ -389,7 +390,9 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files, \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_index") as mock_delete, \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete:
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
+            patch("services.tag_management_service.TagManagementService.cleanup_resource_assignments") as cleanup_resource, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments_for_knowledge_base") as cleanup_documents:
 
         # Properly setup the async mock for list_files
         mock_list_files.return_value = {"files": []}
@@ -447,6 +450,12 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
             ANY,  # Use ANY instead of vdb_core_mock to ignore object identity
             auth_data["user_id"]
         )
+        cleanup_resource.assert_called_once_with(
+            auth_data["tenant_id"], "knowledge_base", auth_data["index_name"], auth_data["user_id"]
+        )
+        cleanup_documents.assert_called_once_with(
+            auth_data["tenant_id"], "local", auth_data["index_name"], auth_data["user_id"]
+        )
 
 
 @pytest.mark.asyncio
@@ -491,7 +500,9 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
             patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files, \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_index") as mock_delete, \
-            patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete:
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
+            patch("services.tag_management_service.TagManagementService.cleanup_resource_assignments"), \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
 
         # Properly setup the async mock for list_files
         mock_list_files.return_value = {"files": []}
@@ -1989,7 +2000,8 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
+            ) as mock_delete_by_scope, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments") as cleanup_document:
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
@@ -2040,6 +2052,9 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_
         )
         redis_service_mock.delete_document_records.assert_called_once_with(
             index_name, path_or_url)
+        cleanup_document.assert_called_once_with(
+            auth_data["tenant_id"], "local", index_name, path_or_url, auth_data["user_id"]
+        )
 
 
 @pytest.mark.asyncio
@@ -2085,7 +2100,8 @@ async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
                 return_value={"status": "success", "scope": "full"},
-            ) as mock_delete:
+            ) as mock_delete, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
         response = client.delete(
             f"/indices/{auth_data['index_name']}/documents",
             params={
@@ -2301,7 +2317,8 @@ async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
+            ) as mock_delete_by_scope, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         response = client.delete(
             f"/indices/{auth_data['index_name']}/documents",
@@ -2323,7 +2340,8 @@ async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_ser
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
+            ) as mock_delete_by_scope, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         index_name = "test_index"
         path_or_url = "knowledge_base/test.pdf"
@@ -2362,7 +2380,8 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock, a
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
+            ) as mock_delete_by_scope, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
@@ -2455,7 +2474,8 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
             patch(
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
-            ) as mock_delete_by_scope:
+            ) as mock_delete_by_scope, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"

@@ -26,6 +26,8 @@ interface McpToolsSearchFilterBarProps {
   statusOptions?: Array<{ value: string; label: string }>;
   categoryStats?: McpCategoryStat[];
   actions?: ReactNode;
+  searchActions?: ReactNode;
+  filterActions?: ReactNode;
   onSearchChange: (value: string) => void;
   onDeploymentTypeChange?: (value: DeploymentFilter) => void;
   onStatusChange?: (value: string) => void;
@@ -43,6 +45,8 @@ export default function McpToolsSearchFilterBar({
   statusOptions,
   categoryStats,
   actions,
+  searchActions,
+  filterActions,
   onSearchChange,
   onDeploymentTypeChange,
   onStatusChange,
@@ -68,40 +72,57 @@ export default function McpToolsSearchFilterBar({
       }`}
     >
       <span>{item.label}</span>
-      <span className={`ml-1.5 rounded-full px-1.5 text-xs ${
-        selected ? "bg-white/20 text-white" : "bg-white text-slate-500"
-      }`}>
+      <span
+        className={`ml-1.5 rounded-full px-1.5 text-xs ${
+          selected ? "bg-white/20 text-white" : "bg-white text-slate-500"
+        }`}
+      >
         {item.count}
       </span>
     </button>
   );
 
-  const tabsContent = filterTabs?.length ? (
-    <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-      {filterTabs.map((item) =>
-        renderTab(item, activeFilterTab === item.value, () => onFilterTabChange?.(item.value))
-      )}
-    </div>
-  ) : categoryStats?.length && onDeploymentTypeChange ? (
-    <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-      {categoryStats.map((item) =>
-        renderTab(item, deploymentType === item.value, () => onDeploymentTypeChange(item.value))
-      )}
-    </div>
-  ) : null;
+  const filterTabsContent = filterTabs?.length
+    ? filterTabs.map((item) =>
+        renderTab(item, activeFilterTab === item.value, () =>
+          onFilterTabChange?.(item.value)
+        )
+      )
+    : categoryStats?.length && onDeploymentTypeChange
+      ? categoryStats.map((item) =>
+          renderTab(item, deploymentType === item.value, () =>
+            onDeploymentTypeChange(item.value)
+          )
+        )
+      : null;
+
+  const tabsContent =
+    filterTabsContent || filterActions ? (
+      <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3">
+        <div className="flex flex-wrap gap-2">{filterTabsContent}</div>
+        {filterActions ? (
+          <div className="ml-auto shrink-0">{filterActions}</div>
+        ) : null}
+      </div>
+    ) : null;
 
   return (
     <div>
       <div className="flex flex-row items-center gap-3 overflow-x-auto">
-        <div className="grid min-w-[240px] flex-1 gap-3 grid-cols-[minmax(160px,1fr)_auto] items-center">
+        <div className="flex min-w-[240px] flex-1 items-center gap-3">
           <Input
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={searchPlaceholder || t("mcpTools.page.searchNameTagPlaceholder")}
+            placeholder={
+              searchPlaceholder || t("mcpTools.page.searchNameTagPlaceholder")
+            }
             allowClear
             prefix={<Search className="h-4 w-4 text-slate-400" />}
-            className="h-10 rounded-lg border-slate-200 bg-slate-50/60"
+            className="h-10 min-w-0 flex-1 rounded-lg border-slate-200 bg-slate-50/60"
           />
+          {searchActions ? (
+            <div className="shrink-0">{searchActions}</div>
+          ) : null}
           {statusOptions && onStatusChange ? (
             <Select
               value={status}
@@ -112,7 +133,9 @@ export default function McpToolsSearchFilterBar({
             />
           ) : null}
         </div>
-        {actions ? <div className="flex shrink-0 flex-nowrap gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="flex shrink-0 flex-nowrap gap-2">{actions}</div>
+        ) : null}
       </div>
       {tabsContent}
     </div>
