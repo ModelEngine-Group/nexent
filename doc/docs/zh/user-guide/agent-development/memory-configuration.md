@@ -36,7 +36,7 @@ Nexent 的记忆功能用于保留跨轮次、跨会话仍有价值的信息。�
 
 开关修改后会立即保存。如果保存失败，页面会恢复到修改前的状态并显示提示。
 
-![](./../assets/memory-management/memory-settings.png)
+![记忆设置页面](./../assets/memory-management/memory-settings.png)
 
 基础设置页还提供 Dreaming 的执行计划和高级参数，详见下文。
 

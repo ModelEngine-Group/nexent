@@ -12,6 +12,8 @@
 | [知识库配置](./agent-development/knowledge-configuration) | 创建知识库、查看个人容量、处理文档和管理 Chunk，让智能体检索私有数据 |
 | [记忆配置](./agent-development/memory-configuration) | 管理 Tenant、User、Agent 三层记忆，并通过 Dreaming 将稳定的短期记忆整理为长期记忆 |
 | [智能体配置](./agent-development/agent-configuration) | 使用智能生成完成整套配置或局部优化，也可以手动调整参数，并完成资源绑定、调试、发布和版本管理 |
+| [添加外部 A2A Agent](./agent-development/a2a-external) | 通过 URL 或 Nacos 发现第三方 Agent，并将其用于智能体协作 |
+| [发布为 A2A Agent](./agent-development/a2a-publish) | 将已发布的智能体开放给外部系统发现和调用 |
 
 ## 主要步骤
 

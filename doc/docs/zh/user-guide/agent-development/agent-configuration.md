@@ -14,27 +14,7 @@
 
 在“智能体开发”的“智能体配置”页签下，点击右上角的“新建”创建空白智能体。创建或选择一个可编辑的智能体后，可以在智能生成面板描述需求，也可以直接在配置面板中手动填写。若当前智能体只有只读权限，页面会显示配置内容，但不会允许生成或修改。
 
-如果您有现成的智能体配置，也可以导入使用：
-
-1. 点击"导入"按钮
-2. 在弹出的文件选择对话框中选择智能体配置文件（支持 JSON 或 zip 压缩包格式）
-3. 点击"打开"按钮，系统会验证配置文件的格式和内容，并显示导入的智能体信息
-
-![image-20260805040825286](./../assets/agent-development/import.png)
-
-![image-20260805043517509](./../assets/agent-development/import-2.png)
-
-
-> ⚠️ **提示**：如果导入了重名的智能体，系统会弹出提示弹窗。您可以选择：
->
-> - **直接导入**：保留重复名称，导入后的智能体会处于不可用状态，需手动修改智能体名称和变量名后才能使用
-> - **重新生成并导入**：系统将调用 LLM 对智能体进行重命名，会消耗一定的模型 token 数，可能耗时较长
-
-> 📌 **重要说明**：通过导入创建的智能体，如果其工具中包含 `knowledge_base_search` 等知识库检索工具，这些工具只会检索**当前登录用户在本环境中有权限访问的知识库**。导入文件中原有的知识库配置不会自动继承，因此实际检索结果和回答效果，可能与智能体原作者环境下的表现存在差异。
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
-</div>
+如果您有现成的智能体配置，也可以点击“导入”，使用 JSON 或 ZIP 文件创建智能体。有关导出文件、导入步骤、重名处理和依赖检查的完整说明，请参阅 [Agent 导出与导入](../../integration/integration-out/agents-export.md)。
 
 ## 👥 配置协作智能体/工具
 
@@ -59,86 +39,7 @@
 
 #### 🌐 添加外部 A2A Agent
 
-Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过以下两种方式发现外部 A2A Agent：
-
-##### 通过 URL 发现 Agent
-
-如果您知道目标 Agent 的 Agent Card 地址，可以使用 URL 发现方式：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. 在外部 A2A Agent 列表中，点击"添加外部 Agent"按钮
-2. 选择"URL 发现"页签
-3. 填写 Agent Card URL 地址，例如：`https://example.com/.well-known/agent.json`
-4. 如果目标 Agent Card 需要认证，在"自定义请求头"中填写 JSON 对象，例如：`{"Authorization": "Bearer <token>"}`
-5. 点击"发现"按钮，系统会自动获取 Agent 的相关信息
-6. 发现成功后，可以查看 Agent 的名称、描述、能力等信息
-7. 点击"添加到列表"完成添加
-
-> 💡 **提示**：自定义请求头会随该外部 Agent 保存，仅用于获取和刷新 Agent Card，不会用于后续调用 Agent。再次发现同一 URL 时，留空会保留现有配置，填写 `{}` 可清空配置。
-
-> 💡 **提示**：Agent Card 是符合 A2A 1.0 规范的 Agent 描述文件，包含了 Agent 的名称、描述、调用地址、能力等信息。
-
-##### 通过 Nacos 发现 Agent
-
-如果您的 Agent 注册在 Nacos 服务发现平台，可以使用 Nacos 发现方式：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. 在外部 A2A Agent 列表中，点击"添加外部 Agent"按钮
-2. 选择"Nacos 发现"页签
-3. 首次使用时，需要先配置 Nacos 连接信息：
-   - **Nacos 服务器地址**：填写 Nacos 服务器地址，如 `http://127.0.0.1:8848`
-   - **命名空间 ID**：填写 Nacos 命名空间 ID（可选）
-   - **分组名**：填写服务分组名，默认为 `DEFAULT_GROUP`
-   - **用户名/密码**：填写 Nacos 访问凭证（可选）
-4. 点击"保存配置"保存 Nacos 连接信息
-5. 填写要扫描的 Agent 服务名称
-6. 点击"扫描"按钮，系统会从 Nacos 中获取匹配的 Agent 信息
-7. 扫描结果会列出所有匹配的 Agent，可以选择需要的 Agent 添加到列表
-
-> ⚠️ **注意**：确保 Nacos 服务正常运行，且目标 Agent 已正确注册到 Nacos。
-
-##### 管理已发现的外部 Agent
-
-在外部 A2A Agent 列表中，您可以查看和管理所有已发现的外部 Agent：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. **查看 Agent 详情**：点击 Agent 卡片，可以查看其完整信息，包括名称、描述、URL、能力列表等
-2. **测试 Agent**：点击"测试"按钮，可以向该 Agent 发送测试消息，验证其是否正常工作
-3. **与 Agent 对话**：点击"对话"按钮，可以打开对话窗口，与该 Agent 进行实时交互
-4. **配置调用协议**：点击"协议配置"按钮，可以选择该 Agent 的调用协议：
-   - **HTTP + JSON**：使用 REST API 风格调用
-   - **JSON-RPC**：使用 JSON-RPC 协议调用
-5. **配置调用认证**：如果 Agent Card 声明了 `securitySchemes` 和 `securityRequirements`，点击"Agent 认证"按钮，填写所需认证值。系统会按 Card 声明将值放入请求头、查询参数或 Cookie；同一认证组合中的字段必须同时填写。
-6. **刷新 Agent 信息**：如果 Agent 信息发生变化，可以点击"刷新"按钮重新获取最新的 Agent Card
-7. **移除 Agent**：点击"移除"按钮，可以将该 Agent 从已发现列表中删除
-
-> 💡 **使用场景**：
->
-> - 通过 URL 发现快速接入已知的第三方 Agent 服务
-> - 通过 Nacos 发现批量接入同一服务注册中心的所有 Agent
-> - 配置协议以兼容不同 Agent 服务提供商的要求
-
-###### 通过URL对接[DataAgent](https://gitcode.com/datagallery/dataagent)
-
-1. 参考[DataAgent文档](https://gitcode.com/datagallery/dataagent#%F0%9F%8C%90-a2a-10-%E6%9C%8D%E5%8A%A1%E6%A8%A1%E5%BC%8F)，以A2A服务模式启动DataAgent
-
-   > 如果 DataAgent 启用了认证，请在发现 Agent 后，根据 Agent Card 声明的安全方案配置调用认证；未启用认证时可直接进行连通性测试。
-
-   <div style="display: flex; justify-content: left;">
-     <img src="../assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
-   </div>
-
-2. 参考[通过 URL 发现 Agent](#通过-url-发现-agent)接入agent，url为http://\<IP\>:9999/.well-known/agent-card.json
-3. 参考[管理已发现的外部 Agent](#管理已发现的外部-agent)配置调用协议，选择HTTP+JSON方式接入
+Nexent 支持通过 URL 或 Nacos 发现第三方 A2A Agent，再将其添加为协作智能体。有关发现、认证、协议配置、连通性测试和 DataAgent 接入示例，请参阅 [添加外部 A2A Agent](./a2a-external.md)。如需了解 A2A 接入流程和协议概念，请参阅 [Agent 智能体接入](../../integration/integration-in/agents.md)。
 
 ### 🛠️ 选择智能体的工具或技能
 
@@ -169,77 +70,7 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 
 ### 🔌 添加 MCP 工具
 
-在"选择智能体的工具"页签右侧，点击"MCP 配置"，可在弹窗中进行 MCP 服务器的配置，查看已配置的 MCP 服务器
-
-您可以通过以下两种方式在 Nexent 中添加 MCP 服务
-
-**1️⃣ 通过 URL 添加 MCP 服务**
-
-🔔 该方法适用于已有独立部署的 MCP 服务（支持 SSE 与 Streamable HTTP 协议）：
-
-> 1.  在界面上方的 **Add MCP Server** 区域填写 **Server name** 、 **Server URL**
->
-> ⚠️ **注意**：服务器名称只能包含英文字母和数字，不能包含空格、下划线等其他字符
->
-> 2.  点击 右侧 **+ Add** 按钮，完成单个服务添加
-
-**2️⃣ 通过 JSON 配置添加容器化 MCP 服务**
-
-🔔 该方法适用于 npx 部署的容器化 MCP 服务
-
-> 1.  在 **Add Containerized MCP Service** 输入框中，填写符合示例格式的 JSON 配置
->
-> ```json
-> {
->   "mcpServers": {
->     "service-name": {
->       "args": ["mcp-package-name@version", "additional-parameters"],
->       "command": "npx"
->     }
->   }
-> }
-> ```
->
-> 2.  在下方 **Port** 输入框中，填写容器化服务对应的端口号
-> 3.  点击右侧 **+ Add** 按钮，完成容器化服务添加
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/mcp.png" style="width: 80%; height: auto;" />
-</div>
-
-有许多第三方服务如 [ModelScope](https://www.modelscope.cn/mcp) 提供了 MCP 服务，您可以快速接入使用。
-您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../../backend/tools/mcp)。
-
-**3️⃣ 存量 API 转换为 MCP 服务**
-
-🔔 该方法适用于将已有的 REST API 接口快速转换为 MCP 工具，无需额外开发即可让智能体调用现有 API 能力：
-
-> 1.  在 MCP 配置模块选择 **"API 转换为 MCP"** 接入类型
-> 2.  在下方的输入框中填写 API 基础信息：
->
-> - **服务名称**：MCP 服务的展示名称
-> - **OpenAPI JSON**：OpenAPI 3.x 规范的 JSON 内容
-> - **基础服务 URL**：API 服务的基础地址（支持 http/https）
->
-> 3.  点击右下角 **+ 添加** 按钮，完成对应 MCP 服务的转换
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/add_mcp_from_api.png" style="width: 80%; height: auto;" />
-</div>
-
-> 4.  转换完成后，可在 **Outer APIs** 页签下查看所有外部 API 转换的 MCP 工具
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/add_mcp_from_api_1.png" style="width: 80%; height: auto;" />
-</div>
-![image-20260805051112051](./../assets/agent-development/add_mcp_from_api_2.png)
-
-
-> 💡 **使用场景**：
->
-> - 快速接入企业内部的 REST API 接口
-> - 将第三方服务的 HTTP API 转换为 MCP 工具
-> - 无需编写 MCP Server 代码，直接通过 OpenAPI 规范生成工具
+在“选择智能体的工具”页签中点击“MCP 配置”，可以接入远程 MCP、容器化 MCP，或将已有 API 转换为 MCP 工具。有关三种接入方式、OpenAPI 要求、服务管理和工具测试，请参阅 [MCP 服务接入](../../integration/integration-in/mcp.md)。
 
 ### ⚙️ 自定义工具
 
@@ -251,66 +82,9 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 
 ### 🔌 创建或导入技能
 
-在智能体的高级配置中切换到“选择技能”页签，点击“构建技能”，即可通过对话生成或文件安装的方式创建技能。技能创建成功后会进入当前用户可访问的技能列表，但**不会自动关联到当前智能体**；完成创建后，还需要选择该技能并保存智能体配置。
+在智能体的高级配置中切换到“选择技能”页签，点击“构建技能”，可以通过对话创建 Skill，也可以上传 `.md` 或 `.zip` 文件。创建完成后，需要选择该 Skill 并保存智能体配置，智能体才能使用它。
 
-#### 交互式创建技能 (NL2SKILL)
-
-“交互式创建”适合从自然语言需求开始构建技能：
-
-1. 点击“构建技能”，选择“交互式创建”页签。
-2. 在左侧对话区描述技能的用途、执行步骤、输入输出以及限制条件。例如：“创建一个读取 CSV 文件并输出数据质量报告的技能”。
-3. 系统会流式生成技能草稿。生成过程中可以停止生成，也可以继续对话，补充要求或要求系统修改已有草稿。
-4. 在右侧草稿区检查并编辑技能信息与文件内容：
-   - **技能名称**：必填，并且不能与现有技能重名。
-   - **技能描述**：必填，用于说明技能的用途和适用场景。
-   - **标签**：最多添加 5 个标签，每个标签不超过 20 个字符，便于后续搜索和筛选。
-   - **用户组与组内权限**：根据需要设置技能的可见范围及编辑权限；仅在当前账号具备相关权限时显示或允许修改。
-   - **技能文件**：`SKILL.md` 是技能的主文件，不可重命名或删除；还可以新增、编辑、重命名或删除脚本、资源文件等其他文件。
-5. 确认草稿内容后，点击“创建”。如果技能名称已存在，请修改名称后重新创建。
-
-#### 从文件安装技能
-
-“安装”页签用于导入已经准备好的技能文件。点击上传区域选择文件，或将文件拖入上传区域。每次只能上传一个文件，支持以下格式：
-
-| 文件格式 | 适用场景 | 文件要求 |
-| --- | --- | --- |
-| `.md` | 仅包含主说明文件的单文件技能 | 文件应为完整的 `SKILL.md`，并在 YAML Front Matter 中包含 `name` 和 `description` |
-| `.zip` | 包含脚本、资源或其他辅助文件的多文件技能 | 压缩包中必须包含 `SKILL.md`；该文件可以位于压缩包根目录或某个子目录中，其他文件会随技能一并导入 |
-
-`SKILL.md` 的基本结构示例如下：
-
-```markdown
----
-name: csv-report
-description: 分析 CSV 文件并生成数据质量报告
-tags:
-  - data-analysis
----
-
-# CSV 数据质量报告
-
-在用户提供 CSV 文件后，检查缺失值、重复数据和字段类型，并输出结构化报告。
-```
-
-上传后，系统会从 `SKILL.md` 中读取技能名称和描述，并展示解析结果。确认无误后点击“创建”完成安装。
-
-> ⚠️ **导入限制**：
->
-> - `SKILL.md` 必须包含有效的 YAML Front Matter，并提供 `name` 和 `description`；缺少任一字段都将导致导入失败。
-> - `SKILL.md` 编码格式必须为`UTF-8`。
-> - 导入不会覆盖同名技能。如果名称已存在，请修改 `SKILL.md` 中的 `name`，然后重新上传。
-> - 多文件技能应先将技能目录压缩为 `.zip`，并确保压缩包内包含 `SKILL.md`。
-
-#### 将新技能关联到智能体
-
-技能创建或安装成功后，按以下步骤将其用于当前智能体：
-
-1. 如列表尚未更新，点击“刷新技能”。
-2. 点击“选择技能”，通过名称、描述或标签找到新技能并选中。
-3. 如果技能包含需要填写的参数，点击 ⚙️ 完成参数配置。
-4. 返回智能体配置页保存配置。之后，该智能体才可以在运行过程中使用此技能。
-
-有关技能的查看、编辑、权限和删除等完整管理方式，请参阅 [技能管理](../resource-repository/skill-repository.md)。
+有关文件格式、`SKILL.md` 结构、上传限制和关联步骤，请参阅 [Skill 技能接入](../../integration/integration-in/skills.md)。有关技能的查看、编辑、权限和删除，请参阅 [技能管理](../resource-repository/skill-repository.md)。
 
 ### 🧪 工具测试
 
@@ -463,119 +237,9 @@ Nexent 支持智能体的版本管理，您可以在调试过程中，保存不�
 
 ### 🚀 发布为 A2A Agent
 
-Nexent 支持将已发布的智能体作为 A2A Agent 暴露给外部系统调用。在发布版本时，您可以勾选"发布为 A2A Agent"选项，将当前智能体注册为符合 A2A 1.0 规范的 Agent。
+发布版本时勾选“发布为 A2A Agent”，可以让外部系统通过 REST 或 JSON-RPC 协议发现并调用该智能体。发布步骤、调用信息、认证和版本更新方法请参阅 [发布为 A2A Agent](./a2a-publish.md)。
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-published-as.jpg" style="width: 50%; height: auto;" />
-</div>
-
-发布成功后，系统会显示 A2A Agent 的调用信息，包括：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-detail.jpg" style="width: 50%; height: auto;" />
-</div>
-
-| 信息项             | 说明                                              |
-| ------------------ | ------------------------------------------------- |
-| **Endpoint ID**    | A2A Agent 的唯一标识符                            |
-| **Agent Card URL** | Agent 发现端点，外部系统通过此地址获取 Agent 描述 |
-| **协议版本**       | A2A 协议版本，当前为 1.0                          |
-| **REST 端点**      | 基于 REST 风格的 API 端点                         |
-| **JSON-RPC 端点**  | 基于 JSON-RPC 2.0 协议的调用端点                  |
-
-#### 调用方式
-
-发布后的 A2A Agent 支持以下两种调用协议：
-
-##### REST API
-
-```bash
-# 获取 Agent Card（用于 Agent 发现）
-GET /nb/a2a/{endpoint_id}/.well-known/agent-card.json
-
-# 发送同步消息
-POST /nb/a2a/{endpoint_id}/message:send
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "请帮我完成某个任务"
-  }
-}
-
-# 发送流式消息（SSE）
-POST /nb/a2a/{endpoint_id}/message:stream
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "请帮我完成某个任务"
-  }
-}
-
-# 获取任务状态
-GET /nb/a2a/{endpoint_id}/tasks/{task_id}
-```
-
-##### JSON-RPC 2.0
-
-```bash
-POST /nb/a2a/{endpoint_id}/v1
-Content-Type: application/json
-
-# 发送同步消息
-{
-  "jsonrpc": "2.0",
-  "method": "SendMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "请帮我完成某个任务"
-    }
-  },
-  "id": 1
-}
-
-# 发送流式消息
-{
-  "jsonrpc": "2.0",
-  "method": "SendStreamingMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "请帮我完成某个任务"
-    }
-  },
-  "id": 2
-}
-
-# 获取任务状态
-{
-  "jsonrpc": "2.0",
-  "method": "GetTask",
-  "params": {
-    "taskId": "task_abc123"
-  },
-  "id": 3
-}
-```
-
-> 💡 **提示**：
->
-> - 本地开发时，如果使用 docker 启动：请将路径前面的 `/nb/a2a` 部分替换为 `http://localhost:5013/nb/a2a`；如果通过 k8s 启动，请使用 `http://localhost:30013/nb/a2a`
-> - 生产环境请将路径替换为您的服务器域名或公网 IP 地址
-
-> ⚠️ **注意事项**：
->
-> - 调用 A2A Agent 需要在请求头中携带有效的认证信息
-> - Agent Card 信息会被缓存，刷新间隔为 1 小时
-> - 如需更新 Agent 信息，需要重新发布智能体版本
-
-当发布的Agent为符合A2A协议的Agent时，在智能体列表中，点击最左侧的icon查看A2A Agent调用具体信息
-
-![image-20260805132836142](./../assets/agent-development/a2a-find-detail.jpg)
+如果需要通过普通北向 RESTful API 开放智能体，请参阅 [Agent 发布](../../integration/integration-out/agents-publish.md)；接口参数和完整请求示例请参阅 [调用 Agent 北向 API](../../integration/integration-out/northbound-api.md)。
 
 
 ## 🔧 管理智能体清单
@@ -600,7 +264,7 @@ Content-Type: application/json
 
 ### 📤 导出
 
-可将调试成功的智能体导出为 JSON 或 Zip 文件，在创建智能体时可以使用此文件以导入的方式创建副本。含有技能的复杂智能体将默认被导出为 Zip 压缩包。
+可将调试成功的智能体导出为 JSON 或 ZIP 文件，并在其他环境中重新导入。有关格式选择、依赖处理和导入限制，请参阅 [Agent 导出与导入](../../integration/integration-out/agents-export.md)。
 
 ### 🗑️ 删除
 

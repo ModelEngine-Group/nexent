@@ -555,6 +555,24 @@ Nexent 智能体基于 [smolagents](https://github.com/huggingface/smolagents) �
 
 ![分享](./assets/start-chat/share.png)
 
+### 5. 批量管理对话
+
+对话管理页面支持批量删除对话。进入批量管理模式后，可以逐个勾选需要删除的对话，也可以全选当前已加载的对话，然后统一删除。
+
+操作步骤如下：
+
+1. 在对话历史区域进入批量管理模式。
+2. 勾选需要删除的对话，或使用“全选”选择当前已加载的全部对话。
+3. 检查已选数量，点击“删除”，然后在确认窗口中完成删除。
+
+> **注意**：删除操作无法撤销。批量删除还会取消并清理绑定到所选对话的自动化任务，请在确认前仔细检查所选对话。
+
+<div style="display: flex; justify-content: center; align-items: flex-start; gap: 16px;">
+  <img src="./assets/start-chat/batch-delete-select.png" alt="选择需要批量删除的对话" style="width: 42%; max-width: 420px; height: auto;" />
+  <img src="./assets/start-chat/batch-delete-confirm.png" alt="确认批量删除对话" style="width: 42%; max-width: 420px; height: auto;" />
+</div>
+
+
 ## 九、后台运行模式
 
 当智能体处理复杂任务或生成文件时，任务可能需要较长时间执行。用户可以离开当前对话页面，系统会继续在后台处理任务。
