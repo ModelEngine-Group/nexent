@@ -19,8 +19,8 @@ test/backend/
 │   ├── test_image_app.py
 │   ├── test_knowledge_app.py
 │   ├── test_knowledge_summary_app.py
-│   ├── test_me_model_managment_app.py
-│   ├── test_model_managment_app.py
+│   ├── test_me_model_management_app.py
+│   ├── test_model_management_app.py
 │   ├── test_prompt_app.py
 │   └── test_remote_mcp_app.py
 ├── services/              # 服务层测试
