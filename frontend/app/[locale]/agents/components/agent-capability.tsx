@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Row, Col, Flex, Tooltip, Badge } from "antd";
 import { Wrench, RefreshCw, Plug, BlocksIcon } from "lucide-react";
@@ -28,7 +28,8 @@ export default function AgentCapability() {
   const { message } = App.useApp();
 
   const currentAgentId = useAgentStore((state) => state.agentId);
-  const { configFocusRequest } = useNl2AgentFlow();
+  const { configFocusRequest, skillCreationRequest, completeSkillCreation } =
+    useNl2AgentFlow();
   const isReadOnly = useAgentReadOnly();
   const selectedTools = useAgentStore(
     (state) => state.editedAgent?.tools ?? []
@@ -51,6 +52,7 @@ export default function AgentCapability() {
   const [activeCapabilityTab, setActiveCapabilityTab] = useState<
     "tools" | "skills"
   >("tools");
+  const openedSkillCreationRequestId = useRef<number | null>(null);
 
   const requestedCapabilityTab =
     configFocusRequest?.agentId === currentAgentId &&
@@ -103,7 +105,36 @@ export default function AgentCapability() {
 
   const handleSkillBuildSuccess = useCallback(() => {
     invalidateSkills();
-  }, [invalidateSkills]);
+    if (
+      skillCreationRequest &&
+      skillCreationRequest.agentId === currentAgentId &&
+      !skillCreationRequest.completed
+    ) {
+      completeSkillCreation(
+        skillCreationRequest.agentId,
+        skillCreationRequest.requestId
+      );
+    }
+  }, [
+    completeSkillCreation,
+    currentAgentId,
+    invalidateSkills,
+    skillCreationRequest,
+  ]);
+
+  useEffect(() => {
+    if (
+      !skillCreationRequest ||
+      skillCreationRequest.completed ||
+      skillCreationRequest.agentId !== currentAgentId ||
+      openedSkillCreationRequestId.current === skillCreationRequest.requestId
+    ) {
+      return;
+    }
+    openedSkillCreationRequestId.current = skillCreationRequest.requestId;
+    setEditingSkill(null);
+    setIsSkillModalOpen(true);
+  }, [currentAgentId, skillCreationRequest]);
 
   const handleOpenSkillEditor = useCallback((skill: Skill) => {
     setEditingSkill({
