@@ -23,6 +23,8 @@ export interface AgentRepositoryListingItem {
   downloads?: number;
   submitted_by?: string | null;
   content?: string | null;
+  /** Platform-provided template; readable/copyable but not tenant-editable. */
+  is_official?: boolean;
 }
 
 export interface AgentRepositoryListingPagination {
@@ -60,6 +62,7 @@ export interface AgentRepositoryListingDetail {
   model_name?: string | null;
   duty_prompt?: string | null;
   tools?: string[];
+  is_official?: boolean;
 }
 
 export interface MyAgentRepositoryInfoItem {

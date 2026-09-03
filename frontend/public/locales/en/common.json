@@ -2241,6 +2241,7 @@
   "agentRepository.card.untitled": "Untitled agent",
   "agentRepository.card.noDescription": "No description",
   "agentRepository.card.copy": "Copy",
+  "agentRepository.card.official": "Official",
   "agentRepository.card.detail": "Details",
   "agentRepository.card.toolCount": "{{count}} tools",
   "agentRepository.copy.title": "Copy \"{{name}}\"",

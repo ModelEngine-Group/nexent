@@ -2,7 +2,7 @@
 
 import type { MenuProps } from "antd";
 import { Button, Card, Dropdown } from "antd";
-import { Bot, Copy, Download, Eye, MoreHorizontal, PackageX } from "lucide-react";
+import { Bot, Copy, Download, Eye, MoreHorizontal, PackageX, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
@@ -33,7 +33,7 @@ export function AgentRepositoryCard({
   const versionText = listing.version_label;
   const downloads = listing.downloads ?? 0;
   const showTagsRow = tags.length > 0 || toolCount > 0;
-  const showMenu = showAdminMenu && onTakeDown != null;
+  const showMenu = showAdminMenu && !listing.is_official && onTakeDown != null;
 
   const menuItems: MenuProps["items"] = showMenu
     ? [
@@ -73,6 +73,12 @@ export function AgentRepositoryCard({
             <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
               {title}
             </h3>
+            {listing.is_official ? (
+              <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                <ShieldCheck className="size-3" aria-hidden />
+                {t("agentRepository.card.official")}
+              </span>
+            ) : null}
             {author ? (
               <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
                 {author}

@@ -69,6 +69,8 @@ config:
   umask: "0022"
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
+  officialAgentsPath: "/mnt/nexent/official-agents"
+  officialAgentProfiles: ""
   marketBackend: "http://60.204.251.153:8010"
   modelEngine:
     enabled: "false"

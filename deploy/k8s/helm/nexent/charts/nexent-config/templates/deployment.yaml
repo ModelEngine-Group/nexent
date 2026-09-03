@@ -62,6 +62,10 @@ spec:
               mountPath: /mnt/nexent
             - name: nexent-skills
               mountPath: /mnt/nexent-data/skills
+            - name: nexent-workspace
+              mountPath: /mnt/nexent/official-agents
+              subPath: official-agents
+              readOnly: true
           resources:
             requests:
               memory: {{ .Values.resources.backend.requests.memory }}
