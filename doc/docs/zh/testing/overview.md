@@ -129,7 +129,7 @@ patches = [
     patch('botocore.client.BaseClient._make_api_call', return_value={}),
     patch('backend.database.client.MinioClient', MagicMock()),
     patch('backend.database.client.db_client', MagicMock()),
-    patch('backend.utils.auth_utils.get_current_user_id', 
+    patch('backend.utils.auth_utils.get_current_user_id',
           MagicMock(return_value=('test_user', 'test_tenant'))),
     patch('httpx.AsyncClient', MagicMock())
 ]
@@ -152,7 +152,7 @@ from apps.file_management_app import router
 
 ## 测试示例
 
-以下是测试结构化的详细示例（pytest 风格，mock 在导入处使用全限定路径）：
+以下是测试结构化的详细示例（pytest 风格，mock 使用函数被引用处的模块全限定路径，确保对已导入的引用生效；底层依赖需在导入前打补丁，见上文"模块补丁技术"）：
 
 ```python
 from unittest.mock import MagicMock, patch
@@ -163,20 +163,20 @@ from apps.tool_config_app import list_tools_api
 
 
 @pytest.mark.asyncio
-@patch("utils.auth_utils.get_current_user_id")
-@patch("database.tool_db.query_all_tools")
-async def test_list_tools_api_success(mock_query_all_tools, mock_get_current_user_id):
+@patch("apps.tool_config_app.get_current_user_id")
+@patch("apps.tool_config_app.list_all_tools")
+async def test_list_tools_api_success(mock_list_all_tools, mock_get_current_user_id):
     # 设置
     mock_get_current_user_id.return_value = ("user123", "tenant456")
     expected_tools = [{"id": 1, "name": "Tool1"}, {"id": 2, "name": "Tool2"}]
-    mock_query_all_tools.return_value = expected_tools
+    mock_list_all_tools.return_value = expected_tools
 
     # 执行
     result = await list_tools_api(authorization="Bearer fake_token")
 
     # 断言
     mock_get_current_user_id.assert_called_once_with("Bearer fake_token")
-    mock_query_all_tools.assert_called_once_with(tenant_id="tenant456")
+    mock_list_all_tools.assert_called_once_with(tenant_id="tenant456", labels=None)
     assert result == expected_tools
 ```
 
@@ -228,4 +228,4 @@ XML coverage report generated: test\coverage.xml
 6. **使用有意义的模拟数据**来代表真实世界的场景
 7. **用清晰的注释记录复杂的测试场景**
 
-这个测试框架确保所有代码更改在部署前都经过彻底验证，在整个 Nexent 平台中保持高代码质量和可靠性。 
+这个测试框架确保所有代码更改在部署前都经过彻底验证，在整个 Nexent 平台中保持高代码质量和可靠性。

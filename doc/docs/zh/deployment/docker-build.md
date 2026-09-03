@@ -106,8 +106,8 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexen
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
 
 # 💻 为多个架构构建 Ubuntu Terminal
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
 ```
 
 ## 💻 本地开发构建
@@ -138,10 +138,10 @@ docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles
 # 🔗 构建 MCP Server 镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile .
 
-# 💻 构建带 Conda 的 OpenSSH Server 镜像（仅当前架构）
+# 💻 构建 OpenSSH Server 镜像（默认 slim 变体，仅当前架构）
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 
-# 💻 构建带 Conda 的 OpenSSH Server 镜像（仅当前架构）
+# 💻 构建带 Conda 的 OpenSSH Server 镜像（conda 变体，仅当前架构）
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/images/dockerfiles/terminal/Dockerfile --build-arg TERMINAL_VARIANT=conda .
 ```
 

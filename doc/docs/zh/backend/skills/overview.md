@@ -33,13 +33,22 @@ skill-name/
 
 ```yaml
 ---
-name: skill-name
-description: |
+name: skill-name           # 必填：技能名称，需唯一
+description: |             # 必填：技能功能描述
   一段描述，说明这个技能是做什么的、什么时候该用它。
   建议用第三人称书写，如："这个技能用于..."
-tags:
+allowed-tools:             # 可选：工具类技能暴露的 nexent sdk 方法或工具名列表
+  - read_file
+  - write_file
+tags:                      # 可选：技能标签，用于分类与检索
   - tag1
   - tag2
+# script_outputs:          # 可选：脚本类技能声明脚本输出结果
+#   scripts/generate.py:   #   （如生成文件的位置与 MIME 类型）
+#     kind: file
+#     mime_types:
+#       - text/plain
+# 其他附加字段（如 output_type / output_mime_types）属于个别技能的扩展写法
 ---
 ```
 

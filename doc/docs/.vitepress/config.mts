@@ -176,6 +176,7 @@ export default defineConfig({
               { text: "API Reference", link: "/en/backend/api-reference" },
               {
                 text: "Tools Integration",
+                link: "/en/backend/tools/",
                 items: [
                   {
                     text: "Nexent Tools",
@@ -186,6 +187,16 @@ export default defineConfig({
                     link: "/en/backend/tools/langchain",
                   },
                   { text: "MCP Tools", link: "/en/backend/tools/mcp" },
+                ],
+              },
+              {
+                text: "Skills System",
+                link: "/en/backend/skills/",
+                items: [
+                  {
+                    text: "Skills Overview",
+                    link: "/en/backend/skills/overview",
+                  },
                 ],
               },
               {
@@ -411,6 +422,7 @@ export default defineConfig({
               { text: "API 文档", link: "/zh/backend/api-reference" },
               {
                 text: "工具集成",
+                link: "/zh/backend/tools/",
                 items: [
                   {
                     text: "Nexent 工具",
@@ -421,6 +433,16 @@ export default defineConfig({
                     link: "/zh/backend/tools/langchain",
                   },
                   { text: "MCP 工具", link: "/zh/backend/tools/mcp" },
+                ],
+              },
+              {
+                text: "Skills 技能系统",
+                link: "/zh/backend/skills/",
+                items: [
+                  {
+                    text: "技能系统概览",
+                    link: "/zh/backend/skills/overview",
+                  },
                 ],
               },
               { text: "提示词开发", link: "/zh/backend/prompt-development" },
@@ -436,6 +458,7 @@ export default defineConfig({
             items: [
               { text: "镜像构建", link: "/zh/deployment/docker-build" },
               { text: "容器开发", link: "/zh/deployment/devcontainer" },
+              { text: "K8s 多副本设计", link: "/zh/deployment/kubernetes-multi-replica-design" },
             ],
           },
           {

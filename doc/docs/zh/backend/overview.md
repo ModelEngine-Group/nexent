@@ -9,7 +9,7 @@ Nexent 的后端采用 FastAPI 和 Python 构建，为 AI 智能体服务提供�
 - **数据库**: PostgreSQL + Redis + Elasticsearch（Elasticsearch 同时承担向量检索与记忆索引）
 - **文件存储**: MinIO
 - **任务队列**: Celery + Ray
-- **AI框架**: smolagents
+- **AI框架**: smolagents（位于 `sdk/nexent/`，backend 通过 SDK 调用）
 - **向量数据库**: Elasticsearch
 
 ## 目录结构
@@ -42,6 +42,8 @@ backend/
 │   ├── cas_app.py / oauth_app.py  # SSO 登录 API
 │   └── ...                      # 其余模块（用户/租户/分组/配额/监控/外部检索源等）
 ├── services/                     # 业务服务层
+│   ├── agent_automation/        # 智能体自动化（意图分析/调度引擎/工具适配）
+│   ├── providers/               # 模型提供商适配（dashscope/modelengine/silicon/tokenpony）
 │   ├── agent_service.py         # 智能体业务逻辑
 │   ├── memory_context_service.py  # 记忆上下文构建（归一化/分数融合/时间衰减/MMR）
 │   ├── memory_index_service.py  # 记忆向量索引（Elasticsearch per-tenant 索引）
@@ -51,7 +53,7 @@ backend/
 │   ├── vectordatabase_service.py  # 搜索引擎服务
 │   ├── model_health_service.py  # 模型健康检查
 │   ├── prompt_service.py        # 提示词服务
-│   └── tenant_service.py        # 租户服务
+│   └── tenant_service.py        # 租户服务（及模型/记忆/评测/技能等 50+ 服务）
 ├── database/                     # 数据访问层
 │   ├── client.py / db_models.py # 数据库连接与 ORM 模型
 │   ├── agent_db.py / agent_version_db.py  # 智能体与版本数据
@@ -62,11 +64,17 @@ backend/
 ├── agents/                       # 智能体核心逻辑
 │   ├── agent_run_manager.py     # 智能体运行管理器
 │   ├── create_agent_info.py     # 智能体信息创建（含记忆/工具挂载）
+│   ├── nl2agent_agent.py        # NL2Agent 临时 Agent
 │   ├── nl2skill_agent.py        # NL2Skill 临时 Agent
+│   ├── preprocess_manager.py    # 预处理管理器
 │   └── default_agents/          # 默认智能体配置
-├── data_process/                 # 数据处理模块
-│   └── ...（app.py / ray_config.py / tasks.py / worker.py / utils.py）
+├── data_process/                 # 数据处理模块（Ray/Celery，app.py / ray_config.py / tasks.py / worker.py / utils.py）
 ├── permissions/                  # 权限（RBAC/DAC/租户隔离）
+├── middleware/                   # 中间件（exception_handler.py）
+├── tool_collection/              # 工具集（langchain 计算工具 / MCP 本地与 NL2Agent 工具）
+├── adapters/                     # 外部 SDK 适配（九问 SDK 等）
+├── ext_components/               # 外部集成组件（AIDP 知识库等）
+├── assets/                       # 静态资源（停用词、测试音频等）
 ├── utils/                        # 工具类
 │   ├── auth_utils.py / config_utils.py / monitoring.py
 │   ├── nacos_client.py          # Nacos A2A 查询
@@ -214,15 +222,17 @@ sequenceDiagram
 ### 环境搭建
 ```bash
 cd backend
-uv sync && uv pip install -e ../sdk
+uv sync --extra data-process --extra test
+uv pip install -e "../sdk[dev]"
 ```
 
 ### 服务启动
 ```bash
-python backend/data_process_service.py   # 数据处理服务
-python backend/config_service.py      # 编辑态服务
-python backend/runtime_service.py        # 运行态服务
-python backend/mcp_service.py     # MCP服务
+cd backend
+python data_process_service.py   # 数据处理服务
+python config_service.py         # 编辑态服务
+python runtime_service.py        # 运行态服务
+python mcp_service.py            # MCP服务
 ```
 
 ## 性能和可扩展性

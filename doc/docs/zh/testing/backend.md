@@ -116,7 +116,7 @@ patches = [
     patch('botocore.client.BaseClient._make_api_call', return_value={}),
     patch('backend.database.client.MinioClient', MagicMock()),
     patch('backend.database.client.db_client', MagicMock()),
-    patch('backend.utils.auth_utils.get_current_user_id', 
+    patch('backend.utils.auth_utils.get_current_user_id',
           MagicMock(return_value=('test_user', 'test_tenant'))),
     patch('httpx.AsyncClient', MagicMock())
 ]
@@ -126,45 +126,46 @@ for p in patches:
     p.start()
 
 # 应用补丁后导入模块
-from apps.agent_app import agent_config_router
+from apps.agent_app import agent_config_router, agent_runtime_router
 
 # 创建测试应用
 app = FastAPI()
 app.include_router(agent_config_router)
+app.include_router(agent_runtime_router)
 client = TestClient(app)
 ```
 
 ### API 测试示例
 
+以下示例改编自真实的 `test/backend/app/test_agent_app.py`。补丁必须打在**引用处所在的模块**上（如 `apps.agent_app.get_current_user_id`），而不是函数原始定义处（`backend.utils.auth_utils.get_current_user_id`）；被 `await` 的异步服务函数需用 `AsyncMock` 模拟：
+
 ```python
-def test_create_agent_success(client):
-    """测试成功的智能体创建"""
-    # 设置 - 模拟服务层返回
-    with patch("services.agent_service.create_agent") as mock_service:
-        mock_service.return_value = {"id": 1, "name": "Test Agent"}
+from unittest.mock import AsyncMock
 
-        # 执行
-        response = client.post("/agents", json={
-            "name": "Test Agent",
-            "description": "A test agent",
-            "system_prompt": "You are a test agent"
-        })
 
-        # 断言
-        assert response.status_code == 200
-        assert "id" in response.json()
-        assert response.json()["name"] == "Test Agent"
-
-def test_create_agent_invalid_data(client):
-    """测试使用无效数据的智能体创建"""
-    # 设置
-    invalid_data = {"name": ""}  # 缺少必需字段
+def test_search_agent_info_api_success(mocker):
+    """测试成功的智能体信息查询"""
+    # 设置 - 模拟身份认证与服务层返回
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_info = mocker.patch(
+        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+    mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
+    mock_get_agent_info.return_value = {"agent_id": 123, "name": "Test Agent"}
 
     # 执行
-    response = client.post("/agents", json=invalid_data)
+    response = client.post(
+        "/agent/search_info",
+        json={"agent_id": 123},
+        headers={"Authorization": "Bearer test_token"}
+    )
 
     # 断言
-    assert response.status_code == 422  # 验证错误
+    assert response.status_code == 200
+    mock_get_user_id.assert_called_once_with("Bearer test_token")
+    # 未传 tenant_id 时回退到认证租户 ID，version_no 默认为 0
+    mock_get_agent_info.assert_called_once_with(123, "auth_tenant_id", 0, "user_id")
+    assert response.json()["agent_id"] == 123
+    assert response.json()["name"] == "Test Agent"
 ```
 
 ## 服务层测试
@@ -173,53 +174,75 @@ def test_create_agent_invalid_data(client):
 
 ### 服务测试模式
 
+以下示例改编自真实的 `test/backend/services/test_agent_service.py`。`get_agent_id_by_name` 内部调用从 `backend.database.agent_db` 导入到服务模块命名空间的 `search_agent_id_by_agent_name`，因此补丁目标为 `backend.services.agent_service.search_agent_id_by_agent_name`（引用处所在模块）：
+
 ```python
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from services.agent_service import create_agent
+from services.agent_service import get_agent_id_by_name
 
 
 @pytest.mark.asyncio
-@patch("backend.database.agent_db.save_agent")
-@patch("backend.utils.auth_utils.get_current_user_id")
-async def test_create_agent_success(mock_get_user, mock_save_agent):
-    # 设置
-    mock_get_user.return_value = ("user123", "tenant456")
-    mock_save_agent.return_value = {"id": 1, "name": "Test Agent"}
+@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+async def test_get_agent_id_by_name(mock_search):
+    """测试通过名称与租户解析智能体 ID"""
+    # 测试成功路径
+    mock_search.return_value = 1
+    result = await get_agent_id_by_name("test_agent", "test_tenant")
+    assert result == 1
+    mock_search.assert_called_once_with("test_agent", "test_tenant")
 
-    # 执行
-    result = await create_agent(
-        name="Test Agent",
-        description="A test agent",
-        system_prompt="You are a test agent",
-        tenant_id="tenant456",
-        user_id="user123",
-    )
-
-    # 断言
-    mock_save_agent.assert_called_once()
-    assert result["name"] == "Test Agent"
-    assert "id" in result
+    # 测试未找到路径
+    mock_search.side_effect = Exception("Not found")
+    with pytest.raises(Exception, match="agent not found"):
+        await get_agent_id_by_name("test_agent", "test_tenant")
 ```
 
 ### 模拟数据库操作
 
+`backend/database/` 层的函数通过 `get_db_session()` 上下文管理器获取会话。测试时可将该函数替换为模拟会话以隔离真实数据库（以下示例基于真实的 `search_agent_id_by_agent_name`）：
+
 ```python
-@pytest.mark.asyncio
-@patch("backend.database.agent_db.query_agent_by_id")
-@patch("backend.database.agent_db.update_agent")
-async def test_update_agent_success(mock_update, mock_query):
-    # 设置
-    mock_query.return_value = {"id": 1, "name": "Old Name"}
-    mock_update.return_value = {"id": 1, "name": "New Name"}
+import pytest
+from unittest.mock import MagicMock
+
+from database.agent_db import search_agent_id_by_agent_name
+
+
+def test_search_agent_id_by_agent_name(mocker):
+    """测试按名称与租户查询智能体 ID"""
+    # 设置 - 模拟会话上下文及 query().filter().first() 查询链
+    session = MagicMock()
+    session.__enter__.return_value = session
+    mocker.patch("database.agent_db.get_db_session", return_value=session)
+    mock_agent = MagicMock()
+    mock_agent.agent_id = 100
+    session.query.return_value = session
+    session.filter.return_value = session
+    session.first.return_value = mock_agent
 
     # 执行
-    result = await update_agent(agent_id=1, name="New Name", tenant_id="tenant456")
+    result = search_agent_id_by_agent_name("Test Agent", "tenant456")
 
     # 断言
-    mock_update.assert_called_once_with(agent_id=1, name="New Name")
-    assert result["name"] == "New Name"
+    assert result == 100
+    session.query.assert_called_once()
+
+
+def test_search_agent_id_by_agent_name_not_found(mocker):
+    """测试未找到时抛出 ValueError"""
+    # 设置 - 查询结果为空
+    session = MagicMock()
+    session.__enter__.return_value = session
+    mocker.patch("database.agent_db.get_db_session", return_value=session)
+    session.query.return_value = session
+    session.filter.return_value = session
+    session.first.return_value = None
+
+    # 执行 & 断言
+    with pytest.raises(ValueError, match="agent not found"):
+        search_agent_id_by_agent_name("Missing Agent", "tenant456")
 ```
 
 ## 工具函数测试
@@ -251,67 +274,120 @@ def test_discover_langchain_modules():
 
 ### 异步测试模式
 
+被 `await` 的异步函数需要用 `AsyncMock` 模拟——`AsyncMock` 的返回值就是 `await` 表达式的结果（示例用法与真实 `test/backend/app/test_agent_app.py` 中的 `new_callable=AsyncMock` 一致）：
+
 ```python
 import pytest
+from unittest.mock import AsyncMock
 
 
 @pytest.mark.asyncio
-@patch("backend.database.agent_db.async_query")
-async def test_async_operation(mock_async_query):
-    # 设置
-    mock_async_query.return_value = {"result": "success"}
+async def test_async_operation():
+    """演示 AsyncMock 模拟被 await 的异步函数"""
+    # 设置 - AsyncMock 的返回值即 await 表达式的结果
+    mock_async_query = AsyncMock(return_value={"result": "success"})
 
     # 执行
-    result = await async_operation()
+    result = await mock_async_query()
 
     # 断言
     assert result["result"] == "success"
-    mock_async_query.assert_called_once()
+    mock_async_query.assert_awaited_once()
 ```
 
 ## 错误处理测试
 
-全面测试错误处理：
+全面测试错误处理。`search_agent_info_api` 捕获所有异常并映射为 HTTP 500，以下示例验证服务层异常被正确转换为错误响应：
 
 ```python
-def test_api_error_handling(client):
-    """测试 API 错误响应"""
-    # 设置 - 模拟服务抛出异常
-    with patch('backend.services.agent_service.create_agent') as mock_service:
-        mock_service.side_effect = Exception("Database error")
+from unittest.mock import AsyncMock
 
-        # 执行
-        response = client.post("/agents", json={"name": "Test"})
 
-        # 断言
-        assert response.status_code == 500
-        assert "error" in response.json()
+def test_search_agent_info_api_error(mocker):
+    """测试 API 错误响应（服务层异常 → HTTP 500）"""
+    # 设置 - 模拟身份认证与异常的服务层返回
+    mocker.patch("apps.agent_app.get_current_user_id",
+                 return_value=("user_id", "auth_tenant_id"))
+    mocker.patch(
+        "apps.agent_app.get_agent_info_impl",
+        new_callable=AsyncMock,
+        side_effect=Exception("Database error"),
+    )
+
+    # 执行
+    response = client.post(
+        "/agent/search_info",
+        json={"agent_id": 123},
+        headers={"Authorization": "Bearer test_token"}
+    )
+
+    # 断言 - search_agent_info_api 捕获异常并返回 500
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Agent search info error."}
 ```
 
 ## 身份验证和授权测试
 
 彻底测试安全相关功能：
 
+### 认证失败 → 401
+
+内部北向端点（`agent_runtime_router`，前缀同为 `/agent`）通过 `verify_internal_runtime_jwt` 校验内部 JWT，失败时映射为 401。示例改编自真实的 `test/backend/app/test_agent_app.py`：
+
 ```python
-def test_authentication_required(client):
-    """测试端点需要身份验证"""
-    # 执行 - 没有身份验证头
-    response = client.get("/agents")
+from consts.exceptions import UnauthorizedError
+
+
+def test_authentication_required(mocker):
+    """测试需要内部 JWT 的端点返回 401"""
+    # 设置 - 模拟内部运行时 JWT 校验失败
+    mocker.patch(
+        "apps.agent_app.verify_internal_runtime_jwt",
+        side_effect=UnauthorizedError("Invalid internal runtime token"),
+    )
+
+    # 执行 - 访问北向停止端点
+    response = client.post(
+        "/agent/internal/northbound/stop/123",
+        headers={"Authorization": "Bearer invalid"}
+    )
 
     # 断言
     assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid internal runtime token"
+```
 
-def test_tenant_isolation(client):
-    """测试用户只能访问其租户的数据"""
-    # 设置 - 模拟身份验证返回不同租户
-    with patch('backend.utils.auth_utils.get_current_user_id') as mock_auth:
-        mock_auth.return_value = ("user1", "tenant1")
+### 租户隔离
 
-        # 执行
-        response = client.get("/agents")
+`/agent/search_info` 支持显式 `tenant_id` 查询参数。示例改编自真实的 `test_search_agent_info_api_with_explicit_tenant_id`，验证显式租户会覆盖认证租户并传给服务层：
 
-        # 断言 - 验证应用了租户过滤
-        # 这将检查服务层是否按租户过滤
+```python
+from unittest.mock import AsyncMock
+
+
+def test_tenant_isolation(mocker):
+    """测试显式传入的 tenant_id 覆盖认证租户"""
+    # 设置 - 认证租户与显式租户不同
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_agent_info = mocker.patch(
+        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+    mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
+    mock_get_agent_info.return_value = {
+        "agent_id": 456, "name": "Test Agent with Explicit Tenant",
+    }
+
+    # 执行 - 显式指定 tenant_id 查询参数
+    response = client.post(
+        "/agent/search_info",
+        json={"agent_id": 456},
+        params={"tenant_id": "explicit_tenant_789"},
+        headers={"Authorization": "Bearer test_token"}
+    )
+
+    # 断言 - 服务层收到的是显式租户而非认证租户
+    assert response.status_code == 200
+    mock_get_agent_info.assert_called_once_with(
+        456, "explicit_tenant_789", 0, "user_id")
 ```
 
 ## 覆盖率分析
@@ -370,12 +446,21 @@ def test_with_fixtures(test_agent, test_user):
 后端测试包括性能考虑：
 
 ```python
-def test_api_response_time(client):
+def test_get_agent_by_name_response_time(mocker):
     """测试 API 响应时间在可接受的时间限制内"""
     import time
 
+    # 设置 - 模拟认证与按名称查询逻辑，避免真实数据库调用
+    mocker.patch("apps.agent_app.get_current_user_id",
+                 return_value=("user_id", "auth_tenant_id"))
+    mocker.patch("apps.agent_app.get_agent_by_name_impl",
+                 return_value={"agent_id": 1, "latest_version_no": 0})
+
     start_time = time.time()
-    response = client.get("/agents")
+    response = client.get(
+        "/agent/by-name/TestAgent",
+        headers={"Authorization": "Bearer test_token"}
+    )
     end_time = time.time()
 
     # 断言响应时间小于 100ms
@@ -394,4 +479,4 @@ def test_api_response_time(client):
 7. **记录复杂测试**：为复杂的测试场景添加注释
 8. **定期覆盖率审查**：监控并随时间改进覆盖率
 
-这个全面的后端测试框架确保所有后端功能在部署前都经过彻底验证，保持高代码质量和可靠性。 
+这个全面的后端测试框架确保所有后端功能在部署前都经过彻底验证，保持高代码质量和可靠性。
