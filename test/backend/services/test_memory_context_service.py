@@ -284,11 +284,11 @@ services_pkg.__path__ = []  # mark as package so submodule imports work
 sys.modules["services"] = services_pkg
 
 
-# Stub ``services.vectordatabase_service`` — transitively imported by
+# Stub ``management.services.knowledge_base.service`` — transitively imported by
 # ``memory_index_service`` during module import.
-vectordb_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordb_service_mod = types.ModuleType("management.services.knowledge_base.service")
 vectordb_service_mod.get_vector_db_core = MagicMock(name="get_vector_db_core")
-sys.modules["services.vectordatabase_service"] = vectordb_service_mod
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_mod
 
 
 # Stub ``services.memory_index_service`` (transitive only).

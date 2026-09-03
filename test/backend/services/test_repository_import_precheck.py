@@ -85,6 +85,10 @@ _consts_model.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckRespon
 _consts_model.ToolSourceEnum = _ToolSourceEnum
 sys.modules["consts.model"] = _consts_model
 
+# Keep model availability real while isolating adapter construction and config.
+sys.modules.setdefault("services.model_gateway_service", MagicMock())
+sys.modules.setdefault("utils.config_utils", MagicMock())
+
 from services.repository_import_precheck import build_repository_import_precheck
 
 
