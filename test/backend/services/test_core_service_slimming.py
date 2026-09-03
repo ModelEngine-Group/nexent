@@ -344,14 +344,10 @@ def test_ac012_permission_requirements_share_resolver(monkeypatch):
         PERMISSION_EDIT="EDIT",
     )
     dependency(monkeypatch, "database.knowledge_db", get_knowledge_record=lambda query: {})
-    dependency(monkeypatch, "database.tenant_db", get_user_tenant_by_user_id=lambda user_id: {})
-    dependency(monkeypatch, "database.user_group_db", query_group_ids_by_user=lambda user_id: [])
-    dependency(
-        monkeypatch,
-        "services.resource_access_service",
-        Resource=object,
-        ResourceAccessControl=object,
-    )
+    dependency(monkeypatch, "database.group_db", query_group_ids_by_user=lambda user_id: [])
+    dependency(monkeypatch, "database.user_tenant_db", get_user_tenant_by_user_id=lambda user_id: {})
+    dependency(monkeypatch, "permissions.models", Resource=object)
+    dependency(monkeypatch, "permissions.dac", ResourceAccessControl=object)
     module = load_source(
         monkeypatch,
         "backend/management/services/knowledge_base/permission.py",

@@ -5,9 +5,10 @@ from typing import List, Optional
 
 from consts.const import ASSET_OWNER_TENANT_ID, IS_SPEED_MODE, PERMISSION_EDIT
 from database.knowledge_db import get_knowledge_record
-from database.tenant_db import get_user_tenant_by_user_id
-from database.user_group_db import query_group_ids_by_user
-from services.resource_access_service import Resource, ResourceAccessControl
+from database.group_db import query_group_ids_by_user
+from database.user_tenant_db import get_user_tenant_by_user_id
+from permissions.dac import ResourceAccessControl
+from permissions.models import Resource
 
 logger = logging.getLogger("knowledge_base_permission_service")
 

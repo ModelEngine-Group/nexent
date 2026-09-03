@@ -145,7 +145,7 @@ agent_service_mock.CAN_EDIT_ALL_USER_ROLES = ["ADMIN", "SUPER_ADMIN"]
 agent_service_mock.PERMISSION_EDIT = "EDIT"
 agent_service_mock.PERMISSION_READ = "READ"
 sys.modules['management.services.agent.service'] = agent_service_mock
-sys.modules['backend.management.services.agent.service'] = agent_service_mock
+sys.modules['management.services.agent.service'] = agent_service_mock
 
 # Mock database module
 database_mock = MagicMock()

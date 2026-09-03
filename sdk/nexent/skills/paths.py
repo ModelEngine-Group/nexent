@@ -16,6 +16,14 @@ class UnsafeSkillRootError(ValueError):
     """The supplied skills root escapes the configured storage root."""
 
 
+def _is_same_or_descendant(path: str, root: str) -> bool:
+    """Return whether path is root itself or a descendant on the same drive."""
+    try:
+        return os.path.commonpath((path, root)) == root
+    except ValueError:
+        return False
+
+
 def validate_path_component(value: str) -> str:
     """Validate a single directory component without changing its spelling."""
     if (
@@ -43,7 +51,7 @@ def resolve_contained_path(root: str, *parts: str) -> str:
         segments.extend(component for component in components if component not in {"", "."})
     root = os.path.realpath(root)
     candidate = os.path.realpath(os.path.join(root, *segments))
-    if candidate != root and not candidate.startswith(root + os.sep):
+    if not _is_same_or_descendant(candidate, root):
         raise UnsafeSkillPathError("Unsafe local skill path")
     return candidate
 
@@ -54,9 +62,9 @@ def resolve_skill_path(root: str, name: str, *parts: str, allowed_root: str | No
     root = os.path.realpath(root)
     if allowed_root:
         allowed_root = os.path.realpath(allowed_root)
-        if root != allowed_root and not root.startswith(allowed_root + os.sep):
+        if not _is_same_or_descendant(root, allowed_root):
             raise UnsafeSkillRootError("Unsafe local skills directory")
     skill_root = resolve_contained_path(root, name)
-    if not skill_root.startswith(root + os.sep):
+    if skill_root == root or not _is_same_or_descendant(skill_root, root):
         raise UnsafeSkillPathError("Unsafe local skill path")
     return resolve_contained_path(skill_root, *parts)

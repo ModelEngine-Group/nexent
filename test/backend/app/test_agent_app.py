@@ -1609,7 +1609,7 @@ def _alias_services_for_tests():
     import sys
     try:
         import backend.services as b_services
-        import backend.management.services.agent.service as b_agent_service
+        import management.services.agent.service as b_agent_service
         # Map both the package and submodule for compatibility
         sys.modules['services'] = b_services
         sys.modules['management.services.agent.service'] = b_agent_service
