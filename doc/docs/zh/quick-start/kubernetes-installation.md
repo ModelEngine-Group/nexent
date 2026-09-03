@@ -10,7 +10,7 @@
 | **架构** | x86_64 / ARM64 |
 | **软件** | Kubernetes 1.24+, Helm 3+, kubectl 已配置 | Kubernetes 1.28+ |
 
-> **💡 注意**：推荐的 **8 核 64 GiB 内存** 配置可确保生产环境下的最佳性能。
+> **💡 注意**：推荐配置适合完整部署。实际资源需求还取决于副本数、知识库规模和并发智能体数量，生产环境应根据压测结果设置 requests 与 limits。
 
 ## 🚀 快速开始
 
@@ -63,6 +63,8 @@ bash deploy.sh k8s --release-scope nexent
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
 
+`application` 还会准备智能体沙箱镜像信息。Runtime 使用共享工作区处理上传文件和生成文件；需要保留的产物会同步到 MinIO。
+
 **端口策略:**
 - **development（默认）**: 使用 NodePort 暴露 Web 和调试/内部服务
 - **production**: 内部服务使用 ClusterIP，仅暴露生产入口
@@ -113,7 +115,7 @@ bash deploy.sh k8s
 解压离线部署包：
 
 ```bash
-unzip nexent-v2.2.1-amd64.zip -d nexent
+unzip nexent-<version>-amd64.zip -d nexent
 cd nexent
 ```
 
@@ -170,9 +172,9 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 **应用服务:**
 | 服务 | 描述 | 默认端口 |
 |---------|-------------|--------------|
-| nexent-config | 配置服务 | 5010 |
-| nexent-runtime | 运行时服务 | 5014 |
-| nexent-mcp | MCP 容器服务 | 5011 |
+| nexent-config | 配置与管理 API | 5010 |
+| nexent-runtime | 智能体运行时 API | 5014 |
+| nexent-mcp | MCP 管理与工具服务 | 5011 |
 | nexent-northbound | 北向 API 服务 | 5013 |
 | nexent-web | Web 前端 | 3000 |
 | nexent-data-process | 数据处理服务 | 5012 |
@@ -182,7 +184,7 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 |---------|-------------|
 | nexent-elasticsearch | 搜索引擎和索引服务 |
 | nexent-postgresql | 关系型数据库 |
-| nexent-redis | 缓存层 |
+| nexent-redis | 缓存、分布式锁和任务消息代理 |
 | nexent-minio | S3 兼容对象存储 |
 
 **Supabase 服务（选择 `supabase` 组件时）:**
@@ -197,6 +199,8 @@ Nexent 采用微服务架构，通过 Helm Chart 进行部署：
 |---------|-------------|
 | nexent-openssh-server | AI 智能体 SSH 终端 |
 | nexent-monitoring | 可选观测组件 |
+
+沙箱不是常驻的业务 Pod。Runtime 会根据部署配置创建隔离执行环境，用于运行模型生成的代码和 Skill 脚本。
 
 ## 🔌 端口映射
 
@@ -221,6 +225,8 @@ Nexent 使用 PersistentVolume 进行数据持久化：
 | Supabase DB（选择 supabase 时）| nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
 | 共享工作区 | nexent-workspace-pv | `/var/lib/nexent` |
 | 共享技能目录 | nexent-skills-pv | `/var/lib/nexent-data/skills` |
+
+`nexent-workspace` 默认申请 10 GiB、`ReadWriteMany` 存储，用于应用服务之间传递本次运行的输入与输出。使用自定义 StorageClass 时，应确认其支持配置的访问模式；多副本部署尤其需要所有相关 Pod 能访问同一工作区。
 
 卸载 Helm release 默认不会删除本地 hostPath 数据。可使用 `bash uninstall.sh k8s --delete-local-data true` 删除 `/var/lib/nexent`、`/var/lib/nexent-data/skills` 和 `/var/lib/nexent-data/nexent-*` 下的 Nexent 本地卷内容，使用 `--keep-local-data` 显式保留。
 
