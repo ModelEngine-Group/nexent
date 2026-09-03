@@ -305,8 +305,6 @@ class ModelConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    appName: str
-    appDescription: str
     iconType: str
     iconKey: Optional[str] = "search"
     customIconUrl: Optional[str] = None
@@ -509,6 +507,10 @@ class ConversationResponse(BaseModel):
 class RenameRequest(BaseModel):
     conversation_id: int
     name: str
+
+
+class BatchDeleteConversationRequest(BaseModel):
+    conversation_ids: List[int]
 
 # Pydantic models for API
 class TaskRequest(BaseModel):

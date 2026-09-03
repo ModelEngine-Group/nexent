@@ -59,7 +59,6 @@ async function requestJson(
 // ---------------------------------------------------------------------------
 export interface MemoryConfig {
   memoryEnabled: boolean;
-  dreamingEnabled: boolean;
   shareOption: "always" | "ask" | "never";
   disableAgentIds: string[];
   disableUserAgentIds: string[];
@@ -158,7 +157,6 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
 
     return {
       memoryEnabled: memorySwitchVal === "Y",
-      dreamingEnabled: (cfg.DREAMING_SWITCH ?? "Y") === "Y",
       shareOption: (shareVal || "always") as "always" | "ask" | "never",
       disableAgentIds,
       disableUserAgentIds,
@@ -168,27 +166,11 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
     // fall back to defaults
     return {
       memoryEnabled: true,
-      dreamingEnabled: true,
       shareOption: "always",
       disableAgentIds: [],
       disableUserAgentIds: [],
     };
   }
-}
-
-export async function setDreamingConfig(
-  enabled: boolean,
-  deleteHistory = false
-): Promise<boolean> {
-  const res = await requestJson(
-    `${API_ENDPOINTS.memory.config.load.replace("/load", "/dreaming")}`,
-    {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ enabled, delete_history: deleteHistory }),
-    }
-  );
-  return !!res?.success;
 }
 
 export async function setMemorySwitch(enabled: boolean): Promise<boolean> {

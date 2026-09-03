@@ -62,7 +62,7 @@ RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv
 # Stage 2: runtime - minimal Python image with Jupyter Kernel Gateway
 # (smolagents DockerExecutor's default IPC channel) and a non-root
 # `sandbox` user. The DockerExecutor will run this image with
-# network_mode=none and per-run resource limits; the image itself only
+# the configured network mode and per-run resource limits; the image itself
 # enforces the in-container invariants (non-root, workdir, libs).
 # ---------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
@@ -70,6 +70,9 @@ FROM python:3.11-slim AS runtime
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
+LABEL org.opencontainers.image.title="Nexent Sandbox" \
+      org.opencontainers.image.description="Default lightweight Nexent sandbox runtime" \
+      io.nexent.sandbox.variant="lightweight"
 
 USER root
 RUN umask 0022

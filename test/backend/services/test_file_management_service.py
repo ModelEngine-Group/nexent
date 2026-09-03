@@ -45,7 +45,7 @@ services_stub = types.ModuleType('services')
 services_stub.__path__ = []  # Mark as package
 sys.modules.setdefault('services', services_stub)
 
-vdb_stub = types.ModuleType('services.vectordatabase_service')
+vdb_stub = types.ModuleType('management.services.knowledge_base.service')
 
 
 class _StubElasticSearchService:
@@ -64,7 +64,7 @@ def _stub_get_vector_db_core():
 
 vdb_stub.ElasticSearchService = _StubElasticSearchService
 vdb_stub.get_vector_db_core = _stub_get_vector_db_core
-sys.modules['services.vectordatabase_service'] = vdb_stub
+sys.modules['management.services.knowledge_base.service'] = vdb_stub
 setattr(services_stub, 'vectordatabase_service', vdb_stub)
 
 knowledge_storage_stub = types.ModuleType('services.knowledge_storage_service')

@@ -13,7 +13,7 @@ from consts.scheduler import (
     SCHEDULER_CHECK_INTERVAL_SECONDS,
 )
 from database.knowledge_db import get_knowledge_bases_for_auto_summary
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import tenant_config_manager
 
 logger = logging.getLogger(__name__)

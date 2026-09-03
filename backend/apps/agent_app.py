@@ -36,7 +36,7 @@ from consts.exceptions import (
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
-from services.agent_service import (
+from management.services.agent.service import (
     get_agent_info_impl,
     get_agent_icon_impl,
     get_creating_sub_agent_info_impl,
@@ -246,13 +246,13 @@ async def nl2agent_run_api(
         ) from exc
 
 
-@agent_runtime_router.get("/stop/{conversation_id}")
-async def agent_stop_api(conversation_id: int, authorization: Optional[str] = Header(None)):
+@agent_runtime_router.get("/stop/{run_id}")
+async def agent_stop_api(run_id: str, authorization: Optional[str] = Header(None)):
     """
-    stop agent run and preprocess tasks for specified conversation_id
+    Stop an agent run by conversation ID or ephemeral debug run ID.
     """
     user_id, _ = get_current_user_id(authorization)
-    return stop_agent_tasks(conversation_id, user_id)
+    return stop_agent_tasks(int(run_id) if run_id.isdigit() else run_id, user_id)
 
 
 @agent_runtime_router.post(

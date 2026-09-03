@@ -83,8 +83,8 @@ redis_service_module = types.ModuleType("services.redis_service")
 redis_service_module.get_redis_service = MagicMock()
 sys.modules["services.redis_service"] = redis_service_module
 
-# services.vectordatabase_service - stub to avoid heavy SDK imports
-vectordb_service_module = types.ModuleType("services.vectordatabase_service")
+# management.services.knowledge_base.service - stub to avoid heavy SDK imports
+vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
 
 class KnowledgeBaseNeedsModelConfigError(Exception):
     def __init__(self, index_name: str, message: str = None):
@@ -102,7 +102,7 @@ class _ElasticSearchServiceStub:
 vectordb_service_module.ElasticSearchService = _ElasticSearchServiceStub
 vectordb_service_module.KnowledgeBaseNeedsModelConfigError = KnowledgeBaseNeedsModelConfigError
 vectordb_service_module.get_vector_db_core = MagicMock()
-sys.modules["services.vectordatabase_service"] = vectordb_service_module
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_module
 
 # database.knowledge_db - stub used by northbound_knowledge_app
 database_pkg = types.ModuleType("database")

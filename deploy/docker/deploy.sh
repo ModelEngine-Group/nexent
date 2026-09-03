@@ -17,6 +17,7 @@ DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
 ORIGINAL_ARGS=("$@")
+DEPLOYMENT_SANDBOX_MODE_SELECTION_ENABLED="true"
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 DOCKER_ASSETS_DIR="$SCRIPT_DIR/assets"
@@ -66,6 +67,7 @@ print_docker_deploy_usage() {
     echo "  --components LIST          要部署的组件列表"
     echo "  --port-policy POLICY       development 或 production"
     echo "  --image-source SOURCE      general、mainland 或 local-latest"
+    echo "  --sandbox-mode MODE        disabled、lightweight 或 full（默认 lightweight）"
     echo "  --registry-profile NAME    兼容旧参数，映射为 general/mainland 镜像源"
     echo "  --image-registry-prefix P  镜像仓库前缀，例如 registry.example.com/nexent"
     echo "  --monitoring-provider NAME 选中 monitoring 组件时使用的监控 provider"
@@ -89,6 +91,7 @@ print_docker_deploy_usage() {
   echo "  --components LIST          Components to deploy"
   echo "  --port-policy POLICY       development or production"
   echo "  --image-source SOURCE      general, mainland, or local-latest"
+  echo "  --sandbox-mode MODE        disabled, lightweight, or full (default: lightweight)"
   echo "  --registry-profile NAME    Legacy alias for image source general/mainland"
   echo "  --image-registry-prefix P  Image registry prefix, e.g. registry.example.com/nexent"
   echo "  --monitoring-provider NAME Monitoring provider when monitoring is selected"
@@ -833,6 +836,14 @@ pull_mcp_image() {
 }
 
 pull_sandbox_image() {
+  if [ "$DEPLOYMENT_SANDBOX_MODE" = "disabled" ]; then
+    echo "🔄 Sandbox is disabled; skipping sandbox image pull."
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
+
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
     echo "🔄 Skipping sandbox image pull because image source is local-latest."
     echo ""
@@ -863,6 +874,34 @@ pull_sandbox_image() {
   echo ""
   echo "--------------------------------"
   echo ""
+}
+
+reconcile_sandbox_container() {
+  local container_name="nexent-runtime-sandbox"
+  local current_image=""
+
+  if ! docker container inspect "$container_name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  current_image="$(docker container inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true)"
+  if [ "$DEPLOYMENT_SANDBOX_MODE" != "disabled" ] && [ "$current_image" = "$NEXENT_SANDBOX_IMAGE" ]; then
+    return 0
+  fi
+
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🔄 沙箱模式或镜像已变更，正在重建固定沙箱容器（工作区卷会保留）..."
+  else
+    echo "🔄 Sandbox mode or image changed; recreating the fixed Sandbox container (workspace volume is preserved)..."
+  fi
+  docker rm -f "$container_name" >/dev/null || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 无法移除旧的固定沙箱容器：$container_name"
+    else
+      echo "❌ Failed to remove the previous fixed Sandbox container: $container_name"
+    fi
+    return 1
+  }
 }
 
 select_deployment_mode() {
@@ -1039,11 +1078,12 @@ prepare_directory_and_data() {
   create_dir_with_permission "$NEXENT_USER_DIR" 775
   echo "   🖥️  Nexent user workspace: $NEXENT_USER_DIR"
 
-  # Copy official-skills-zip folder to /mnt/nexent
+  # Refresh bundled official skills while preserving additional target files.
   if [ -d "$DOCKER_ASSETS_DIR/official-skills-zip" ]; then
-    cp -rn "$DOCKER_ASSETS_DIR/official-skills-zip" "$NEXENT_USER_DIR/"
+    mkdir -p "$NEXENT_USER_DIR/official-skills-zip"
+    cp -rf "$DOCKER_ASSETS_DIR/official-skills-zip/." "$NEXENT_USER_DIR/official-skills-zip/"
     chmod -R 775 "$NEXENT_USER_DIR/official-skills-zip"
-    echo "   📦 Official skills copied to $NEXENT_USER_DIR/official-skills-zip"
+    echo "   📦 Official skills refreshed at $NEXENT_USER_DIR/official-skills-zip"
   else
     echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
   fi
@@ -1634,7 +1674,7 @@ main_deploy() {
     echo "🌐 App version: $APP_VERSION"
   fi
 
-  # Select deployment components, port policy and image source via shared config.
+  # Select deployment components, port policy, image source, and Sandbox mode via shared config.
   apply_deployment_common_config || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "❌ 部署配置失败"
@@ -1690,6 +1730,13 @@ main_deploy() {
     fi
   fi
 
+  update_env_var "NEXENT_SANDBOX_DEFAULT_LEVEL" "${NEXENT_SANDBOX_DEFAULT_LEVEL}"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🔧 沙箱模式已设置为：${DEPLOYMENT_SANDBOX_MODE}（执行级别：${NEXENT_SANDBOX_DEFAULT_LEVEL}）"
+  else
+    echo "🔧 Sandbox mode set to: ${DEPLOYMENT_SANDBOX_MODE} (execution level: ${NEXENT_SANDBOX_DEFAULT_LEVEL})"
+  fi
+
   # Add permission
   prepare_directory_and_data || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1726,6 +1773,8 @@ main_deploy() {
     fi
     exit 1
   }
+
+  reconcile_sandbox_container || exit 1
 
   # Deploy infrastructure services
   deploy_infrastructure || {

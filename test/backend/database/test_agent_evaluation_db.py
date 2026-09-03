@@ -195,6 +195,42 @@ class TestUpdateAgentEvaluationStatus:
 
 
 # ---------------------------------------------------------------------------
+# claim_agent_evaluation_run
+# ---------------------------------------------------------------------------
+
+class TestClaimAgentEvaluationRun:
+    def _wire_chain(self, session, updated):
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.update.return_value = updated
+        session.query.return_value = query
+        return query
+
+    def test_claims_pending_run(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        query = self._wire_chain(session, 1)
+
+        assert agent_evaluation_db.claim_agent_evaluation_run(7, "t1", "u1") is True
+        assert query.update.call_args.kwargs["synchronize_session"] is False
+        assert query.update.call_args.args[0] == {
+            "status": "RUNNING",
+            "updated_by": "u1",
+        }
+        session.commit.assert_called_once_with()
+
+    def test_returns_false_when_run_was_claimed(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        self._wire_chain(session, 0)
+
+        assert agent_evaluation_db.claim_agent_evaluation_run(7, "t1") is False
+        session.commit.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
 # get_agent_evaluation
 # ---------------------------------------------------------------------------
 

@@ -1,6 +1,7 @@
 import asyncio
-import hashlib
 import logging
+
+from utils.storage_key_utils import build_preview_pdf_object_key
 import os
 from datetime import datetime
 from io import BytesIO
@@ -45,7 +46,7 @@ from database.attachment_db import (
 )
 from database.knowledge_file_lifecycle_db import create_file_records, transition_file_record
 from database.model_management_db import get_model_by_model_id
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from utils.file_management_utils import save_upload_file
 from utils.knowledge_ingestion_errors import ingestion_error_fields
@@ -891,11 +892,8 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
 
     # Office documents - convert to PDF with caching
     elif content_type in OFFICE_MIME_TYPES:
-        name_without_ext = object_name.rsplit(
-            '.', 1)[0] if '.' in object_name else object_name
-        hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
-        pdf_object_name = f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
-        temp_pdf_object_name = f"preview/converting/{name_without_ext}_{hash_suffix}.pdf.tmp"
+        pdf_object_name = build_preview_pdf_object_key(object_name)
+        temp_pdf_object_name = build_preview_pdf_object_key(object_name, temporary=True)
 
         # Trigger conversion if cache is missing or corrupted
         if not _is_pdf_cache_valid(pdf_object_name):

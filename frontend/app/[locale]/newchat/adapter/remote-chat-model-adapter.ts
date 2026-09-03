@@ -247,6 +247,8 @@ export interface Nl2aMessage {
 interface NexentRunConfig {
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
+  onGenerationStopped?: (conversationId: number) => void;
+  onRunId?: (runId: string) => void;
   resume?: boolean;
   agentId?: number | string;
   agentVersionNo?: number;
@@ -1355,6 +1357,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const isEphemeralRuntime = isNl2Agent || isNl2Skill || isAgentDebug;
     const serverThreadId = custom?.threadId;
     const onServerConversationId = custom?.onServerConversationId;
+    const onRunId = custom?.onRunId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
     const nl2AgentId =
       typeof custom?.agentId === "string"
@@ -1489,17 +1492,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let backendConversationId = hasServerConversationId
       ? numericServerThreadId
       : null;
+    let backendRunId: string | null = null;
     let backendStopPromise: Promise<void> | null = null;
     let abortHandled = false;
     let userAborted = false;
-    const stopBackendConversation = async (conversationId: number) => {
-      if (isEphemeralRuntime || backendStopPromise) return;
+    const stopBackendRun = async (runId: string | number) => {
+      if (backendStopPromise) return;
       backendStopPromise = conversationService
-        .stop(conversationId)
+        .stop(runId)
         .then(() => undefined)
         .catch((error) => {
           log.error(
-            `[ChatModelAdapter] Failed to stop backend conversation ${conversationId}:`,
+            `[ChatModelAdapter] Failed to stop backend run ${runId}:`,
             error
           );
         });
@@ -1517,12 +1521,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       userAborted = true;
+      if (backendConversationId !== null) {
+        custom?.onGenerationStopped?.(backendConversationId);
+      }
       const nl2AgentId = Number(custom?.agentId);
       if (isNl2Agent && Number.isInteger(nl2AgentId) && nl2AgentId > 0) {
         custom?.onNl2AgentStopped?.(nl2AgentId);
       }
       if (backendConversationId !== null) {
-        void stopBackendConversation(backendConversationId);
+        void stopBackendRun(backendConversationId);
+      } else if (backendRunId !== null) {
+        void stopBackendRun(backendRunId);
       }
     };
     abortSignal?.addEventListener("abort", handleAbort, { once: true });
@@ -1573,7 +1582,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           if (!Number.isNaN(numericId) && numericId > 0) {
             backendConversationId = numericId;
             if (abortSignal?.aborted) {
-              void stopBackendConversation(numericId);
+              custom?.onGenerationStopped?.(numericId);
+              void stopBackendRun(numericId);
             }
           }
           if (numericId > 0 && onServerConversationId) {
@@ -1585,6 +1595,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
         (version) => {
           returnedRuntimeMetadataVersion = version;
+        },
+        (runId) => {
+          backendRunId = runId;
+          onRunId?.(runId);
+          if (abortSignal?.aborted) {
+            void stopBackendRun(runId);
+          }
         }
       );
       if (custom?.runtimeMetadata !== undefined) {

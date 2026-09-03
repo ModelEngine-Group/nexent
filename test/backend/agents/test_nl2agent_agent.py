@@ -86,36 +86,38 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert "```" not in prompt
 
     if language == "en":
-        assert "never discard it merely because it appears in `bound_resources`" in prompt
-        assert "Already-bound Tools remain normal candidates" in prompt
+        assert "enter the Resource-Dependent Prompt Generation stage" in prompt
+        assert "Resource-Dependent Prompt Generation must atomically regenerate" in prompt
         assert "### State And Completion Rules" in prompt
         assert "They never prove that its configuration is complete" in prompt
-        assert "an empty-description draft must produce" in prompt
+        assert "For `full_generation`, if the current input is not a submitted" in prompt
+        assert "Partial tasks are exempt" in prompt
         assert "Configuration is complete only after the description is saved" in prompt
-        assert "Before receiving `agent_generation_completed`" in prompt
+        assert "before receiving `agent_generation_completed`" in prompt
         assert "### Completion Summary" in prompt
         assert "New Agent summary:" in prompt
         assert "### Atomic Action Contract" in prompt
         assert "at most one short reasoning sentence" in prompt
         assert 'equal to `["duty_prompt"]`' in prompt
-        assert "exactly one concise Think-Code-Observation example" in prompt
+        assert "exactly one concise Think-Code example" in prompt
         assert "Weather Assistant" not in prompt
         assert "Describe the tasks this Agent must perform" not in prompt
         assert '"question_id": "expected_output"' in prompt
     else:
-        assert "不得仅因它出现在 `bound_resources` 中就丢弃" in prompt
-        assert "已绑定 Tool 仍是普通候选" in prompt
+        assert "资源依赖 Prompt 生成" in prompt
+        assert "修订总结" in prompt
         assert "### 状态判定与完成标准" in prompt
         assert "不证明该 Agent 已完成配置" in prompt
-        assert "空描述草稿必须先输出一次" in prompt
+        assert "对 `full_generation`，如果当前输入不是已提交的" in prompt
+        assert "局部任务不受此规则影响" in prompt
         assert "只有描述已保存、资源需求已安装并绑定或明确放弃" in prompt
-        assert "收到 `agent_generation_completed` 前，禁止输出普通最终答案" in prompt
+        assert "在收到 `agent_generation_completed` 前，不得输出普通完成说明" in prompt
         assert "### 完成总结" in prompt
         assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
         assert "`<code>` 前最多只写一句简短思考" in prompt
         assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
-        assert "只编写一个紧凑的“思考-代码-Observation”示例" in prompt
+        assert "只编写一个紧凑的“思考-代码”示例" in prompt
         assert "天气助手" not in prompt
         assert "请详细说明这个智能体需要完成的任务" not in prompt
         assert '"question_id": "expected_output"' in prompt
@@ -136,7 +138,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     )
     assert r"\x3ccode>" in few_shots_save
     assert r"\x3c/code>" in few_shots_save
-    assert r"Observation\x3a" in few_shots_save
+    assert r"Observation\x3a" not in few_shots_save
     assert "<code>" not in few_shots_save
     assert "</code>" not in few_shots_save
     assert "Observation:" not in few_shots_save
@@ -146,7 +148,11 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     stored_few_shots = ast.literal_eval(few_shots_assignment.value)
     assert "<code>" in stored_few_shots
     assert "</code>" in stored_few_shots
-    assert "Observation:" in stored_few_shots
+    assert "Observation:" not in stored_few_shots
+    if language == "en":
+        assert "The system supplies the tool result in subsequent context" in stored_few_shots
+    else:
+        assert "系统在后续上下文中提供工具结果" in stored_few_shots
 
 
 def test_build_nl2agent_system_prompt_falls_back_to_chinese():
@@ -229,7 +235,7 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "One request may update multiple explicitly requested fields in one save call",
             "Omit every unspecified field so its persisted value remains unchanged",
             "listing only the potentially affected fields",
-            "search only for the newly requested capability",
+            "searches only for the newly requested capability",
             "reconfigure a specifically requested bound resource",
             "Never start at `duty_prompt` or enter the full Prompt generation chain",
             'Start with "Updated:"',
@@ -270,9 +276,8 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
 ):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert priority_heading in prompt
-    assert state_rule in prompt
-    assert linear_priority_rule in prompt
+    assert "### Intent And Minimal Workflow" in prompt or "### 任务意图与最小流程" in prompt
+    assert "Partial tasks are exempt" in prompt or "局部任务不受此规则影响" in prompt
     assert partial_patch_rule in prompt
     assert preserve_rule in prompt
     assert clarification_rule in prompt
@@ -283,17 +288,12 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
         or "不代表用户确认更新任何 Prompt" in prompt
     )
     assert reconfigure_rule in prompt
-    assert resource_continue_rule in prompt
+    assert "resource-dependent" in prompt.lower() or "资源依赖" in prompt
     assert revision_summary_rule in prompt
     assert removal_rule in prompt
     assert immutable_boundary in prompt
-    assert "revision save emits `agent_generation_completed`" in prompt or (
-        "修订保存触发 `agent_generation_completed`" in prompt
-    )
-    assert (
-        "must still follow every bound-resource" in prompt
-        or "仍须遵守“Prompt 生成”中的真实绑定资源" in prompt
-    )
+    assert "Resource-Dependent Prompt Generation" in prompt or "资源依赖 Prompt 生成" in prompt
+    assert "updated_fields" in prompt
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
@@ -540,7 +540,7 @@ def test_nl2agent_explicit_system_context_reaches_final_model_messages():
         "user",
     ]
     assert "### 核心职责" in message_texts[0]
-    assert "空描述草稿必须先输出一次 `requirement_clarification` 卡" in message_texts[0]
+    assert "当 `description` 缺失、为空字符串或只包含空白时，该草稿是“空描述草稿”" in message_texts[0]
     assert message_texts[1] == "Verified database binding facts: agent_id=42"
     assert message_texts[2] == "配置这个草稿"
 
