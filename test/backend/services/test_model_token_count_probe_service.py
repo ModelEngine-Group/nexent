@@ -1,13 +1,19 @@
 from datetime import datetime, timedelta, timezone
+import socket
 
+import httpx
 import pytest
 
+from backend.services import model_token_count_probe_service as probe_service
 from backend.services.model_token_count_probe_service import (
     PROBE_ADAPTER_VERSION,
+    ProbeHTTPRequest,
     ProbeHTTPResponse,
+    build_probe_request,
     classify_probe_response,
     endpoint_fingerprint,
     run_token_count_probe,
+    should_reuse_probe,
     validate_probe_url,
 )
 
@@ -255,3 +261,185 @@ def test_endpoint_fingerprint_omits_userinfo_query_and_fragment():
     assert len(fingerprint) == 24
     assert "secret" not in fingerprint
     assert PROBE_ADAPTER_VERSION == "1.0.0"
+
+
+def test_time_parsing_and_cache_reuse_reject_invalid_evidence():
+    assert probe_service._parse_time(None) is None
+    assert probe_service._parse_time("not-a-time") is None
+    assert not should_reuse_probe(
+        {"fingerprint": "current", "status": "temporarily_unavailable"},
+        current_fingerprint="current",
+        now=NOW,
+        force=False,
+    )
+
+
+def test_default_resolver_collects_unique_addresses(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda _host, _port: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 0)),
+        ],
+    )
+    assert probe_service._default_resolver("example.test") == {"8.8.8.8"}
+
+
+@pytest.mark.parametrize("url", ["ftp://example.test/v1", "https:///missing-host"])
+def test_probe_url_rejects_unsupported_or_missing_origin(url):
+    with pytest.raises(ValueError, match="ssrf_rejected"):
+        validate_probe_url(url, resolver=PUBLIC)
+
+
+def test_probe_url_reports_dns_failure_and_empty_dns_result():
+    def failed_resolver(_host):
+        raise socket.gaierror("dns unavailable")
+
+    with pytest.raises(ValueError, match="connection_failed"):
+        validate_probe_url("https://example.test/v1", resolver=failed_resolver)
+    with pytest.raises(ValueError, match="connection_failed"):
+        validate_probe_url("https://example.test/v1", resolver=lambda _host: ())
+
+
+def test_probe_url_normalizes_ipv6_and_explicit_port():
+    result = validate_probe_url(
+        "HTTPS://[2001:4860:4860::8888]:8443/v1/",
+        allow_private=True,
+        resolver=lambda _host: ("2001:4860:4860::8888",),
+    )
+    assert result == "https://[2001:4860:4860::8888]:8443/v1"
+
+
+def test_gemini_request_and_response_schema():
+    request = build_probe_request(
+        "gemini",
+        base_url="https://api.example.test/v1",
+        model_name="gemini-test",
+        api_key="secret",
+    )
+    assert request.url.endswith("/models/gemini-test:countTokens")
+    assert classify_probe_response(
+        "gemini", ProbeHTTPResponse(200, {"totalTokens": 12})
+    ) == ("supported", "supported", 12)
+    assert classify_probe_response("gemini", ProbeHTTPResponse(200, None)) == (
+        "invalid_response",
+        "invalid_schema",
+        None,
+    )
+    assert classify_probe_response("gemini", ProbeHTTPResponse(418)) == (
+        "temporarily_unavailable",
+        "connection_failed",
+        None,
+    )
+    with pytest.raises(ValueError, match="unsupported_protocol"):
+        build_probe_request(
+            "unknown",
+            base_url="https://api.example.test/v1",
+            model_name="model",
+            api_key="secret",
+        )
+
+
+class _FakeAsyncClient:
+    response = None
+    error = None
+
+    def __init__(self, **_kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def post(self, *_args, **_kwargs):
+        if self.error:
+            raise self.error
+        return self.response
+
+
+def _request():
+    return ProbeHTTPRequest("openai_responses", "https://api.example.test", {}, {})
+
+
+@pytest.mark.asyncio
+async def test_http_transport_handles_redirect_oversize_and_invalid_json(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
+
+    redirect = httpx.Response(302, headers={"location": "https://other.test"})
+    _FakeAsyncClient.response = redirect
+    result = await probe_service._httpx_transport(_request())
+    assert result.redirect_location == "https://other.test"
+
+    oversized = httpx.Response(200, content=b"x" * (probe_service.MAX_RESPONSE_BYTES + 1))
+    _FakeAsyncClient.response = oversized
+    result = await probe_service._httpx_transport(_request())
+    assert result.payload is None
+
+    invalid_json = httpx.Response(200, content=b"not-json")
+    _FakeAsyncClient.response = invalid_json
+    result = await probe_service._httpx_transport(_request())
+    assert result.payload is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (httpx.ReadTimeout("slow"), TimeoutError),
+        (httpx.ConnectError("offline"), ConnectionError),
+    ],
+)
+async def test_http_transport_maps_httpx_errors(monkeypatch, error, expected):
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
+    _FakeAsyncClient.error = error
+    try:
+        with pytest.raises(expected):
+            await probe_service._httpx_transport(_request())
+    finally:
+        _FakeAsyncClient.error = None
+
+
+@pytest.mark.asyncio
+async def test_probe_rejects_cross_origin_target_and_maps_connection_error(monkeypatch):
+    original_builder = probe_service.build_probe_request
+
+    def cross_origin(*_args, **_kwargs):
+        return ProbeHTTPRequest(
+            "openai_responses", "https://other.example.test/input_tokens", {}, {}
+        )
+
+    monkeypatch.setattr(probe_service, "build_probe_request", cross_origin)
+    rejected = await run_token_count_probe(
+        inference_protocol="openai",
+        base_url="https://api.example.test/v1",
+        model_name="model",
+        canonical_model_id="openai/model",
+        api_key="key",
+        credential_scope="scope",
+        fingerprint_salt="salt",
+        resolver=PUBLIC,
+        now=NOW,
+    )
+    assert rejected["reason"] == "redirect_rejected"
+
+    monkeypatch.setattr(probe_service, "build_probe_request", original_builder)
+
+    async def disconnected(_request):
+        raise ConnectionError
+
+    failed = await run_token_count_probe(
+        inference_protocol="openai",
+        base_url="https://api.example.test/v1",
+        model_name="model",
+        canonical_model_id="openai/model",
+        api_key="key",
+        credential_scope="scope",
+        fingerprint_salt="salt",
+        resolver=PUBLIC,
+        transport=disconnected,
+        now=NOW,
+    )
+    assert failed["reason"] == "connection_failed"
