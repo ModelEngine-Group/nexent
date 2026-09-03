@@ -37,6 +37,9 @@ def test_p8_catalog_covers_representative_target_model_families():
         ) == expected
         assert resolved["catalog_revision"] == CATALOG_REVISION
         assert resolved["evidence"]
+        if resolved["reasoning"]["mode"] == "effort":
+            assert resolved["reasoning"]["default_effort"] == "medium"
+            assert "medium" in resolved["reasoning"]["efforts"]
 
 
 def test_p8_catalog_never_propagates_capabilities_across_factories():

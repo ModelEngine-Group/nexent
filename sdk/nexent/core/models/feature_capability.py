@@ -19,6 +19,7 @@ UNKNOWN_FEATURE_CAPABILITIES = {
         "mode": "unknown",
         "request_style": "unknown",
         "efforts": [],
+        "default_effort": None,
     },
     "prompt_cache": {
         "supported": None,
@@ -116,6 +117,12 @@ def extract_provider_feature_candidate(raw: Mapping[str, Any]) -> Optional[dict[
         if isinstance(value, (list, tuple)):
             efforts = [str(item).strip().lower() for item in value if str(item).strip()]
             break
+    default_effort = None
+    for candidate in candidates:
+        value = candidate.get("default_reasoning_effort") or candidate.get("reasoning_effort_default")
+        if isinstance(value, str) and value.strip():
+            default_effort = value.strip().lower()
+            break
 
     if reasoning_supported is None and cache_supported is None:
         return None
@@ -142,6 +149,7 @@ def extract_provider_feature_candidate(raw: Mapping[str, Any]) -> Optional[dict[
             ),
             "request_style": request_style if reasoning_supported is not False else "none",
             "efforts": efforts,
+            "default_effort": default_effort,
         },
         "prompt_cache": {
             "supported": cache_supported,
@@ -168,6 +176,16 @@ def _normalize_branch(profile: Mapping[str, Any], branch: str) -> dict[str, Any]
             defaults["request_style"] = "unknown"
         if not isinstance(defaults["efforts"], list):
             defaults["efforts"] = []
+        defaults["efforts"] = [
+            str(item).strip().lower()
+            for item in defaults["efforts"]
+            if str(item).strip()
+        ]
+        default_effort = defaults.get("default_effort")
+        if not isinstance(default_effort, str) or default_effort.lower() not in defaults["efforts"]:
+            defaults["default_effort"] = None
+        else:
+            defaults["default_effort"] = default_effort.lower()
     elif defaults["mode"] not in _VALID_CACHE_MODES:
         defaults["mode"] = "unknown"
     return defaults
@@ -246,3 +264,117 @@ def resolve_feature_capabilities(
     result = normalize_feature_profile({})
     result.update({"source": "unknown", "match_kind": "none", "catalog_revision": catalog_revision})
     return result
+
+
+def resolve_effective_feature_policy(
+    feature_capabilities: Optional[Mapping[str, Any]],
+    preferences: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Resolve runtime behavior without mutating model capability facts.
+
+    Confirmed capabilities are enabled by default. Optional preferences are a
+    future-facing override contract and can narrow, but never expand, confirmed
+    model support.
+    """
+    profile = normalize_feature_profile(feature_capabilities) or normalize_feature_profile({})
+    preference_map = preferences if isinstance(preferences, Mapping) else {}
+    reasoning_preference = preference_map.get("reasoning")
+    reasoning_preference = reasoning_preference if isinstance(reasoning_preference, Mapping) else {}
+    cache_preference = preference_map.get("prompt_cache")
+    cache_preference = cache_preference if isinstance(cache_preference, Mapping) else {}
+    warnings: list[str] = []
+
+    reasoning = profile["reasoning"]
+    reasoning_supported = reasoning.get("supported") is True
+    reasoning_mode = str(reasoning.get("mode") or "unknown")
+    reasoning_enabled = reasoning_supported
+    requested_reasoning_enabled = reasoning_preference.get("enabled")
+    effort = reasoning.get("default_effort") if reasoning_mode == "effort" else None
+
+    preferred_effort = reasoning_preference.get("effort")
+    if isinstance(preferred_effort, str):
+        preferred_effort = preferred_effort.strip().lower()
+        if preferred_effort in reasoning.get("efforts", []):
+            effort = preferred_effort
+        elif preferred_effort:
+            warnings.append("unsupported_reasoning_effort_preference")
+
+    if requested_reasoning_enabled is False and reasoning_supported:
+        if reasoning_mode == "always":
+            warnings.append("reasoning_disable_unsupported")
+        elif reasoning_mode == "effort" and "none" in reasoning.get("efforts", []):
+            reasoning_enabled = False
+            effort = "none"
+        elif reasoning_mode == "toggle":
+            reasoning_enabled = False
+        else:
+            warnings.append("reasoning_disable_unsupported")
+    elif requested_reasoning_enabled is True and not reasoning_supported:
+        warnings.append("reasoning_enable_unsupported")
+
+    cache = profile["prompt_cache"]
+    cache_supported = cache.get("supported") is True
+    cache_enabled = cache_supported
+    requested_cache_enabled = cache_preference.get("enabled")
+    if requested_cache_enabled is False:
+        cache_enabled = False
+    elif requested_cache_enabled is True and not cache_supported:
+        warnings.append("prompt_cache_enable_unsupported")
+
+    return {
+        "reasoning": {
+            "supported": reasoning.get("supported"),
+            "enabled": reasoning_enabled,
+            "mode": reasoning_mode,
+            "request_style": reasoning.get("request_style") or "unknown",
+            "effort": effort,
+        },
+        "prompt_cache": {
+            "supported": cache.get("supported"),
+            "enabled": cache_enabled,
+            "mode": cache.get("mode") or "unknown",
+        },
+        "source": "user_preference" if preference_map else "nexent_default",
+        "warnings": warnings,
+    }
+
+
+def apply_reasoning_request_policy(
+    completion_kwargs: Mapping[str, Any],
+    effective_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Apply one normalized reasoning policy to an OpenAI-compatible payload."""
+    request = dict(completion_kwargs)
+    extra_body = request.get("extra_body")
+    safe_extra_body = dict(extra_body) if isinstance(extra_body, Mapping) else {}
+
+    request.pop("reasoning_effort", None)
+    safe_extra_body.pop("enable_thinking", None)
+    safe_extra_body.pop("reasoning", None)
+    template_kwargs = safe_extra_body.get("chat_template_kwargs")
+    if isinstance(template_kwargs, Mapping) and "enable_thinking" in template_kwargs:
+        retained_template_kwargs = {
+            key: value for key, value in template_kwargs.items() if key != "enable_thinking"
+        }
+        if retained_template_kwargs:
+            safe_extra_body["chat_template_kwargs"] = retained_template_kwargs
+        else:
+            safe_extra_body.pop("chat_template_kwargs", None)
+
+    reasoning = effective_policy.get("reasoning")
+    reasoning = reasoning if isinstance(reasoning, Mapping) else {}
+    enabled = reasoning.get("enabled") is True
+    mode = str(reasoning.get("mode") or "unknown")
+    request_style = str(reasoning.get("request_style") or "unknown")
+    if request_style == "openai_reasoning_effort" and mode == "effort":
+        effort = reasoning.get("effort")
+        if isinstance(effort, str) and effort:
+            request["reasoning_effort"] = effort
+    elif request_style == "extra_body_enable_thinking" and mode == "toggle":
+        safe_extra_body["enable_thinking"] = enabled
+
+    if safe_extra_body:
+        request["extra_body"] = safe_extra_body
+    else:
+        request.pop("extra_body", None)
+    return request

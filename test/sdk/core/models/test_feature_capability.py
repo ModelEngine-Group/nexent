@@ -1,5 +1,7 @@
 from nexent.core.models.feature_capability import (
+    apply_reasoning_request_policy,
     extract_provider_feature_candidate,
+    resolve_effective_feature_policy,
     resolve_feature_capabilities,
 )
 
@@ -90,3 +92,76 @@ def test_family_exclusion_and_factory_boundary_are_enforced():
     },)
     assert resolve_feature_capabilities("factory", "qwen-unsafe", family_rules=rules)["source"] == "unknown"
     assert resolve_feature_capabilities("other", "qwen-good", family_rules=rules)["source"] == "unknown"
+
+
+def test_p8_012_confirmed_toggle_and_effort_capabilities_default_on():
+    toggle = _profile()
+    toggle_policy = resolve_effective_feature_policy(toggle)
+    assert toggle_policy["reasoning"] == {
+        "supported": True,
+        "enabled": True,
+        "mode": "toggle",
+        "request_style": "extra_body_enable_thinking",
+        "effort": None,
+    }
+    assert toggle_policy["prompt_cache"]["enabled"] is True
+    assert toggle_policy["source"] == "nexent_default"
+
+    effort = _profile()
+    effort["reasoning"].update({
+        "mode": "effort",
+        "request_style": "openai_reasoning_effort",
+        "efforts": ["low", "medium", "high"],
+        "default_effort": "medium",
+    })
+    effort_policy = resolve_effective_feature_policy(effort)
+    assert effort_policy["reasoning"]["enabled"] is True
+    assert effort_policy["reasoning"]["effort"] == "medium"
+
+
+def test_p8_013_preferences_can_narrow_but_not_expand_capabilities():
+    profile = _profile(reasoning=False, cache=False)
+    policy = resolve_effective_feature_policy(
+        profile,
+        {"reasoning": {"enabled": True}, "prompt_cache": {"enabled": True}},
+    )
+    assert policy["reasoning"]["enabled"] is False
+    assert policy["prompt_cache"]["enabled"] is False
+    assert policy["warnings"] == [
+        "reasoning_enable_unsupported",
+        "prompt_cache_enable_unsupported",
+    ]
+
+    always = _profile()
+    always["reasoning"].update({"mode": "always", "request_style": "none"})
+    policy = resolve_effective_feature_policy(always, {"reasoning": {"enabled": False}})
+    assert policy["reasoning"]["enabled"] is True
+    assert policy["warnings"] == ["reasoning_disable_unsupported"]
+
+
+def test_p8_014_effective_policy_maps_to_wire_parameter_names():
+    effort_request = apply_reasoning_request_policy(
+        {"messages": [], "extra_body": {"logprobs": True, "enable_thinking": False}},
+        {
+            "reasoning": {
+                "enabled": True,
+                "mode": "effort",
+                "request_style": "openai_reasoning_effort",
+                "effort": "medium",
+            }
+        },
+    )
+    assert effort_request["reasoning_effort"] == "medium"
+    assert effort_request["extra_body"] == {"logprobs": True}
+
+    toggle_request = apply_reasoning_request_policy(
+        {"messages": [], "extra_body": {"logprobs": True}},
+        {
+            "reasoning": {
+                "enabled": True,
+                "mode": "toggle",
+                "request_style": "extra_body_enable_thinking",
+            }
+        },
+    )
+    assert toggle_request["extra_body"] == {"logprobs": True, "enable_thinking": True}

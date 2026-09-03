@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 
-CATALOG_REVISION = "2026-09-01.2"
+CATALOG_REVISION = "2026-09-03.3"
 
 OPENAI_MODEL_EVIDENCE = (
     "https://platform.openai.com/docs/models",
@@ -37,6 +37,7 @@ def _profile(
     reasoning_mode: str = "unknown",
     request_style: str = "unknown",
     efforts: tuple[str, ...] = (),
+    default_effort: str | None = None,
     cache: bool | None,
     cache_mode: str = "unknown",
     cache_metrics: bool | None = None,
@@ -49,6 +50,7 @@ def _profile(
             "mode": reasoning_mode,
             "request_style": request_style,
             "efforts": list(efforts),
+            "default_effort": default_effort,
         },
         "prompt_cache": {
             "supported": cache,
@@ -95,9 +97,10 @@ FAMILY_RULES = (
         "provider": "openai",
         "pattern": r"(?:gpt-5(?:\.[0-9]+)?|o[134])(?:[-.].+)?",
         **_profile(
-            "openai/reasoning-family@1", reasoning=True, reasoning_mode="effort",
+            "openai/reasoning-family@2", reasoning=True, reasoning_mode="effort",
             request_style="openai_reasoning_effort",
             efforts=("none", "minimal", "low", "medium", "high", "xhigh"),
+            default_effort="medium",
             cache=True, cache_mode="openai_automatic", cache_metrics=True,
             evidence=OPENAI_MODEL_EVIDENCE,
         ),
@@ -116,9 +119,10 @@ FAMILY_RULES = (
         "provider": "dashscope",
         "pattern": r"qwen3\.[5-8]-(?:max|plus|flash)(?:[-.].+)?",
         **_profile(
-            "dashscope/qwen3-hybrid-family@1", reasoning=True,
+            "dashscope/qwen3-hybrid-family@2", reasoning=True,
             reasoning_mode="effort", request_style="openai_reasoning_effort",
             efforts=("none", "minimal", "low", "medium", "high", "xhigh", "max"),
+            default_effort="medium",
             cache=True, cache_mode="provider_automatic", cache_metrics=True,
             evidence=DASHSCOPE_REASONING_EVIDENCE,
         ),
@@ -219,9 +223,9 @@ FAMILY_RULES = (
         "provider": "tokenpony",
         "pattern": r"(?:gpt-5(?:\.[0-9]+)?|o[134])(?:[-.].+)?",
         **_profile(
-            "tokenpony/openai-reasoning-proxy-family@1", reasoning=True,
+            "tokenpony/openai-reasoning-proxy-family@2", reasoning=True,
             reasoning_mode="effort", request_style="openai_reasoning_effort",
-            efforts=("minimal", "low", "medium", "high"), cache=None,
+            efforts=("minimal", "low", "medium", "high"), default_effort="medium", cache=None,
             evidence=OPENAI_MODEL_EVIDENCE,
         ),
     },
