@@ -6,7 +6,6 @@ import os
 import time
 import types
 import unittest
-from enum import Enum
 from pathlib import Path
 from unittest.mock import MagicMock, ANY, AsyncMock, call
 # Mock MinioClient before importing modules that use it
@@ -111,21 +110,6 @@ consts_exceptions_mod.TenantResourceLimitError = TenantResourceLimitError
 consts_pkg = importlib.import_module("consts")
 consts_const_mod = importlib.import_module("consts.const")
 consts_scheduler_mod = importlib.import_module("consts.scheduler")
-
-# The shared test bootstrap can load a reduced consts stub before this module.
-# Supply the knowledge-base service constants required by the refactored module.
-if not hasattr(consts_const_mod, "DATAMATE_URL"):
-    consts_const_mod.DATAMATE_URL = "DATAMATE_URL"
-if not hasattr(consts_const_mod, "ES_API_KEY"):
-    consts_const_mod.ES_API_KEY = ""
-if not hasattr(consts_const_mod, "ES_HOST"):
-    consts_const_mod.ES_HOST = ""
-if not hasattr(consts_const_mod, "VectorDatabaseType"):
-    class VectorDatabaseType(str, Enum):
-        ELASTICSEARCH = "elasticsearch"
-        DATAMATE = "datamate"
-
-    consts_const_mod.VectorDatabaseType = VectorDatabaseType
 
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_const_mod
@@ -3369,42 +3353,6 @@ class TestElasticSearchService(unittest.TestCase):
             weight_accurate=0.5
         )
         mock_get_embedding_by_index.assert_called_once_with(consts_const_mod.DEFAULT_TENANT_ID, "test_index")
-
-    def test_apply_document_tag_predicates_keeps_only_matching_documents(self):
-        tag_projection_module = types.ModuleType('services.tag_document_projection')
-        tag_projection_module.LOCAL_DOCUMENT_PROVIDER = 'local'
-        tag_projection_module.decode_document_resource_id = (
-            lambda resource_id: tuple(resource_id.split(':', 2))
-        )
-        tag_management_module = types.ModuleType('services.tag_management_service')
-        tag_management_module.TagManagementService = type(
-            'TagManagementService',
-            (),
-            {
-                'filter_document_ids_by_predicates': staticmethod(
-                    lambda *_args: ['local:test_index:matched.md']
-                )
-            },
-        )
-
-        with patch.dict(
-            sys.modules,
-            {
-                'services.tag_document_projection': tag_projection_module,
-                'services.tag_management_service': tag_management_module,
-            },
-        ):
-            results = ElasticSearchService._apply_document_tag_predicates(
-                [
-                    {'index': 'test_index', 'path_or_url': 'matched.md'},
-                    {'index': 'test_index', 'path_or_url': 'other.md'},
-                ],
-                tenant_id='tenant-1',
-                index_names=['test_index'],
-                tag_predicates=[{'key': 'topic', 'values': ['marketing']}],
-            )
-
-        self.assertEqual(results, [{'index': 'test_index', 'path_or_url': 'matched.md'}])
 
     def test_search_hybrid_missing_tenant_id(self):
         """Test search_hybrid raises ValueError when tenant_id is missing."""

@@ -3,11 +3,13 @@ FastAPI application factory with common configurations and exception handlers.
 """
 import logging
 
-from apps.health_app import install_health_contract
-from consts.exceptions import AppException, QuotaExceededError, TokenExpiredError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from apps.health_app import install_health_contract
+from consts.exceptions import AppException, QuotaExceededError, TokenExpiredError
+
 
 logger = logging.getLogger(__name__)
 
@@ -132,11 +134,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     # the real error from the client.
     try:
         from ext_components.aidp.consts.aidp_exceptions import (
-            AidpGroupValidationError,
-            AidpKbConflictError,
             AidpKbNotFoundError,
             AidpKbPermissionDeniedError,
+            AidpKbConflictError,
             AidpKbSyncError,
+            AidpGroupValidationError,
         )
 
         @app.exception_handler(AidpKbNotFoundError)

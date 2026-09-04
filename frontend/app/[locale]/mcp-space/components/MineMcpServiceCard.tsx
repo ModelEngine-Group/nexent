@@ -9,7 +9,6 @@ import {
   resolveDeploymentType,
 } from "@/lib/mcpTools";
 import { getMineCardReviewBadge } from "@/lib/mcpToolsMine";
-import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import TransportIcon from "./shared/TransportIcon";
 
 export type MineMcpCardItem =
@@ -239,13 +238,6 @@ export default function MineMcpServiceCard({
         ))}
         {tags.length > 3 ? (
           <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">+{tags.length - 3}</span>
-        ) : null}
-        {item.kind === "local" ? (
-          <ResourceTagChips
-            resourceType="mcp_service"
-            resourceId={String(item.service.mcpId)}
-            max={3}
-          />
         ) : null}
         <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">
           {t("mcpTools.repository.toolCount", { count: toolCount })}

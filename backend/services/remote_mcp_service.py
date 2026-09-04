@@ -1054,21 +1054,14 @@ async def delete_mcp_service(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    from services.tag_management_service import TagManagementService
-
-    TagManagementService.cleanup_resource_assignments(
-        tenant_id, "mcp_service", str(mcp_id), user_id
-    )
 
 
 async def delete_mcp_by_container_id(tenant_id: str, user_id: str, container_id: str) -> None:
     """Soft delete MCP record associated with a specific container ID."""
     # Hide the deleted MCP's tools from the agent tool selection list.
-    deleted_mcp_id = None
     try:
         for record in get_mcp_records_by_tenant(tenant_id=tenant_id):
             if str(record.get("container_id") or "") == str(container_id):
-                deleted_mcp_id = record.get("mcp_id")
                 set_mcp_tools_unavailable(
                     tenant_id=tenant_id,
                     mcp_server_name=record.get("mcp_name") or "",
@@ -1083,12 +1076,6 @@ async def delete_mcp_by_container_id(tenant_id: str, user_id: str, container_id:
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    if deleted_mcp_id is not None:
-        from services.tag_management_service import TagManagementService
-
-        TagManagementService.cleanup_resource_assignments(
-            tenant_id, "mcp_service", str(deleted_mcp_id), user_id
-        )
 
 
 # ---------------------------------------------------------------------------

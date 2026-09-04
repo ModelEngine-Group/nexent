@@ -507,7 +507,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             tenant_id: str,
             top_k: int = 10,
             weight_accurate: Optional[float] = None,
-            tag_predicates: Optional[List[Dict[str, Any]]] = None,
             vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     ):
         """
@@ -573,14 +572,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                     document["score_details"] = item["scores"]
                 formatted_results.append(document)
 
-            if tag_predicates:
-                formatted_results = ElasticSearchService._apply_document_tag_predicates(
-                    formatted_results,
-                    tenant_id=tenant_id,
-                    index_names=index_names,
-                    tag_predicates=tag_predicates,
-                )
-
             return {
                 "results": formatted_results,
                 "total": len(formatted_results),
@@ -596,45 +587,6 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 exc_info=True,
             )
             raise Exception(f"Error executing hybrid search: {str(exc)}")
-
-    @staticmethod
-    def _apply_document_tag_predicates(
-        results: List[Dict[str, Any]],
-        *,
-        tenant_id: str,
-        index_names: List[str],
-        tag_predicates: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        from services.tag_document_projection import (
-            LOCAL_DOCUMENT_PROVIDER,
-            decode_document_resource_id,
-        )
-        from services.tag_management_service import TagManagementService
-
-        allowed_paths_by_index: Dict[str, set] = {}
-        for index in index_names:
-            resource_ids = TagManagementService.filter_document_ids_by_predicates(
-                tenant_id, LOCAL_DOCUMENT_PROVIDER, index, tag_predicates
-            )
-            allowed_paths = set()
-            for resource_id in resource_ids:
-                try:
-                    provider, knowledge_base_id, document_id = decode_document_resource_id(
-                        resource_id
-                    )
-                except ValueError:
-                    continue
-                if provider == LOCAL_DOCUMENT_PROVIDER and knowledge_base_id == index:
-                    allowed_paths.add(document_id)
-            allowed_paths_by_index[index] = allowed_paths
-
-        return [
-            document
-            for document in results
-            if document.get("path_or_url") in allowed_paths_by_index.get(
-                document.get("index"), set()
-            )
-        ]
 
     @staticmethod
     def _generate_chunk_id() -> str:

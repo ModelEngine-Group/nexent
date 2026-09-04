@@ -1,6 +1,5 @@
 import React, {
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -10,7 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
 
-import { Button, Input, Popover, Select, Tooltip } from "antd";
+import { Button, Input, Select, Tooltip } from "antd";
 import {
   SyncOutlined,
   PlusOutlined,
@@ -20,7 +19,6 @@ import {
 } from "@ant-design/icons";
 import {
   PencilRuler,
-  Tag,
   Eye,
   Glasses,
   Trash2,
@@ -32,13 +30,6 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
 import PersonalKnowledgeBaseCapacityBar from "./PersonalKnowledgeBaseCapacityBar";
-import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
-import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
-import TagFilterControls from "@/components/tag/TagFilterControls";
-import ResourceTagChips from "@/components/tag/ResourceTagChips";
-import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
-import { tagManagementApi } from "@/services/tagManagementService";
-import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
@@ -186,52 +177,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Edit modal states
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [assignTarget, setAssignTarget] = useState<{
-    indexName: string;
-    canEdit: boolean;
-  } | null>(null);
-  const [tagManagementOpen, setTagManagementOpen] = useState(false);
-  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
-    []
-  );
-  const [matchedTagIds, setMatchedTagIds] = useState<Set<string> | null>(null);
-  const { data: tagLibraries } = useTagLibraries();
-  const defaultLibrary =
-    tagLibraries?.find(
-      (library) => library.bucket_key === "default_resource"
-    ) ?? null;
-  const { data: assignDefinitions, refresh: refreshAssignDefinitions } =
-    useTagDefinitions(defaultLibrary?.bucket_id ?? null);
-
-  useEffect(() => {
-    if (tagPredicates.length === 0) {
-      setMatchedTagIds(null);
-      return;
-    }
-    const resourceIds = knowledgeBases.map((knowledgeBase) =>
-      String(knowledgeBase.id)
-    );
-    if (resourceIds.length === 0) {
-      setMatchedTagIds(new Set());
-      return;
-    }
-    let cancelled = false;
-    void tagManagementApi
-      .filterResourceIds("knowledge_base", resourceIds, tagPredicates)
-      .then((result) => {
-        if (!cancelled) {
-          setMatchedTagIds(new Set(result.matched_resource_ids));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMatchedTagIds(new Set());
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [knowledgeBases, tagPredicates]);
   const [editingKnowledge, setEditingKnowledge] =
     useState<KnowledgeBase | null>(null);
 
@@ -349,10 +294,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             effectiveSelectedModels.length === 0 ||
             effectiveSelectedModels.includes(kb.embeddingModel);
 
-          const matchesTag =
-            matchedTagIds === null || matchedTagIds.has(String(kb.id));
-          const matches =
-            matchesSearch && matchesSource && matchesModel && matchesTag;
+          const matches = matchesSearch && matchesSource && matchesModel;
 
           if (!matches) {
             log.log("KB filtered out:", {
@@ -368,20 +310,13 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           return matches;
         });
 
-    const tagFilteredResult =
-      matchedTagIds === null
-        ? result
-        : result.filter((knowledgeBase) =>
-            matchedTagIds.has(String(knowledgeBase.id))
-          );
-    log.log("Filtered result:", tagFilteredResult.length, "items");
-    return tagFilteredResult;
+    log.log("Filtered result:", result.length, "items");
+    return result;
   }, [
     sortedKnowledgeBases,
     effectiveSearchKeyword,
     effectiveSelectedSources,
     effectiveSelectedModels,
-    matchedTagIds,
     serverFiltered,
   ]);
 
@@ -535,20 +470,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               </span>
               <span>{t("knowledgeBase.button.sync")}</span>
             </Button>
-            <Button
-              style={{
-                padding: "4px 15px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                flexShrink: 0,
-              }}
-              onClick={() => setTagManagementOpen(true)}
-              icon={<Tag className="h-4 w-4" />}
-            >
-              {t("knowledgeBase.button.tagManagement")}
-            </Button>
             {showDataMateConfig && (
               <Button
                 style={{
@@ -622,41 +543,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               ))}
             </Select>
           )}
-
-          {defaultLibrary && assignDefinitions && (
-            <Popover
-              trigger="click"
-              placement="bottomRight"
-              title={t("knowledgeBase.tagFilter.placeholder")}
-              content={
-                <div className="w-64">
-                  <TagFilterControls
-                    definitions={assignDefinitions}
-                    value={tagPredicates}
-                    onChange={setTagPredicates}
-                  />
-                  {tagPredicates.length > 0 && (
-                    <Button
-                      size="small"
-                      block
-                      className="mt-2"
-                      onClick={() => setTagPredicates([])}
-                    >
-                      {t("knowledgeBase.tagFilter.clear")}
-                    </Button>
-                  )}
-                </div>
-              }
-            >
-              <Button
-                icon={<FilterOutlined />}
-                type={tagPredicates.length > 0 ? "primary" : "default"}
-                aria-label={t("knowledgeBase.tagFilter.placeholder")}
-              >
-                {t("knowledgeBase.tagFilter.button")}
-              </Button>
-            </Popover>
-          )}
         </div>
       </div>
 
@@ -728,22 +614,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                         </div>
                         <div className="flex items-center ml-2">
                           <Can permission="kb:update">
-                            <Tooltip
-                              title={t("knowledgeBase.action.assignTags")}
-                            >
-                              <Button
-                                type="text"
-                                icon={<Tag className="h-4 w-4" />}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setAssignTarget({
-                                    indexName: kb.id,
-                                    canEdit: kb.permission !== "READ_ONLY",
-                                  });
-                                }}
-                                size="small"
-                              />
-                            </Tooltip>
                             {/* Edit button - only show for Nexent (local) sources and when user has edit permission */}
                             {(!kb.source ||
                               kb.source === "nexent" ||
@@ -800,14 +670,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           {t("knowledgeBase.tag.chunks", {
                             count: kb.chunkCount || 0,
                           })}
-                        </span>
-
-                        <span className="inline-flex items-center mr-1">
-                          <ResourceTagChips
-                            resourceType="knowledge_base"
-                            resourceId={kb.id}
-                            max={3}
-                          />
                         </span>
 
                         {/* Always show source tag regardless of document/chunk count */}
@@ -926,25 +788,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             onKnowledgeBaseUpdate(updatedKnowledgeBase);
           }
         }}
-      />
-      <TagDefinitionManagementModal
-        open={tagManagementOpen}
-        onClose={() => {
-          setTagManagementOpen(false);
-          void refreshAssignDefinitions();
-        }}
-        bucketId={defaultLibrary?.bucket_id ?? 0}
-        bucketName={defaultLibrary?.bucket_name ?? ""}
-        canManage={true}
-      />
-      <ResourceTagAssignmentModal
-        open={assignTarget !== null}
-        onClose={() => setAssignTarget(null)}
-        resourceType="knowledge_base"
-        resourceId={assignTarget?.indexName ?? ""}
-        definitions={assignDefinitions ?? []}
-        canEdit={assignTarget?.canEdit ?? false}
-        onManageDefinitions={() => setTagManagementOpen(true)}
       />
     </div>
   );

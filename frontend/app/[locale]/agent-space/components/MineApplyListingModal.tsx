@@ -1,22 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Dropdown, Input, Modal, Spin } from "antd";
+import { App, Button, Dropdown, Input, Modal, Select, Spin } from "antd";
 import { ChevronDown, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { AGENT_REPOSITORY_ICONS } from "@/const/agentRepository";
+import {
+  AGENT_REPOSITORY_ICONS,
+  AGENT_REPOSITORY_PRESET_TAGS,
+} from "@/const/agentRepository";
 import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import {
-  getAgentRepositoryTagLabel,
-  resolveAgentRepositoryTagForSubmit,
-} from "@/lib/agentRepositoryLabels";
+import { getAgentRepositoryTagLabel, resolveAgentRepositoryTagForSubmit } from "@/lib/agentRepositoryLabels";
 import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
-import {
-  useTagAssignments,
-  useTagDefinitions,
-  useTagLibraries,
-} from "@/hooks/useTagManagement";
-import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import {
   buildApplyListingFormPrefill,
   pickApplyListingPrefillSource,
@@ -25,7 +19,6 @@ import type {
   AgentRepositoryListingCreatePayload,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
-import type { TagAssignmentValue } from "@/types/tagManagement";
 
 const MAX_TAGS = 5;
 const MAX_TAG_LENGTH = 20;
@@ -36,7 +29,7 @@ interface MineApplyListingModalProps {
   agent: MyEditableAgentItem | null;
   isSubmitting?: boolean;
   onClose: () => void;
-  onSubmit: (payload: AgentRepositoryListingCreatePayload) => Promise<void>;
+  onSubmit: (payload: AgentRepositoryListingCreatePayload) => void;
 }
 
 export function MineApplyListingModal({
@@ -50,42 +43,16 @@ export function MineApplyListingModal({
   const { message } = App.useApp();
 
   const icons = AGENT_REPOSITORY_ICONS;
-  const { data: tagLibraries } = useTagLibraries();
-  const defaultResourceLibrary = useMemo(
-    () =>
-      (tagLibraries ?? []).find(
-        (library) => library.bucket_key === "default_resource"
-      ) ?? null,
-    [tagLibraries]
-  );
-  const { data: tagDefinitions } = useTagDefinitions(
-    defaultResourceLibrary?.bucket_id ?? null
-  );
-  const agentCategory = useMemo(
-    () =>
-      (tagDefinitions ?? []).find(
-        (definition) => definition.definition_key === "agent_category"
-      ) ?? null,
-    [tagDefinitions]
-  );
-  const categoryValues = agentCategory?.values ?? [];
+  const presetTags = AGENT_REPOSITORY_PRESET_TAGS;
 
   const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
   const [iconInput, setIconInput] = useState("");
   const [iconError, setIconError] = useState<string | null>(null);
   const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [listingContent, setListingContent] = useState("");
-  const [formInitialized, setFormInitialized] = useState(false);
-  const [tagEditorOpen, setTagEditorOpen] = useState(false);
-  const [savedAssignments, setSavedAssignments] = useState<
-    TagAssignmentValue[] | null
-  >(null);
 
   const agentId = agent?.agent_id;
-  const agentTagAssignments = useTagAssignments(
-    "agent",
-    agentId == null ? null : String(agentId)
-  );
   const {
     data: listingsData,
     isSuccess: isListingsSuccess,
@@ -97,59 +64,14 @@ export function MineApplyListingModal({
     open && agentId != null
   );
 
-  const assignmentValues =
-    savedAssignments ?? agentTagAssignments.data?.assignments ?? [];
-
-  const categoryAssignmentValueIds = useMemo(
+  const tagOptions = useMemo(
     () =>
-      new Set(
-        assignmentValues
-          .filter(
-            (assignment) =>
-              assignment.definition_id === agentCategory?.definition_id
-          )
-          .map((assignment) => assignment.value_id)
-      ),
-    [agentCategory?.definition_id, assignmentValues]
+      presetTags.map((tag) => ({
+        label: getAgentRepositoryTagLabel(tag, t),
+        value: tag,
+      })),
+    [presetTags, t]
   );
-
-  const selectedCategoryValues = useMemo(
-    () =>
-      categoryValues.filter((value) =>
-        categoryAssignmentValueIds.has(value.value_id)
-      ),
-    [categoryAssignmentValueIds, categoryValues]
-  );
-
-  const legacyCategorySelection = useMemo(() => {
-    if (!agentCategory || categoryAssignmentValueIds.size > 0) return {};
-    const source = pickApplyListingPrefillSource(
-      listingsData?.items ?? [],
-      agent?.version_label
-    );
-    const prefill = buildApplyListingFormPrefill(source, { maxTags: MAX_TAGS });
-    if (!prefill) return {};
-    const legacyTags = new Set(
-      prefill.tags.map((tag) => tag.trim().toLocaleLowerCase())
-    );
-    const valueIds = categoryValues
-      .filter((value) =>
-        [
-          value.normalized_value,
-          value.display_value,
-          getAgentRepositoryTagLabel(value.normalized_value, t),
-        ].some((candidate) => legacyTags.has(candidate.trim().toLocaleLowerCase()))
-      )
-      .map((value) => value.value_id);
-    return valueIds.length > 0 ? { [agentCategory.definition_id]: valueIds } : {};
-  }, [
-    agent?.version_label,
-    agentCategory,
-    categoryAssignmentValueIds.size,
-    categoryValues,
-    listingsData?.items,
-    t,
-  ]);
 
   const invalidIconMessage = t(
     "agentRepository.mine.applyModal.validation.iconInvalid"
@@ -186,13 +108,13 @@ export function MineApplyListingModal({
 
   useEffect(() => {
     if (!open) {
-      setFormInitialized(false);
-      setTagEditorOpen(false);
-      setSavedAssignments(null);
       return;
     }
 
-    if (!agent || !isListingsSuccess || formInitialized) {
+    if (!agent || !isListingsSuccess) {
+      clearIconState();
+      setSelectedTags([]);
+      setListingContent("");
       return;
     }
 
@@ -206,8 +128,8 @@ export function MineApplyListingModal({
 
     if (!prefill) {
       clearIconState();
+      setSelectedTags([]);
       setListingContent("");
-      setFormInitialized(true);
       return;
     }
 
@@ -218,8 +140,8 @@ export function MineApplyListingModal({
       clearIconState();
     }
 
+    setSelectedTags(prefill.tags);
     setListingContent("");
-    setFormInitialized(true);
   }, [
     open,
     agent,
@@ -227,10 +149,24 @@ export function MineApplyListingModal({
     listingsData,
     clearIconState,
     applyIconInputFromValue,
-    formInitialized,
   ]);
 
-  const title = agent?.name?.trim() || t("agentRepository.card.untitled");
+  const title =
+    agent?.name?.trim() || t("agentRepository.card.untitled");
+
+  const normalizeTags = (tags: string[]) => {
+    const normalized: string[] = [];
+    const seen = new Set<string>();
+    for (const rawTag of tags) {
+      const tag = rawTag.trim();
+      if (!tag || seen.has(tag)) {
+        continue;
+      }
+      seen.add(tag);
+      normalized.push(tag);
+    }
+    return normalized;
+  };
 
   const handlePresetIconClick = (icon: string) => {
     applyIconInputFromValue(icon, false);
@@ -255,7 +191,7 @@ export function MineApplyListingModal({
     </div>
   );
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (iconInput.trim() && !isSingleSimpleEmoji(iconInput)) {
       setIconError(invalidIconMessage);
       message.warning(invalidIconMessage);
@@ -267,11 +203,14 @@ export function MineApplyListingModal({
       return;
     }
 
-    if (selectedCategoryValues.length === 0 || !agentCategory) {
+    const tags = normalizeTags(selectedTags).map((tag) =>
+      resolveAgentRepositoryTagForSubmit(tag, t)
+    );
+    if (tags.length === 0) {
       message.warning(t("agentRepository.mine.applyModal.validation.tags"));
       return;
     }
-    if (selectedCategoryValues.length > MAX_TAGS) {
+    if (tags.length > MAX_TAGS) {
       message.warning(
         t("agentRepository.mine.applyModal.validation.tagsMax", {
           count: MAX_TAGS,
@@ -279,9 +218,6 @@ export function MineApplyListingModal({
       );
       return;
     }
-    const tags = selectedCategoryValues.map((value) =>
-      resolveAgentRepositoryTagForSubmit(value.normalized_value, t)
-    );
     if (tags.some((tag) => tag.length > MAX_TAG_LENGTH)) {
       message.warning(
         t("agentRepository.mine.applyModal.validation.tagLength", {
@@ -291,20 +227,15 @@ export function MineApplyListingModal({
       return;
     }
 
-    try {
-      await onSubmit({
-        icon: selectedIcon,
-        tags,
-        content: listingContent.trim(),
-      });
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
-    }
+    onSubmit({
+      icon: selectedIcon,
+      tags,
+      content: listingContent.trim(),
+    });
   };
 
   return (
-    <>
-      <Modal
+    <Modal
       open={open && agent != null}
       onCancel={onClose}
       centered
@@ -320,11 +251,7 @@ export function MineApplyListingModal({
           <Button onClick={onClose} disabled={isSubmitting}>
             {t("common.cancel")}
           </Button>
-          <Button
-            type="primary"
-            loading={isSubmitting}
-            onClick={() => void handleSubmit()}
-          >
+          <Button type="primary" loading={isSubmitting} onClick={handleSubmit}>
             {t("agentRepository.mine.applyModal.submit")}
           </Button>
         </div>
@@ -342,7 +269,9 @@ export function MineApplyListingModal({
             </p>
             <Input
               value={iconInput}
-              onChange={(event) => applyIconInputFromValue(event.target.value)}
+              onChange={(event) =>
+                applyIconInputFromValue(event.target.value)
+              }
               maxLength={MAX_ICON_LENGTH}
               status={iconError ? "error" : undefined}
               className="!h-[3.75rem] !w-[6.5rem] shrink-0 !text-4xl"
@@ -393,22 +322,19 @@ export function MineApplyListingModal({
             <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
               {t("agentRepository.mine.applyModal.tags")}
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button onClick={() => setTagEditorOpen(true)}>
-                {t("tagManagement.action.editTags")}
-              </Button>
-              {selectedCategoryValues.length > 0 ? (
-                <span className="text-sm text-slate-600 dark:text-slate-300">
-                  {selectedCategoryValues
-                    .map((value) =>
-                      getAgentRepositoryTagLabel(value.normalized_value, t)
-                    )
-                    .join(" · ")}
-                </span>
-              ) : null}
-            </div>
+            <Select
+              mode="tags"
+              className="w-full"
+              value={selectedTags}
+              onChange={setSelectedTags}
+              options={tagOptions}
+              maxCount={MAX_TAGS}
+              placeholder={t("agentRepository.mine.applyModal.tagsPlaceholder")}
+            />
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {t("agentRepository.mine.applyModal.tagsHint")}
+              {t("agentRepository.mine.applyModal.tagsHint", {
+                count: MAX_TAGS,
+              })}
             </p>
           </section>
 
@@ -420,22 +346,13 @@ export function MineApplyListingModal({
               value={listingContent}
               onChange={(event) => setListingContent(event.target.value)}
               rows={4}
-              placeholder={t("repository.mine.applyModal.contentPlaceholder")}
+              placeholder={t(
+                "repository.mine.applyModal.contentPlaceholder"
+              )}
             />
           </section>
         </div>
       </Spin>
-      </Modal>
-      <ResourceTagAssignmentModal
-        open={tagEditorOpen && agentId != null}
-        onClose={() => setTagEditorOpen(false)}
-        resourceType="agent"
-        resourceId={String(agentId ?? "")}
-        definitions={tagDefinitions ?? []}
-        canEdit={agent?.permission !== "READ_ONLY"}
-        initialSelection={legacyCategorySelection}
-        onSaved={(assignment) => setSavedAssignments(assignment.assignments)}
-      />
-    </>
+    </Modal>
   );
 }

@@ -1,15 +1,12 @@
-import json
 import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from consts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
-from consts.model import (
-    SkillRepositoryInstallRequest,
-    SkillRepositoryListingCreateRequest,
-    TagAssignmentFilter,
-)
 from fastapi import APIRouter, Body, Header, HTTPException, Query
+from starlette.responses import JSONResponse
+
+from consts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
+from consts.model import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
 from services.skill_repository_service import (
     count_my_editable_skills_impl,
     create_skill_repository_listing_impl,
@@ -18,26 +15,12 @@ from services.skill_repository_service import (
     install_skill_from_repository_impl,
     list_my_editable_skills_impl,
     list_skill_repository_listings_impl,
-    list_skill_repository_tag_stats_impl,
     update_skill_repository_status_impl,
 )
-from starlette.responses import JSONResponse
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 skill_repository_router = APIRouter(prefix="/repository/skill")
-
-
-def _parse_tag_predicates(raw: str | None) -> list[TagAssignmentFilter]:
-    if not raw:
-        return []
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise ValueError("tag_predicates must be valid JSON") from error
-    if not isinstance(payload, list):
-        raise ValueError("tag_predicates must be a list")
-    return [TagAssignmentFilter.model_validate(item) for item in payload]
 
 
 @skill_repository_router.get("")
@@ -58,11 +41,6 @@ async def list_skill_repository_listings_api(
     search: Optional[str] = Query(
         None, description="Filter by name, description, source, submitter, or tags"
     ),
-    tag_predicates: Optional[str] = Query(
-        None,
-        description="Structured tag predicates encoded as JSON",
-    ),
-    tag: Optional[str] = Query(None, description="Filter by an exact tag"),
     sort_by_update_time: bool = Query(
         False, description="Sort by repository update time descending"
     ),
@@ -72,22 +50,17 @@ async def list_skill_repository_listings_api(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         ensure_skill_repository_access(user_id)
-        filters = {
-            "user_id": user_id,
-            "status": status,
-            "skill_id": skill_id,
-            "category_id": category_id,
-            "page": page,
-            "page_size": page_size,
-            "search": search,
-            "sort_by_update_time": sort_by_update_time,
-        }
-        predicates = _parse_tag_predicates(tag_predicates)
-        if predicates:
-            filters["tag_predicates"] = predicates
-        if tag:
-            filters["tag"] = tag
-        result = list_skill_repository_listings_impl(tenant_id, **filters)
+        result = list_skill_repository_listings_impl(
+            tenant_id,
+            user_id=user_id,
+            status=status,
+            skill_id=skill_id,
+            category_id=category_id,
+            page=page,
+            page_size=page_size,
+            search=search,
+            sort_by_update_time=sort_by_update_time,
+        )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(
@@ -104,33 +77,6 @@ async def list_skill_repository_listings_api(
             f"Invalid skill repository listings request parameters: {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
-
-
-@skill_repository_router.get("/tags")
-async def list_skill_repository_tag_stats_api(authorization: str = Header(None)):
-    """List shared repository tag values with counts for the caller tenant."""
-    try:
-        user_id, tenant_id = get_current_user_id(authorization)
-        ensure_skill_repository_access(user_id)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"items": list_skill_repository_tag_stats_impl(tenant_id)},
-        )
-    except UnauthorizedError as e:
-        logger.warning(f"Unauthorized skill repository tag-stat access: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except ForbiddenError as e:
-        logger.warning(f"Forbidden skill repository tag-stat access: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
-    except Exception as e:
-        logger.error(
-            "Failed to list skill repository tag statistics: %s",
-            e,
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail="Failed to list skill repository tag statistics",
-        ) from e
 
 
 @skill_repository_router.get("/mine")
@@ -151,28 +97,20 @@ async def list_my_editable_skills_api(
         False,
         description="Reserve first slot on page 1 for create-skill placeholder",
     ),
-    tag_predicates: Optional[str] = Query(
-        None,
-        description="Structured tag predicates encoded as JSON",
-    ),
     authorization: str = Header(None),
 ):
     """List editable skills for the current user with repository listing info."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        filters = {
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "ownership": ownership or "all",
-            "page": page,
-            "page_size": page_size,
-            "search": search,
-            "new_skill_padding": new_skill_padding,
-        }
-        predicates = _parse_tag_predicates(tag_predicates)
-        if predicates:
-            filters["tag_predicates"] = predicates
-        result = list_my_editable_skills_impl(**filters)
+        result = list_my_editable_skills_impl(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            ownership=ownership or "all",
+            page=page,
+            page_size=page_size,
+            search=search,
+            new_skill_padding=new_skill_padding,
+        )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(

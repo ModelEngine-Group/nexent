@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Form, Input, Modal, Select, Spin } from "antd";
+import { Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { McpTransportType } from "@/const/mcpTools";
 import type { McpServiceItem } from "@/types/mcpTools";
 import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { Can } from "@/components/permission/Can";
-import TagChips from "@/components/tag/TagChips";
-import { useTagAssignments } from "@/hooks/useTagManagement";
+import TagEditor from "./shared/TagEditor";
 
 export interface PublishOverride {
   name: string;
@@ -66,14 +65,6 @@ export default function PublishConfirmModal({
 
   const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
-  const assignmentState = useTagAssignments(
-    "mcp_service",
-    open && source ? String(source.mcpId) : null
-  );
-  const inheritedAssignments = assignmentState.data?.assignments ?? [];
-  const inheritedTags = assignmentState.data
-    ? inheritedAssignments.map((assignment) => assignment.display_value)
-    : source?.tags ?? [];
 
   useEffect(() => {
     if (!open || !source) return;
@@ -122,7 +113,7 @@ export default function PublishConfirmModal({
       name: draft.name.trim(),
       description: draft.description,
       version: draft.version.trim(),
-      tags: inheritedTags,
+      tags: draft.tags,
       serverUrl:
         source?.transportType !== McpTransportType.CONTAINER
           ? draft.serverUrl.trim()
@@ -274,18 +265,19 @@ export default function PublishConfirmModal({
           </div>
         ) : null}
 
-        <Form.Item label={t("mcpTools.detail.tags")}>
-          {assignmentState.loading ? (
-            <Spin size="small" />
-          ) : inheritedAssignments.length > 0 ? (
-            <TagChips assignments={inheritedAssignments} />
-          ) : (
-            <span className="text-sm text-slate-400">—</span>
-          )}
-          <p className="mt-1 text-xs text-slate-400">
-            {t("mcpTools.publish.tagsInheritedHint")}
-          </p>
-        </Form.Item>
+        <TagEditor
+          title={t("mcpTools.detail.tags")}
+          tags={draft.tags}
+          onAddTag={(tag) => {
+            const next = (tag || "").trim();
+            if (!next || draft.tags.includes(next)) return;
+            patch({ tags: [...draft.tags, next] });
+          }}
+          onRemoveTag={(index) =>
+            patch({ tags: draft.tags.filter((_, i) => i !== index) })
+          }
+          removeAriaKey="mcpTools.detail.removeTagAria"
+        />
 
         <Can permission="kb.groups:read">
           <Form.Item

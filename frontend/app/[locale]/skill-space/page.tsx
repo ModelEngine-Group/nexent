@@ -13,8 +13,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
-import type { TagResourcePredicate } from "@/types/tagManagement";
 import {
   invalidateSkillRepositoryCaches,
   SKILLS_LIST_QUERY_KEY,
@@ -100,18 +98,12 @@ export default function SkillRepositoryPage() {
   );
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [repositorySearch, setRepositorySearch] = useState("");
-  const [repositoryTagPredicates, setRepositoryTagPredicates] = useState<
-    TagResourcePredicate[]
-  >([]);
   const [debouncedRepositorySearch, setDebouncedRepositorySearch] =
     useState("");
   const [minePage, setMinePage] = useState(1);
   const [mineOwnership, setMineOwnership] =
     useState<MineOwnershipFilter>("all");
   const [mineSearch, setMineSearch] = useState("");
-  const [mineTagPredicates, setMineTagPredicates] = useState<
-    TagResourcePredicate[]
-  >([]);
   const [debouncedMineSearch, setDebouncedMineSearch] = useState("");
   const [reviewPage, setReviewPage] = useState(1);
   const [detailRepositoryId, setDetailRepositoryId] = useState<number | null>(
@@ -153,13 +145,6 @@ export default function SkillRepositoryPage() {
   const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
   const isMineTab = tab === SkillRepositoryTab.MINE;
   const isReviewTab = tab === SkillRepositoryTab.REVIEW;
-  const { data: tagLibraries } = useTagLibraries();
-  const defaultTagLibrary =
-    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
-    null;
-  const { data: mineTagDefinitions } = useTagDefinitions(
-    defaultTagLibrary?.bucket_id ?? null
-  );
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -194,11 +179,8 @@ export default function SkillRepositoryPage() {
       ...(debouncedRepositorySearch.trim()
         ? { search: debouncedRepositorySearch.trim() }
         : {}),
-      ...(repositoryTagPredicates.length > 0
-        ? { tag_predicates: repositoryTagPredicates }
-        : {}),
     }),
-    [debouncedRepositorySearch, repositoryPage, repositoryTagPredicates]
+    [debouncedRepositorySearch, repositoryPage]
   );
 
   const mineParams = useMemo(
@@ -209,15 +191,11 @@ export default function SkillRepositoryPage() {
       ...(debouncedMineSearch.trim()
         ? { search: debouncedMineSearch.trim() }
         : {}),
-      ...(mineTagPredicates.length > 0
-        ? { tag_predicates: mineTagPredicates }
-        : {}),
       ...(mineOwnership === "all" && !debouncedMineSearch.trim()
-        && mineTagPredicates.length === 0
         ? { new_skill_padding: true }
         : {}),
     }),
-    [debouncedMineSearch, mineOwnership, minePage, mineTagPredicates]
+    [debouncedMineSearch, mineOwnership, minePage]
   );
 
   const reviewParams = useMemo(
@@ -591,12 +569,6 @@ export default function SkillRepositoryPage() {
                     setRepositorySearch(value);
                     setRepositoryPage(1);
                   }}
-                  tagDefinitions={mineTagDefinitions ?? []}
-                  tagPredicates={repositoryTagPredicates}
-                  onTagPredicatesChange={(value) => {
-                    setRepositoryTagPredicates(value);
-                    setRepositoryPage(1);
-                  }}
                   listings={repositoryItems}
                   isLoading={isRepositoryLoading}
                   isError={isRepositoryError}
@@ -625,12 +597,6 @@ export default function SkillRepositoryPage() {
                   searchQuery={mineSearch}
                   onSearchChange={(value) => {
                     setMineSearch(value);
-                    setMinePage(1);
-                  }}
-                  tagDefinitions={mineTagDefinitions ?? []}
-                  tagPredicates={mineTagPredicates}
-                  onTagPredicatesChange={(value) => {
-                    setMineTagPredicates(value);
                     setMinePage(1);
                   }}
                   isLoading={isMineLoading}

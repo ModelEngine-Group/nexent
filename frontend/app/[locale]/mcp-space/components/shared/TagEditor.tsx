@@ -5,18 +5,27 @@ import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 
 interface TagEditorProps {
+  /** Optional heading shown above the tag list. */
   title?: string;
   tags: string[];
+  /** Owned input value (when undefined, the editor manages it internally). */
   tagInput?: string;
   onTagInputChange?: (value: string) => void;
   onAddTag: (value?: string) => void;
   onRemoveTag: (index: number) => void;
   removeAriaKey?: string;
   placeholderKey?: string;
+  /** Disable interactions while saving. */
   loading?: boolean;
   titleClassName?: string;
 }
 
+/**
+ * Reusable tag editor with default AntD Tag styles. Tags are added through a
+ * "+" affordance that toggles an inline input, instead of an always-visible
+ * input pill — this matches AntD's recommended pattern and keeps the row
+ * tidy when no tags are present.
+ */
 export default function TagEditor({
   title,
   tags,
@@ -54,11 +63,13 @@ export default function TagEditor({
 
   return (
     <div>
-      {title ? <p className={titleClassName}>{title}</p> : null}
+      {title ? (
+        <p className={titleClassName}>
+          {title}
+        </p>
+      ) : null}
       <div
-        className={`flex flex-wrap items-center gap-2 ${
-          loading ? "pointer-events-none opacity-60" : ""
-        }`}
+        className={`flex flex-wrap items-center gap-2 ${loading ? "opacity-60 pointer-events-none" : ""}`}
       >
         {tags.map((tag, index) => (
           <Tag
@@ -89,7 +100,7 @@ export default function TagEditor({
         ) : (
           <Tag
             onClick={() => !loading && setEditing(true)}
-            className="m-0 cursor-pointer border-dashed bg-transparent"
+            className={`m-0 cursor-pointer border-dashed bg-transparent ${loading ? "" : ""}`}
           >
             <PlusOutlined /> {loading ? t("mcpTools.detail.saving") : t("common.add")}
           </Tag>

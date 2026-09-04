@@ -24,12 +24,14 @@ import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
-import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import type { SkillFileContent, SkillFormData } from "@/types/skill";
 import { SkillCodePreview } from "./SkillCodePreview";
 import { isCodeFile, resolveLanguageFromPath } from "./skillFileLanguage";
 
 const { TextArea } = Input;
+const MAX_SKILL_TAGS = 5;
+const MAX_SKILL_TAG_LENGTH = 20;
+
 interface SkillDraftPanelProps {
   form: FormInstance<SkillFormData>;
   skillTabs: SkillFileContent[];
@@ -45,10 +47,6 @@ interface SkillDraftPanelProps {
   groupSelectOptions?: Array<{ label: string; value: number }>;
   groupNamesById?: Map<number, string>;
   canEditGroupSettings?: boolean;
-  tagResourceId?: string;
-  tagPreviewRefreshKey?: number;
-  onAssignTags?: () => void;
-  canAssignTags?: boolean;
   className?: string;
 }
 
@@ -67,10 +65,6 @@ export default function SkillDraftPanel({
   groupSelectOptions = [],
   groupNamesById = new Map(),
   canEditGroupSettings = true,
-  tagResourceId,
-  tagPreviewRefreshKey,
-  onAssignTags,
-  canAssignTags = false,
   className,
 }: SkillDraftPanelProps) {
   const { t } = useTranslation("common");
@@ -228,6 +222,20 @@ export default function SkillDraftPanel({
     );
   };
 
+  const handleTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "Enter") return;
+
+    const tags = form.getFieldValue("tags");
+    if (Array.isArray(tags) && tags.length >= MAX_SKILL_TAGS) {
+      form.setFields([
+        {
+          name: "tags",
+          errors: [t("skillManagement.form.tagsMaxCount")],
+        },
+      ]);
+    }
+  };
+
   return (
     <div
       className={`flex h-full min-h-0 flex-col gap-2 overflow-hidden ${className || ""}`}
@@ -357,29 +365,46 @@ export default function SkillDraftPanel({
               style={{ resize: "none" }}
             />
           </Form.Item>
-          {tagResourceId ? (
-            <Form.Item
-              label={t("skillManagement.form.tags")}
-              style={{ marginBottom: 10 }}
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-                  <ResourceTagChips
-                    resourceType="skill"
-                    resourceId={tagResourceId}
-                    max={4}
-                    refreshKey={tagPreviewRefreshKey}
-                    singleLine
-                  />
-                </div>
-                {canAssignTags && onAssignTags ? (
-                  <Button type="link" size="small" onClick={onAssignTags}>
-                    {t("tagManagement.action.editTags")}
-                  </Button>
-                ) : null}
-              </div>
-            </Form.Item>
-          ) : null}
+
+          <Form.Item
+            name="tags"
+            label={t("skillManagement.form.tags")}
+            style={{ marginBottom: 8 }}
+            rules={[
+              {
+                validator: (_, value?: string[]) => {
+                  const tags = Array.isArray(value) ? value : [];
+                  if (tags.length > MAX_SKILL_TAGS) {
+                    return Promise.reject(
+                      new Error(t("skillManagement.form.tagsMaxCount"))
+                    );
+                  }
+                  if (tags.some((tag) => tag.length > MAX_SKILL_TAG_LENGTH)) {
+                    return Promise.reject(
+                      new Error(t("skillManagement.form.tagMaxLength"))
+                    );
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <Select
+              mode="tags"
+              maxCount={MAX_SKILL_TAGS}
+              suffixIcon={null}
+              placeholder={
+                readOnly ? "-" : t("skillManagement.form.tagsPlaceholder")
+              }
+              open={false}
+              onInputKeyDown={handleTagInputKeyDown}
+              onChange={() => {
+                form.validateFields(["tags"]).catch(() => undefined);
+              }}
+              style={{ width: "100%" }}
+              popupMatchSelectWidth={false}
+            />
+          </Form.Item>
         </Form>
       </div>
 

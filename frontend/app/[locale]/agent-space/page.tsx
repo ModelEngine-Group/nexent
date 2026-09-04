@@ -18,9 +18,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
-import { getTagSearchPredicates } from "@/lib/systemTagLabels";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
 import {
   useAgentRepositoryListingDetail,
   useAgentRepositoryListings,
@@ -38,7 +35,6 @@ import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
-import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 import { MineAgentsView } from "./components/MineAgentsView";
@@ -84,16 +80,10 @@ export default function AgentRepositoryPage() {
     return AgentRepositoryTab.REPOSITORY;
   });
   const [searchQuery, setSearchQuery] = useState("");
-  const [repositoryTagPredicates, setRepositoryTagPredicates] = useState<
-    TagResourcePredicate[]
-  >([]);
   const [repositoryPage, setRepositoryPage] = useState(1);
   const [mineOwnership, setMineOwnership] = useState<MineOwnershipFilter>("all");
   const [minePage, setMinePage] = useState(1);
   const [mineSearch, setMineSearch] = useState("");
-  const [mineTagPredicates, setMineTagPredicates] = useState<
-    TagResourcePredicate[]
-  >([]);
   const [reviewPage, setReviewPage] = useState(1);
   const [detailSource, setDetailSource] = useState<AgentDetailSource | null>(
     null
@@ -119,21 +109,6 @@ export default function AgentRepositoryPage() {
   const isRepositoryTab = tab === AgentRepositoryTab.REPOSITORY;
   const isReviewTab = tab === AgentRepositoryTab.REVIEW;
   const isMineTab = tab === AgentRepositoryTab.MINE;
-  const { data: tagLibraries } = useTagLibraries();
-  const defaultTagLibrary =
-    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
-    null;
-  const { data: mineTagDefinitions } = useTagDefinitions(
-    defaultTagLibrary?.bucket_id ?? null
-  );
-  const repositorySearchTagPredicates = useMemo(
-    () => getTagSearchPredicates(mineTagDefinitions, searchQuery, t),
-    [mineTagDefinitions, searchQuery, t]
-  );
-  const mineSearchTagPredicates = useMemo(
-    () => getTagSearchPredicates(mineTagDefinitions, mineSearch, t),
-    [mineSearch, mineTagDefinitions, t]
-  );
 
   const reviewDeepLink = useMemo(
     () => parseReviewDeepLinkParams(searchParams),
@@ -150,19 +125,8 @@ export default function AgentRepositoryPage() {
       page: repositoryPage,
       page_size: REPOSITORY_PAGE_SIZE,
       ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
-      ...(repositorySearchTagPredicates.length > 0
-        ? { search_tag_predicates: repositorySearchTagPredicates }
-        : {}),
-      ...(repositoryTagPredicates.length > 0
-        ? { tag_predicates: repositoryTagPredicates }
-        : {}),
     }),
-    [
-      repositoryPage,
-      repositorySearchTagPredicates,
-      repositoryTagPredicates,
-      searchQuery,
-    ]
+    [repositoryPage, searchQuery]
   );
 
   const { data, isLoading, isError, refetch, isFetching } =
@@ -179,18 +143,11 @@ export default function AgentRepositoryPage() {
       page: minePage,
       page_size: MINE_PAGE_SIZE,
       ...(mineSearch.trim() ? { search: mineSearch.trim() } : {}),
-      ...(mineTagPredicates.length > 0
-        ? { tag_predicates: mineTagPredicates }
-        : {}),
-      ...(mineSearchTagPredicates.length > 0
-        ? { search_tag_predicates: mineSearchTagPredicates }
-        : {}),
       ...(mineOwnership === "all" && !mineSearch.trim()
-        && mineTagPredicates.length === 0
         ? { new_agent_padding: true }
         : {}),
     }),
-    [mineOwnership, minePage, mineSearch, mineSearchTagPredicates, mineTagPredicates]
+    [mineOwnership, minePage, mineSearch]
   );
 
   const {
@@ -459,12 +416,6 @@ export default function AgentRepositoryPage() {
                 <RepositoryView
                   searchQuery={searchQuery}
                   onSearchChange={handleRepositorySearchChange}
-                  tagDefinitions={mineTagDefinitions ?? []}
-                  tagPredicates={repositoryTagPredicates}
-                  onTagPredicatesChange={(value) => {
-                    setRepositoryTagPredicates(value);
-                    setRepositoryPage(1);
-                  }}
                   isLoading={isLoading}
                   isError={isError}
                   isFetching={isFetching}
@@ -523,12 +474,6 @@ export default function AgentRepositoryPage() {
                     setMineSearch(value);
                     setMinePage(1);
                   }}
-                  tagDefinitions={mineTagDefinitions ?? []}
-                  tagPredicates={mineTagPredicates}
-                  onTagPredicatesChange={(value) => {
-                    setMineTagPredicates(value);
-                    setMinePage(1);
-                  }}
                   page={minePage}
                   pageSize={MINE_PAGE_SIZE}
                   total={mineTotal}
@@ -575,9 +520,6 @@ export default function AgentRepositoryPage() {
 function RepositoryView({
   searchQuery,
   onSearchChange,
-  tagDefinitions,
-  tagPredicates,
-  onTagPredicatesChange,
   isLoading,
   isError,
   isFetching,
@@ -595,9 +537,6 @@ function RepositoryView({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  tagDefinitions: TagDefinition[];
-  tagPredicates: TagResourcePredicate[];
-  onTagPredicatesChange: (value: TagResourcePredicate[]) => void;
   isLoading: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -649,21 +588,14 @@ function RepositoryView({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="relative min-w-0 flex-1">
-          <Input
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder={t("agentRepository.page.searchPlaceholder")}
-            prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            className="h-11 rounded-xl"
-            allowClear
-          />
-        </div>
-        <TagFilterPopover
-          definitions={tagDefinitions}
-          value={tagPredicates}
-          onChange={onTagPredicatesChange}
+      <div className="relative">
+        <Input
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder={t("agentRepository.page.searchPlaceholder")}
+          prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+          className="h-11 rounded-xl"
+          allowClear
         />
       </div>
 

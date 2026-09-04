@@ -42,20 +42,6 @@ export async function fetchSkillRepositoryListings(
   }
 }
 
-export async function fetchSkillRepositoryTagStats(): Promise<
-  Array<{ tag: string; count: number }>
-> {
-  const response = await fetchWithErrorHandling(
-    API_ENDPOINTS.skillRepository.tagStats,
-    { method: "GET", headers: getAuthHeaders() }
-  );
-  if (!response.ok) throw new Error("Failed to fetch skill repository tag stats");
-  const data = (await response.json()) as {
-    items?: Array<{ tag: string; count: number }>;
-  };
-  return data.items ?? [];
-}
-
 export async function fetchSkillRepositoryListingDetail(
   skillRepositoryId: number
 ): Promise<SkillRepositoryListingDetail> {
@@ -236,7 +222,6 @@ export async function installSkillFromRepository(
 
 const skillRepositoryService = {
   fetchSkillRepositoryListings,
-  fetchSkillRepositoryTagStats,
   fetchSkillRepositoryListingDetail,
   fetchMyEditableSkills,
   fetchMyEditableSkillCounts,

@@ -192,16 +192,6 @@ sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 
-# Skill deletion invokes tag cleanup after the skill record is removed.  Keep
-# this SkillService unit suite isolated from the tag service's separate graph.
-tag_management_service_mock = types.ModuleType('services.tag_management_service')
-tag_management_service_mock.TagManagementService = type(
-    'TagManagementService',
-    (),
-    {'cleanup_resource_assignments': staticmethod(lambda *_args, **_kwargs: 0)},
-)
-sys.modules['services.tag_management_service'] = tag_management_service_mock
-
 # Set up aiofiles mock for async file operations
 import aiofiles
 aiofiles_mock = types.ModuleType('aiofiles')
@@ -1356,26 +1346,6 @@ class TestSkillServiceDeleteSkill:
             result = service.delete_skill("skill_to_delete", tenant_id="test-tenant", user_id="user123")
 
         assert result is True
-
-    def test_delete_skill_cleans_up_tags_after_successful_delete(self, mocker):
-        mocker.patch(
-            'management.services.skill.service.skill_db.get_skill_by_name',
-            return_value={"skill_id": 1, "name": "skill_to_delete"},
-        )
-        mocker.patch(
-            'management.services.skill.service.skill_db.delete_skill',
-            return_value=True,
-        )
-        cleanup = mocker.patch(
-            'services.tag_management_service.TagManagementService.cleanup_resource_assignments'
-        )
-        service = SkillService(tenant_id="test-tenant")
-
-        with patch('os.path.exists', return_value=False):
-            result = service.delete_skill("skill_to_delete", user_id="user123")
-
-        assert result is True
-        cleanup.assert_called_once_with("test-tenant", "skill", "1", "user123")
 
     def test_delete_skill_with_local_dir(self, mocker):
         mocker.patch(

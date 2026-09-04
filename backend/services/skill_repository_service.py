@@ -28,7 +28,6 @@ from database.skill_repository_db import (
     increment_skill_repository_downloads,
     insert_skill_repository_record,
     list_skill_repository_by_skill_ids,
-    list_skill_repository_tag_stats,
     list_skill_repository_summaries,
     reset_skill_repository_status,
     update_skill_repository_by_id,
@@ -965,7 +964,6 @@ def list_my_editable_skills_impl(
     page_size: int = 10,
     search: Optional[str] = None,
     new_skill_padding: bool = False,
-    tag_predicates: Optional[list] = None,
 ) -> Dict[str, Any]:
     """List editable skills for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -983,27 +981,6 @@ def list_my_editable_skills_impl(
         tenant_id=tenant_id,
         user_id=user_id,
     )
-    if tag_predicates:
-        from database.tag_management_db import TagManagementDB
-
-        skill_ids = [
-            str(skill["skill_id"])
-            for skill in skills
-            if skill.get("skill_id") is not None
-        ]
-        matched_ids = set(
-            TagManagementDB.filter_authorized_resource_ids(
-                tenant_id,
-                "skill",
-                skill_ids,
-                tag_predicates,
-            )
-        )
-        skills = [
-            skill
-            for skill in skills
-            if str(skill.get("skill_id")) in matched_ids
-        ]
     counts = _count_skills_by_ownership(skills, user_id)
 
     filtered_skills = [
@@ -1015,7 +992,6 @@ def list_my_editable_skills_impl(
         new_skill_padding
         and normalized_ownership == OWNERSHIP_ALL
         and not (search and search.strip())
-        and not tag_predicates
     )
     paged_skills, total = _paginate_mine_skills_with_optional_padding(
         filtered_skills,
@@ -1075,8 +1051,6 @@ def list_skill_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
-    tag_predicates: Optional[list] = None,
-    tag: Optional[str] = None,
     sort_by_update_time: bool = False,
 ) -> Dict[str, Any]:
     """List skill repository listings for the caller tenant with optional filters."""
@@ -1086,36 +1060,14 @@ def list_skill_repository_listings_impl(
             f"{', '.join(sorted(VALID_REPOSITORY_STATUSES))}"
         )
 
-    skill_ids = None
-    if tag_predicates:
-        from database.tag_management_db import TagManagementDB
-
-        visible_skill_ids = [
-            str(skill["skill_id"])
-            for skill in SkillService(tenant_id=tenant_id).list_visible_skills(
-                tenant_id=tenant_id,
-                user_id=user_id,
-            )
-            if skill.get("skill_id") is not None
-        ]
-        matched_ids = TagManagementDB.filter_authorized_resource_ids(
-            tenant_id,
-            "skill",
-            visible_skill_ids,
-            tag_predicates,
-        )
-        skill_ids = [int(skill_id) for skill_id in matched_ids]
-
     result = list_skill_repository_summaries(
         publisher_tenant_id=tenant_id,
         status=status,
         skill_id=skill_id,
-        skill_ids=skill_ids,
         category_id=category_id,
         page=page,
         page_size=page_size,
         search=search,
-        tag=tag,
         sort_by_update_time=sort_by_update_time,
     )
     user_role = _get_user_role(user_id)
@@ -1138,11 +1090,6 @@ def list_skill_repository_listings_impl(
         ],
         "pagination": result.get("pagination"),
     }
-
-
-def list_skill_repository_tag_stats_impl(tenant_id: str) -> List[Dict[str, Any]]:
-    """Return shared repository tag values with counts for one tenant."""
-    return list_skill_repository_tag_stats(tenant_id)
 
 
 def get_skill_repository_listing_detail_impl(

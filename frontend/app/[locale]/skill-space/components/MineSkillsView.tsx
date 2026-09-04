@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { App, Button, Dropdown, Input, Popover, Tooltip } from "antd";
+import { App, Button, Dropdown, Input, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,7 +15,6 @@ import {
   Power,
   Search,
   Share2,
-  Tag,
   Trash2,
 } from "lucide-react";
 
@@ -42,8 +41,6 @@ import type {
   SkillRepositoryListingCreatePayload,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
-import TagFilterControls from "@/components/tag/TagFilterControls";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -80,9 +77,6 @@ export function MineSkillsView({
   onOwnershipChange,
   searchQuery,
   onSearchChange,
-  tagDefinitions,
-  tagPredicates,
-  onTagPredicatesChange,
   isLoading,
   isError,
   isFetching,
@@ -109,9 +103,6 @@ export function MineSkillsView({
   onOwnershipChange: (ownership: MineOwnershipFilter) => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  tagDefinitions: TagDefinition[];
-  tagPredicates: TagResourcePredicate[];
-  onTagPredicatesChange: (predicates: TagResourcePredicate[]) => void;
   isLoading: boolean;
   isError: boolean;
   isFetching: boolean;
@@ -302,51 +293,17 @@ export function MineSkillsView({
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <div className="flex flex-wrap gap-1.5">
-          {MINE_OWNERSHIP_FILTERS.map((filter) => (
-            <FilterButton
-              key={filter}
-              active={ownership === filter}
-              onClick={() => onOwnershipChange(filter)}
-            >
-              {t(ownershipLabelKey[filter])}
-              <span className="ml-1 text-xs opacity-80">{counts[filter]}</span>
-            </FilterButton>
-          ))}
-        </div>
-        <div className="ml-auto shrink-0">
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            content={
-              <div className="w-72">
-                <TagFilterControls
-                  definitions={tagDefinitions}
-                  value={tagPredicates}
-                  onChange={onTagPredicatesChange}
-                />
-                {tagPredicates.length > 0 ? (
-                  <button
-                    type="button"
-                    className="mt-2 text-xs text-blue-600 hover:underline"
-                    onClick={() => onTagPredicatesChange([])}
-                  >
-                    {t("repository.tagFilter.clear")}
-                  </button>
-                ) : null}
-              </div>
-            }
+      <div className="flex flex-wrap gap-1.5">
+        {MINE_OWNERSHIP_FILTERS.map((filter) => (
+          <FilterButton
+            key={filter}
+            active={ownership === filter}
+            onClick={() => onOwnershipChange(filter)}
           >
-            <Button
-              type={tagPredicates.length > 0 ? "primary" : "default"}
-              className="h-11"
-              icon={<Tag className="size-3.5" aria-hidden />}
-            >
-              {t("repository.tagFilter.button")}
-            </Button>
-          </Popover>
-        </div>
+            {t(ownershipLabelKey[filter])}
+            <span className="ml-1 text-xs opacity-80">{counts[filter]}</span>
+          </FilterButton>
+        ))}
       </div>
 
       <p className="text-sm text-slate-500 dark:text-slate-400">

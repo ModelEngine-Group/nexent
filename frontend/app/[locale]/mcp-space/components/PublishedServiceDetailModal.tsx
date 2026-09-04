@@ -32,6 +32,7 @@ import {
 } from "@/lib/mcpTools";
 import TransportIcon from "./shared/TransportIcon";
 import JsonPreviewModal from "./shared/JsonPreviewModal";
+import TagEditor from "./shared/TagEditor";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -45,7 +46,7 @@ interface PublishedServiceDetailModalProps {
 /**
  * Editable detail modal for the "my published" tab. Mirrors the layout of
  * {@link McpServiceDetailModal} with a rich header, sectioned content,
- * and inline edit mode for name/description. Published tags are read-only.
+ * and inline edit mode for name/description. Version and tags remain editable.
  */
 export default function PublishedServiceDetailModal({
   open,
@@ -58,7 +59,8 @@ export default function PublishedServiceDetailModal({
   const [form] = Form.useForm();
   const [isEditing, setIsEditing] = useState(false);
   const edit = usePublishedServiceDetailEdit(service, open);
-  const { draft, saving, deleting, updateDraft } = edit;
+  const { draft, saving, deleting, updateDraft, addDraftTag, removeDraftTag } =
+    edit;
   const [showServerJsonModal, setShowServerJsonModal] = useState(false);
   const [showConfigJsonModal, setShowConfigJsonModal] = useState(false);
   const { user } = useAuthorizationContext();
@@ -392,20 +394,14 @@ export default function PublishedServiceDetailModal({
                 <TagIcon className="h-4 w-4 text-slate-400" />
                 {t("mcpTools.detail.tags")}
               </h3>
-              <div className="flex flex-wrap gap-2">
-                {(draft.tags ?? []).length > 0 ? (
-                  (draft.tags ?? []).map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600"
-                    >
-                      {tag}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-sm text-slate-400">—</span>
-                )}
-              </div>
+              <TagEditor
+                tags={draft.tags ?? []}
+                onAddTag={(tag) => addDraftTag((tag || "").trim())}
+                onRemoveTag={removeDraftTag}
+                removeAriaKey="mcpTools.detail.removeTagAria"
+                placeholderKey="mcpTools.detail.tagInputPlaceholder"
+                loading={edit.tagSaving}
+              />
             </section>
 
             {/* Permissions Section */}

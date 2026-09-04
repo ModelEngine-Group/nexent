@@ -139,6 +139,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
         await addContainerMcpToolServiceStream({
           name: trimmedName,
           description: draft.description ?? "",
+          tags: draft.tags,
           source: McpSource.LOCAL,
           authorization_token: draft.authorizationToken?.trim() || undefined,
           registry_json: registryJson,
@@ -160,6 +161,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
           custom_headers: customHeaders,
           config_json: configJson,
           registry_json: registryJson,
+          tags: draft.tags,
           group_ids: draft.groupIds?.join(",") ?? undefined,
           ingroup_permission: draft.ingroupPermission ?? undefined,
           shared_fields: draft.sharedFields ?? undefined,
