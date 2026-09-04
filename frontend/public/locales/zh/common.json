@@ -881,6 +881,8 @@
   "nl2agent.resourceBinding.retry": "重试失败项",
   "nl2agent.resourceBinding.skip": "跳过",
   "nl2agent.resourceBinding.continue": "继续",
+  "nl2agent.resourceBinding.noMatches": "这些都不符合",
+  "nl2agent.resourceBinding.noMatchesSummary": "这些资源都不符合我的需求",
   "nl2agent.resourceBinding.validationSummary": "请完成所有已选资源的配置。",
   "nl2agent.resourceBinding.syncFailed": "资源已保存，但智能体页面刷新失败，请重试后继续。",
   "nl2agent.resourceBinding.loadingExistingConfig": "正在加载当前资源配置...",

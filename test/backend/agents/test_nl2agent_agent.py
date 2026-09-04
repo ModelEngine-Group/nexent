@@ -170,7 +170,8 @@ def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
     assert "resource_gap_resolution" in prompt
     assert "skill_created" in prompt
     if language == "en":
-        assert "Do not infer coverage from fuzzy candidates" in prompt
+        assert "Backend relevance ranking determines recommendation labels" in prompt
+        assert "no_matching_resources" in prompt
 
 
 @pytest.mark.parametrize(
@@ -424,6 +425,7 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
         "subtype": "installed_resource_binding",
         "agent_id": 42,
         "resources": [],
+        "requirements": [],
     }
 
 
@@ -444,6 +446,24 @@ def test_resource_gap_resolution_wrapper_preserves_original_requirements():
     resolution = ResourceGapResolutionPayload.model_validate(payload)
     assert resolution.agent_id == 42
     assert resolution.requirements == [requirement]
+
+
+def test_installed_resource_binding_wrapper_preserves_requirements_for_rejection():
+    requirement = ResourceRequirement(
+        requirement_id="ticket_query",
+        query="Query train tickets",
+        search_terms=["train", "tickets"],
+    )
+
+    wrapped = build_nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={"status": "success", "resources": []},
+        requirements=[requirement],
+    )
+
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    assert payload["requirements"] == [requirement.model_dump(mode="json")]
 
 
 def test_resource_gap_requires_a_requirement_uncovered_by_both_searches():

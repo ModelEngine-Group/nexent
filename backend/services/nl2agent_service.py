@@ -67,24 +67,6 @@ STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
 UNINSTALLED_SOURCE_PAGE_SIZE = 100
 MAX_INTERNAL_SOURCE_ITEMS = 300
-_GENERIC_RESOURCE_TERMS = frozenset(
-    {
-        "access",
-        "action",
-        "data",
-        "find",
-        "get",
-        "information",
-        "manage",
-        "query",
-        "search",
-        "查询",
-        "搜索",
-        "管理",
-        "获取",
-        "信息",
-    }
-)
 AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
@@ -581,54 +563,6 @@ def _score_resource_requirement(
     return min(1.0, score)
 
 
-def _resource_declares_requirement_term(resource: dict[str, Any], term: str) -> bool:
-    """Return whether trusted resource metadata explicitly contains one term."""
-
-    _, term_compact = _resource_text_variants(term)
-    if not term_compact:
-        return False
-    values = [
-        *resource["names"],
-        *resource["labels"],
-        *resource["descriptions"],
-        *resource["interfaces"],
-    ]
-    return any(
-        term_compact in value_compact
-        for value in values
-        for _, value_compact in [_resource_text_variants(value)]
-        if value_compact
-    )
-
-
-def _resource_has_requirement_evidence(
-    requirement: ResourceRequirement,
-    resource: dict[str, Any],
-) -> bool:
-    """Require declared evidence before a strong fuzzy match can cover a requirement."""
-
-    if requirement.resource_name_hint:
-        return _resource_declares_requirement_term(
-            resource, requirement.resource_name_hint
-        )
-
-    specific_terms = [
-        term
-        for term in requirement.search_terms
-        if _normalize_search_text(term) not in _GENERIC_RESOURCE_TERMS
-    ]
-    numeric_terms = [term for term in specific_terms if any(char.isdigit() for char in term)]
-    if numeric_terms:
-        return all(
-            _resource_declares_requirement_term(resource, term)
-            for term in numeric_terms
-        )
-    return not specific_terms or any(
-        _resource_declares_requirement_term(resource, term)
-        for term in specific_terms
-    )
-
-
 def _rank_resource_catalog(
     *,
     requirements: list[ResourceRequirement],
@@ -636,9 +570,6 @@ def _rank_resource_catalog(
 ) -> ResourceSearchOutput:
     """Rank one normalized catalog and return a compact coverage set."""
 
-    requirements_by_id = {
-        requirement.requirement_id: requirement for requirement in requirements
-    }
     scored: list[dict[str, Any]] = []
     strong_requirement_ids: set[str] = set()
     for resource in catalog:
@@ -660,10 +591,6 @@ def _rank_resource_catalog(
             requirement_id
             for requirement_id, score in relationships.items()
             if score >= STRONG_RESOURCE_SCORE
-            and _resource_has_requirement_evidence(
-                requirements_by_id[requirement_id],
-                resource,
-            )
         }
         strong_requirement_ids.update(strong_ids)
         candidate_score = min(
@@ -1060,14 +987,13 @@ def _recommended_resource(
     *,
     actual: dict[str, Any],
     supplied: ResourceCandidate,
-    recommended_refs: set[str],
     is_bound: bool = False,
 ) -> RecommendedResource:
     return RecommendedResource(
         candidate=_verified_resource_candidate(actual, supplied),
         recommendation=(
             "recommended"
-            if supplied.candidate_ref in recommended_refs
+            if supplied.score >= STRONG_RESOURCE_SCORE
             else "optional"
         ),
         is_bound=is_bound,
@@ -1096,7 +1022,7 @@ async def recommend_uninstalled_resources_impl(
         user_id=user_id,
     )
     by_ref = {item["candidate_ref"]: item for item in internal_catalog}
-    recommended = set(recommended_refs)
+    del recommended_refs
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
@@ -1105,7 +1031,6 @@ async def recommend_uninstalled_resources_impl(
         resources.append(_recommended_resource(
             actual=actual,
             supplied=supplied,
-            recommended_refs=recommended,
         ))
     return RecommendResourcesOutput(resources=resources)
 
@@ -1134,7 +1059,7 @@ async def recommend_installed_resources_impl(
         )
         if isinstance(instance.get("tool_id"), int)
     }
-    recommended = set(recommended_refs)
+    del recommended_refs
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
@@ -1143,7 +1068,6 @@ async def recommend_installed_resources_impl(
         resources.append(_recommended_resource(
             actual=actual,
             supplied=supplied,
-            recommended_refs=recommended,
             is_bound=supplied.candidate_ref in bound_tool_refs,
         ))
     return RecommendResourcesOutput(resources=resources)

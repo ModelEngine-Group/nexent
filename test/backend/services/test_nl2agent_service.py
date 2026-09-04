@@ -21,6 +21,7 @@ from services.nl2agent_service import (
     _load_installed_resource_catalog,
     _normalize_skill_config,
     _normalize_tool_config,
+    _recommended_resource,
     _rank_resource_catalog,
     _redact_installation_snapshot,
     _resource_similarity,
@@ -66,7 +67,7 @@ def _basic_draft_fields(**overrides):
     return AgentDraftFields(**values)
 
 
-def test_resource_search_does_not_cover_specific_requirement_with_generic_query_tool():
+def test_resource_search_keeps_relevant_generic_query_tool_as_a_candidate():
     result = _rank_resource_catalog(
         requirements=[
             ResourceRequirement(
@@ -92,7 +93,34 @@ def test_resource_search_does_not_cover_specific_requirement_with_generic_query_
         ],
     )
 
-    assert result.uncovered_requirement_ids == ["ticket_query"]
+    assert result.uncovered_requirement_ids == []
+    assert result.candidates[0].candidate_ref == "tool:127"
+
+
+def test_recommendation_is_derived_from_backend_score_not_model_refs():
+    candidate = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="LOCAL_TOOL",
+        name="train_query",
+        description="Query train schedules",
+        requirement_ids=["train_query"],
+        score=0.8,
+    )
+
+    result = _recommended_resource(
+        actual={
+            "candidate_ref": "tool:7",
+            "resource_type": "tool",
+            "source": "LOCAL_TOOL",
+            "name": "train_query",
+            "description": "Query train schedules",
+            "config": [],
+        },
+        supplied=candidate,
+    )
+
+    assert result.recommendation == "recommended"
 
 
 def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():

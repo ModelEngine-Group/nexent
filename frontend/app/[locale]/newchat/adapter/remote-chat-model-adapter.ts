@@ -170,6 +170,7 @@ export interface Nl2aInstalledResourceBindingPayload {
   subtype: "installed_resource_binding";
   agent_id: number;
   resources: Nl2aRecommendedResource[];
+  requirements?: Nl2aResourceRequirement[];
 }
 
 export interface Nl2aResourceRequirement {
@@ -817,6 +818,12 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         content.agent_id <= 0 ||
         !Array.isArray(content.resources) ||
         content.resources.length > 12 ||
+        (content.requirements !== undefined &&
+          (!Array.isArray(content.requirements) ||
+            content.requirements.some(
+              (requirement) =>
+                !requirement?.requirement_id || !requirement?.query
+            ))) ||
         content.resources.some(
           (resource) =>
             !resource?.candidate?.candidate_ref ||

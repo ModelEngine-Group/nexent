@@ -346,6 +346,7 @@ class InstalledResourceBindingPayload(BaseModel):
     subtype: Literal["installed_resource_binding"] = "installed_resource_binding"
     agent_id: int = Field(gt=0)
     resources: list[RecommendedResource] = Field(max_length=12)
+    requirements: list[ResourceRequirement] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_installed_sources(self) -> "InstalledResourceBindingPayload":
@@ -609,9 +610,10 @@ def build_nl2a_wrapper(
             if subtype == "suggested_resource_installation"
             else InstalledResourceBindingPayload
         )
-        output = payload_model(
-            agent_id=agent_id, resources=verified.resources
-        ).model_dump(mode="json")
+        payload_kwargs = {"agent_id": agent_id, "resources": verified.resources}
+        if subtype == "installed_resource_binding":
+            payload_kwargs["requirements"] = requirements or []
+        output = payload_model(**payload_kwargs).model_dump(mode="json")
     else:
         raise ValueError(f"unsupported nl2a subtype: {subtype}")
 
@@ -1099,6 +1101,7 @@ async def nl2a_wrapper(
             subtype=subtype,
             agent_id=resolved_agent_id,
             resource_result=verified,
+            requirements=requirements,
         )
 
     return build_nl2a_wrapper(

@@ -893,6 +893,8 @@
   "nl2agent.resourceBinding.retry": "Retry failed",
   "nl2agent.resourceBinding.skip": "Skip",
   "nl2agent.resourceBinding.continue": "Continue",
+  "nl2agent.resourceBinding.noMatches": "None of these fit",
+  "nl2agent.resourceBinding.noMatchesSummary": "None of these resources fit my needs",
   "nl2agent.resourceBinding.validationSummary": "Complete the configuration for every selected resource.",
   "nl2agent.resourceBinding.syncFailed": "Resources were saved, but the Agent view could not be refreshed. Retry to continue.",
   "nl2agent.resourceBinding.loadingExistingConfig": "Loading the current resource configuration...",

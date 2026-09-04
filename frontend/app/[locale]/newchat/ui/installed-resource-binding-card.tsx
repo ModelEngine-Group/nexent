@@ -352,6 +352,7 @@ export const InstalledResourceBindingCard: FC<{
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
   const isInteractionLocked = isLocked || loadingConfigRef !== null;
   const selectedItems = items.filter((item) => item.selected);
+  const requirements = payload.requirements ?? [];
   const isBinding = items.some((item) => item.bindingStatus === "binding");
   const canContinue =
     selectedItems.length === 0 ||
@@ -637,6 +638,39 @@ export const InstalledResourceBindingCard: FC<{
     });
   };
 
+  const rejectResources = () => {
+    if (
+      isInteractionLocked ||
+      selectedItems.length !== 0 ||
+      !requirements.length
+    ) {
+      return;
+    }
+    const action: Nl2AgentCardAction = {
+      type: "nl2agent_card_action",
+      subtype: payload.subtype,
+      agent_id: payload.agent_id,
+      action: "no_matching_resources",
+      result: { requirements },
+    };
+    setIsSubmitted(true);
+    submitCard(cardKey);
+    aui.thread().append({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: t(
+            "nl2agent.resourceBinding.noMatchesSummary",
+            "None of these resources fit my needs"
+          ),
+        },
+      ],
+      metadata: { custom: { nl2agentCardAction: action } },
+      startRun: true,
+    });
+  };
+
   const retryGeneration = () => {
     if (!canRetryGeneration || disabled) return;
     markResourcesBound(payload.agent_id);
@@ -868,13 +902,19 @@ export const InstalledResourceBindingCard: FC<{
               isSynchronizing ||
               loadingConfigRef !== null
             }
-            onClick={continueFlow}
+            onClick={
+              selectedItems.length === 0 && requirements.length
+                ? rejectResources
+                : continueFlow
+            }
           >
             {isSynchronizing ? (
               <Loader2 className="mr-2 size-4 animate-spin" />
             ) : null}
             {selectedItems.length === 0
-              ? t("nl2agent.resourceBinding.skip", "Skip")
+              ? requirements.length
+                ? t("nl2agent.resourceBinding.noMatches", "None of these fit")
+                : t("nl2agent.resourceBinding.skip", "Skip")
               : t("nl2agent.resourceBinding.continue", "Continue")}
           </Button>
         </div>
