@@ -81,6 +81,12 @@ sys.modules['nexent.core.agents.context'] = context_items_mock
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
+fa_memory_extractor_module = types.ModuleType("services.fa_memory_extractor")
+fa_memory_extractor_module.FaMemoryExtractor = MagicMock
+sys.modules['services.fa_memory_extractor'] = fa_memory_extractor_module
+memory_backend_adapter_module = types.ModuleType("services.memory_backend_adapter")
+memory_backend_adapter_module.build_memory_service_for_fa_extraction = MagicMock
+sys.modules['services.memory_backend_adapter'] = memory_backend_adapter_module
 sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()
