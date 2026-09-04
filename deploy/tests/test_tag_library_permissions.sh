@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MIGRATION_FILE="$DEPLOY_ROOT/sql/migrations/v2.5.1_0817_tag_library_permissions.sql"
+MIGRATION_FILE="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
 INIT_FILE="$DEPLOY_ROOT/sql/init.sql"
 
 fail() {
@@ -45,6 +45,13 @@ assert_seed_contract() {
 grep -Fq 'BEGIN;' "$MIGRATION_FILE" || fail "migration must begin a transaction"
 grep -Fq 'COMMIT;' "$MIGRATION_FILE" || fail "migration must commit a transaction"
 assert_seed_contract "$MIGRATION_FILE"
-assert_seed_contract "$INIT_FILE"
+if [ -n "$(seed_block "$INIT_FILE")" ]; then
+  fail "init.sql must not contain migration-only tag library permission grants"
+fi
+
+sequence_line="$(grep -nF "pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id')" "$MIGRATION_FILE" | head -1 | cut -d: -f1)"
+seed_line="$(grep -nF 'tag-library-permission-seed:start' "$MIGRATION_FILE" | head -1 | cut -d: -f1)"
+[ -n "$sequence_line" ] || fail "role permission sequence repair missing from migration"
+[ "$sequence_line" -lt "$seed_line" ] || fail "role permission sequence must be repaired before grants are inserted"
 
 echo "Tag library permission seed contract passed."

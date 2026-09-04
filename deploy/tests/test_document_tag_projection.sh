@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.2_0818_document_tag_projection.sql"
+MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
 INIT_SQL="$DEPLOY_ROOT/sql/init.sql"
 POSTGRES_TEST_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:15-alpine}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
@@ -46,7 +46,10 @@ require_prerequisites() {
 }
 
 start_postgres() {
-  "$DOCKER_BIN" run --rm -d +    --name "$CONTAINER_NAME" +    -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" +    "$POSTGRES_TEST_IMAGE" >/dev/null
+  "$DOCKER_BIN" run --rm -d \
+    --name "$CONTAINER_NAME" \
+    -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+    "$POSTGRES_TEST_IMAGE" >/dev/null
   CONTAINER_STARTED=true
 
   local attempt
@@ -62,18 +65,43 @@ start_postgres() {
 
 create_database() {
   local database="$1"
-  "$DOCKER_BIN" exec "$CONTAINER_NAME" +    psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres +    -c "CREATE DATABASE \"$database\"" >/dev/null
+  "$DOCKER_BIN" exec "$CONTAINER_NAME" \
+    psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "CREATE DATABASE \"$database\"" >/dev/null
 }
 
 run_sql() {
   local database="$1"
-  "$DOCKER_BIN" exec -i "$CONTAINER_NAME" +    psql -X -v ON_ERROR_STOP=1 -U postgres -d "$database" -A -t -q
+  "$DOCKER_BIN" exec -i "$CONTAINER_NAME" \
+    psql -X -v ON_ERROR_STOP=1 -U postgres -d "$database" -A -t -q
 }
 
 run_file() {
   local database="$1"
   local file="$2"
-  "$DOCKER_BIN" exec -i "$CONTAINER_NAME" +    psql -X -v ON_ERROR_STOP=1 -U postgres -d "$database" -A -t -q < "$file"
+  "$DOCKER_BIN" exec -i "$CONTAINER_NAME" \
+    psql -X -v ON_ERROR_STOP=1 -U postgres -d "$database" -A -t -q < "$file"
+}
+
+run_file_with_search_path() {
+  local database="$1"
+  local file="$2"
+  "$DOCKER_BIN" exec -e PGOPTIONS="-c search_path=nexent,public" -i "$CONTAINER_NAME" \
+    psql -X -v ON_ERROR_STOP=1 -U root -d "$database" -A -t -q < "$file"
+}
+
+run_migration_files_through() {
+  local database="$1"
+  local stop_at="$2"
+  local migration_file
+  while IFS= read -r migration_file; do
+    run_file_with_search_path "$database" "$migration_file" >/dev/null
+    if [ "$(basename "$migration_file")" = "$stop_at" ]; then
+      return
+    fi
+  done < <(printf '%s
+' "$DEPLOY_ROOT"/sql/migrations/*.sql | sort -V)
+  fail "migration boundary not found: $stop_at"
 }
 
 assert_query() {
@@ -90,21 +118,41 @@ test_migration_ddl() {
   local database="dtp_migration"
   create_database "$database"
 
-  run_file "$database" "$MIGRATION_SQL" >/dev/null
-  assert_query "$database" +    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" +    "1" "migration creates document_tag_projection table"
-  assert_query "$database" +    "SELECT count(*) FROM pg_indexes WHERE schemaname = 'nexent' AND indexname IN ('idx_document_tag_projection_tenant_status', 'idx_document_tag_projection_kb', 'idx_document_tag_projection_resource');" +    "3" "migration creates the projection lookup indexes"
-  assert_query "$database" +    "SELECT count(*) FROM pg_constraint AS c JOIN pg_class AS cl ON cl.oid = c.conrelid JOIN pg_namespace AS ns ON ns.oid = cl.relnamespace WHERE ns.nspname = 'nexent' AND cl.relname = 'document_tag_projection' AND c.conname = 'uq_document_tag_projection_identity';" +    "1" "migration creates the document identity unique constraint"
+  run_sql "$database" <<'SQL'
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'root') THEN
+        CREATE ROLE root LOGIN SUPERUSER;
+    END IF;
+END;
+$$;
+SQL
+  run_file "$database" "$INIT_SQL" >/dev/null
+  run_migration_files_through "$database" "v2.5.2_unified_tag_management.sql"
+  assert_query "$database" \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" \
+    "1" "migration creates document_tag_projection table"
+  assert_query "$database" \
+    "SELECT count(*) FROM pg_indexes WHERE schemaname = 'nexent' AND indexname IN ('idx_document_tag_projection_tenant_status', 'idx_document_tag_projection_kb', 'idx_document_tag_projection_resource');" \
+    "3" "migration creates the projection lookup indexes"
+  assert_query "$database" \
+    "SELECT count(*) FROM pg_constraint AS c JOIN pg_class AS cl ON cl.oid = c.conrelid JOIN pg_namespace AS ns ON ns.oid = cl.relnamespace WHERE ns.nspname = 'nexent' AND cl.relname = 'document_tag_projection' AND c.conname = 'uq_document_tag_projection_identity';" \
+    "1" "migration creates the document identity unique constraint"
 
   run_file "$database" "$MIGRATION_SQL" >/dev/null
-  assert_query "$database" +    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" +    "1" "migration rerun is idempotent"
-  pass "document tag projection migration DDL and rerun idempotency"
+  assert_query "$database" \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" \
+    "1" "migration rerun is idempotent"
+  pass "document tag projection remains valid after the consolidated migration reruns"
 }
 
 test_init_sql_fresh_schema() {
   local database="dtp_init"
   create_database "$database"
   run_file "$database" "$INIT_SQL" >/dev/null
-  assert_query "$database" +    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" +    "1" "init.sql creates document_tag_projection for fresh installs"
+  assert_query "$database" \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" \
+    "1" "init.sql creates document_tag_projection for fresh installs"
   pass "fresh install init.sql includes the document tag projection ledger"
 }
 

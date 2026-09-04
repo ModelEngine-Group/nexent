@@ -472,8 +472,8 @@ EXECUTE FUNCTION update_ag_tool_instance_update_time();
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_ag_tool_instance_update_time_trigger ON nexent.ag_tool_instance_t IS 'Trigger to call update_ag_tool_instance_update_time function before each update on ag_tool_instance_t table';
 
--- Unified tag management final schema. Legacy source migration remains in the
--- versioned v2.5.0 migration and is intentionally not duplicated here.
+-- Unified tag management final schema. Legacy data migration remains in the
+-- versioned v2.5.2 migration and is intentionally not duplicated here.
 CREATE TABLE IF NOT EXISTS nexent.tag_bucket (
     bucket_id BIGSERIAL PRIMARY KEY,
     tenant_id VARCHAR(100) NOT NULL CHECK (btrim(tenant_id) <> ''),
@@ -942,63 +942,3 @@ BEGIN
     END IF;
 END;
 $$;
-
--- tag-library-permission-seed:start
--- role_permission_t is created by a versioned migration on a fresh baseline.
--- When init.sql is reapplied after that point, keep the final grant set equivalent.
-DO $$
-BEGIN
-    IF to_regclass('nexent.role_permission_t') IS NOT NULL THEN
-        IF EXISTS (
-            SELECT 1
-            FROM nexent.role_permission_t
-            WHERE permission_category = 'RESOURCE'
-              AND permission_type = 'TAG_LIBRARY'
-              AND permission_subtype = 'MANAGE'
-              AND user_role NOT IN ('SU', 'ADMIN', 'SPEED', 'ASSET_OWNER')
-        ) THEN
-            RAISE EXCEPTION 'TAG_LIBRARY/MANAGE is assigned to a role outside the approved set';
-        END IF;
-
-        IF EXISTS (
-            SELECT 1
-            FROM nexent.role_permission_t
-            WHERE permission_category = 'RESOURCE'
-              AND permission_type = 'TAG_LIBRARY'
-              AND permission_subtype = 'MANAGE'
-            GROUP BY user_role
-            HAVING count(*) > 1
-        ) THEN
-            RAISE EXCEPTION 'TAG_LIBRARY/MANAGE contains duplicate role grants';
-        END IF;
-
-        INSERT INTO nexent.role_permission_t (
-            user_role,
-            permission_category,
-            permission_type,
-            permission_subtype
-        )
-        SELECT
-            required_grants.user_role,
-            required_grants.permission_category,
-            required_grants.permission_type,
-            required_grants.permission_subtype
-        FROM (
-            VALUES
-                ('SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
-                ('ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
-                ('SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
-                ('ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
-        ) AS required_grants(user_role, permission_category, permission_type, permission_subtype)
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM nexent.role_permission_t AS existing
-            WHERE existing.user_role = required_grants.user_role
-              AND existing.permission_category = required_grants.permission_category
-              AND existing.permission_type = required_grants.permission_type
-              AND existing.permission_subtype = required_grants.permission_subtype
-        );
-    END IF;
-END;
-$$;
--- tag-library-permission-seed:end
