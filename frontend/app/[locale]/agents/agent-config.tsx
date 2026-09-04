@@ -50,7 +50,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-type AgentConfigTab = "basic" | "advanced" | "security";
+type AgentConfigTab = "basic" | "tools_skills" | "advanced";
 type ConfigSectionKey =
   | "display_info"
   | "role_model"
@@ -67,10 +67,6 @@ const BASIC_CONFIG_SECTIONS = new Set<ConfigSectionKey>([
   "role_model",
   "knowledge_base",
   "conversation_guide",
-]);
-
-const SECURITY_CONFIG_SECTIONS = new Set<ConfigSectionKey>([
-  "guardrail",
 ]);
 
 const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
@@ -232,19 +228,15 @@ export default function AgentConfig({
 
     const { requestId, target } = configFocusRequest;
     const requestKey = `${configFocusRequest.agentId}:${requestId}`;
-    
     if (lastScrolledRequestRef.current === requestKey) {
       return;
     }
-    
     const newTab = BASIC_CONFIG_SECTIONS.has(target.section)
       ? "basic"
-      : SECURITY_CONFIG_SECTIONS.has(target.section)
-        ? "security"
+      : target.section === "tools_skills"
+        ? "tools_skills"
         : "advanced";
-    
     setActiveConfigTab(newTab);
-    
     setOpenSections((current) =>
       current[target.section] ? current : { ...current, [target.section]: true }
     );
@@ -284,7 +276,11 @@ export default function AgentConfig({
   const handleTabChange = useCallback(
     (value: string) => {
       flushDraft();
-      if (value === "basic" || value === "advanced" || value === "security") {
+      if (
+        value === "basic" ||
+        value === "tools_skills" ||
+        value === "advanced"
+      ) {
         setActiveConfigTab(value);
       }
     },
@@ -370,16 +366,16 @@ export default function AgentConfig({
             {t("agent.config.tab.basic")}
           </TabsTrigger>
           <TabsTrigger
+            value="tools_skills"
+            className="h-10 rounded-none border-b-2 border-transparent px-0 pb-2 pt-1 text-gray-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+          >
+            {t("agent.config.tab.toolsSkills")}
+          </TabsTrigger>
+          <TabsTrigger
             value="advanced"
             className="h-10 rounded-none border-b-2 border-transparent px-0 pb-2 pt-1 text-gray-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
           >
             {t("agent.config.tab.advanced")}
-          </TabsTrigger>
-          <TabsTrigger
-            value="security"
-            className="h-10 rounded-none border-b-2 border-transparent px-0 pb-2 pt-1 text-gray-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
-          >
-            {t("agent.config.tab.security")}
           </TabsTrigger>
         </TabsList>
         <div className="mt-2">
@@ -408,8 +404,6 @@ export default function AgentConfig({
             />
           )}
         </div>
-
-
         <TabsContent
           value="basic"
           className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-2"
@@ -473,10 +467,9 @@ export default function AgentConfig({
         </TabsContent>
 
         <TabsContent
-          value="advanced"
+          value="tools_skills"
           className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
         >
-          {/* 1. 工具与技能 */}
           <ConfigSection
             title={t("agent.config.section.toolsSkills.title")}
             description={t("agent.config.section.toolsSkills.description")}
@@ -489,8 +482,13 @@ export default function AgentConfig({
           >
             <AgentCapability />
           </ConfigSection>
+        </TabsContent>
 
-          {/* 2. 协同 Agent */}
+        <TabsContent
+          value="advanced"
+          className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
+        >
+          {/* 1. 协同 Agent */}
           <ConfigSection
             title={t("agent.config.section.collaborativeAgents.title")}
             description={t(
@@ -507,7 +505,7 @@ export default function AgentConfig({
             <CollaborativeAgent />
           </ConfigSection>
 
-          {/* 3. 运行策略 */}
+          {/* 2. 运行策略 */}
           <ConfigSection
             title={t("agent.config.section.runStrategy.title")}
             description={t("agent.config.section.runStrategy.description")}
@@ -521,7 +519,7 @@ export default function AgentConfig({
             <AgentRunPolicy />
           </ConfigSection>
 
-          {/* 4. 发布属性 */}
+          {/* 3. 发布属性 */}
           <ConfigSection
             title={t("agent.config.section.publishAttributes.title")}
             description={t(
@@ -536,13 +534,8 @@ export default function AgentConfig({
           >
             <AgentDeployment />
           </ConfigSection>
-        </TabsContent>
 
-        <TabsContent
-          value="security"
-          className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
-        >
-          {/* 1. 安全护栏 */}
+          {/* 4. 安全护栏 */}
           <ConfigSection
             title={t("agent.config.section.guardrail.title")}
             description={t("agent.config.section.guardrail.description")}
