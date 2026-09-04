@@ -284,11 +284,11 @@ services_pkg.__path__ = []  # mark as package so submodule imports work
 sys.modules["services"] = services_pkg
 
 
-# Stub ``services.vectordatabase_service`` — transitively imported by
+# Stub ``management.services.knowledge_base.service`` — transitively imported by
 # ``memory_index_service`` during module import.
-vectordb_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordb_service_mod = types.ModuleType("management.services.knowledge_base.service")
 vectordb_service_mod.get_vector_db_core = MagicMock(name="get_vector_db_core")
-sys.modules["services.vectordatabase_service"] = vectordb_service_mod
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_mod
 
 
 # Stub ``services.memory_index_service`` (transitive only).
@@ -337,6 +337,7 @@ consts_mod.MMR_LAMBDA = 0.7
 consts_mod.MEMORY_TOKEN_BUDGET = 2000
 consts_mod.W_AGENT_SHORT_TERM = 1.0
 consts_mod.W_EXTERNAL = 0.8
+consts_mod.EXTERNAL_MEMORY_SEARCH_ENABLED = True
 consts_mod.ES_API_KEY = ""
 consts_mod.ES_HOST = ""
 
@@ -823,6 +824,30 @@ class TestBuildContextPipelineEnabled:
         assert context.external == []
         pipeline.run.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_ac_p3_18_pipeline_preserves_external_when_internal_empty(
+        self, service, fake_retrieval_service
+    ):
+        """AC-P3-18: external-only hits still traverse the retrieval pipeline."""
+        fake_retrieval_service.search.return_value = []
+        external_item = ExternalMemoryItem(
+            id="mem0-1", content="Sister Jules has an interview", score=0.9, provider="mem0"
+        )
+        pipeline = service.pipeline
+        pipeline.run_result = PipelineResult(external=[external_item])
+
+        context = await service.build_context(
+            tenant_id="tn",
+            user_id="u",
+            query="sister Jules",
+            embedding_model_info=MagicMock(),
+            external_results=[external_item],
+        )
+
+        assert pipeline.run_calls[0]["internal_results"] == []
+        assert pipeline.run_calls[0]["external_results"] == [external_item]
+        assert context.external == [external_item]
+
 
 # ---------------------------------------------------------------------------
 # MemoryContextService.build_context: pipeline-disabled branch
@@ -830,6 +855,26 @@ class TestBuildContextPipelineEnabled:
 
 
 class TestBuildContextPipelineDisabled:
+    @pytest.mark.asyncio
+    async def test_ac_p3_18_non_pipeline_preserves_external_when_internal_empty(
+        self, service_no_pipeline
+    ):
+        """AC-P3-18: fallback bucketing must retain external-only hits."""
+        service_no_pipeline.retrieval_service.search = AsyncMock(return_value=[])
+        external_item = ExternalMemoryItem(
+            id="mem0-1", content="Sister Jules has an interview", score=0.9, provider="mem0"
+        )
+
+        context = await service_no_pipeline.build_context(
+            tenant_id="tn",
+            user_id="u",
+            query="sister Jules",
+            embedding_model_info=MagicMock(),
+            external_results=[external_item],
+        )
+
+        assert context.external == [external_item]
+
     @pytest.mark.asyncio
     async def test_pipeline_disabled_buckets_results_into_context(self, service_no_pipeline):
         tenant = MemorySearchResult(memory_id=10, layer=MemoryLayer.TENANT)

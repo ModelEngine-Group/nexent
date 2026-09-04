@@ -3,10 +3,12 @@ Northbound API with A2A support.
 
 This module combines northbound app with A2A server endpoints.
 """
+import asyncio
 import base64
 import hashlib
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Dict
 from http import HTTPStatus
 
@@ -15,6 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.app_factory import create_app
+from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from .northbound_app import router as northbound_router
 from .northbound_knowledge_app import router as northbound_knowledge_router
 
@@ -40,13 +43,29 @@ from database import a2a_agent_db
 
 logger = logging.getLogger("northbound_base_app")
 
-# Create FastAPI app with common configurations
+async def recover_northbound_tasks_on_startup():
+    from services.startup_recovery_service import (
+        recover_northbound_tasks,
+        schedule_interrupted_upload_cleanup,
+    )
+
+    await asyncio.to_thread(recover_northbound_tasks)
+    await schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME)
+
+
+@asynccontextmanager
+async def northbound_lifespan(_app):
+    await recover_northbound_tasks_on_startup()
+    yield
+
+
 northbound_app = create_app(
     title="Nexent Northbound API",
     description="Northbound APIs for partners",
     version="1.0.0",
     cors_methods=["GET", "POST", "PUT", "DELETE"],
-    enable_monitoring=False  # Disable monitoring for northbound API if not needed
+    enable_monitoring=False,  # Disable monitoring if not needed
+    lifespan=northbound_lifespan,
 )
 
 northbound_app.include_router(northbound_router)

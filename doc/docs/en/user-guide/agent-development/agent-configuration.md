@@ -1,30 +1,19 @@
 # Agent Development
 
-In the Agent Development page, you can create, configure, and manage agents. Agents are the core feature of Nexent—they can understand your needs and perform corresponding tasks.
+On the Agent Development page, you can create, configure, and manage agents. The page contains an **AI Generation** panel and a **Configuration** panel: AI Generation turns natural-language requirements into a configuration draft, while Configuration lets you adjust settings manually. After configuration, click **Debug** in the lower-right corner to open the debug panel and verify the agent's behavior.
+
+<div style="display: flex; justify-content: center;">
+  <img
+    src="../assets/agent-development/agent-config-overview.png"
+    alt="Agent configuration page overview"
+    style="width: 90%; height: auto;"
+  />
+</div>
 
 ## 🔧 Create an Agent
 
-On the Agent Management tab, click **New** to create a blank agent. Click **Exit Create** to leave creation mode.
-If you have an existing agent configuration, you can also import it:
-
-1. Click **Import**.
-2. In the file selection dialog, select an agent configuration file in JSON or ZIP format.
-3. Click "Open"; the system will validate the file format and content, and display the imported agent information
-
-![Import an agent](./../assets/agent-development/import.png)
-
-![Imported agent information](./../assets/agent-development/import-2.png)
-
-> ⚠️ **Note:** If you import an agent with a duplicate name, a prompt dialog will appear. You can choose:
->
-> - **Import anyway**: Keep the duplicate name; the imported agent will be in an unavailable state and requires manual modification of the Agent name and variable name before it can be used
-> - **Regenerate and import**: The system will call the LLM to rename the Agent, which will consume a certain amount of model tokens and may take longer
-
-> 📌 **Important:** For agents created via import, if their tools include `knowledge_base_search` or other knowledge base search tools, these tools will only search **knowledge bases that the currently logged-in user is allowed to access in this environment**. The original knowledge base configuration in the exported agent will _not_ be automatically inherited, so actual search results and answer quality may differ from what the original author observed.
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
-</div>
+On the **Agent Configuration** tab of Agent Development, click **New** in the upper-right corner to create a blank agent. After creating or selecting an editable agent, describe the requirement in AI Generation or fill in the Configuration panel manually. If you have read-only access, you can view the configuration but cannot generate or modify it.
+If you already have an agent configuration, click **Import** and create an agent from a JSON or ZIP file. For details about export formats, import steps, duplicate-name handling, and dependency checks, see [Export and Import Agents](../../integration/integration-out/agents-export.md).
 
 ## 👥 Configure Collaborative Agents/Tools
 
@@ -49,85 +38,7 @@ Collaborative agents help the current agent complete complex tasks. The sources 
 
 #### 🌐 Add External A2A Agents
 
-Nexent supports communication with third-party agents through the A2A protocol. You can discover external A2A agents in the following two ways:
-
-##### Discover Agent via URL
-
-If you know the Agent Card address of the target agent, you can use the URL discovery method:
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. In the External A2A Agent list, click the "Add External Agent" button
-2. Select the "URL Discovery" tab
-3. Fill in the Agent Card URL address, for example: `https://example.com/.well-known/agent.json`
-4. If the target Agent Card requires authentication, enter a JSON object in "Custom Request Headers", for example: `{"Authorization": "Bearer <token>"}`
-5. Click the "Discover" button; the system will automatically retrieve the agent's related information
-6. After successful discovery, you can view the agent's name, description, capabilities and other information
-7. Click "Add to List" to complete the addition
-
-> 💡 **Tip**: Custom request headers are saved with the external agent and used only to retrieve and refresh its Agent Card. They are never used for agent calls. When rediscovering the same URL, leaving this field empty keeps the current configuration; entering `{}` clears it.
-
-> 💡 **Tip**: The Agent Card is an Agent description file that complies with the A2A 1.0 specification, containing the agent's name, description, calling address, capabilities and other information.
-
-##### Discover Agent via Nacos
-
-If your agent is registered with the Nacos service discovery platform, you can use the Nacos discovery method:
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. In the External A2A Agent list, click the "Add External Agent" button
-2. Select the "Nacos Discovery" tab
-3. For first-time use, you need to configure the Nacos connection information:
-   - **Nacos Server Address**: Fill in the Nacos server address, such as `http://127.0.0.1:8848`
-   - **Namespace ID**: Fill in the Nacos namespace ID (optional)
-   - **Group Name**: Fill in the service group name, default is `DEFAULT_GROUP`
-   - **Username/Password**: Fill in the Nacos access credentials (optional)
-4. Click "Save Configuration" to save the Nacos connection information
-5. Fill in the Agent service name to scan
-6. Click the "Scan" button; the system will obtain matching Agent information from Nacos
-7. The scan results will list all matching Agents. You can select the agents you need and add them to the list
-
-> ⚠️ **Note**: Make sure the Nacos service is running properly and the target Agent is correctly registered with Nacos.
-
-##### Manage Discovered External Agents
-
-In the External A2A Agent list, you can view and manage all discovered external agents:
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. **View Agent Details**: Click on the agent card to view its complete information, including name, description, URL, capability list, etc.
-2. **Test Agent**: Click the "Test" button to send a test message to the agent and verify if it is working properly
-3. **Chat with Agent**: Click the "Chat" button to open a chat window and interact with the agent in real time
-4. **Configure Calling Protocol**: Click the "Protocol Configuration" button to select the calling protocol for this agent:
-   - **HTTP + JSON**: Use REST API style calls
-   - **JSON-RPC**: Use JSON-RPC protocol calls
-5. **Configure Call Authentication**: If the Agent Card declares `securitySchemes` and `securityRequirements`, click "Agent Authentication" and enter the required values. Nexent places each value in the header, query string, or cookie specified by the Card; fields in the same requirement must all be configured.
-6. **Refresh Agent Information**: If the agent information changes, click the "Refresh" button to re-fetch the latest Agent Card
-7. **Remove Agent**: Click the "Remove" button to delete the agent from the discovered list
-
-> 💡 **Use Cases**:
->
-> - Quickly integrate known third-party agent services through URL discovery
-> - Batch integrate all agents from the same service registry through Nacos discovery
-> - Configure protocols to meet the requirements of different agent service providers
-
-###### Integrate [DataAgent](https://gitcode.com/datagallery/dataagent) A2A Agent via URL
-
-1. Refer to the [DataAgent documentation](https://gitcode.com/datagallery/dataagent#%F0%9F%8C%90-a2a-10-%E6%9C%8D%E5%8A%A1%E6%A8%A1%E5%BC%8F) and start DataAgent in A2A service mode.
-   > Nexent does not currently support agents that require authentication. Do not set `auth-token` when starting DataAgent.
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
-</div>
-
-2. Refer to [Discover Agent via URL](#discover-agent-via-url) to integrate the agent. The URL is `http://<IP>:9999/.well-known/agent-card.json`.
-3. Refer to [Manage Discovered External Agents](#manage-discovered-external-agents) to configure the invocation protocol, and select HTTP + JSON for integration.
+Nexent can discover third-party A2A agents through URL or Nacos and add them as collaborative agents. For discovery, authentication, protocol configuration, connectivity testing, and a DataAgent example, see [Add External A2A Agents](./a2a-external.md). For the overall A2A integration workflow and protocol concepts, see [Integrate Agents](../../integration/integration-in/agents.md).
 
 ### 🛠️ Select Agent Tools or Skills
 
@@ -157,76 +68,7 @@ Agents can use tools and skills to complete tasks, including local capabilities 
 
 ### 🔌 Add MCP Tools
 
-On the "Select Agent Tools" tab, click "MCP Config" to configure MCP servers in the popup and view configured servers.
-
-You can add MCP services to Nexent in the following two ways:
-
-**1️⃣ Add MCP Service via URL**
-
-🔔 This method is suitable for independently deployed MCP services (supports SSE and Streamable HTTP protocols):
-
-> 1.  In the **Add MCP Server** section at the top of the interface, fill in **Server name** and **Server URL**
->
-> ⚠️ **Note:** The server name must contain only English letters or digits; spaces, underscores, and other characters are not allowed.
->
-> 2.  Click the **+ Add** button on the right to complete adding a single service
-
-**2️⃣ Add Containerized MCP Service via JSON Configuration**
-
-🔔 This method is suitable for containerized MCP services deployed via npx:
-
-> 1.  In the **Add Containerized MCP Service** input box, fill in a JSON configuration that matches the example format:
->
-> ```json
-> {
->   "mcpServers": {
->     "service-name": {
->       "args": ["mcp-package-name@version", "additional-parameters"],
->       "command": "npx"
->     }
->   }
-> }
-> ```
->
-> 2.  In the **Port** input box below, enter the port number corresponding to the containerized service
-> 3.  Click the **+ Add** button on the right to complete adding the containerized service
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/mcp.png" style="width: 80%; height: auto;" />
-</div>
-
-Many third-party services such as [ModelScope](https://www.modelscope.cn/mcp) provide MCP services, which you can quickly integrate and use.
-You can also develop your own MCP services and connect them to Nexent; see [MCP Tool Development](../../backend/tools/mcp).
-
-**3️⃣ Convert Stock API to MCP Service**
-
-🔔 This method is suitable for quickly converting existing REST API endpoints into MCP tools without additional development, allowing agents to call existing API capabilities:
-
-> 1.  In the MCP Config module, select **"API to MCP"** as the access type
-> 2.  Fill in the API basic information in the input box below:
->
-> - **Service Name**: Display name for the MCP service
-> - **OpenAPI JSON**: OpenAPI 3.x specification in JSON format
-> - **Base Service URL**: Base address of the API service (supports http/https)
->
-> 3.  Click the **+ Add** button in the lower right corner to complete the MCP service conversion
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/add_mcp_from_api.png" style="width: 80%; height: auto;" />
-</div>
-
-> 4.  After conversion, you can view all externally converted MCP tools in the **Outer APIs** tab
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/add_mcp_from_api_1.png" style="width: 80%; height: auto;" />
-</div>
-![Converted MCP tools](./../assets/agent-development/add_mcp_from_api_2.png)
-
-> 💡 **Use Cases**:
->
-> - Quickly integrate internal enterprise REST API endpoints
-> - Convert third-party service HTTP APIs into MCP tools
-> - Generate tools directly from OpenAPI specifications without writing MCP Server code
+On the **Select Agent Tools** tab, click **MCP Config** to connect a remote or containerized MCP service, or convert an existing API into MCP tools. For all three connection methods, OpenAPI requirements, service management, and tool testing, see [Integrate MCP Services](../../integration/integration-in/mcp.md).
 
 ### ⚙️ Custom Tools
 
@@ -238,66 +80,9 @@ You can refer to the following guides to develop your own tools and integrate th
 
 ### 🔌 Create or Import Skills
 
-In the agent's advanced configuration, switch to the **Select Skills** tab and click **Build Skill**. You can create a skill through an interactive conversation or install one from a file. A successfully created skill is added to the list available to the current user, but it is **not automatically associated with the current agent**. You must select the skill and save the agent configuration afterward.
+In the agent's advanced configuration, switch to **Select Skills** and click **Build Skill**. You can create a skill through a conversation or upload a `.md` or `.zip` file. After creation, select the skill and save the agent configuration before the agent can use it.
 
-#### Create a Skill Interactively (NL2SKILL)
-
-Interactive creation is suitable for building a skill from a natural-language requirement:
-
-1. Click **Build Skill**, then select the **Interactive Creation** tab.
-2. In the conversation area on the left, describe the skill's purpose, execution steps, inputs, outputs, and constraints. For example: "Create a skill that reads a CSV file and produces a data quality report."
-3. The system streams a draft skill. You can stop generation at any time or continue the conversation to add requirements and revise the existing draft.
-4. Review and edit the skill information and files in the draft area on the right:
-   - **Skill Name:** Required and must be unique.
-   - **Skill Description:** Required; explains the skill's purpose and applicable scenarios.
-   - **Tags:** Add up to five tags, with no more than 20 characters per tag, to make the skill easier to search and filter.
-   - **User Groups and Group Permissions:** Configure skill visibility and editing permissions as needed. These settings are shown or editable only when the current account has the required permissions.
-   - **Skill Files:** `SKILL.md` is the main skill file and cannot be renamed or deleted. You can add, edit, rename, or delete scripts, assets, and other supporting files.
-5. After reviewing the draft, click **Create**. If the skill name already exists, change it and try again.
-
-#### Install a Skill from a File
-
-Use the **Install** tab to import a prepared skill file. Click the upload area to select a file, or drag a file into it. Only one file can be uploaded at a time, in one of the following formats:
-
-| File Format | Use Case | Requirements |
-| --- | --- | --- |
-| `.md` | A single-file skill containing only its main instructions | The file must be a complete `SKILL.md` with `name` and `description` in its YAML Front Matter |
-| `.zip` | A multi-file skill containing scripts, assets, or other supporting files | The archive must contain `SKILL.md`, either at its root or in a subdirectory; other files are imported with the skill |
-
-A basic `SKILL.md` looks like this:
-
-```markdown
----
-name: csv-report
-description: Analyze CSV files and generate data quality reports
-tags:
-  - data-analysis
----
-
-# CSV Data Quality Report
-
-After the user provides a CSV file, check missing values, duplicate records, and field types, then produce a structured report.
-```
-
-After upload, the system reads the skill name and description from `SKILL.md` and displays the parsed result. Confirm the information and click **Create** to complete the installation.
-
-> ⚠️ **Import Restrictions:**
->
-> - `SKILL.md` must contain valid YAML Front Matter with both `name` and `description`. Missing either field causes the import to fail.
-> - `SKILL.md` must use UTF-8 encoding.
-> - Importing does not overwrite an existing skill with the same name. Change `name` in `SKILL.md`, then upload the file again.
-> - For a multi-file skill, compress the skill directory as a `.zip` file and ensure the archive contains `SKILL.md`.
-
-#### Associate the New Skill with the Agent
-
-After creating or installing a skill, associate it with the current agent as follows:
-
-1. If the list has not updated, click **Refresh Skills**.
-2. Click **Select Skills**, then find and select the new skill by name, description, or tag.
-3. If the skill has parameters that require values, click ⚙️ to configure them.
-4. Return to the agent configuration page and save the configuration. The agent can use the skill only after these steps are complete.
-
-For complete instructions on viewing, editing, sharing, and deleting skills, see [Skill Management](../resource-repository/skill-repository.md).
+For file formats, the `SKILL.md` structure, upload restrictions, and association steps, see [Integrate Skills](../../integration/integration-in/skills.md). For viewing, editing, permissions, and deletion, see [Skill Management](../resource-repository/skill-repository.md).
 
 ### 🧪 Tool Testing
 
@@ -323,53 +108,72 @@ Nexent provides a "Tool Testing" capability for all types of tools—whether the
 
 ### ✍️ Describe How the Agent Should Work
 
-Based on the selected collaborative agents and tools, you can now describe in simple language how you expect this agent to work. Nexent will automatically generate the agent name, description, and prompts based on your configuration and description.
+Describe the business goal, intended users, inputs, outputs, and constraints in the **AI Generation** panel. Nexent can generate a complete configuration or optimize only the fields or resources you specify.
 
-1. In the editor under "Describe how should this agent work", enter a brief description, such as "You are a professional knowledge Q&A assistant with local knowledge search and online search capabilities, synthesizing information to answer user questions"
-2. Select a model (choose a smarter model when generating prompts to optimize response logic), click the "Generate Agent" button, and Nexent will generate detailed agent content for you, including basic information and prompts (role, usage requirements, examples)
-3. You can edit and fine-tune the auto-generated content (including agent information and prompts) in the Agent Detail Content below
+To generate a complete configuration for the first time:
+
+1. **Describe the requirement**: Explain the problem the agent should solve. For example, “Create a product Q&A assistant for after-sales staff. Prefer the internal knowledge base and cite sources in every answer.”
+2. **Clarify the requirement**: When information is missing, Nexent displays a question card. Select an option or add details under **Other**, then submit it.
+3. **Apply the draft**: After Nexent generates the description, duty prompt, constraint prompt, examples, greeting, and example questions, click **Apply to Draft** and review the result in the Configuration panel.
+
+While generation or resource binding is in progress, the configuration form is temporarily locked to prevent manual edits from overwriting generated results. If generation fails or you do not want to wait, click **Unlock** to stop the current generation and resume manual editing.
+
+
+For an existing configuration, use the shortcuts in AI Generation to optimize a specific part. Clicking a card fills its instruction into the input box; send it directly or edit it before sending.
+
+| Shortcut | What It Updates |
+| --- | --- |
+| **Generate Prompts** | Generates the duty, constraint, and example prompts from the current role and bound tools and skills; other settings remain unchanged |
+| **Recommend Available Tools** | Finds tools for the current role and regenerates prompts affected by the resources after you confirm the binding |
+| **Recommend Available Skills** | Finds skills for the current role and regenerates prompts affected by the resources after you confirm the binding |
+| **Generate Conversation Guide** | Generates the greeting and example questions; other settings remain unchanged |
+
+AI Generation applies the smallest change required by the current request instead of regenerating the entire configuration automatically. When you add or replace a resource, Nexent updates the prompts affected by that resource. To remove a tool or skill, use **Tools and Skills** in the Configuration panel.
+
+<div style="display: flex; justify-content: center;">
+  <img
+    src="../assets/agent-development/nl2agent-requirement.png"
+    alt="Clarify requirements in AI Generation"
+    style="width: 90%; height: auto;"
+  />
+</div>
 
 #### 📋 Agent Basic Information Configuration
 
-In the basic information section, if you are not satisfied of the auto-generated content, you can configure the following fields by your own:
+The **Basic Settings** tab contains five collapsible sections:
 
-| Field | Description |
+| Section | Main Settings |
 | --- | --- |
-| **Agent Name** | The display name shown in the interface and used to identify the agent. |
-| **Agent Variable Name** | The internal identifier used to reference the agent. It can contain only letters, numbers, and underscores, and must begin with a letter or underscore. |
-| **Large Language Model** | The model the agent uses for reasoning, tool calls, and response generation. |
-| **Agent Description** | Describes the agent's purpose and capabilities. |
+| **Display Information** | Icon, display name, variable name, author, and description |
+| **Model and Prompts** | Large language model, duty prompt, constraint prompt, and example prompt |
+| **Tools and Skills** | Tools and skills the agent can call, including their parameters |
+| **Run Strategy** | Maximum steps, output reserve, run summary, self-verification, and the conversation Metadata switch |
+| **Publishing Properties** | User groups, group permission, main-agent status, and A2A publishing settings |
 
-> 💡 **Usage Suggestions**:
->
-> - Use meaningful English variable names that are easy for the model to understand, such as `code_assistant` or `data_analyst`.
+The agent variable name can contain only letters, numbers, and underscores, and must start with a letter or underscore. Use a meaningful English name such as `code_assistant` or `data_analyst`.
 
-![Agent basic information](./../assets/agent-development/generate_agent.png)
+If a previously configured model has been deleted, a warning appears at the top of the Configuration panel: **Agent unavailable: Some configured models have been deleted**. Click **Refresh** to check availability again, then select an available model under **Model and Prompts** and save the configuration. Refreshing updates the status but does not restore a deleted model.
+
+**Allow Conversation Metadata** is disabled by default. When enabled, users can enter a JSON object for each conversation in Start Chat and pass business identifiers, channels, or other runtime parameters to the model. Metadata is visible to the model and cannot exceed 64 KiB. Do not include passwords, access tokens, personal information, or other sensitive data.
+
+![Agent basic settings](./../assets/agent-development/agent-basic-setting.png)
 
 #### ⚙️ Advanced Settings
 
-Click **Advanced Settings** on the right side of **Agent Details** to further configure the agent's runtime behavior, permissions, self-verification, and safety guardrails. Advanced Settings contains **Basic Settings** and **Safety Guardrails** tabs. After making changes, click **OK** in the dialog and then save the agent for the settings to take effect.
+Use the **Advanced Settings** tab to configure relationships between the agent and other resources.
 
-![Advanced settings](./../assets/agent-development/agent-settings.png)
+##### Advanced Configuration Sections
 
-##### Basic Settings
+| Section | Main Settings |
+| --- | --- |
+| **Collaborative Agents** | Add internal agents or external A2A agents and configure collaboration |
+| **Knowledge Bases** | Select knowledge bases the agent can retrieve from; selecting one enables knowledge-base retrieval and creates the association |
+| **Conversation Guide** | Set the greeting and example questions shown when a user first opens Start Chat |
+| **Safety Guardrails** | Configure content-matching rules, actions taken after a match, and rule tests |
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| **Author** | Current user | The author name of the agent. |
-| **Main Agent** | Yes | Controls whether the agent is displayed as a main agent that can be used for independent conversations. If set to **No**, the agent is better suited for use as a collaborative agent and does not appear in the list of main agents available for starting a conversation, even after publication. |
-| **User Groups** | None | One or more user groups that the agent belongs to, used for organization and permission management. Only users with the required permissions can modify this setting. |
-| **Group Permission** | Read-only | Controls access for users in the same group: **Editable** allows group members to view and edit; **Read-only** allows viewing only; **Private** limits access to the creator and administrators. |
-| **Maximum Agent Run Steps** | 15 | The maximum number of think-act cycles allowed in a single run. It must be an integer of at least 1. When the limit is reached, the system stops further execution and summarizes the completed work. More steps support more complex tasks but increase time and resource consumption. |
-| **Provide Run Summary** | No | Applies only when the agent is invoked by a main agent as a collaborative agent. **Yes** appends a summary of the work process to the final result; **No** returns only the final result and reduces context usage by the main agent. |
-| **Output Reserve** | Model default | Limits the maximum number of output tokens per response and reserves that space in the model's context window. A larger value allows longer responses but leaves less room for input and history and triggers context compression earlier. A smaller value preserves more input but may truncate the response. The value must be a positive integer and cannot exceed the selected model's maximum output tokens. |
-| **Self-Verification** | No | When enabled, the system checks key execution events and the final response. If it finds issues with tool calls, retrieval evidence, code execution, or answer quality, it asks the agent to correct or retry. If the final response repeatedly fails verification, the system returns a controlled explanation instead of an unverified definitive conclusion. |
+Knowledge bases and collaborative agents must be accessible to the current account. After importing or copying an agent, check these associations again because resource identifiers and permissions from another environment are not transferred automatically.
 
-> 💡 **Configuration Tips:**
->
-> - Use 3–5 maximum steps for simple Q&A and 10–20 for complex retrieval or reasoning tasks, then adjust based on debugging results.
-> - Enable **Provide Run Summary** only when the main agent needs details about the collaborative agent's execution. Otherwise, leave it disabled to save context.
-> - Normally, leave **Output Reserve** empty to use the model default. Adjust it only when responses are frequently truncated or when more space is needed for conversation history.
+![Agent advanced settings](./../assets/agent-development/agent-advanced-setting.png)
 
 ##### 🚧 Safety Guardrails
 
@@ -402,15 +206,16 @@ Safety guardrails also provide the following supporting capabilities:
 
 > ⚠️ **Note:** Safety guardrails perform regular-expression-based content screening and are not a complete semantic safety review. AI-generated rules can also produce false positives or false negatives. Test both normal and risky samples in **Regex Test Preview** before saving the configuration.
 
-### 🐛 Debug and Save
+## 🐛 Debug and Save
 
-After completing the initial agent configuration, you can debug the agent and fine-tune the prompts based on the debugging results to continuously improve agent performance.
+The **Draft** label at the top of the Configuration panel means the current changes have not become a published version. After the initial configuration:
 
-1. Click the "Debug" button in the lower right corner of the page to open the agent debug page
-2. Test conversations with the agent and observe its responses and behavior
-3. Review conversation performance and error messages, and optimize the agent prompts based on the test results
+1. Click **Debug**. Nexent validates and saves the draft, then opens the debug panel.
+2. Use representative questions to test prompts, knowledge retrieval, tool calls, and collaboration flows.
+3. Adjust the configuration based on the execution trace and error messages, then debug again.
+4. Click **Publish**. Nexent saves the draft again and opens the version publishing dialog.
 
-After successful debugging, click the "Save" button in the lower right corner, and the agent will be saved and appear in the agent list.
+Only successfully published main agents appear in production entry points such as Start Chat. Debugging does not read or write memory, so verify cross-conversation memory behavior in Start Chat.
 
 ## 📋 Version Management
 
@@ -428,119 +233,9 @@ To roll back to another version, open the menu on the right side of that version
 
 ### 🚀 Publish as A2A Agent
 
-Nexent supports exposing published agents as A2A Agents for external systems to call. When publishing a version, you can check the "Publish as A2A Agent" option to register the current agent as an A2A 1.0 compliant Agent.
+When publishing a version, select **Publish as A2A Agent** to let external systems discover and call the agent through REST or JSON-RPC. For publishing steps, endpoint information, authentication, and version updates, see [Publish as A2A Agent](./a2a-publish.md).
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-published-as.jpg" style="width: 50%; height: auto;" />
-</div>
-
-After successful publishing, the system will display the A2A Agent's call information:
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-detail.jpg" style="width: 50%; height: auto;" />
-</div>
-
-| Field                 | Description                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------ |
-| **Endpoint ID**       | Unique identifier for the A2A Agent                                                        |
-| **Agent Card URL**    | Agent discovery endpoint; external systems use this address to retrieve Agent descriptions |
-| **Protocol Version**  | A2A protocol version; currently 1.0                                                        |
-| **REST Endpoints**    | REST-style API endpoints                                                                   |
-| **JSON-RPC Endpoint** | JSON-RPC 2.0 protocol calling endpoint                                                     |
-
-#### Calling Methods
-
-The published A2A Agent supports the following two calling protocols:
-
-##### REST API
-
-```bash
-# Get Agent Card (for Agent discovery)
-GET /nb/a2a/{endpoint_id}/.well-known/agent-card.json
-
-# Send synchronous message
-POST /nb/a2a/{endpoint_id}/message:send
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "Please help me complete a task"
-  }
-}
-
-# Send streaming message (SSE)
-POST /nb/a2a/{endpoint_id}/message:stream
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "Please help me complete a task"
-  }
-}
-
-# Get task status
-GET /nb/a2a/{endpoint_id}/tasks/{task_id}
-```
-
-##### JSON-RPC 2.0
-
-```bash
-POST /nb/a2a/{endpoint_id}/v1
-Content-Type: application/json
-
-# Send synchronous message
-{
-  "jsonrpc": "2.0",
-  "method": "SendMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "Please help me complete a task"
-    }
-  },
-  "id": 1
-}
-
-# Send streaming message
-{
-  "jsonrpc": "2.0",
-  "method": "SendStreamingMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "Please help me complete a task"
-    }
-  },
-  "id": 2
-}
-
-# Get task status
-{
-  "jsonrpc": "2.0",
-  "method": "GetTask",
-  "params": {
-    "taskId": "task_abc123"
-  },
-  "id": 3
-}
-```
-
-> 💡 **Tips**:
->
-> - For local development, replace the `/nb/a2a` prefix with `http://localhost:5013/nb/a2a` (use `http://localhost:30013/nb/a2a` if running on k8s)
-> - For production environments, replace the prefix with your server domain name or public IP address
-
-> ⚠️ **Notes**:
->
-> - Calling A2A Agents requires carrying valid authentication information in the request headers
-> - Agent Card information is cached with a refresh interval of 1 hour
-> - If you need to update Agent information, you need to republish the agent version
-
-When an agent is published as an A2A-compliant Agent, click the leftmost icon in the agent list to view its detailed calling information.
-
-![View A2A Agent calling information](./../assets/agent-development/a2a-find-detail.jpg)
+To expose an agent through the standard northbound RESTful API, see [Publish Agents](../../integration/integration-out/agents-publish.md). For endpoint parameters and complete request examples, see [Call the Agent Northbound API](../../integration/integration-out/northbound-api.md).
 
 ## 🔧 Manage the Agent List
 
@@ -564,7 +259,7 @@ View the collaborative agents/tools used by the agent, displayed in a tree diagr
 
 ### 📤 Export
 
-Export a successfully debugged agent as a JSON or ZIP file, which can later be imported to create a copy. Complex agents that include skills are exported as ZIP archives by default.
+Export a successfully debugged agent as a JSON or ZIP file and import it into another environment. For format selection, dependency handling, and import restrictions, see [Export and Import Agents](../../integration/integration-out/agents-export.md).
 
 ### 🗑️ Delete
 

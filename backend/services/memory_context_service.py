@@ -13,7 +13,7 @@ The resulting MemorySearchContext is what gets serialized into the prompt.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import (
@@ -28,6 +28,7 @@ from nexent.memory.policy import MemoryRetrievalPolicy
 
 from consts.const import (
     AGENT_SHORT_TERM_HALF_LIFE_DAYS,
+    EXTERNAL_MEMORY_SEARCH_ENABLED,
     MMR_CANDIDATE_TOP_K,
     MMR_DUPLICATE_THRESHOLD,
     MMR_FINAL_TOP_K,
@@ -92,6 +93,7 @@ class MemoryContextService:
         self,
         retrieval_service: Optional[MemoryRetrievalService] = None,
         pipeline_enabled: bool = True,
+        external_search_hook: Optional[Callable] = None,
     ):
         """Initialize the context service.
 
@@ -100,9 +102,17 @@ class MemoryContextService:
             pipeline_enabled: When True (default), the Phase 4 retrieval
                 pipeline is applied to agent short-term + external results.
                 Set to False to preserve the Phase 2 behaviour.
+            external_search_hook: Optional async callable for Phase 3
+                transparent proxy.  Signature:
+                ``async (query, tenant_id, user_id, agent_id, conversation_id)
+                -> List[ExternalMemoryItem]``.
+                When set and ``EXTERNAL_MEMORY_SEARCH_ENABLED`` is True,
+                ``build_context`` auto-queries external providers if
+                ``external_results`` was not explicitly passed.
         """
         self.retrieval_service = retrieval_service or get_memory_retrieval_service()
         self.pipeline_enabled = pipeline_enabled
+        self._external_search_hook = external_search_hook
         self._pipeline: Optional[RetrievalPipeline] = None
 
     @property
@@ -190,8 +200,41 @@ class MemoryContextService:
             embedding_model_info=resolved_model_info,
             write_hits=bool(query),
         )
+        logger.info(
+            "event=memory_context_internal_search_completed tenant_id=%s "
+            "result_count=%d external_prefetched=%s",
+            tenant_id,
+            len(results),
+            external_results is not None,
+        )
 
-        if self.pipeline_enabled and results:
+        if (
+            external_results is None
+            and EXTERNAL_MEMORY_SEARCH_ENABLED
+            and self._external_search_hook is not None
+        ):
+            try:
+                external_results = await self._external_search_hook(
+                    query=query or "",
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    conversation_id=conversation_id,
+                )
+                logger.info(
+                    "event=memory_context_external_search_completed tenant_id=%s "
+                    "result_count=%d",
+                    tenant_id,
+                    len(external_results or []),
+                )
+            except Exception:
+                logger.warning(
+                    "external_search_hook failed for tenant=%s",
+                    tenant_id,
+                    exc_info=True,
+                )
+
+        if self.pipeline_enabled and (results or external_results):
             pipeline_result = self.pipeline.run(
                 internal_results=results,
                 query=query or "",
@@ -199,6 +242,14 @@ class MemoryContextService:
                 created_at_for_id=created_at_for_id,
             )
             context = pipeline_result.into_memory_search_context()
+            logger.info(
+                "event=memory_context_pipeline_completed tenant_id=%s internal_count=%d "
+                "external_count=%d final_count=%d",
+                tenant_id,
+                len(results),
+                len(external_results or []),
+                len(getattr(pipeline_result, "final_memory_records", [])),
+            )
         else:
             context = MemorySearchContext()
             for result in results:
@@ -210,6 +261,7 @@ class MemoryContextService:
                     context.agent_short_term.append(result)
                 else:
                     context.external.append(result)
+            context.external.extend(external_results or [])
 
         return context
 

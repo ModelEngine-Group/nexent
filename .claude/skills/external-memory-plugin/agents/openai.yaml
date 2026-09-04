@@ -1,0 +1,4 @@
+interface:
+  display_name: "External Memory Plugin"
+  short_description: "Develop and test Nexent external memory plugins"
+  default_prompt: "Use $external-memory-plugin to develop and test a Nexent external memory provider plugin."

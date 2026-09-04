@@ -72,6 +72,25 @@ SH
   chmod +x "$BIN_DIR/docker"
 }
 
+create_fake_zip() {
+  cat > "$BIN_DIR/zip" <<'SH'
+#!/bin/sh
+archive=""
+for argument in "$@"; do
+  case "$argument" in
+    -*) ;;
+    *)
+      archive="$argument"
+      break
+      ;;
+  esac
+done
+[ -n "$archive" ] || exit 1
+: > "$archive"
+SH
+  chmod +x "$BIN_DIR/zip"
+}
+
 assert_common_package_files() {
   local package_dir="$1"
   [ -f "$package_dir/deploy.sh" ] || fail "deploy.sh should be packaged"
@@ -104,9 +123,21 @@ assert_common_package_files() {
 }
 
 create_fake_docker
+create_fake_zip
 
 WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/build-offline-package.yml")"
-echo "$WORKFLOW_CONTENT" | grep -A2 '^  push:$' | grep -q -- "- 'v\*'" || fail "offline package workflow should run automatically for version tags"
+DOCKERHUB_WORKFLOW_CONTENT="$(cat "$PROJECT_ROOT/.github/workflows/docker-build-push-overseas.yml")"
+echo "$WORKFLOW_CONTENT" | grep -A20 '^  workflow_call:$' | grep -q '^      version:$' || fail "offline package workflow should support reusable calls"
+echo "$WORKFLOW_CONTENT" | grep -A3 '^      version:$' | grep -q 'required: true' || fail "reusable offline package calls should require a version"
+! echo "$WORKFLOW_CONTENT" | grep -q '^  push:$' || fail "offline package workflow should not race image builds on tag pushes"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -q "if: \${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}" || fail "offline packages should be called only for pushed version tags"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A3 '^  build-offline-package:$' | grep -q 'needs: build-and-push' || fail "offline packages should wait for the complete image matrix"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A4 '^  build-offline-package:$' | grep -q 'uses: ./.github/workflows/build-offline-package.yml' || fail "DockerHub builds should call the reusable offline package workflow"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A10 '^  build-offline-package:$' | grep -q 'version: \${{ github.ref_name }}' || fail "automatic offline packages should use the release tag as their version"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A10 '^  build-offline-package:$' | grep -q 'image_source: general' || fail "automatic offline packages should use the general image source"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A10 '^  build-offline-package:$' | grep -q 'include_source: false' || fail "automatic offline packages should exclude source by default"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A10 '^  build-offline-package:$' | grep -q 'upload_to_obs: true' || fail "automatic offline packages should upload to OBS"
+echo "$DOCKERHUB_WORKFLOW_CONTENT" | grep -A12 '^  build-offline-package:$' | grep -q 'secrets: inherit' || fail "automatic offline packages should receive the existing repository secrets"
 ! echo "$WORKFLOW_CONTENT" | grep -A4 '^      version:$' | grep -q "default: 'latest'" || fail "offline package workflow version input should defer to the selected ref"
 echo "$WORKFLOW_CONTENT" | grep -q 'elif \[ "$REF_TYPE" = "tag" \]; then' || fail "offline package workflow should resolve the package version from a tag"
 echo "$WORKFLOW_CONTENT" | grep -q 'VERSION="$REF_NAME"' || fail "offline package workflow should use the tag name as the package version"
@@ -116,24 +147,35 @@ echo "$WORKFLOW_CONTENT" | grep -A4 '^      upload_to_obs:$' | grep -q 'type: bo
 echo "$WORKFLOW_CONTENT" | grep -q "UPLOAD_TO_OBS=\"\${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.upload_to_obs }}\"" || fail "tag-triggered builds should enable OBS upload"
 echo "$WORKFLOW_CONTENT" | grep -A2 -- '- name: Authenticate to Huawei Cloud' | grep -q "if: \${{ steps.set-vars.outputs.upload_to_obs == 'true' }}" || fail "Huawei Cloud authentication should honor the OBS upload switch"
 echo "$WORKFLOW_CONTENT" | grep -A2 -- '- name: Upload to Huawei Cloud OBS' | grep -q "if: \${{ steps.set-vars.outputs.upload_to_obs == 'true' }}" || fail "Huawei Cloud OBS upload should honor the OBS upload switch"
+echo "$WORKFLOW_CONTENT" | grep -q "region: 'ap-southeast-1'" || fail "offline package workflow should use the Huawei Cloud Hong Kong region"
+echo "$WORKFLOW_CONTENT" | grep -q "bucket_name: 'modelengine-software'" || fail "offline package workflow should upload to the modelengine-software bucket"
 echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
-echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}' || fail "offline package workflow package name should include source suffix"
+echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}${FULL_SANDBOX_SUFFIX}' || fail "offline package workflow package name should include selected feature suffixes"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--package-name "${{ steps.set-vars.outputs.package-name }}"' || fail "offline package workflow should pass the final package name to the build script"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--compress true' || fail "offline package workflow should create the named final zip"
 echo "$WORKFLOW_CONTENT" | grep -q "local_file_path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip to OBS"
-echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'packages/\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should preserve the named zip in OBS"
+echo "$WORKFLOW_CONTENT" | grep -q "obs_file_path: 'nexent/\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip under the nexent OBS prefix"
 echo "$WORKFLOW_CONTENT" | grep -q 'uses: actions/upload-artifact@v7' || fail "offline package workflow should use upload-artifact v7 for unarchived uploads"
 echo "$WORKFLOW_CONTENT" | grep -q "^[[:space:]]*path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip artifact"
 echo "$WORKFLOW_CONTENT" | grep -q '^[[:space:]]*archive: false' || fail "offline package workflow should upload the zip without adding another archive layer"
 echo "$WORKFLOW_CONTENT" | grep -q 'COMPONENTS="infrastructure,application,data-process,supabase,terminal"' || fail "offline package workflow should select all packageable components"
+echo "$WORKFLOW_CONTENT" | grep -A4 '^      include_full_sandbox:$' | grep -q 'default: false' || fail "offline packages should keep the full sandbox opt-in"
+echo "$WORKFLOW_CONTENT" | grep -q -- '--include-sandbox-full "${{ steps.set-vars.outputs.include-full-sandbox }}"' || fail "offline package workflow should forward the full sandbox switch"
 
 OFFLINE_HELP="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --help)"
 echo "$OFFLINE_HELP" | grep -q -- '--include-sandbox BOOL' || fail "offline package help should document --include-sandbox"
+echo "$OFFLINE_HELP" | grep -q -- '--include-sandbox-full BOOL' || fail "offline package help should document --include-sandbox-full"
 echo "$OFFLINE_HELP" | grep -q -- '--package-name NAME' || fail "offline package help should document --package-name"
 
 SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --dry-run)"
 echo "$SANDBOX_DRY_RUN" | grep -q 'Include Sandbox image: true' || fail "offline dry-run should show that the Sandbox image is enabled by default"
 echo "$SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "offline packages should include the Sandbox image by default"
+! echo "$SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox-full:v2.2.0' || fail "offline packages should exclude the full Sandbox image by default"
+
+FULL_SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --include-sandbox-full true --dry-run)"
+echo "$FULL_SANDBOX_DRY_RUN" | grep -q 'Include full Sandbox image: true' || fail "offline dry-run should show the full Sandbox selection"
+echo "$FULL_SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox:v2.2.0' || fail "full Sandbox packages should retain the default lightweight image"
+echo "$FULL_SANDBOX_DRY_RUN" | grep -q 'nexent/nexent-sandbox-full:v2.2.0' || fail "the full Sandbox switch should add the full image"
 
 NO_SANDBOX_DRY_RUN="$(DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --version v2.2.0 --platform amd64 --components infrastructure,application --image-source general --target docker --include-sandbox false --dry-run)"
 echo "$NO_SANDBOX_DRY_RUN" | grep -q 'Include Sandbox image: false' || fail "offline dry-run should show that the Sandbox image is disabled explicitly"
@@ -143,6 +185,11 @@ if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.s
   fail "--include-sandbox should accept only true or false"
 fi
 grep -q "Include sandbox must be 'true' or 'false'" "$TMP_DIR/invalid-include-sandbox.log" || fail "invalid --include-sandbox error should be explicit"
+
+if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --include-sandbox-full invalid --dry-run >"$TMP_DIR/invalid-include-full-sandbox.log" 2>&1; then
+  fail "--include-sandbox-full should accept only true or false"
+fi
+grep -q "Include full sandbox must be 'true' or 'false'" "$TMP_DIR/invalid-include-full-sandbox.log" || fail "invalid --include-sandbox-full error should be explicit"
 
 if DEPLOYMENT_LANG=en bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" --package-name ../invalid --dry-run >"$TMP_DIR/invalid-package-name.log" 2>&1; then
   fail "--package-name should reject path traversal"
@@ -201,6 +248,23 @@ assert_common_package_files "$sandbox_package_dir"
 grep -q 'includeSandbox: "false"' "$sandbox_package_dir/manifest.yaml" || fail "manifest should record that the Sandbox image is excluded"
 ! grep -q 'nexent-sandbox' "$sandbox_package_dir/manifest.yaml" || fail "--include-sandbox false should exclude the Sandbox image"
 [ ! -f "$sandbox_package_dir/images/nexent-sandbox-v2-2-0.tar" ] || fail "--include-sandbox false should not save the Sandbox image tar"
+
+full_sandbox_package_dir="$OUT_DIR/with-full-sandbox"
+PATH="$BIN_DIR:$PATH" \
+  bash "$PROJECT_ROOT/deploy/offline/build_offline_package.sh" \
+    --version v2.2.0 \
+    --platform amd64 \
+    --components infrastructure,application \
+    --image-source general \
+    --target docker \
+    --include-sandbox-full true \
+    --output-dir "$full_sandbox_package_dir" >"$TMP_DIR/with-full-sandbox.log"
+
+assert_common_package_files "$full_sandbox_package_dir"
+grep -q 'includeFullSandbox: "true"' "$full_sandbox_package_dir/manifest.yaml" || fail "manifest should record the full Sandbox selection"
+grep -q 'nexent/nexent-sandbox:v2.2.0' "$full_sandbox_package_dir/manifest.yaml" || fail "full Sandbox packages should retain the lightweight image"
+grep -q 'nexent/nexent-sandbox-full:v2.2.0' "$full_sandbox_package_dir/manifest.yaml" || fail "manifest should include the full Sandbox image"
+[ -f "$full_sandbox_package_dir/images/nexent-sandbox-full-v2-2-0.tar" ] || fail "the full Sandbox image should be saved in the offline package"
 
 deploy_wrapper_dir="$OUT_DIR/deploy-wrapper"
 mkdir -p "$deploy_wrapper_dir/deploy/common" "$deploy_wrapper_dir/deploy/env"

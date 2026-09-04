@@ -81,7 +81,7 @@ async def test_resolve_agent_capabilities_collects_all_configured_sources(monkey
 
     monkeypatch.setattr("agents.create_agent_info.create_agent_config", fake_create_agent_config)
     monkeypatch.setattr(
-        "services.skill_service.SkillService.get_enabled_skills_for_agent",
+        "management.services.skill.service.SkillService.get_enabled_skills_for_agent",
         lambda self, **kwargs: [{"name": "enabled-skill", "description": "Enabled skill"}],
     )
     monkeypatch.setattr(
@@ -141,7 +141,7 @@ async def test_resolve_agent_capabilities_reports_missing_requirements_and_toler
 
     monkeypatch.setattr("agents.create_agent_info.create_agent_config", fake_create_agent_config)
     monkeypatch.setattr(
-        "services.skill_service.SkillService.get_enabled_skills_for_agent",
+        "management.services.skill.service.SkillService.get_enabled_skills_for_agent",
         raise_skill_error,
     )
     monkeypatch.setattr(capability_resolver, "resolve_agent_display_names", lambda references, tenant_id: {})

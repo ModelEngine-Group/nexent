@@ -97,7 +97,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### Completion Summary" in prompt
         assert "New Agent summary:" in prompt
         assert "### Atomic Action Contract" in prompt
-        assert "at most one short reasoning sentence" in prompt
+        assert "once the action is known, emit executable code immediately" in prompt
         assert 'equal to `["duty_prompt"]`' in prompt
         assert "exactly one concise Think-Code example" in prompt
         assert "Weather Assistant" not in prompt
@@ -115,7 +115,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "### 完成总结" in prompt
         assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
-        assert "`<code>` 前最多只写一句简短思考" in prompt
+        assert "确定动作后必须立即输出可执行代码" in prompt
         assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
         assert "只编写一个紧凑的“思考-代码”示例" in prompt
         assert "天气助手" not in prompt

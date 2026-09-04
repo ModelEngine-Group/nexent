@@ -1,5 +1,6 @@
 """Unit tests for backend.apps.skill_repository_app module."""
 
+import json
 import os
 import sys
 import types
@@ -32,8 +33,14 @@ class _SkillRepositoryInstallRequest(BaseModel):
     target_name: Optional[str] = Field(None, max_length=100)
 
 
+class _TagAssignmentFilter(BaseModel):
+    definition_id: int
+    value_ids: list[int]
+
+
 consts_model.SkillRepositoryListingCreateRequest = _SkillRepositoryListingCreateRequest
 consts_model.SkillRepositoryInstallRequest = _SkillRepositoryInstallRequest
+consts_model.TagAssignmentFilter = _TagAssignmentFilter
 sys.modules["consts.model"] = consts_model
 
 import consts.exceptions as exceptions_module
@@ -106,6 +113,103 @@ def test_list_skill_repository_listings_api_passes_filters(mocker, mock_auth_hea
     )
 
 
+def test_list_skill_repository_listings_api_passes_tag_filter(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_list = mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        return_value={"items": [], "pagination": {"total": 0}},
+    )
+
+    response = client.get("/repository/skill?tag=operations", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    mock_list.assert_called_once_with(
+        "tenant-1",
+        user_id="user-1",
+        status=None,
+        skill_id=None,
+        category_id=None,
+        page=1,
+        page_size=10,
+        search=None,
+        sort_by_update_time=False,
+        tag="operations",
+    )
+
+
+def test_list_skill_repository_listings_api_passes_tag_predicates(
+    mocker, mock_auth_header
+):
+    """Test repository API forwards structured tag filters."""
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_list = mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        return_value={"items": [], "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/skill",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
+def test_list_skill_repository_tag_stats_api(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch("apps.skill_repository_app.ensure_skill_repository_access")
+    mock_stats = mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_tag_stats_impl",
+        return_value=[{"tag": "operations", "count": 2}],
+    )
+
+    response = client.get("/repository/skill/tags", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [{"tag": "operations", "count": 2}]}
+    mock_stats.assert_called_once_with("tenant-1")
+
+
+@pytest.mark.asyncio
+async def test_list_skill_repository_tag_stats_api_converts_unexpected_errors_to_http_500(
+    mocker, mock_auth_header
+):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mocker.patch("apps.skill_repository_app.ensure_skill_repository_access")
+    mocker.patch(
+        "apps.skill_repository_app.list_skill_repository_tag_stats_impl",
+        side_effect=RuntimeError("database unavailable"),
+    )
+
+    with pytest.raises(app_module.HTTPException) as error:
+        await app_module.list_skill_repository_tag_stats_api(
+            mock_auth_header["Authorization"]
+        )
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "Failed to list skill repository tag statistics"
+
+
 def test_list_my_editable_skills_api_passes_filters(mocker, mock_auth_header):
     mocker.patch(
         "apps.skill_repository_app.get_current_user_id",
@@ -132,6 +236,31 @@ def test_list_my_editable_skills_api_passes_filters(mocker, mock_auth_header):
         search="report",
         new_skill_padding=True,
     )
+
+
+def test_list_my_editable_skills_api_passes_tag_predicates(mocker, mock_auth_header):
+    mocker.patch(
+        "apps.skill_repository_app.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    mock_list = mocker.patch(
+        "apps.skill_repository_app.list_my_editable_skills_impl",
+        return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/skill/mine",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    tag_predicates = mock_list.call_args.kwargs["tag_predicates"]
+    assert tag_predicates == [_TagAssignmentFilter(definition_id=1, value_ids=[2])]
 
 
 def test_count_my_editable_skills_api(mocker, mock_auth_header):

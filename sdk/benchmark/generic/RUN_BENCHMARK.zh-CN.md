@@ -63,12 +63,12 @@
 | `--tenant-id` | builtin skill tools 的运行范围；默认依次取 CLI、YAML `agent_info.tenant_id`、`tenant_id` |
 | `--skills-path` | builtin skill tools 使用的本地 Skill 根目录；未传时读取 `SKILLS_PATH` |
 
-`--language` 会选择和生产相同的公共 Prompt 模板与 ContextItem 装配路径。未显式设置
-`APP_DESCRIPTION` 时，Benchmark 也会按语言使用与生产一致的默认值：
+`--language` 会选择和生产相同的公共 Prompt 模板与 ContextItem 装配路径。
+Benchmark 与生产使用相同的 Nexent 固定身份描述：
 
 ```text
-zh -> Nexent 是一个开源智能体SDK和平台
-en -> Nexent is an open-source agent SDK and platform
+zh -> Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。
+en -> Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multimodal Q&A, retrieval, data analysis, and processing capabilities.
 ```
 
 `--language` 不会翻译 YAML 中的 `duty_prompt`、`constraint_prompt` 或

@@ -1,8 +1,15 @@
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "nexent-northbound must remain single-replica for startup task recovery" -}}
+{{- end -}}
+{{- if ne .Values.strategy.type "Recreate" -}}
+{{- fail "nexent-northbound strategy.type must be Recreate for startup task recovery" -}}
+{{- end -}}
 {{- $global := default dict .Values.global -}}
 {{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
+{{- $logsStorage := default dict $sharedStorage.logs -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -53,6 +60,26 @@ spec:
               value: {{ .Values.config.skipProxy | quote }}
             - name: UMASK
               value: {{ .Values.config.umask | quote }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 5013
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 5013
+            initialDelaySeconds: 5
+            periodSeconds: 5
           volumeMounts:
             - name: nexent-sql-files
               mountPath: /opt/nexent/sql
@@ -61,6 +88,8 @@ spec:
               mountPath: /mnt/nexent
             - name: nexent-skills
               mountPath: /mnt/nexent-data/skills
+            - name: nexent-logs
+              mountPath: /mnt/nexent-data/logs
           resources:
             requests:
               memory: {{ .Values.resources.backend.requests.memory }}
@@ -93,3 +122,6 @@ spec:
         - name: nexent-skills
           persistentVolumeClaim:
             claimName: {{ default "nexent-skills" $skillsStorage.existingClaim }}
+        - name: nexent-logs
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-logs" $logsStorage.existingClaim }}

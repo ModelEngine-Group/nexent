@@ -17,9 +17,9 @@ from consts.exceptions import (
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
-from services.vectordatabase_service import (
+from management.services.model.resolver import get_embedding_model_by_id
+from management.services.knowledge_base.service import (
     ElasticSearchService,
-    get_embedding_model_by_id,
     get_vector_db_core,
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
@@ -159,6 +159,14 @@ async def delete_index(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
+        from services.tag_management_service import TagManagementService
+
+        TagManagementService.cleanup_resource_assignments(
+            tenant_id, "knowledge_base", index_name, user_id
+        )
+        TagManagementService.cleanup_document_assignments_for_knowledge_base(
+            tenant_id, "local", index_name, user_id
+        )
         return result
     except AppException:
         # Preserve the EDS code/details for the common application handler.
@@ -685,9 +693,12 @@ async def delete_documents(
             index_name, path_or_url, scope, vdb_core, **delete_kwargs
         )
 
-        # The service owns cleanup for real deletions.  Keep the legacy API
-        # fallback for callers/tests that provide an older service result.
-        if scope == "full" and "redis_cleanup" not in result and not result.get("deletion_pending"):
+        if scope == "full":
+            from services.tag_management_service import TagManagementService
+
+            TagManagementService.cleanup_document_assignments(
+                tenant_id, "local", index_name, path_or_url, user_id
+            )
             try:
                 redis_service = get_redis_service()
                 redis_cleanup_result = redis_service.delete_document_records(
@@ -1067,14 +1078,17 @@ async def hybrid_search(
                 index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
             )
             resolved_index_names.append(resolved_name)
-        result = ElasticSearchService.search_hybrid(
-            index_names=resolved_index_names,
-            query=payload.query,
-            tenant_id=tenant_id,
-            top_k=payload.top_k,
-            weight_accurate=payload.weight_accurate,
-            vdb_core=vdb_core,
-        )
+        search_kwargs = {
+            "index_names": resolved_index_names,
+            "query": payload.query,
+            "tenant_id": tenant_id,
+            "top_k": payload.top_k,
+            "weight_accurate": payload.weight_accurate,
+            "vdb_core": vdb_core,
+        }
+        if payload.tag_predicates:
+            search_kwargs["tag_predicates"] = payload.tag_predicates
+        result = ElasticSearchService.search_hybrid(**search_kwargs)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except KnowledgeBaseNeedsModelConfigError as exc:
         # Return a specific error that frontend can detect to show the config dialog

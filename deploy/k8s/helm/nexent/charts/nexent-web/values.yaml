@@ -21,8 +21,14 @@ resources:
       memory: 512Mi
       cpu: 500m
 
+probes:
+  startup:
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 60
+
 config:
-  marketBackend: "http://60.204.251.153:8010"
   proxyTimeoutMs: "600000"
   proxyWsTimeoutMs: "600000"
   sseProxyTimeoutMs: "600000"

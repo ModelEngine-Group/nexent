@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nexent-infrastructure-common
+description: Shared secrets and PostgreSQL bootstrap SQL for Nexent infrastructure
+type: application
+version: 0.1.0
+appVersion: "latest"

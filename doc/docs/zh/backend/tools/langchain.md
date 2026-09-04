@@ -1,6 +1,6 @@
 # 在 LangChain 中自定义工具（Python 指南）
 
-> 本文示例代码部分位于 `backend/mcp_service/langchain/compute_tool.py`
+> 本文示例代码部分位于 `backend/tool_collection/langchain/compute_tool.py`
 >
 > 参考链接：<https://python.langchain.ac.cn/docs/how_to/custom_tools/>
 

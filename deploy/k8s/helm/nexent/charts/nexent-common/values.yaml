@@ -69,7 +69,9 @@ config:
   umask: "0022"
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
-  marketBackend: "http://60.204.251.153:8010"
+  memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
+  externalMemorySearchEnabled: "false"
+  logDir: "/mnt/nexent-data/logs"
   modelEngine:
     enabled: "false"
   voiceService:
@@ -221,7 +223,6 @@ config:
 
 # Secrets used by common templates
 secrets:
-  elasticPassword: "nexent@2025"
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
   minio:

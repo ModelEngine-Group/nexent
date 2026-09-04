@@ -17,6 +17,7 @@ DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
 ORIGINAL_ARGS=("$@")
+DEPLOYMENT_SANDBOX_MODE_SELECTION_ENABLED="true"
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 DOCKER_ASSETS_DIR="$SCRIPT_DIR/assets"
@@ -66,6 +67,7 @@ print_docker_deploy_usage() {
     echo "  --components LIST          要部署的组件列表"
     echo "  --port-policy POLICY       development 或 production"
     echo "  --image-source SOURCE      general、mainland 或 local-latest"
+    echo "  --sandbox-mode MODE        disabled、lightweight 或 full（默认 lightweight）"
     echo "  --registry-profile NAME    兼容旧参数，映射为 general/mainland 镜像源"
     echo "  --image-registry-prefix P  镜像仓库前缀，例如 registry.example.com/nexent"
     echo "  --monitoring-provider NAME 选中 monitoring 组件时使用的监控 provider"
@@ -89,6 +91,7 @@ print_docker_deploy_usage() {
   echo "  --components LIST          Components to deploy"
   echo "  --port-policy POLICY       development or production"
   echo "  --image-source SOURCE      general, mainland, or local-latest"
+  echo "  --sandbox-mode MODE        disabled, lightweight, or full (default: lightweight)"
   echo "  --registry-profile NAME    Legacy alias for image source general/mainland"
   echo "  --image-registry-prefix P  Image registry prefix, e.g. registry.example.com/nexent"
   echo "  --monitoring-provider NAME Monitoring provider when monitoring is selected"
@@ -480,6 +483,44 @@ persist_deploy_options() {
   } > "$DEPLOY_OPTIONS_FILE"
 }
 
+# Persist the LOG_DIR env var alongside ROOT_DIR.
+#
+# Containers running the backend service see ROOT_DIR mounted at
+# /mnt/nexent-data (see deploy/docker/compose/docker-compose.*.yml), so the
+# log directory inside the container must be /mnt/nexent-data/logs. Writing
+# logs there gives a stable path that survives container restarts and is
+# bind-mounted back to ${ROOT_DIR}/logs on the host.
+#
+# This always overrides any pre-existing LOG_DIR value for the Docker
+# deployment path: a previous value of "logs" (the local-dev default) or
+# any other host path would otherwise be written into the container's
+# ephemeral layer and silently lost on container recreate.
+persist_log_dir() {
+  local log_dir="/mnt/nexent-data/logs"
+  if grep -q "^LOG_DIR=" "$ROOT_ENV_FILE"; then
+    local current_value
+    current_value="$(grep -E '^LOG_DIR=' "$ROOT_ENV_FILE" | head -n1 | cut -d'=' -f2-)"
+    if [ "$current_value" = "$log_dir" ]; then
+      echo "   ✓ LOG_DIR already configured for Docker mount"
+      return 0
+    fi
+    echo "   ↻ LOG_DIR was \"$current_value\"; overriding to \"$log_dir\" for Docker mount"
+  else
+    echo "   + LOG_DIR missing; setting to \"$log_dir\""
+  fi
+  update_env_var "LOG_DIR" "$log_dir"
+}
+
+# Ensure the host-side log directory exists with the right ownership/permissions
+# so that the container's backend process (running as root inside the image) can
+# create category subdirectories on first write.
+prepare_log_dir_on_host() {
+  if [ -z "${ROOT_DIR:-}" ]; then
+    return 0
+  fi
+  create_dir_with_permission "$ROOT_DIR/logs" 775
+}
+
 generate_minio_ak_sk() {
   if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] && [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
     echo "   MinIO credentials unchanged; reusing deploy/env/.env values"
@@ -833,6 +874,14 @@ pull_mcp_image() {
 }
 
 pull_sandbox_image() {
+  if [ "$DEPLOYMENT_SANDBOX_MODE" = "disabled" ]; then
+    echo "🔄 Sandbox is disabled; skipping sandbox image pull."
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
+
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
     echo "🔄 Skipping sandbox image pull because image source is local-latest."
     echo ""
@@ -863,6 +912,34 @@ pull_sandbox_image() {
   echo ""
   echo "--------------------------------"
   echo ""
+}
+
+reconcile_sandbox_container() {
+  local container_name="nexent-runtime-sandbox"
+  local current_image=""
+
+  if ! docker container inspect "$container_name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  current_image="$(docker container inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true)"
+  if [ "$DEPLOYMENT_SANDBOX_MODE" != "disabled" ] && [ "$current_image" = "$NEXENT_SANDBOX_IMAGE" ]; then
+    return 0
+  fi
+
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🔄 沙箱模式或镜像已变更，正在重建固定沙箱容器（工作区卷会保留）..."
+  else
+    echo "🔄 Sandbox mode or image changed; recreating the fixed Sandbox container (workspace volume is preserved)..."
+  fi
+  docker rm -f "$container_name" >/dev/null || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 无法移除旧的固定沙箱容器：$container_name"
+    else
+      echo "❌ Failed to remove the previous fixed Sandbox container: $container_name"
+    fi
+    return 1
+  }
 }
 
 select_deployment_mode() {
@@ -914,12 +991,14 @@ select_deployment_mode() {
       # Add new ROOT_DIR to .env
       update_env_var "ROOT_DIR" "$ROOT_DIR"
     fi
+    persist_log_dir
   elif grep -q "^ROOT_DIR=" "$ROOT_ENV_FILE"; then
   # Check if ROOT_DIR already exists in .env (second priority)
     # Extract existing ROOT_DIR value from .env
     env_root_dir=$(grep "^ROOT_DIR=" "$ROOT_ENV_FILE" | cut -d'=' -f2 | sed 's/^"//;s/"$//')
     ROOT_DIR="$env_root_dir"
     echo "   📁 Use existing ROOT_DIR path: $env_root_dir"
+    persist_log_dir
 
   else
   # Use default value and prompt user input (lowest priority)
@@ -928,6 +1007,7 @@ select_deployment_mode() {
     ROOT_DIR="${user_root_dir:-$default_root_dir}"
 
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   fi
   echo ""
   echo "--------------------------------"
@@ -1017,6 +1097,7 @@ prepare_directory_and_data() {
   create_dir_with_permission "$ROOT_DIR/postgresql" 775
   create_dir_with_permission "$ROOT_DIR/minio/data" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
+  create_dir_with_permission "$ROOT_DIR/memory-provider-plugins" 775
 
   cp -rn "$DOCKER_ASSETS_DIR/volumes" "$ROOT_DIR"
   chmod -R 775 $ROOT_DIR/volumes
@@ -1180,9 +1261,11 @@ configure_root_dir_from_env() {
     ROOT_DIR="$ROOT_DIR_PARAM"
     echo "   📁 Using ROOT_DIR from parameter: $ROOT_DIR"
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   elif grep -q "^ROOT_DIR=" "$ROOT_ENV_FILE"; then
     ROOT_DIR="$(grep "^ROOT_DIR=" "$ROOT_ENV_FILE" | cut -d'=' -f2 | sed 's/^"//;s/"$//')"
     echo "   📁 Use existing ROOT_DIR path: $ROOT_DIR"
+    persist_log_dir
   else
     local default_root_dir="$HOME/nexent-data"
     if deployment_should_prompt_root_dir && [ -t 0 ]; then
@@ -1193,7 +1276,9 @@ configure_root_dir_from_env() {
       ROOT_DIR="$default_root_dir"
     fi
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   fi
+  prepare_log_dir_on_host
   export ROOT_DIR
   echo ""
   echo "--------------------------------"
@@ -1635,7 +1720,7 @@ main_deploy() {
     echo "🌐 App version: $APP_VERSION"
   fi
 
-  # Select deployment components, port policy and image source via shared config.
+  # Select deployment components, port policy, image source, and Sandbox mode via shared config.
   apply_deployment_common_config || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "❌ 部署配置失败"
@@ -1691,6 +1776,13 @@ main_deploy() {
     fi
   fi
 
+  update_env_var "NEXENT_SANDBOX_DEFAULT_LEVEL" "${NEXENT_SANDBOX_DEFAULT_LEVEL}"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🔧 沙箱模式已设置为：${DEPLOYMENT_SANDBOX_MODE}（执行级别：${NEXENT_SANDBOX_DEFAULT_LEVEL}）"
+  else
+    echo "🔧 Sandbox mode set to: ${DEPLOYMENT_SANDBOX_MODE} (execution level: ${NEXENT_SANDBOX_DEFAULT_LEVEL})"
+  fi
+
   # Add permission
   prepare_directory_and_data || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1727,6 +1819,8 @@ main_deploy() {
     fi
     exit 1
   }
+
+  reconcile_sandbox_container || exit 1
 
   # Deploy infrastructure services
   deploy_infrastructure || {
