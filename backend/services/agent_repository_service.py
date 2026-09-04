@@ -1,5 +1,4 @@
 import logging
-import re
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
 from consts.agent_repository import (
@@ -1098,9 +1097,9 @@ async def import_agent_from_repository_impl(
     if record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID:
         from services.official_agent_service import install_official_agents
 
-        content = str(record.get("content") or "")
-        match = re.search(r"Official Nexent agent bundle:\s*(\S+)", content)
-        bundle_name = match.group(1) if match else str(record.get("name") or "")
+        # The official bundle directory name is the root Agent name, which is
+        # already stored in the repository record's ``name`` field.
+        bundle_name = str(record.get("name") or "")
         results = await install_official_agents(
             [bundle_name],
             tenant_id=tenant_id,

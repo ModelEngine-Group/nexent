@@ -102,11 +102,7 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
         "tags": bundle.tags or [],
         "icon": bundle.icon,
         "tool_count": sum(len(agent.tools) for agent in snapshot.agent_info.values()),
-        # Keep the bundle key in the listing without adding a schema field. The
-        # repository import path uses this key to reload the ZIP and prepare
-        # tenant-level dependencies; the serialized agent snapshot remains a
-        # normal repository snapshot for display and compatibility.
-        "content": f"Official Nexent agent bundle: {bundle.name}",
+        "content": "Official Nexent agent",
     }
     repository_id, updated = upsert_agent_repository_record(
         repository_data,
