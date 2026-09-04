@@ -2,7 +2,6 @@
 Celery tasks for data processing and vector storage
 """
 import asyncio
-from contextlib import contextmanager
 import json
 import logging
 import math
@@ -78,16 +77,16 @@ def _is_document_delete_requested(
     file_id: Optional[str] = None,
     tenant_id: Optional[str] = None,
 ) -> bool:
-    """Read the Redis fence and fall back to the durable PG status."""
-    if not index_name and not source and not file_id:
+    """Read the file-ID fence and use the matching PG row only on Redis errors."""
+    if not file_id:
         return False
     try:
-        if get_redis_service().is_document_delete_requested(
-            index_name=index_name,
-            path_or_url=source,
+        redis_fence_requested = get_redis_service().is_document_delete_requested(
             file_id=file_id,
-        ):
-            return True
+        )
+        # A healthy Redis miss is the normal path. Do not query PG for every
+        # processing-stage fence check; PG is reserved for Redis failures.
+        return bool(redis_fence_requested)
     except Exception as redis_exc:
         logger.warning(
             "Deletion fence lookup failed for index=%s source=%s file_id=%s: %s",
@@ -103,7 +102,6 @@ def _is_document_delete_requested(
             file_id=file_id,
             tenant_id=tenant_id,
             index_name=index_name,
-            object_name=source if not file_id else None,
             include_hidden=True,
         )
         return bool(record and str(record.get("status") or "").upper() in {"DELETE_REQUESTED", "DELETED"})
@@ -136,54 +134,6 @@ def _ensure_document_not_deleted(
         raise DocumentDeleteRequested(
             f"Document deletion requested for index={index_name}, source={source}, file_id={file_id}"
         )
-
-
-@contextmanager
-def _document_write_lease(
-    *,
-    index_name: Optional[str],
-    source: Optional[str],
-    task_id: Optional[str],
-    file_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
-):
-    """Hold a short-lived lease while issuing one external write."""
-    _ensure_document_not_deleted(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    )
-    lease_key = None
-    try:
-        try:
-            lease_key = get_redis_service().acquire_document_write_lease(
-                index_name=index_name,
-                path_or_url=source,
-                task_id=task_id,
-                file_id=file_id,
-            )
-        except Exception as redis_exc:
-            logger.warning(
-                "Document write lease unavailable for index=%s source=%s file_id=%s: %s",
-                index_name,
-                source,
-                file_id,
-                redis_exc,
-            )
-        _ensure_document_not_deleted(
-            index_name=index_name,
-            source=source,
-            file_id=file_id,
-            tenant_id=tenant_id,
-        )
-        yield
-    finally:
-        if lease_key:
-            try:
-                get_redis_service().release_document_write_lease(lease_key)
-            except Exception as release_exc:
-                logger.warning("Failed to release document write lease %s: %s", lease_key, release_exc)
 
 
 def _update_file_lifecycle(
@@ -855,42 +805,41 @@ def _send_chunks_to_es(
             if large_mode:
                 request_params["large_mode"] = "true"
 
-            with _document_write_lease(
+            _ensure_document_not_deleted(
                 index_name=index_name,
                 source=source,
-                task_id=task_id,
                 file_id=file_id,
                 tenant_id=tenant_id,
-            ):
-                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                    async with session.post(
-                        full_url,
-                        headers=headers,
-                        json=chunks,
-                        params=request_params,
-                        raise_for_status=False
-                    ) as response:
-                        text = await response.text()
-                        status = response.status
-                        parsed_body = _parse_json_or_none(text)
+            )
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                async with session.post(
+                    full_url,
+                    headers=headers,
+                    json=chunks,
+                    params=request_params,
+                    raise_for_status=False
+                ) as response:
+                    text = await response.text()
+                    status = response.status
+                    parsed_body = _parse_json_or_none(text)
 
-                        if status >= 400:
-                            error_code = _extract_error_code_from_es_response(
-                                parsed_body, text)
-                            if error_code:
-                                raise _build_forward_error(
-                                    message=f"ElasticSearch service returned HTTP {status}",
-                                    index_name=index_name,
-                                    source=source,
-                                    original_filename=original_filename,
-                                    error_code=error_code,
-                                )
+                    if status >= 400:
+                        error_code = _extract_error_code_from_es_response(
+                            parsed_body, text)
+                        if error_code:
+                            raise _build_forward_error(
+                                message=f"ElasticSearch service returned HTTP {status}",
+                                index_name=index_name,
+                                source=source,
+                                original_filename=original_filename,
+                                error_code=error_code,
+                            )
 
-                            raise Exception(
-                                f"ElasticSearch service returned HTTP {status}")
+                        raise Exception(
+                            f"ElasticSearch service returned HTTP {status}")
 
-                        result = parsed_body if isinstance(parsed_body, dict) else await response.json()
-                        return result
+                    result = parsed_body if isinstance(parsed_body, dict) else await response.json()
+                    return result
 
         except DocumentDeleteRequested:
             raise
@@ -2852,9 +2801,11 @@ def process_and_forward(
         file_id: Optional[str] = None,
 ) -> str:
     """
-    Combined task that chains processing and forwarding
+    Compatibility wrapper for task messages created before direct chain submission.
 
-    This task delegates to a chain of process -> forward
+    New API requests call ``submit_process_forward_chain`` directly so the
+    returned task ID always identifies the real processing chain.  This task
+    remains registered only so already queued wrapper messages can finish.
 
     Args:
         source: Source file path, URL, or text content

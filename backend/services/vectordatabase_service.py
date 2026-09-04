@@ -62,9 +62,9 @@ from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.knowledge_file_lifecycle_db import (
     create_delete_tombstone,
     delete_file_record,
+    delete_file_records_for_knowledge_base,
     get_file_record,
     list_file_records,
-    list_pending_delete_records,
     transition_file_record,
 )
 from services.knowledge_storage_service import (
@@ -660,8 +660,9 @@ class ElasticSearchService:
         # Check the durable lifecycle table before mutating any external
         # system.  This closes the race where a processing task can recreate
         # data after the index/source cleanup has started.
-        ElasticSearchService._assert_knowledge_base_delete_allowed(index_name)
+        lifecycle_rows = ElasticSearchService._assert_knowledge_base_delete_allowed(index_name)
 
+        lifecycle_fence_cleanup = {"cleared_count": 0, "failed_count": 0}
         try:
             minio_cleanup = await ElasticSearchService._delete_kb_source_objects(
                 index_name=index_name,
@@ -675,7 +676,6 @@ class ElasticSearchService:
                 f"Step 3/5: Marking all tasks as cancelled and cleaning up Redis records for index '{index_name}'.")
             redis_cleanup_result = {}
             try:
-                from services.redis_service import get_redis_service
                 redis_service = get_redis_service()
                 redis_cleanup_result = redis_service.delete_knowledgebase_records(
                     index_name)
@@ -698,6 +698,48 @@ class ElasticSearchService:
             finally:
                 _SKIP_INDEX_SOURCE_CLEANUP.reset(cleanup_token)
 
+            lifecycle_cleanup = {"deleted_count": 0}
+            if lifecycle_rows:
+                try:
+                    lifecycle_cleanup["deleted_count"] = delete_file_records_for_knowledge_base(
+                        index_name=index_name,
+                    )
+                    logger.info(
+                        "Deleted %d lifecycle records for knowledge base '%s'",
+                        lifecycle_cleanup["deleted_count"],
+                        index_name,
+                    )
+                except Exception as lifecycle_error:
+                    logger.error(
+                        "Failed to delete lifecycle records for knowledge base '%s': %s",
+                        index_name,
+                        lifecycle_error,
+                        exc_info=True,
+                    )
+                    lifecycle_cleanup["error"] = str(lifecycle_error)
+
+            # A file deletion request may already have scheduled a local
+            # retry task and installed a Redis fence.  The knowledge-base
+            # index has now been removed, so those per-file coordinators must
+            # not keep retrying against a deleted index or leave stale fences.
+            for lifecycle_row in lifecycle_rows:
+                file_id = lifecycle_row.get("file_id")
+                if not file_id:
+                    continue
+                pending_delete_task = _document_delete_tasks.pop(str(file_id), None)
+                if pending_delete_task and not pending_delete_task.done():
+                    pending_delete_task.cancel()
+                try:
+                    if get_redis_service().clear_document_delete_fence(file_id=file_id):
+                        lifecycle_fence_cleanup["cleared_count"] += 1
+                except Exception as fence_error:
+                    lifecycle_fence_cleanup["failed_count"] += 1
+                    logger.warning(
+                        "Failed to clear deletion fence for file %s after knowledge-base deletion: %s",
+                        file_id,
+                        fence_error,
+                    )
+
             # Construct final result
             result = {
                 "status": "success",
@@ -709,7 +751,9 @@ class ElasticSearchService:
                 ),
                 "es_delete_result": delete_index_result,
                 "minio_cleanup": minio_cleanup,
-                "redis_cleanup": redis_cleanup_result
+                "redis_cleanup": redis_cleanup_result,
+                "lifecycle_cleanup": lifecycle_cleanup,
+                "lifecycle_fence_cleanup": lifecycle_fence_cleanup,
             }
 
             if "errors" in redis_cleanup_result:
@@ -725,13 +769,14 @@ class ElasticSearchService:
             raise e
 
     @staticmethod
-    def _assert_knowledge_base_delete_allowed(index_name: str) -> None:
+    def _assert_knowledge_base_delete_allowed(index_name: str) -> List[Dict[str, Any]]:
         """Raise an EDS conflict when files are still being ingested.
 
         Lifecycle rows are the durable source of truth for this precondition.
         ``DELETE_REQUESTED`` and ``DELETED`` rows are deliberately ignored:
         they are already owned by the deletion path and must not block a
-        broader knowledge-base deletion.
+        broader knowledge-base deletion. The rows are returned so the caller
+        can clean up lifecycle records after external deletion succeeds.
         """
         try:
             lifecycle_rows = list_file_records(
@@ -780,6 +825,8 @@ class ElasticSearchService:
                     "blocking_files": blocking_files,
                 },
             )
+
+        return lifecycle_rows
 
     @staticmethod
     async def _delete_kb_source_objects(
@@ -2249,8 +2296,6 @@ class ElasticSearchService:
 
             try:
                 fence_ok = get_redis_service().mark_document_delete_requested(
-                    index_name=index_name,
-                    path_or_url=path_or_url,
                     file_id=(record or {}).get("file_id") or file_id,
                     requested_by=requested_by,
                 )
@@ -2304,11 +2349,9 @@ class ElasticSearchService:
     @staticmethod
     def _cancel_document_tasks(
             *,
-            index_name: str,
-            path_or_url: str,
             lifecycle_record: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Revoke known Celery tasks while the document fence stops late tasks."""
+        """Revoke the Celery tasks recorded for one lifecycle file."""
         task_ids = {
             lifecycle_record.get(field)
             for field in ("process_task_id", "forward_task_id", "parent_task_id")
@@ -2336,14 +2379,7 @@ class ElasticSearchService:
                                 kwargs = {}
                         if not isinstance(kwargs, dict):
                             kwargs = {}
-                        task_source = kwargs.get("source") or kwargs.get("path_or_url")
-                        task_matches = (
-                            (file_id and kwargs.get("file_id") == file_id)
-                            or (
-                                kwargs.get("index_name") == index_name
-                                and task_source == path_or_url
-                            )
-                        )
+                        task_matches = bool(file_id and kwargs.get("file_id") == file_id)
                         if task_matches and task.get("id"):
                             task_ids.add(task["id"])
         except Exception as inspect_exc:
@@ -2382,69 +2418,77 @@ class ElasticSearchService:
             timeout_seconds: float,
             poll_interval_seconds: float = 0.2,
     ) -> bool:
-        """Wait for known/visible Celery work to observe the deletion fence."""
+        """Wait for the file's real Celery chain to reach a terminal state.
+
+        The lifecycle row stores the ID returned by
+        ``submit_process_forward_chain``.  Waiting on that result is more
+        reliable than inspecting only active/reserved workers: a task may be
+        queued in the broker or may already have handed work to a chord while
+        being absent from both inspection snapshots.
+        """
         deadline = time.monotonic() + max(0.0, float(timeout_seconds))
-        tracked_ids = {
-            lifecycle_record.get(field)
-            for field in ("process_task_id", "forward_task_id", "parent_task_id")
-            if lifecycle_record.get(field)
-        }
+        task_id = lifecycle_record.get("parent_task_id")
+        if not task_id:
+            lifecycle_status = str(lifecycle_record.get("status") or "").upper()
+            if lifecycle_status in KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES:
+                logger.warning(
+                    "Cannot drain file task without parent_task_id status=%s file_id=%s",
+                    lifecycle_status,
+                    lifecycle_record.get("file_id"),
+                )
+                return False
+            return True
+
         while True:
-            visible_ids = set()
-            celery_app = None
             try:
-                from data_process.app import app as celery_app
+                # The config service does not install Celery. Read the same
+                # result-backend record directly instead of importing the
+                # data-process Celery application across service boundaries.
+                task_data = get_redis_service().backend_client.get(
+                    f"celery-task-meta-{task_id}"
+                )
+                if task_data:
+                    if isinstance(task_data, bytes):
+                        task_data = task_data.decode("utf-8")
+                    task_meta = json.loads(task_data)
+                    task_state = str(
+                        task_meta.get("status") or task_meta.get("state") or ""
+                    ).upper()
+                    if task_state in {"SUCCESS", "FAILURE", "REVOKED"}:
+                        logger.info(
+                            "Celery task chain reached terminal state task_id=%s state=%s",
+                            task_id,
+                            task_state,
+                        )
+                        return True
+                else:
+                    task_state = "PENDING"
+                logger.debug(
+                    "Waiting for Celery task chain task_id=%s state=%s",
+                    task_id,
+                    task_state,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as result_exc:
+                logger.warning(
+                    "Unable to parse Celery task result task_id=%s: %s",
+                    task_id,
+                    result_exc,
+                )
+                return False
+            except Exception as result_exc:
+                logger.warning(
+                    "Unable to read Celery task result task_id=%s: %s",
+                    task_id,
+                    result_exc,
+                )
+                return False
 
-                inspector = celery_app.control.inspect(timeout=0.5)
-                for method_name in ("active", "reserved"):
-                    try:
-                        workers = getattr(inspector, method_name)() or {}
-                    except Exception as inspect_exc:
-                        logger.debug("Unable to inspect %s Celery tasks while draining: %s", method_name, inspect_exc)
-                        continue
-                    for worker_tasks in workers.values():
-                        for task in worker_tasks or []:
-                            task_id = task.get("id")
-                            kwargs = task.get("kwargs") or {}
-                            if isinstance(kwargs, str):
-                                try:
-                                    kwargs = json.loads(kwargs)
-                                except Exception:
-                                    kwargs = {}
-                            if not isinstance(kwargs, dict):
-                                kwargs = {}
-                            task_source = kwargs.get("source") or kwargs.get("path_or_url")
-                            matches = (
-                                task_id in tracked_ids
-                                or kwargs.get("file_id") == lifecycle_record.get("file_id")
-                                or (
-                                    kwargs.get("index_name") == index_name
-                                    and task_source == path_or_url
-                                )
-                            )
-                            if matches and task_id:
-                                visible_ids.add(task_id)
-            except Exception as inspect_exc:
-                logger.debug("Celery task drain unavailable: %s", inspect_exc)
-
-            for task_id in visible_ids:
-                try:
-                    get_redis_service().mark_task_cancelled(task_id)
-                except Exception:
-                    pass
-                try:
-                    celery_app.control.revoke(task_id, terminate=False)
-                except Exception:
-                    pass
-
-            if not visible_ids:
-                return True
             if time.monotonic() >= deadline:
                 logger.warning(
-                    "Timed out waiting for Celery tasks index=%s path=%s active=%s",
+                    "Timed out waiting for Celery task chain index=%s path=%s task_id=%s",
                     index_name,
                     path_or_url,
-                    sorted(visible_ids),
+                    task_id,
                 )
                 return False
             time.sleep(max(0.01, float(poll_interval_seconds)))
@@ -2459,7 +2503,7 @@ class ElasticSearchService:
             lifecycle_record: Optional[Dict[str, Any]],
             requested_by: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Finish one deletion once all in-flight writes have drained."""
+        """Finish one deletion after the file task chain has terminated."""
         file_id = (lifecycle_record or {}).get("file_id")
         legacy_mode = lifecycle_record is None or not lifecycle_record.get("object_name")
         if lifecycle_record is None or not lifecycle_record.get("object_name"):
@@ -2483,27 +2527,6 @@ class ElasticSearchService:
                     "source_available": True,
                     "message": "Deletion requested; waiting for Celery tasks to stop.",
                 }
-            try:
-                redis_service = get_redis_service()
-                drained = await asyncio.to_thread(
-                    redis_service.wait_for_document_writes,
-                    index_name=index_name,
-                    path_or_url=path_or_url,
-                    file_id=file_id,
-                    timeout_seconds=DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
-                )
-            except Exception as drain_exc:
-                logger.warning("Unable to drain document writes index=%s path=%s: %s", index_name, path_or_url, drain_exc)
-                drained = False
-        if not drained:
-            return {
-                "status": "pending",
-                "scope": scope,
-                "deletion_pending": True,
-                "lifecycle_status": "DELETE_REQUESTED",
-                "source_available": True,
-                "message": "Deletion requested; waiting for in-flight processing to stop.",
-            }
 
         if scope == "source_only":
             try:
@@ -2599,13 +2622,9 @@ class ElasticSearchService:
         try:
             fence_service = get_redis_service()
             fence_service.clear_document_delete_fence(
-                index_name=index_name,
-                path_or_url=path_or_url,
                 file_id=file_id,
             )
             if fence_service.is_document_delete_requested(
-                index_name=index_name,
-                path_or_url=path_or_url,
                 file_id=file_id,
             ):
                 if not legacy_mode:
@@ -2696,33 +2715,6 @@ class ElasticSearchService:
         )
 
     @staticmethod
-    async def resume_pending_document_deletions() -> int:
-        """Resume durable DELETE_REQUESTED rows after an API restart."""
-        try:
-            pending_records = list_pending_delete_records()
-        except Exception as exc:
-            logger.debug("Pending deletion recovery skipped: %s", exc)
-            return 0
-        resumed = 0
-        for record in pending_records:
-            if not record.get("object_name"):
-                continue
-            try:
-                core = get_vector_db_core()
-                ElasticSearchService._schedule_document_delete_retry(
-                    index_name=record["index_name"],
-                    path_or_url=record["object_name"],
-                    scope="full",
-                    vdb_core=core,
-                    lifecycle_record=record,
-                    requested_by=record.get("updated_by"),
-                )
-                resumed += 1
-            except Exception as exc:
-                logger.debug("Unable to resume deletion for %s: %s", record.get("file_id"), exc)
-        return resumed
-
-    @staticmethod
     def delete_lifecycle_record_without_object(
             lifecycle_record: Dict[str, Any],
             requested_by: Optional[str] = None,
@@ -2738,8 +2730,6 @@ class ElasticSearchService:
         current_status = str(lifecycle_record.get("status") or "").upper()
         try:
             get_redis_service().mark_document_delete_requested(
-                index_name=index_name,
-                path_or_url=None,
                 file_id=file_id,
                 requested_by=requested_by,
             )
@@ -2747,8 +2737,6 @@ class ElasticSearchService:
             logger.debug("Unable to install no-object deletion fence for %s: %s", file_id, fence_exc)
         try:
             ElasticSearchService._cancel_document_tasks(
-                index_name=index_name or "",
-                path_or_url="",
                 lifecycle_record=lifecycle_record,
             )
         except Exception as cancel_exc:
@@ -2766,8 +2754,6 @@ class ElasticSearchService:
             delete_file_record(file_id, expected_statuses=("DELETE_REQUESTED", "DELETED"))
             try:
                 get_redis_service().clear_document_delete_fence(
-                    index_name=index_name,
-                    path_or_url=None,
                     file_id=file_id,
                 )
             except Exception:
@@ -2820,8 +2806,6 @@ class ElasticSearchService:
 
         try:
             get_redis_service().clear_document_delete_fence(
-                index_name=index_name,
-                path_or_url=None,
                 file_id=file_id,
             )
         except Exception:
@@ -2869,8 +2853,6 @@ class ElasticSearchService:
                 file_id=file_id,
             )
         cancellation = ElasticSearchService._cancel_document_tasks(
-            index_name=index_name,
-            path_or_url=path_or_url,
             lifecycle_record=lifecycle_record,
         )
         result = await ElasticSearchService._finalize_document_delete(

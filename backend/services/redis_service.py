@@ -1,4 +1,3 @@
-import hashlib
 import json
 import logging
 import re
@@ -54,44 +53,15 @@ class RedisService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _document_identity(index_name: Optional[str], path_or_url: Optional[str]) -> str:
-        """Return a stable, non-sensitive identity for a document path."""
-        raw_identity = f"{index_name or ''}\x00{path_or_url or ''}"
-        return hashlib.sha256(raw_identity.encode("utf-8")).hexdigest()
-
-    @classmethod
-    def _document_fence_keys(
-        cls,
-        *,
-        index_name: Optional[str],
-        path_or_url: Optional[str],
-        file_id: Optional[str] = None,
-    ) -> tuple[str, ...]:
-        keys = []
-        if file_id:
-            keys.append(f"kb:delete:fence:file:{file_id}")
-        if index_name or path_or_url:
-            keys.append(
-                f"kb:delete:fence:document:{cls._document_identity(index_name, path_or_url)}"
-            )
-        return tuple(keys)
-
-    @classmethod
-    def _document_active_write_pattern(
-        cls,
-        *,
-        index_name: Optional[str],
-        path_or_url: Optional[str],
-        file_id: Optional[str] = None,
-    ) -> str:
-        identity = file_id or cls._document_identity(index_name, path_or_url)
-        return f"kb:delete:active-write:{identity}:*"
+    def _document_fence_key(file_id: Optional[str]) -> Optional[str]:
+        """Return the deletion-fence key for a lifecycle file record."""
+        if not file_id:
+            return None
+        return f"kb:delete:fence:file:{file_id}"
 
     def mark_document_delete_requested(
         self,
         *,
-        index_name: Optional[str],
-        path_or_url: Optional[str],
         file_id: Optional[str] = None,
         requested_by: Optional[str] = None,
     ) -> bool:
@@ -101,15 +71,11 @@ class RedisService:
         to recreate a deleted document until the deletion coordinator has
         explicitly completed and removed the fence.
         """
-        keys = self._document_fence_keys(
-            index_name=index_name, path_or_url=path_or_url, file_id=file_id
-        )
-        if not keys:
+        key = self._document_fence_key(file_id)
+        if not key:
             return False
         payload = json.dumps(
             {
-                "index_name": index_name,
-                "path_or_url": path_or_url,
                 "file_id": file_id,
                 "requested_by": requested_by,
                 "requested_at": time.time(),
@@ -119,22 +85,16 @@ class RedisService:
         try:
             # Use SET (not SETEX) so this marker survives worker/service
             # restarts and is removed only by the successful finalizer.
-            self.client.set(keys[0], payload)
-            for key in keys[1:]:
-                self.client.set(key, payload)
+            self.client.set(key, payload)
             logger.info(
-                "Installed document deletion fence index=%s source=%s file_id=%s keys=%s",
-                index_name,
-                path_or_url,
+                "Installed document deletion fence file_id=%s key=%s",
                 file_id,
-                keys,
+                key,
             )
             return True
         except Exception as exc:
             logger.error(
-                "Failed to install document deletion fence index=%s source=%s file_id=%s: %s",
-                index_name,
-                path_or_url,
+                "Failed to install document deletion fence file_id=%s: %s",
                 file_id,
                 exc,
             )
@@ -143,155 +103,54 @@ class RedisService:
     def is_document_delete_requested(
         self,
         *,
-        index_name: Optional[str],
-        path_or_url: Optional[str],
         file_id: Optional[str] = None,
     ) -> bool:
-        """Check whether a document has an active deletion fence."""
-        keys = self._document_fence_keys(
-            index_name=index_name, path_or_url=path_or_url, file_id=file_id
-        )
-        if not keys:
+        """Check whether a lifecycle file has an active deletion fence.
+
+        A healthy Redis miss returns ``False``. Redis errors are re-raised so
+        the caller can fall back to the durable PG lifecycle status instead of
+        treating an unavailable Redis service as a healthy miss.
+        """
+        key = self._document_fence_key(file_id)
+        if not key:
             return False
         try:
-            return any(bool(self.client.exists(key)) for key in keys)
+            return bool(self.client.exists(key))
         except Exception as exc:
             logger.warning(
-                "Failed to read document deletion fence index=%s source=%s file_id=%s: %s",
-                index_name,
-                path_or_url,
+                "Failed to read document deletion fence file_id=%s: %s",
                 file_id,
                 exc,
             )
-            return False
+            # Let the caller distinguish a healthy Redis miss from an
+            # unavailable Redis service and decide whether PG fallback is
+            # required.
+            raise
 
     def clear_document_delete_fence(
         self,
         *,
-        index_name: Optional[str],
-        path_or_url: Optional[str],
         file_id: Optional[str] = None,
     ) -> int:
         """Remove a document deletion fence after all cleanup completed."""
-        keys = self._document_fence_keys(
-            index_name=index_name, path_or_url=path_or_url, file_id=file_id
-        )
-        if not keys:
+        key = self._document_fence_key(file_id)
+        if not key:
             return 0
         try:
-            deleted = int(self.client.delete(*keys) or 0)
+            deleted = int(self.client.delete(key) or 0)
             logger.info(
-                "Cleared document deletion fence index=%s source=%s file_id=%s deleted=%s",
-                index_name,
-                path_or_url,
+                "Cleared document deletion fence file_id=%s deleted=%s",
                 file_id,
                 deleted,
             )
             return deleted
         except Exception as exc:
             logger.error(
-                "Failed to clear document deletion fence index=%s source=%s file_id=%s: %s",
-                index_name,
-                path_or_url,
+                "Failed to clear document deletion fence file_id=%s: %s",
                 file_id,
                 exc,
             )
             return 0
-
-    def acquire_document_write_lease(
-        self,
-        *,
-        index_name: Optional[str],
-        path_or_url: Optional[str],
-        task_id: Optional[str],
-        file_id: Optional[str] = None,
-        ttl_seconds: int = 900,
-    ) -> Optional[str]:
-        """Acquire an expiring lease around one external document write.
-
-        This lease is deliberately different from the deletion fence: it may
-        expire after a worker crash so deletion can make progress, while the
-        fence itself never expires.
-        """
-        if not task_id or self.is_document_delete_requested(
-            index_name=index_name, path_or_url=path_or_url, file_id=file_id
-        ):
-            return None
-        identity = file_id or self._document_identity(index_name, path_or_url)
-        key = f"kb:delete:active-write:{identity}:{task_id}"
-        try:
-            acquired = self.client.set(key, "1", nx=True, ex=max(1, int(ttl_seconds)))
-            if not acquired:
-                return None
-            # Re-check after acquiring the lease to close the fence/lease race.
-            if self.is_document_delete_requested(
-                index_name=index_name, path_or_url=path_or_url, file_id=file_id
-            ):
-                self.client.delete(key)
-                return None
-            return key
-        except Exception as exc:
-            logger.warning(
-                "Failed to acquire document write lease index=%s source=%s file_id=%s: %s",
-                index_name,
-                path_or_url,
-                file_id,
-                exc,
-            )
-            return None
-
-    def release_document_write_lease(self, lease_key: Optional[str]) -> None:
-        if not lease_key:
-            return
-        try:
-            self.client.delete(lease_key)
-        except Exception as exc:
-            logger.warning("Failed to release document write lease %s: %s", lease_key, exc)
-
-    def wait_for_document_writes(
-        self,
-        *,
-        index_name: Optional[str],
-        path_or_url: Optional[str],
-        file_id: Optional[str] = None,
-        timeout_seconds: float = 30.0,
-        poll_interval_seconds: float = 0.2,
-    ) -> bool:
-        """Wait until no worker holds a document write lease."""
-        deadline = time.monotonic() + max(0.0, float(timeout_seconds))
-        patterns = [
-            self._document_active_write_pattern(
-                index_name=index_name, path_or_url=path_or_url, file_id=file_id
-            )
-        ]
-        # Older workers may not have received file_id in their task kwargs;
-        # drain their path-based lease as well before deleting external data.
-        if file_id:
-            patterns.append(
-                self._document_active_write_pattern(
-                    index_name=index_name, path_or_url=path_or_url, file_id=None
-                )
-            )
-        while True:
-            try:
-                active = []
-                for pattern in patterns:
-                    active.extend(self.client.scan_iter(match=pattern, count=100))
-            except Exception as exc:
-                logger.warning("Failed to inspect document write leases %s: %s", patterns, exc)
-                return False
-            if not active:
-                return True
-            if time.monotonic() >= deadline:
-                logger.warning(
-                    "Timed out waiting for document write leases index=%s source=%s file_id=%s active=%s",
-                    index_name,
-                    path_or_url,
-                    file_id,
-                    len(active),
-                )
-                return False
-            time.sleep(max(0.01, float(poll_interval_seconds)))
 
     def mark_task_cancelled(self, task_id: str, ttl_hours: int = 24) -> bool:
         """

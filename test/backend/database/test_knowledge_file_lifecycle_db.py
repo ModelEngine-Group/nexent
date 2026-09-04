@@ -198,21 +198,6 @@ def test_list_file_records_applies_tenant_and_hides_deleted_rows(monkeypatch):
     assert query.filter.call_count == 1
 
 
-def test_list_pending_delete_records_returns_rows_in_update_order(monkeypatch):
-    session = MagicMock()
-    query = session.query.return_value
-    query.filter.return_value = query
-    query.order_by.return_value = query
-    rows = [MagicMock(file_id="fid-pending")]
-    query.all.return_value = rows
-    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
-    monkeypatch.setattr(lifecycle_db, "as_dict", lambda value: {"file_id": value.file_id})
-
-    assert lifecycle_db.list_pending_delete_records() == [{"file_id": "fid-pending"}]
-    query.filter.assert_called_once()
-    query.order_by.assert_called_once()
-
-
 def test_transition_file_record_updates_allowed_fields_and_version(monkeypatch):
     session = MagicMock()
     query = session.query.return_value
@@ -291,6 +276,22 @@ def test_delete_file_record_is_idempotent_when_row_is_missing(monkeypatch):
     monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
 
     assert lifecycle_db.delete_file_record("fid-missing") is False
+
+
+def test_delete_file_records_for_knowledge_base_only_removes_eligible_statuses(monkeypatch):
+    session = MagicMock()
+    query = session.query.return_value
+    query.filter.return_value = query
+    query.delete.return_value = 3
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+
+    assert lifecycle_db.delete_file_records_for_knowledge_base(
+        index_name="kb-1",
+        tenant_id="tenant-1",
+        knowledge_id=10,
+    ) == 3
+    assert query.filter.call_count == 3
+    query.delete.assert_called_once_with(synchronize_session=False)
 
 
 def test_delete_tombstone_creates_and_finalizes_missing_row(monkeypatch):

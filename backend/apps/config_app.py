@@ -84,21 +84,6 @@ async def start_dreaming_scheduler():
     await dreaming_scheduler.start()
 
 
-@app.on_event("startup")
-async def resume_pending_knowledge_file_deletions():
-    """Resume durable document deletions after an API restart."""
-    try:
-        from services.vectordatabase_service import ElasticSearchService
-
-        resumed = await ElasticSearchService.resume_pending_document_deletions()
-        if resumed:
-            logger.info("Resumed %s pending knowledge-file deletions", resumed)
-    except Exception as exc:
-        # Startup must remain compatible with deployments that have not run the
-        # lifecycle migration yet.
-        logger.warning("Pending knowledge-file deletion recovery skipped: %s", exc)
-
-
 @app.on_event("shutdown")
 async def stop_dreaming_scheduler():
     from services.memory_dreaming_scheduler import dreaming_scheduler

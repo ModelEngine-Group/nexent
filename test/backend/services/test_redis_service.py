@@ -2191,111 +2191,42 @@ class TestRedisService(unittest.TestCase):
         """Deletion fences are durable markers, unlike task cancellation flags."""
         self.redis_service._client = self.mock_redis_client
         self.mock_redis_client.set.return_value = True
-        self.mock_redis_client.exists.side_effect = [1, 0]
-        self.mock_redis_client.delete.return_value = 2
+        self.mock_redis_client.exists.side_effect = [1, 0, 0]
+        self.mock_redis_client.delete.return_value = 1
 
         assert self.redis_service.mark_document_delete_requested(
-            index_name="kb", path_or_url="knowledge_base/a.txt", file_id="fid-1"
+            file_id="fid-1"
         )
         for fence_call in self.mock_redis_client.set.call_args_list:
             assert "ex" not in fence_call.kwargs
             assert "px" not in fence_call.kwargs
         assert self.redis_service.is_document_delete_requested(
-            index_name="kb", path_or_url="knowledge_base/a.txt", file_id="fid-1"
+            file_id="fid-1"
         )
         assert self.redis_service.clear_document_delete_fence(
-            index_name="kb", path_or_url="knowledge_base/a.txt", file_id="fid-1"
-        ) == 2
+            file_id="fid-1"
+        ) == 1
         assert not self.redis_service.is_document_delete_requested(
-            index_name="kb", path_or_url="knowledge_base/a.txt", file_id="fid-1"
-        )
-
-    def test_document_write_lease_rejects_fenced_document(self):
-        """A worker must not acquire a write lease after deletion is requested."""
-        self.redis_service._client = self.mock_redis_client
-        self.mock_redis_client.exists.return_value = 1
-
-        lease = self.redis_service.acquire_document_write_lease(
-            index_name="kb", path_or_url="knowledge_base/a.txt", file_id="fid-1", task_id="task-1"
-        )
-
-        assert lease is None
-        self.mock_redis_client.set.assert_not_called()
-
-    def test_wait_for_document_writes_drains_expired_lease(self):
-        """The drain waits for a lease to disappear before external deletion."""
-        self.redis_service._client = self.mock_redis_client
-        self.mock_redis_client.scan_iter.side_effect = [[b"lease"], [], [], []]
-
-        assert self.redis_service.wait_for_document_writes(
-            index_name="kb",
-            path_or_url="knowledge_base/a.txt",
-            file_id="fid-1",
-            timeout_seconds=0.1,
-            poll_interval_seconds=0.01,
+            file_id="fid-1"
         )
 
     def test_document_fence_handles_empty_identity_and_redis_errors(self):
-        """Fence helpers fail closed without turning Redis outages into exceptions."""
+        """Fence reads surface Redis outages so callers can use PG fallback."""
         self.redis_service._client = self.mock_redis_client
         self.assertFalse(self.redis_service.mark_document_delete_requested(
-            index_name=None, path_or_url=None, file_id=None))
+            file_id=None))
         self.mock_redis_client.set.side_effect = redis.RedisError("write failed")
         self.assertFalse(self.redis_service.mark_document_delete_requested(
-            index_name="kb", path_or_url="obj"))
+            file_id="fid-1"))
         self.mock_redis_client.exists.side_effect = redis.RedisError("read failed")
-        self.assertFalse(self.redis_service.is_document_delete_requested(
-            index_name="kb", path_or_url="obj"))
+        with self.assertRaises(redis.RedisError):
+            self.redis_service.is_document_delete_requested(
+                file_id="fid-1")
         self.assertEqual(self.redis_service.clear_document_delete_fence(
-            index_name=None, path_or_url=None, file_id=None), 0)
+            file_id=None), 0)
         self.mock_redis_client.delete.side_effect = redis.RedisError("delete failed")
         self.assertEqual(self.redis_service.clear_document_delete_fence(
-            index_name="kb", path_or_url="obj"), 0)
-
-    def test_document_fence_read_handles_empty_identity(self):
-        self.redis_service._client = self.mock_redis_client
-        self.assertFalse(self.redis_service.is_document_delete_requested(
-            index_name=None, path_or_url=None, file_id=None))
-        self.mock_redis_client.exists.assert_not_called()
-
-    def test_document_write_lease_handles_races_and_errors(self):
-        """Lease acquisition/release covers contention, Redis errors, and cleanup."""
-        self.redis_service._client = self.mock_redis_client
-        self.mock_redis_client.exists.return_value = 0
-        self.mock_redis_client.set.return_value = False
-        self.assertIsNone(self.redis_service.acquire_document_write_lease(
-            index_name="kb", path_or_url="obj", task_id="task"))
-        self.mock_redis_client.set.side_effect = redis.RedisError("set failed")
-        self.assertIsNone(self.redis_service.acquire_document_write_lease(
-            index_name="kb", path_or_url="obj", task_id="task"))
-        self.redis_service.release_document_write_lease(None)
-        self.mock_redis_client.delete.side_effect = redis.RedisError("release failed")
-        self.redis_service.release_document_write_lease("lease")
-
-    def test_document_write_lease_deletes_a_lease_when_fence_wins_the_race(self):
-        self.redis_service._client = self.mock_redis_client
-        self.mock_redis_client.exists.side_effect = [0, 0, 0, 1]
-        self.mock_redis_client.set.return_value = True
-
-        self.assertIsNone(self.redis_service.acquire_document_write_lease(
-            index_name="kb", path_or_url="obj", task_id="task", file_id="fid"))
-        self.mock_redis_client.delete.assert_called_once()
-        assert self.mock_redis_client.delete.call_args.args[0].startswith(
-            "kb:delete:active-write:"
-        )
-
-    def test_wait_for_document_writes_handles_scan_error_and_timeout(self):
-        """A scan failure or a lease that never drains returns False."""
-        self.redis_service._client = self.mock_redis_client
-        self.mock_redis_client.scan_iter.side_effect = redis.RedisError("scan failed")
-        self.assertFalse(self.redis_service.wait_for_document_writes(
-            index_name="kb", path_or_url="obj", timeout_seconds=0.01))
-
-        self.mock_redis_client.scan_iter.side_effect = [[b"lease"], [b"lease"]]
-        with patch("backend.services.redis_service.time.monotonic", side_effect=[0.0, 1.0]):
-            self.assertFalse(self.redis_service.wait_for_document_writes(
-                index_name="kb", path_or_url="obj", timeout_seconds=0.1,
-                poll_interval_seconds=0.01))
+            file_id="fid-1"), 0)
 
     def test_cleanup_single_task_related_keys_removes_split_companions(self):
         """The aggregated ready marker and per-part payloads are cleaned with the task."""

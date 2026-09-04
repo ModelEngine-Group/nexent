@@ -185,18 +185,6 @@ class TestConfigAppRouterConfiguration:
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
 
-        lifecycle_module = types.ModuleType("services.vectordatabase_service")
-        lifecycle_service = types.SimpleNamespace(
-            resume_pending_document_deletions=AsyncMock(return_value=2)
-        )
-        lifecycle_module.ElasticSearchService = lifecycle_service
-        monkeypatch.setitem(sys.modules, "services.vectordatabase_service", lifecycle_module)
-        asyncio.run(config_app.resume_pending_knowledge_file_deletions())
-        lifecycle_service.resume_pending_document_deletions.side_effect = RuntimeError(
-            "migration missing"
-        )
-        asyncio.run(config_app.resume_pending_knowledge_file_deletions())
-
         assert api_key_router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {
             "/api-keys",

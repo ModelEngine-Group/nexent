@@ -1889,9 +1889,6 @@ def test_send_chunks_to_es_returns_response_json_when_body_is_not_json(monkeypat
         def is_document_delete_requested(self, **_kwargs):
             return False
 
-        def acquire_document_write_lease(self, **_kwargs):
-            return None
-
     monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisService())
     assert tasks._send_chunks_to_es(
         chunks=[{"content": "x"}], index_name="idx", authorization=None,
@@ -1905,13 +1902,12 @@ def test_send_chunks_to_es_raises_generic_http_error_without_error_code(monkeypa
     _patch_send_chunks_http(monkeypatch, tasks, status=500, body="upstream failure")
     monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
         is_document_delete_requested=lambda **_kwargs: False,
-        acquire_document_write_lease=lambda **_kwargs: None,
     ))
 
     with pytest.raises(Exception, match="ElasticSearch service returned HTTP 500"):
         tasks._send_chunks_to_es(
             chunks=[{"content": "x"}], index_name="idx", authorization=None,
-            task_id="task", source="obj", original_filename="x.txt"
+            task_id="task", source="obj", original_filename="x.txt", file_id="fid"
         )
 
 
@@ -1931,7 +1927,7 @@ def test_send_chunks_to_es_propagates_document_delete_request(monkeypatch):
     with pytest.raises(tasks.DocumentDeleteRequested):
         tasks._send_chunks_to_es(
             chunks=[{"content": "x"}], index_name="idx", authorization=None,
-            task_id="task", source="obj", original_filename="x.txt"
+            task_id="task", source="obj", original_filename="x.txt", file_id="fid"
         )
 
 
@@ -3064,7 +3060,7 @@ def test_forward_part_returns_cancelled_when_parent_is_cancelled(monkeypatch):
 
 
 def test_document_delete_fence_lookup_paths(monkeypatch):
-    """Deletion checks cover empty identity, Redis fence, and durable PG fallback."""
+    """Deletion checks cover Redis hits, misses, and PG fallback on errors."""
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
 
     assert tasks._is_document_delete_requested(
@@ -3078,114 +3074,31 @@ def test_document_delete_fence_lookup_paths(monkeypatch):
     assert tasks._is_document_delete_requested(
         index_name="idx", source="obj", file_id="fid") is True
 
+    pg_lookups = []
+    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle.get_file_record = lambda **_kwargs: pg_lookups.append(True)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+
+    class RedisClear:
+        def is_document_delete_requested(self, **_kwargs):
+            return False
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisClear())
+    assert tasks._is_document_delete_requested(
+        index_name="idx", source="obj", file_id="fid") is False
+    assert pg_lookups == []
+
     class RedisUnavailable:
         def is_document_delete_requested(self, **_kwargs):
             raise RuntimeError("redis unavailable")
 
     monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisUnavailable())
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
     lifecycle.get_file_record = lambda **_kwargs: {
         "file_id": "fid", "status": "DELETE_REQUESTED"
     }
     monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
     assert tasks._is_document_delete_requested(
         index_name="idx", source="obj", file_id="fid", tenant_id="tenant") is True
-
-
-def test_document_write_lease_acquires_and_releases(monkeypatch):
-    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
-    calls = []
-
-    class RedisService:
-        def is_document_delete_requested(self, **_kwargs):
-            return False
-
-        def acquire_document_write_lease(self, **kwargs):
-            calls.append(("acquire", kwargs))
-            return "lease-key"
-
-        def release_document_write_lease(self, key):
-            calls.append(("release", key))
-
-    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisService())
-    with tasks._document_write_lease(
-        index_name="idx", source="obj", task_id="task", file_id="fid",
-        tenant_id="tenant",
-    ):
-        calls.append(("write", None))
-    assert [call[0] for call in calls] == ["acquire", "write", "release"]
-
-
-def test_document_write_lease_rejects_a_document_fenced_before_acquire(monkeypatch):
-    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
-
-    class RedisService:
-        def is_document_delete_requested(self, **_kwargs):
-            return True
-
-        def acquire_document_write_lease(self, **_kwargs):
-            raise AssertionError("a fenced document must not acquire a lease")
-
-    redis_service = RedisService()
-    monkeypatch.setattr(tasks, "get_redis_service", lambda: redis_service)
-    with pytest.raises(tasks.DocumentDeleteRequested):
-        with tasks._document_write_lease(
-            index_name="idx", source="obj", task_id="task", file_id="fid"
-        ):
-            raise AssertionError("a fenced document must not write")
-
-
-def test_document_write_lease_continues_when_redis_lease_is_unavailable(monkeypatch):
-    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
-    writes = []
-
-    class RedisService:
-        def is_document_delete_requested(self, **_kwargs):
-            return False
-
-        def acquire_document_write_lease(self, **_kwargs):
-            raise RuntimeError("redis unavailable")
-
-        def release_document_write_lease(self, _key):
-            raise AssertionError("no release is needed without a lease")
-
-    redis_service = RedisService()
-    monkeypatch.setattr(tasks, "get_redis_service", lambda: redis_service)
-    with tasks._document_write_lease(
-        index_name="idx", source="obj", task_id="task", file_id="fid"
-    ):
-        writes.append("external-write")
-    assert writes == ["external-write"]
-
-
-def test_document_write_lease_rechecks_fence_and_releases_raced_lease(monkeypatch):
-    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
-    calls = []
-
-    class RedisService:
-        def __init__(self):
-            self.checks = 0
-
-        def is_document_delete_requested(self, **_kwargs):
-            self.checks += 1
-            return self.checks == 2
-
-        def acquire_document_write_lease(self, **_kwargs):
-            calls.append("acquire")
-            return "lease-key"
-
-        def release_document_write_lease(self, key):
-            calls.append(("release", key))
-            raise RuntimeError("release temporarily unavailable")
-
-    service = RedisService()
-    monkeypatch.setattr(tasks, "get_redis_service", lambda: service)
-    with pytest.raises(tasks.DocumentDeleteRequested):
-        with tasks._document_write_lease(
-            index_name="idx", source="obj", task_id="task", file_id="fid"
-        ):
-            raise AssertionError("the raced deletion must stop the write")
-    assert calls == ["acquire", ("release", "lease-key")]
 
 
 def test_process_part_discards_chunks_when_deletion_wins_after_ray_processing(monkeypatch):
