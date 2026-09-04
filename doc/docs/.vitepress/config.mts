@@ -162,10 +162,6 @@ export default defineConfig({
                 items: [
                   { text: "Overview", link: "/en/developer-guide/overview" },
                   { text: "Environment Setup", link: "/en/developer-guide/environment-setup" },
-                  {
-                    text: "External Memory Plugins",
-                    link: "/en/developer-guide/external-memory-plugin",
-                  },
                 ],
               },
               {
@@ -442,10 +438,6 @@ export default defineConfig({
                 items: [
                   { text: "概览", link: "/zh/developer-guide/overview" },
                   { text: "环境准备", link: "/zh/developer-guide/environment-setup" },
-                  {
-                    text: "外部记忆插件",
-                    link: "/zh/developer-guide/external-memory-plugin",
-                  },
                 ],
               },
               {
