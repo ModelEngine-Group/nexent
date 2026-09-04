@@ -145,6 +145,7 @@ test("AC-P3-27/28/33/34 statuses, card grid, responsive layout, and advanced set
   await page.setViewportSize({ width: 1600, height: 1000 });
   await gotoMemory(page);
   const providerGrid = page.locator(".external-provider-list");
+  await expect(page.getByText("Timeout 30s", { exact: true })).toHaveCount(0);
   await expect(providerGrid).toHaveCSS(
     "grid-template-columns",
     /^(\d+(\.\d+)?px ){3}\d+(\.\d+)?px$/

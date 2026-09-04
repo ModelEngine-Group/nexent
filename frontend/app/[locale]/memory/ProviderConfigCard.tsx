@@ -399,11 +399,6 @@ export function ProviderConfigCard({
                             })}
                           </Tag>
                         ))}
-                        <Text type="secondary">
-                          {t("memory.external.timeout", {
-                            seconds: provider.timeout_seconds,
-                          })}
-                        </Text>
                       </Flex>
                       {status.key !== "normal" && status.key !== "disabled" && (
                         <Text
