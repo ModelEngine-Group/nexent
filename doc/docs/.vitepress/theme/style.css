@@ -324,3 +324,96 @@ body.mermaid-fullscreen-active {
   overflow: hidden;
 }
 
+/**
+ * Component: Local search (sidebar entry + modal polish)
+ * -------------------------------------------------------------------------- */
+
+/* Search entry lives in the sidebar only. The modal itself is still owned by
+   VPNavBarSearch internals: the hidden navbar button is clicked programmatically,
+   and Ctrl+K keeps working regardless of visibility. */
+.VPNavBarSearch {
+  display: none !important;
+}
+
+:root {
+  /* Softer match highlight instead of solid brand background */
+  --vp-local-search-highlight-bg: color-mix(
+    in srgb,
+    var(--vp-c-brand-1) 18%,
+    transparent
+  );
+  --vp-local-search-highlight-text: var(--vp-c-text-1);
+
+  /* Selected result: soft brand tint (default is same as bg, border only) */
+  --vp-local-search-result-selected-bg: color-mix(
+    in srgb,
+    var(--vp-c-brand-1) 8%,
+    var(--vp-c-bg)
+  );
+}
+
+/* VPLocalSearchBox's scoped styles tie at (0,2,0) with single-class overrides,
+   and async-component CSS is injected after this stylesheet — doubling the root
+   class guarantees these win regardless of injection order. */
+
+/* Modal shell: larger radius + border + shadow */
+.VPLocalSearchBox.VPLocalSearchBox .shell {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.12);
+}
+
+.VPLocalSearchBox.VPLocalSearchBox .search-bar {
+  border-radius: 8px;
+}
+
+/* Keyboard shortcut footer: add a separator */
+.VPLocalSearchBox.VPLocalSearchBox .search-keyboard-shortcuts {
+  border-top: 1px solid var(--vp-c-divider);
+  padding-top: 12px;
+}
+
+/* Result list: spacing + slim scrollbar */
+.VPLocalSearchBox.VPLocalSearchBox .results {
+  gap: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vp-c-divider) transparent;
+}
+
+/* Result items: thinner border + larger radius */
+.VPLocalSearchBox .results .result {
+  border-width: 1px;
+  border-radius: 8px;
+}
+
+.VPLocalSearchBox .results .result > div {
+  margin: 10px 14px;
+}
+
+/* Title hierarchy: muted breadcrumb, bold page title */
+.VPLocalSearchBox .results .title {
+  font-size: 0.8rem;
+  color: var(--vp-c-text-3);
+}
+
+.VPLocalSearchBox .results .title .vpi-chevron-right {
+  opacity: 0.4;
+}
+
+.VPLocalSearchBox .results .title.main {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+/* Excerpt readability */
+.VPLocalSearchBox .results .excerpt {
+  opacity: 0.65;
+}
+
+/* Empty state */
+.VPLocalSearchBox .results .no-results {
+  color: var(--vp-c-text-3);
+  padding: 20px 12px;
+}
+

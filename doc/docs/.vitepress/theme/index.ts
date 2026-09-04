@@ -2,6 +2,7 @@
 import { h } from 'vue'
 import type { Theme } from 'vitepress'
 import DefaultTheme from 'vitepress/theme'
+import SidebarSearch from './SidebarSearch.vue'
 import './style.css'
 
 let preview: HTMLDivElement | undefined
@@ -416,6 +417,7 @@ export default {
   Layout: () => {
     return h(DefaultTheme.Layout, null, {
       // https://vitepress.dev/guide/extending-default-theme#layout-slots
+      'sidebar-nav-before': () => h(SidebarSearch)
     })
   },
   enhanceApp() {
