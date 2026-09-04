@@ -767,17 +767,6 @@ SET status = CASE WHEN nexent.resource_tag_assignment.status = 'active' THEN 'ac
 -- -----------------------------------------------------------------------------
 -- Consolidated from v2.5.1_0817_tag_library_permissions.sql
 -- -----------------------------------------------------------------------------
--- Historical permission migrations use explicit primary keys without advancing
--- the SERIAL sequence. Synchronize it before inserting grants through the
--- role_permission_id default.
-SELECT setval(
-    pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id'),
-    COALESCE(MAX(role_permission_id), 1),
-    MAX(role_permission_id) IS NOT NULL
-)
-FROM nexent.role_permission_t;
-
-
 SET LOCAL search_path TO nexent, public;
 
 -- tag-library-permission-seed:start
@@ -805,23 +794,77 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'TAG_LIBRARY/MANAGE contains duplicate role grants';
     END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM nexent.role_permission_t AS existing
+        JOIN (
+            VALUES
+                (41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+                (92, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+                (229, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+                (230, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
+        ) AS required_grants(
+            role_permission_id,
+            user_role,
+            permission_category,
+            permission_type,
+            permission_subtype
+        ) ON existing.role_permission_id = required_grants.role_permission_id
+        WHERE existing.user_role IS DISTINCT FROM required_grants.user_role
+           OR existing.permission_category IS DISTINCT FROM required_grants.permission_category
+           OR existing.permission_type IS DISTINCT FROM required_grants.permission_type
+           OR existing.permission_subtype IS DISTINCT FROM required_grants.permission_subtype
+    ) THEN
+        RAISE EXCEPTION 'Unified tag migration blocked: tag_library_permission_id_conflict; a reserved permission ID is already in use';
+    END IF;
 END;
 $$;
 
-WITH required_grants (user_role, permission_category, permission_type, permission_subtype) AS (
+WITH required_grants (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) AS (
     VALUES
-        ('SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
-        ('ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
-        ('SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
-        ('ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
+        (41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (92, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (229, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (230, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
+)
+UPDATE nexent.role_permission_t AS existing
+SET role_permission_id = required_grants.role_permission_id
+FROM required_grants
+WHERE existing.user_role = required_grants.user_role
+  AND existing.permission_category = required_grants.permission_category
+  AND existing.permission_type = required_grants.permission_type
+  AND existing.permission_subtype = required_grants.permission_subtype
+  AND existing.role_permission_id <> required_grants.role_permission_id;
+
+WITH required_grants (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) AS (
+    VALUES
+        (41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (92, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (229, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+        (230, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')
 )
 INSERT INTO nexent.role_permission_t (
+    role_permission_id,
     user_role,
     permission_category,
     permission_type,
     permission_subtype
 )
 SELECT
+    required_grants.role_permission_id,
     required_grants.user_role,
     required_grants.permission_category,
     required_grants.permission_type,
@@ -835,6 +878,15 @@ WHERE NOT EXISTS (
       AND existing.permission_type = required_grants.permission_type
       AND existing.permission_subtype = required_grants.permission_subtype
 );
+
+-- Explicit primary keys do not advance a SERIAL sequence. Synchronize it after
+-- inserting and normalizing the grants so later default IDs cannot collide.
+SELECT setval(
+    pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id'),
+    COALESCE(MAX(role_permission_id), 1),
+    MAX(role_permission_id) IS NOT NULL
+)
+FROM nexent.role_permission_t;
 -- tag-library-permission-seed:end
 
 -- -----------------------------------------------------------------------------

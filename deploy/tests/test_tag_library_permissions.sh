@@ -31,12 +31,16 @@ assert_seed_contract() {
   printf '%s\n' "$block" | grep -Fq 'WHERE NOT EXISTS' \
     || fail "idempotent insert guard missing from $file"
 
-  for role in SU ADMIN SPEED ASSET_OWNER; do
-    printf '%s\n' "$block" | grep -Fq "('$role', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')" \
-      || fail "missing $role grant in $file"
+  for grant in \
+    "41, 'SU'" \
+    "92, 'ADMIN'" \
+    "229, 'SPEED'" \
+    "230, 'ASSET_OWNER'"; do
+    printf '%s\n' "$block" | grep -Fq "($grant, 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')" \
+      || fail "missing reserved grant ($grant) in $file"
   done
 
-  if printf '%s\n' "$block" | grep -Eq "\('(DEV|USER)', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'\)"; then
+  if printf '%s\n' "$block" | grep -Eq "'(DEV|USER)', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'"; then
     fail "DEV or USER management grant found in $file"
   fi
 }
@@ -52,6 +56,8 @@ fi
 sequence_line="$(grep -nF "pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id')" "$MIGRATION_FILE" | head -1 | cut -d: -f1)"
 seed_line="$(grep -nF 'tag-library-permission-seed:start' "$MIGRATION_FILE" | head -1 | cut -d: -f1)"
 [ -n "$sequence_line" ] || fail "role permission sequence repair missing from migration"
-[ "$sequence_line" -lt "$seed_line" ] || fail "role permission sequence must be repaired before grants are inserted"
+seed_end_line="$(grep -nF 'tag-library-permission-seed:end' "$MIGRATION_FILE" | head -1 | cut -d: -f1)"
+[ "$sequence_line" -gt "$seed_line" ] || fail "role permission sequence must be repaired after explicit grants are inserted"
+[ "$sequence_line" -lt "$seed_end_line" ] || fail "role permission sequence repair must remain inside the seed block"
 
 echo "Tag library permission seed contract passed."

@@ -333,6 +333,67 @@ SQL
   pass "empty legacy tenant provisions the final tag library and reruns idempotently"
 }
 
+test_tag_library_permission_ids_and_legacy_normalization() {
+  local database="utm_permission_ids"
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" >/dev/null <<'SQL'
+INSERT INTO nexent.role_permission_t (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) VALUES
+    (1605, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+    (1606, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+    (1607, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+    (1608, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE');
+
+SELECT setval('nexent.role_permission_t_role_permission_id_seq', 1608, TRUE);
+SQL
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  assert_query "$database" \
+    "SELECT string_agg(role_permission_id || ':' || user_role, ',' ORDER BY role_permission_id) FROM nexent.role_permission_t WHERE permission_category = 'RESOURCE' AND permission_type = 'TAG_LIBRARY' AND permission_subtype = 'MANAGE';" \
+    "41:SU,92:ADMIN,229:SPEED,230:ASSET_OWNER" \
+    "legacy generated permission IDs should normalize to the reserved IDs"
+  assert_query "$database" \
+    "SELECT (last_value >= (SELECT max(role_permission_id) FROM nexent.role_permission_t))::TEXT FROM nexent.role_permission_t_role_permission_id_seq;" \
+    "true" "permission sequence must not lag behind explicit IDs"
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  assert_query "$database" \
+    "SELECT string_agg(role_permission_id || ':' || user_role, ',' ORDER BY role_permission_id) FROM nexent.role_permission_t WHERE permission_category = 'RESOURCE' AND permission_type = 'TAG_LIBRARY' AND permission_subtype = 'MANAGE';" \
+    "41:SU,92:ADMIN,229:SPEED,230:ASSET_OWNER" \
+    "permission ID normalization should remain idempotent"
+  pass "TAG_LIBRARY permissions use reserved IDs and normalize legacy generated IDs"
+}
+
+test_tag_library_permission_id_conflict_rolls_back() {
+  local database="utm_permission_id_conflict"
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.role_permission_t (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) VALUES (
+    41, 'DEV', 'RESOURCE', 'MODEL', 'READ'
+);
+SQL
+
+  expect_migration_failure "$database" "tag_library_permission_id_conflict"
+  assert_schema_rolled_back "$database"
+  assert_query "$database" \
+    "SELECT role_permission_id || ':' || user_role || ':' || permission_type FROM nexent.role_permission_t;" \
+    "41:DEV:MODEL" "permission ID conflict rollback must preserve the existing permission"
+  pass "occupied reserved TAG_LIBRARY permission IDs fail closed and roll back"
+}
+
 test_valid_legacy_backfill_and_idempotency() {
   local database="utm_valid"
   local preflight_output
@@ -999,6 +1060,8 @@ main() {
 
   test_preflight_before_tag_schema
   test_empty_legacy_provisions_final_tag_library
+  test_tag_library_permission_ids_and_legacy_normalization
+  test_tag_library_permission_id_conflict_rolls_back
   test_valid_legacy_backfill_and_idempotency
   test_agent_category_compatibility_and_future_tenant_provisioning
   test_agent_category_capacity_conflict_rolls_back

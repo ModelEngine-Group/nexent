@@ -124,13 +124,13 @@ assert_file_not_contains "$DEPLOY_ROOT/sql/init.sql" \
   "init SQL should not contain migration-only tag permission grants"
 assert_file_contains "$UNIFIED_TAG_MIGRATION" \
   "pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id')" \
-  "consolidated migration should repair the role permission sequence before default IDs are used"
+  "consolidated migration should repair the role permission sequence after explicit IDs are used"
 assert_file_contains "$UNIFIED_TAG_MIGRATION" \
   "MAX(role_permission_id)" \
   "consolidated migration should advance beyond existing explicit permission IDs"
 assert_file_contains "$UNIFIED_TAG_MIGRATION" \
-  "('SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')" \
-  "consolidated migration should seed tag library grants"
+  "(41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')" \
+  "consolidated migration should seed tag library grants with reserved IDs"
 
 HISTORY_PROJECTION_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.3_merged_migrations.sql"
 assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
