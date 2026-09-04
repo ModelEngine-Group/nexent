@@ -292,6 +292,15 @@ RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
+# Logging Configuration
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_ROTATION_MODE = os.getenv("LOG_ROTATION_MODE", "time").lower()  # "time" or "size"
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))  # 10 MB
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "7"))  # days, used with time rotation
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "10"))
+
+
 # Service Control Flags
 DISABLE_RAY_DASHBOARD = os.getenv(
     "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
