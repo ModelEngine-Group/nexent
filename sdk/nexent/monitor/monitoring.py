@@ -2563,11 +2563,13 @@ class MonitoringRecordBuffer:
             os.getenv("MODEL_MONITORING_BATCH_SIZE", "100"))
         self._flush_interval: int = int(
             os.getenv("MODEL_MONITORING_FLUSH_INTERVAL_SECONDS", "30"))
+        self._error_retry_delay: float = min(1.0, float(self._flush_interval))
         self._consecutive_failures: int = 0
         self._max_failures: int = 3
         self._degraded_until: float = 0.0
         self._last_flush_time: float = time.time()
         self._running: bool = False
+        self._stop_event = threading.Event()
         self._flush_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
@@ -2578,6 +2580,7 @@ class MonitoringRecordBuffer:
         with self._lock:
             if self._running:
                 return
+            self._stop_event.clear()
             self._running = True
             self._flush_thread = threading.Thread(
                 target=self._flush_loop,
@@ -2593,6 +2596,7 @@ class MonitoringRecordBuffer:
         self._buffer.append(record)
 
     def _flush_loop(self) -> None:
+        retry_delay = 0.0
         while self._running:
             try:
                 now = time.time()
@@ -2604,13 +2608,20 @@ class MonitoringRecordBuffer:
                 if should_flush:
                     self._flush_to_db()
                     self._last_flush_time = now
+                retry_delay = 0.0
             except Exception as e:
                 logger.error(f"Error in monitoring flush loop: {e}")
+                # Back off from a short delay instead of always waiting a full
+                # flush interval, so a transient error does not stall retries.
+                retry_delay = min(
+                    self._flush_interval,
+                    self._error_retry_delay if retry_delay <= 0.0
+                    else retry_delay * 2,
+                )
 
-            for _ in range(10):
-                if not self._running:
-                    return
-                time.sleep(self._flush_interval / 10)
+            wait_time = retry_delay if retry_delay > 0.0 else self._flush_interval
+            if self._stop_event.wait(timeout=wait_time):
+                return
 
     def _flush_to_db(self) -> None:
         now = time.time()
@@ -2690,6 +2701,7 @@ class MonitoringRecordBuffer:
 
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()
         if self._flush_thread and self._flush_thread.is_alive():
             self._flush_thread.join(timeout=5)
         logger.info("Monitoring buffer flush thread stopped")
