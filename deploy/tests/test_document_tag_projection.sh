@@ -146,21 +146,29 @@ SQL
   pass "document tag projection remains valid after the consolidated migration reruns"
 }
 
-test_init_sql_fresh_schema() {
+test_fresh_install_requires_versioned_tag_migration() {
   local database="dtp_init"
   create_database "$database"
   run_file "$database" "$INIT_SQL" >/dev/null
   assert_query "$database" \
-    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" \
-    "1" "init.sql creates document_tag_projection for fresh installs"
-  pass "fresh install init.sql includes the document tag projection ledger"
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name IN ('tag_bucket', 'tag_bucket_resource_type', 'tag_definition', 'tag_value', 'resource_tag_assignment', 'document_tag_projection');" \
+    "0" "init.sql must not create unified tag management tables"
+  assert_query "$database" \
+    "SELECT count(*) FROM pg_proc AS procedure JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = 'nexent' AND procedure.proname IN ('provision_unified_tag_management', 'provision_unified_tag_management_after_user_tenant_insert', 'enforce_tag_definition_limit', 'enforce_tag_value_limit', 'enforce_resource_tag_assignment_rules');" \
+    "0" "init.sql must not create unified tag management functions"
+
+  run_migration_files_through "$database" "v2.5.2_unified_tag_management.sql"
+  assert_query "$database" \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name IN ('tag_bucket', 'tag_bucket_resource_type', 'tag_definition', 'tag_value', 'resource_tag_assignment', 'document_tag_projection');" \
+    "6" "the versioned migration chain must create all unified tag management tables"
+  pass "fresh installs receive the unified tag schema only through versioned migrations"
 }
 
 main() {
   require_prerequisites
   start_postgres
   test_migration_ddl
-  test_init_sql_fresh_schema
+  test_fresh_install_requires_versioned_tag_migration
   echo "PASS: all document tag projection SQL tests passed"
 }
 
