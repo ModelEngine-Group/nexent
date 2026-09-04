@@ -36,7 +36,15 @@ sfms_stub = types.ModuleType("services.file_management_service")
 async def _stub_upload_to_minio(files, folder, user_id=None):
     return []
 
-async def _stub_upload_files_impl(destination, file, folder, index_name, user_id=None):
+async def _stub_upload_files_impl(
+    destination,
+    file,
+    folder,
+    index_name,
+    user_id=None,
+    uploader_tenant_id=None,
+    upload_owner_service=None,
+):
     return [], [], []
 
 async def _stub_get_file_url_impl(object_name: str, expires: int):
@@ -243,7 +251,16 @@ async def test_options_route_ok():
 
 @pytest.mark.asyncio
 async def test_upload_files_success(monkeypatch):
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
+    async def fake_upload_impl(
+        dest,
+        files,
+        folder,
+        index_name,
+        user_id=None,
+        uploader_tenant_id=None,
+        upload_owner_service=None,
+    ):
+        assert upload_owner_service == "nexent-config"
         return [], ["/abs/path1"], ["a.txt"]
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
@@ -319,7 +336,15 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
             ]
             return result
 
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
+    async def fake_upload_impl(
+        dest,
+        files,
+        folder,
+        index_name,
+        user_id=None,
+        uploader_tenant_id=None,
+        upload_owner_service=None,
+    ):
         return UploadResult()
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
@@ -341,7 +366,15 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_files_internal_error(monkeypatch):
     """Test upload_files with internal error returns 500."""
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
+    async def fake_upload_impl(
+        dest,
+        files,
+        folder,
+        index_name,
+        user_id=None,
+        uploader_tenant_id=None,
+        upload_owner_service=None,
+    ):
         raise RuntimeError("Storage failed")
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)

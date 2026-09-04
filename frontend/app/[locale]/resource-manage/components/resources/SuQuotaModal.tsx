@@ -207,6 +207,11 @@ export function SuQuotaModal({
                   <Descriptions.Item label={t("quota.used", "Used")}>
                     {usedReadable}
                   </Descriptions.Item>
+                  <Descriptions.Item
+                    label={t("quota.esPhysicalIndex", "ES Physical Index")}
+                  >
+                    {usageData.es_physical_readable || "0 B"}
+                  </Descriptions.Item>
                   <Descriptions.Item label={t("quota.kbCount", "KBs")}>
                     {usageData.kb_count ?? 0}
                   </Descriptions.Item>

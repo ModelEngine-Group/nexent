@@ -1,5 +1,8 @@
 replicaCount: 1
 
+strategy:
+  type: Recreate
+
 images:
   dataProcess:
     repository: nexent/nexent-data-process

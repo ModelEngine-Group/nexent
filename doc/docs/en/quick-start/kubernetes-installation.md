@@ -10,7 +10,7 @@
 | **Architecture** | x86_64 / ARM64 | x86_64 |
 | **Software** | Kubernetes 1.24+, Helm 3+, kubectl configured | Kubernetes 1.28+ |
 
-> **💡 Note**: The recommended configuration of **8 cores and 64 GiB RAM** provides optimal performance for production workloads.
+> **💡 Note**: The recommended configuration is suitable for a complete deployment. Actual resource requirements also depend on the replica count, knowledge-base size, and number of concurrent agents. Set requests and limits in production according to load-test results.
 
 ## 🚀 Quick Start
 
@@ -63,6 +63,8 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
 
+The `application` component also prepares the agent sandbox image configuration. The Runtime service uses a shared workspace to process uploaded and generated files, and synchronizes artifacts that must be retained to MinIO.
+
 **Port Policy:**
 - **development (default)**: uses NodePort for Web and selected debug/internal services
 - **production**: keeps internal services as ClusterIP and exposes only production entrypoints
@@ -113,7 +115,7 @@ When the target cluster cannot access public image registries, download a prebui
 Extract the offline deployment package:
 
 ```bash
-unzip nexent-v2.2.1-amd64.zip -d nexent
+unzip nexent-<version>-amd64.zip -d nexent
 cd nexent
 ```
 
@@ -170,10 +172,10 @@ Nexent uses a microservices architecture deployed via Helm charts:
 **Application Services:**
 | Service | Description | Default Port |
 |---------|-------------|--------------|
-| nexent-config | Configuration service | 5010 |
-| nexent-runtime | Runtime service | 5010 |
-| nexent-mcp | MCP container service | 5010 |
-| nexent-northbound | Northbound API service | 5010 |
+| nexent-config | Configuration and management API | 5010 |
+| nexent-runtime | Agent runtime API | 5014 |
+| nexent-mcp | MCP management and tool service | 5011 |
+| nexent-northbound | Northbound API service | 5013 |
 | nexent-web | Web frontend | 3000 |
 | nexent-data-process | Data processing service | 5012 |
 
@@ -182,7 +184,7 @@ Nexent uses a microservices architecture deployed via Helm charts:
 |---------|-------------|
 | nexent-elasticsearch | Search and indexing engine |
 | nexent-postgresql | Relational database |
-| nexent-redis | Caching layer |
+| nexent-redis | Cache, distributed locks, and task message broker |
 | nexent-minio | S3-compatible object storage |
 
 **Supabase Services (when `supabase` is selected):**
@@ -197,6 +199,8 @@ Nexent uses a microservices architecture deployed via Helm charts:
 |---------|-------------|
 | nexent-openssh-server | SSH terminal for AI agents |
 | nexent-monitoring | Optional observability stack |
+
+Sandboxes are not persistent business Pods. The Runtime service creates isolated execution environments according to the deployment configuration to run model-generated code and Skill scripts.
 
 ## 🔌 Port Mapping
 
@@ -221,6 +225,8 @@ Nexent uses PersistentVolumes for data persistence:
 | Supabase DB (when `supabase` is selected) | nexent-supabase-db-pv | `/var/lib/nexent-data/nexent-supabase-db` |
 | Shared workspace | nexent-workspace-pv | `/var/lib/nexent` |
 | Shared skills | nexent-skills-pv | `/var/lib/nexent-data/skills` |
+
+By default, `nexent-workspace` requests 10 GiB of `ReadWriteMany` storage and transfers the inputs and outputs of each run between application services. When using a custom StorageClass, make sure it supports the configured access mode. In multi-replica deployments, all related Pods must be able to access the same workspace.
 
 Helm uninstall does not delete local hostPath data by default. Use `bash deploy/k8s/uninstall.sh --delete-local-data true` or `bash uninstall.sh k8s --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`; use `--keep-local-data` to preserve them explicitly.
 
