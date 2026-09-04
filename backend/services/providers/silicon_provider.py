@@ -8,6 +8,7 @@ from services.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
+    _extract_feature_capability_hints_from_raw,
 )
 
 
@@ -116,6 +117,7 @@ class SiliconModelProvider(AbstractModelProvider):
             if provider_model_type in ("llm", "vlm"):
                 for item in model_list:
                     item.update(_extract_capacity_hints(item))
+                    item.update(_extract_feature_capability_hints_from_raw(item))
                     item["model_tag"] = "chat"
                     item["model_type"] = model_type
                     item["max_tokens"] = DEFAULT_LLM_MAX_TOKENS

@@ -8,6 +8,7 @@ from services.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
+    _extract_feature_capability_hints_from_raw,
 )
 
 logger = logging.getLogger("model_provider")
@@ -113,6 +114,7 @@ class ModelEngineProvider(AbstractModelProvider):
                         "api_key": api_key,
                     }
                     cleaned_model.update(_extract_capacity_hints(model))
+                    cleaned_model.update(_extract_feature_capability_hints_from_raw(model))
                     filtered_models.append(cleaned_model)
 
             return filtered_models

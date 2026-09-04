@@ -29,6 +29,9 @@ class Profile:
         max_input_tokens=None,
         default_output_reserve_tokens=4096,
         tokenizer_family="test-tokenizer",
+        aliases=(),
+        exclusions=(),
+        auto_applicable=False,
     ):
         self.context_window_tokens = context_window_tokens
         self.max_input_tokens = max_input_tokens
@@ -36,6 +39,9 @@ class Profile:
         self.default_output_reserve_tokens = default_output_reserve_tokens
         self.tokenizer_family = tokenizer_family
         self.capability_profile_version = capability_profile_version
+        self.aliases = aliases
+        self.exclusions = exclusions
+        self.auto_applicable = auto_applicable
 
 
 CATALOG = {
@@ -82,6 +88,47 @@ def test_suggest_capacity_catalog_exact_case_insensitive():
 
     assert result.match_kind == CapacitySuggestionMatchKind.CATALOG_EXACT
     assert result.canonical_model_name == "gpt-4o"
+
+
+def test_explicit_alias_matches_before_structural_fallback():
+    catalog = {
+        ("dashscope", "qwen-plus"): Profile(
+            131_072,
+            16_384,
+            "dashscope/qwen-plus@2",
+            aliases=("qwen-plus-latest",),
+            exclusions=("qwen-plus-vl",),
+            auto_applicable=True,
+        )
+    }
+    result = suggest_capacity(
+        model_name="qwen-plus-latest",
+        provider_hint="dashscope",
+        model_type="llm",
+        catalog=catalog,
+    )
+    assert result.match_kind == CapacitySuggestionMatchKind.CATALOG_EXACT
+    assert result.capacity_source_on_accept == "profile"
+
+
+def test_explicit_exclusion_overrides_alias():
+    catalog = {
+        ("dashscope", "qwen-plus"): Profile(
+            131_072,
+            16_384,
+            "dashscope/qwen-plus@2",
+            aliases=("qwen-plus-vl",),
+            exclusions=("qwen-plus-vl",),
+            auto_applicable=True,
+        )
+    }
+    result = suggest_capacity(
+        model_name="qwen-plus-vl",
+        provider_hint="dashscope",
+        model_type="llm",
+        catalog=catalog,
+    )
+    assert result.match_kind == CapacitySuggestionMatchKind.NONE
 
 
 def test_suggest_capacity_catalog_fuzzy_normalized_name():
@@ -306,22 +353,22 @@ def test_suggest_capacity_no_op_when_instruments_disabled():
 
 
 @pytest.mark.parametrize("raw, expected", [
-    ("gpt-4o", "gpt4o"),
-    ("GPT-4o", "gpt4o"),
-    ("glm-5.1", "glm51"),
-    ("glm5.1", "glm51"),
-    ("Deepseek V4 Flash", "deepseekv4flash"),
-    ("deepseek-ai/DeepSeek-V4-Flash", "deepseekaideepseekv4flash"),
-    ("Kimi-K2.6", "kimik26"),
-    ("Pro/moonshotai/Kimi-K2.6", "promoonshotaikimik26"),
-    ("qwen-plus", "qwenplus"),
-    ("  gpt-4o  ", "gpt4o"),
-    ("model_name.v2", "modelnamev2"),
-    ("a-b_c.d/e f", "abcdef"),
+    ("gpt-4o", "gpt-4o"),
+    ("GPT-4o", "gpt-4o"),
+    ("glm-5.1", "glm-5.1"),
+    ("glm5.1", "glm-5.1"),
+    ("Deepseek V4 Flash", "deepseek-v4-flash"),
+    ("deepseek-ai/DeepSeek-V4-Flash", "deepseek-ai/deepseek-v4-flash"),
+    ("Kimi-K2.6", "kimi-k2.6"),
+    ("Pro/moonshotai/Kimi-K2.6", "pro/moonshotai/kimi-k2.6"),
+    ("qwen-plus", "qwen-plus"),
+    ("  gpt-4o  ", "gpt-4o"),
+    ("model_name.v2", "model-name-v2"),
+    ("a-b_c.d/e f", "a-b-c-d/e-f"),
     ("", ""),
     ("   ", ""),
 ])
-def test_normalize_model_name_strips_lowercases_and_collapses_separators(raw, expected):
+def test_normalize_model_name_preserves_boundaries_and_lowercases(raw, expected):
     assert normalize_model_name(raw) == expected
 
 
@@ -498,6 +545,10 @@ def test_model_capacity_suggestion_response_catalog_exact_shape(_pydantic_models
         "canonical_model_name",
         "capability_profile_version",
         "capacity_source_on_accept",
+        "canonical_identity",
+        "capacity_match",
+        "tokenizer_match",
+        "governance_metadata_proposal",
     }
     assert dumped["match_kind"] == "catalog_exact"
     assert dumped["match_confidence"] == "high"

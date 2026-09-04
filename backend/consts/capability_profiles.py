@@ -22,7 +22,7 @@ from nexent.core.models.capacity_resolver import CapabilityProfile, ProfileKey
 logger = logging.getLogger(__name__)
 
 
-CATALOG_REVISION = "2026-06-27.1"
+CATALOG_REVISION = "2026-08-24.2"
 
 
 CATALOG: Dict[ProfileKey, CapabilityProfile] = {
@@ -55,6 +55,16 @@ CATALOG: Dict[ProfileKey, CapabilityProfile] = {
         max_output_tokens=16_384,
         default_output_reserve_tokens=4_096,
         tokenizer_family="qwen",
+        aliases=("qwen-plus",),
+        exclusions=("qwen-vl", "qwen-omni"),
+        evidence=("aliyun-model-studio-model-catalog-2026-08",),
+        verified_at="2026-08-01T00:00:00Z",
+        shared_context=True,
+        independent_input=False,
+        max_output=16_384,
+        reasoning_behavior="unknown",
+        overhead_behavior="bounded",
+        confidence="high",
     ),
     ("dashscope", "qwen-turbo"): CapabilityProfile(
         provider="dashscope",
@@ -65,6 +75,29 @@ CATALOG: Dict[ProfileKey, CapabilityProfile] = {
         max_output_tokens=16_384,
         default_output_reserve_tokens=4_096,
         tokenizer_family="qwen",
+    ),
+    # Verified 2026-08-24 against the official model-specific DashScope page:
+    # https://help.aliyun.com/zh/model-studio/qwen3-7-plus
+    ("dashscope", "qwen3.7-plus"): CapabilityProfile(
+        provider="dashscope",
+        model_name="qwen3.7-plus",
+        capability_profile_version="dashscope/qwen3.7-plus@1",
+        window_shape="combined",
+        context_window_tokens=1_000_000,
+        max_input_tokens=991_808,
+        max_output_tokens=131_072,
+        default_output_reserve_tokens=8_192,
+        tokenizer_family="qwen",
+        aliases=("qwen3.7-plus", "qwen-3.7-plus"),
+        exclusions=("qwen3.7-max", "qwen3.7-flash"),
+        evidence=("https://help.aliyun.com/zh/model-studio/qwen3-7-plus",),
+        verified_at="2026-08-24T00:00:00Z",
+        shared_context=True,
+        independent_input=False,
+        max_output=131_072,
+        reasoning_behavior="reserved",
+        overhead_behavior="bounded",
+        confidence="high",
     ),
     # Sources cross-checked 2026-06-23:
     # https://help.aliyun.com/zh/model-studio/models (Bailian model catalog)
@@ -89,15 +122,33 @@ CATALOG: Dict[ProfileKey, CapabilityProfile] = {
         default_output_reserve_tokens=8_192,
         tokenizer_family="chatglm",
     ),
+    # Verified 2026-08-24 against SiliconFlow's model center and launch note.
+    # The list-models API exposes identity only, so this complete catalog row is
+    # the capacity fallback for the hosted model.
+    # https://www.siliconflow.cn/models
+    # https://www.siliconflow.cn/news/grz0d71bw8xguh4n6lnjqkw9
     ("silicon", "Qwen/Qwen3.6-27B"): CapabilityProfile(
         provider="silicon",
         model_name="Qwen/Qwen3.6-27B",
-        capability_profile_version="silicon/qwen3.6-27b@1",
+        capability_profile_version="silicon/qwen3.6-27b@2",
         window_shape="combined",
         context_window_tokens=262_144,
         max_output_tokens=65_536,
         default_output_reserve_tokens=8_192,
         tokenizer_family="qwen",
+        aliases=("Qwen/Qwen3.6-27B", "Qwen3.6-27B"),
+        exclusions=("Qwen3.6-35B-A3B",),
+        evidence=(
+            "https://www.siliconflow.cn/models",
+            "https://www.siliconflow.cn/news/grz0d71bw8xguh4n6lnjqkw9",
+        ),
+        verified_at="2026-08-24T00:00:00Z",
+        shared_context=True,
+        independent_input=False,
+        max_output=65_536,
+        reasoning_behavior="reserved",
+        overhead_behavior="bounded",
+        confidence="high",
     ),
     ("silicon", "Pro/moonshotai/Kimi-K2.6"): CapabilityProfile(
         provider="silicon",

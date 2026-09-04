@@ -1,5 +1,4 @@
 import logging
-import re
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -135,6 +134,24 @@ HOST_PROVIDER_PATTERNS = (
 SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
 
 
+# Keep these imports behind the service call boundary. This module is also
+# loaded by lightweight model-management/bootstrap environments that expose a
+# partial ``nexent.core`` package; importing the SDK matcher at module scope
+# breaks those environments before suggestion matching is requested. These
+# adapters delegate directly to the SDK and intentionally contain no matching
+# logic of their own.
+def _parse_model_identity(model_name: str, provider: Optional[str] = None) -> Any:
+    from nexent.core.models.model_identity import parse_model_identity
+
+    return parse_model_identity(model_name, provider)
+
+
+def _identities_are_safe_aliases(left: Any, right: Any) -> bool:
+    from nexent.core.models.model_identity import identities_are_safe_aliases
+
+    return identities_are_safe_aliases(left, right)
+
+
 def pick_provider_from_base_url(base_url: Optional[str]) -> Optional[str]:
     # Match the entire lower-cased base_url, mirroring the frontend
     # detectProviderFromUrl helper. Substring `in` check, first hit wins.
@@ -160,7 +177,10 @@ def _normalize_provider(provider: Optional[str]) -> Optional[str]:
 
 
 def normalize_model_name(model_name: str) -> str:
-    return re.sub(r"[-_./\s]+", "", model_name.strip().lower())
+    """Compatibility helper returning the separator-aware canonical path."""
+    if not model_name.strip():
+        return ""
+    return _parse_model_identity(model_name).canonical_id
 
 
 def _normalize_catalog_exact_name(model_name: str) -> str:
@@ -196,7 +216,9 @@ def _result_from_profile(
         suggested_provider=provider,
         canonical_model_name=model_name,
         capability_profile_version=profile.capability_profile_version,
-        capacity_source_on_accept="operator",
+        capacity_source_on_accept=(
+            "profile" if getattr(profile, "auto_applicable", False) else "operator"
+        ),
     )
 
 
@@ -225,12 +247,13 @@ def _unique_final_segment_match(
     catalog: Mapping[ProfileKey, CapabilityProfileLike],
     provider: str,
 ) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
-    requested = normalize_model_name(model_name)
+    requested = _parse_model_identity(model_name, provider)
     matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
     for key, profile in _provider_catalog(catalog, provider).items():
         catalog_model = key[1]
         final_segment = catalog_model.split("/")[-1]
-        if normalize_model_name(final_segment) == requested:
+        candidate = _parse_model_identity(final_segment, provider)
+        if _identities_are_safe_aliases(requested, candidate):
             matches.append((key, profile))
 
     if len(matches) == 1:
@@ -243,16 +266,44 @@ def _fuzzy_catalog_match(
     catalog: Mapping[ProfileKey, CapabilityProfileLike],
     provider: str,
 ) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
-    requested = normalize_model_name(model_name)
+    requested = _parse_model_identity(model_name, provider)
     matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
     for key, profile in _provider_catalog(catalog, provider).items():
-        if normalize_model_name(key[1]) == requested:
+        candidate = _parse_model_identity(key[1], provider)
+        if requested.canonical_id == candidate.canonical_id:
             matches.append((key, profile))
 
     if len(matches) == 1:
         return matches[0]
 
     return _unique_final_segment_match(model_name, catalog, provider)
+
+
+def _explicit_alias_match(
+    model_name: str,
+    catalog: Mapping[ProfileKey, CapabilityProfileLike],
+    provider: str,
+) -> Optional[tuple[ProfileKey, CapabilityProfileLike]]:
+    requested = _parse_model_identity(model_name, provider)
+    matches: list[tuple[ProfileKey, CapabilityProfileLike]] = []
+    for key, profile in _provider_catalog(catalog, provider).items():
+        exclusions = getattr(profile, "exclusions", ()) or ()
+        if any(
+            _identities_are_safe_aliases(
+                requested, _parse_model_identity(exclusion, provider)
+            )
+            for exclusion in exclusions
+        ):
+            continue
+        aliases = getattr(profile, "aliases", ()) or ()
+        if any(
+            _identities_are_safe_aliases(
+                requested, _parse_model_identity(alias, provider)
+            )
+            for alias in aliases
+        ):
+            matches.append((key, profile))
+    return matches[0] if len(matches) == 1 else None
 
 
 def _unique_catalog_provider_for_model(
@@ -375,6 +426,16 @@ def _suggest_capacity_inner(
             normalized_exact_key[0],
             normalized_exact_key[1],
             active_catalog[normalized_exact_key],
+            CapacitySuggestionMatchKind.CATALOG_EXACT,
+        )
+
+    alias_match = _explicit_alias_match(clean_model_name, active_catalog, provider)
+    if alias_match:
+        alias_key, profile = alias_match
+        return _result_from_profile(
+            alias_key[0],
+            alias_key[1],
+            profile,
             CapacitySuggestionMatchKind.CATALOG_EXACT,
         )
 

@@ -15,6 +15,15 @@ from services.providers.tokenpony_provider import TokenPonyModelProvider
 from services.providers.dashscope_provider import DashScopeModelProvider
 from services.providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
 from utils.model_name_utils import split_repo_name, add_repo_to_name
+from consts.model_feature_capabilities import (
+    CATALOG_REVISION as FEATURE_CATALOG_REVISION,
+    EXACT_CATALOG as FEATURE_EXACT_CATALOG,
+    FAMILY_RULES as FEATURE_FAMILY_RULES,
+)
+from nexent.core.models.feature_capability import (
+    normalize_feature_profile,
+    resolve_feature_capabilities,
+)
 
 logger = logging.getLogger("model_provider")
 
@@ -48,6 +57,19 @@ async def get_provider_models(model_data: dict) -> List[dict]:
     elif model_data["provider"] == ProviderEnum.TOKENPONY.value:
         provider = TokenPonyModelProvider()
         model_list = await provider.get_models(model_data)
+
+    provider_name = model_data.get("provider")
+    for model in model_list:
+        if not isinstance(model, dict) or model.get("_error") or not model.get("id"):
+            continue
+        model["feature_capability_metadata"] = resolve_feature_capabilities(
+            provider_name,
+            model.get("id"),
+            provider_candidate=model.pop("feature_capability_candidate", None),
+            exact_catalog=FEATURE_EXACT_CATALOG,
+            family_rules=FEATURE_FAMILY_RULES,
+            catalog_revision=FEATURE_CATALOG_REVISION,
+        )
 
     return model_list
 
@@ -117,12 +139,11 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     #     in (all None) and every freshly batch-created row lands with
     #     context_window_tokens=NULL, max_output_tokens=NULL even though
     #     the user filled the panel -- the glm-5.1/glm-5.2 incident.
-    #   - capacity_source="provider_candidate" (or anything else): per the
-    #     W1 design these are advisory UI hints surfaced from the catalog
-    #     by _extract_capacity_hints. They are shown to the user as
-    #     suggestions but not auto-persisted; only operator acceptance
-    #     should write them.
+    #   - capacity_source="provider_candidate": these are authoritative
+    #     field-scoped provider facts. Persist only the fields returned by the
+    #     provider; governance keeps operator-owned fields authoritative.
     is_operator_capacity = model.get("capacity_source") == "operator"
+    is_provider_capacity = model.get("capacity_source") == "provider_candidate"
     capacity_kwargs = (
         {
             "context_window_tokens": model.get("context_window_tokens"),
@@ -130,11 +151,16 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
             "max_output_tokens": model.get("max_output_tokens"),
             "default_output_reserve_tokens": model.get("default_output_reserve_tokens"),
             "tokenizer_family": model.get("tokenizer_family"),
-            "capacity_source": "operator",
+            "capacity_source": (
+                "operator" if is_operator_capacity else "provider_candidate"
+            ),
             "capability_profile_version": model.get("capability_profile_version"),
         }
-        if is_operator_capacity
+        if is_operator_capacity or is_provider_capacity
         else {}
+    )
+    feature_capability_metadata = normalize_feature_profile(
+        model.get("feature_capability_metadata")
     )
 
     model_obj = ModelRequest(
@@ -148,6 +174,7 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
         maximum_chunk_size=maximum_chunk_size,
         chunk_batch=chunk_batch,
         timeout_seconds=timeout_seconds_value,
+        feature_capability_metadata=feature_capability_metadata,
         **capacity_kwargs,
     )
 
