@@ -33,14 +33,14 @@ from nexent.memory.models import (
 )
 from nexent.memory.service import MemoryService
 
-from .memory_record_service import (
+from services.memory_record_service import (
     MemoryRecordError,
     _resolve_tenant_embedding_model_info,
     get_memory_record_service,
 )
-from .memory_retrieval_service import get_memory_retrieval_service
-from .memory_external_provider_service import get_memory_external_provider_service
-from .memory_ingestion_event_service import MemoryIngestionEventService
+from services.memory_retrieval_service import get_memory_retrieval_service
+from services.memory_external_provider_service import get_memory_external_provider_service
+from services.memory_ingestion_event_service import MemoryIngestionEventService
 
 
 logger = logging.getLogger("memory_backend_adapter")

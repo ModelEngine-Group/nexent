@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
 
-from .client import filter_property, get_db_session
-from .db_models import MemoryExternalIngestEventLog
+from database.client import filter_property, get_db_session
+from database.db_models import MemoryExternalIngestEventLog
 
 
 def _to_dict(item: MemoryExternalIngestEventLog) -> Dict[str, Any]:

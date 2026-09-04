@@ -1,8 +1,8 @@
 import logging
 from typing import Dict
 
-from .client import get_db_session
-from .db_models import MemoryProviderConfigParam
+from database.client import get_db_session
+from database.db_models import MemoryProviderConfigParam
 
 
 def get_params(provider_config_id: int) -> Dict[str, str]:

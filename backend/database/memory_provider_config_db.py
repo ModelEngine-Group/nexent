@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
 
-from .client import filter_property, get_db_session
-from .db_models import MemoryProviderConfig
+from database.client import filter_property, get_db_session
+from database.db_models import MemoryProviderConfig
 
 
 def _to_dict(item: MemoryProviderConfig) -> Dict[str, Any]:
