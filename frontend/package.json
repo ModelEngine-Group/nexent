@@ -50,7 +50,7 @@
     "mermaid": "^11.12.0",
     "multiparty": "^4.3.0",
     "next": "^15.5.9",
-    "next-i18next": "^15.4.2",
+    "next-i18next": "^16.0.7",
     "next-themes": "^0.4.4",
     "papaparse": "^5.5.3",
     "pdfjs-dist": "5.3.93",
