@@ -447,7 +447,6 @@ class MemoryUserConfig(BaseModel):
     disable_agent_ids: List[str] = Field(description="Disable agent ids")
     disable_user_agent_ids: List[str] = Field(description="Disable user agent ids")
     external_provider_top_k: int = Field(default=20, description="Max results per external provider")
-    external_provider_timeout: int = Field(default=30, description="External provider search timeout in seconds")
 
     def __str__(self) -> str:  # pragma: no cover
         return self.model_dump_json(indent=2, ensure_ascii=False)

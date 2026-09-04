@@ -97,3 +97,4 @@ Nexent 提供两种发现外部 A2A Agent 的方式：**URL 发现** 和 **Nacos
 
 2. 在 Nexent 中选择「URL 发现」，填写 `http://<IP>:9999/.well-known/agent-card.json`，点击「发现」
 3. 发现成功后，在「协议配置」中选择 **HTTP + JSON**，即可开始调用
+

@@ -154,14 +154,7 @@ def _run_test_file(
         }
     return {
         "file": rel_path,
-        # A marker-only file may be fully deselected by the default pytest
-        # expression (for example, hosted integration tests). Treat that
-        # explicit opt-in case as skipped rather than a suite failure.
-        "returncode": (
-            0
-            if result.returncode == 5 and re.search(r"\b\d+ deselected\b", result.stdout)
-            else result.returncode
-        ),
+        "returncode": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
     }

@@ -1256,12 +1256,13 @@ async def create_agent_config(
                     description=(
                         "Store one model-selected and summarized short-term memory extracted only "
                         "from the conversation between the user and the current agent. Eligible "
-                        "information is limited to process-level observations made during intermediate "
-                        "action steps: user preferences, task goals, action plans and latest progress, "
-                        "or reflections on user feedback and errors. Do not store whole conversations, "
-                        "transient calculations, unverified guesses, duplicates, secrets, or information "
-                        "the user asks to forget. Call this tool only during intermediate action steps, "
-                        "not when generating the final answer."
+                        "information is limited to user preferences, task goals, action plans and "
+                        "latest progress, or reflections on user feedback and errors. Consider the "
+                        "user question, tool or code execution results, and the final answer. Do not "
+                        "store whole conversations, transient calculations, unverified guesses, "
+                        "duplicates, secrets, or information the user asks to forget. Before every "
+                        "final answer, assess whether an eligible memory was added or updated; if so, "
+                        "calling this tool is mandatory."
                     ),
                     inputs=json.dumps({
                         "content": {

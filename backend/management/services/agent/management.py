@@ -79,6 +79,7 @@ from services.conversation_management_service import (
 )
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 

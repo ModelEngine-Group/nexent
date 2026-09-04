@@ -266,30 +266,3 @@ def _supabase_mock():
 # overwrote ``sys.modules['supabase']``.
 if 'supabase' not in sys.modules:
     install_supabase_mock()
-
-
-# ---------------------------------------------------------------------------
-# Integration test gating (--run-integration flag)
-# ---------------------------------------------------------------------------
-
-
-def pytest_addoption(parser):
-    """Register --run-integration CLI flag for integration tests."""
-    parser.addoption(
-        "--run-integration",
-        action="store_true",
-        default=False,
-        help="Run integration tests that require external services (Mem0)",
-    )
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip integration tests unless --run-integration is passed."""
-    if config.getoption("--run-integration"):
-        return
-    skip_integration = pytest.mark.skip(
-        reason="Need --run-integration to run integration tests"
-    )
-    for item in items:
-        if "integration" in item.keywords:
-            item.add_marker(skip_integration)

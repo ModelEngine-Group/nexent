@@ -353,14 +353,6 @@ def test_build_memory_service_for_dreaming_returns_memory_service():
     assert svc.kwargs.get("backend_search") is None
 
 
-def test_build_memory_service_for_fa_extraction_returns_memory_service():
-    svc = memory_backend_adapter.build_memory_service_for_fa_extraction()
-    assert isinstance(svc, MemoryService)
-    assert callable(svc.kwargs.get("backend_store"))
-    assert svc.kwargs.get("backend_search") is None
-    assert svc.kwargs.get("embedding_model_info") is None
-
-
 def test_fanout_external_ingest_skips_without_enabled_providers(monkeypatch):
     provider_service = MagicMock()
     provider_service._config_service.get_enabled_providers.return_value = []

@@ -225,21 +225,6 @@ export async function setExternalProviderTopK(topK: number): Promise<boolean> {
   }
 }
 
-export async function setExternalProviderTimeout(timeout: number): Promise<boolean> {
-  try {
-    const body = { key: "EXTERNAL_PROVIDER_TIMEOUT", value: timeout };
-    const res = await requestJson(API_ENDPOINTS.memory.config.set, {
-      method: "POST",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(body),
-    });
-    return !!res?.success;
-  } catch (e) {
-    log.error("setExternalProviderTimeout error", e);
-    return false;
-  }
-}
-
 // ---------------- Disable list helpers ----------------
 export async function addDisabledAgentId(agentId: string): Promise<boolean> {
   try {
