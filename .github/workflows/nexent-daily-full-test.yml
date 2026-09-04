@@ -1,0 +1,148 @@
+name: Nexent Daily Full Test
+
+on:
+  # 联调阶段：任何 push/合入 develop 的提交都会触发。
+  push:
+    branches:
+      - develop
+
+  # 支持在 GitHub Actions 页面手动执行。
+  workflow_dispatch:
+
+  # GitHub cron 使用 UTC。
+  # 16:00 UTC = 北京时间次日 00:00。
+  schedule:
+    - cron: "0 16 * * *"
+
+permissions:
+  contents: read
+
+# GitHub 触发的 Daily 不并发运行，也不会取消正在执行的批次。
+concurrency:
+  group: nexent-daily-full-test
+  cancel-in-progress: false
+
+jobs:
+  daily-full-test:
+    name: Daily D0-D6
+
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+
+    # 包括代码同步、测试资产维护、镜像构建、部署和 D1-D6。
+    timeout-minutes: 1440
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      TEST_ROOT: /home/jason/nexent-test-suite
+      REPO_ROOT: /root/project/nexent
+
+    steps:
+      - name: Verify local test environment
+        run: |
+          set -euo pipefail
+
+          test -d "$TEST_ROOT"
+          test -x "$TEST_ROOT/scripts/run-daily-suite.sh"
+          test -x "$TEST_ROOT/scripts/doctor.sh"
+
+          test -f "$TEST_ROOT/config/daily.env"
+          test -f "$TEST_ROOT/config/secrets.env"
+          test -f "$TEST_ROOT/config/opencode-daily.jsonc"
+          test -f "$TEST_ROOT/config/opencode-analysis.jsonc"
+
+          test -d "$REPO_ROOT/.git"
+
+          current_branch="$(git -C "$REPO_ROOT" branch --show-current)"
+          if [[ "$current_branch" != "develop" ]]; then
+            echo "Expected develop branch, but found: $current_branch" >&2
+            exit 2
+          fi
+
+          test -x /home/jason/.opencode/bin/opencode
+
+          command -v docker >/dev/null
+          docker info >/dev/null
+
+          command -v git >/dev/null
+          command -v flock >/dev/null
+          command -v grep >/dev/null
+
+          "$TEST_ROOT/scripts/doctor.sh"
+
+      - name: Run Nexent Daily D0-D6
+        run: |
+          set -euo pipefail
+          umask 027
+
+          workflow_log_root="$TEST_ROOT/runs/github-actions"
+          workflow_log="$workflow_log_root/run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.log"
+
+          install -d -m 0750 "$workflow_log_root"
+
+          {
+            echo "github_run_id=$GITHUB_RUN_ID"
+            echo "github_run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "github_event_name=$GITHUB_EVENT_NAME"
+            echo "github_ref=$GITHUB_REF"
+            echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >"$workflow_log"
+
+          # 如果存在手动启动的本地 Daily，最多等待 12 小时。
+          lock_wait_deadline=$((SECONDS + 43200))
+
+          while true; do
+            set +e
+
+            "$TEST_ROOT/scripts/run-daily-suite.sh" \
+              --repo "$REPO_ROOT" \
+              >>"$workflow_log" 2>&1
+
+            daily_status=$?
+            set -e
+
+            if ((daily_status == 0)); then
+              echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                >>"$workflow_log"
+              break
+            fi
+
+            # run-daily-suite.sh 使用退出码 3 表示本地 Daily 锁被占用。
+            if ((daily_status == 3)) &&
+               grep -qF "another daily run is active" "$workflow_log"; then
+
+              if ((SECONDS >= lock_wait_deadline)); then
+                echo "Timed out waiting for the existing local Daily batch." >&2
+                echo "Local workflow log: $workflow_log" >&2
+                exit 3
+              fi
+
+              echo "Another local Daily batch is active; retrying in 30 seconds."
+              sleep 30
+              continue
+            fi
+
+            echo "Nexent Daily failed with exit code $daily_status." >&2
+            echo "Detailed results are retained only on the Ubuntu runner." >&2
+            echo "Local workflow log: $workflow_log" >&2
+            exit "$daily_status"
+          done
+
+          echo "Nexent Daily D0-D6 completed."
+          echo "Detailed results are retained only on the Ubuntu runner."
+          echo "Local workflow log: $workflow_log"
+
+      - name: Show local result locations
+        if: always()
+        run: |
+          set -euo pipefail
+
+          echo "No GitHub Artifact was uploaded."
+          echo "Daily runs: $TEST_ROOT/runs/daily"
+          echo "Latest report: $TEST_ROOT/reports/latest"
+          echo "Workflow log: $TEST_ROOT/runs/github-actions/run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.log"
