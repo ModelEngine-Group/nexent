@@ -193,3 +193,134 @@
   cursor: default;
 }
 
+/**
+ * Component: Mermaid diagrams
+ * -------------------------------------------------------------------------- */
+
+.mermaid-figure {
+  position: relative;
+  margin: 16px 0;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+}
+
+.mermaid-viewport {
+  position: relative;
+  padding: 16px;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  touch-action: pan-y;
+}
+
+.mermaid-viewport:active {
+  cursor: grabbing;
+}
+
+.mermaid-stage {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.mermaid-stage svg {
+  display: block;
+  margin: 0 auto;
+}
+
+.mermaid-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vp-c-bg) 82%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.mermaid-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+}
+
+.mermaid-btn:hover:not(:disabled) {
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-1);
+}
+
+.mermaid-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.mermaid-zoom-label {
+  min-width: 32px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--vp-c-text-2);
+}
+
+.mermaid-close {
+  display: none;
+}
+
+/* Fullscreen mode (GitHub-style overlay, Esc or backdrop click to exit) */
+
+.mermaid-figure.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--vp-c-bg);
+}
+
+.mermaid-figure.is-fullscreen .mermaid-viewport {
+  position: absolute;
+  inset: 0;
+  padding: 32px 48px;
+}
+
+.mermaid-figure.is-fullscreen .mermaid-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+  cursor: pointer;
+}
+
+.mermaid-figure.is-fullscreen .mermaid-close:hover {
+  color: var(--vp-c-text-1);
+  background: var(--vp-c-default-soft);
+}
+
+body.mermaid-fullscreen-active {
+  overflow: hidden;
+}
+
