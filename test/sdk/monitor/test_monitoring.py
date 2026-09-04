@@ -1633,7 +1633,7 @@ class TestEnqueueMonitoringRecord:
             "output_reserve_source": "model_default",
             "provider_input_limit_tokens": 127000,
             "uncertainty_reserve_tokens": 12800,
-            "uncertainty_reserve_basis": "context_window_10pct",
+            "uncertainty_reserve_basis": "provider_input_limit_10pct",
             "soft_limit_ratio": 0.8,
             "soft_input_budget_tokens": 91360,
             "hard_input_budget_tokens": 114200,
@@ -1653,7 +1653,10 @@ class TestEnqueueMonitoringRecord:
         assert record["budget_output_reserve_source"] == "model_default"
         assert record["budget_provider_input_limit_tokens"] == 127000
         assert record["budget_uncertainty_reserve_tokens"] == 12800
-        assert record["budget_uncertainty_reserve_basis"] == "context_window_10pct"
+        assert (
+            record["budget_uncertainty_reserve_basis"]
+            == "provider_input_limit_10pct"
+        )
         assert record["budget_soft_limit_ratio"] == 0.8
         assert record["budget_soft_input_budget_tokens"] == 91360
         assert record["budget_hard_input_budget_tokens"] == 114200
