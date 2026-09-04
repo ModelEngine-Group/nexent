@@ -10,6 +10,7 @@
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
 {{- $skillsStorage := default dict $sharedStorage.skills -}}
 {{- $memoryPluginsStorage := default dict $sharedStorage.memoryPlugins -}}
+{{- $logsStorage := default dict $sharedStorage.logs -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -91,6 +92,8 @@ spec:
               mountPath: /mnt/nexent-data/skills
             - name: nexent-memory-plugins
               mountPath: /mnt/nexent-data/memory-provider-plugins
+            - name: nexent-logs
+              mountPath: /mnt/nexent-data/logs
           resources:
             requests:
               memory: {{ .Values.resources.backend.requests.memory }}
@@ -126,3 +129,6 @@ spec:
         - name: nexent-memory-plugins
           persistentVolumeClaim:
             claimName: {{ default "nexent-memory-plugins" $memoryPluginsStorage.existingClaim }}
+        - name: nexent-logs
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-logs" $logsStorage.existingClaim }}

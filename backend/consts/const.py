@@ -300,6 +300,16 @@ RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
+# Logging Configuration
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# When IS_DEBUG=true, force DEBUG level for all loggers (overrides LOG_LEVEL).
+IS_DEBUG = os.getenv("IS_DEBUG", "false").lower() == "true"
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "1"))  # days
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
+
+
 # Service Control Flags
 DISABLE_RAY_DASHBOARD = os.getenv(
     "DISABLE_RAY_DASHBOARD", "false").lower() == "true"

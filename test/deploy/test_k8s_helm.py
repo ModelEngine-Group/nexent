@@ -55,6 +55,7 @@ APPLICATION_PVCS = {
     "nexent-workspace",
     "nexent-skills",
     "nexent-memory-plugins",
+    "nexent-logs",
     "nexent-supabase-db",
 }
 INFRASTRUCTURE_PVCS = {

@@ -296,6 +296,10 @@ render_shared_storage_persistence_values() {
     printf '      size: "5Gi"\n'
     printf '      localPath: "%s/skills"\n' "$LOCAL_PATH"
     printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-skills")"
+    printf '    logs:\n'
+    printf '      size: "5Gi"\n'
+    printf '      localPath: "%s/logs"\n' "$LOCAL_PATH"
+    printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-logs")"
   } >> "$output_file"
 }
 
@@ -475,6 +479,7 @@ render_k8s_runtime_config_values() {
     printf '    skipProxy: %s\n' "$(yaml_quote "$(env_or_default skip_proxy "true")")"
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
     printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
+    printf '    logDir: %s\n' "$(yaml_quote "$(env_or_default LOG_DIR "/mnt/nexent-data/logs")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
     echo "    voiceService:"

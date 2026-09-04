@@ -19,6 +19,10 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/memory-provider-plugins"
       existingClaim: "nexent-memory-plugins"
+    logs:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/logs"
+      existingClaim: "nexent-logs"
   deploymentVersion: "full"
   deploymentComponents:
     infrastructure: false

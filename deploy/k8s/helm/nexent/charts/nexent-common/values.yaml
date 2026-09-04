@@ -71,6 +71,7 @@ config:
   skillsPath: "/mnt/nexent-data/skills"
   memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
   externalMemorySearchEnabled: "false"
+  logDir: "/mnt/nexent-data/logs"
   modelEngine:
     enabled: "false"
   voiceService:

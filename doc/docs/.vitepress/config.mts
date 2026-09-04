@@ -128,6 +128,28 @@ export default defineConfig({
                     text: "Memory Configuration",
                     link: "/en/user-guide/agent-development/memory-configuration",
                   },
+                  {
+                    text: "Agent Evaluation",
+                    link: "/en/user-guide/evaluation",
+                    items: [
+                      {
+                        text: "Create an Evaluation Task",
+                        link: "/en/user-guide/evaluation/create-task",
+                      },
+                      {
+                        text: "Manage Evaluation Sets",
+                        link: "/en/user-guide/evaluation/sets",
+                      },
+                      {
+                        text: "Configure Evaluators",
+                        link: "/en/user-guide/evaluation/evaluators",
+                      },
+                      {
+                        text: "View Results and Annotations",
+                        link: "/en/user-guide/evaluation/results",
+                      },
+                    ],
+                  },
                 ],
               },
               {
@@ -407,6 +429,28 @@ export default defineConfig({
                   {
                     text: "记忆配置",
                     link: "/zh/user-guide/agent-development/memory-configuration",
+                  },
+                  {
+                    text: "智能体评估",
+                    link: "/zh/user-guide/evaluation",
+                    items: [
+                      {
+                        text: "创建评估任务",
+                        link: "/zh/user-guide/evaluation/create-task",
+                      },
+                      {
+                        text: "管理评测集",
+                        link: "/zh/user-guide/evaluation/sets",
+                      },
+                      {
+                        text: "配置评估器",
+                        link: "/zh/user-guide/evaluation/evaluators",
+                      },
+                      {
+                        text: "查看结果与标注",
+                        link: "/zh/user-guide/evaluation/results",
+                      },
+                    ],
                   },
                 ],
               },

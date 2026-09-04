@@ -152,6 +152,7 @@ data:
   SKILLS_PATH: {{ .Values.config.skillsPath | quote }}
   MEMORY_PROVIDER_PLUGINS_DIR: {{ .Values.config.memoryProviderPluginsDir | quote }}
   EXTERNAL_MEMORY_SEARCH_ENABLED: {{ .Values.config.externalMemorySearchEnabled | quote }}
+  LOG_DIR: {{ .Values.config.logDir | quote }}
 
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}

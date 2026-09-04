@@ -483,6 +483,44 @@ persist_deploy_options() {
   } > "$DEPLOY_OPTIONS_FILE"
 }
 
+# Persist the LOG_DIR env var alongside ROOT_DIR.
+#
+# Containers running the backend service see ROOT_DIR mounted at
+# /mnt/nexent-data (see deploy/docker/compose/docker-compose.*.yml), so the
+# log directory inside the container must be /mnt/nexent-data/logs. Writing
+# logs there gives a stable path that survives container restarts and is
+# bind-mounted back to ${ROOT_DIR}/logs on the host.
+#
+# This always overrides any pre-existing LOG_DIR value for the Docker
+# deployment path: a previous value of "logs" (the local-dev default) or
+# any other host path would otherwise be written into the container's
+# ephemeral layer and silently lost on container recreate.
+persist_log_dir() {
+  local log_dir="/mnt/nexent-data/logs"
+  if grep -q "^LOG_DIR=" "$ROOT_ENV_FILE"; then
+    local current_value
+    current_value="$(grep -E '^LOG_DIR=' "$ROOT_ENV_FILE" | head -n1 | cut -d'=' -f2-)"
+    if [ "$current_value" = "$log_dir" ]; then
+      echo "   ✓ LOG_DIR already configured for Docker mount"
+      return 0
+    fi
+    echo "   ↻ LOG_DIR was \"$current_value\"; overriding to \"$log_dir\" for Docker mount"
+  else
+    echo "   + LOG_DIR missing; setting to \"$log_dir\""
+  fi
+  update_env_var "LOG_DIR" "$log_dir"
+}
+
+# Ensure the host-side log directory exists with the right ownership/permissions
+# so that the container's backend process (running as root inside the image) can
+# create category subdirectories on first write.
+prepare_log_dir_on_host() {
+  if [ -z "${ROOT_DIR:-}" ]; then
+    return 0
+  fi
+  create_dir_with_permission "$ROOT_DIR/logs" 775
+}
+
 generate_minio_ak_sk() {
   if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] && [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
     echo "   MinIO credentials unchanged; reusing deploy/env/.env values"
@@ -953,12 +991,14 @@ select_deployment_mode() {
       # Add new ROOT_DIR to .env
       update_env_var "ROOT_DIR" "$ROOT_DIR"
     fi
+    persist_log_dir
   elif grep -q "^ROOT_DIR=" "$ROOT_ENV_FILE"; then
   # Check if ROOT_DIR already exists in .env (second priority)
     # Extract existing ROOT_DIR value from .env
     env_root_dir=$(grep "^ROOT_DIR=" "$ROOT_ENV_FILE" | cut -d'=' -f2 | sed 's/^"//;s/"$//')
     ROOT_DIR="$env_root_dir"
     echo "   📁 Use existing ROOT_DIR path: $env_root_dir"
+    persist_log_dir
 
   else
   # Use default value and prompt user input (lowest priority)
@@ -967,6 +1007,7 @@ select_deployment_mode() {
     ROOT_DIR="${user_root_dir:-$default_root_dir}"
 
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   fi
   echo ""
   echo "--------------------------------"
@@ -1220,9 +1261,11 @@ configure_root_dir_from_env() {
     ROOT_DIR="$ROOT_DIR_PARAM"
     echo "   📁 Using ROOT_DIR from parameter: $ROOT_DIR"
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   elif grep -q "^ROOT_DIR=" "$ROOT_ENV_FILE"; then
     ROOT_DIR="$(grep "^ROOT_DIR=" "$ROOT_ENV_FILE" | cut -d'=' -f2 | sed 's/^"//;s/"$//')"
     echo "   📁 Use existing ROOT_DIR path: $ROOT_DIR"
+    persist_log_dir
   else
     local default_root_dir="$HOME/nexent-data"
     if deployment_should_prompt_root_dir && [ -t 0 ]; then
@@ -1233,7 +1276,9 @@ configure_root_dir_from_env() {
       ROOT_DIR="$default_root_dir"
     fi
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   fi
+  prepare_log_dir_on_host
   export ROOT_DIR
   echo ""
   echo "--------------------------------"
