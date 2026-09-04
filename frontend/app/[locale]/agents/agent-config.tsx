@@ -67,12 +67,18 @@ type ConfigSectionKey =
   | "conversation_guide"
   | "guardrail";
 
-const BASIC_CONFIG_SECTIONS = new Set<ConfigSectionKey>([
-  "display_info",
-  "role_model",
-  "knowledge_base",
-  "conversation_guide",
-]);
+const CONFIG_TAB_BY_SECTION: Record<ConfigSectionKey, AgentConfigTab> = {
+  display_info: "basic",
+  role_model: "basic",
+  knowledge_base: "basic",
+  conversation_guide: "basic",
+  tools: "tools_skills",
+  skills: "tools_skills",
+  run_strategy: "advanced",
+  publish_attributes: "advanced",
+  collaborative_agents: "advanced",
+  guardrail: "advanced",
+};
 
 const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   display_info: true,
@@ -240,11 +246,7 @@ export default function AgentConfig({
     }
     const targetSection: ConfigSectionKey =
       target.section === "tools_skills" ? target.capabilityTab : target.section;
-    const newTab = BASIC_CONFIG_SECTIONS.has(targetSection)
-      ? "basic"
-      : target.section === "tools_skills"
-        ? "tools_skills"
-        : "advanced";
+    const newTab = CONFIG_TAB_BY_SECTION[targetSection];
     setActiveConfigTab(newTab);
     setOpenSections((current) =>
       current[targetSection] ? current : { ...current, [targetSection]: true }
