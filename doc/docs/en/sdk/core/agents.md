@@ -67,7 +67,7 @@ Common processing stages of the ProcessType enumeration include (see `nexent.cor
 
 Core usage examples now live in [Basic Usage](../basic-usage#using-agent_run-recommended-for-streaming), including both `CoreAgent.run` and the streaming `agent_run` helper. This page focuses on module concepts (architecture, MessageObserver, patterns) rather than code walkthroughs.
 
-### Agent Run Sequence Diagram
+### Agent Run Flowchart
 
 The following diagram shows the real call chain of `agent_run` (based on core/agents/run_agent.py, nexent_agent.py, core_agent.py):
 

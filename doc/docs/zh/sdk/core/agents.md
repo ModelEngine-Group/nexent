@@ -67,7 +67,7 @@ ProcessType枚举的常用处理阶段包括（完整定义见 `nexent.core.util
 
 具体的代码示例已集中到 [基本使用](../basic-usage#使用-agent_run推荐的流式运行方式)，其中包含 `CoreAgent.run` 与流式的 `agent_run`。本页仅保留模块层面的概念和能力描述。
 
-### Agent 运行时序图
+### Agent 运行流程图
 
 下图展示 `agent_run` 的真实调用链（基于 core/agents/run_agent.py、nexent_agent.py、core_agent.py）：
 

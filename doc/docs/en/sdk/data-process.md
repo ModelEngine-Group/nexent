@@ -252,7 +252,7 @@ except Exception as e:
    - Reuse `DataProcessCore` instances
    - Avoid repeated initialization
 
-## 🔄 Data Flow Architecture
+## 🔄 Data Processing Flow
 
 Data processing in the Nexent system follows these flow patterns:
 

@@ -252,7 +252,7 @@ except Exception as e:
    - 复用 `DataProcessCore` 实例
    - 避免重复初始化
 
-## 🔄 数据流架构
+## 🔄 数据处理流程
 
 Nexent 系统中的数据处理遵循以下流程模式：
 
