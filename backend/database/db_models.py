@@ -650,6 +650,10 @@ class AgentInfo(TableBase):
         server_default=text("'USER'"),
         doc="Agent ownership origin: USER or SYSTEM",
     )
+    system_revision = Column(
+        String(100),
+        doc="Server-controlled Nexent release revision for a system Agent",
+    )
     display_name = Column(String(100), doc="Agent display name")
     description = Column(Text, doc="Description")
     author = Column(String(100), doc="Agent author")

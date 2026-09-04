@@ -395,20 +395,26 @@ class TestCreateTenant:
     """Test cases for create_tenant function"""
 
     def test_create_tenant_success(self, service_mocks):
-        """Test successfully creating a tenant"""
+        """UT-BE-SAL-004: tenant creation provisions the localized system Agent."""
         # Setup
         tenant_name = "New Tenant"
         user_id = "creator_user"
         group_id = 123
 
         service_mocks['create_tenant_with_default_group'].return_value = group_id
-        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
-            result = create_tenant(tenant_name, user_id)
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
+                patch('backend.services.tenant_service.ensure_workbench_main_agent') as ensure:
+            result = create_tenant(tenant_name, user_id, locale="zh")
 
         assert result["tenant_name"] == tenant_name
         assert result["default_group_id"] == str(group_id)
         assert "tenant_id" in result
         service_mocks['create_tenant_with_default_group'].assert_called_once()
+        ensure.assert_called_once_with(
+            tenant_id=result["tenant_id"],
+            user_id=user_id,
+            locale="zh",
+        )
 
     def test_create_tenant_name_already_exists(self, service_mocks):
         """Test creating tenant with a name that already exists"""

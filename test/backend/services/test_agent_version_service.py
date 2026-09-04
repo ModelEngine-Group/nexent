@@ -210,6 +210,68 @@ def test_publish_allows_internal_system_agent_sync(monkeypatch):
         )
 
 
+@pytest.mark.parametrize(
+    ("operation", "downstream_name"),
+    [
+        (
+            lambda: get_version_list_impl(agent_id=1, tenant_id="tenant1"),
+            "query_version_list",
+        ),
+        (
+            lambda: get_version_impl(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no=2,
+            ),
+            "search_version_by_version_no",
+        ),
+        (
+            lambda: get_version_detail_impl(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no=2,
+            ),
+            "search_version_by_version_no",
+        ),
+        (
+            lambda: get_current_version_impl(agent_id=1, tenant_id="tenant1"),
+            "query_current_version_no",
+        ),
+        (
+            lambda: compare_versions_impl(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no_a=1,
+                version_no_b=2,
+            ),
+            "_get_version_detail_or_draft",
+        ),
+        (
+            lambda: _get_version_detail_or_draft(
+                agent_id=1,
+                tenant_id="tenant1",
+                version_no=0,
+            ),
+            "query_agent_draft",
+        ),
+    ],
+)
+def test_version_reads_hide_system_agent_before_snapshot_access(
+    monkeypatch,
+    operation,
+    downstream_name,
+):
+    """UT-BE-SAL-010: direct version reads must not disclose system Agents."""
+    monkeypatch.setattr(agent_version_service_module, "is_system_agent", lambda *_: True)
+    downstream = MagicMock()
+    monkeypatch.setattr(agent_version_service_module, downstream_name, downstream)
+
+    with pytest.raises(ValueError, match="Agent not found"):
+        operation()
+
+    downstream.assert_not_called()
+
+
 @pytest.fixture
 def mock_agent_draft():
     """Mock agent draft data"""

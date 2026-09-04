@@ -49,6 +49,12 @@ def _ensure_system_agent_mutation_allowed(
         raise ValueError("System Agent is managed by the platform")
 
 
+def _ensure_system_agent_hidden(agent_id: int, tenant_id: str) -> None:
+    """Hide protected platform Agents from ordinary direct-ID read paths."""
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("Agent not found")
+
+
 def _remove_audit_fields_for_insert(data: dict) -> None:
     """
     Remove audit fields that should not be copied during snapshot
@@ -238,6 +244,7 @@ def get_version_list_impl(
     """
     Get version list for an agent
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     items = query_version_list(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -257,6 +264,7 @@ def get_version_impl(
     """
     Get version
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     return search_version_by_version_no(agent_id, tenant_id, version_no)
 
 
@@ -269,6 +277,7 @@ def get_version_detail_impl(
     Get version detail including snapshot data, structured like agent info.
     Returns agent info with tools, sub_agents, skills, availability, etc.
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     result: Dict[str, Any] = {}
 
     # Get version metadata first
@@ -605,6 +614,7 @@ def get_current_version_impl(
     """
     Get current published version
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     current_version_no = query_current_version_no(agent_id, tenant_id)
     if current_version_no is None:
         raise ValueError("No published version")
@@ -636,6 +646,7 @@ def compare_versions_impl(
     Returns detailed comparison data for both versions.
     Handles version 0 as draft data.
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     # Get version A detail (handles version 0 as draft)
     version_a = _get_version_detail_or_draft(agent_id, tenant_id, version_no_a)
     # Get version B detail (handles version 0 as draft)
@@ -746,6 +757,7 @@ def _get_version_detail_or_draft(
     Get version detail for published versions, or draft data for version 0.
     Returns structured agent info similar to get_version_detail_impl.
     """
+    _ensure_system_agent_hidden(agent_id, tenant_id)
     from database import skill_db as skill_db_module
 
     result: Dict[str, Any] = {}

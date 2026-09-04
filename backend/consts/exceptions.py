@@ -321,6 +321,40 @@ class SkillException(Exception):
     pass
 
 
+class WorkbenchAgentError(Exception):
+    """Stable domain error raised by the system Agent provider."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        message: Optional[str] = None,
+    ):
+        super().__init__(message or code)
+        self.code = code
+        self.message_key = code
+        self.retryable = retryable
+        self.resource_type = "agent"
+
+
+class RuntimeSubAgentError(ValueError):
+    """Stable validation and authorization error for runtime adapters."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        message: Optional[str] = None,
+    ):
+        super().__init__(message or code)
+        self.code = code
+        self.message_key = code
+        self.retryable = retryable
+        self.resource_type = "runtime_sub_agent"
+
+
 class QuotaExceededError(Exception):
     """Raised when tenant storage hard limit is exceeded during file upload."""
 

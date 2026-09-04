@@ -297,6 +297,11 @@ async def search_agent_info_api(
         effective_tenant_id = tenant_id or auth_tenant_id
         agent_info = await get_agent_info_impl(agent_id, effective_tenant_id, version_no, user_id)
         return apply_agent_detail_prompt_visibility(auth_tenant_id, agent_info)
+    except ForbiddenError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(e),
+        ) from e
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(

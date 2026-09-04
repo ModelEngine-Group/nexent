@@ -11,6 +11,58 @@ import pytest
 from fastapi.responses import StreamingResponse
 from fastapi import Request
 
+
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_hides_system_agent_before_capability_reads(monkeypatch):
+    """UT-BE-SAL-010: ordinary detail lookup must not disclose a system Agent."""
+    from backend.services import agent_service
+
+    monkeypatch.setattr(
+        agent_service,
+        "search_agent_info_by_agent_id",
+        lambda *_args, **_kwargs: {
+            "agent_id": 7,
+            "tenant_id": "tenant-a",
+            "name": "workbench_main",
+            "agent_origin": "SYSTEM",
+            "system_key": "workbench_main",
+        },
+    )
+    tool_lookup = MagicMock()
+    monkeypatch.setattr(agent_service, "search_tools_for_sub_agent", tool_lookup)
+
+    with pytest.raises(agent_service.ForbiddenError, match="not accessible"):
+        await agent_service.get_agent_info_impl(
+            agent_id=7,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    tool_lookup.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_agent_with_skills_rejects_system_agent_before_skill_reads(monkeypatch):
+    """UT-BE-SAL-010 and UT-BE-SAL-011: reject before Skill reads."""
+    from backend.services import agent_service
+
+    monkeypatch.setattr(
+        agent_service,
+        "get_current_user_info",
+        lambda _authorization: ("user-a", "tenant-a", "USER"),
+    )
+    monkeypatch.setattr(agent_service, "is_system_agent", lambda *_args: True)
+    skill_collector = MagicMock()
+    monkeypatch.setattr(agent_service, "collect_skill_zip_entries", skill_collector)
+
+    with pytest.raises(agent_service.ForbiddenError, match="cannot be exported"):
+        await agent_service.export_agent_with_skills_impl(
+            agent_id=7,
+            authorization="Bearer token",
+        )
+
+    skill_collector.assert_not_called()
+
 # =============================================================================
 # STEP 1: Set up ALL sys.modules mocks BEFORE any backend imports
 # =============================================================================
@@ -2788,7 +2840,20 @@ async def test_list_all_agent_info_impl_success(
             "created_by": "user2",
             "create_time": 2,
             "current_version_no": 1,  # Published
-        }
+        },
+        {
+            "agent_id": 99,
+            "name": "workbench_main",
+            "display_name": "Nexent Workbench",
+            "description": "Protected system Agent",
+            "enabled": True,
+            "group_ids": "",
+            "created_by": "admin_user",
+            "create_time": 3,
+            "current_version_no": 1,
+            "agent_origin": "SYSTEM",
+            "system_key": "workbench_main",
+        },
     ]
 
     # Configure mocks
@@ -2804,6 +2869,8 @@ async def test_list_all_agent_info_impl_success(
 
     # Assert
     assert len(result) == 2
+    # UT-BE-SAL-009: ownership metadata cannot expose a system Agent.
+    assert {agent["agent_id"] for agent in result} == {1, 2}
     assert result[0]["agent_id"] == 1
     assert result[0]["name"] == "Agent 1"
     assert result[0]["display_name"] == "Display Agent 1"
@@ -18494,6 +18561,7 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
         (b"x" * (agent_service.AGENT_ICON_MAX_BYTES + 1), "Agent icon must not exceed 2 MB"),
         (b"not an image", "Agent icon must be a PNG, JPEG, GIF, or WebP image"),
     ],
+    ids=["empty", "too-large", "invalid-type"],
 )
 async def test_upload_agent_icon_impl_rejects_invalid_content(content, message):
     with pytest.raises(ValueError, match=message):

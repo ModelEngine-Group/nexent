@@ -803,6 +803,33 @@ def test_search_agent_info_api_exception(mocker, mock_auth_header):
     assert "Agent search info error" in response.json()["detail"]
 
 
+def test_search_agent_info_api_maps_system_agent_forbidden_without_disclosure(
+    mocker,
+    mock_auth_header,
+):
+    """UT-BE-SAL-010: ordinary detail returns a non-disclosing 403 response."""
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("user_id", "auth_tenant_id"),
+    )
+    mock_get_agent_info = mocker.patch(
+        "apps.agent_app.get_agent_info_impl",
+        new_callable=AsyncMock,
+    )
+    mock_get_agent_info.side_effect = ForbiddenError("Agent is not accessible")
+
+    response = config_client.post(
+        "/agent/search_info",
+        json={"agent_id": 7},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Agent is not accessible"}
+    assert "workbench_main" not in response.text
+    assert "auth_tenant_id" not in response.text
+
+
 def test_search_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test search_agent_info_api exception handling with explicit tenant_id query parameter and default version_no=0."""
     # Setup mocks using pytest-mock

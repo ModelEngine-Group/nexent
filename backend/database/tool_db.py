@@ -51,7 +51,7 @@ def create_or_update_tool_by_tool_info(
     Returns:
         Created or updated ToolInstance object
     """
-    from database.agent_db import is_system_agent
+    from .agent_db import is_system_agent
 
     if not allow_system and is_system_agent(tool_info.agent_id, tenant_id) is True:
         raise ValueError("System Agent is managed by the platform")
@@ -466,7 +466,13 @@ def check_tool_is_available(tool_id_list: List[int]):
         return [tool.is_available for tool in tools]
 
 
-def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
+def delete_tools_by_agent_id(
+    agent_id,
+    tenant_id,
+    user_id,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Delete all tool instances for an agent.
     Default version_no=0 deletes the draft version.
@@ -477,6 +483,10 @@ def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
         user_id: User ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
     with get_db_session() as session:
         session.query(ToolInstance).filter(
             ToolInstance.agent_id == agent_id,

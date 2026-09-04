@@ -294,6 +294,7 @@ def create_tenant(
             ensure_workbench_main_agent(
                 tenant_id=tenant_id,
                 user_id=created_by or "system",
+                locale=locale,
             )
         except Exception as e:
             # Tenant creation remains recoverable because Workbench runtime also
@@ -526,10 +527,20 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
                 agent_id = agent.get("agent_id")
                 # Delete tool instances first
                 delete_tools_by_agent_id(
-                    agent_id, tenant_id, deleted_by or "system", version_no=0)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=0,
+                    allow_system=True,
+                )
                 # Delete agent relationships
                 delete_agent_relationship(
-                    agent_id, tenant_id, deleted_by or "system", version_no=0)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=0,
+                    allow_system=True,
+                )
                 # Delete the agent
                 delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
             except Exception as e:
@@ -543,9 +554,19 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
             try:
                 agent_id = agent.get("agent_id")
                 delete_tools_by_agent_id(
-                    agent_id, tenant_id, deleted_by or "system", version_no=1)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=1,
+                    allow_system=True,
+                )
                 delete_agent_relationship(
-                    agent_id, tenant_id, deleted_by or "system", version_no=1)
+                    agent_id,
+                    tenant_id,
+                    deleted_by or "system",
+                    version_no=1,
+                    allow_system=True,
+                )
                 delete_agent_by_id(agent_id, tenant_id, deleted_by or "system")
             except Exception as e:
                 logger.warning(

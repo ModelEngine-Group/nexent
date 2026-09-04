@@ -1513,10 +1513,17 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     try:
         agent_info = search_agent_info_by_agent_id(
             agent_id, tenant_id, version_no)
+        if (
+            agent_info.get("agent_origin") == "SYSTEM"
+            or agent_info.get("system_key") is not None
+        ):
+            raise ForbiddenError("Agent is not accessible")
         # Keep the request-scoped tenant_id unless the record explicitly provides one.
         record_tenant_id = agent_info.get("tenant_id")
         if record_tenant_id:
             tenant_id = record_tenant_id
+    except ForbiddenError:
+        raise
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
         raise ValueError(f"Failed to get agent info: {str(e)}")
@@ -4178,6 +4185,8 @@ async def export_agent_with_skills_impl(
       - ExportAndImportDataFormat as a plain dict when the agent has no skills
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
+    if is_system_agent(agent_id, tenant_id) is True:
+        raise ForbiddenError("System Agent cannot be exported")
 
     skill_zip_entries = collect_skill_zip_entries(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no

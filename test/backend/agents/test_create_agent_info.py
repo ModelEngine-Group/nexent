@@ -702,7 +702,7 @@ class TestGetSkillScriptTools:
     """Tests for the _get_skill_script_tools function"""
 
     def test_get_skill_script_tools_success(self):
-        """Test case for successfully getting skill script tools"""
+        """UT-BE-WMA-019: standard runtime injects upload/download helpers."""
         mock_tool_config.reset_mock()
         with patch('consts.const.CONTAINER_SKILLS_PATH', "/container/skills"):
             result = _get_skill_script_tools(
@@ -2477,7 +2477,7 @@ class TestCreateAgentConfig:
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_memory(self):
-        """Test case for creating agent configuration with memory"""
+        """UT-BE-WMA-018: standard Agent configuration preserves memory."""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
