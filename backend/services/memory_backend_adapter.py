@@ -240,3 +240,15 @@ def build_memory_service_for_dreaming() -> MemoryService:
         backend_search=None,
     )
 
+def build_memory_service_for_fa_extraction() -> MemoryService:
+    """Return a facade for final-answer memory extraction.
+
+    Reuses the same backend store hook as StoreMemoryTool. The extraction
+    pipeline writes agent short-term memory with the same policy constraints.
+    """
+    return MemoryService(
+        embedding_model=None,
+        embedding_model_info=None,
+        backend_store=_backend_store_hook,
+        backend_search=None,
+    )

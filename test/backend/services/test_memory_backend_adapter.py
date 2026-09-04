@@ -570,3 +570,11 @@ def test_backend_search_hook_serializes_string_layer(fake_retrieval_service):
         memory_backend_adapter._backend_search_hook(payload)
     )
     assert results[0]["layer"] == "user"
+
+
+def test_build_memory_service_for_fa_extraction_returns_memory_service():
+    svc = memory_backend_adapter.build_memory_service_for_fa_extraction()
+    assert isinstance(svc, MemoryService)
+    assert callable(svc.kwargs.get("backend_store"))
+    assert svc.kwargs.get("backend_search") is None
+    assert svc.kwargs.get("embedding_model_info") is None

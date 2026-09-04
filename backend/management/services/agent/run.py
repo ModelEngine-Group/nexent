@@ -10,6 +10,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
 from nexent.memory.models import MemoryIngestUnit
+from nexent.core.models import OpenAIModel
 
 from agents.agent_run_manager import AgentRunAlreadyActiveError, agent_run_manager
 from agents.create_agent_info import create_agent_run_info
@@ -19,6 +20,7 @@ from consts.const import (
     DEFAULT_ZH_TITLE,
     LANGUAGE,
     MESSAGE_ROLE,
+    MODEL_CONFIG_MAPPING,
     RUNTIME_CANCEL_POLL_INTERVAL_SECONDS,
     STREAM_STATUS_EVENT,
 )
@@ -77,6 +79,8 @@ from services.knowledge_scope_service import (
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
+from services.fa_memory_extractor import FaMemoryExtractor
+from services.memory_backend_adapter import build_memory_service_for_fa_extraction
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
@@ -89,6 +93,7 @@ from utils.agent_stream_utils import (
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
 )
 from utils.context_utils import build_authorized_context_input
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 from nexent.monitor import agent_monitoring_context
@@ -107,6 +112,7 @@ AGENT_ICON_CONTENT_TYPES = {
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
+_fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
 
 def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int:
@@ -819,6 +825,68 @@ async def _stream_agent_chunks(
             supplement_task = asyncio.create_task(_per_turn_supplement())
             _external_memory_ingest_tasks.add(supplement_task)
             supplement_task.add_done_callback(_external_memory_ingest_tasks.discard)
+
+        if (
+            final_answer_content
+            and memory_ctx is not None
+            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+        ):
+            async def _run_fa_extraction() -> None:
+                try:
+                    config = tenant_config_manager.get_model_config(
+                        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
+                    )
+                    if not config:
+                        logger.warning("fa_memory_extraction: no tenant LLM configured, skipping")
+                        return
+
+                    model = OpenAIModel(
+                        model_id=get_model_name_from_config(config),
+                        api_base=config.get("base_url", ""),
+                        api_key=config.get("api_key", ""),
+                        temperature=0.1,
+                        top_p=0.9,
+                        model_factory=config.get("model_factory"),
+                        ssl_verify=config.get("ssl_verify", True),
+                        display_name=config.get("display_name") or None,
+                        timeout_seconds=config.get("timeout_seconds"),
+                    )
+
+                    class _ModelAdapter:
+                        def __init__(self, sync_model):
+                            self._model = sync_model
+
+                        async def chat(self, messages):
+                            result = await asyncio.to_thread(self._model.generate, messages)
+                            content = getattr(result, "content", result)
+                            return content if isinstance(content, str) else str(content)
+
+                    extractor = FaMemoryExtractor(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        agent_id=str(getattr(agent_request, "agent_id", "")),
+                        conversation_id=str(getattr(agent_request, "conversation_id", "")),
+                        memory_service=build_memory_service_for_fa_extraction(),
+                        model_client=_ModelAdapter(model),
+                    )
+                    result = await extractor.extract_and_store(
+                        final_answer_content,
+                        user_query=str(getattr(agent_request, "query", "") or ""),
+                    )
+                    logger.info(
+                        "fa_memory_extraction: tenant=%s user=%s agent=%s items=%d reason=%s",
+                        tenant_id,
+                        user_id,
+                        str(getattr(agent_request, "agent_id", "")),
+                        len(result.items),
+                        result.reason,
+                    )
+                except Exception:
+                    logger.exception("fa_memory_extraction: unexpected error")
+
+            extraction_task = asyncio.create_task(_run_fa_extraction())
+            _fa_extraction_tasks.add(extraction_task)
+            extraction_task.add_done_callback(_fa_extraction_tasks.discard)
 
 
 def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:
