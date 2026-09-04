@@ -32,6 +32,7 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.sandbox import SandboxConfig
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
@@ -43,6 +44,7 @@ from management.services.knowledge_base.service import (
     get_embedding_model_by_index_name,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
+from services.memory_external_provider_service import get_memory_external_provider_service
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
@@ -73,6 +75,7 @@ from consts.const import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
+    EXTERNAL_MEMORY_SEARCH_ENABLED,
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
@@ -91,6 +94,13 @@ def _create_fixed_search_memory_tool():
     from nexent.core.tools.search_memory_tool import SearchMemoryTool
 
     return SearchMemoryTool()
+
+
+def _get_external_provider_service_for_search():
+    """Resolve the external provider service only when the search kill switch is on."""
+    if not EXTERNAL_MEMORY_SEARCH_ENABLED:
+        return None
+    return get_memory_external_provider_service()
 
 
 def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
@@ -1160,6 +1170,65 @@ async def create_agent_config(
 
             if memory_context_service is not None:
                 try:
+                    external_results = None
+                    try:
+                        provider_service = _get_external_provider_service_for_search()
+                        if provider_service is not None:
+                            top_k = memory_context.user_config.external_provider_top_k
+                            logger.info(
+                                "event=external_provider_search_started tenant_id=%s "
+                                "agent_id=%s top_k=%d",
+                                tenant_id,
+                                agent_id,
+                                top_k,
+                            )
+
+                            search_request = memory_models.MemorySearchRequest(
+                                query=last_user_query or "",
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                user_id=str(memory_context.user_id or ""),
+                                agent_id=str(memory_context.agent_id or "") or None,
+                                conversation_id=(
+                                    str(conversation_id) if conversation_id is not None else None
+                                ),
+                                top_k=top_k,
+                            )
+
+                            ext_search_results = await provider_service.search_all_enabled(
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                request=search_request,
+                                limit=top_k,
+                            )
+
+                            if ext_search_results:
+                                external_results = [
+                                    memory_models.ExternalMemoryItem(
+                                        id=str(r.memory_id or r.external_id or ""),
+                                        content=r.content,
+                                        score=r.score,
+                                        provider=r.source or "external",
+                                        metadata=r.metadata or {},
+                                        created_at=None,
+                                    )
+                                    for r in ext_search_results
+                                ]
+                            logger.info(
+                                "event=external_provider_search_completed tenant_id=%s "
+                                "agent_id=%s results_count=%d",
+                                tenant_id,
+                                agent_id,
+                                len(external_results or []),
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "event=external_provider_search_failed tenant_id=%s user_id=%s "
+                            "agent_id=%s error_type=%s",
+                            tenant_id,
+                            user_id,
+                            agent_id,
+                            type(exc).__name__,
+                        )
+
                     long_term_search_context = await memory_context_service.build_context(
                         tenant_id=str(memory_context.tenant_id or ""),
                         user_id=str(memory_context.user_id or ""),
@@ -1167,6 +1236,7 @@ async def create_agent_config(
                         conversation_id=(str(conversation_id) if conversation_id is not None else None),
                         query=None,
                         layers=["tenant", "user"],
+                        external_results=external_results,
                     )
                     long_term_memory_items = _build_long_term_memory_items(long_term_search_context)
                 except Exception as exc:
@@ -1223,6 +1293,7 @@ async def create_agent_config(
                     str(conversation_id) if conversation_id is not None else ""
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
+                fixed_search_tool.external_results = external_results
                 fixed_search_result = await asyncio.to_thread(
                     fixed_search_tool.forward,
                     last_user_query or "",

@@ -81,10 +81,19 @@ sys.modules['nexent.core.agents.context'] = context_items_mock
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
+memory_models_module = types.ModuleType("nexent.memory.models")
+memory_models_module.MemoryIngestUnit = MagicMock
+sys.modules['nexent.memory.models'] = memory_models_module
+knowledge_scope_service_module = types.ModuleType("services.knowledge_scope_service")
+knowledge_scope_service_module.build_runtime_knowledge_policy = MagicMock
+knowledge_scope_service_module.build_runtime_knowledge_resources = MagicMock
+knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
+sys.modules['services.knowledge_scope_service'] = knowledge_scope_service_module
 fa_memory_extractor_module = types.ModuleType("services.fa_memory_extractor")
 fa_memory_extractor_module.FaMemoryExtractor = MagicMock
 sys.modules['services.fa_memory_extractor'] = fa_memory_extractor_module
 memory_backend_adapter_module = types.ModuleType("services.memory_backend_adapter")
+memory_backend_adapter_module._build_ingestion_event_service = MagicMock
 memory_backend_adapter_module.build_memory_service_for_fa_extraction = MagicMock
 sys.modules['services.memory_backend_adapter'] = memory_backend_adapter_module
 sys.modules['nexent.storage'] = MagicMock()
@@ -17733,18 +17742,17 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     mocker, mock_agent_request, mock_http_request,
 ):
     """A dict knowledge_scope resolves the per-run pool and wires runtime context."""
-    from backend.consts.model import ConversationKnowledgeScopeRequest
-
-    import sys as _sys
-    import types as _types
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
-    mocker.patch.object(kss_module, "build_runtime_knowledge_policy", return_value="scope policy", create=True)
-    mocker.patch.object(kss_module, "build_runtime_knowledge_resources", return_value="scope resources", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
+    mocker.patch.object(
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
+    )
+    mocker.patch.object(
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
+    )
 
 
     mock_create_conversation = mocker.patch.object(
@@ -17820,23 +17828,16 @@ async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
     mocker, mock_agent_request, mock_http_request,
 ):
     """A request scope on an existing conversation is re-persisted after resolution."""
-    from backend.consts.model import ConversationKnowledgeScopeRequest
-
-    import sys as _sys
-    import types as _types
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_policy",
-        return_value="scope policy", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
     )
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_resources",
-        return_value="scope resources", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
     )
     mocker.patch.object(
         agent_run_service, "get_conversation_service",
@@ -17903,23 +17904,16 @@ async def test_run_agent_stream_uses_stored_scope_when_request_has_none(
     mocker, mock_agent_request, mock_http_request,
 ):
     """When the request carries no scope, the stored conversation scope wins."""
-    from backend.consts.model import ConversationKnowledgeScopeRequest
-
-    import sys as _sys
-    import types as _types
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_policy",
-        return_value="scope policy", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
     )
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_resources",
-        return_value="scope resources", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
     )
     mock_get_conversation = mocker.patch.object(
         agent_run_service, "get_conversation_service",
@@ -17978,22 +17972,16 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
     mocker, mock_agent_request, mock_http_request,
 ):
     """The stream emits a knowledge_scope_resolved SSE event carrying the effective scope."""
-    import sys as _sys
-    import types as _types
-
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_policy",
-        return_value="scope policy", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
     )
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_resources",
-        return_value="scope resources", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
     )
     mocker.patch.object(
         agent_run_service, "get_conversation_service",

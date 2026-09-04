@@ -12,6 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "type-check": "tsc --noEmit",
+    "test:e2e:external-memory": "playwright test e2e/external-memory-provider.spec.ts",
     "check-all": "npm run type-check && npm run lint && npm run format:check && npm run build"
   },
   "dependencies": {
@@ -79,6 +80,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/js-yaml": "^4.0.9",
     "@types/mdast": "4.0.4",

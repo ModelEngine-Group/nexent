@@ -9,6 +9,7 @@ from typing import Any, Optional, Dict
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
+from nexent.memory.models import MemoryIngestUnit
 from nexent.core.models import OpenAIModel
 
 from agents.agent_run_manager import AgentRunAlreadyActiveError, agent_run_manager
@@ -42,6 +43,7 @@ from database.agent_db import (
     search_agent_info_by_agent_id
 )
 from database.conversation_db import (
+    get_units_by_message,
     resolve_conversation_runtime_metadata,
 )
 from utils.runtime_metadata_utils import (
@@ -49,7 +51,6 @@ from utils.runtime_metadata_utils import (
 )
 from database.tool_db import (
     query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
-    
 )
 from utils.time_context_utils import prepend_current_time
 from services.conversation_management_service import (
@@ -72,6 +73,12 @@ from services.conversation_management_service import (
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
 from services.memory_config_service import build_memory_context
+from services.memory_backend_adapter import _build_ingestion_event_service
+from services.knowledge_scope_service import (
+    build_runtime_knowledge_policy,
+    build_runtime_knowledge_resources,
+    resolve_knowledge_scope,
+)
 from services.fa_memory_extractor import FaMemoryExtractor
 from services.memory_backend_adapter import build_memory_service_for_fa_extraction
 from services.streaming_channel import streaming_channel_manager
@@ -104,6 +111,7 @@ AGENT_ICON_CONTENT_TYPES = {
 }
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
+_external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
 
@@ -781,6 +789,44 @@ async def _stream_agent_chunks(
         # ``agent.short_term``).
 
         if (
+            terminal_status == "completed"
+            and streaming_message_id is not None
+            and memory_ctx is not None
+            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+        ):
+            async def _per_turn_supplement() -> None:
+                try:
+                    units = get_units_by_message(streaming_message_id)
+                    ingest_units = [
+                        MemoryIngestUnit(
+                            event_id=str(unit["unit_id"]),
+                            event_type="turn_completed",
+                            unit_type=unit["unit_type"],
+                            unit_content=unit["unit_content"],
+                            unit_index=unit["unit_index"],
+                        )
+                        for unit in units
+                        if unit["unit_type"] != "final_answer"
+                    ]
+                    if not ingest_units:
+                        return
+                    await _build_ingestion_event_service().send_ingest_all_enabled(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        agent_id=str(getattr(agent_request, "agent_id", "")),
+                        conversation_id=str(agent_request.conversation_id),
+                        event_type="turn_completed",
+                        event_id=str(streaming_message_id),
+                        units=ingest_units,
+                    )
+                except Exception as exc:
+                    logger.warning("Per-turn supplement failed: %s", exc)
+
+            supplement_task = asyncio.create_task(_per_turn_supplement())
+            _external_memory_ingest_tasks.add(supplement_task)
+            supplement_task.add_done_callback(_external_memory_ingest_tasks.discard)
+
+        if (
             final_answer_content
             and memory_ctx is not None
             and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
@@ -1264,12 +1310,6 @@ async def run_agent_stream(
 
     resolved_scope = None
     if source_scope is not None and not resume:
-        from services.knowledge_scope_service import (
-            build_runtime_knowledge_policy,
-            build_runtime_knowledge_resources,
-            resolve_knowledge_scope,
-        )
-
         if agent_request.agent_id is None:
             raise ValueError("agent_id is required when knowledge_scope is set")
         resolved_scope = resolve_knowledge_scope(

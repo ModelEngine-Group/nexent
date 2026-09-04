@@ -15,6 +15,10 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/skills"
       existingClaim: "nexent-skills"
+    memoryPlugins:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/memory-provider-plugins"
+      existingClaim: "nexent-memory-plugins"
     logs:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/logs"

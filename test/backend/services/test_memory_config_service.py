@@ -28,16 +28,26 @@ consts_const.DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
 consts_const.DEFAULT_MEMORY_SWITCH_KEY = "N"
 consts_const.DEFAULT_DREAMING_SWITCH_KEY = "Y"
 consts_const.DEFAULT_MEMORY_AGENT_SHARE_KEY = MemoryAgentShareMode.NEVER.value
+consts_const.EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
+consts_const.DEFAULT_EXTERNAL_PROVIDER_TOP_K = 5
 sys.modules["consts.const"] = consts_const
 
 # Stub nexent.core.agents.agent_model for MemoryContext and MemoryUserConfig
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 class MemoryUserConfig:
-    def __init__(self, memory_switch: bool, agent_share_option: str, disable_agent_ids, disable_user_agent_ids):
+    def __init__(
+        self,
+        memory_switch: bool,
+        agent_share_option: str,
+        disable_agent_ids,
+        disable_user_agent_ids,
+        external_provider_top_k: int = 5,
+    ):
         self.memory_switch = memory_switch
         self.agent_share_option = agent_share_option
         self.disable_agent_ids = disable_agent_ids
         self.disable_user_agent_ids = disable_user_agent_ids
+        self.external_provider_top_k = external_provider_top_k
 class MemoryContext:
     def __init__(self, user_config, tenant_id, user_id, agent_id, memory_config=None):
         self.user_config = user_config
@@ -117,6 +127,11 @@ utils_memory_utils = types.ModuleType("utils.memory_utils")
 utils_memory_utils.build_memory_config = lambda tenant_id: {}
 sys.modules["utils.memory_utils"] = utils_memory_utils
 
+from backend.services.memory_config_service import (
+    get_external_provider_top_k,
+    set_external_provider_top_k,
+)
+
 
 class TestMemoryConfigService(unittest.TestCase):
     def setUp(self):
@@ -125,6 +140,22 @@ class TestMemoryConfigService(unittest.TestCase):
         self.agent_id = 123
 
     # ------------------------------- helpers -------------------------------
+    @patch("backend.services.memory_config_service.get_user_configs")
+    def test_get_external_provider_top_k(self, get_configs):
+        get_configs.return_value = {"EXTERNAL_PROVIDER_TOP_K": "12"}
+        self.assertEqual(get_external_provider_top_k(self.user_id), 12)
+        get_configs.return_value = {"EXTERNAL_PROVIDER_TOP_K": "invalid"}
+        self.assertEqual(get_external_provider_top_k(self.user_id), 5)
+
+    @patch("backend.services.memory_config_service._update_single_config")
+    def test_set_external_provider_top_k(self, update_config):
+        update_config.return_value = True
+        self.assertTrue(set_external_provider_top_k(self.user_id, 10))
+        update_config.assert_called_once_with(
+            self.user_id, "EXTERNAL_PROVIDER_TOP_K", "10"
+        )
+        self.assertFalse(set_external_provider_top_k(self.user_id, 0))
+        self.assertFalse(set_external_provider_top_k(self.user_id, 101))
     @patch("backend.services.memory_config_service.get_all_configs_by_user_id")
     def test_get_user_configs_defaults_and_aggregation(self, m_get_all):
         # one single key, and two multi values

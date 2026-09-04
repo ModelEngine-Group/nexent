@@ -28,6 +28,7 @@ from consts.const import (
     MEMORY_AGENT_SHARE_KEY,
     MEMORY_SWITCH_KEY,
     DREAMING_SWITCH_KEY,
+    EXTERNAL_PROVIDER_TOP_K_KEY,
     BOOLEAN_TRUE_VALUES,
 )
 from consts.model import MemoryAgentShareMode
@@ -41,6 +42,7 @@ from services.memory_config_service import (
     set_agent_share,
     set_memory_switch,
     set_dreaming_switch,
+    set_external_provider_top_k,
 )
 from database import memory_dreaming_db
 from services.memory_record_service import (
@@ -119,6 +121,13 @@ def set_single_config(
     elif key == DREAMING_SWITCH_KEY:
         enabled = bool(value) if isinstance(value, bool) else str(value).lower() in BOOLEAN_TRUE_VALUES
         ok = set_dreaming_switch(user_id, enabled)
+    elif key == EXTERNAL_PROVIDER_TOP_K_KEY:
+        try:
+            top_k = int(value)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
+                                detail="Invalid value for EXTERNAL_PROVIDER_TOP_K (expected integer)")
+        ok = set_external_provider_top_k(user_id, top_k)
     else:
         raise HTTPException(status_code=HTTPStatus.NOT_ACCEPTABLE,
                             detail="Unsupported configuration key")

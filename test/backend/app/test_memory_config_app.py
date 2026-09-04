@@ -121,6 +121,33 @@ class TestMemoryEmbeddingStatus:
 
 
 class TestSetSingleConfig:
+    def test_set_external_provider_top_k(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ), patch(
+            "apps.memory_config_app.set_external_provider_top_k", return_value=True
+        ) as set_top_k:
+            resp = client.post(
+                "/memory/config/set",
+                json={"key": "EXTERNAL_PROVIDER_TOP_K", "value": "12"},
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.OK
+        set_top_k.assert_called_once_with("u", 12)
+
+    def test_set_external_provider_top_k_rejects_non_integer(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ):
+            resp = client.post(
+                "/memory/config/set",
+                json={"key": "EXTERNAL_PROVIDER_TOP_K", "value": "many"},
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == HTTPStatus.NOT_ACCEPTABLE
+
     def test_set_dreaming_switch(self):
         with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")), patch(
             "apps.memory_config_app.set_dreaming_switch", return_value=True
