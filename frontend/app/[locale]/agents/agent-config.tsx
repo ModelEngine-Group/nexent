@@ -78,7 +78,7 @@ const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   display_info: true,
   role_model: true,
   tools: true,
-  skills: false,
+  skills: true,
   run_strategy: false,
   publish_attributes: false,
   collaborative_agents: false,
