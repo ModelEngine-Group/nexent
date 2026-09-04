@@ -24,7 +24,8 @@ from consts.const import (
     IS_SPEED_MODE,
     PERMISSION_PRIVATE,
 )
-from consts.exceptions import DuplicateError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, DuplicateError
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
     create_knowledge_record,
@@ -38,6 +39,7 @@ from database.knowledge_db import (
 )
 from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.knowledge_file_lifecycle_db import (
+    delete_file_records_for_knowledge_base,
     list_file_records,
 )
 from services.knowledge_storage_service import (
@@ -84,6 +86,17 @@ from management.services.knowledge_base.permission import (
     resolve_knowledge_base_permission,
 )
 
+
+# A knowledge base deletion is rejected while any file is still owned by the
+# ingestion pipeline. DELETE_REQUESTED/DELETED rows are already owned by a
+# file-deletion operation and therefore do not block the broader deletion.
+KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES = frozenset({
+    "UPLOADING",
+    "UPLOADED",
+    "PROCESSING",
+    "FORWARDING",
+})
+
 class KnowledgeBaseManagementService:
     CREATOR_PERMISSION = CREATOR_PERMISSION
     resolve_knowledge_base_permission = staticmethod(resolve_knowledge_base_permission)
@@ -103,7 +116,7 @@ class KnowledgeBaseManagementService:
         # Check the durable lifecycle table before mutating any external
         # system.  This closes the race where a processing task can recreate
         # data after the index/source cleanup has started.
-        lifecycle_rows = ElasticSearchService._assert_knowledge_base_delete_allowed(index_name)
+        lifecycle_rows = KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed(index_name)
 
         lifecycle_fence_cleanup = {"cleared_count": 0, "failed_count": 0}
         try:
@@ -169,6 +182,11 @@ class KnowledgeBaseManagementService:
                 file_id = lifecycle_row.get("file_id")
                 if not file_id:
                     continue
+                # A per-file deletion retry task is in-memory and can only
+                # exist in this process. A knowledge-base deletion supersedes
+                # it after the index and lifecycle rows have been removed.
+                from management.services.knowledge_base.deletion import _document_delete_tasks
+
                 pending_delete_task = _document_delete_tasks.pop(str(file_id), None)
                 if pending_delete_task and not pending_delete_task.done():
                     pending_delete_task.cancel()

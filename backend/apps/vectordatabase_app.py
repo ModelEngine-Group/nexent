@@ -699,38 +699,26 @@ async def delete_documents(
             TagManagementService.cleanup_document_assignments(
                 tenant_id, "local", index_name, path_or_url, user_id
             )
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(
-                    index_name, path_or_url
-                )
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for document %s in index %s: %s",
-                    path_or_url,
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}, but Redis cleanup encountered an error: "
-                    f"{str(redis_error)}"
-                )
+            # The deletion service performs Redis cleanup for new callers. Keep
+            # the legacy fallback only when an older service implementation did
+            # not include that result, and avoid duplicate deletion calls.
+            if "redis_cleanup" not in result and not result.get("deletion_pending"):
+                try:
+                    redis_service = get_redis_service()
+                    redis_cleanup_result = redis_service.delete_document_records(
+                        index_name, path_or_url
+                    )
+                    result["redis_cleanup"] = redis_cleanup_result
+                    if redis_cleanup_result.get("errors"):
+                        result["redis_warnings"] = redis_cleanup_result["errors"]
+                except Exception as redis_error:
+                    logger.warning(
+                        "Redis cleanup failed for document %s in index %s: %s",
+                        path_or_url,
+                        index_name,
+                        redis_error,
+                    )
+                    result["redis_cleanup_error"] = str(redis_error)
 
         return result
 
