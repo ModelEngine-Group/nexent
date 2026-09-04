@@ -103,6 +103,35 @@ if grep -Eq '^COMMENT ON COLUMN .*conversation_message_unit_t.*step_index' "$DEP
   fail "init SQL should not comment conversation_message_unit_t.step_index before its migration adds the column"
 fi
 
+UNIFIED_TAG_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
+[ -f "$UNIFIED_TAG_MIGRATION" ] || fail "PR #3809 SQL should be consolidated into one v2.5.2 migration"
+
+for superseded_migration in \
+  v2.5.0_0817_unified_tag_management.sql \
+  v2.5.1_0817_tag_library_permissions.sql \
+  v2.5.2_0818_document_tag_projection.sql \
+  v2.5.3_0819_agent_category_preset_tags.sql \
+  v2.5.4_0820_tag_value_usage_index.sql \
+  v2.5.5_0829_agent_category_compatibility.sql \
+  v2.5.6_0829_document_tag_projection_delete_flag.sql \
+  v2.5.7_0831_no_value_tag_definitions.sql; do
+  [ ! -e "$DEPLOY_ROOT/sql/migrations/$superseded_migration" ] \
+    || fail "superseded PR #3809 migration should be removed: $superseded_migration"
+done
+
+assert_file_not_contains "$DEPLOY_ROOT/sql/init.sql" \
+  "tag-library-permission-seed:start" \
+  "init SQL should not contain migration-only tag permission grants"
+assert_file_contains "$UNIFIED_TAG_MIGRATION" \
+  "pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id')" \
+  "consolidated migration should repair the role permission sequence after explicit IDs are used"
+assert_file_contains "$UNIFIED_TAG_MIGRATION" \
+  "MAX(role_permission_id)" \
+  "consolidated migration should advance beyond existing explicit permission IDs"
+assert_file_contains "$UNIFIED_TAG_MIGRATION" \
+  "(41, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE')" \
+  "consolidated migration should seed tag library grants with reserved IDs"
+
 HISTORY_PROJECTION_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.3_merged_migrations.sql"
 assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
   "ADD COLUMN IF NOT EXISTS step_index INTEGER DEFAULT NULL;" \

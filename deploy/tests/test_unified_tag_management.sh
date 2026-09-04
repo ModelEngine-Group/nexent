@@ -5,9 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INIT_SQL="$DEPLOY_ROOT/sql/init.sql"
-MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.0_0817_unified_tag_management.sql"
-AGENT_CATEGORY_SEED_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.3_0819_agent_category_preset_tags.sql"
-AGENT_CATEGORY_COMPATIBILITY_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.5_0829_agent_category_compatibility.sql"
+MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
 PREFLIGHT_SQL="$DEPLOY_ROOT/sql/preflight/unified_tag_management_preflight.sql"
 POSTGRES_TEST_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:15-alpine}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
@@ -64,8 +62,6 @@ require_prerequisites() {
   command -v "$DOCKER_BIN" >/dev/null 2>&1 || fail "docker command not found: $DOCKER_BIN"
   [ -f "$INIT_SQL" ] || fail "init SQL not found: $INIT_SQL"
   [ -f "$MIGRATION_SQL" ] || fail "migration SQL not found: $MIGRATION_SQL"
-  [ -f "$AGENT_CATEGORY_SEED_SQL" ] || fail "migration SQL not found: $AGENT_CATEGORY_SEED_SQL"
-  [ -f "$AGENT_CATEGORY_COMPATIBILITY_SQL" ] || fail "migration SQL not found: $AGENT_CATEGORY_COMPATIBILITY_SQL"
   [ -f "$PREFLIGHT_SQL" ] || fail "preflight SQL not found: $PREFLIGHT_SQL"
 }
 
@@ -166,7 +162,7 @@ expect_agent_category_migration_failure() {
   local database="$1"
   local expected_reason="$2"
   local output
-  if output="$(run_file "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" 2>&1)"; then
+  if output="$(run_file "$database" "$MIGRATION_SQL" 2>&1)"; then
     fail "Agent Category compatibility migration unexpectedly succeeded for $database"
   fi
   assert_contains "$output" "Agent category migration blocked" \
@@ -286,6 +282,14 @@ CREATE TABLE nexent.mcp_market_record_t (
     tags TEXT[],
     delete_flag VARCHAR(1) DEFAULT 'N'
 );
+
+CREATE TABLE nexent.role_permission_t (
+    role_permission_id SERIAL PRIMARY KEY,
+    user_role VARCHAR(100),
+    permission_category VARCHAR(100),
+    permission_type VARCHAR(100),
+    permission_subtype VARCHAR(100)
+);
 SQL
 }
 
@@ -306,7 +310,7 @@ test_preflight_before_tag_schema() {
   pass "preflight runs before tag schema and returns the document sentinel"
 }
 
-test_empty_legacy_provisions_only_buckets_and_bindings() {
+test_empty_legacy_provisions_final_tag_library() {
   local database="utm_empty"
   create_database "$database"
   create_legacy_schema "$database"
@@ -317,16 +321,77 @@ SQL
 
   run_file "$database" "$MIGRATION_SQL" >/dev/null
   assert_query "$database" \
-    "SELECT (SELECT count(*) FROM nexent.tag_bucket) || '|' || (SELECT count(*) FROM nexent.tag_bucket_resource_type) || '|' || (SELECT count(*) FROM nexent.tag_definition);" \
-    "2|6|0" \
-    "empty legacy data should create two buckets and six bindings without Keywords"
+    "SELECT (SELECT count(*) FROM nexent.tag_bucket) || '|' || (SELECT count(*) FROM nexent.tag_bucket_resource_type) || '|' || (SELECT count(*) FROM nexent.tag_definition) || '|' || (SELECT count(*) FROM nexent.tag_value);" \
+    "2|6|1|20" \
+    "empty legacy data should create final buckets, bindings, and Agent Category presets"
 
   run_file "$database" "$MIGRATION_SQL" >/dev/null
   assert_query "$database" \
-    "SELECT (SELECT count(*) FROM nexent.tag_bucket) || '|' || (SELECT count(*) FROM nexent.tag_bucket_resource_type) || '|' || (SELECT count(*) FROM nexent.tag_definition);" \
-    "2|6|0" \
+    "SELECT (SELECT count(*) FROM nexent.tag_bucket) || '|' || (SELECT count(*) FROM nexent.tag_bucket_resource_type) || '|' || (SELECT count(*) FROM nexent.tag_definition) || '|' || (SELECT count(*) FROM nexent.tag_value);" \
+    "2|6|1|20" \
     "empty migration rerun should remain duplicate-free"
-  pass "empty legacy tenant provisions only buckets/bindings and reruns idempotently"
+  pass "empty legacy tenant provisions the final tag library and reruns idempotently"
+}
+
+test_tag_library_permission_ids_and_legacy_normalization() {
+  local database="utm_permission_ids"
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" >/dev/null <<'SQL'
+INSERT INTO nexent.role_permission_t (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) VALUES
+    (1605, 'SU', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+    (1606, 'ADMIN', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+    (1607, 'SPEED', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE'),
+    (1608, 'ASSET_OWNER', 'RESOURCE', 'TAG_LIBRARY', 'MANAGE');
+
+SELECT setval('nexent.role_permission_t_role_permission_id_seq', 1608, TRUE);
+SQL
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  assert_query "$database" \
+    "SELECT string_agg(role_permission_id || ':' || user_role, ',' ORDER BY role_permission_id) FROM nexent.role_permission_t WHERE permission_category = 'RESOURCE' AND permission_type = 'TAG_LIBRARY' AND permission_subtype = 'MANAGE';" \
+    "41:SU,92:ADMIN,229:SPEED,230:ASSET_OWNER" \
+    "legacy generated permission IDs should normalize to the reserved IDs"
+  assert_query "$database" \
+    "SELECT (last_value >= (SELECT max(role_permission_id) FROM nexent.role_permission_t))::TEXT FROM nexent.role_permission_t_role_permission_id_seq;" \
+    "true" "permission sequence must not lag behind explicit IDs"
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  assert_query "$database" \
+    "SELECT string_agg(role_permission_id || ':' || user_role, ',' ORDER BY role_permission_id) FROM nexent.role_permission_t WHERE permission_category = 'RESOURCE' AND permission_type = 'TAG_LIBRARY' AND permission_subtype = 'MANAGE';" \
+    "41:SU,92:ADMIN,229:SPEED,230:ASSET_OWNER" \
+    "permission ID normalization should remain idempotent"
+  pass "TAG_LIBRARY permissions use reserved IDs and normalize legacy generated IDs"
+}
+
+test_tag_library_permission_id_conflict_rolls_back() {
+  local database="utm_permission_id_conflict"
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.role_permission_t (
+    role_permission_id,
+    user_role,
+    permission_category,
+    permission_type,
+    permission_subtype
+) VALUES (
+    41, 'DEV', 'RESOURCE', 'MODEL', 'READ'
+);
+SQL
+
+  expect_migration_failure "$database" "tag_library_permission_id_conflict"
+  assert_schema_rolled_back "$database"
+  assert_query "$database" \
+    "SELECT role_permission_id || ':' || user_role || ':' || permission_type FROM nexent.role_permission_t;" \
+    "41:DEV:MODEL" "permission ID conflict rollback must preserve the existing permission"
+  pass "occupied reserved TAG_LIBRARY permission IDs fail closed and roll back"
 }
 
 test_valid_legacy_backfill_and_idempotency() {
@@ -360,8 +425,8 @@ SQL
     "SELECT count(*) FROM nexent.tag_definition WHERE definition_key = 'keywords' AND definition_name = 'Keywords' AND selection_mode = 'multi_select';" \
     "1" "valid legacy values should create one Keywords definition"
   assert_query "$database" \
-    "SELECT count(*) FROM nexent.tag_value;" "7" \
-    "trimmed case-insensitive values should be deduplicated"
+    "SELECT count(*) FROM nexent.tag_value;" "27" \
+    "legacy values should be deduplicated alongside 20 Agent Category presets"
   assert_query "$database" \
     "SELECT normalized_value || '|' || display_value FROM nexent.tag_value WHERE normalized_value = 'alpha';" \
     "alpha|ALPHA" \
@@ -389,7 +454,7 @@ SQL
   run_file "$database" "$MIGRATION_SQL" >/dev/null
   assert_query "$database" \
     "SELECT (SELECT count(*) FROM nexent.tag_bucket) || '|' || (SELECT count(*) FROM nexent.tag_bucket_resource_type) || '|' || (SELECT count(*) FROM nexent.tag_definition) || '|' || (SELECT count(*) FROM nexent.tag_value) || '|' || (SELECT count(*) FROM nexent.resource_tag_assignment);" \
-    "2|6|1|7|7" \
+    "2|6|2|27|7" \
     "valid migration rerun should not create duplicates"
   pass "valid legacy sources normalize into deterministic Keywords values and rerun idempotently"
 }
@@ -421,8 +486,6 @@ UPDATE nexent.ag_agent_repository_t SET category_id = 1 WHERE agent_repository_i
 SQL
 
   run_file "$database" "$MIGRATION_SQL" >/dev/null
-  run_file "$database" "$AGENT_CATEGORY_SEED_SQL" >/dev/null
-  run_file "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" >/dev/null
 
   assert_query "$database" \
     "SELECT count(*) FROM nexent.tag_definition WHERE tenant_id = 'tenant-category' AND definition_key = 'agent_category' AND delete_flag = 'N';" \
@@ -452,7 +515,7 @@ SQL
     "SELECT category_id FROM nexent.ag_agent_repository_t WHERE agent_repository_id = 301;" \
     "1" "the removed category_id taxonomy should remain unchanged"
 
-  run_file "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" >/dev/null
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
   assert_query "$database" \
     "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE assignment.tenant_id = 'tenant-category' AND definition.definition_key = 'agent_category' AND assignment.delete_flag = 'N';" \
     "7" "Agent Category compatibility migration should rerun without duplicates"
@@ -486,24 +549,14 @@ SELECT 501, 'tenant-category-capacity', 50,
 FROM generate_series(1, 100) AS series(item);
 SQL
 
-  run_file "$database" "$MIGRATION_SQL" >/dev/null
-  run_file "$database" "$AGENT_CATEGORY_SEED_SQL" >/dev/null
-  preflight_output="$(run_file "$database" "$PREFLIGHT_SQL")"
-  assert_contains "$preflight_output" "agent_category_assignment_capacity_exceeded" \
-    "preflight should report the projected Agent Category assignment overflow"
-  assert_contains "$preflight_output" '"new_agent_categories": 1' \
-    "preflight should report the one category assignment that would exceed capacity"
   expect_agent_category_migration_failure "$database" "assignment-capacity"
   assert_query "$database" \
-    "SELECT count(*) FROM nexent.resource_tag_assignment WHERE tenant_id = 'tenant-category-capacity' AND resource_type = 'agent' AND resource_id = '50' AND delete_flag = 'N';" \
-    "100" "failed Agent Category projection should preserve the existing 100 Keywords assignments"
-  assert_query "$database" \
-    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE assignment.tenant_id = 'tenant-category-capacity' AND assignment.resource_id = '50' AND definition.definition_key = 'agent_category';" \
-    "0" "capacity conflict should roll back every projected Agent Category assignment"
+    "SELECT COALESCE(to_regclass('nexent.tag_bucket')::TEXT, '');" \
+    "" "capacity conflict should roll back the complete consolidated tag migration"
   assert_query "$database" \
     "SELECT cardinality(tags) FROM nexent.ag_agent_repository_t WHERE agent_repository_id = 501;" \
     "100" "capacity conflict should preserve all legacy Agent repository tags"
-  pass "Agent Category projection fails closed and rolls back when it would create the 101st assignment"
+  pass "Agent Category projection fails closed and rolls back the consolidated migration"
 }
 
 test_latest_init_and_tag_migration_order() {
@@ -519,11 +572,7 @@ END;
 $$;
 SQL
   run_file_with_search_path "$database" "$INIT_SQL" >/dev/null
-  run_migration_files_through "$database" "v2.5.0_0817_unified_tag_management.sql"
-  run_file_with_search_path "$database" "$AGENT_CATEGORY_SEED_SQL" >/dev/null
-  run_file_with_search_path "$database" \
-    "$DEPLOY_ROOT/sql/migrations/v2.5.4_0820_tag_value_usage_index.sql" >/dev/null
-  run_file_with_search_path "$database" "$AGENT_CATEGORY_COMPATIBILITY_SQL" >/dev/null
+  run_migration_files_through "$database" "v2.5.2_unified_tag_management.sql"
 
   run_sql "$database" <<'SQL'
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, created_by, delete_flag)
@@ -691,7 +740,7 @@ SQL
     "hard delete should reject an in-use tag definition"
   assert_query "$database" \
     "SELECT (SELECT count(*) FROM nexent.tag_definition) || '|' || (SELECT count(*) FROM nexent.tag_value) || '|' || (SELECT count(*) FROM nexent.resource_tag_assignment);" \
-    "1|1|1" "failed hard deletes must preserve definition, value, and assignment"
+    "2|21|1" "failed hard deletes must preserve built-in presets, definitions, values, and assignments"
   assert_query "$database" \
     "SELECT labels::TEXT FROM nexent.ag_tool_info_t WHERE tool_id = 1;" \
     "[\"KeepMe\"]" "failed hard deletes must preserve the legacy field"
@@ -715,27 +764,27 @@ INSERT INTO nexent.tag_definition (
 SELECT 'tenant-trigger', bucket.bucket_id,
        'definition-' || item::TEXT,
        'Definition ' || item::TEXT,
-       CASE WHEN item = 99 THEN 'single_select' ELSE 'multi_select' END
+       CASE WHEN item = 98 THEN 'single_select' ELSE 'multi_select' END
 FROM nexent.tag_bucket AS bucket
-CROSS JOIN generate_series(1, 99) AS series(item)
+CROSS JOIN generate_series(1, 98) AS series(item)
 WHERE bucket.tenant_id = 'tenant-trigger'
   AND bucket.bucket_key = 'default_resource';
 SQL
   assert_query "$database" \
     "SELECT count(*) FROM nexent.tag_definition WHERE tenant_id = 'tenant-trigger';" \
-    "99" "definition trigger should allow 99 definitions"
+    "99" "definition trigger should allow 98 user definitions plus the built-in preset"
 
   run_sql "$database" <<'SQL'
 INSERT INTO nexent.tag_definition (
     tenant_id, bucket_id, definition_key, definition_name, selection_mode
 )
-SELECT 'tenant-trigger', bucket_id, 'definition-100', 'Definition 100', 'multi_select'
+SELECT 'tenant-trigger', bucket_id, 'definition-99', 'Definition 99', 'multi_select'
 FROM nexent.tag_bucket
 WHERE tenant_id = 'tenant-trigger' AND bucket_key = 'default_resource';
 SQL
   assert_query "$database" \
     "SELECT count(*) FROM nexent.tag_definition WHERE tenant_id = 'tenant-trigger';" \
-    "100" "definition trigger should allow the 100th definition"
+    "100" "definition trigger should allow the 100th definition including the built-in preset"
   run_sql "$database" <<'SQL'
 INSERT INTO nexent.ag_tool_info_t (tool_id, author, labels, delete_flag)
 VALUES (100, 'tenant-trigger', '["ProjectedKeyword"]'::JSONB, 'N');
@@ -755,27 +804,27 @@ SQL
   run_sql "$database" <<'SQL'
 UPDATE nexent.tag_definition
 SET status = 'disabled'
-WHERE tenant_id = 'tenant-trigger' AND definition_key = 'definition-97';
+WHERE tenant_id = 'tenant-trigger' AND definition_key = 'definition-96';
 SQL
   expect_sql_failure "$database" \
-    "INSERT INTO nexent.tag_definition (tenant_id, bucket_id, definition_key, definition_name, selection_mode) SELECT 'tenant-trigger', bucket_id, 'definition-101', 'Definition 101', 'multi_select' FROM nexent.tag_bucket WHERE tenant_id = 'tenant-trigger' AND bucket_key = 'default_resource';" \
+    "INSERT INTO nexent.tag_definition (tenant_id, bucket_id, definition_key, definition_name, selection_mode) SELECT 'tenant-trigger', bucket_id, 'definition-100', 'Definition 100', 'multi_select' FROM nexent.tag_bucket WHERE tenant_id = 'tenant-trigger' AND bucket_key = 'default_resource';" \
     "Tag definition limit exceeded" \
     "disabled definitions should still count and reject the 101st definition"
   run_sql "$database" <<'SQL'
 UPDATE nexent.tag_definition
 SET delete_flag = 'Y'
-WHERE tenant_id = 'tenant-trigger' AND definition_key = 'definition-98';
+WHERE tenant_id = 'tenant-trigger' AND definition_key = 'definition-97';
 
 INSERT INTO nexent.tag_definition (
     tenant_id, bucket_id, definition_key, definition_name, selection_mode
 )
 SELECT 'tenant-trigger', bucket_id,
-       'definition-98-rebuilt', 'Definition 98', 'multi_select'
+       'definition-97-rebuilt', 'Definition 97', 'multi_select'
 FROM nexent.tag_bucket
 WHERE tenant_id = 'tenant-trigger' AND bucket_key = 'default_resource';
 SQL
   assert_query "$database" \
-    "SELECT count(*) FILTER (WHERE delete_flag = 'N') || '|' || count(*) FILTER (WHERE normalized_name = 'definition 98') FROM nexent.tag_definition WHERE tenant_id = 'tenant-trigger';" \
+    "SELECT count(*) FILTER (WHERE delete_flag = 'N') || '|' || count(*) FILTER (WHERE normalized_name = 'definition 97') FROM nexent.tag_definition WHERE tenant_id = 'tenant-trigger';" \
     "100|2" \
     "soft-deleted definitions should not count and their normalized name should be reusable"
 
@@ -883,7 +932,7 @@ INSERT INTO nexent.tag_value (tenant_id, definition_id, normalized_value, displa
 SELECT 'tenant-trigger', definition_id, value_key, display_value
 FROM nexent.tag_definition
 CROSS JOIN (VALUES ('single-a', 'Single A'), ('single-b', 'Single B')) AS values(value_key, display_value)
-WHERE tenant_id = 'tenant-trigger' AND definition_key = 'definition-99';
+WHERE tenant_id = 'tenant-trigger' AND definition_key = 'definition-98';
 
 INSERT INTO nexent.resource_tag_assignment (
     tenant_id, resource_type, resource_id, definition_id, value_id
@@ -893,12 +942,12 @@ FROM nexent.tag_value AS value
 JOIN nexent.tag_definition AS definition
   ON definition.tenant_id = value.tenant_id
  AND definition.definition_id = value.definition_id
-WHERE definition.definition_key = 'definition-99'
+WHERE definition.definition_key = 'definition-98'
 ORDER BY value.value_id
 LIMIT 1;
 SQL
   expect_sql_failure "$database" \
-    "INSERT INTO nexent.resource_tag_assignment (tenant_id, resource_type, resource_id, definition_id, value_id) SELECT value.tenant_id, 'tool', 'single-resource', value.definition_id, value.value_id FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition ON definition.tenant_id = value.tenant_id AND definition.definition_id = value.definition_id WHERE definition.definition_key = 'definition-99' ORDER BY value.value_id DESC LIMIT 1;" \
+    "INSERT INTO nexent.resource_tag_assignment (tenant_id, resource_type, resource_id, definition_id, value_id) SELECT value.tenant_id, 'tool', 'single-resource', value.definition_id, value.value_id FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition ON definition.tenant_id = value.tenant_id AND definition.definition_id = value.definition_id WHERE definition.definition_key = 'definition-98' ORDER BY value.value_id DESC LIMIT 1;" \
     "single_select definition" \
     "single_select should reject a second active value"
 
@@ -932,15 +981,15 @@ INSERT INTO nexent.tag_definition (
 SELECT 'tenant-concurrent', bucket.bucket_id,
        'concurrent-definition-' || item::TEXT,
        'Concurrent Definition ' || item::TEXT,
-       CASE WHEN item = 99 THEN 'single_select' ELSE 'multi_select' END
+       CASE WHEN item = 98 THEN 'single_select' ELSE 'multi_select' END
 FROM nexent.tag_bucket AS bucket
-CROSS JOIN generate_series(1, 99) AS series(item)
+CROSS JOIN generate_series(1, 98) AS series(item)
 WHERE bucket.tenant_id = 'tenant-concurrent'
   AND bucket.bucket_key = 'default_resource';
 SQL
   run_concurrent_sql_pair "$database" "definitions" "Tag definition limit exceeded" \
-    "INSERT INTO nexent.tag_definition (tenant_id, bucket_id, definition_key, definition_name, selection_mode) SELECT 'tenant-concurrent', bucket_id, 'concurrent-definition-100a', 'Concurrent Definition 100 A', 'multi_select' FROM nexent.tag_bucket WHERE tenant_id = 'tenant-concurrent' AND bucket_key = 'default_resource';" \
-    "INSERT INTO nexent.tag_definition (tenant_id, bucket_id, definition_key, definition_name, selection_mode) SELECT 'tenant-concurrent', bucket_id, 'concurrent-definition-100b', 'Concurrent Definition 100 B', 'multi_select' FROM nexent.tag_bucket WHERE tenant_id = 'tenant-concurrent' AND bucket_key = 'default_resource';"
+    "INSERT INTO nexent.tag_definition (tenant_id, bucket_id, definition_key, definition_name, selection_mode) SELECT 'tenant-concurrent', bucket_id, 'concurrent-definition-99a', 'Concurrent Definition 99 A', 'multi_select' FROM nexent.tag_bucket WHERE tenant_id = 'tenant-concurrent' AND bucket_key = 'default_resource';" \
+    "INSERT INTO nexent.tag_definition (tenant_id, bucket_id, definition_key, definition_name, selection_mode) SELECT 'tenant-concurrent', bucket_id, 'concurrent-definition-99b', 'Concurrent Definition 99 B', 'multi_select' FROM nexent.tag_bucket WHERE tenant_id = 'tenant-concurrent' AND bucket_key = 'default_resource';"
   assert_query "$database" \
     "SELECT count(*) FROM nexent.tag_definition WHERE tenant_id = 'tenant-concurrent' AND delete_flag = 'N';" \
     "100" "concurrent definition final-slot writes must stop at 100"
@@ -975,11 +1024,11 @@ CROSS JOIN (VALUES
     ('concurrent-single-b', 'Concurrent Single B')
 ) AS values(value_key, display_value)
 WHERE definition.tenant_id = 'tenant-concurrent'
-  AND definition.definition_key = 'concurrent-definition-99';
+  AND definition.definition_key = 'concurrent-definition-98';
 SQL
   run_concurrent_sql_pair "$database" "single-select" "single_select definition" \
-    "INSERT INTO nexent.resource_tag_assignment (tenant_id, resource_type, resource_id, definition_id, value_id) SELECT value.tenant_id, 'tool', 'concurrent-single-resource', value.definition_id, value.value_id FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE definition.definition_key = 'concurrent-definition-99' AND value.normalized_value = 'concurrent-single-a';" \
-    "INSERT INTO nexent.resource_tag_assignment (tenant_id, resource_type, resource_id, definition_id, value_id) SELECT value.tenant_id, 'tool', 'concurrent-single-resource', value.definition_id, value.value_id FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE definition.definition_key = 'concurrent-definition-99' AND value.normalized_value = 'concurrent-single-b';"
+    "INSERT INTO nexent.resource_tag_assignment (tenant_id, resource_type, resource_id, definition_id, value_id) SELECT value.tenant_id, 'tool', 'concurrent-single-resource', value.definition_id, value.value_id FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE definition.definition_key = 'concurrent-definition-98' AND value.normalized_value = 'concurrent-single-a';" \
+    "INSERT INTO nexent.resource_tag_assignment (tenant_id, resource_type, resource_id, definition_id, value_id) SELECT value.tenant_id, 'tool', 'concurrent-single-resource', value.definition_id, value.value_id FROM nexent.tag_value AS value JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) WHERE definition.definition_key = 'concurrent-definition-98' AND value.normalized_value = 'concurrent-single-b';"
   assert_query "$database" \
     "SELECT count(*) FROM nexent.resource_tag_assignment WHERE tenant_id = 'tenant-concurrent' AND resource_type = 'tool' AND resource_id = 'concurrent-single-resource';" \
     "1" "concurrent single_select writes must leave exactly one assignment"
@@ -1010,7 +1059,9 @@ main() {
   start_postgres
 
   test_preflight_before_tag_schema
-  test_empty_legacy_provisions_only_buckets_and_bindings
+  test_empty_legacy_provisions_final_tag_library
+  test_tag_library_permission_ids_and_legacy_normalization
+  test_tag_library_permission_id_conflict_rolls_back
   test_valid_legacy_backfill_and_idempotency
   test_agent_category_compatibility_and_future_tenant_provisioning
   test_agent_category_capacity_conflict_rolls_back
