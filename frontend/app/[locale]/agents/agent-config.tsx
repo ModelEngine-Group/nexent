@@ -19,7 +19,10 @@ import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 
 import AgentInfo from "./components/agent-info";
 import AgentPrmopt from "./components/agent-prompt";
-import AgentCapability from "./components/agent-capability";
+import {
+  AgentSkillCapability,
+  AgentToolCapability,
+} from "./components/agent-capability";
 import AgentRunPolicy from "./components/agent-run-policy";
 import AgentGuide from "./components/agent-guide";
 import AgentDeployment from "./components/agent-deployment";
@@ -39,6 +42,7 @@ import {
   Info,
   Cpu,
   Wrench,
+  BlocksIcon,
   Play,
   Globe,
   Database,
@@ -54,7 +58,8 @@ type AgentConfigTab = "basic" | "tools_skills" | "advanced";
 type ConfigSectionKey =
   | "display_info"
   | "role_model"
-  | "tools_skills"
+  | "tools"
+  | "skills"
   | "run_strategy"
   | "publish_attributes"
   | "collaborative_agents"
@@ -72,7 +77,8 @@ const BASIC_CONFIG_SECTIONS = new Set<ConfigSectionKey>([
 const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   display_info: true,
   role_model: true,
-  tools_skills: false,
+  tools: true,
+  skills: false,
   run_strategy: false,
   publish_attributes: false,
   collaborative_agents: false,
@@ -163,7 +169,8 @@ export default function AgentConfig({
   >(() => ({ ...DEFAULT_OPEN_SECTIONS }));
   const displayInfoSectionRef = useRef<HTMLDivElement>(null);
   const roleModelSectionRef = useRef<HTMLDivElement>(null);
-  const toolsSkillsSectionRef = useRef<HTMLDivElement>(null);
+  const toolsSectionRef = useRef<HTMLDivElement>(null);
+  const skillsSectionRef = useRef<HTMLDivElement>(null);
   const runStrategySectionRef = useRef<HTMLDivElement>(null);
   const publishAttributesSectionRef = useRef<HTMLDivElement>(null);
   const collaborativeAgentsSectionRef = useRef<HTMLDivElement>(null);
@@ -231,14 +238,16 @@ export default function AgentConfig({
     if (lastScrolledRequestRef.current === requestKey) {
       return;
     }
-    const newTab = BASIC_CONFIG_SECTIONS.has(target.section)
+    const targetSection: ConfigSectionKey =
+      target.section === "tools_skills" ? target.capabilityTab : target.section;
+    const newTab = BASIC_CONFIG_SECTIONS.has(targetSection)
       ? "basic"
       : target.section === "tools_skills"
         ? "tools_skills"
         : "advanced";
     setActiveConfigTab(newTab);
     setOpenSections((current) =>
-      current[target.section] ? current : { ...current, [target.section]: true }
+      current[targetSection] ? current : { ...current, [targetSection]: true }
     );
 
     lastScrolledRequestRef.current = requestKey;
@@ -246,7 +255,8 @@ export default function AgentConfig({
       const sectionRefs: Record<ConfigSectionKey, React.RefObject<HTMLDivElement | null>> = {
         display_info: displayInfoSectionRef,
         role_model: roleModelSectionRef,
-        tools_skills: toolsSkillsSectionRef,
+        tools: toolsSectionRef,
+        skills: skillsSectionRef,
         run_strategy: runStrategySectionRef,
         publish_attributes: publishAttributesSectionRef,
         collaborative_agents: collaborativeAgentsSectionRef,
@@ -254,7 +264,7 @@ export default function AgentConfig({
         conversation_guide: conversationGuideSectionRef,
         guardrail: guardrailSectionRef,
       };
-      const sectionElement = sectionRefs[target.section].current;
+      const sectionElement = sectionRefs[targetSection].current;
       if (!sectionElement) {
         clearConfigFocusRequest();
         return;
@@ -471,16 +481,24 @@ export default function AgentConfig({
           className={cn("min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 mt-3")}
         >
           <ConfigSection
-            title={t("agent.config.section.toolsSkills.title")}
-            description={t("agent.config.section.toolsSkills.description")}
+            title={t("agent.config.section.tools.title")}
+            description={t("agent.config.section.tools.description")}
             icon={<Wrench className="h-4 w-4 shrink-0 text-blue-500" />}
-            open={openSections.tools_skills}
-            onOpenChange={(open) =>
-              handleSectionOpenChange("tools_skills", open)
-            }
-            containerRef={toolsSkillsSectionRef}
+            open={openSections.tools}
+            onOpenChange={(open) => handleSectionOpenChange("tools", open)}
+            containerRef={toolsSectionRef}
           >
-            <AgentCapability />
+            <AgentToolCapability />
+          </ConfigSection>
+          <ConfigSection
+            title={t("agent.config.section.skills.title")}
+            description={t("agent.config.section.skills.description")}
+            icon={<BlocksIcon className="h-4 w-4 shrink-0 text-blue-500" />}
+            open={openSections.skills}
+            onOpenChange={(open) => handleSectionOpenChange("skills", open)}
+            containerRef={skillsSectionRef}
+          >
+            <AgentSkillCapability />
           </ConfigSection>
         </TabsContent>
 
