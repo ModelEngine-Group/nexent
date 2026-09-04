@@ -315,14 +315,17 @@ class TestDashScopeModelProvider:
             "output": {
                 "models": [
                     {
-                        "model": "qwen-plus",
+                        "model": "qwen3.7-max",
                         "description": "Advanced text generation",
                         "inference_metadata": {
                             "request_modality": ["Text"],
                             "response_modality": ["Text"],
-                            "context_length": 131072,
-                            "max_output_tokens": "8192",
                             "tokenizer_family": "qwen",
+                        },
+                        "model_info": {
+                            "context_window": 1000000,
+                            "max_input_tokens": 991808,
+                            "max_output_tokens": 131072,
                         },
                     }
                 ]
@@ -337,8 +340,9 @@ class TestDashScopeModelProvider:
             "api_key": "test-api-key",
         })
 
-        assert result[0]["context_window_tokens"] == 131072
-        assert result[0]["max_output_tokens"] == 8192
+        assert result[0]["context_window_tokens"] == 1000000
+        assert result[0]["max_input_tokens"] == 991808
+        assert result[0]["max_output_tokens"] == 131072
         assert result[0]["tokenizer_family"] == "qwen"
         assert result[0]["capacity_source"] == "provider_candidate"
 

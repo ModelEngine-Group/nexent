@@ -9,12 +9,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
-
 PROMPT_CACHE_CAPABILITY_VERSION = "w3.capabilities.v1"
 
 
-# Conservative allow-list.  Unknown providers must not receive cache-specific
-# request fields merely because they speak an OpenAI-compatible protocol.
+# Legacy constants are retained for import compatibility only. Runtime callers
+# must pass a resolved model-level profile; provider identity alone is not
+# evidence that every hosted model supports the same cache behavior.
 APPROVED_PROVIDER_PROMPT_CACHE_PROFILES: Dict[str, Dict[str, Any]] = {
     "openai": {
         "mode": "openai_automatic",
@@ -58,11 +58,9 @@ def resolve_prompt_cache_profile(
     provider: Optional[str],
     explicit_profile: Optional[Mapping[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Return a normalized, explicitly approved provider cache profile."""
+    """Return a normalized, explicitly resolved model cache profile."""
     provider_name = (provider or "").lower()
     profile: Optional[Mapping[str, Any]] = explicit_profile
-    if profile is None:
-        profile = APPROVED_PROVIDER_PROMPT_CACHE_PROFILES.get(provider_name)
     if not profile:
         return None
 

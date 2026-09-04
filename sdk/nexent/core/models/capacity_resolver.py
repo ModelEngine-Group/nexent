@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 from typing import Any, List, Literal, Mapping, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,6 +23,7 @@ CapacitySource = Literal[
 ReasoningWindowBehavior = Literal["none", "reserved", "unknown"]
 ProviderOverheadBehavior = Literal["negligible", "bounded", "unknown"]
 PromptCacheCapability = Literal["none", "supported", "unknown"]
+ProfileConfidence = Literal["high", "medium", "low", "unknown"]
 
 
 ProfileKey = Tuple[str, str]
@@ -58,6 +60,76 @@ class CapabilityProfile(BaseModel):
     reasoning_window_behavior: ReasoningWindowBehavior = "unknown"
     provider_overhead_behavior: ProviderOverheadBehavior = "unknown"
     prompt_cache: PromptCacheCapability = "unknown"
+
+    # P1 catalog-governance declarations. They intentionally default to an
+    # incomplete/suggestion-only state so old catalog rows cannot silently be
+    # promoted to verified automatic facts during rollout.
+    aliases: Tuple[str, ...] = ()
+    exclusions: Tuple[str, ...] = ()
+    evidence: Tuple[str, ...] = ()
+    verified_at: Optional[str] = None
+    shared_context: Optional[bool] = None
+    independent_input: Optional[bool] = None
+    max_output: Optional[int] = None
+    reasoning_behavior: Optional[ReasoningWindowBehavior] = None
+    overhead_behavior: Optional[ProviderOverheadBehavior] = None
+    confidence: ProfileConfidence = "unknown"
+
+    def automatic_validation_errors(self) -> Tuple[str, ...]:
+        """Return fail-closed reasons preventing automatic catalog use."""
+        errors: list[str] = []
+        if not self.aliases:
+            errors.append("aliases_missing")
+        if not self.evidence or any(not item.strip() for item in self.evidence):
+            errors.append("evidence_missing")
+        if not self.verified_at:
+            errors.append("verified_at_missing")
+        if self.shared_context is None:
+            errors.append("shared_context_missing")
+        if self.independent_input is None:
+            errors.append("independent_input_missing")
+        if self.max_output is None or self.max_output <= 0:
+            errors.append("max_output_missing")
+        elif self.max_output_tokens is not None and self.max_output != self.max_output_tokens:
+            errors.append("max_output_conflict")
+        if self.reasoning_behavior is None:
+            errors.append("reasoning_behavior_missing")
+        if self.overhead_behavior is None:
+            errors.append("overhead_behavior_missing")
+        if self.confidence != "high":
+            errors.append("confidence_not_high")
+        if self.shared_context is True and self.window_shape != "combined":
+            errors.append("shared_context_conflict")
+        if self.independent_input is True and self.max_input_tokens is None:
+            errors.append("independent_input_limit_missing")
+        return tuple(errors)
+
+    @property
+    def auto_applicable(self) -> bool:
+        return not self.automatic_validation_errors()
+
+
+def validate_capability_catalog(
+    catalog: Mapping[ProfileKey, CapabilityProfile],
+) -> Mapping[ProfileKey, Tuple[str, ...]]:
+    """Validate catalog identity and automatic-use declarations.
+
+    Incomplete legacy rows are returned with reasons and remain
+    suggestion-only. A row that claims high confidence fails closed because a
+    verified label without complete evidence is a catalog authoring error.
+    """
+    diagnostics: dict[ProfileKey, Tuple[str, ...]] = {}
+    for key, profile in catalog.items():
+        if key != (profile.provider, profile.model_name):
+            raise ValueError(f"catalog_key_mismatch:{key!r}")
+        reasons = profile.automatic_validation_errors()
+        if profile.confidence == "high" and reasons:
+            raise ValueError(
+                f"incomplete_verified_profile:{profile.capability_profile_version}:"
+                f"{','.join(reasons)}"
+            )
+        diagnostics[key] = reasons
+    return diagnostics
 
 
 class ModelCapacitySnapshot(BaseModel):
@@ -197,6 +269,20 @@ _OVERRIDABLE_FIELDS = (
 _DEFAULT_REQUESTED_OUTPUT_TOKENS = 4096
 
 
+def derive_output_protection_tokens(
+    *, context_window_tokens: Optional[int], max_output_tokens: Optional[int]
+) -> int:
+    """Derive context-management headroom without constraining completion output."""
+    if max_output_tokens is None or max_output_tokens <= 0:
+        raise ProviderCapabilityUnknown("max_output_tokens is required")
+    proportional = (
+        math.ceil(context_window_tokens * 0.10)
+        if context_window_tokens is not None
+        else _DEFAULT_REQUESTED_OUTPUT_TOKENS
+    )
+    return min(max_output_tokens, max(_DEFAULT_REQUESTED_OUTPUT_TOKENS, proportional))
+
+
 def resolve_capacity(
     *,
     model_id: str,
@@ -284,30 +370,23 @@ def resolve_capacity(
             f"so the override never takes effect"
         )
 
-    if requested_output_tokens is None:
-        requested_output_tokens = (
-            default_output_reserve_tokens
-            if default_output_reserve_tokens is not None
-            else _DEFAULT_REQUESTED_OUTPUT_TOKENS
-        )
-    if requested_output_tokens <= 0:
+    # Legacy model/Agent/request reserve values are intentionally ignored.
+    # Input is observed and this automatically derived value only decides when
+    # context-management actions should run. The provider wire output cap is
+    # always max_output_tokens.
+    output_protection_tokens = derive_output_protection_tokens(
+        context_window_tokens=context_window_tokens,
+        max_output_tokens=max_output_tokens,
+    )
+    if output_protection_tokens <= 0:
         raise InvalidCapacityConfiguration(
-            f"requested_output_tokens must be positive, got {requested_output_tokens}"
+            f"requested_output_tokens must be positive, got {output_protection_tokens}"
         )
-    if (
-        max_output_tokens is not None
-        and requested_output_tokens > max_output_tokens
-    ):
-        raise RequestedOutputExceedsCap(
-            f"requested_output_tokens ({requested_output_tokens}) exceeds "
-            f"max_output_tokens ({max_output_tokens})"
-        )
-
     derived_limits: list[int] = []
     if max_input_tokens is not None:
         derived_limits.append(max_input_tokens)
     if context_window_tokens is not None:
-        derived_limits.append(context_window_tokens - requested_output_tokens)
+        derived_limits.append(context_window_tokens - output_protection_tokens)
     provider_input_limit_tokens = min(derived_limits)
     if provider_input_limit_tokens <= 0:
         raise InvalidCapacityConfiguration(
@@ -338,7 +417,7 @@ def resolve_capacity(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         default_output_reserve_tokens=default_output_reserve_tokens,
-        requested_output_tokens=requested_output_tokens,
+        requested_output_tokens=output_protection_tokens,
         provider_input_limit_tokens=provider_input_limit_tokens,
         tokenizer_family=tokenizer_family,
         counting_mode=counting_mode,
@@ -354,7 +433,7 @@ def resolve_capacity(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         default_output_reserve_tokens=default_output_reserve_tokens,
-        requested_output_tokens=requested_output_tokens,
+        requested_output_tokens=output_protection_tokens,
         provider_input_limit_tokens=provider_input_limit_tokens,
         tokenizer_family=tokenizer_family,
         counting_mode=counting_mode,

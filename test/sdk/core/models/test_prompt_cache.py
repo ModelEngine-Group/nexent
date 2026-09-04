@@ -39,10 +39,14 @@ from nexent.core.models.prompt_cache import (
 )
 
 
-def test_known_provider_profile_is_structured_and_unknown_provider_is_disabled():
-    profile = resolve_prompt_cache_profile("openai")
+def test_model_profile_is_structured_and_provider_name_alone_is_disabled():
+    profile = resolve_prompt_cache_profile(
+        "openai",
+        {"prompt_cache": {"mode": "openai_automatic", "supported": True}},
+    )
     assert profile["mode"] == "openai_automatic"
     assert profile["enabled"] is True
+    assert resolve_prompt_cache_profile("openai") is None
     assert resolve_prompt_cache_profile("unrecognized-provider") is None
 
 
@@ -112,7 +116,10 @@ def test_missing_metrics_never_reports_a_provider_cache_hit():
 
 
 def test_deepseek_profile_extracts_prompt_cache_hit_tokens():
-    profile = resolve_prompt_cache_profile("deepseek")
+    profile = resolve_prompt_cache_profile(
+        "deepseek",
+        {"prompt_cache": {"mode": "provider_automatic", "supported": True}},
+    )
     result = extract_prompt_cache_usage({"prompt_cache_hit_tokens": 75}, 100, capability_profile=profile)
     assert profile["serialization_version"] == "deepseek_chat_completions.v1"
     assert result.cached_input_tokens == 75
