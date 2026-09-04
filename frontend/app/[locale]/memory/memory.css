@@ -177,7 +177,7 @@
 
 .external-provider-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -185,9 +185,8 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-  padding: 16px;
-  min-height: 154px;
+  gap: 12px;
+  padding: 12px;
   border: 1px solid #e4e7ec;
   border-radius: 10px;
   background: #ffffff;
@@ -219,6 +218,12 @@
 
 .external-provider-actions {
   flex: 0 0 auto;
+}
+
+@media (max-width: 1440px) {
+  .external-provider-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 980px) {

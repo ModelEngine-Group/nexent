@@ -142,12 +142,25 @@ test("AC-P3-27/28/33/34 statuses, card grid, responsive layout, and advanced set
     savedTopK = route.request().postDataJSON();
     return json(route, { success: true });
   });
-  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.setViewportSize({ width: 1600, height: 1000 });
   await gotoMemory(page);
   const providerGrid = page.locator(".external-provider-list");
   await expect(providerGrid).toHaveCSS(
     "grid-template-columns",
+    /^(\d+(\.\d+)?px ){3}\d+(\.\d+)?px$/
+  );
+  const firstProviderCard = page.locator(".external-provider-row").first();
+  await expect(firstProviderCard).toHaveCSS("min-height", "0px");
+  await expect(firstProviderCard).toHaveCSS("padding", "12px");
+  await page.setViewportSize({ width: 1200, height: 1000 });
+  await expect(providerGrid).toHaveCSS(
+    "grid-template-columns",
     /^\d+(\.\d+)?px \d+(\.\d+)?px$/
+  );
+  await page.setViewportSize({ width: 900, height: 1000 });
+  await expect(providerGrid).toHaveCSS(
+    "grid-template-columns",
+    /^\d+(\.\d+)?px$/
   );
   await expect(page.getByLabel("Maximum results per provider")).toBeHidden();
   await expect(page.locator(".external-memory-advanced")).toHaveCount(0);
