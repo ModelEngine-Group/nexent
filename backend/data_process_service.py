@@ -577,7 +577,14 @@ except Exception as e_exec:
         logger.info(f"📋 Effective service config: {self.config}")
         
         for service_name, start_func, config_key in services:
-            if self.config.get(config_key, True):
+            service_enabled = self.config.get(config_key, True)
+            if service_name == "Ray Cluster":
+                # Redis must be available for cancellation markers, while
+                # recovery must finish before Ray or Celery can consume work.
+                from services.startup_recovery_service import recover_data_process_tasks
+
+                recover_data_process_tasks()
+            if service_enabled:
                 enabled_count += 1
                 logger.info(f"Starting {service_name}...")
                 if start_func():

@@ -157,15 +157,15 @@ jobs:
         with:
           access_key_id: ${{ secrets.HUAWEI_OBS_ACCESSKEY }}
           secret_access_key: ${{ secrets.HUAWEI_OBS_SECRETKEY }}
-          region: 'cn-east-3'
+          region: 'ap-southeast-1'
 
       - name: Upload to Huawei Cloud OBS
         if: ${{ steps.set-vars.outputs.upload_to_obs == 'true' }}
         uses: huaweicloud/obs-helper@v1.0.0
         with:
-          bucket_name: 'nexent-images'
+          bucket_name: 'modelengine-software'
           local_file_path: './${{ steps.set-vars.outputs.package-name }}.zip'
-          obs_file_path: 'packages/${{ steps.set-vars.outputs.package-name }}.zip'
+          obs_file_path: 'nexent/${{ steps.set-vars.outputs.package-name }}.zip'
           operation_type: 'upload'
 
       - name: Upload artifact

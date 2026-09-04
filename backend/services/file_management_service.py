@@ -381,6 +381,7 @@ async def upload_files_impl(
     index_name: Optional[str] = None,
     user_id: Optional[str] = None,
     uploader_tenant_id: Optional[str] = None,
+    upload_owner_service: Optional[str] = None,
 ) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
@@ -392,6 +393,7 @@ async def upload_files_impl(
         index_name: Knowledge base index for conflict resolution
         user_id: User ID for attachment path isolation
         uploader_tenant_id: Uploader tenant ID (ASSET_OWNER uses dedicated prefix)
+        upload_owner_service: Service responsible for recovering interrupted uploads
 
     Returns:
         UploadFilesResult: Three-item tuple-compatible result with quota metadata
@@ -445,6 +447,7 @@ async def upload_files_impl(
                     "bucket_name": storage_context.bucket_name,
                     "object_name": planned_object_name,
                     "file_size": getattr(upload, "size", None),
+                    "upload_owner_service": upload_owner_service,
                     "status": "UPLOADING",
                     "stage": "UPLOAD",
                     "created_by": user_id,

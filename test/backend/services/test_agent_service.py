@@ -134,6 +134,11 @@ services_module.__path__ = [
 ]
 sys.modules['services'] = services_module
 
+tag_management_service_module = types.ModuleType("services.tag_management_service")
+tag_management_service_module.TagManagementService = MagicMock()
+sys.modules['services.tag_management_service'] = tag_management_service_module
+setattr(services_module, 'tag_management_service', tag_management_service_module)
+
 runtime_state_service_module = types.ModuleType("services.runtime_state_service")
 runtime_state_service_mock = MagicMock()
 runtime_state_service_mock.enabled = False
@@ -149,7 +154,8 @@ sys.modules['services.runtime_state_service'] = runtime_state_service_module
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
 agent_version_service_mock = MagicMock()
-skill_service_mock = MagicMock()
+skill_service_mock = types.ModuleType("management.services.skill.service")
+skill_service_mock.SkillService = MagicMock()
 skill_service_mock.SkillService.return_value.list_skill_instances.return_value = []
 prompt_template_service_mock = MagicMock()
 prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_ID = 0
@@ -163,7 +169,6 @@ sys.modules['services.agent_version_service'] = agent_version_service_mock
 sys.modules['management.services.skill.service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 sys.modules['services.file_management_service'] = MagicMock()
-sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['services.streaming_channel'] = MagicMock()
 
 model_gateway_service_mock = types.ModuleType("services.model_gateway_service")
@@ -862,6 +867,27 @@ async def test_delete_agent_impl_success(mock_delete_skills, mock_delete_agent,
         123, "test_tenant", "test_user")
     mock_delete_tools.assert_called_once_with(123, "test_tenant", "test_user")
     mock_delete_skills.assert_called_once_with(123, "test_tenant", "test_user")
+
+
+@patch('management.services.agent.management.delete_tools_by_agent_id')
+@patch('management.services.agent.management.delete_agent_relationship')
+@patch('management.services.agent.management.delete_agent_by_id')
+@patch('management.services.agent.management.skill_db.delete_skills_by_agent_id')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_delete_agent_impl_cleans_up_tags_for_tenant_owned_agent(
+    mock_search_agent,
+    mock_delete_skills,
+    _mock_delete_agent,
+    _mock_delete_related,
+    _mock_delete_tools,
+):
+    mock_search_agent.return_value = {"tenant_id": "test_tenant"}
+    cleanup = tag_management_service_module.TagManagementService.cleanup_resource_assignments
+
+    await delete_agent_impl(123, "test_tenant", "test_user")
+
+    cleanup.assert_called_once_with("test_tenant", "agent", "123", "test_user")
 
 
 @patch('management.services.agent.service.search_agent_info_by_agent_id')

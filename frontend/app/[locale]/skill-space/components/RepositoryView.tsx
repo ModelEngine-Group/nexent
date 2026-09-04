@@ -3,14 +3,19 @@
 import { Button, Input } from "antd";
 import { Copy, Eye, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
 
 import { SkillRepositoryCard } from "./SkillRepositoryCard";
 import { AsyncContent, PaginationBar } from "./SkillRepositoryControls";
 import type { SkillRepositoryListingItem } from "@/types/skillRepository";
+import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
 
 export function RepositoryView({
   searchQuery,
   onSearchChange,
+  tagDefinitions,
+  tagPredicates,
+  onTagPredicatesChange,
   listings,
   isLoading,
   isError,
@@ -29,6 +34,9 @@ export function RepositoryView({
 }: {
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  tagDefinitions: TagDefinition[];
+  tagPredicates: TagResourcePredicate[];
+  onTagPredicatesChange: (value: TagResourcePredicate[]) => void;
   listings: SkillRepositoryListingItem[];
   isLoading: boolean;
   isError: boolean;
@@ -48,14 +56,21 @@ export function RepositoryView({
   const { t } = useTranslation("common");
   return (
     <div className="space-y-5">
-      <div className="relative">
-        <Input
-          allowClear
-          value={searchQuery}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={t("skillRepository.searchPlaceholder")}
-          prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-          className="h-11 rounded-xl"
+      <div className="flex items-center gap-3">
+        <div className="relative min-w-0 flex-1">
+          <Input
+            allowClear
+            value={searchQuery}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder={t("skillRepository.searchPlaceholder")}
+            prefix={<Search className="size-4 text-slate-400" aria-hidden />}
+            className="h-11 rounded-xl"
+          />
+        </div>
+        <TagFilterPopover
+          definitions={tagDefinitions}
+          value={tagPredicates}
+          onChange={onTagPredicatesChange}
         />
       </div>
 

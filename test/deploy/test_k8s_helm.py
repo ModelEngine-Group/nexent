@@ -34,16 +34,22 @@ INFRASTRUCTURE_DEPLOYMENTS = {
 }
 THREE_REPLICA_APPLICATIONS = {
     "nexent-web": {"/mnt/nexent"},
-    "nexent-config": {"/mnt/nexent", "/mnt/nexent-data/skills"},
-    "nexent-runtime": {"/mnt/nexent", "/mnt/nexent-data/skills"},
-    "nexent-northbound": {"/mnt/nexent", "/mnt/nexent-data/skills"},
 }
 APPLICATION_SINGLE_REPLICA = {
     "nexent-mcp",
+    "nexent-config",
     "nexent-data-process",
+    "nexent-northbound",
+    "nexent-runtime",
     "nexent-supabase-kong",
     "nexent-supabase-auth",
     "nexent-supabase-db",
+}
+STARTUP_RECOVERY_DEPLOYMENTS = {
+    "nexent-config",
+    "nexent-data-process",
+    "nexent-northbound",
+    "nexent-runtime",
 }
 APPLICATION_PVCS = {"nexent-workspace", "nexent-skills", "nexent-supabase-db"}
 INFRASTRUCTURE_PVCS = {
@@ -519,6 +525,78 @@ def test_infrastructure_components_cannot_be_scaled(
     )
     assert rendered.returncode != 0
     assert f"{component} must remain single-replica" in rendered.stderr
+
+
+def test_startup_recovery_deployments_use_single_replica_recreate(
+    chart_dirs: dict[str, Path],
+) -> None:
+    rendered = _template(
+        chart_dirs["application"],
+        "nexent",
+        _application_dynamic_args(),
+    )
+    assert rendered.returncode == 0, rendered.stderr
+
+    deployments = {
+        document["metadata"]["name"]: document
+        for document in _documents(rendered.stdout)
+        if document.get("kind") == "Deployment"
+    }
+    for component in STARTUP_RECOVERY_DEPLOYMENTS:
+        spec = deployments[component]["spec"]
+        assert spec["replicas"] == 1
+        assert spec["strategy"] == {"type": "Recreate"}
+
+
+@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS))
+def test_startup_recovery_deployments_cannot_be_scaled(
+    chart_dirs: dict[str, Path],
+    component: str,
+) -> None:
+    rendered = _template(
+        chart_dirs["application"],
+        "nexent",
+        [*_application_dynamic_args(), "--set", f"{component}.replicaCount=2"],
+    )
+    assert rendered.returncode != 0
+    assert f"{component} must remain single-replica" in rendered.stderr
+
+
+@pytest.mark.parametrize("component", sorted(STARTUP_RECOVERY_DEPLOYMENTS))
+def test_startup_recovery_deployments_require_recreate(
+    chart_dirs: dict[str, Path],
+    component: str,
+) -> None:
+    rendered = _template(
+        chart_dirs["application"],
+        "nexent",
+        [
+            *_application_dynamic_args(),
+            "--set",
+            f"{component}.strategy.type=RollingUpdate",
+        ],
+    )
+    assert rendered.returncode != 0
+    assert (
+        f"{component} strategy.type must be Recreate"
+        in rendered.stderr
+    )
+
+
+def test_stateless_web_can_still_be_scaled(chart_dirs: dict[str, Path]) -> None:
+    rendered = _template(
+        chart_dirs["application"],
+        "nexent",
+        [*_application_dynamic_args(), "--set", "nexent-web.replicaCount=2"],
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    web = next(
+        document
+        for document in _documents(rendered.stdout)
+        if document.get("kind") == "Deployment"
+        and document["metadata"]["name"] == "nexent-web"
+    )
+    assert web["spec"]["replicas"] == 2
 
 
 def test_deploy_and_uninstall_scripts_have_valid_shell_syntax() -> None:

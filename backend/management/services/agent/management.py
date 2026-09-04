@@ -61,7 +61,7 @@ from database.tool_db import (
     search_tools_for_sub_agent
 )
 from database import skill_db
-from management.services.skill.service import SkillService, generate_available_copy_skill_name
+from management.services.skill.service import SkillService
 from database.agent_version_db import query_version_list
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -71,6 +71,7 @@ from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_NAME,
 )
 from utils.str_utils import convert_list_to_string, convert_string_to_list
+from utils.skill_import_utils import generate_available_copy_skill_name
 from services.conversation_management_service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     save_message_unit,  # noqa: F401 - retained as a compatibility re-export
@@ -78,6 +79,7 @@ from services.conversation_management_service import (
 )
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
@@ -230,10 +232,23 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         user_id: User ID performing the deletion
     """
     try:
+        try:
+            agent = search_agent_info_by_agent_id(agent_id, tenant_id)
+        except ValueError:
+            agent = None
+        is_tenant_owned_agent = bool(
+            agent and str(agent.get("tenant_id") or "") == str(tenant_id)
+        )
         delete_agent_by_id(agent_id, tenant_id, user_id)
         delete_agent_relationship(agent_id, tenant_id, user_id)
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
+        if is_tenant_owned_agent:
+            from services.tag_management_service import TagManagementService
+
+            TagManagementService.cleanup_resource_assignments(
+                tenant_id, "agent", str(agent_id), user_id
+            )
     except Exception as e:
         logger.error(f"Failed to delete agent: {str(e)}")
         raise ValueError(f"Failed to delete agent: {str(e)}")

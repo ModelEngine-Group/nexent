@@ -1,7 +1,15 @@
+from datetime import datetime
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
@@ -158,6 +166,377 @@ class ModelResponse(BaseModel):
     code: int = 200
     message: str = ""
     data: Any
+
+
+class TagDefinitionCreateRequest(BaseModel):
+    definition_key: str | None = Field(None, min_length=1, max_length=100)
+    definition_name: str = Field(..., min_length=1, max_length=255)
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
+    initial_values: list[str] = Field(default_factory=list, max_length=1000)
+    sort_order: int | None = None
+
+    @field_validator("definition_key", "definition_name")
+    @classmethod
+    def strip_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Value must not be empty")
+        return normalized
+
+    @field_validator("initial_values")
+    @classmethod
+    def validate_initial_values(cls, values: list[str]) -> list[str]:
+        normalized_values = []
+        seen = set()
+        for value in values:
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("Tag values must not be empty")
+            normalized_key = normalized.lower()
+            if normalized_key in seen:
+                raise ValueError("Tag values must be unique after normalization")
+            seen.add(normalized_key)
+            normalized_values.append(normalized)
+        return normalized_values
+
+    @model_validator(mode="after")
+    def validate_selection_mode_values(self):
+        if self.selection_mode == "no_value" and self.initial_values:
+            raise ValueError("A no-value tag definition cannot contain tag values")
+        if self.selection_mode != "no_value" and not self.initial_values:
+            raise ValueError("At least one tag value is required")
+        return self
+
+
+class TagDefinitionUpdateRequest(BaseModel):
+    definition_name: str | None = Field(None, min_length=1, max_length=255)
+    selection_mode: Literal["single_select", "multi_select", "no_value"] | None = None
+
+    @field_validator("definition_name")
+    @classmethod
+    def strip_definition_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Definition name must not be empty")
+        return normalized
+
+
+class TagValueCreateRequest(BaseModel):
+    display_value: str = Field(..., min_length=1)
+    sort_order: int = 0
+
+    @field_validator("display_value")
+    @classmethod
+    def strip_display_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Tag value must not be empty")
+        return normalized
+
+
+class TagValueUpdateRequest(BaseModel):
+    display_value: str = Field(..., min_length=1)
+
+    @field_validator("display_value")
+    @classmethod
+    def strip_updated_display_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Tag value must not be empty")
+        return normalized
+
+
+class TagStatusUpdateRequest(BaseModel):
+    status: Literal["active", "disabled"]
+
+
+class TagOrderUpdateRequest(BaseModel):
+    sort_order: int
+
+
+class TagAuditResponse(BaseModel):
+    created_by: str | None = None
+    updated_by: str | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class TagValueResponse(TagAuditResponse):
+    value_id: int
+    display_value: str
+    normalized_value: str
+    sort_order: int
+    status: Literal["active", "disabled"]
+
+
+class TagDefinitionResponse(TagAuditResponse):
+    definition_id: int
+    bucket_id: int
+    definition_key: str
+    definition_name: str
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
+    sort_order: int
+    status: Literal["active", "disabled"]
+    active_value_count: int = Field(..., ge=0, le=1000)
+    value_capacity: int = Field(..., ge=1, le=1000)
+    values: list[TagValueResponse] | None = Field(default=None, max_length=1000)
+
+
+class TagLibraryResponse(TagAuditResponse):
+    bucket_id: int
+    bucket_key: Literal["default_resource", "knowledge_content"]
+    bucket_name: str
+    status: Literal["active", "disabled"]
+    resource_types: List[
+        Literal[
+            "agent",
+            "skill",
+            "tool",
+            "mcp_service",
+            "knowledge_base",
+            "knowledge_document",
+        ]
+    ] = Field(default_factory=list, max_length=6)
+    definition_count: int = Field(..., ge=0, le=100)
+    definition_capacity: int = Field(..., ge=1, le=100)
+
+
+class TagDefinitionUsageResponse(BaseModel):
+    definition_id: int
+    active_value_count: int = Field(..., ge=0, le=1000)
+    active_usage_count: int = Field(..., ge=0)
+    value_capacity: int = Field(..., ge=1, le=1000)
+
+
+class TagValueUsageResponse(BaseModel):
+    value_id: int
+    active_usage_count: int = Field(..., ge=0)
+
+
+class TagDeleteResponse(BaseModel):
+    success: bool
+
+
+class TagConflictDetailsResponse(BaseModel):
+    definition_id: Optional[int] = None
+    value_id: Optional[int] = None
+    active_value_count: int | None = Field(None, ge=0, le=1000)
+    active_usage_count: int | None = Field(None, ge=0)
+    resources_with_multiple_values: int | None = Field(None, ge=0)
+    limit: int | None = Field(None, ge=1)
+    current_count: int | None = Field(None, ge=0)
+    scope: Literal["definition", "value", "assignment"] | None = None
+
+
+class TagConflictResponse(BaseModel):
+    message: str
+    details: TagConflictDetailsResponse
+
+
+class TagHTTPConflictResponse(BaseModel):
+    detail: TagConflictResponse
+
+
+_LEGACY_FLAT_TAG_FIELDS = ("tags", "labels", "label", "tag")
+
+
+def _reject_legacy_flat_tag_fields(data: Any) -> None:
+    """Reject deprecated flat tag fields on canonical structured writes."""
+
+    if not isinstance(data, dict):
+        return
+    supplied = [field for field in _LEGACY_FLAT_TAG_FIELDS if field in data]
+    if supplied:
+        raise ValueError(
+            "Legacy flat tag fields are rejected by the canonical assignment API "
+            f"({', '.join(supplied)}); submit structured controlled value_ids only. "
+            "Use the migration backfill or the structured assignment endpoints."
+        )
+
+
+class TagAssignmentReplaceRequest(BaseModel):
+    """Controlled value identifiers replacing one resource's assignments."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_flat_writes(cls, data):
+        _reject_legacy_flat_tag_fields(data)
+        return data
+
+    @field_validator("value_ids")
+    @classmethod
+    def validate_value_ids(cls, value_ids: list[int]) -> list[int]:
+        if any(value_id <= 0 for value_id in value_ids):
+            raise ValueError("Tag value IDs must be positive")
+        return list(dict.fromkeys(value_ids))
+
+
+class TagAssignmentValueResponse(BaseModel):
+    definition_id: int
+    definition_key: str
+    definition_name: str
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
+    value_id: int
+    display_value: str
+    value_status: Literal["active", "disabled"]
+
+
+class TagAssignmentResponse(BaseModel):
+    resource_type: Literal[
+        "agent",
+        "skill",
+        "tool",
+        "mcp_service",
+        "knowledge_base",
+        "knowledge_document",
+    ]
+    resource_id: str
+    assignment_count: int = Field(..., ge=0, le=100)
+    assignment_capacity: int = Field(..., ge=1, le=100)
+    assignments: list[TagAssignmentValueResponse] = Field(default_factory=list)
+
+
+class TagDocumentProjectionStatusResponse(BaseModel):
+    """Synchronization status of one provider-backed document tag projection."""
+
+    status: Literal[
+        "pending", "synced", "failed", "unsupported", "not_projected"
+    ]
+    version: int
+    tag_count: int
+    last_error: str | None = None
+    retry_count: int = 0
+    last_attempt_at: datetime | None = None
+    next_attempt_at: datetime | None = None
+    update_time: datetime | None = None
+
+
+class TagLegacyFlatTagsProjectionResponse(BaseModel):
+    """Bounded deprecated flat-array projection derived from structured assignments."""
+
+    resource_type: str
+    resource_id: str
+    tags: list[str] = Field(default_factory=list)
+    count: int = 0
+    limit: int = 100
+    deprecated: Literal[True] = True
+
+
+class TagAssignmentBulkTarget(BaseModel):
+    """One explicit resource target for a bulk replacement request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_id: str = Field(..., min_length=1)
+    provider: str | None = Field(None, min_length=1)
+    knowledge_base_id: str | None = Field(None, min_length=1)
+    value_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_flat_writes(cls, data):
+        _reject_legacy_flat_tag_fields(data)
+        return data
+
+    @field_validator("value_ids")
+    @classmethod
+    def validate_target_value_ids(cls, value_ids: list[int]) -> list[int]:
+        return TagAssignmentReplaceRequest.validate_value_ids(value_ids)
+
+
+class TagAssignmentBulkReplaceRequest(BaseModel):
+    """Explicit resource targets for one resource-type bulk replacement."""
+
+    targets: list[TagAssignmentBulkTarget] = Field(..., min_length=1)
+
+
+class TagAssignmentBulkOutcome(BaseModel):
+    resource_id: str
+    outcome: Literal["updated", "not_found_or_forbidden", "validation"]
+    assignment: TagAssignmentResponse | None = None
+    message: str | None = None
+    details: dict[str, Any] | None = None
+
+
+class TagAssignmentFilter(BaseModel):
+    """One definition predicate; callers combine predicates with AND."""
+
+    definition_id: int = Field(..., gt=0)
+    value_ids: list[int] = Field(..., min_length=1)
+
+    @field_validator("value_ids")
+    @classmethod
+    def validate_filter_value_ids(cls, value_ids: list[int]) -> list[int]:
+        return TagAssignmentReplaceRequest.validate_value_ids(value_ids)
+
+
+class TagResourceFilterRequest(BaseModel):
+    """Filter already-authorized non-document resource ids by tag predicates.
+
+    Callers supply the resource ids their own list flow has already authorized;
+    the tag service narrows that set to resources matching every predicate
+    (OR within a definition, AND across definitions). It never widens scope or
+    returns resources the caller could not already see.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_ids: list[str] = Field(..., min_length=1, max_length=500)
+    predicates: list[TagAssignmentFilter] = Field(default_factory=list)
+
+    @field_validator("resource_ids")
+    @classmethod
+    def validate_filter_resource_ids(cls, resource_ids: list[str]) -> list[str]:
+        normalized = []
+        for resource_id in resource_ids:
+            value = str(resource_id).strip()
+            if not value:
+                raise ValueError("resource_ids must not contain empty values")
+            normalized.append(value)
+        return list(dict.fromkeys(normalized))
+
+
+class TagResourceFilterResponse(BaseModel):
+    """Resource ids from the caller's authorized set that match the predicates."""
+
+    resource_type: str
+    matched_resource_ids: list[str] = Field(default_factory=list)
+
+
+class TagDocumentBatchStatusRequest(BaseModel):
+    """Batch document tag status for one provider knowledge base."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] = Field(..., min_length=1, max_length=200)
+    predicates: list[TagAssignmentFilter] = Field(default_factory=list)
+
+    @field_validator("document_ids")
+    @classmethod
+    def validate_document_ids(cls, document_ids: list[str]) -> list[str]:
+        normalized = []
+        for document_id in document_ids:
+            value = str(document_id).strip()
+            if not value:
+                raise ValueError("document_ids must not contain empty values")
+            normalized.append(value)
+        return list(dict.fromkeys(normalized))
+
+
+class TagDocumentBatchStatusResponse(BaseModel):
+    """One document's tag assignment and provider projection summary."""
+
+    document_id: str
+    assignment_count: int = 0
+    projection_status: TagDocumentProjectionStatusResponse | None = None
 
 
 class ModelRequest(BaseModel):
@@ -572,10 +951,14 @@ class HybridSearchRequest(BaseModel):
     top_k: int = Field(10, ge=1, le=100,
                        description="Number of results to return")
     weight_accurate: Optional[float] = Field(
-        None,
-        ge=0.0,
-        le=1.0,
+        None, ge=0.0, le=1.0,
         description="Optional caller-specified weight applied to accurate search scores",
+    )
+    tag_predicates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Document tag predicates: list of {definition_id, value_ids} "
+        "groups combined with OR-within / AND-across semantics. Results are "
+        "restricted to projection-confirmed documents when provided.",
     )
 
 

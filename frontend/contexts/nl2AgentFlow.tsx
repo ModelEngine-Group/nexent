@@ -59,6 +59,7 @@ interface Nl2AgentFlowState {
   submittedCardKeys: ReadonlySet<string>;
   failedPromptFields: readonly string[];
   configFocusRequest: Nl2AgentConfigFocusRequest | null;
+  configFocusRequestSequence: number;
   completionSyncFailed: boolean;
   isFormLocked: boolean;
   isComposerDisabled: boolean;
@@ -92,6 +93,7 @@ const INITIAL_STATE: Nl2AgentFlowState = {
   submittedCardKeys: new Set(),
   failedPromptFields: [],
   configFocusRequest: null,
+  configFocusRequestSequence: 0,
   completionSyncFailed: false,
   isFormLocked: false,
   isComposerDisabled: false,
@@ -108,6 +110,7 @@ function reducer(
         ...INITIAL_STATE,
         agentId: action.agentId,
         sessionGeneration: state.sessionGeneration + 1,
+        configFocusRequestSequence: state.configFocusRequestSequence,
       };
     case "register_card":
       if (state.submittedCardKeys.has(action.card.key)) return state;
@@ -195,12 +198,14 @@ function reducer(
       if (state.agentId !== null && state.agentId !== action.agentId) {
         return state;
       }
+      const requestId = state.configFocusRequestSequence + 1;
       return {
         ...state,
+        configFocusRequestSequence: requestId,
         configFocusRequest: {
           agentId: action.agentId,
           target: action.target,
-          requestId: (state.configFocusRequest?.requestId ?? 0) + 1,
+          requestId,
         },
       };
     case "clear_config_focus_request":

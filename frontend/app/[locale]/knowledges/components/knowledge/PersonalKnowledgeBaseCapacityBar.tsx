@@ -89,6 +89,10 @@ export default function PersonalKnowledgeBaseCapacityBar() {
         status={capacity.is_over_quota ? "exception" : "normal"}
         strokeColor={hasQuota ? undefined : "#94a3b8"}
       />
+      <div className="mt-1 text-right text-[11px] text-gray-400">
+        {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
+        {capacity.es_physical_readable || "0 B"}
+      </div>
     </div>
   );
 }

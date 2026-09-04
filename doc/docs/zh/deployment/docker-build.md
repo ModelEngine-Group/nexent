@@ -102,7 +102,7 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 
 ```bash
 # 🚀 构建应用程序镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
+docker build --no-cache --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
 
 # 📊 构建数据处理镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .
