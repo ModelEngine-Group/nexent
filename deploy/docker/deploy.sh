@@ -487,17 +487,27 @@ persist_deploy_options() {
 #
 # Containers running the backend service see ROOT_DIR mounted at
 # /mnt/nexent-data (see deploy/docker/compose/docker-compose.*.yml), so the
-# log directory inside the container is /mnt/nexent-data/logs. Writing logs
-# there gives a stable path that survives container restarts and is bind-mounted
-# back to ${ROOT_DIR}/logs on the host.
+# log directory inside the container must be /mnt/nexent-data/logs. Writing
+# logs there gives a stable path that survives container restarts and is
+# bind-mounted back to ${ROOT_DIR}/logs on the host.
 #
-# When LOG_DIR is already set in .env (e.g. local dev), leave it untouched.
+# This always overrides any pre-existing LOG_DIR value for the Docker
+# deployment path: a previous value of "logs" (the local-dev default) or
+# any other host path would otherwise be written into the container's
+# ephemeral layer and silently lost on container recreate.
 persist_log_dir() {
-  if grep -q "^LOG_DIR=" "$ROOT_ENV_FILE"; then
-    echo "   ↺ LOG_DIR already configured; leaving as-is"
-    return 0
-  fi
   local log_dir="/mnt/nexent-data/logs"
+  if grep -q "^LOG_DIR=" "$ROOT_ENV_FILE"; then
+    local current_value
+    current_value="$(grep -E '^LOG_DIR=' "$ROOT_ENV_FILE" | head -n1 | cut -d'=' -f2-)"
+    if [ "$current_value" = "$log_dir" ]; then
+      echo "   ✓ LOG_DIR already configured for Docker mount"
+      return 0
+    fi
+    echo "   ↻ LOG_DIR was \"$current_value\"; overriding to \"$log_dir\" for Docker mount"
+  else
+    echo "   + LOG_DIR missing; setting to \"$log_dir\""
+  fi
   update_env_var "LOG_DIR" "$log_dir"
 }
 

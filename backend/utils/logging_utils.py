@@ -5,6 +5,7 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from consts.const import (
+    IS_DEBUG,
     LOG_BACKUP_COUNT,
     LOG_DIR,
     LOG_LEVEL,
@@ -114,16 +115,20 @@ def _make_console_handler() -> logging.Handler:
     return handler
 
 
-def configure_logging(level: int = logging.INFO, categories: list[str] | None = None):
+def configure_logging(level: int | None = None, categories: list[str] | None = None):
     """Configure root logger with console + file handlers.
 
     Args:
-        level: Log level for the root logger.
+        level: Log level for the root logger. If None, the effective level is
+            computed as DEBUG when IS_DEBUG=true, otherwise LOG_LEVEL.
         categories: List of log categories to create file handlers for.
                     Defaults to the standard Nexent categories.
     """
     if categories is None:
         categories = ["config", "runtime", "northbound", "data_process", "model_call"]
+
+    if level is None:
+        level = logging.DEBUG if IS_DEBUG else getattr(logging, LOG_LEVEL, logging.INFO)
 
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
@@ -148,7 +153,8 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
     if categories is None:
         categories = ["config", "runtime", "northbound", "data_process", "model_call"]
 
-    level = LOG_LEVEL or "INFO"
+    effective_level = "DEBUG" if IS_DEBUG else LOG_LEVEL
+    level = effective_level  # string: "DEBUG" or "INFO"
 
     # --- Console handler (color, stdout) ---
     console_handler: dict[str, object] = {
