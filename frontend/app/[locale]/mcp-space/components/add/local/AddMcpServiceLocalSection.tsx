@@ -20,7 +20,6 @@ import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
-import TagEditor from "../../shared/TagEditor";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 
 /** Maps the shared add-server tabs (mirroring the MCP config modal) to deployment types. */
@@ -214,16 +213,6 @@ export default function AddMcpServiceLocalSection({
       form.setFieldValue(key as string, next);
     },
   });
-
-  const addTag = (tag: string) => {
-    const next = (tag || "").trim();
-    if (!next || draft.tags.includes(next)) return;
-    patchDraft({ tags: [...draft.tags, next] });
-  };
-
-  const removeTag = (index: number) => {
-    patchDraft({ tags: draft.tags.filter((_, i) => i !== index) });
-  };
 
   const handlePermissionChange = (value: string) => {
     const permission = value as "EDIT" | "READ_ONLY" | "PRIVATE";
@@ -735,17 +724,6 @@ export default function AddMcpServiceLocalSection({
             </Can>
           </div>
         </Can>
-        <div className="flex flex-col gap-4">
-          <TagEditor
-            title={t("mcpTools.detail.tags")}
-            titleClassName="mb-1 block text-sm font-medium text-slate-700"
-            tags={draft.tags}
-            onAddTag={(tag) => addTag(tag || "")}
-            onRemoveTag={removeTag}
-            removeAriaKey="mcpTools.detail.removeTagAria"
-            placeholderKey="mcpTools.detail.tagInputPlaceholder"
-          />
-        </div>
       </Form>
 
       <div className="flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
