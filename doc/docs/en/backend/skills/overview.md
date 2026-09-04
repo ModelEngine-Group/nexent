@@ -33,13 +33,22 @@ Each skill must have a `SKILL.md` file, consisting of two parts:
 
 ```yaml
 ---
-name: skill-name
-description: |
+name: skill-name           # Required: skill name, must be unique
+description: |             # Required: description of what the skill does
   A description of what this skill does and when to use it.
   Write in third person, e.g., "This skill is used for..."
-tags:
+allowed-tools:             # Optional: list of nexent sdk methods or tool names exposed by tool skills
+  - read_file
+  - write_file
+tags:                      # Optional: skill tags for categorization and retrieval
   - tag1
   - tag2
+# script_outputs:          # Optional: declared script outputs for script-based skills
+#   scripts/generate.py:   #   (e.g., location and MIME type of generated files)
+#     kind: file
+#     mime_types:
+#       - text/plain
+# Other extra fields (such as output_type / output_mime_types) are per-skill extensions
 ---
 ```
 
@@ -70,6 +79,8 @@ Skills fall into two categories based on their purpose:
 | `delete-file-directory` | Delete files or directories |
 | `move-file-directory` | Move or rename files/directories |
 | `list-directory` | List directory structure in a tree view |
+| `create-docx` | Create/generate Word documents from structured specs, supporting one-shot generation and fine-grained editing |
+| `create-excel` | Create/generate Excel workbooks from structured specs, supporting one-shot generation and fine-grained editing |
 
 ### Knowledge Base Search
 

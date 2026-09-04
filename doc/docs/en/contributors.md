@@ -4,29 +4,21 @@ The Nexent project is made possible by the dedicated work of our core team membe
 
 ## Nexent Team
 
-### Team Manager / Product Manager
-- **Shuangrui Chen** @Phinease
+### Maintainers
+- **Shuangrui Chen** [@Phinease](https://github.com/Phinease)
+- **Yafeng Zhang** [@yafengzhang2025](https://github.com/yafengzhang2025)
+- **Simeng Bian** [@SimengBian](https://github.com/SimengBian)
 
-### Senior System Engineer
-- **Simeng Bian** @Simeng Bian
-- **Tao Liu** @liutao12138
+### Committers
+- **Mingchen Wan** [@WMC001](https://github.com/WMC001)
+- **Peng Yang** [@Dallas98](https://github.com/Dallas98)
+- **Zhaofu Wu** [@jeffwu-1999](https://github.com/jeffwu-1999)
 
-### Development Group Leader
-- **Jingyuan Li** @ljy65535
-
-### Developer
-- **Yichen Xia** @Jasonxia007
-- **Mingchen Wan** @WMC001
-- **Yu Lin** @linsensen222
-- **Wenqi Bai** @Bavichi
-- **Feiyang Xiang** @feixiangkong
-- **Peiling Jiang** @porkpink
-
-### SRE (Site Reliability Engineer)
-- **Peiling Jiang** @porkpink
+###### SRE
+- **Sicong He** [@hhhhsc701](https://github.com/hhhhsc701)
 
 ### Operations Manager
-- **Chenxue Jia** @Davina-jcx
+- **Gaoqi Zheng** [@zgqhope](https://github.com/zgqhope)
 
 ## Recognition
 

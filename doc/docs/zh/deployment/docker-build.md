@@ -13,7 +13,7 @@ bash build.sh
 # 按镜像构建指定版本
 bash build.sh \
   --images main,web,mcp,data-process,terminal \
-  --version v2.2.1 \
+  --version v2.5.0 \
   --registry general \
   --platform linux/amd64,linux/arm64 \
   --push
@@ -27,10 +27,10 @@ bash build.sh \
   --load
 
 # 需要时也可以只构建一个或多个指定镜像
-bash build.sh --web --docs --version v2.2.1 --dry-run
+bash build.sh --web --docs --version v2.5.0 --dry-run
 
 # 跳过 Docker 构建缓存
-bash build.sh --web --version v2.2.1 --no-cache
+bash build.sh --web --version v2.5.0 --no-cache
 ```
 
 根目录 `build.sh` 会把镜像构建转发到 `deploy/images/build.sh`。使用 `bash build.sh --package ...` 可以转发到离线包构建脚本。在终端无参数运行 `build.sh` 时，会依次选择镜像、镜像版本（`latest` 或根 `VERSION`）和镜像源。交互式默认选择 `main,web` 和 `latest`。也可以用 `--interactive` 强制进入同样的选择流程。
@@ -75,11 +75,11 @@ docker buildx create --name nexent_builder --use
 
 # 🚀 为多个架构构建应用程序
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent -f deploy/images/dockerfiles/main/Dockerfile . --push
 
 # 📊 为多个架构构建数据处理服务
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/web/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile . --push
 
 # 🌐 为多个架构构建前端
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-web -f deploy/images/dockerfiles/web/Dockerfile . --push
@@ -94,8 +94,8 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexen
 docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile . --push
 
 # 💻 为多个架构构建 Ubuntu Terminal
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
-docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
+docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.ccs.tencentyun.com/nexent-hub/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile . --push
 ```
 
 ## 💻 本地开发构建
@@ -126,12 +126,14 @@ docker build --progress=plain -t nexent/nexent-docs -f deploy/images/dockerfiles
 # 🔗 构建 MCP Server 镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-mcp -f deploy/images/dockerfiles/mcp/Dockerfile .
 
-# 💻 构建 OpenSSH Server 镜像（仅当前架构）
+# 💻 构建 OpenSSH Server 镜像（默认 slim 变体，仅当前架构）
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal -f deploy/images/dockerfiles/terminal/Dockerfile .
 
-# 💻 构建带 Conda 的 OpenSSH Server 镜像（仅当前架构）
+# 💻 构建带 Conda 的 OpenSSH Server 镜像（conda 变体，仅当前架构）
 docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/images/dockerfiles/terminal/Dockerfile --build-arg TERMINAL_VARIANT=conda .
 ```
+
+其中 `CONFIGURED_BASE_PATH` 用于将前端部署在反向代理子路径下。
 
 ## 🔧 镜像说明
 
@@ -194,6 +196,7 @@ docker build --progress=plain -t nexent/nexent-ubuntu-terminal-conda -f deploy/i
 - `nexent/nexent-docs` - Vitepress 文档站点
 - `nexent/nexent-mcp` - MCP 服务器代理服务
 - `nexent/nexent-ubuntu-terminal` - OpenSSH 开发服务器容器
+- `nexent/nexent-sandbox` - 智能体 Python 代码沙箱运行时
 
 ## 📚 文档镜像独立部署
 
@@ -235,7 +238,7 @@ docker rm nexent-docs
 
 ## 🚀 部署建议
 
-构建完成后，可以进入 `docker` 目录使用部署脚本启动本地镜像：
+构建完成后，可以在仓库根目录使用部署脚本启动本地镜像：
 
 ```bash
 bash deploy.sh docker --image-source local-latest
@@ -250,7 +253,7 @@ bash deploy.sh docker --image-source local-latest
 ```bash
 bash build.sh --package \
   --target all \
-  --version v2.2.1 \
+  --version v2.5.0 \
   --platform amd64 \
   --components infrastructure,application,data-process,supabase \
   --image-source general \
@@ -287,6 +290,8 @@ bash build.sh --package \
 `local-latest` 会复用本地 Nexent 应用镜像，不会再次拉取这些 `latest` 镜像。构建脚本会生成镜像 tar、部署资源、`manifest.yaml` 和 `checksums.txt`，且不会复制本机的 `deploy/env/.env`、`deploy/env/monitoring.env` 或 `deploy.options`。
 
 启用 `--compress true` 后，会在输出目录旁生成 `nexent-offline-<target>-<platform>-<version>.zip`。也可以手动运行 GitHub Actions 中的 [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml)，工作流会为 AMD64 和 ARM64 分别生成可下载的 `nexent-<version>-<platform>.zip`，默认保留 30 天。
+
+此外，离线部署包支持压缩产物与镜像仓库前缀配置，并支持在 CI 场景下按命名上传至华为 OBS。MinIO 镜像源已切换为 Quay。
 
 离线包的获取和安装方法参见：
 
