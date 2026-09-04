@@ -154,6 +154,9 @@ class OpenAIModel(OpenAIServerModel):
         self.feature_preferences: Optional[Dict[str, Any]] = kwargs.pop(
             "feature_preferences", None
         )
+        self.feature_configuration_warnings = list(
+            kwargs.pop("feature_configuration_warnings", None) or []
+        )
         self.provider_usage_profile: Optional[Dict[str, Any]] = kwargs.pop(
             "provider_usage_profile", None
         )
@@ -473,6 +476,11 @@ class OpenAIModel(OpenAIServerModel):
         effective_feature_policy = resolve_effective_feature_policy(
             runtime_feature_capabilities,
             self.feature_preferences,
+            source=(
+                "model_record_override"
+                if self.feature_preferences is not None
+                else "nexent_default"
+            ),
         )
         self.last_effective_feature_policy = effective_feature_policy
         completion_kwargs = apply_reasoning_request_policy(
@@ -552,6 +560,9 @@ class OpenAIModel(OpenAIServerModel):
                 ),
                 "llm.feature.policy_source": str(
                     effective_feature_policy.get("source") or "nexent_default"
+                ),
+                "llm.feature.configuration_warnings": ",".join(
+                    self.feature_configuration_warnings
                 ),
                 "llm.prompt_cache.mode": cache_advice.mode,
                 "llm.prompt_cache.supported": cache_advice.supported,

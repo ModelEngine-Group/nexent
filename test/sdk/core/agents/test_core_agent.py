@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import threading
+from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
@@ -398,6 +399,14 @@ def test_complete_explicit_final_answer_is_not_misclassified(output):
 def test_length_truncated_non_code_output_is_not_a_final_answer():
     assert core_agent_module._looks_like_incomplete_action_output(
         "这是一个尚未完成的回答",
+        finish_reason="length",
+    ) is False
+
+
+def test_length_truncated_action_preamble_still_requires_a_tool_call():
+    assert core_agent_module._looks_like_incomplete_action_output(
+        "思考：我需要先调用 knowledge_base_search",
+        available_tool_names={"knowledge_base_search"},
         finish_reason="length",
     ) is True
 
@@ -2285,6 +2294,120 @@ class TestRunStreamRealExecution:
 
         assert agent._last_uncompressed_est == 5000
 
+    def test_ac_p2_011_step_stream_supplies_source_backed_rebuild_for_w2(self):
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock(steps=[], system_prompt=None)
+        agent.logger = MagicMock()
+        agent.monitor = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        agent.context_runtime.chars_per_token = 1.0
+        agent.context_runtime.token_counts.return_value = {"uncompressed": 10, "compressed": 10}
+        initial = MagicMock(messages=[MagicMock()])
+        initial.evidence.over_hard_budget = False
+        rebuilt = MagicMock(messages=[MagicMock()])
+        rebuilt.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_step.side_effect = [initial, rebuilt]
+        response = MagicMock(content="ok")
+        agent.model = MagicMock(return_value=response)
+        agent.model.safe_input_budget_snapshot = {"fingerprint": "w2"}
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        action_step = MagicMock()
+
+        stream = agent._step_stream(action_step)
+        try:
+            next(stream)
+        except (StopIteration, ValueError):
+            pass
+
+        callback = agent.model.call_args.kwargs["context_rebuild"]
+        assert callback(123) is rebuilt
+        assert agent.context_runtime.prepare_step.call_args.kwargs[
+            "target_input_budget_tokens"
+        ] == 123
+
+    def test_ac_002_emergency_archive_tool_refreshes_live_executor_registry(self):
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        agent = object.__new__(CoreAgent)
+        existing_tool = MagicMock(name="existing_tool")
+        archive_tool = MagicMock(name="archive_tool")
+        archive_tool.name = "search_archived_history"
+        agent.tools = {"existing_tool": existing_tool}
+        agent.managed_agents = {}
+        agent.python_executor = MagicMock()
+        agent.context_runtime = MagicMock()
+        agent.context_runtime.context_manager.activate_emergency_archive.return_value = archive_tool
+        agent._guardrail_wrap_tools = MagicMock()
+        agent._wrap_visible_tool_events = MagicMock()
+
+        result = agent._activate_emergency_archive_tool(hard_budget=10_000)
+
+        assert result is archive_tool
+        assert agent.tools["search_archived_history"] is archive_tool
+        agent.python_executor.send_tools.assert_called_once_with({
+            "existing_tool": existing_tool,
+            "search_archived_history": archive_tool,
+        })
+
+    def test_ac_003_recall_execution_emits_updated_persistable_budget_event(self):
+        module = self._load_core_agent_in_isolation()
+        CoreAgent = module.CoreAgent
+        module.ProcessType.CONTEXT_BUDGET = "context_budget"
+
+        @dataclass(frozen=True)
+        class Evidence:
+            purpose: str = "step"
+            raw_token_estimate: int = 100
+            final_token_estimate: int = 80
+            compression_attempted: bool = True
+            fallback_compaction_used: bool = False
+            compression_records: tuple = ()
+            archive_active: bool = True
+            archived_item_count: int = 2
+            retained_item_count: int = 4
+            recall_invocation_count: int = 0
+            recalled_tokens: int = 0
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.step_number = 1
+        agent.observer = MagicMock()
+        archive = SimpleNamespace(recall_invocations=1, recalled_tokens=4000)
+        agent.context_runtime = SimpleNamespace(
+            context_manager=SimpleNamespace(
+                archive_tool=SimpleNamespace(archive=archive)
+            )
+        )
+        components = SimpleNamespace(
+            message_text=50, message_framing=5, tools=10,
+            media=0, reasoning=0, other_semantic=0,
+        )
+        preflight = SimpleNamespace(
+            components=components, soft_budget=100, hard_budget=90,
+            hard_count=70, count_source="estimated",
+            request_fingerprint="request", identity_fingerprint="budget",
+            retry_ordinal=2,
+        )
+        agent.model = SimpleNamespace(
+            last_context_evidence=Evidence(),
+            last_final_request_preflight=preflight,
+            _using_provisional_capacity=False,
+        )
+
+        agent._emit_archive_recall_budget_update()
+
+        emitted = json.loads(agent.observer.add_message.call_args.args[2])
+        assert emitted["recovery"]["recall_invocation_count"] == 1
+        assert emitted["recovery"]["recalled_tokens"] == 4000
+        assert agent.model.last_context_evidence.recalled_tokens == 4000
+
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""
         module = self._load_core_agent_in_isolation()
@@ -2934,6 +3057,25 @@ class TestHandleMaxStepsReached:
 
         # Model should be called with messages from ContextRuntime.
         assert agent.model.called
+
+    def test_ac_p2_011_final_answer_supplies_source_backed_rebuild_for_w2(self):
+        agent, _module = self._create_agent_for_handle_max_steps_test()
+        initial = agent.context_runtime.prepare_final_answer.return_value
+        rebuilt = MagicMock(messages=[{"role": "user", "content": "short"}])
+        rebuilt.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_final_answer.side_effect = [initial, rebuilt]
+        response = MagicMock(role="assistant", content="Summary.", token_usage=None)
+        agent.model = MagicMock(return_value=response)
+        agent.model.safe_input_budget_snapshot = {"fingerprint": "w2"}
+        agent._finalize_step = MagicMock()
+
+        agent._handle_max_steps_reached("my task prompt")
+
+        callback = agent.model.call_args.kwargs["context_rebuild"]
+        assert callback(321) is rebuilt
+        assert agent.context_runtime.prepare_final_answer.call_args.kwargs[
+            "target_input_budget_tokens"
+        ] == 321
 
 
 # ----------------------------------------------------------------------------

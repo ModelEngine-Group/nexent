@@ -45,6 +45,13 @@ class ToolExecutionException(Exception):
     pass
 
 
+class MockModelCapacityConfigError(ValidationError):
+    def __init__(self, reason_code, message, *, field=None):
+        self.reason_code = reason_code
+        self.field = field
+        super().__init__(f"{reason_code}: {message}")
+
+
 consts_model_module = types.ModuleType("consts.model")
 consts_model_module.HistoryItem = HistoryItem
 
@@ -67,10 +74,17 @@ sys.modules["consts.capability_profiles"] = types.ModuleType(
     "consts.capability_profiles"
 )
 sys.modules["consts.capability_profiles"].CATALOG = {}
+sys.modules["consts.model_feature_capabilities"] = types.ModuleType(
+    "consts.model_feature_capabilities"
+)
+sys.modules["consts.model_feature_capabilities"].CATALOG_REVISION = "test"
+sys.modules["consts.model_feature_capabilities"].EXACT_CATALOG = {}
+sys.modules["consts.model_feature_capabilities"].FAMILY_RULES = ()
 
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
+consts_exceptions_module.ModelCapacityConfigError = MockModelCapacityConfigError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
@@ -181,6 +195,16 @@ class MockAgentVerificationConfig:
         return value or {}
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
+sys.modules['nexent.core.models.feature_capability'] = _create_stub_module(
+    "nexent.core.models.feature_capability",
+    normalize_feature_profile=lambda value: value if isinstance(value, dict) else None,
+    resolve_feature_capabilities=lambda *args, **kwargs: {
+        "schema_version": 1,
+        "reasoning": {"supported": None, "mode": "unknown", "request_style": "unknown", "efforts": []},
+        "prompt_cache": {"supported": None, "mode": "unknown", "metrics_available": None},
+        "source": "unknown",
+    },
+)
 sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     "nexent.core.agents.agent_model",
     AgentHistory=AgentHistory,
@@ -216,10 +240,14 @@ sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
 )
 sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
     "nexent.core.models.prompt_cache",
-    resolve_prompt_cache_profile=lambda provider: (
+    resolve_prompt_cache_profile=lambda provider, explicit_profile=None: (
         {"mode": "openai_automatic", "enabled": True}
         if (provider or "").lower() == "openai" else None
     ),
+    resolve_provider_usage_profile=lambda provider, version=None: {
+        "capability_profile_version": version,
+        "reasoning_usage_semantics": "unavailable",
+    },
 )
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
@@ -258,6 +286,52 @@ sys.modules['langchain_core.tools'] = MagicMock()
 # Build services module hierarchy with minimal functionality
 services_module = _create_stub_module("services")
 sys.modules['services'] = services_module
+
+
+def _stub_effective_feature_factory(record):
+    factory = str(record.get("model_factory") or "").lower()
+    if factory != "openai-api-compatible":
+        return factory
+    url = str(record.get("base_url") or "").lower()
+    if url.startswith("https://dashscope.aliyuncs.com/"):
+        return "dashscope"
+    if url.startswith("https://api.openai.com/"):
+        return "openai"
+    return factory
+
+
+def _stub_feature_configuration(record):
+    baseline = record.get("feature_capability_metadata") or {
+        "schema_version": 1,
+        "reasoning": {
+            "supported": None,
+            "mode": "unknown",
+            "request_style": "unknown",
+            "efforts": [],
+        },
+        "prompt_cache": {
+            "supported": None,
+            "mode": "unknown",
+            "metrics_available": None,
+        },
+        "source": "unknown",
+    }
+    override = record.get("feature_capability_override")
+    return {
+        "baseline": baseline,
+        "override": override,
+        "effective_capabilities": baseline,
+        "effective_policy": {},
+        "warnings": [],
+        "baseline_changed": False,
+    }
+
+
+sys.modules['services.model_feature_configuration_service'] = _create_stub_module(
+    "services.model_feature_configuration_service",
+    effective_feature_factory=_stub_effective_feature_factory,
+    resolve_record_feature_configuration=_stub_feature_configuration,
+)
 sys.modules['services.image_service'] = _create_stub_module(
     "services.image_service",
     get_vlm_model=MagicMock(return_value="stub_vlm"),
@@ -402,7 +476,11 @@ class MockSafeInputBudgetCalculator:
         )
 
 
-class MockUncertaintyReserveBasisUnknown(Exception):
+class MockBudgetResolverError(Exception):
+    """Mock W2 base exception."""
+
+
+class MockUncertaintyReserveBasisUnknown(MockBudgetResolverError):
     """Mock W2 exception raised when context_window_tokens is missing."""
 
 
@@ -415,6 +493,7 @@ sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
 )
 sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
     "nexent.core.models.capacity_budget",
+    BudgetResolverError=MockBudgetResolverError,
     RequestBudgetOverrides=MockRequestBudgetOverrides,
     SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
@@ -534,6 +613,8 @@ from backend.agents.create_agent_info import (
     _build_security_headers,
     _resolve_scheme_field,
     _build_auth_header_for_scheme,
+    _effective_feature_factory,
+    _resolve_model_feature_configuration,
     _get_external_a2a_agents,
     _build_internal_s3_url,
     _format_minio_files_for_content,
@@ -614,6 +695,34 @@ class TestResolveInputBudget:
         assert capacity_snapshot["capacity_fingerprint"] == resolved_capacity_snapshot.fingerprint
         assert isinstance(resolved_capacity_snapshot, MockModelCapacitySnapshot)
         assert safe_budget_snapshot["model_name"] == resolved_capacity_snapshot.model_name
+
+    def test_persisted_profile_identity_overrides_compatibility_factory(self):
+        profile = types.SimpleNamespace(
+            capability_profile_version="dashscope/qwen3.7-plus@1"
+        )
+        snapshot = MockModelCapacitySnapshot(
+            model_name="qwen3.7-plus",
+            capability_profile_version="dashscope/qwen3.7-plus@1",
+        )
+        with patch.object(
+            create_agent_info_module,
+            "CAPABILITY_CATALOG",
+            {("dashscope", "qwen3.7-plus"): profile},
+        ), patch.object(
+            create_agent_info_module,
+            "resolve_capacity",
+            return_value=snapshot,
+        ) as resolver:
+            _resolve_input_budget(
+                {
+                    "model_factory": "OpenAI-API-Compatible",
+                    "model_name": "qwen3.7-plus",
+                    "capability_profile_version": "dashscope/qwen3.7-plus@1",
+                }
+            )
+
+        assert resolver.call_args.kwargs["provider"] == "dashscope"
+        assert resolver.call_args.kwargs["model_id"] == "qwen3.7-plus"
 
 
 class TestGetSkillsForTemplate:
@@ -2311,7 +2420,7 @@ class TestCreateAgentConfig:
         assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
-        assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
+        assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
@@ -3782,6 +3891,25 @@ class TestCreateAgentConfig:
                 assert last_tool.source == "local"
 
 
+def test_p8_effective_feature_factory_requires_generic_factory_and_exact_known_host():
+    assert _effective_feature_factory({
+        "model_factory": "OpenAI-API-Compatible",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    }) == "dashscope"
+    assert _effective_feature_factory({
+        "model_factory": "OpenAI-API-Compatible",
+        "base_url": "https://api.openai.com/v1",
+    }) == "openai"
+    assert _effective_feature_factory({
+        "model_factory": "OpenAI-API-Compatible",
+        "base_url": "https://dashscope.aliyuncs.com.evil.example/v1",
+    }) == "openai-api-compatible"
+    assert _effective_feature_factory({
+        "model_factory": "modelengine",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    }) == "modelengine"
+
+
 class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
 
@@ -3818,7 +3946,14 @@ class TestCreateModelConfigList:
             mock_manager.get_model_config.return_value = {
                 "api_key": "main_key",
                 "model_name": "main_model",
-                "base_url": "http://main.url"
+                "base_url": "http://main.url",
+                "context_window_tokens": 1_000_000,
+                "max_input_tokens": 991_808,
+                "default_output_reserve_tokens": 8_192,
+                "canonical_model_id": "qwen:qwen3.7-plus",
+                "tokenizer_family": "qwen",
+                "tokenizer_match_metadata": {"auto_applicable": True},
+                "token_count_probe_metadata": {"status": "supported"},
             }
 
             # Mock utility functions
@@ -3861,12 +3996,106 @@ class TestCreateModelConfigList:
             assert calls[2][1]['api_key'] == "main_key"
             assert calls[2][1]['model_name'] == "main_model_name"
             assert calls[2][1]['url'] == "http://main.url"
+            assert calls[2][1]['context_window_tokens'] == 1_000_000
+            assert calls[2][1]['canonical_model_id'] == "qwen:qwen3.7-plus"
+            assert calls[2][1]['token_count_probe_metadata'] == {"status": "supported"}
 
             # Fourth call: sub_model
             assert calls[3][1]['cite_name'] == "sub_model"
             assert calls[3][1]['api_key'] == "main_key"
             assert calls[3][1]['model_name'] == "main_model_name"
             assert calls[3][1]['url'] == "http://main.url"
+            assert calls[3][1]['context_window_tokens'] == 1_000_000
+            assert calls[3][1]['canonical_model_id'] == "qwen:qwen3.7-plus"
+            assert calls[3][1]['token_count_probe_metadata'] == {"status": "supported"}
+
+    @pytest.mark.asyncio
+    async def test_p8_tenant_override_reaches_agent_model_config(self):
+        """P8-019: effective capabilities, policy and warnings reach runtime."""
+        mock_model_config.reset_mock()
+        effective = {
+            "schema_version": 1,
+            "reasoning": {
+                "supported": True,
+                "mode": "effort",
+                "request_style": "openai_reasoning_effort",
+                "efforts": ["low", "high"],
+                "default_effort": "high",
+            },
+            "prompt_cache": {
+                "supported": False,
+                "mode": "none",
+                "metrics_available": None,
+            },
+            "source": "model_record_override",
+        }
+        configuration = {
+            "baseline": effective,
+            "override": {
+                "schema_version": 1,
+                "policy": {"reasoning": {"enabled": True, "effort": "low"}},
+            },
+            "effective_capabilities": effective,
+            "warnings": ["override_identity_mismatch"],
+            "baseline_changed": False,
+        }
+        record = {
+            "model_id": 9,
+            "display_name": "Tenant model",
+            "api_key": "key",
+            "model_repo": "openai",
+            "model_name": "gpt-5",
+            "base_url": "https://api.openai.com/v1",
+        }
+        with patch(
+            'backend.agents.create_agent_info.get_model_records',
+            return_value=[record],
+        ), patch(
+            'backend.agents.create_agent_info.tenant_config_manager'
+        ) as manager, patch(
+            'backend.agents.create_agent_info.get_model_name_from_config',
+            return_value="fallback",
+        ), patch(
+            'backend.agents.create_agent_info.add_repo_to_name',
+            return_value="openai/gpt-5",
+        ), patch(
+            'backend.agents.create_agent_info._resolve_model_feature_configuration',
+            return_value=configuration,
+        ):
+            manager.get_model_config.return_value = record
+
+            await create_model_config_list("tenant")
+
+        first = mock_model_config.call_args_list[0].kwargs
+        assert first["feature_capabilities"] == effective
+        assert first["feature_preferences"] == {
+            "reasoning": {"enabled": True, "effort": "low"}
+        }
+        assert first["feature_configuration_warnings"] == [
+            "override_identity_mismatch"
+        ]
+
+
+    def test_p8_runtime_refreshes_stale_feature_baseline(self):
+        baseline = {"schema_version": 1, "source": "catalog_exact"}
+        with patch(
+            'backend.agents.create_agent_info.resolve_record_feature_configuration',
+            return_value={
+                "baseline": baseline,
+                "effective_capabilities": baseline,
+                "override": None,
+                "warnings": [],
+                "baseline_changed": True,
+            },
+        ), patch(
+            'backend.agents.create_agent_info.update_model_record'
+        ) as update:
+            configuration = _resolve_model_feature_configuration({"model_id": 12})
+
+        assert configuration["baseline"] == baseline
+        update.assert_called_once_with(
+            12, {"feature_capability_metadata": baseline}
+        )
 
     @pytest.mark.asyncio
     async def test_create_model_config_list_empty_database(self):
@@ -5196,6 +5425,43 @@ class TestAdditionalAgentInfoCoverage:
             )
 
         assert result is None
+
+    @pytest.mark.parametrize(
+        ("exception_name", "reason"),
+        [
+            ("InvalidReservePolicy", "invalid_reserve_policy"),
+            ("RequestedOutputExceedsCapacity", "requested_output_exceeds_model"),
+            ("ReserveExceedsCapacity", "reserve_exceeds_capacity"),
+            ("NoSafeInputCapacity", "no_safe_input_capacity"),
+            ("SafeInputBudgetFingerprintMismatch", "budget_fingerprint_mismatch"),
+            ("CallerMaxTokensOverrideForbidden", "caller_output_override_forbidden"),
+            ("SafeInputBudgetCapacityMismatch", "capacity_snapshot_mismatch"),
+            ("FutureBudgetError", "budget_resolution_failed"),
+        ],
+    )
+    def test_ac_007_resolve_safe_input_budget_maps_budget_error(
+        self, exception_name, reason
+    ):
+        capacity = MockModelCapacitySnapshot(model_name="invalid-model")
+        calculator = MagicMock()
+        exception_type = type(exception_name, (MockBudgetResolverError,), {})
+        calculator.calculate_safe_input_budget.side_effect = exception_type("internal details")
+        with patch(
+            "backend.agents.create_agent_info.SafeInputBudgetCalculator",
+            return_value=calculator,
+        ):
+            with pytest.raises(
+                create_agent_info_module.ModelCapacityConfigError,
+                match=f"capacity_config_invalid.{reason}",
+            ) as exc_info:
+                _resolve_safe_input_budget(
+                    capacity_snapshot=capacity,
+                    tenant_id="tenant-1",
+                    agent_requested_output_tokens=None,
+                    request_requested_output_tokens=None,
+                )
+
+        assert "internal details" not in str(exc_info.value)
 
     def test_inject_plan_tools_adds_tools_once(self):
         tools = []

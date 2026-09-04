@@ -16,6 +16,57 @@ export interface TokenMetrics {
   hard_input_budget_tokens: number | null;
   context_processing_mode: "adaptive_compact" | "passthrough" | null;
   output_finish_reason: string | null;
+  context_budget?: ContextBudgetMetrics;
+}
+
+export interface ContextBudgetMetrics {
+  schema_version: 1;
+  purpose: string;
+  step_number: number;
+  raw_tokens: number;
+  final_tokens: number;
+  soft_budget: number;
+  hard_budget: number;
+  hard_count: number;
+  components: {
+    message_text: number;
+    message_framing: number;
+    tools: number;
+    media: number;
+    reasoning: number;
+    other_semantic: number;
+  };
+  count_source: string;
+  compression: {
+    attempted: boolean;
+    saved_tokens: number;
+    ratio: number;
+    fallback_compaction: boolean;
+    reasons: Array<
+      | "history_summary"
+      | "history_incremental"
+      | "long_term_memory_selection"
+      | "representation_compaction"
+    >;
+  };
+  recovery_state: string;
+  recovery?: {
+    trigger?: string;
+    phase?: "compression" | "archive";
+    attempt?: number;
+    maximum_attempts?: number;
+    compression_target?: number;
+    provisional_capacity?: boolean;
+    archive_active?: boolean;
+    archived_item_count?: number;
+    retained_item_count?: number;
+    recall_invocation_count?: number;
+    recalled_tokens?: number;
+    partial_preserved?: boolean;
+    auto_continued?: boolean;
+    terminal_reason?: string;
+  };
+  retry_ordinal: number;
 }
 
 // Step related types
@@ -45,6 +96,7 @@ export interface StepContent {
     | typeof chatConfig.messageTypes.PREPROCESS
     | typeof chatConfig.messageTypes.VERIFICATION
     | typeof chatConfig.messageTypes.HISTORY_SUMMARY
+    | typeof chatConfig.messageTypes.CONTEXT_BUDGET
     | typeof chatConfig.messageTypes.MAX_STEPS_REACHED;
   content: string;
   expanded: boolean;

@@ -2325,11 +2325,59 @@ def test_p8_feature_resolution_is_emitted_as_sanitized_span_attributes(
         "llm.reasoning.effective_enabled": True,
         "llm.reasoning.effective_effort": "",
         "llm.feature.policy_source": "nexent_default",
+        "llm.feature.configuration_warnings": "",
         "llm.prompt_cache.mode": "provider_automatic",
         "llm.prompt_cache.supported": True,
         "llm.prompt_cache.directive_reason": "provider_automatic_cache",
         "llm.prompt_cache.profile_supported": True,
     }
+
+
+def test_p8_tenant_feature_policy_and_warning_are_traced(openai_model_instance):
+    openai_model_instance.feature_capabilities = {
+        "reasoning": {
+            "supported": True,
+            "mode": "toggle",
+            "request_style": "extra_body_enable_thinking",
+            "efforts": [],
+        },
+        "prompt_cache": {"supported": False, "mode": "none"},
+    }
+    openai_model_instance.feature_preferences = {
+        "reasoning": {"enabled": False}
+    }
+    openai_model_instance.feature_configuration_warnings = [
+        "override_identity_mismatch"
+    ]
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "ok"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.choices[0].finish_reason = "stop"
+    mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+
+    with patch.object(
+        openai_model_instance, "_prepare_completion_kwargs", return_value={}
+    ):
+        openai_model_instance.client.chat.completions.create.return_value = [
+            mock_chunk
+        ]
+        openai_model_instance([{"role": "user", "content": "verify"}])
+
+    attributes = next(
+        call.kwargs
+        for call in reversed(
+            openai_model_instance._monitoring.set_span_attributes.call_args_list
+        )
+        if "llm.feature.source" in call.kwargs
+    )
+    assert attributes["llm.reasoning.effective_enabled"] is False
+    assert attributes["llm.feature.policy_source"] == "model_record_override"
+    assert (
+        attributes["llm.feature.configuration_warnings"]
+        == "override_identity_mismatch"
+    )
 
 
 def test_p8_014_supported_effort_defaults_are_sent_in_completion_payload(

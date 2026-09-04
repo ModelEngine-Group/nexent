@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -545,6 +546,42 @@ def test_context_manager_management_and_diagnostic_helpers():
         manager._item_source([normalized, item_input])
     with pytest.raises(ValueError, match="requires final_answer_templates"):
         manager._purpose_messages(purpose="final_answer", task="task", final_answer_templates=None)
+
+
+def test_ac_p2_005_rebuild_target_tightens_both_context_budgets():
+    manager = ContextManager(
+        ContextManagerConfig(
+            token_threshold=100,
+            soft_input_budget_tokens=80,
+            hard_input_budget_tokens=100,
+            chars_per_token=1.0,
+        )
+    )
+    memory = MagicMock(system_prompt=None, steps=[])
+    run_context = manager.prepare_run_context(
+        memory,
+        "",
+        items=[
+            ContextItemInput(
+                id="system:large",
+                type="system",
+                content={"text": "x" * 60},
+            )
+        ],
+    )
+
+    rebuilt = manager.assemble_final_context(
+        model=MagicMock(),
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+        target_input_budget_tokens=40,
+    )
+
+    assert rebuilt.evidence.soft_budget == 40
+    assert rebuilt.evidence.hard_budget == 40
+    assert rebuilt.evidence.over_hard_budget is True
+    assert rebuilt.evidence.budget_failure_reason == "single_context_item_oversize"
 
 
 @dataclass
