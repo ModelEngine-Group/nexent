@@ -134,6 +134,10 @@ sys.modules['tool_collection.mcp.nl2agent_mcp_tools'] = stub_nl2agent_mcp_tools
 stub_utils = types.ModuleType("utils")
 stub_utils.logging_utils = types.ModuleType("utils.logging_utils")
 stub_utils.logging_utils.configure_logging = MagicMock()
+stub_utils.logging_utils.configure_elasticsearch_logging = MagicMock()
+stub_utils.logging_utils.get_uvicorn_logging_config = MagicMock(
+    return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
+)
 sys.modules['utils'] = stub_utils
 sys.modules['utils.logging_utils'] = stub_utils.logging_utils
 
