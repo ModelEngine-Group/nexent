@@ -295,10 +295,9 @@ RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() ==
 # Logging Configuration
 LOG_DIR = os.getenv("LOG_DIR", "logs")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-LOG_ROTATION_MODE = os.getenv("LOG_ROTATION_MODE", "time").lower()  # "time" or "size"
-LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))  # 10 MB
-LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "7"))  # days, used with time rotation
-LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "10"))
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "1"))  # days
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
 
 
 # Service Control Flags

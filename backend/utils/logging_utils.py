@@ -1,7 +1,7 @@
 import logging
 import logging.config
 import os
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from consts.const import (
@@ -10,7 +10,6 @@ from consts.const import (
     LOG_LEVEL,
     LOG_MAX_BYTES,
     LOG_ROTATION_INTERVAL,
-    LOG_ROTATION_MODE,
 )
 
 
@@ -30,32 +29,75 @@ class ColorFormatter(logging.Formatter):
         return message
 
 
+class HybridRotatingFileHandler(TimedRotatingFileHandler):
+    """A handler that rotates on both time and size, whichever comes first.
+
+    Rotation is triggered when EITHER:
+      - The configured interval (LOG_ROTATION_INTERVAL days at midnight) has elapsed, OR
+      - The current file exceeds LOG_MAX_BYTES.
+
+    This avoids the common issue where a large log file grows unbounded between
+    two rotation time windows.
+    """
+
+    def __init__(
+        self,
+        filename: str | Path,
+        interval: int = 1,
+        backupCount: int = 0,
+        maxBytes: int = 0,
+        **kwargs,
+    ):
+        self._max_bytes = maxBytes
+        super().__init__(filename, interval=interval, backupCount=backupCount, **kwargs)
+
+    def shouldRollover(self, record: logging.LogRecord) -> int:
+        """Return > 0 if rollover needed, 0 otherwise."""
+        # Check time-based rollover first (inherited from TimedRotatingFileHandler)
+        time_check = super().shouldRollover(record)
+        if time_check:
+            return time_check
+
+        # Check size-based rollover
+        if self._max_bytes <= 0:
+            return 0
+
+        try:
+            pos = self.stream.tell()
+            if pos >= self._max_bytes:
+                return 1
+        except Exception:
+            pass
+
+        return 0
+
+    def doRollover(self):
+        self.mode = "a"
+        super().doRollover()
+
+
 def _make_file_handler(category: str) -> logging.Handler:
-    """Create a rotating file handler for a given category.
+    """Create a hybrid time+size rotating file handler for a given category.
+
+    Rotation is triggered when EITHER:
+      - The configured interval (LOG_ROTATION_INTERVAL days at midnight) has elapsed, OR
+      - The current file exceeds LOG_MAX_BYTES.
 
     The log file lives at: {LOG_DIR}/{category}/nexent_{category}.log
-    Rotation strategy is controlled by LOG_ROTATION_MODE / LOG_MAX_BYTES / LOG_BACKUP_COUNT.
     """
     log_dir = Path(LOG_DIR)
     category_dir = log_dir / category
     category_dir.mkdir(parents=True, exist_ok=True)
     log_path = category_dir / f"nexent_{category}.log"
 
-    if LOG_ROTATION_MODE == "size":
-        handler: logging.Handler = RotatingFileHandler(
-            log_path,
-            maxBytes=LOG_MAX_BYTES,
-            backupCount=LOG_BACKUP_COUNT,
-            encoding="utf-8",
-        )
-    else:
-        handler = TimedRotatingFileHandler(
-            log_path,
-            when="midnight",
-            interval=LOG_ROTATION_INTERVAL,
-            backupCount=LOG_BACKUP_COUNT,
-            encoding="utf-8",
-        )
+    handler: logging.Handler = HybridRotatingFileHandler(
+        log_path,
+        when="midnight",
+        interval=LOG_ROTATION_INTERVAL,
+        backupCount=LOG_BACKUP_COUNT,
+        maxBytes=LOG_MAX_BYTES,
+        encoding="utf-8",
+    )
 
     # File format (no color, machine-parseable)
     fmt = "%(asctime)s  %(levelname)-8s  %(name)-25s  %(message)s"
@@ -116,7 +158,7 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         "stream": "ext://sys.stdout",
     }
 
-    # --- File handler per category (one handler each) ---
+    # --- File handler per category (hybrid time+size) ---
     file_handlers: dict[str, object] = {}
     for cat in categories:
         cat_key = f"file_{cat}"
@@ -124,27 +166,17 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         log_path = str(log_dir / cat / f"nexent_{cat}.log")
         (log_dir / cat).mkdir(parents=True, exist_ok=True)
 
-        if LOG_ROTATION_MODE == "size":
-            file_handlers[cat_key] = {
-                "class": "logging.handlers.RotatingFileHandler",
-                "level": level,
-                "formatter": "plain",
-                "filename": log_path,
-                "maxBytes": LOG_MAX_BYTES,
-                "backupCount": LOG_BACKUP_COUNT,
-                "encoding": "utf-8",
-            }
-        else:
-            file_handlers[cat_key] = {
-                "class": "logging.handlers.TimedRotatingFileHandler",
-                "level": level,
-                "formatter": "plain",
-                "filename": log_path,
-                "when": "midnight",
-                "interval": LOG_ROTATION_INTERVAL,
-                "backupCount": LOG_BACKUP_COUNT,
-                "encoding": "utf-8",
-            }
+        file_handlers[cat_key] = {
+            "class": f"{__name__}.HybridRotatingFileHandler",
+            "level": level,
+            "formatter": "plain",
+            "filename": log_path,
+            "when": "midnight",
+            "interval": LOG_ROTATION_INTERVAL,
+            "backupCount": LOG_BACKUP_COUNT,
+            "maxBytes": LOG_MAX_BYTES,
+            "encoding": "utf-8",
+        }
 
     # --- Formatters ---
     formatters: dict[str, object] = {
