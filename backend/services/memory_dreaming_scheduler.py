@@ -28,7 +28,7 @@ class DreamingLeaseStore:
         return memory_dreaming_db.claim_queued(owner_id, lease_seconds)
 
     async def recover(self) -> None:
-        await asyncio.to_thread(memory_dreaming_db.recover_stale)
+        await asyncio.to_thread(memory_dreaming_db.recover_stale, True)
 
     async def claim_due(
         self,

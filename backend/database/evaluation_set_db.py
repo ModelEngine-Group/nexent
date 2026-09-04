@@ -6,7 +6,7 @@ from sqlalchemy import or_
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 from database.client import as_dict, get_db_session
-from database.db_models import EvaluationSet, EvaluationSetCase
+from database.db_models import AgentEvaluation, EvaluationSet, EvaluationSetCase
 
 
 logger = logging.getLogger(__name__)
@@ -264,6 +264,137 @@ def hard_delete_evaluation_set(evaluation_set_id: int, tenant_id: str) -> int:
         )
         session.commit()
     return deleted
+
+
+def recover_interrupted_generations() -> int:
+    """Fail interrupted AI generations and remove only their appended cases.
+
+    ``case_count`` is updated only when generation completes, so it is the
+    durable pre-generation baseline. Generated rows are append-only; keeping
+    the oldest baseline rows avoids adding a new generation-attempt column.
+    """
+    with get_db_session() as session:
+        sets = (
+            session.query(EvaluationSet)
+            .filter(
+                EvaluationSet.generation_status == "GENERATING",
+                EvaluationSet.delete_flag == "N",
+            )
+            .with_for_update()
+            .all()
+        )
+        for evaluation_set in sets:
+            case_rows = (
+                session.query(EvaluationSetCase.evaluation_set_case_id)
+                .filter(
+                    EvaluationSetCase.evaluation_set_id
+                    == evaluation_set.evaluation_set_id,
+                    EvaluationSetCase.tenant_id == evaluation_set.tenant_id,
+                    EvaluationSetCase.delete_flag == "N",
+                )
+                .order_by(EvaluationSetCase.evaluation_set_case_id.asc())
+                .all()
+            )
+            baseline_count = max(0, int(evaluation_set.case_count or 0))
+            appended_ids = [case_id for (case_id,) in case_rows[baseline_count:]]
+            if appended_ids:
+                session.query(EvaluationSetCase).filter(
+                    EvaluationSetCase.evaluation_set_case_id.in_(appended_ids)
+                ).delete(synchronize_session=False)
+            evaluation_set.generation_status = "FAILED"
+            evaluation_set.generation_progress = 0
+        return len(sets)
+
+
+def cleanup_orphaned_virtual_evaluation_sets() -> int:
+    """Delete no-set evaluation data that was never linked to a run."""
+    with get_db_session() as session:
+        referenced_set_ids = session.query(AgentEvaluation.evaluation_set_id).filter(
+            AgentEvaluation.delete_flag == "N"
+        )
+        orphan_rows = (
+            session.query(EvaluationSet.evaluation_set_id, EvaluationSet.tenant_id)
+            .filter(
+                EvaluationSet.source_filename == "__no_set_virtual__",
+                EvaluationSet.delete_flag == "N",
+                ~EvaluationSet.evaluation_set_id.in_(referenced_set_ids),
+            )
+            .all()
+        )
+        orphan_ids = [set_id for set_id, _ in orphan_rows]
+        if orphan_ids:
+            session.query(EvaluationSetCase).filter(
+                EvaluationSetCase.evaluation_set_id.in_(orphan_ids)
+            ).delete(synchronize_session=False)
+            session.query(EvaluationSet).filter(
+                EvaluationSet.evaluation_set_id.in_(orphan_ids)
+            ).delete(synchronize_session=False)
+        return len(orphan_ids)
+
+
+def materialize_virtual_evaluation_set_for_run(
+    *,
+    tenant_id: str,
+    name: str,
+    cases: list[dict[str, Any]],
+    created_by: str,
+    agent_evaluation_id: int,
+) -> int:
+    """Atomically create a no-set dataset and attach it to a pending run."""
+    with get_db_session() as session:
+        run = (
+            session.query(AgentEvaluation)
+            .filter(
+                AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
+                AgentEvaluation.tenant_id == tenant_id,
+                AgentEvaluation.status == "PENDING",
+                AgentEvaluation.delete_flag == "N",
+            )
+            .with_for_update()
+            .first()
+        )
+        if run is None:
+            raise AppException(
+                ErrorCode.COMMON_RESOURCE_NOT_FOUND,
+                "Pending agent evaluation not found",
+            )
+
+        evaluation_set = EvaluationSet(
+            tenant_id=tenant_id,
+            name=name,
+            description=None,
+            source_filename="__no_set_virtual__",
+            case_count=len(cases),
+            generation_status="DONE",
+            generation_progress=100,
+            created_by=created_by,
+            updated_by=created_by,
+            delete_flag="N",
+        )
+        session.add(evaluation_set)
+        session.flush()
+
+        for index, case in enumerate(cases):
+            session.add(
+                EvaluationSetCase(
+                    tenant_id=tenant_id,
+                    evaluation_set_id=evaluation_set.evaluation_set_id,
+                    inputs=case["inputs"],
+                    label=case["label"],
+                    order_no=int(case.get("order_no", index)),
+                    session_id=case.get("session_id"),
+                    turn_order=int(case.get("turn_order", 0)),
+                    created_by=created_by,
+                    updated_by=created_by,
+                    delete_flag="N",
+                )
+            )
+
+        run.evaluation_set_id = evaluation_set.evaluation_set_id
+        run.progress_total = len(cases)
+        run.updated_by = created_by
+        session.flush()
+        return int(evaluation_set.evaluation_set_id)
 
 
 def list_case_turn_orders_by_session(

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+
+from utils.time_context_utils import strip_current_time_prefix
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -271,11 +273,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     # Strip the [Current time: ...] prefix before persisting so historical
     # messages do not show the time marker. The prefix is injected by
     # run_agent_stream for the LLM call only.
-    raw_query = request.query
-    if raw_query and raw_query.startswith("[Current time:"):
-        close_idx = raw_query.find("]", len("[Current time:"))
-        if close_idx >= 0:
-            raw_query = raw_query[close_idx + 1:].lstrip("\n").strip()
+    raw_query = strip_current_time_prefix(request.query)
 
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,

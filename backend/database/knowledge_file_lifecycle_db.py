@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
+
+from sqlalchemy import and_, or_
 
 from .client import as_dict, get_db_session
 from .db_models import KnowledgeFileLifecycle
@@ -35,6 +38,7 @@ def create_file_record(
     bucket_name: Optional[str] = None,
     object_name: Optional[str] = None,
     file_size: Optional[int] = None,
+    upload_owner_service: Optional[str] = None,
     status: str = "UPLOADING",
     stage: str = "UPLOAD",
     created_by: Optional[str] = None,
@@ -49,6 +53,7 @@ def create_file_record(
         bucket_name=bucket_name,
         object_name=object_name,
         file_size=file_size,
+        upload_owner_service=upload_owner_service,
         status=status,
         stage=stage,
         created_by=created_by,
@@ -79,6 +84,7 @@ def create_file_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any
                 bucket_name=record.get("bucket_name"),
                 object_name=record.get("object_name"),
                 file_size=record.get("file_size"),
+                upload_owner_service=record.get("upload_owner_service"),
                 status=record.get("status", "UPLOADING"),
                 stage=record.get("stage", "UPLOAD"),
                 created_by=record.get("created_by"),
@@ -138,6 +144,66 @@ def list_file_records(
         if not include_hidden:
             query = query.filter(KnowledgeFileLifecycle.status.notin_(HIDDEN_STATUSES))
         return [as_dict(row) for row in query.order_by(KnowledgeFileLifecycle.create_time.asc()).all()]
+
+
+def fail_interrupted_file_tasks() -> List[Dict[str, Any]]:
+    """Fail ingestion stages that had actually started before worker restart.
+
+    FORWARDING without a forward task ID is still queued behind a completed
+    process task and is intentionally left for the existing Celery chain.
+    """
+    with get_db_session() as session:
+        rows = (
+            session.query(KnowledgeFileLifecycle)
+            .filter(
+                KnowledgeFileLifecycle.delete_flag == "N",
+                or_(
+                    KnowledgeFileLifecycle.status == "PROCESSING",
+                    and_(
+                        KnowledgeFileLifecycle.status == "FORWARDING",
+                        KnowledgeFileLifecycle.forward_task_id.is_not(None),
+                    ),
+                ),
+            )
+            .with_for_update()
+            .all()
+        )
+        recovered = []
+        failed_at = datetime.utcnow()
+        for row in rows:
+            recovered.append(as_dict(row))
+            row.status = "FAILED"
+            row.error_code = "CONTAINER_RESTARTED"
+            row.error_message = "Data-process service restarted before the task completed"
+            row.error_stage = row.stage or (
+                "FORWARD" if row.forward_task_id else "PROCESS"
+            )
+            row.failed_at = failed_at
+            row.version = int(row.version or 0) + 1
+        return recovered
+
+
+def list_uploading_files_created_before(
+    cutoff: datetime,
+    upload_owner_service: str,
+) -> List[Dict[str, Any]]:
+    """Return old uploads owned by the service that is being restarted."""
+    if not upload_owner_service:
+        raise ValueError("upload_owner_service is required for upload recovery")
+
+    with get_db_session() as session:
+        rows = (
+            session.query(KnowledgeFileLifecycle)
+            .filter(
+                KnowledgeFileLifecycle.status == "UPLOADING",
+                KnowledgeFileLifecycle.delete_flag == "N",
+                KnowledgeFileLifecycle.upload_owner_service == upload_owner_service,
+                KnowledgeFileLifecycle.create_time < cutoff,
+            )
+            .order_by(KnowledgeFileLifecycle.create_time.asc())
+            .all()
+        )
+        return [as_dict(row) for row in rows]
 
 
 def transition_file_record(

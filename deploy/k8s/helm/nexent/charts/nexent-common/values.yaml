@@ -69,6 +69,7 @@ config:
   umask: "0022"
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
+  logDir: "/mnt/nexent-data/logs"
   modelEngine:
     enabled: "false"
   voiceService:

@@ -8,9 +8,10 @@ This test file focuses on testing config_app by importing it from the app_factor
 module and verifying the app structure without triggering all the complex router
 dependencies.
 """
+import asyncio
 import atexit
 import importlib.util
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import AsyncMock, patch, Mock, MagicMock
 import os
 from pathlib import Path
 import sys
@@ -89,8 +90,9 @@ class TestConfigAppRouterConfiguration:
 
     def test_config_app_registers_api_key_routes(self, monkeypatch):
         class RecordingApp:
-            def __init__(self):
+            def __init__(self, lifespan=None):
                 self.included_routers = []
+                self.lifespan = lifespan
 
             def on_event(self, _event):
                 return lambda handler: handler
@@ -99,7 +101,9 @@ class TestConfigAppRouterConfiguration:
                 self.included_routers.append(router)
 
         app_factory_module = types.ModuleType("apps.app_factory")
-        app_factory_module.create_app = lambda **_: RecordingApp()
+        app_factory_module.create_app = (
+            lambda **kwargs: RecordingApp(kwargs.get("lifespan"))
+        )
         monkeypatch.setitem(sys.modules, "apps.app_factory", app_factory_module)
 
         api_key_router = APIRouter(prefix="/api-keys")
@@ -157,6 +161,7 @@ class TestConfigAppRouterConfiguration:
             "apps.memory_record_app": {"router": APIRouter()},
             "apps.memory_long_term_app": {"router": APIRouter()},
             "apps.memory_dreaming_app": {"router": APIRouter()},
+            "apps.tag_management_app": {"router": APIRouter()},
             "apps.quota_app": {
                 "tenant_quota_router": APIRouter(),
                 "platform_quota_router": APIRouter(),
@@ -189,6 +194,66 @@ class TestConfigAppRouterConfiguration:
             "/api-keys",
             "/api-keys/refresh",
         }
+
+        recover_config_tasks = MagicMock()
+        schedule_upload_cleanup = AsyncMock()
+        startup_recovery_module = types.ModuleType(
+            "services.startup_recovery_service"
+        )
+        startup_recovery_module.recover_config_tasks = recover_config_tasks
+        startup_recovery_module.schedule_interrupted_upload_cleanup = (
+            schedule_upload_cleanup
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "services.startup_recovery_service",
+            startup_recovery_module,
+        )
+
+        start_evaluation_maintenance = MagicMock()
+        evaluation_maintenance_module = types.ModuleType(
+            "services.evaluation_maintenance"
+        )
+        evaluation_maintenance_module.start = start_evaluation_maintenance
+        monkeypatch.setitem(
+            sys.modules,
+            "services.evaluation_maintenance",
+            evaluation_maintenance_module,
+        )
+
+        dreaming_scheduler = MagicMock()
+        dreaming_scheduler.start = AsyncMock()
+        dreaming_scheduler.stop = AsyncMock()
+        dreaming_scheduler_module = types.ModuleType(
+            "services.memory_dreaming_scheduler"
+        )
+        dreaming_scheduler_module.dreaming_scheduler = dreaming_scheduler
+        monkeypatch.setitem(
+            sys.modules,
+            "services.memory_dreaming_scheduler",
+            dreaming_scheduler_module,
+        )
+
+        sync_defaults = AsyncMock()
+
+        async def exercise_lifespan():
+            async with config_app.config_lifespan(None):
+                pass
+
+        with patch.object(
+            config_app,
+            "sync_default_prompt_template_on_startup",
+            new=sync_defaults,
+        ):
+            asyncio.run(exercise_lifespan())
+
+        assert config_app.app.lifespan is config_app.config_lifespan
+        recover_config_tasks.assert_called_once_with()
+        start_evaluation_maintenance.assert_called_once_with()
+        schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
+        sync_defaults.assert_awaited_once_with()
+        dreaming_scheduler.start.assert_awaited_once_with()
+        dreaming_scheduler.stop.assert_awaited_once_with()
 
     def test_create_app_with_multiple_routers(self):
         """Test that create_app can include multiple routers."""

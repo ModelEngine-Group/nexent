@@ -1,6 +1,6 @@
 """Acceptance-driven tests for Agent stream memory helpers."""
 
-from backend.services.agent_service import _finalize_buffered_unit_fragments
+from management.services.agent.run import _finalize_buffered_unit_fragments
 
 
 def test_ac_003_mergeable_fragments_finalize_once_without_private_fields():

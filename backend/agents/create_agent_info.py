@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import copy
 import json
 import logging
@@ -36,11 +36,11 @@ from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import validate_urls_access
-from services.vectordatabase_service import (
+from management.services.model.resolver import get_rerank_model
+from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
-    get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
 
@@ -547,7 +547,7 @@ def _get_skills_for_template(
         List of skill dicts with name and description
     """
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
         skill_service = SkillService()
         enabled_skills = skill_service.get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -738,7 +738,7 @@ def _get_skill_script_tools(
 
     skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
 
         enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -1076,13 +1076,6 @@ async def create_agent_config(
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
 
-    # Get app information
-    default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
-    app_name = tenant_config_manager.get_app_config(
-        'APP_NAME', tenant_id=tenant_id) or "Nexent"
-    app_description = tenant_config_manager.get_app_config(
-        'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
-
     # Memory list population: in the new Memory system this is performed by
     # the backend's ``memory_context_service`` via the
     # ``MemoryService.search_memory`` facade. The legacy
@@ -1193,13 +1186,12 @@ async def create_agent_config(
                     description=(
                         "Store one model-selected and summarized short-term memory extracted only "
                         "from the conversation between the user and the current agent. Eligible "
-                        "information is limited to user preferences, task goals, action plans and "
-                        "latest progress, or reflections on user feedback and errors. Consider the "
-                        "user question, tool or code execution results, and the final answer. Do not "
-                        "store whole conversations, transient calculations, unverified guesses, "
-                        "duplicates, secrets, or information the user asks to forget. Before every "
-                        "final answer, assess whether an eligible memory was added or updated; if so, "
-                        "calling this tool is mandatory."
+                        "information is limited to process-level observations made during intermediate "
+                        "action steps: user preferences, task goals, action plans and latest progress, "
+                        "or reflections on user feedback and errors. Do not store whole conversations, "
+                        "transient calculations, unverified guesses, duplicates, secrets, or information "
+                        "the user asks to forget. Call this tool only during intermediate action steps, "
+                        "not when generating the final answer."
                     ),
                     inputs=json.dumps({
                         "content": {
@@ -1316,11 +1308,6 @@ async def create_agent_config(
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
-        "APP_NAME": app_name,
-        "APP_DESCRIPTION": app_description,
-        "memory_list": memory_list,
-        "knowledge_base_summary": knowledge_base_summary,
-        "user_id": user_id,
     }
     # AgentInfo stores model_ids (a list); pick the first for the primary model lookup
     agent_model_ids = agent_info.get("model_ids")
@@ -1378,9 +1365,6 @@ async def create_agent_config(
         duty=duty_prompt,
         constraint=constraint_prompt,
         few_shots=few_shots_prompt,
-        app_name=app_name,
-        app_description=app_description,
-        user_id=user_id,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,
@@ -2223,7 +2207,7 @@ async def create_agent_run_info(
     # Resolve sandbox config: DB policy overrides env-var defaults.
     # build_sandbox_policy returns None when level=local (backward-compatible).
     # Import inside function body to avoid circular dependency.
-    from services.agent_service import build_sandbox_policy, get_sandbox_minio_client
+    from management.services.agent.service import build_sandbox_policy, get_sandbox_minio_client
     sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
     agent_db_policy = getattr(agent_config, "sandbox_policy", None)
     merged_policy = sandbox_policy if sandbox_policy else agent_db_policy

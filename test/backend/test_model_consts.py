@@ -255,13 +255,14 @@ def test_model_config_hierarchy():
     """Test ModelConfig, AppConfig, and GlobalConfig hierarchy"""
     # Build a complete config
     app_config = model_consts.AppConfig(
-        appName="TestApp",
-        appDescription="Test Description",
+        appName="Legacy App",
+        appDescription="Legacy description",
         iconType="icon",
         modelEngineEnabled=True
     )
-    assert app_config.appName == "TestApp"
     assert app_config.modelEngineEnabled is True
+    assert "appName" not in app_config.model_dump()
+    assert "appDescription" not in app_config.model_dump()
 
     # Single model config
     single_model = model_consts.SingleModelConfig(

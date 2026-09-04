@@ -75,6 +75,7 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - ${ROOT_DIR}/scripts/sync_user_supabase2pg.py:/opt/sync_user_supabase2pg.py:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
@@ -109,6 +110,7 @@ services:
       - nexent_agent_workspace:/mnt/nexent/workdir
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
@@ -139,6 +141,8 @@ services:
     restart: always
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
@@ -170,6 +174,7 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
@@ -222,6 +227,7 @@ services:
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ../../sql:/opt/nexent/sql:ro
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"

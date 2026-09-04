@@ -15,7 +15,7 @@ _MODULES_TO_RESTORE = [
     "database.oauth_account_db",
     "database.user_tenant_db",
     "services.oauth_service",
-    "services.skill_service",
+    "management.services.skill.service",
     "services.tool_configuration_service",
     "utils.auth_utils",
 ]
@@ -54,7 +54,7 @@ sys.modules["database.cas_session_db"] = MagicMock()
 sys.modules["database.oauth_account_db"] = MagicMock()
 sys.modules["database.user_tenant_db"] = MagicMock()
 sys.modules["services.oauth_service"] = MagicMock()
-sys.modules["services.skill_service"] = MagicMock()
+sys.modules["management.services.skill.service"] = MagicMock()
 sys.modules["services.tool_configuration_service"] = MagicMock()
 sys.modules["utils.auth_utils"] = MagicMock()
 

@@ -54,7 +54,7 @@ async def test_lease_store_recover(monkeypatch, inline_to_thread):
     store = DreamingLeaseStore()
     await store.recover()
 
-    mock_recover.assert_called_once()
+    mock_recover.assert_called_once_with(True)
 
 
 @pytest.mark.asyncio

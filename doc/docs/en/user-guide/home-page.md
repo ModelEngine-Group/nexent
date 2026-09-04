@@ -28,6 +28,7 @@ Taking the administrator account as an example, the left sidebar exposes every m
 - **Agent Space** – Manage all existing agents.
 - **Agent Market** – Discover and install published agents.
 - **Agent Development** – Create and configure agents.
+- **Agent Evaluation** – Validate agent behavior with evaluation sets and evaluators.
 - **Knowledge Base** – Upload documents and materials to help agents understand your exclusive knowledge.
 - **MCP Tools** – Connect servers, sync tools, and view status at a glance (coming soon).
 - **Monitoring & Operations** – Monitor agent runtime status in real time (coming soon).

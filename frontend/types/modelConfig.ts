@@ -67,8 +67,6 @@ export interface ModelOption {
 
 // Application configuration interface
 export interface AppConfig {
-  appName: string;
-  appDescription: string;
   iconType: "preset" | "custom";
   iconKey: string; // Selected preset icon key
   customIconUrl: string | null;
