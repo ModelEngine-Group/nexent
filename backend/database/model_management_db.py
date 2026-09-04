@@ -139,6 +139,55 @@ def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:
         return result.rowcount > 0
 
 
+def apply_model_mutations(
+    *,
+    creates: List[Dict[str, Any]],
+    updates: List[tuple[int, Dict[str, Any]]],
+    deletes: List[int],
+    user_id: str,
+    tenant_id: str,
+) -> None:
+    """Apply a validated model batch in one database transaction."""
+    with get_db_session() as session:
+        for model_data in creates:
+            cleaned = db_client.clean_string_values(model_data)
+            cleaned["create_time"] = func.current_timestamp()
+            cleaned["tenant_id"] = tenant_id
+            if user_id:
+                cleaned = add_creation_tracking(cleaned, user_id)
+            session.execute(insert(ModelRecord).values(cleaned))
+
+        for model_id, update_data in updates:
+            cleaned = db_client.clean_string_values(update_data)
+            cleaned["update_time"] = func.current_timestamp()
+            if user_id:
+                cleaned = add_update_tracking(cleaned, user_id)
+            session.execute(
+                update(ModelRecord)
+                .where(
+                    ModelRecord.model_id == model_id,
+                    ModelRecord.tenant_id == tenant_id,
+                )
+                .values(cleaned)
+            )
+
+        for model_id in deletes:
+            cleaned = {
+                "delete_flag": "Y",
+                "update_time": func.current_timestamp(),
+            }
+            if user_id:
+                cleaned = add_update_tracking(cleaned, user_id)
+            session.execute(
+                update(ModelRecord)
+                .where(
+                    ModelRecord.model_id == model_id,
+                    ModelRecord.tenant_id == tenant_id,
+                )
+                .values(cleaned)
+            )
+
+
 def get_model_records(filters: Optional[Dict[str, Any]], tenant_id: str) -> List[Dict[str, Any]]:
     """
     Get a list of model records

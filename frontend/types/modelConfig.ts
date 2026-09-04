@@ -1,9 +1,6 @@
 // Model connection status type
 export type ModelConnectStatus =
-  | "not_detected"
-  | "detecting"
-  | "available"
-  | "unavailable";
+  "not_detected" | "detecting" | "available" | "unavailable";
 
 // API response type
 export interface ApiResponse<T = any> {
@@ -49,6 +46,11 @@ export interface ModelOption {
   tokenizerFamily?: string;
   capacitySource?: string;
   capabilityProfileVersion?: string;
+  capacityFieldMetadata?: CapacityFieldMetadata | null;
+  canonicalModelId?: string | null;
+  modelIdentityMetadata?: ModelIdentityMetadata | null;
+  tokenizerMatchMetadata?: ProfileMatchMetadata | null;
+  tokenCountProbeMetadata?: TokenCountProbeMetadata | null;
   source: ModelSource;
   apiKey: string;
   apiUrl: string;
@@ -109,6 +111,65 @@ export interface SingleModelConfig {
   tokenizerFamily?: string;
   capacitySource?: string;
   capabilityProfileVersion?: string;
+  capacityFieldMetadata?: CapacityFieldMetadata | null;
+  canonicalModelId?: string | null;
+  modelIdentityMetadata?: ModelIdentityMetadata | null;
+  tokenizerMatchMetadata?: ProfileMatchMetadata | null;
+  tokenCountProbeMetadata?: TokenCountProbeMetadata | null;
+}
+
+export type CapacityFieldSource =
+  "catalog" | "provider" | "operator" | "legacy" | "unknown";
+
+export interface CapacityFieldProvenance {
+  source: CapacityFieldSource;
+  confidence?: "high" | "medium" | "low" | "unknown";
+  profileVersion?: string;
+  evidenceId?: string;
+  verifiedAt?: string;
+  updatedAt?: string;
+}
+
+export interface CapacityFieldMetadata {
+  schemaVersion: number;
+  fields: Partial<
+    Record<keyof CapacitySuggestionFields, CapacityFieldProvenance>
+  >;
+}
+
+export interface ModelIdentityMetadata {
+  schemaVersion: number;
+  canonicalId?: string;
+  resolved?: boolean;
+  ambiguity?: boolean;
+  confidence?: string;
+  matcherVersion?: string;
+}
+
+export interface ProfileMatchMetadata {
+  schemaVersion: number;
+  selectedProfile?: string | null;
+  confidence?: string | null;
+  source: string;
+  reason: string;
+  matcherVersion: string;
+  candidates?: string[];
+  autoApplicable?: boolean;
+}
+
+export interface TokenCountProbeMetadata {
+  schemaVersion: number;
+  status:
+    | "supported"
+    | "unsupported"
+    | "authorization_error"
+    | "temporarily_unavailable"
+    | "invalid_response"
+    | "unknown";
+  reason: string;
+  selectedProtocol?: string | null;
+  checkedAt?: string;
+  staleAt?: string;
 }
 
 export interface CapacitySuggestionFields {
@@ -120,10 +181,7 @@ export interface CapacitySuggestionFields {
 }
 
 export type CapacitySuggestionMatchKind =
-  | "catalog_exact"
-  | "catalog_fuzzy"
-  | "provider_discovery"
-  | "none";
+  "catalog_exact" | "catalog_fuzzy" | "provider_discovery" | "none";
 
 export type CapacitySuggestionConfidence = "high" | "medium" | "low";
 
@@ -135,7 +193,30 @@ export interface CapacitySuggestion {
   suggestedProvider?: string | null;
   canonicalModelName?: string | null;
   capabilityProfileVersion?: string | null;
-  capacitySourceOnAccept?: "operator" | null;
+  capacitySourceOnAccept?: "operator" | "profile" | null;
+  canonicalIdentity?: ModelIdentityMetadata | null;
+  capacityMatch?: ProfileMatchMetadata | null;
+  tokenizerMatch?: ProfileMatchMetadata | null;
+  governanceMetadataProposal?: CapacityFieldMetadata | null;
+}
+
+export interface CapacityAdoptionFieldDiff {
+  currentValue?: number | string | null;
+  currentSource: CapacityFieldSource;
+  proposedValue?: number | string | null;
+  proposedSource: "catalog";
+  changed: boolean;
+  blockedByManual: boolean;
+  applicable: boolean;
+}
+
+export interface CapacityAdoptionPreview {
+  displayName: string;
+  canonicalModelId: string;
+  matcherVersion: string;
+  currentProfileVersion?: string | null;
+  proposedProfileVersion: string;
+  fields: Record<string, CapacityAdoptionFieldDiff>;
 }
 
 export interface CapacityCoverageBareModel {
@@ -151,6 +232,59 @@ export interface CapacityCoverage {
   totalLlmVlm: number;
   bareCount: number;
   bareModels: CapacityCoverageBareModel[];
+}
+
+export type CapacityHealthStatus =
+  | "healthy"
+  | "review_due"
+  | "expired"
+  | "estimated"
+  | "unconfigured"
+  | "invalid"
+  | "probe_degraded";
+
+export interface CapacityHealthItem {
+  modelId: number;
+  displayName: string;
+  modelName: string;
+  modelFactory?: string | null;
+  modelType: "llm" | "vlm" | "vlm2" | "vlm3";
+  status: CapacityHealthStatus;
+  reasons: string[];
+  action:
+    "none" | "edit" | "review_profile" | "review_evidence" | "retry_probe";
+  matcherVersion: string;
+  profileVersion?: string | null;
+  verifiedAt?: string | null;
+  reviewAt?: string | null;
+  expiresAt?: string | null;
+  suggestionAvailable: boolean;
+}
+
+export interface CapacityHealth {
+  catalogRevision: string;
+  generatedAt: string;
+  total: number;
+  counts: Partial<Record<CapacityHealthStatus, number>>;
+  items: CapacityHealthItem[];
+}
+
+export interface CapacityCatalogCandidate {
+  revision: string;
+  sourceIdentity: string;
+  stagedAt: string;
+  added: string[];
+  changed: string[];
+  removed: string[];
+}
+
+export interface CapacityCatalogStatus {
+  activeRevision: string;
+  profileCount: number;
+  lifecycleCounts: Partial<
+    Record<"current" | "review_due" | "expired", number>
+  >;
+  candidate?: CapacityCatalogCandidate | null;
 }
 
 // Model configuration interface

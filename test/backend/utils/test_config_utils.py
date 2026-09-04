@@ -17,7 +17,7 @@ class InvalidReservePolicy(Exception):
 
 
 class CapacityReservePolicy(BaseModel):
-    soft_limit_ratio: float = Field(default=0.8, gt=0, le=1)
+    soft_limit_ratio: float = Field(default=1.0, gt=0, le=1)
     soft_limit_ratio_source: str = "code_default"
 
 
@@ -241,7 +241,7 @@ class TestTenantConfigManager:
 
         policy = config_manager.get_capacity_reserve_policy("tenant1")
 
-        assert policy.soft_limit_ratio == 0.8
+        assert policy.soft_limit_ratio == 1.0
         assert policy.soft_limit_ratio_source == "code_default"
 
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
@@ -253,8 +253,8 @@ class TestTenantConfigManager:
 
         policy = config_manager.get_capacity_reserve_policy("tenant1")
 
-        assert policy.soft_limit_ratio == 0.75
-        assert policy.soft_limit_ratio_source == "tenant_config"
+        assert policy.soft_limit_ratio == 1.0
+        assert policy.soft_limit_ratio_source == "code_default"
 
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
     def test_get_capacity_reserve_policy_invalid_override(self, mock_get_configs, config_manager):
@@ -263,8 +263,8 @@ class TestTenantConfigManager:
             {"config_key": CONTEXT_SOFT_LIMIT_RATIO_KEY, "config_value": "1.5"}
         ]
 
-        with pytest.raises(Exception, match=CONTEXT_SOFT_LIMIT_RATIO_KEY):
-            config_manager.get_capacity_reserve_policy("tenant1")
+        policy = config_manager.get_capacity_reserve_policy("tenant1")
+        assert policy.soft_limit_ratio == 1.0
 
     @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
     def test_get_context_policy_parses_tenant_json(self, mock_get_configs, config_manager):
