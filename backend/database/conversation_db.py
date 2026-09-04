@@ -82,7 +82,11 @@ def _parse_history_summary_content(content: Any) -> Optional[Dict[str, Any]]:
     """Return a valid summary payload, or ``None`` for malformed/stale units."""
     try:
         payload = json.loads(content) if isinstance(content, str) else content
-        if not isinstance(payload, dict) or not isinstance(payload.get("summary"), dict):
+        if not isinstance(payload, dict):
+            return None
+        summary = payload.get("summary")
+        if not isinstance(summary, (dict, str)) or (
+                isinstance(summary, str) and not summary.strip()):
             return None
         boundary = payload.get("covered_through_message_id")
         if isinstance(boundary, bool) or int(boundary) <= 0:
@@ -2024,14 +2028,16 @@ def update_message_minio_files(message_id: int, skill_file_uploads: List[Dict[st
 
 def save_history_summary(
     conversation_id: int, user_id: str, tenant_id: str,
-    summary: Dict[str, Any], covered_through_message_id: int,
+    summary: Dict[str, Any] | str, covered_through_message_id: int,
     previous_summary_unit_id: Optional[int] = None,
     trigger: Optional[str] = None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
-    if not user_id or not tenant_id or not isinstance(summary, dict):
+    if (not user_id or not tenant_id
+            or not isinstance(summary, (dict, str))
+            or (isinstance(summary, str) and not summary.strip())):
         raise HistorySummaryPersistenceError(
-            "user_id, tenant_id and an object summary are required")
+            "user_id, tenant_id and a summary are required")
     conversation_id = int(conversation_id)
     covered_through_message_id = int(covered_through_message_id)
     user_tenant = _get_user_tenant(user_id)

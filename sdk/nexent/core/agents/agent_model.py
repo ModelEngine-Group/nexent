@@ -82,6 +82,22 @@ class ModelConfig(BaseModel):
         description="Version of the approved provider/model capability profile selected by the resolver, e.g. 'openai/gpt-4o@1'.",
         default=None,
     )
+    canonical_model_id: Optional[str] = Field(
+        description="P1 canonical model identity used to isolate P2 request calibration.",
+        default=None,
+    )
+    model_identity_metadata: Optional[Dict[str, Any]] = Field(
+        description="Sanitized P1 model-identity and matcher evidence.",
+        default=None,
+    )
+    tokenizer_match_metadata: Optional[Dict[str, Any]] = Field(
+        description="Sanitized P1 tokenizer match and conformance evidence.",
+        default=None,
+    )
+    token_count_probe_metadata: Optional[Dict[str, Any]] = Field(
+        description="Sanitized P1 Provider full-request count capability evidence.",
+        default=None,
+    )
     timeout_seconds: Optional[float] = Field(
         description="Request timeout in seconds. If None, uses provider default.",
         default=None
@@ -96,6 +112,21 @@ class ModelConfig(BaseModel):
             "capability disables provider cache directives while still allowing "
             "deterministic prefix proxy metrics."
         ),
+        default=None,
+    )
+    feature_capabilities: Optional[Dict[str, Any]] = Field(
+        description="Resolved model-level reasoning and prompt-cache capabilities.",
+        default=None,
+    )
+    feature_preferences: Optional[Dict[str, Any]] = Field(
+        description=(
+            "Optional user behavior overrides applied within confirmed model capabilities. "
+            "Reserved for the future preference API/UI; absent means Nexent defaults."
+        ),
+        default=None,
+    )
+    provider_usage_profile: Optional[Dict[str, Any]] = Field(
+        description="P7 provider usage field paths and verified semantic relationships.",
         default=None,
     )
 

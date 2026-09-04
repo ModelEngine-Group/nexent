@@ -114,7 +114,15 @@ class LLMSummary:
             ChatMessage(role=MessageRole.USER,
                         content=[{"type": "text", "text": user_prompt}]),
         ]
-        response = model(messages, stop_sequences=[])
+        usage_kwargs = (
+            {
+                "usage_purpose": "history_summary",
+                "usage_turn_id": getattr(model, "default_usage_turn_id", None),
+            }
+            if hasattr(model, "provider_call_usages")
+            else {}
+        )
+        response = model(messages, stop_sequences=[], **usage_kwargs)
 
         raw_output = response.content
         if isinstance(raw_output, list):

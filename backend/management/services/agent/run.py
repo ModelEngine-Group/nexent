@@ -924,10 +924,8 @@ async def prepare_agent_run(
         "is_debug": agent_request.is_debug,
         "override_version_no": agent_request.version_no,
         "override_model_id": agent_request.model_id,
-        "requested_output_tokens": agent_request.requested_output_tokens,
         "tool_params": agent_request.tool_params,
         "conversation_id": agent_request.conversation_id,
-        "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
     runtime_knowledge_context = getattr(agent_request, "_runtime_knowledge_context", None)

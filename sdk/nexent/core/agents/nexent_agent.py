@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
+from uuid import uuid4
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
@@ -297,6 +298,20 @@ class NexentAgent:
             max_output_tokens=model_config.max_output_tokens,
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
+            **{
+                key: value
+                for key, value in {
+                    "provider_usage_profile": model_config.provider_usage_profile,
+                    "feature_capabilities": model_config.feature_capabilities,
+                    "feature_preferences": model_config.feature_preferences,
+                    "canonical_model_id": model_config.canonical_model_id,
+                    "model_identity_metadata": model_config.model_identity_metadata,
+                    "tokenizer_match_metadata": model_config.tokenizer_match_metadata,
+                    "token_count_probe_metadata": model_config.token_count_probe_metadata,
+                    "tokenizer_family": model_config.tokenizer_family,
+                }.items()
+                if value is not None
+            },
         )
         model.stop_event = self.stop_event
         return model
@@ -1018,6 +1033,13 @@ class NexentAgent:
         observer = self.agent.observer
         total_output_tokens = 0
         final_answer_for_trace = None
+        turn_id = str(uuid4())
+        self.agent._usage_turn_id = turn_id
+        active_model = getattr(self.agent, "model", None)
+        if active_model is not None:
+            active_model.default_usage_turn_id = turn_id
+        turn_call_records = []
+        emitted_call_ids: set[str] = set()
         with monitoring_manager.start_agent_run(metadata):
             with monitoring_manager.trace_agent_step(
                 "agent.run.loop",
@@ -1105,6 +1127,14 @@ class NexentAgent:
                                 "uncompressed_est_tokens": last_metric.get("uncompressed_mem_est_input", 0),
                             })
                         active_model = getattr(self.agent, "model", None)
+                        step_call_records = list(
+                            getattr(active_model, "turn_provider_call_usages", ()) or ()
+                        )
+                        for call_record in step_call_records:
+                            if call_record.call_id in emitted_call_ids:
+                                continue
+                            emitted_call_ids.add(call_record.call_id)
+                            turn_call_records.append(call_record)
                         cache_usage = getattr(active_model, "last_prompt_cache_usage", None)
                         cache_advice = getattr(active_model, "last_provider_cache_advice", None)
                         if cache_usage is not None:
@@ -1151,6 +1181,25 @@ class NexentAgent:
                         getattr(observer, "lang", "en"),
                     )
                     final_answer_for_trace = final_answer_str
+                    context_limit = getattr(
+                        getattr(self.agent, "context_runtime", None),
+                        "context_window_tokens",
+                        None,
+                    )
+                    from ..models.usage_aggregation import aggregate_turn_usage
+
+                    turn_summary = aggregate_turn_usage(
+                        turn_call_records,
+                        context_limit_tokens=context_limit,
+                    )
+                    turn_summary["turn_id"] = turn_id
+                    turn_usage_type = getattr(ProcessType, "TURN_USAGE", None)
+                    if turn_usage_type is not None:
+                        observer.add_message(
+                            "",
+                            turn_usage_type,
+                            json.dumps(turn_summary, ensure_ascii=False),
+                        )
                     monitoring_manager.set_openinference_output(final_answer_str)
                     observer.add_message(self.agent.agent_name,
                                          ProcessType.FINAL_ANSWER, final_answer_str)

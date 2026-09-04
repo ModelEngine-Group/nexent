@@ -68,6 +68,8 @@ class ManagedContextRuntime:
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        target_input_budget_tokens: int | None = None,
+        emergency_archive: bool = False,
     ) -> FinalContext:
         final_context = self.context_manager.assemble_final_context(
             model=model,
@@ -76,6 +78,8 @@ class ManagedContextRuntime:
             tools=tools,
             purpose="step",
             run_context=self._ensure_run_context(memory),
+            target_input_budget_tokens=target_input_budget_tokens,
+            emergency_archive=emergency_archive,
         )
         self._evidence.record_call(final_context.evidence)
         return final_context
@@ -89,6 +93,8 @@ class ManagedContextRuntime:
         task: str,
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
+        target_input_budget_tokens: int | None = None,
+        emergency_archive: bool = False,
     ) -> FinalContext:
         final_context = self.context_manager.assemble_final_context(
             model=model,
@@ -99,6 +105,8 @@ class ManagedContextRuntime:
             task=task,
             final_answer_templates=final_answer_templates,
             run_context=self._ensure_run_context(memory),
+            target_input_budget_tokens=target_input_budget_tokens,
+            emergency_archive=emergency_archive,
         )
         self._evidence.record_call(final_context.evidence)
         return final_context

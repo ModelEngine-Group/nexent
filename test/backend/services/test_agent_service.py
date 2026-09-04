@@ -4271,10 +4271,8 @@ async def test_prepare_agent_run(
         is_debug=False,
         override_version_no=None,
         override_model_id=None,
-        requested_output_tokens=4096,
         tool_params=None,
         conversation_id=123,
-        context_policy=None,
         enable_planning=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
@@ -15082,6 +15080,73 @@ async def test_stream_agent_chunks_skill_files_join_final_batch(monkeypatch):
         "description": "",
     }]
     assert any('"type": "files"' in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_ac_tu_004_stream_persists_llm_and_turn_usage_units_atomically(monkeypatch):
+    """P7 usage units join the existing assistant terminal batch in stream order."""
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="usage",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+    llm_usage = {
+        "schema_version": 2,
+        "call_id": "call-1",
+        "usage": {"input_tokens": 10, "output_tokens": 2},
+    }
+    turn_usage = {
+        "schema_version": 2,
+        "turn_id": "turn-1",
+        "call_ids": ["call-1"],
+    }
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "llm_usage", "content": json.dumps(llm_usage)})
+        yield json.dumps({"type": "turn_usage", "content": json.dumps(turn_usage)})
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_run_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert len(chunks) == 3
+    assert len(persisted_batches) == 1
+    units = persisted_batches[0]["message_units"]
+    assert [unit["unit_type"] for unit in units] == [
+        "llm_usage",
+        "turn_usage",
+        "final_answer",
+    ]
+    assert json.loads(units[0]["unit_content"])["call_id"] == "call-1"
+    assert json.loads(units[1]["unit_content"])["call_ids"] == ["call-1"]
 
 
 @pytest.mark.asyncio
