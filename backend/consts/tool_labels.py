@@ -29,6 +29,7 @@ _category_file = {
 }
 _category_search = {
     "tavily_search": ["search"], "exa_search": ["search"], "linkup_search": ["search"],
+    "serply_search": ["search"],
     "search_memory": ["search"], "knowledge_base_search": ["search"],
 }
 _category_kb = {

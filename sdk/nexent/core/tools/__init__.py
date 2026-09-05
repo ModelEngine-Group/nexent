@@ -11,6 +11,7 @@ from .ragflow_search_tool import RAGFlowSearchTool
 from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
+from .serply_search_tool import SerplySearchTool
 from .linkup_search_tool import LinkupSearchTool
 from .create_file_tool import CreateFileTool
 from .read_file_tool import ReadFileTool
@@ -47,6 +48,7 @@ __all__ = [
     "SendEmailTool",
     "GetEmailTool",
     "TavilySearchTool",
+    "SerplySearchTool",
     "LinkupSearchTool",
     "CreateFileTool",
     "ReadFileTool",
