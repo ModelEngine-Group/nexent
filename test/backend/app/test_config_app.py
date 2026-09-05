@@ -83,6 +83,7 @@ class TestConfigAppIntegration:
         assert cors_middleware.kwargs.get("allow_credentials") is True
         assert cors_middleware.kwargs.get("allow_methods") == ["*"]
         assert cors_middleware.kwargs.get("allow_headers") == ["*"]
+        assert cors_middleware.kwargs.get("expose_headers") == ["conversation_id"]
 
 
 class TestConfigAppRouterConfiguration:
