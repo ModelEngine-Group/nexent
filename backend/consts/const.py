@@ -51,6 +51,16 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
+# Document deletion coordination.  The Redis deletion fence itself never
+# expires; these values only bound one drain attempt and background retry
+# cadence while workers finish an in-flight request.
+DOCUMENT_DELETE_DRAIN_TIMEOUT_S = float(
+    os.getenv("DOCUMENT_DELETE_DRAIN_TIMEOUT_S", "30")
+)
+DOCUMENT_DELETE_RETRY_INTERVAL_S = float(
+    os.getenv("DOCUMENT_DELETE_RETRY_INTERVAL_S", "2")
+)
+
 # Agent automation runtime configuration
 AGENT_AUTOMATION_ENABLED = os.getenv(
     "AGENT_AUTOMATION_ENABLED", "true"

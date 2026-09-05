@@ -11,7 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import aiohttp
 import ray
@@ -64,6 +64,76 @@ _NON_RETRYABLE_FORWARD_CODES = {
     "es_bulk_failed",
     "es_dim_mismatch",
 }
+
+
+class DocumentDeleteRequested(RuntimeError):
+    """Raised when a task reaches a document that is being deleted."""
+
+
+def _is_document_delete_requested(
+    *,
+    index_name: Optional[str],
+    source: Optional[str],
+    file_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> bool:
+    """Read the file-ID fence and use the matching PG row only on Redis errors."""
+    if not file_id:
+        return False
+    try:
+        redis_fence_requested = get_redis_service().is_document_delete_requested(
+            file_id=file_id,
+        )
+        # A healthy Redis miss is the normal path. Do not query PG for every
+        # processing-stage fence check; PG is reserved for Redis failures.
+        return bool(redis_fence_requested)
+    except Exception as redis_exc:
+        logger.warning(
+            "Deletion fence lookup failed for index=%s source=%s file_id=%s: %s",
+            index_name,
+            source,
+            file_id,
+            redis_exc,
+        )
+    try:
+        from database.knowledge_file_lifecycle_db import get_file_record
+
+        record = get_file_record(
+            file_id=file_id,
+            tenant_id=tenant_id,
+            index_name=index_name,
+            include_hidden=True,
+        )
+        return bool(record and str(record.get("status") or "").upper() in {"DELETE_REQUESTED", "DELETED"})
+    except Exception as lifecycle_exc:
+        # A deployment without the lifecycle migration must retain the legacy
+        # behavior; a database lookup failure therefore does not cancel work.
+        logger.debug(
+            "Durable deletion status lookup unavailable for index=%s source=%s file_id=%s: %s",
+            index_name,
+            source,
+            file_id,
+            lifecycle_exc,
+        )
+        return False
+
+
+def _ensure_document_not_deleted(
+    *,
+    index_name: Optional[str],
+    source: Optional[str],
+    file_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> None:
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+        tenant_id=tenant_id,
+    ):
+        raise DocumentDeleteRequested(
+            f"Document deletion requested for index={index_name}, source={source}, file_id={file_id}"
+        )
 
 
 def _update_file_lifecycle(
@@ -131,7 +201,12 @@ def _fetch_minio_source(source: str) -> bytes:
     return data
 
 
-def _wait_for_split_ready(redis_key: str, timeout_s: int, poll_interval_ms: int) -> int:
+def _wait_for_split_ready(
+    redis_key: str,
+    timeout_s: int,
+    poll_interval_ms: int,
+    cancellation_check: Optional[Callable[[], bool]] = None,
+) -> int:
     """
     Wait until async split aggregation is marked ready in Redis.
     Returns aggregated chunk count.
@@ -147,6 +222,10 @@ def _wait_for_split_ready(redis_key: str, timeout_s: int, poll_interval_ms: int)
     deadline = time.time() + timeout_s
 
     while time.time() < deadline:
+        if cancellation_check and cancellation_check():
+            raise DocumentDeleteRequested(
+                f"Document deletion requested while waiting for '{redis_key}'"
+            )
         if client.get(ready_key):
             cached = client.get(redis_key)
             if cached:
@@ -698,6 +777,8 @@ def _send_chunks_to_es(
     source: str = "",
     original_filename: str = "",
     large_mode: bool = False,
+    file_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     async def _post():
         elasticsearch_url = ELASTICSEARCH_SERVICE
@@ -724,6 +805,12 @@ def _send_chunks_to_es(
             if large_mode:
                 request_params["large_mode"] = "true"
 
+            _ensure_document_not_deleted(
+                index_name=index_name,
+                source=source,
+                file_id=file_id,
+                tenant_id=tenant_id,
+            )
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.post(
                     full_url,
@@ -754,6 +841,8 @@ def _send_chunks_to_es(
                     result = parsed_body if isinstance(parsed_body, dict) else await response.json()
                     return result
 
+        except DocumentDeleteRequested:
+            raise
         except aiohttp.ClientConnectorError as e:
             logger.error(
                 f"[{task_id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
@@ -953,11 +1042,30 @@ def process_part(
         source_type: Optional[str] = None,
         model_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
+        index_name: Optional[str] = None,
+        file_id: Optional[str] = None,
         **params
 ) -> Dict[str, Any]:
     """
     Hidden sub-task to process a file part with Ray.
     """
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id or params.get("file_id"),
+        tenant_id=tenant_id,
+    ):
+        logger.info(
+            "[process_part] Skipping deleted document source=%s file_id=%s",
+            source,
+            file_id,
+        )
+        return {
+            "part_redis_key": part_redis_key,
+            "chunks_count": 0,
+            "cancelled": True,
+        }
+
     actor = get_ray_actor()
     try:
         chunks_ref = actor.process_bytes.remote(
@@ -970,6 +1078,23 @@ def process_part(
             **params
         )
         chunks = ray.get(chunks_ref) or []
+
+        if _is_document_delete_requested(
+            index_name=index_name,
+            source=source,
+            file_id=file_id or params.get("file_id"),
+            tenant_id=tenant_id,
+        ):
+            logger.info(
+                "[process_part] Discarding chunks after deletion request source=%s file_id=%s",
+                source,
+                file_id,
+            )
+            return {
+                "part_redis_key": part_redis_key,
+                "chunks_count": 0,
+                "cancelled": True,
+            }
 
         if not REDIS_BACKEND_URL:
             raise RuntimeError("REDIS_BACKEND_URL not configured")
@@ -1023,18 +1148,35 @@ def aggregate_store_chunks(
         redis_key: str,
         source: Optional[str] = None,
         index_name: Optional[str] = None,
-        original_filename: Optional[str] = None
+        original_filename: Optional[str] = None,
+        file_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Hidden sub-task to aggregate part chunks and store into Redis for forward task.
     """
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+    ):
+        return {
+            "chunks_count": 0,
+            "redis_key": redis_key,
+            "source": source,
+            "index_name": index_name,
+            "original_filename": original_filename,
+            "file_id": file_id,
+            "cancelled": True,
+        }
+
     if not REDIS_BACKEND_URL:
         raise Exception(json.dumps({
             "message": "REDIS_BACKEND_URL not configured to store chunks",
             "index_name": index_name,
             "task_name": "process",
             "source": source,
-            "original_filename": original_filename
+            "original_filename": original_filename,
+            "file_id": file_id,
         }, ensure_ascii=False))
 
     try:
@@ -1062,6 +1204,21 @@ def aggregate_store_chunks(
             except Exception:
                 pass
 
+        if _is_document_delete_requested(
+            index_name=index_name,
+            source=source,
+            file_id=file_id,
+        ):
+            return {
+                "chunks_count": 0,
+                "redis_key": redis_key,
+                "source": source,
+                "index_name": index_name,
+                "original_filename": original_filename,
+                "file_id": file_id,
+                "cancelled": True,
+            }
+
         serialized = json.dumps(merged, ensure_ascii=False)
         client.set(redis_key, serialized)
         client.expire(redis_key, 2 * 60 * 60)
@@ -1084,7 +1241,8 @@ def aggregate_store_chunks(
         "redis_key": redis_key,
         "source": source,
         "index_name": index_name,
-        "original_filename": original_filename
+        "original_filename": original_filename,
+        "file_id": file_id,
     }
 
 
@@ -1099,6 +1257,8 @@ def forward_part(
         parent_total_chunks: Optional[int] = None,
         source: Optional[str] = None,
         original_filename: Optional[str] = None,
+        file_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
         batch_index: Optional[int] = None,
         total_batches: Optional[int] = None,
         large_mode: Optional[bool] = False,
@@ -1107,6 +1267,29 @@ def forward_part(
     Forward sub-task that indexes a chunk batch.
     """
     try:
+        # Respect cancellation from parent task and durable document fence.
+        if _is_document_delete_requested(
+            index_name=index_name,
+            source=source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        ):
+            logger.info(
+                "Skipping deleted forward batch %s/%s for source=%s file_id=%s",
+                batch_index,
+                total_batches,
+                source,
+                file_id,
+            )
+            return {
+                "success": True,
+                "total_indexed": 0,
+                "total_submitted": 0,
+                "batch_index": batch_index,
+                "total_batches": total_batches,
+                "cancelled": True,
+            }
+
         # Respect cancellation from parent task if available
         if parent_task_id:
             try:
@@ -1139,10 +1322,12 @@ def forward_part(
             chunks=chunks,
             index_name=index_name,
             authorization=authorization,
-            task_id=None,
             source=source,
             original_filename=original_filename,
             large_mode=large_mode,
+            file_id=file_id,
+            tenant_id=tenant_id,
+            task_id=getattr(self.request, "id", None),
         )
 
         if not isinstance(es_result, dict) or not es_result.get("success"):
@@ -1178,6 +1363,15 @@ def forward_part(
             "total_submitted": es_result.get("total_submitted", len(chunks)),
             "batch_index": batch_index,
             "total_batches": total_batches,
+        }
+    except DocumentDeleteRequested:
+        return {
+            "success": True,
+            "total_indexed": 0,
+            "total_submitted": 0,
+            "batch_index": batch_index,
+            "total_batches": total_batches,
+            "cancelled": True,
         }
     except Exception as e:
         classified = classify_ingestion_exception(e, "FORWARD")
@@ -1223,10 +1417,29 @@ def aggregate_forward_parts(
         source: Optional[str] = None,
         index_name: Optional[str] = None,
         original_filename: Optional[str] = None,
+        file_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Aggregate forward_part results.
     """
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+        tenant_id=tenant_id,
+    ):
+        return {
+            "success": True,
+            "total_indexed": 0,
+            "total_submitted": 0,
+            "source": source,
+            "index_name": index_name,
+            "original_filename": original_filename,
+            "file_id": file_id,
+            "cancelled": True,
+        }
+
     total_indexed = 0
     total_submitted = 0
     for result in parts_results or []:
@@ -1241,7 +1454,8 @@ def aggregate_forward_parts(
         "total_submitted": total_submitted,
         "source": source,
         "index_name": index_name,
-        "original_filename": original_filename
+        "original_filename": original_filename,
+        "file_id": file_id,
     }
 
 
@@ -1328,7 +1542,14 @@ def _run_processing_for_parts(
     embedding_model_id: Optional[int],
     tenant_id: Optional[str],
     params: Dict[str, Any],
+    file_id: Optional[str] = None,
 ) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[int]]:
+    _ensure_document_not_deleted(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+        tenant_id=tenant_id,
+    )
     if not parts:
         logger.warning(
             f"[{request_id}] PROCESS TASK: Split returned no parts; fallback to full-file processing")
@@ -1355,7 +1576,8 @@ def _run_processing_for_parts(
             task_id=None,
             model_id=embedding_model_id,
             tenant_id=tenant_id,
-            **params
+            file_id=file_id,
+            **{key: value for key, value in params.items() if key != "file_id"}
         )
         logger.info(
             f"[{request_id}] PROCESS TASK: Waiting for Ray processing to complete...")
@@ -1372,14 +1594,17 @@ def _run_processing_for_parts(
             source_type=source_type,
             model_id=embedding_model_id,
             tenant_id=tenant_id,
-            **params
+            index_name=index_name,
+            file_id=file_id,
+            **{key: value for key, value in params.items() if key != "file_id"}
         ) for idx, part in enumerate(parts)
     )
     callback = aggregate_store_chunks.s(
         redis_key=redis_key,
         source=source,
         index_name=index_name,
-        original_filename=original_filename
+        original_filename=original_filename,
+        file_id=file_id,
     ).set(queue='process_part_q')
     logger.info(
         f"[{request_id}] PROCESS TASK: Dispatching {len(parts)} part tasks...")
@@ -1410,6 +1635,12 @@ def _run_processing_for_parts(
             redis_key=redis_key,
             timeout_s=split_wait_timeout,
             poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
+            cancellation_check=lambda: _is_document_delete_requested(
+                index_name=index_name,
+                source=source,
+                file_id=file_id,
+                tenant_id=tenant_id,
+            ),
         )
     return True, None, split_chunk_count
 
@@ -1426,8 +1657,15 @@ def _process_source_with_split(
     embedding_model_id: Optional[int],
     tenant_id: Optional[str],
     params: Dict[str, Any],
+    file_id: Optional[str] = None,
     file_data: Optional[bytes] = None,
 ) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[int]]:
+    _ensure_document_not_deleted(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+        tenant_id=tenant_id,
+    )
     file_size_bytes = (
         len(file_data)
         if file_data is not None
@@ -1460,6 +1698,12 @@ def _process_source_with_split(
                 **params,
             )
         chunks = ray.get(chunks_ref)
+        _ensure_document_not_deleted(
+            index_name=index_name,
+            source=source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        )
         if chunks:
             redis_key = f"dp:{task_id}:chunks"
             stored = ray.get(
@@ -1490,6 +1734,7 @@ def _process_source_with_split(
         original_filename=original_filename,
         embedding_model_id=embedding_model_id,
         tenant_id=tenant_id,
+        file_id=file_id,
         params=params,
     )
 
@@ -1501,6 +1746,12 @@ def _process_source_with_split(
             f"[{request_id}] PROCESS TASK: Ray processing completed, got {len(chunks) if chunks else 0} chunks")
 
     if not split_async:
+        _ensure_document_not_deleted(
+            index_name=index_name,
+            source=source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        )
         redis_key = f"dp:{task_id}:chunks"
         process_actor = get_ray_actor()
         store_ref = process_actor.store_chunks_in_redis.remote(redis_key, chunks)
@@ -1534,6 +1785,29 @@ def _build_no_valid_chunks_error(
     }, ensure_ascii=False))
 
 
+def _build_process_cancelled_result(
+    *,
+    task_id: str,
+    source: str,
+    index_name: Optional[str],
+    original_filename: Optional[str],
+    file_id: Optional[str],
+) -> Dict[str, Any]:
+    """Return a chain-compatible result when deletion wins the race."""
+    return {
+        "task_id": task_id,
+        "source": source,
+        "index_name": index_name,
+        "original_filename": original_filename,
+        "file_id": file_id,
+        "redis_key": f"dp:{task_id}:chunks",
+        "chunks": None,
+        "split_async": False,
+        "cancelled": True,
+        "message": "Processing cancelled because document deletion was requested.",
+    }
+
+
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.process', queue='process_q')
 @trace_knowledge_operation("knowledge.process", "process")
 def process(
@@ -1563,6 +1837,25 @@ def process(
     start_time = time.time()
     task_id = self.request.id
     file_id = params.get("file_id")
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+        tenant_id=tenant_id,
+    ):
+        logger.info(
+            "Skipping deleted process task source=%s file_id=%s task_id=%s",
+            source,
+            file_id,
+            task_id,
+        )
+        return _build_process_cancelled_result(
+            task_id=task_id,
+            source=source,
+            index_name=index_name,
+            original_filename=original_filename,
+            file_id=file_id,
+        )
     _update_file_lifecycle(
         file_id=file_id,
         tenant_id=tenant_id,
@@ -1620,6 +1913,7 @@ def process(
                 original_filename=original_filename,
                 embedding_model_id=embedding_model_id,
                 tenant_id=tenant_id,
+                file_id=file_id,
                 params=params,
             )
             elapsed_time = time.time() - start_time
@@ -1650,6 +1944,7 @@ def process(
                 original_filename=original_filename,
                 embedding_model_id=embedding_model_id,
                 tenant_id=tenant_id,
+                file_id=file_id,
                 params=params,
                 file_data=file_data,
             )
@@ -1661,6 +1956,13 @@ def process(
             # For other source types, implement accordingly
             raise NotImplementedError(
                 f"Source type '{source_type}' not yet supported")
+
+        _ensure_document_not_deleted(
+            index_name=index_name,
+            source=source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        )
 
         if split_async:
             chunk_count = split_chunk_count or 0
@@ -1749,6 +2051,14 @@ def process(
 
         return returned_data
 
+    except DocumentDeleteRequested:
+        return _build_process_cancelled_result(
+            task_id=task_id,
+            source=source,
+            index_name=index_name,
+            original_filename=original_filename,
+            file_id=file_id,
+        )
     except Exception as e:
         logger.error(f"Error processing file {source}: {str(e)}")
         # task_id is already defined at the start of the function
@@ -1909,6 +2219,29 @@ def forward(
     original_index_name = index_name
     filename = original_filename
     file_id = file_id or (processed_data or {}).get("file_id")
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+        tenant_id=tenant_id,
+    ):
+        logger.info(
+            "Skipping deleted forward task source=%s file_id=%s task_id=%s",
+            source,
+            file_id,
+            task_id,
+        )
+        return _build_forward_cancelled_result(
+            _init_forward_context(
+                task_id=task_id,
+                request_id=str(self.request.id),
+                start_time=start_time,
+                source=source,
+                index_name=index_name,
+                source_type=source_type,
+                original_filename=original_filename,
+            )
+        )
     _update_file_lifecycle(
         file_id=file_id,
         tenant_id=tenant_id,
@@ -1937,6 +2270,13 @@ def forward(
                 f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
             )
             return _build_forward_cancelled_result(ctx)
+
+        _ensure_document_not_deleted(
+            index_name=original_index_name,
+            source=original_source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        )
 
         chunks, split_async, original_source, original_index_name, filename = _load_forward_chunks(
             self,
@@ -2028,6 +2368,8 @@ def forward(
                 source=original_source,
                 original_filename=original_filename,
                 large_mode=False,
+                file_id=file_id,
+                tenant_id=tenant_id,
             )
         else:
             batches = _build_balanced_batches(
@@ -2059,6 +2401,8 @@ def forward(
                     parent_total_chunks=total_chunks,
                     source=original_source,
                     original_filename=original_filename,
+                    file_id=file_id,
+                    tenant_id=tenant_id,
                     batch_index=idx + 1,
                     total_batches=total_batches,
                     # If request was split into multiple groups, force all groups to use large path.
@@ -2069,12 +2413,22 @@ def forward(
                 source=original_source,
                 index_name=original_index_name,
                 original_filename=original_filename,
+                file_id=file_id,
+                tenant_id=tenant_id,
             ).set(queue='forward_aggregate_q')
             result = chord(group_tasks)(callback)
             with allow_join_result():
                 es_result = result.get()
         logger.debug(
             f"[{self.request.id}] FORWARD TASK: API response from main_server for source '{original_source}': {es_result}")
+
+        if _is_document_delete_requested(
+            index_name=original_index_name,
+            source=original_source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        ):
+            return _build_forward_cancelled_result(ctx)
 
         if isinstance(es_result, dict) and es_result.get("success"):
             total_indexed = es_result.get("total_indexed", 0)
@@ -2164,6 +2518,8 @@ def forward(
             'storage_time': end_time - start_time,
             'es_result': es_result
         }
+    except DocumentDeleteRequested:
+        return _build_forward_cancelled_result(ctx)
     except Exception as e:
         # If it's an Exception, all go here (including our custom JSON message)
         # Important: if this is a Celery Retry, re-raise immediately without recording error_code
@@ -2271,6 +2627,7 @@ def cleanup_source(
     """
     index_name = (forward_result or {}).get("index_name")
     source = (forward_result or {}).get("source")
+    file_id = (forward_result or {}).get("file_id")
 
     cleanup_info: Dict[str, Any] = {
         "attempted": False,
@@ -2283,6 +2640,16 @@ def cleanup_source(
 
     if not index_name or not source:
         cleanup_info["skipped_reason"] = "missing_index_name_or_source"
+        forward_result = dict(forward_result or {})
+        forward_result["source_cleanup"] = cleanup_info
+        return forward_result
+
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+    ):
+        cleanup_info["skipped_reason"] = "document_delete_requested"
         forward_result = dict(forward_result or {})
         forward_result["source_cleanup"] = cleanup_info
         return forward_result
@@ -2434,9 +2801,11 @@ def process_and_forward(
         file_id: Optional[str] = None,
 ) -> str:
     """
-    Combined task that chains processing and forwarding
+    Compatibility wrapper for task messages created before direct chain submission.
 
-    This task delegates to a chain of process -> forward
+    New API requests call ``submit_process_forward_chain`` directly so the
+    returned task ID always identifies the real processing chain.  This task
+    remains registered only so already queued wrapper messages can finish.
 
     Args:
         source: Source file path, URL, or text content
@@ -2451,6 +2820,18 @@ def process_and_forward(
     Returns:
         Task ID of the chain
     """
+    if _is_document_delete_requested(
+        index_name=index_name,
+        source=source,
+        file_id=file_id,
+        tenant_id=tenant_id,
+    ):
+        logger.info(
+            "Skipping process-forward submission for deleted document source=%s file_id=%s",
+            source,
+            file_id,
+        )
+        return ""
     logger.info(
         f"Starting processing chain for {source}, original_filename={original_filename}, strategy={chunking_strategy}, index={index_name}, model_id={embedding_model_id}")
 

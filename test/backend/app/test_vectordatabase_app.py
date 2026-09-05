@@ -459,6 +459,30 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
 
 
 @pytest.mark.asyncio
+async def test_delete_index_preserves_eds_blocking_error(vdb_core_mock, auth_data):
+    """The delete route preserves EDS code/details for an in-flight file guard."""
+    blocking_details = {
+        "index_name": auth_data["index_name"],
+        "blocking_files": [
+            {"file_id": "file-1", "file_name": "report.pdf", "status": "PROCESSING"}
+        ],
+    }
+    with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
+            patch("backend.apps.vectordatabase_app.get_current_user_id",
+                  return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
+            patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base",
+                  new_callable=AsyncMock,
+                  side_effect=AppException(ErrorCode.KNOWLEDGE_DELETE_BLOCKED,
+                                            details=blocking_details)):
+        response = client.delete(
+            f"/indices/{auth_data['index_name']}", headers=auth_data["auth_header"])
+
+    assert response.status_code == 409
+    assert response.json()["code"] == ErrorCode.KNOWLEDGE_DELETE_BLOCKED.value
+    assert response.json()["details"] == blocking_details
+
+
+@pytest.mark.asyncio
 async def test_delete_index_forbidden_for_read_only(vdb_core_mock, auth_data):
     """Read-only users must not be able to delete a knowledge base."""
     with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
@@ -2084,7 +2108,8 @@ async def test_delete_documents_resolves_lifecycle_file_id(vdb_core_mock, redis_
             include_hidden=True,
         )
         mock_delete_by_scope.assert_awaited_once_with(
-            auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY
+            auth_data["index_name"], "knowledge_base/a.txt", "source_only", ANY,
+            file_id="fid-1", requested_by=auth_data["user_id"]
         )
 
 
@@ -2114,7 +2139,8 @@ async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
 
     assert response.status_code == 200
     mock_delete.assert_awaited_once_with(
-        auth_data["index_name"], "knowledge_base/legacy.txt", "full", ANY
+        auth_data["index_name"], "knowledge_base/legacy.txt", "full", ANY,
+        file_id="fid-legacy", requested_by=auth_data["user_id"]
     )
 
 

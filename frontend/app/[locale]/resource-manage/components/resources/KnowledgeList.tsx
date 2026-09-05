@@ -37,6 +37,7 @@ import PersonalKnowledgeBaseCapacity from "./PersonalKnowledgeBaseCapacity";
 import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
 import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
+import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -192,7 +193,11 @@ export default function KnowledgeList({
       handleRefetch();
     } catch (error: any) {
       message.error(
-        error.message || t("tenantResources.knowledgeBase.deleteFailed")
+        formatKnowledgeBaseDeleteError(
+          error,
+          t,
+          "tenantResources.knowledgeBase.deleteFailed"
+        )
       );
     }
   };

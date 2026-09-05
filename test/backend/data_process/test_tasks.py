@@ -1787,6 +1787,45 @@ def _run_coro(coro):
     return loop.run_until_complete(coro)
 
 
+def _patch_send_chunks_http(monkeypatch, tasks, *, status, body, response_json=None):
+    class FakeResponse:
+        async def text(self):
+            return body
+
+        async def json(self):
+            return response_json
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    FakeResponse.status = status
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(tasks, "aiohttp", types.SimpleNamespace(
+        TCPConnector=lambda **kwargs: None,
+        ClientTimeout=lambda **kwargs: None,
+        ClientSession=FakeSession,
+        ClientConnectorError=Exception,
+        ClientResponseError=Exception,
+    ))
+    monkeypatch.setattr(tasks, "run_async", _run_coro)
+
+
 def test_forward_index_documents_error_code_from_detail(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
@@ -1836,6 +1875,60 @@ def test_forward_index_documents_error_code_from_detail(monkeypatch):
             authorization="Bearer token",
         )
     assert "detail_err" in str(exc.value)
+
+
+def test_send_chunks_to_es_returns_response_json_when_body_is_not_json(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
+    _patch_send_chunks_http(
+        monkeypatch, tasks, status=200, body="not-json",
+        response_json={"success": True, "total_indexed": 1},
+    )
+
+    class RedisService:
+        def is_document_delete_requested(self, **_kwargs):
+            return False
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisService())
+    assert tasks._send_chunks_to_es(
+        chunks=[{"content": "x"}], index_name="idx", authorization=None,
+        task_id="task", source="obj", original_filename="x.txt"
+    ) == {"success": True, "total_indexed": 1}
+
+
+def test_send_chunks_to_es_raises_generic_http_error_without_error_code(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "ELASTICSEARCH_SERVICE", "http://api")
+    _patch_send_chunks_http(monkeypatch, tasks, status=500, body="upstream failure")
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
+        is_document_delete_requested=lambda **_kwargs: False,
+    ))
+
+    with pytest.raises(Exception, match="ElasticSearch service returned HTTP 500"):
+        tasks._send_chunks_to_es(
+            chunks=[{"content": "x"}], index_name="idx", authorization=None,
+            task_id="task", source="obj", original_filename="x.txt", file_id="fid"
+        )
+
+
+def test_send_chunks_to_es_propagates_document_delete_request(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "aiohttp", types.SimpleNamespace(
+        TCPConnector=lambda **_kwargs: None,
+        ClientTimeout=lambda **_kwargs: None,
+        ClientConnectorError=Exception,
+        ClientResponseError=Exception,
+    ))
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
+        is_document_delete_requested=lambda **_kwargs: True,
+    ))
+    monkeypatch.setattr(tasks, "run_async", _run_coro)
+
+    with pytest.raises(tasks.DocumentDeleteRequested):
+        tasks._send_chunks_to_es(
+            chunks=[{"content": "x"}], index_name="idx", authorization=None,
+            task_id="task", source="obj", original_filename="x.txt", file_id="fid"
+        )
 
 
 def test_forward_index_documents_regex_error_code(monkeypatch):
@@ -2966,6 +3059,345 @@ def test_forward_part_returns_cancelled_when_parent_is_cancelled(monkeypatch):
     assert out["total_submitted"] == 0
 
 
+def test_document_delete_fence_lookup_paths(monkeypatch):
+    """Deletion checks cover Redis hits, misses, and PG fallback on errors."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    assert tasks._is_document_delete_requested(
+        index_name=None, source=None, file_id=None) is False
+
+    class RedisFence:
+        def is_document_delete_requested(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisFence())
+    assert tasks._is_document_delete_requested(
+        index_name="idx", source="obj", file_id="fid") is True
+
+    pg_lookups = []
+    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle.get_file_record = lambda **_kwargs: pg_lookups.append(True)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+
+    class RedisClear:
+        def is_document_delete_requested(self, **_kwargs):
+            return False
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisClear())
+    assert tasks._is_document_delete_requested(
+        index_name="idx", source="obj", file_id="fid") is False
+    assert pg_lookups == []
+
+    class RedisUnavailable:
+        def is_document_delete_requested(self, **_kwargs):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisUnavailable())
+    lifecycle.get_file_record = lambda **_kwargs: {
+        "file_id": "fid", "status": "DELETE_REQUESTED"
+    }
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+    assert tasks._is_document_delete_requested(
+        index_name="idx", source="obj", file_id="fid", tenant_id="tenant") is True
+
+
+def test_process_part_discards_chunks_when_deletion_wins_after_ray_processing(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        process_bytes = types.SimpleNamespace(remote=lambda *_args, **_kwargs: "chunks-ref")
+
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: Actor())
+    fake_ray.get_returns = {"chunks-ref": [{"content": "chunk"}]}
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://unused")
+
+    class RedisService:
+        def __init__(self):
+            self.checks = 0
+
+        def is_document_delete_requested(self, **_kwargs):
+            self.checks += 1
+            return self.checks == 2
+
+    redis_service = RedisService()
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: redis_service)
+    result = tasks.process_part(
+        FakeSelf("part-race"), part_bytes=b"x", filename="x.txt",
+        chunking_strategy="basic", part_redis_key="dp:part",
+        source="obj", index_name="idx", file_id="fid",
+    )
+    assert result["cancelled"] is True
+    assert result["chunks_count"] == 0
+
+
+def test_aggregate_store_chunks_discards_merged_chunks_when_deletion_wins(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://unused")
+
+    class Client:
+        def get(self, _key):
+            return '[{"content":"chunk"}]'
+
+        def delete(self, _key):
+            return 1
+
+        def set(self, *_args):
+            raise AssertionError("deleted document must not publish merged chunks")
+
+        def expire(self, *_args):
+            raise AssertionError("deleted document must not publish readiness")
+
+    monkeypatch.setitem(sys.modules, "redis", types.SimpleNamespace(
+        Redis=types.SimpleNamespace(from_url=lambda *args, **kwargs: Client())
+    ))
+
+    class RedisService:
+        def __init__(self):
+            self.checks = 0
+
+        def is_document_delete_requested(self, **_kwargs):
+            self.checks += 1
+            return self.checks == 2
+
+    redis_service = RedisService()
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: redis_service)
+    result = tasks.aggregate_store_chunks(
+        FakeSelf("aggregate-race"), parts_results=[{"part_redis_key": "dp:part"}],
+        redis_key="dp:chunks", source="obj", index_name="idx", file_id="fid",
+    )
+    assert result["cancelled"] is True
+
+
+def test_forward_part_returns_cancelled_when_external_write_is_fenced(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
+        is_document_delete_requested=lambda **_kwargs: False,
+    ))
+    monkeypatch.setattr(
+        tasks, "_send_chunks_to_es",
+        lambda **_kwargs: (_ for _ in ()).throw(tasks.DocumentDeleteRequested("deleted")),
+    )
+    result = tasks.forward_part(
+        FakeSelf("forward-race"), chunks=[{"content": "x"}], index_name="idx",
+        source="obj", file_id="fid", batch_index=1, total_batches=1,
+    )
+    assert result["cancelled"] is True
+
+
+def test_process_returns_cancelled_when_delete_wins_before_chunk_storage(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda **_kwargs: False)
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **_kwargs: None)
+    monkeypatch.setattr(tasks, "_process_source_with_split", lambda **_kwargs: (
+        False, [{"content": "chunk", "metadata": {}}], None
+    ))
+    monkeypatch.setattr(tasks.os.path, "exists", lambda _source: True)
+    monkeypatch.setattr(tasks.os.path, "getsize", lambda _source: 1)
+    monkeypatch.setattr(
+        tasks, "_ensure_document_not_deleted",
+        lambda **_kwargs: (_ for _ in ()).throw(tasks.DocumentDeleteRequested("deleted")),
+    )
+    self = FakeSelf("process-race")
+    result = tasks.process(
+        self, source="obj", source_type="local", chunking_strategy="basic",
+        index_name="idx", original_filename="x.txt", file_id="fid",
+    )
+    assert result["cancelled"] is True
+
+
+def test_process_source_with_split_stores_synchronous_chunks_after_part_processing(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        store_chunks_in_redis = types.SimpleNamespace(remote=lambda *_args, **_kwargs: "stored-ref")
+
+    monkeypatch.setattr(tasks, "DP_FILE_SPLIT_SIZE_MB", 0)
+    monkeypatch.setattr(tasks.os.path, "getsize", lambda _source: 1)
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: Actor())
+    monkeypatch.setattr(tasks, "_split_file_for_processing", lambda **_kwargs: [b"part"])
+    monkeypatch.setattr(tasks, "_run_processing_for_parts", lambda **_kwargs: (
+        False, [{"content": "chunk"}], None
+    ))
+    monkeypatch.setattr(tasks, "_ensure_document_not_deleted", lambda **_kwargs: None)
+    fake_ray.get_returns = {"stored-ref": True}
+
+    result = tasks._process_source_with_split(
+        request_id="split-store", source="obj", source_type="local", task_id="task",
+        chunking_strategy="basic", index_name="idx", original_filename="x.txt",
+        embedding_model_id=None, tenant_id=None, file_id="fid", params={},
+    )
+    assert result[0] is False
+    assert result[1] == [{"content": "chunk"}]
+
+
+def test_process_source_with_split_reports_failed_synchronous_chunk_storage(monkeypatch):
+    tasks, fake_ray = import_tasks_with_fake_ray(monkeypatch)
+
+    class Actor:
+        store_chunks_in_redis = types.SimpleNamespace(remote=lambda *_args, **_kwargs: "stored-ref")
+
+    monkeypatch.setattr(tasks, "DP_FILE_SPLIT_SIZE_MB", 0)
+    monkeypatch.setattr(tasks.os.path, "getsize", lambda _source: 1)
+    monkeypatch.setattr(tasks, "get_ray_actor", lambda: Actor())
+    monkeypatch.setattr(tasks, "_split_file_for_processing", lambda **_kwargs: [b"part"])
+    monkeypatch.setattr(tasks, "_run_processing_for_parts", lambda **_kwargs: (
+        False, [{"content": "chunk"}], None
+    ))
+    monkeypatch.setattr(tasks, "_ensure_document_not_deleted", lambda **_kwargs: None)
+    fake_ray.get_returns = {"stored-ref": False}
+
+    with pytest.raises(RuntimeError, match="Failed to persist processed chunks"):
+        tasks._process_source_with_split(
+            request_id="split-store-failed", source="obj", source_type="local", task_id="task",
+            chunking_strategy="basic", index_name="idx", original_filename="x.txt",
+            embedding_model_id=None, tenant_id=None, file_id="fid", params={},
+        )
+
+
+def test_forward_returns_cancelled_when_document_fence_is_set(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
+        is_document_delete_requested=lambda **_kwargs: True,
+    ))
+    result = tasks.forward(
+        FakeSelf("forward-fenced"), processed_data={}, index_name="idx",
+        source="obj", source_type="minio", original_filename="x.txt", file_id="fid",
+    )
+    assert result["chunks_stored"] == 0
+    assert result["es_result"]["message"].startswith("Indexing cancelled")
+
+
+def test_forward_returns_cancelled_if_deletion_wins_after_es_response(monkeypatch):
+    """A deletion request observed after ES responds must suppress completion."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    checks = {"count": 0}
+
+    def deletion_requested_after_write(**_kwargs):
+        checks["count"] += 1
+        return checks["count"] >= 3
+
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", deletion_requested_after_write)
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **_kwargs: None)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(tasks, "run_async", lambda _coro: {
+        "success": True, "total_indexed": 1, "total_submitted": 1,
+    })
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
+        save_progress_info=lambda *_args, **_kwargs: True,
+    ))
+
+    result = tasks.forward(
+        FakeSelf("forward-post-write-delete"),
+        processed_data={"chunks": [{"content": "chunk", "metadata": {}}]},
+        index_name="idx", source="obj", source_type="minio", file_id="fid",
+    )
+
+    assert result["chunks_stored"] == 0
+    assert result["es_result"]["message"].startswith("Indexing cancelled")
+    assert checks["count"] == 3
+
+
+def test_forward_catches_document_delete_requested_during_processing(monkeypatch):
+    """A fence exception raised inside the forwarding try block is chain-compatible."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda **_kwargs: False)
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        tasks, "_ensure_document_not_deleted",
+        lambda **_kwargs: (_ for _ in ()).throw(tasks.DocumentDeleteRequested("deleted")),
+    )
+
+    result = tasks.forward(
+        FakeSelf("forward-caught-delete"),
+        processed_data={"chunks": [{"content": "chunk", "metadata": {}}]},
+        index_name="idx", source="obj", source_type="minio", file_id="fid",
+    )
+
+    assert result["chunks_stored"] == 0
+    assert result["es_result"]["message"].startswith("Indexing cancelled")
+
+
+def test_wait_for_split_ready_honors_deletion_fence(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
+
+    class Client:
+        def get(self, _key):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules, "redis",
+        types.SimpleNamespace(Redis=types.SimpleNamespace(
+            from_url=lambda *a, **k: Client())),
+    )
+    with pytest.raises(tasks.DocumentDeleteRequested):
+        tasks._wait_for_split_ready(
+            "dp:fence", timeout_s=1, poll_interval_ms=1,
+            cancellation_check=lambda: True,
+        )
+
+
+def test_processing_tasks_return_cancelled_when_document_fence_is_set(monkeypatch):
+    """Each processing stage exits without external work after deletion wins the race."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class RedisFence:
+        def is_document_delete_requested(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisFence())
+    self = FakeSelf("fenced-process")
+    process_result = tasks.process(
+        self, source="obj", source_type="local", index_name="idx",
+        file_id="fid",
+    )
+    assert process_result["cancelled"] is True
+
+    part_result = tasks.process_part(
+        self, part_bytes=b"x", filename="x.txt", chunking_strategy="basic",
+        part_redis_key="dp:part", source="obj", index_name="idx",
+        file_id="fid",
+    )
+    assert part_result["cancelled"] is True
+
+    aggregate_result = tasks.aggregate_store_chunks(
+        self, parts_results=[], redis_key="dp:chunks", source="obj",
+        index_name="idx", file_id="fid",
+    )
+    assert aggregate_result["cancelled"] is True
+
+    forward_result = tasks.forward_part(
+        self, chunks=[{"content": "x"}], index_name="idx", source="obj",
+        file_id="fid",
+    )
+    assert forward_result["cancelled"] is True
+
+    aggregate_forward_result = tasks.aggregate_forward_parts(
+        self, parts_results=[], source="obj", index_name="idx", file_id="fid",
+    )
+    assert aggregate_forward_result["cancelled"] is True
+
+
+def test_process_and_forward_does_not_submit_after_document_deletion(monkeypatch):
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+
+    class RedisFence:
+        def is_document_delete_requested(self, **_kwargs):
+            return True
+
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisFence())
+    monkeypatch.setattr(
+        tasks, "submit_process_forward_chain",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("deleted document must not submit a chain")),
+    )
+    result = tasks.process_and_forward(
+        FakeSelf("fenced-chain"), source="obj", source_type="minio",
+        chunking_strategy="basic", index_name="idx", file_id="fid",
+    )
+    assert result == ""
+
+
 def test_forward_part_continues_when_parent_cancellation_lookup_fails(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "get_redis_service", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
@@ -3371,6 +3803,20 @@ def test_cleanup_source_failure_is_warning_only(monkeypatch):
     assert out["source_cleanup"]["attempted"] is True
     assert out["source_cleanup"]["success"] is False
     assert "boom" in (out["source_cleanup"]["error"] or "")
+
+
+def test_cleanup_source_skips_when_document_deletion_is_requested(monkeypatch):
+    """The cleanup stage must not issue a second source delete after a user delete."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda **_kwargs: True)
+
+    out = tasks.cleanup_source(
+        FakeSelf("cleanup-fenced"),
+        {"task_id": "t1", "index_name": "idx", "source": "obj", "file_id": "fid"},
+    )
+
+    assert out["source_cleanup"]["attempted"] is False
+    assert out["source_cleanup"]["skipped_reason"] == "document_delete_requested"
 
 
 def test_parse_failure_info_accepts_json_and_plain_text(monkeypatch):

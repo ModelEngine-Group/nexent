@@ -2187,6 +2187,59 @@ class TestRedisService(unittest.TestCase):
         self.mock_redis_client.pipeline.assert_not_called()
         self.mock_backend_client.pipeline.assert_not_called()
 
+    def test_document_delete_fence_has_no_ttl_and_can_be_cleared(self):
+        """Deletion fences are durable markers, unlike task cancellation flags."""
+        self.redis_service._client = self.mock_redis_client
+        self.mock_redis_client.set.return_value = True
+        self.mock_redis_client.exists.side_effect = [1, 0, 0]
+        self.mock_redis_client.delete.return_value = 1
+
+        assert self.redis_service.mark_document_delete_requested(
+            file_id="fid-1"
+        )
+        for fence_call in self.mock_redis_client.set.call_args_list:
+            assert "ex" not in fence_call.kwargs
+            assert "px" not in fence_call.kwargs
+        assert self.redis_service.is_document_delete_requested(
+            file_id="fid-1"
+        )
+        assert self.redis_service.clear_document_delete_fence(
+            file_id="fid-1"
+        ) == 1
+        assert not self.redis_service.is_document_delete_requested(
+            file_id="fid-1"
+        )
+
+    def test_document_fence_handles_empty_identity_and_redis_errors(self):
+        """Fence reads surface Redis outages so callers can use PG fallback."""
+        self.redis_service._client = self.mock_redis_client
+        self.assertFalse(self.redis_service.mark_document_delete_requested(
+            file_id=None))
+        self.assertFalse(self.redis_service.is_document_delete_requested(
+            file_id=None))
+        self.mock_redis_client.set.side_effect = redis.RedisError("write failed")
+        self.assertFalse(self.redis_service.mark_document_delete_requested(
+            file_id="fid-1"))
+        self.mock_redis_client.exists.side_effect = redis.RedisError("read failed")
+        with self.assertRaises(redis.RedisError):
+            self.redis_service.is_document_delete_requested(
+                file_id="fid-1")
+        self.assertEqual(self.redis_service.clear_document_delete_fence(
+            file_id=None), 0)
+        self.mock_redis_client.delete.side_effect = redis.RedisError("delete failed")
+        self.assertEqual(self.redis_service.clear_document_delete_fence(
+            file_id="fid-1"), 0)
+
+    def test_cleanup_single_task_related_keys_removes_split_companions(self):
+        """The aggregated ready marker and per-part payloads are cleaned with the task."""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+        self.mock_redis_client.delete.return_value = 0
+        self.mock_backend_client.delete.return_value = 1
+        self.mock_backend_client.scan_iter.side_effect = [[b"dp:task:chunks:ready"], [b"dp:task:part:0"]]
+        deleted = self.redis_service._cleanup_single_task_related_keys("task")
+        self.assertEqual(deleted, 3)
+
     def test_parse_progress_falsy_raw_returns_defaults(self):
         """A falsy raw payload (None, '', 0) returns (0, default_total)."""
         for falsy in (None, "", 0):

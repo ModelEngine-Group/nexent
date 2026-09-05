@@ -1019,6 +1019,8 @@
   "knowledgeBase.modal.deleteDataMate.content": "{productName} cannot delete DataMate knowledge bases. Please go to the DataMate page to perform the operation.",
   "knowledgeBase.message.deleteSuccess": "Knowledge base deleted successfully",
   "knowledgeBase.message.deleteError": "Failed to delete knowledge base",
+  "knowledgeBase.message.deleteBlocked": "The knowledge base cannot be deleted while files are being processed.",
+  "knowledgeBase.message.deleteBlockedWithFiles": "The knowledge base cannot be deleted while files are being processed: {{files}}",
   "knowledgeBase.message.syncSuccess": "Knowledge base synchronized successfully",
   "knowledgeBase.message.syncError": "Failed to synchronize knowledge base",
   "knowledgeBase.message.syncDataMateSuccess": "DataMate knowledge bases synchronized successfully",

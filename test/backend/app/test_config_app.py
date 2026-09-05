@@ -10,6 +10,7 @@ dependencies.
 """
 import asyncio
 import atexit
+import asyncio
 import importlib.util
 from unittest.mock import AsyncMock, patch, Mock, MagicMock
 import os
@@ -298,8 +299,6 @@ class TestConfigAppRouterConfiguration:
         # Check that routes are registered
         routes = [r for r in app.routes if hasattr(r, 'path')]
         assert len(routes) >= 1
-
-
 class TestConfigAppExceptionHandling:
     """Test class for exception handling patterns in config app."""
 

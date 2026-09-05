@@ -49,7 +49,6 @@ app.conf.update(
     task_routes={
         f'{import_path}.process': {'queue': 'process_q'},
         f'{import_path}.forward': {'queue': 'forward_q'},
-        f'{import_path}.process_and_forward': {'queue': 'process_q'},
         f'{import_path}.forward_part': {'queue': 'forward_part_q'},
         f'{import_path}.aggregate_forward_parts': {'queue': 'forward_aggregate_q'},
     },
