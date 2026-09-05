@@ -4078,6 +4078,7 @@ class TestCreateAgentRunInfo:
                 workspace_run_id=ANY,
                 tenant_id="tenant_1",
                 minio_files=[],
+                user_context=None,
             )
 
             # Verify that other functions were called correctly
@@ -7580,3 +7581,140 @@ class TestBuildSecurityHeaders:
             "security_credentials": {"k": "v"},
         }
         assert _build_security_headers(agent) == {}
+
+
+# ===========================================================================
+# Tool user context (user-info pass-through for tool-side authorization)
+# ===========================================================================
+
+class TestBuildToolUserContext:
+    """Tests for _build_tool_user_context: assembles caller identity for tools."""
+
+    @staticmethod
+    def _db_stubs(tenant_name_record, user_tenant_record, groups):
+        tenant_config_db = types.ModuleType("database.tenant_config_db")
+        tenant_config_db.get_single_config_info = Mock(return_value=tenant_name_record)
+        user_tenant_db = types.ModuleType("database.user_tenant_db")
+        user_tenant_db.get_user_tenant_by_user_id = Mock(return_value=user_tenant_record)
+        group_db = types.ModuleType("database.group_db")
+        group_db.query_groups_by_user = Mock(return_value=groups)
+        return {
+            "database.tenant_config_db": tenant_config_db,
+            "database.user_tenant_db": user_tenant_db,
+            "database.group_db": group_db,
+        }
+
+    def test_full_context(self):
+        from backend.agents.create_agent_info import _build_tool_user_context
+        with patch.object(consts_const, "TENANT_NAME", "TENANT_NAME", create=True), \
+                patch.dict(sys.modules, self._db_stubs(
+                    {"config_value": "bug-repro"},
+                    {"user_email": "bug-admin@qq.com"},
+                    [{"group_name": "Default Group"}, {"group_name": "QA"}],
+                )):
+            ctx = _build_tool_user_context("u-1", "t-1")
+        assert ctx == {
+            "tenant_id": "t-1",
+            "tenant_name": "bug-repro",
+            "user_id": "u-1",
+            "user_name": "bug-admin@qq.com",
+            "user_account": "bug-admin@qq.com",
+            "user_groups": ["Default Group", "QA"],
+        }
+
+    def test_tenant_name_missing_falls_back_to_tenant_id(self):
+        from backend.agents.create_agent_info import _build_tool_user_context
+        with patch.object(consts_const, "TENANT_NAME", "TENANT_NAME", create=True), \
+                patch.dict(sys.modules, self._db_stubs(
+                    None,
+                    {"user_email": "bug-admin@qq.com"},
+                    [],
+                )):
+            ctx = _build_tool_user_context("u-1", "t-1")
+        assert ctx["tenant_name"] == "t-1"
+        assert ctx["user_groups"] == []
+
+    def test_lookup_errors_degrade_without_raising(self):
+        from backend.agents.create_agent_info import _build_tool_user_context
+
+        tenant_config_db = types.ModuleType("database.tenant_config_db")
+        tenant_config_db.get_single_config_info = Mock(side_effect=RuntimeError("db down"))
+        user_tenant_db = types.ModuleType("database.user_tenant_db")
+        user_tenant_db.get_user_tenant_by_user_id = Mock(side_effect=RuntimeError("db down"))
+        group_db = types.ModuleType("database.group_db")
+        group_db.query_groups_by_user = Mock(side_effect=RuntimeError("db down"))
+        stubs = {
+            "database.tenant_config_db": tenant_config_db,
+            "database.user_tenant_db": user_tenant_db,
+            "database.group_db": group_db,
+        }
+        with patch.object(consts_const, "TENANT_NAME", "TENANT_NAME", create=True), \
+                patch.dict(sys.modules, stubs):
+            ctx = _build_tool_user_context("u-1", "t-1")
+        # Minimal context keeps the conversation going instead of failing.
+        assert ctx == {
+            "tenant_id": "t-1",
+            "tenant_name": "t-1",
+            "user_id": "u-1",
+            "user_name": "",
+            "user_account": "",
+            "user_groups": [],
+        }
+
+
+class TestAgentTreeNeedsUserContext:
+    """Tests for _agent_tree_needs_user_context build-skip condition."""
+
+    @staticmethod
+    def _cfg(tools=None, external=None, managed=None):
+        config = types.SimpleNamespace()
+        config.tools = tools or []
+        config.external_a2a_agents = external or []
+        config.managed_agents = managed or []
+        return config
+
+    def test_local_only_tree_skips(self):
+        from backend.agents.create_agent_info import _agent_tree_needs_user_context
+        config = self._cfg(tools=[types.SimpleNamespace(source="local"),
+                                  types.SimpleNamespace(source="builtin")])
+        assert _agent_tree_needs_user_context(config) is False
+
+    def test_mcp_tool_triggers(self):
+        from backend.agents.create_agent_info import _agent_tree_needs_user_context
+        config = self._cfg(tools=[types.SimpleNamespace(source="local"),
+                                  types.SimpleNamespace(source="mcp")])
+        assert _agent_tree_needs_user_context(config) is True
+
+    def test_external_a2a_triggers(self):
+        from backend.agents.create_agent_info import _agent_tree_needs_user_context
+        config = self._cfg(external=[types.SimpleNamespace()])
+        assert _agent_tree_needs_user_context(config) is True
+
+    def test_sub_agent_mcp_triggers(self):
+        from backend.agents.create_agent_info import _agent_tree_needs_user_context
+        sub = self._cfg(tools=[types.SimpleNamespace(source="mcp")])
+        config = self._cfg(tools=[types.SimpleNamespace(source="local")], managed=[sub])
+        assert _agent_tree_needs_user_context(config) is True
+
+
+class TestResolveToolUserContext:
+    """Tests for _resolve_tool_user_context defensive resolver."""
+
+    def test_unneeded_tree_returns_none(self):
+        from backend.agents.create_agent_info import _resolve_tool_user_context
+        config = types.SimpleNamespace(
+            tools=[types.SimpleNamespace(source="local")],
+            external_a2a_agents=[],
+            managed_agents=[],
+        )
+        assert _resolve_tool_user_context(config, "u-1", "t-1") is None
+
+    def test_build_failure_degrades_to_none(self):
+        """A tree needing context but failing lookups degrades to None, never raises."""
+        from backend.agents.create_agent_info import _resolve_tool_user_context
+        config = types.SimpleNamespace(
+            tools=[types.SimpleNamespace(source="mcp")],
+            external_a2a_agents=[],
+            managed_agents=[],
+        )
+        assert _resolve_tool_user_context(config, "u-1", "t-1") is None

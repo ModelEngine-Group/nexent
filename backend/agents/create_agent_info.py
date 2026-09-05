@@ -2147,6 +2147,94 @@ def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)
     return list(used_mcp_urls)
 
 
+def _as_config_list(value: Any) -> List[Any]:
+    """Coerce an agent-config collection attribute to a real list defensively.
+
+    Guards against non-iterable stand-ins (e.g. mocks) so the user-context
+    condition check never raises on unusual config objects.
+    """
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _agent_tree_needs_user_context(agent_config: AgentConfig) -> bool:
+    """Whether the agent tree may need caller user context for tool-side authorization.
+
+    True when the agent (or any sub-agent) uses MCP tools or external A2A
+    agents; pure local/builtin tool trees skip the user-context DB lookups.
+    """
+    tools = _as_config_list(getattr(agent_config, "tools", None))
+    if any(getattr(tool, "source", None) == "mcp" for tool in tools):
+        return True
+    if _as_config_list(getattr(agent_config, "external_a2a_agents", None)):
+        return True
+    return any(
+        _agent_tree_needs_user_context(sub_agent)
+        for sub_agent in _as_config_list(getattr(agent_config, "managed_agents", None))
+    )
+
+
+def _build_tool_user_context(user_id: str, tenant_id: str) -> Dict[str, Any]:
+    """Build the caller user context passed through to tools for tool-side authorization.
+
+    The platform itself does no authorization here; it only assembles the
+    authenticated-session identity (tenant name, user name/account, groups) so
+    tools can authorize on their own before accessing data. Any lookup failure
+    degrades to a minimal context instead of blocking the conversation.
+    """
+    from consts.const import TENANT_NAME
+    from database.group_db import query_groups_by_user
+    from database.tenant_config_db import get_single_config_info
+    from database.user_tenant_db import get_user_tenant_by_user_id
+
+    user_context: Dict[str, Any] = {
+        "tenant_id": str(tenant_id or ""),
+        "tenant_name": str(tenant_id or ""),
+        "user_id": str(user_id or ""),
+        "user_name": "",
+        "user_account": "",
+        "user_groups": [],
+    }
+    try:
+        name_record = get_single_config_info(tenant_id, TENANT_NAME)
+        tenant_name = (name_record or {}).get("config_value")
+        if tenant_name:
+            user_context["tenant_name"] = str(tenant_name)
+    except Exception as exc:
+        logger.warning("tool user context: tenant name lookup failed: %s", exc)
+    try:
+        user_tenant = get_user_tenant_by_user_id(user_id)
+        user_email = (user_tenant or {}).get("user_email") or ""
+        user_context["user_name"] = user_email
+        user_context["user_account"] = user_email
+    except Exception as exc:
+        logger.warning("tool user context: user email lookup failed: %s", exc)
+    try:
+        groups = query_groups_by_user(user_id) or []
+        user_context["user_groups"] = [
+            str(g.get("group_name")) for g in groups if g.get("group_name")
+        ]
+    except Exception as exc:
+        logger.warning("tool user context: user groups lookup failed: %s", exc)
+    return user_context
+
+
+def _resolve_tool_user_context(agent_config: AgentConfig, user_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve the caller user context, degrading to None on any failure.
+
+    Building the context must never block conversation execution, so every
+    error (including unusual agent config shapes) falls back to no context.
+    """
+    try:
+        if not _agent_tree_needs_user_context(agent_config):
+            return None
+        return _build_tool_user_context(user_id, tenant_id)
+    except Exception as exc:
+        logger.warning("tool user context: build skipped: %s", exc)
+        return None
+
+
 async def create_agent_run_info(
     agent_id,
     minio_files,
@@ -2325,5 +2413,6 @@ async def create_agent_run_info(
         tenant_id=tenant_id,
         minio_files=minio_files,
         redis_client=get_redis_client(),
+        user_context=_resolve_tool_user_context(agent_config, user_id, tenant_id),
     )
     return agent_run_info

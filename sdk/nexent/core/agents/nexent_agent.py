@@ -24,6 +24,7 @@ from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
+from .tool_user_context import apply_user_context_to_mcp_tool
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 
@@ -229,7 +230,8 @@ class NexentAgent:
                  tenant_id=None,
                  workspace_path=None,
                  workspace_run_id=None,
-                 minio_files=None):
+                 minio_files=None,
+                 user_context=None):
         """
         Initialize the NexentAgent factory.
 
@@ -249,6 +251,8 @@ class NexentAgent:
             workspace_path: Run-scoped host workspace path.
             workspace_run_id: Opaque run id used to validate cleanup scope.
             minio_files: Authorized files attached to the current request.
+            user_context: Optional caller user context (tenant/user/groups)
+                passed through to tools for tool-side authorization.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -266,6 +270,7 @@ class NexentAgent:
         self.workspace_path = workspace_path
         self.workspace_run_id = workspace_run_id
         self.minio_files = list(minio_files or [])
+        self.user_context = dict(user_context or {})
         self._workspace_uploads: List[Dict[str, Any]] = []
         self._workspace_uploaded_paths: set[str] = set()
         self._sandbox_executors: List[Any] = []
@@ -505,7 +510,7 @@ class NexentAgent:
         )
         if tool_obj is None:
             raise ValueError(f"{class_name} not found in MCP server")
-        return tool_obj
+        return apply_user_context_to_mcp_tool(tool_obj, self.user_context)
 
     def create_builtin_tool(self, tool_config: ToolConfig):
         """Create a builtin tool instance.
@@ -745,7 +750,8 @@ class NexentAgent:
                         wrapper = ExternalA2AAgentWrapper(
                             agent_info=a2a_agent_info,
                             stop_event=self.stop_event,
-                            observer=self.observer
+                            observer=self.observer,
+                            user_context=self.user_context,
                         )
                         managed_agents_list.append(
                             self._wrap_subagent(
