@@ -720,6 +720,28 @@ async def delete_documents(
                     )
                     result["redis_cleanup_error"] = str(redis_error)
 
+            # Preserve the response message contract used by existing clients.
+            # The new deletion service may already provide redis_cleanup, while
+            # the fallback above adds it for older service implementations.
+            # Only terminal responses receive the summary; pending responses
+            # must keep their retry-oriented message.
+            if not result.get("deletion_pending"):
+                original_message = result.get("message", "Documents deleted successfully")
+                if result.get("redis_cleanup_error"):
+                    if "Redis cleanup encountered an error" not in original_message:
+                        result["message"] = (
+                            f"{original_message}, but Redis cleanup encountered an error: "
+                            f"{result['redis_cleanup_error']}"
+                        )
+                elif result.get("redis_cleanup") and "Cleaned up" not in original_message:
+                    redis_cleanup = result["redis_cleanup"]
+                    result["message"] = (
+                        f"{original_message}. "
+                        f"Cleaned up {redis_cleanup.get('total_deleted', 0)} Redis records "
+                        f"({redis_cleanup.get('celery_tasks_deleted', 0)} tasks, "
+                        f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
+                    )
+
         return result
 
     except ValueError as exc:
