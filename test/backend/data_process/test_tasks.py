@@ -3267,6 +3267,56 @@ def test_forward_returns_cancelled_when_document_fence_is_set(monkeypatch):
     assert result["es_result"]["message"].startswith("Indexing cancelled")
 
 
+def test_forward_returns_cancelled_if_deletion_wins_after_es_response(monkeypatch):
+    """A deletion request observed after ES responds must suppress completion."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    checks = {"count": 0}
+
+    def deletion_requested_after_write(**_kwargs):
+        checks["count"] += 1
+        return checks["count"] >= 3
+
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", deletion_requested_after_write)
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **_kwargs: None)
+    monkeypatch.setattr(tasks, "get_file_size", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(tasks, "run_async", lambda _coro: {
+        "success": True, "total_indexed": 1, "total_submitted": 1,
+    })
+    monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(
+        save_progress_info=lambda *_args, **_kwargs: True,
+    ))
+
+    result = tasks.forward(
+        FakeSelf("forward-post-write-delete"),
+        processed_data={"chunks": [{"content": "chunk", "metadata": {}}]},
+        index_name="idx", source="obj", source_type="minio", file_id="fid",
+    )
+
+    assert result["chunks_stored"] == 0
+    assert result["es_result"]["message"].startswith("Indexing cancelled")
+    assert checks["count"] == 3
+
+
+def test_forward_catches_document_delete_requested_during_processing(monkeypatch):
+    """A fence exception raised inside the forwarding try block is chain-compatible."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda **_kwargs: False)
+    monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        tasks, "_ensure_document_not_deleted",
+        lambda **_kwargs: (_ for _ in ()).throw(tasks.DocumentDeleteRequested("deleted")),
+    )
+
+    result = tasks.forward(
+        FakeSelf("forward-caught-delete"),
+        processed_data={"chunks": [{"content": "chunk", "metadata": {}}]},
+        index_name="idx", source="obj", source_type="minio", file_id="fid",
+    )
+
+    assert result["chunks_stored"] == 0
+    assert result["es_result"]["message"].startswith("Indexing cancelled")
+
+
 def test_wait_for_split_ready_honors_deletion_fence(monkeypatch):
     tasks, _ = import_tasks_with_fake_ray(monkeypatch)
     monkeypatch.setattr(tasks, "REDIS_BACKEND_URL", "redis://x")
@@ -3753,6 +3803,20 @@ def test_cleanup_source_failure_is_warning_only(monkeypatch):
     assert out["source_cleanup"]["attempted"] is True
     assert out["source_cleanup"]["success"] is False
     assert "boom" in (out["source_cleanup"]["error"] or "")
+
+
+def test_cleanup_source_skips_when_document_deletion_is_requested(monkeypatch):
+    """The cleanup stage must not issue a second source delete after a user delete."""
+    tasks, _ = import_tasks_with_fake_ray(monkeypatch)
+    monkeypatch.setattr(tasks, "_is_document_delete_requested", lambda **_kwargs: True)
+
+    out = tasks.cleanup_source(
+        FakeSelf("cleanup-fenced"),
+        {"task_id": "t1", "index_name": "idx", "source": "obj", "file_id": "fid"},
+    )
+
+    assert out["source_cleanup"]["attempted"] is False
+    assert out["source_cleanup"]["skipped_reason"] == "document_delete_requested"
 
 
 def test_parse_failure_info_accepts_json_and_plain_text(monkeypatch):

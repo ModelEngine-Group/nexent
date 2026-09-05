@@ -617,6 +617,23 @@ class TestIndexManagement:
         assert response.json() == {"status": "success"}
         mock_delete.assert_awaited_once()
 
+    def test_delete_index_preserves_app_exception(self, client, mock_northbound_context):
+        """EDS deletion errors keep their structured code and details."""
+        mock_northbound_context.return_value = ASSET_CTX
+        expected = AppException(
+            "KNOWLEDGE_DELETE_BLOCKED",
+            details={"index_name": "kb1", "blocking_files": []},
+        )
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.full_delete_knowledge_base",
+            new_callable=AsyncMock,
+            side_effect=expected,
+        ):
+            with pytest.raises(AppException) as exc_info:
+                client.delete("/nb/v1/knowledge/indices/kb1")
+
+        assert exc_info.value is expected
+
     @pytest.mark.parametrize(
         ("exception", "status_code"),
         [

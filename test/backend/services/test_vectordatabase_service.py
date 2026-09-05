@@ -464,6 +464,7 @@ with patch('botocore.client.BaseClient._make_api_call'), \
     # Import utils.document_vector_utils to ensure it's available for patching
     import utils.document_vector_utils
     from management.services.knowledge_base.deletion import KnowledgeBaseDocumentDeletionService
+    from management.services.knowledge_base.management import KnowledgeBaseManagementService
     from management.services.knowledge_base.service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
 
 
@@ -9255,7 +9256,7 @@ def test_delete_lifecycle_record_without_object_handles_fence_and_cancel_errors(
         "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
     )
     monkeypatch.setattr(
-        ElasticSearchService, "_cancel_document_tasks",
+        KnowledgeBaseDocumentDeletionService, "_cancel_document_tasks",
         MagicMock(side_effect=RuntimeError("celery down")),
     )
     delete = MagicMock(return_value=True)
@@ -9274,7 +9275,7 @@ def test_delete_lifecycle_record_without_object_logs_fence_clear_error(monkeypat
     monkeypatch.setattr(
         "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
     )
-    monkeypatch.setattr(ElasticSearchService, "_cancel_document_tasks", MagicMock())
+    monkeypatch.setattr(KnowledgeBaseDocumentDeletionService, "_cancel_document_tasks", MagicMock())
     monkeypatch.setattr(
         "management.services.knowledge_base.deletion.transition_file_record",
         MagicMock(return_value={"file_id": "fid", "status": "DELETE_REQUESTED"}),
@@ -9287,3 +9288,272 @@ def test_delete_lifecycle_record_without_object_logs_fence_clear_error(monkeypat
         "file_id": "fid", "index_name": "kb", "status": "UPLOADED", "object_name": None,
     })
     assert result["lifecycle_deleted"] is True
+
+
+def test_wait_for_document_tasks_decodes_bytes_result(monkeypatch):
+    """Celery's Redis backend may return bytes for a terminal chain result."""
+    redis_mock = MagicMock()
+    redis_mock.backend_client.get.return_value = b'{"state":"SUCCESS"}'
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
+    )
+
+    assert ElasticSearchService._wait_for_document_tasks(
+        index_name="kb",
+        path_or_url="obj",
+        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
+        timeout_seconds=1,
+    )
+
+
+def test_wait_for_document_tasks_returns_false_for_malformed_result(monkeypatch):
+    """Malformed task metadata is treated as an unfinished chain rather than deleting early."""
+    redis_mock = MagicMock()
+    redis_mock.backend_client.get.return_value = b"not-json"
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
+    )
+
+    assert not ElasticSearchService._wait_for_document_tasks(
+        index_name="kb",
+        path_or_url="obj",
+        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
+        timeout_seconds=1,
+    )
+
+
+def test_wait_for_document_tasks_returns_false_for_backend_error(monkeypatch):
+    """A Redis result-backend error must not be interpreted as a completed chain."""
+    redis_mock = MagicMock()
+    redis_mock.backend_client.get.side_effect = RuntimeError("backend unavailable")
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
+    )
+
+    assert not ElasticSearchService._wait_for_document_tasks(
+        index_name="kb",
+        path_or_url="obj",
+        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
+        timeout_seconds=1,
+    )
+
+
+def test_wait_for_document_tasks_polls_before_timeout(monkeypatch):
+    """A non-terminal result is polled until the configured deadline."""
+    redis_mock = MagicMock()
+    redis_mock.backend_client.get.return_value = '{"status":"PENDING"}'
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.get_redis_service", lambda: redis_mock
+    )
+    monkeypatch.setattr("management.services.knowledge_base.deletion.time.sleep", lambda _: None)
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.time.monotonic",
+        MagicMock(side_effect=[0.0, 0.0, 1.0]),
+    )
+
+    assert not ElasticSearchService._wait_for_document_tasks(
+        index_name="kb",
+        path_or_url="obj",
+        lifecycle_record={"file_id": "fid", "parent_task_id": "chain"},
+        timeout_seconds=0.1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_document_by_scope_rejects_unknown_scope():
+    """Only the documented source-only and full deletion scopes are accepted."""
+    with pytest.raises(ValueError, match="Invalid scope"):
+        await ElasticSearchService.delete_document_by_scope(
+            "kb", "obj", "unknown", MagicMock()
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_document_by_scope_supports_legacy_lookup(monkeypatch):
+    """Callers without file metadata continue to use the path-based lifecycle lookup."""
+    marker = MagicMock(return_value={"file_id": "fid", "object_name": "obj"})
+    canceller = MagicMock(return_value={"task_ids": []})
+    finalizer = AsyncMock(return_value={"status": "success"})
+    monkeypatch.setattr(ElasticSearchService, "_mark_file_delete_requested", marker)
+    monkeypatch.setattr(ElasticSearchService, "_cancel_document_tasks", canceller)
+    monkeypatch.setattr(ElasticSearchService, "_finalize_document_delete", finalizer)
+
+    result = await ElasticSearchService.delete_document_by_scope(
+        "kb", "obj", "full", MagicMock()
+    )
+
+    assert result["status"] == "success"
+    marker.assert_called_once_with("kb", "obj")
+    canceller.assert_called_once_with(lifecycle_record={"file_id": "fid", "object_name": "obj"})
+
+
+def test_delete_documents_releases_storage_charge_after_minio_delete(monkeypatch):
+    """Successful MinIO deletion also reconciles the tenant storage ledger."""
+    import management.services.knowledge_base.deletion as deletion_module
+
+    vdb_core = MagicMock()
+    vdb_core.delete_documents.return_value = 3
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.delete_file",
+        MagicMock(return_value={"success": True}),
+    )
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.get_knowledge_record",
+        MagicMock(return_value={"tenant_id": "tenant-1"}),
+    )
+    reference = SimpleNamespace(bucket_name="bucket", object_name="obj")
+    monkeypatch.setattr(
+        "management.services.knowledge_base.deletion.resolve_storage_reference",
+        MagicMock(return_value=reference),
+    )
+    release = MagicMock()
+    monkeypatch.setattr("management.services.knowledge_base.deletion.release_storage_charge", release)
+    update_time = MagicMock()
+    monkeypatch.setattr("management.services.knowledge_base.deletion.update_last_doc_update_time", update_time)
+
+    result = ElasticSearchService.delete_documents("kb", "obj", vdb_core)
+
+    assert result == {"status": "success", "deleted_es_count": 3, "deleted_minio": True}
+    release.assert_called_once_with(
+        tenant_id="tenant-1", bucket_name="bucket", object_name="obj"
+    )
+    update_time.assert_called_once_with("kb")
+
+
+def test_knowledge_base_delete_guard_returns_non_ingesting_rows(monkeypatch):
+    """Non-ingesting lifecycle states are returned for cleanup and do not block KB deletion."""
+    rows = [
+        {"file_id": "completed", "status": "COMPLETED"},
+        {"file_id": "requested", "status": "DELETE_REQUESTED"},
+        {"file_id": "deleted", "status": "DELETED"},
+        {"file_id": "unknown", "status": None},
+    ]
+    list_records = MagicMock(return_value=rows)
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.list_file_records", list_records
+    )
+
+    result = KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed("kb")
+
+    assert result == rows
+    list_records.assert_called_once_with(index_name="kb", include_hidden=True)
+
+
+def test_knowledge_base_delete_guard_reports_blocking_files(monkeypatch):
+    """An active ingestion lifecycle row rejects knowledge-base deletion with file details."""
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.list_file_records",
+        lambda **_: [{"file_id": "fid-1", "status": "processing", "object_name": "obj.txt"}],
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed("kb")
+
+    assert exc_info.value.details["index_name"] == "kb"
+    assert exc_info.value.details["blocking_files"] == [{
+        "file_id": "fid-1",
+        "file_name": "obj.txt",
+        "status": "PROCESSING",
+    }]
+
+
+def test_knowledge_base_delete_guard_wraps_lifecycle_read_error(monkeypatch):
+    """A lifecycle database error is mapped to the service database error."""
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.list_file_records",
+        MagicMock(side_effect=RuntimeError("database unavailable")),
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed("kb")
+
+    assert exc_info.value.details == {
+        "operation": "knowledge_base_delete_guard",
+        "index_name": "kb",
+    }
+
+
+@pytest.mark.asyncio
+async def test_full_delete_knowledge_base_cleans_lifecycle_rows_and_fences(monkeypatch):
+    """A successful KB deletion hard-deletes lifecycle rows and clears file fences."""
+    import management.services.knowledge_base.deletion as deletion_module
+
+    rows = [
+        {"file_id": "fid-1", "status": "DELETE_REQUESTED"},
+        {"file_id": "fid-2", "status": "DELETED"},
+        {"status": "DELETED"},
+    ]
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.list_file_records",
+        MagicMock(return_value=rows),
+    )
+    lifecycle_delete = MagicMock(return_value=2)
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.delete_file_records_for_knowledge_base",
+        lifecycle_delete,
+    )
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.KnowledgeBaseManagementService._delete_kb_source_objects",
+        AsyncMock(return_value={"deleted_count": 0, "failed_count": 0}),
+    )
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index",
+        AsyncMock(return_value={"status": "success"}),
+    )
+    redis_mock = MagicMock()
+    redis_mock.delete_knowledgebase_records.return_value = {"total_deleted": 2}
+    redis_mock.clear_document_delete_fence.side_effect = [True, False]
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.get_redis_service",
+        lambda: redis_mock,
+    )
+
+    pending = SimpleNamespace(done=lambda: False, cancel=MagicMock())
+    deletion_module._document_delete_tasks["fid-1"] = pending
+    try:
+        result = await KnowledgeBaseManagementService.full_delete_knowledge_base(
+            index_name="kb", vdb_core=MagicMock(), user_id="user-1"
+        )
+    finally:
+        deletion_module._document_delete_tasks.pop("fid-1", None)
+
+    assert result["lifecycle_cleanup"] == {"deleted_count": 2}
+    assert result["lifecycle_fence_cleanup"] == {"cleared_count": 1, "failed_count": 0}
+    pending.cancel.assert_called_once()
+    lifecycle_delete.assert_called_once_with(index_name="kb")
+
+
+@pytest.mark.asyncio
+async def test_full_delete_knowledge_base_reports_lifecycle_cleanup_errors(monkeypatch):
+    """External deletion still returns a result when lifecycle cleanup or fence clearing fails."""
+    rows = [{"file_id": "fid-1", "status": "DELETED"}]
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.list_file_records",
+        MagicMock(return_value=rows),
+    )
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.delete_file_records_for_knowledge_base",
+        MagicMock(side_effect=RuntimeError("lifecycle database unavailable")),
+    )
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.KnowledgeBaseManagementService._delete_kb_source_objects",
+        AsyncMock(return_value={"deleted_count": 0, "failed_count": 0}),
+    )
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index",
+        AsyncMock(return_value={"status": "success"}),
+    )
+    redis_mock = MagicMock()
+    redis_mock.delete_knowledgebase_records.return_value = {"total_deleted": 0}
+    redis_mock.clear_document_delete_fence.side_effect = RuntimeError("redis unavailable")
+    monkeypatch.setattr(
+        "management.services.knowledge_base.management.get_redis_service",
+        lambda: redis_mock,
+    )
+
+    result = await KnowledgeBaseManagementService.full_delete_knowledge_base(
+        index_name="kb", vdb_core=MagicMock(), user_id="user-1"
+    )
+
+    assert "lifecycle database unavailable" in result["lifecycle_cleanup"]["error"]
+    assert result["lifecycle_fence_cleanup"] == {"cleared_count": 0, "failed_count": 1}

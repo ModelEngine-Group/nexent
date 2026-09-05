@@ -2215,6 +2215,8 @@ class TestRedisService(unittest.TestCase):
         self.redis_service._client = self.mock_redis_client
         self.assertFalse(self.redis_service.mark_document_delete_requested(
             file_id=None))
+        self.assertFalse(self.redis_service.is_document_delete_requested(
+            file_id=None))
         self.mock_redis_client.set.side_effect = redis.RedisError("write failed")
         self.assertFalse(self.redis_service.mark_document_delete_requested(
             file_id="fid-1"))
