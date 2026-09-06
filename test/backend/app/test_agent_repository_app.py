@@ -28,6 +28,17 @@ class _AgentRepositoryListingCreateRequest(BaseModel):
     tool_count: Optional[int] = Field(None, ge=0)
 
 
+class _AgentRepositoryImportRequest(BaseModel):
+    model_replacements: dict[str, int] = Field(default_factory=dict)
+
+
+class _AgentRepositorySkillInstallRequest(BaseModel):
+    skill_name: str = Field(..., min_length=1, max_length=100)
+    overwrite: bool = False
+
+
+consts_model.AgentRepositoryImportRequest = _AgentRepositoryImportRequest
+consts_model.AgentRepositorySkillInstallRequest = _AgentRepositorySkillInstallRequest
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
 sys.modules["consts.model"] = consts_model
 
@@ -353,8 +364,7 @@ def test_update_agent_repository_status_api_unauthorized(mocker, mock_auth_heade
         "apps.agent_repository_app.update_agent_repository_status_impl",
     )
 
-    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
-    mock_update_status.side_effect = UnauthorizedError("Not authorized")
+    mock_get_user_id.side_effect = UnauthorizedError("Not authorized")
 
     response = client.patch(
         "/repository/agent/42/status",
@@ -362,7 +372,32 @@ def test_update_agent_repository_status_api_unauthorized(mocker, mock_auth_heade
         json={"status": "pending_review"},
     )
 
+    mock_update_status.assert_not_called()
     assert response.status_code == 401
+    assert response.json()["detail"] == "Not authorized"
+
+
+def test_update_agent_repository_status_api_forbidden(mocker, mock_auth_header):
+    """Test update_agent_repository_status_api maps ForbiddenError to 403."""
+    from consts.exceptions import ForbiddenError
+
+    mock_get_user_id = mocker.patch(
+        "apps.agent_repository_app.get_current_user_id"
+    )
+    mock_update_status = mocker.patch(
+        "apps.agent_repository_app.update_agent_repository_status_impl",
+    )
+
+    mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
+    mock_update_status.side_effect = ForbiddenError("Not authorized")
+
+    response = client.patch(
+        "/repository/agent/42/status",
+        headers=mock_auth_header,
+        json={"status": "pending_review"},
+    )
+
+    assert response.status_code == 403
     assert response.json()["detail"] == "Not authorized"
 
 

@@ -34,6 +34,7 @@ import type { AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/ag
 import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { cn } from "@/lib/utils";
+import { ApiError } from "@/services/api";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
@@ -765,11 +766,13 @@ function ReviewCenterView({
           : t("repository.review.rejectSuccess", { name: title })
       );
       closeReviewModal();
-    } catch {
+    } catch (error) {
       message.error(
-        isApprove
-          ? t("repository.review.approveError")
-          : t("repository.review.rejectError")
+        error instanceof ApiError && String(error.code) === "403"
+          ? t("agentRepository.review.permissionDenied")
+          : isApprove
+            ? t("repository.review.approveError")
+            : t("repository.review.rejectError")
       );
       throw new Error("Review action failed");
     }

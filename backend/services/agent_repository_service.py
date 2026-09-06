@@ -13,7 +13,7 @@ from consts.agent_repository import (
     VALID_OWNERSHIP_FILTERS,
     VALID_REPOSITORY_STATUSES,
 )
-from consts.exceptions import SkillDuplicateError, SkillException, UnauthorizedError
+from consts.exceptions import ForbiddenError, SkillDuplicateError, SkillException, UnauthorizedError
 from consts.model import AgentRepositorySnapshot, ModelConnectStatusEnum
 from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 from database import skill_db
@@ -631,11 +631,11 @@ def _validate_repository_status_transition(
 
     if user_role in ("ADMIN", "DEV"):
         if record.get("publisher_tenant_id") != tenant_id:
-            raise UnauthorizedError(
+            raise ForbiddenError(
                 "Not authorized to update this repository listing"
             )
         if user_role == "DEV" and record.get("publisher_user_id") != user_id:
-            raise UnauthorizedError(
+            raise ForbiddenError(
                 "Not authorized to update this repository listing"
             )
         if (
@@ -654,7 +654,7 @@ def _validate_repository_status_transition(
             }
         return None
 
-    raise UnauthorizedError(
+    raise ForbiddenError(
         f"User role {user_role} not authorized to update repository status"
     )
 

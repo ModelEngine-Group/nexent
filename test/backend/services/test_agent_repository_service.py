@@ -44,6 +44,8 @@ sys.modules["database.agent_db"] = _agent_db_mock
 _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.search_version_by_version_no = MagicMock()
 sys.modules["database.agent_version_db"] = _agent_version_db_mock
+sys.modules["database.skill_db"] = MagicMock()
+sys.modules["database.model_management_db"] = MagicMock()
 
 
 class _SkillZipEntryMock:
@@ -112,9 +114,10 @@ sys.modules["services.repository_import_precheck"] = _precheck_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["services.notification_service"] = _notification_service_mock
+sys.modules["services.skill_service"] = MagicMock()
 
 from consts.const import ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
+from consts.exceptions import ForbiddenError, UnauthorizedError
 from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
 from backend.services import agent_repository_service as ars
@@ -970,7 +973,7 @@ def test_update_status_admin_tenant_mismatch(mock_status_update_deps):
         publisher_tenant_id="other_tenant",
     )
 
-    with pytest.raises(UnauthorizedError, match="Not authorized"):
+    with pytest.raises(ForbiddenError, match="Not authorized"):
         ars.update_agent_repository_status_impl(
             agent_repository_id=1,
             status="pending_review",
@@ -1125,7 +1128,8 @@ def test_update_status_admin_pending_review_to_rejected(mock_status_update_deps)
     )
 
 
-def test_update_status_admin_review_tenant_mismatch(mock_status_update_deps):
+@pytest.mark.parametrize("status", ["shared", "rejected"])
+def test_update_status_admin_review_tenant_mismatch(mock_status_update_deps, status):
     deps = mock_status_update_deps
     deps["get_user_role"].return_value = {"user_role": "ADMIN"}
     deps["get_by_id"].return_value = _repository_record(
@@ -1133,13 +1137,15 @@ def test_update_status_admin_review_tenant_mismatch(mock_status_update_deps):
         publisher_tenant_id="other_tenant",
     )
 
-    with pytest.raises(UnauthorizedError, match="Not authorized"):
+    with pytest.raises(ForbiddenError, match="Not authorized"):
         ars.update_agent_repository_status_impl(
             agent_repository_id=1,
-            status="shared",
+            status=status,
             user_id="admin_user",
             tenant_id="tenant_a",
         )
+
+    deps["update_status"].assert_not_called()
 
 
 def test_update_status_admin_pending_review_to_not_shared(mock_status_update_deps):
@@ -1177,7 +1183,7 @@ def test_update_status_dev_publisher_user_mismatch(mock_status_update_deps):
         publisher_user_id="other_user",
     )
 
-    with pytest.raises(UnauthorizedError, match="Not authorized"):
+    with pytest.raises(ForbiddenError, match="Not authorized"):
         ars.update_agent_repository_status_impl(
             agent_repository_id=1,
             status="pending_review",
@@ -1211,7 +1217,7 @@ def test_update_status_user_role_rejected(mock_status_update_deps):
     deps["get_user_role"].return_value = {"user_role": "USER"}
     deps["get_by_id"].return_value = _repository_record(status="not_shared")
 
-    with pytest.raises(UnauthorizedError, match="not authorized"):
+    with pytest.raises(ForbiddenError, match="not authorized"):
         ars.update_agent_repository_status_impl(
             agent_repository_id=1,
             status="pending_review",

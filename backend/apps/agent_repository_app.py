@@ -185,6 +185,12 @@ async def update_agent_repository_status_api(
             f"(id={agent_repository_id}, status={status}): {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ForbiddenError as e:
+        logger.warning(
+            f"Forbidden agent repository status update attempt "
+            f"(id={agent_repository_id}, status={status}): {str(e)}"
+        )
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Invalid agent repository status update "

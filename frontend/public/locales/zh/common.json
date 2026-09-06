@@ -2136,6 +2136,7 @@
   "agentRepository.review.reviewOpinionPlaceholder": "选填",
   "agentRepository.review.approveSuccess": "已通过「{{name}}」的审核",
   "agentRepository.review.rejectSuccess": "已驳回「{{name}}」",
+  "agentRepository.review.permissionDenied": "您无权限审核该智能体",
   "agentRepository.review.approveError": "通过审核失败，请稍后重试",
   "agentRepository.review.rejectError": "驳回审核失败，请稍后重试",
   "agentRepository.category.writingAssistant": "写作助手",
