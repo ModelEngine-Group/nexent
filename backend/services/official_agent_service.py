@@ -179,6 +179,20 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
         return None
 
     dir_path = os.path.join(OFFICIAL_AGENTS_PATH, name)
+    if not os.path.isdir(dir_path):
+        # Deployment resources may be grouped by profile, for example
+        # ``official-agents/general/<bundle>/agent.json``. The repository
+        # stores the Bundle directory name, so resolve it below any profile
+        # directory without exposing the host path to callers.
+        for root, directories, files in os.walk(OFFICIAL_AGENTS_PATH):
+            directories[:] = [
+                directory
+                for directory in directories
+                if not directory.startswith(".")
+            ]
+            if os.path.basename(root) == name and "agent.json" in files:
+                dir_path = root
+                break
     if os.path.isdir(dir_path) and os.path.isfile(
         os.path.join(dir_path, "agent.json")
     ):
@@ -195,6 +209,17 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
         return bundle
 
     single_path = os.path.join(OFFICIAL_AGENTS_PATH, f"{name}.json")
+    if not os.path.isfile(single_path):
+        for root, directories, files in os.walk(OFFICIAL_AGENTS_PATH):
+            directories[:] = [
+                directory
+                for directory in directories
+                if not directory.startswith(".")
+            ]
+            candidate = os.path.join(root, f"{name}.json")
+            if os.path.isfile(candidate):
+                single_path = candidate
+                break
     if os.path.isfile(single_path):
         try:
             with open(single_path, encoding="utf-8") as f:
@@ -207,6 +232,17 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
         return bundle
 
     zip_path = os.path.join(OFFICIAL_AGENTS_PATH, f"{name}.zip")
+    if not os.path.isfile(zip_path):
+        for root, directories, files in os.walk(OFFICIAL_AGENTS_PATH):
+            directories[:] = [
+                directory
+                for directory in directories
+                if not directory.startswith(".")
+            ]
+            candidate = os.path.join(root, f"{name}.zip")
+            if os.path.isfile(candidate):
+                zip_path = candidate
+                break
     if os.path.isfile(zip_path):
         extract_dir = tempfile.mkdtemp(prefix="nexent-official-agent-")
         try:
