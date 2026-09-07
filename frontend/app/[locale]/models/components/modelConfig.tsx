@@ -57,7 +57,6 @@ import log from "@/lib/logger";
 
 import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
-import { ModelEditDialogV2 } from "./model/ModelEditDialogV2";
 import { DefaultModelDialog } from "./model/DefaultModelDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
@@ -1430,7 +1429,7 @@ export const ModelConfigSection = forwardRef<
           capacityCoverage={capacityCoverage}
         />
 
-        <ModelEditDialogV2
+        <ModelAddDialogV2
           isOpen={!!editingCardModel}
           model={editingCardModel}
           onClose={() => setEditingCardModel(null)}

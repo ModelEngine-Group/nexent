@@ -27,6 +27,7 @@ import {
   ModelCatalogModelEntry,
   ModelCatalogProfile,
   ModelCatalogProviderInfo,
+  ModelOption,
   ModelType,
   SingleModelConfig,
 } from "@/types/modelConfig";
@@ -79,6 +80,10 @@ interface ModelAddDialogV2Props {
   onSuccess: (model?: AddedModel) => Promise<void>;
   /** Optional tenant id for super-admin manage paths. When absent, current-tenant endpoints are used. */
   tenantId?: string;
+  /** When provided, the dialog opens in edit mode: the "自定义接入" tab is
+      selected by default and the custom form is prefilled from this model.
+      On submit the update endpoints are used instead of the create ones. */
+  model?: ModelOption | null;
 }
 
 // =============================================================================
@@ -200,6 +205,7 @@ export const ModelAddDialogV2 = ({
   onClose,
   onSuccess,
   tenantId,
+  model,
 }: ModelAddDialogV2Props) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -259,6 +265,57 @@ export const ModelAddDialogV2 = ({
       .then(({ catalog }) => setCatalog(catalog))
       .catch(() => setCatalog(null));
   }, [isOpen]);
+
+  // ---------- edit mode: default to "自定义接入" tab ----------
+  // When opening, pick the initial tab from the mode: edit (model provided)
+  // lands on "custom", add lands on "batch".
+  useEffect(() => {
+    if (!isOpen) return;
+    setActiveTab(model ? "custom" : "batch");
+  }, [isOpen, model]);
+
+  // ---------- edit mode: prefill custom form from the existing model ----------
+  // inferenceSpecs is in the dependency list so a late specs load (after the
+  // model is set) re-runs this effect and populates inference params correctly.
+  useEffect(() => {
+    if (!isOpen || !model) return;
+    setCustomForm({
+      type: model.type,
+      name: model.name,
+      displayName: model.displayName || model.name,
+      url: model.apiUrl || "",
+      apiKey: model.apiKey || "",
+      maxTokens: model.maxTokens?.toString() || "4096",
+      isMultimodal: model.type === MODEL_TYPES.MULTI_EMBEDDING,
+      chunkSizeRange: [
+        model.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
+        model.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
+      ] as [number, number],
+      chunkingBatchSize: (model.chunkingBatchSize ?? 10).toString(),
+    });
+    setCustomCapacity(capacityFormFromModel(model));
+    const advancedValue = advancedSettingsValueFromRecord(
+      {
+        temperature: model.temperature,
+        top_p: model.topP,
+        extra_params: model.extraParams,
+        display_name: model.displayName,
+        model_factory: model.modelFactory,
+        model_appid: model.modelAppid,
+        access_token: model.accessToken,
+      },
+      inferenceSpecs,
+      model.type
+    );
+    // display_name drives the custom form's display-name field; ensure it is
+    // always seeded even when not part of the inference specs.
+    advancedValue.display_name = model.displayName || model.name;
+    if (model.modelFactory) advancedValue.model_factory = model.modelFactory;
+    if (model.modelAppid) advancedValue.model_appid = model.modelAppid;
+    if (model.accessToken) advancedValue.access_token = model.accessToken;
+    setCustomAdvanced(advancedValue);
+    setCustomConnectivity({ status: null, message: "" });
+  }, [isOpen, model, inferenceSpecs]);
 
   // ---------- derived: model type options (aligned with original ModelAddDialog) ----------
   const modelTypeOptions = useMemo(() => [
@@ -676,37 +733,96 @@ export const ModelAddDialogV2 = ({
         ? 0
         : Number.parseInt(customForm.maxTokens, 10) || 0;
 
-      const modelParams: any = {
-        name: customForm.name,
-        type: resolvedModelType,
-        url: customForm.url,
-        apiKey: customForm.apiKey.trim() === "" ? "sk-no-api-key" : customForm.apiKey,
-        maxTokens: maxTokensValue,
-        displayName: (customAdvanced.display_name as string) || defaultDisplayName(customForm.name),
-        ...capacityPayload,
-        ...inferencePayload,
-        ...(isEmbedding
-          ? {
-              // Vector dimension is fixed at 1024 (not user-editable, matching original)
-              maxTokens: 1024,
-              expectedChunkSize: customForm.chunkSizeRange[0],
-              maximumChunkSize: customForm.chunkSizeRange[1],
-              chunkingBatchSize: Number.parseInt(customForm.chunkingBatchSize, 10) || 10,
-            }
-          : {}),
+      const displayNameValue =
+        (customAdvanced.display_name as string) || defaultDisplayName(customForm.name);
+      const isVoice = isVoiceType(resolvedModelType);
+      const inferenceUpdate = {
+        temperature: inferencePayload.temperature as number | undefined,
+        topP: inferencePayload.top_p as number | undefined,
+        extraParams: inferencePayload.extra_params as
+          | Record<string, unknown>
+          | undefined,
       };
 
-      if (tenantId) {
-        await modelService.createManageTenantModel({ tenantId, ...modelParams });
+      if (model) {
+        // ---------- edit (update) path ----------
+        // Look up the existing row by its original display name, then send the
+        // edited fields. Mirrors ModelEditDialogV2's update payload shape,
+        // adapted to the fields exposed by the custom-access form.
+        const originalDisplayName = model.displayName || model.name;
+        const updateBase = {
+          currentDisplayName: originalDisplayName,
+          name: customForm.name,
+          ...(displayNameValue !== originalDisplayName
+            ? { displayName: displayNameValue }
+            : {}),
+          url: customForm.url,
+          apiKey:
+            customForm.apiKey.trim() === "" ? "sk-no-api-key" : customForm.apiKey,
+          ...(isEmbedding
+            ? {
+                expectedChunkSize: customForm.chunkSizeRange[0],
+                maximumChunkSize: customForm.chunkSizeRange[1],
+                chunkingBatchSize:
+                  Number.parseInt(customForm.chunkingBatchSize, 10) || 10,
+              }
+            : {}),
+          ...(isVoice
+            ? {
+                modelFactory:
+                  (customAdvanced.model_factory as string) || undefined,
+                modelAppid: customAdvanced.model_appid as string | undefined,
+                accessToken: customAdvanced.access_token as string | undefined,
+              }
+            : {}),
+          ...(supportsCapacityFields(customForm.type) ? capacityPayload : {}),
+          ...inferenceUpdate,
+        };
+        if (tenantId) {
+          await modelService.updateManageTenantModel({
+            tenantId,
+            ...updateBase,
+          });
+        } else {
+          await modelService.updateSingleModel({
+            ...updateBase,
+            source: model.source,
+          });
+        }
       } else {
-        await modelService.addCustomModel(modelParams);
+        // ---------- add (create) path ----------
+        const modelParams: any = {
+          name: customForm.name,
+          type: resolvedModelType,
+          url: customForm.url,
+          apiKey: customForm.apiKey.trim() === "" ? "sk-no-api-key" : customForm.apiKey,
+          maxTokens: maxTokensValue,
+          displayName: displayNameValue,
+          ...capacityPayload,
+          ...inferencePayload,
+          ...(isEmbedding
+            ? {
+                // Vector dimension is fixed at 1024 (not user-editable, matching original)
+                maxTokens: 1024,
+                expectedChunkSize: customForm.chunkSizeRange[0],
+                maximumChunkSize: customForm.chunkSizeRange[1],
+                chunkingBatchSize: Number.parseInt(customForm.chunkingBatchSize, 10) || 10,
+              }
+            : {}),
+        };
+
+        if (tenantId) {
+          await modelService.createManageTenantModel({ tenantId, ...modelParams });
+        } else {
+          await modelService.addCustomModel(modelParams);
+        }
       }
 
       // persist to local config (best-effort)
       const modelConfig: SingleModelConfig = {
         id: 0,
         modelName: customForm.name,
-        displayName: (customAdvanced.display_name as string) || defaultDisplayName(customForm.name),
+        displayName: displayNameValue,
         apiConfig: { apiKey: customForm.apiKey, modelUrl: customForm.url },
         ...capacityPayload,
       };
@@ -717,7 +833,11 @@ export const ModelAddDialogV2 = ({
         log.warn("Failed to persist model config after custom add");
       }
 
-      message.success(t("model.dialog.v2.customSuccess", { defaultValue: "模型添加成功" }));
+      message.success(
+        model
+          ? t("model.dialog.editSuccess", { defaultValue: "模型更新成功" })
+          : t("model.dialog.v2.customSuccess", { defaultValue: "模型添加成功" })
+      );
       resetCustomForm();
       onClose();
       await onSuccess({
@@ -726,14 +846,19 @@ export const ModelAddDialogV2 = ({
       });
     } catch (error: any) {
       message.error(
-        t("model.dialog.error.addFailed", {
-          error: translateError(error?.message || "", t),
-        })
+        t(
+          model
+            ? "model.dialog.error.editFailed"
+            : "model.dialog.error.addFailed",
+          {
+            error: translateError(error?.message || "", t),
+          }
+        )
       );
     } finally {
       setLoading(false);
     }
-  }, [customForm, customAdvanced, customCapacity, tenantId, message, t, updateModelConfig, saveConfig, onClose, onSuccess, validateCustomForm]);
+  }, [customForm, customAdvanced, customCapacity, tenantId, model, message, t, updateModelConfig, saveConfig, onClose, onSuccess, validateCustomForm]);
 
   const resetCustomForm = useCallback(() => {
     setCustomForm({
@@ -884,7 +1009,11 @@ export const ModelAddDialogV2 = ({
     <Modal
       open={isOpen}
       onCancel={handleClose}
-      title={t("model.dialog.v2.title", { defaultValue: "添加模型" })}
+      title={
+        model
+          ? t("model.dialog.editTitle", { defaultValue: "编辑模型" })
+          : t("model.dialog.v2.title", { defaultValue: "添加模型" })
+      }
       width={900}
       footer={null}
       destroyOnClose
