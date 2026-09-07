@@ -67,7 +67,7 @@ spec:
   storageClassName: {{ $storageClassName | quote }}
   capacity:
     storage: {{ $skillsSize }}
-    accessModes:
+  accessModes:
 {{ toYaml $accessModes | indent 4 }}
   persistentVolumeReclaimPolicy: Retain
   hostPath:
