@@ -139,11 +139,11 @@ copy_profiles() {
 
 sync_repository() {
   if [ "${DEPLOY_OFFICIAL_K8S:-false}" = true ]; then
-    kubectl exec deployment/nexent-config -n "$NAMESPACE" -- \
+    MSYS_NO_PATHCONV=1 kubectl exec deployment/nexent-config -n "$NAMESPACE" -- \
       python backend/scripts/sync_official_agents.py \
       --base-dir "$TARGET_CONTAINER_DIR" --profiles "$PROFILES"
   else
-    docker exec -e "OFFICIAL_AGENT_PROFILES=$PROFILES" nexent-config \
+    MSYS_NO_PATHCONV=1 docker exec -e "OFFICIAL_AGENT_PROFILES=$PROFILES" nexent-config \
       python backend/scripts/sync_official_agents.py \
       --base-dir "$TARGET_CONTAINER_DIR" --profiles "$PROFILES"
   fi
