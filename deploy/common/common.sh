@@ -1573,7 +1573,7 @@ deployment_tui_step_should_run() {
       deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ -z "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
       ;;
     4)
-      [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ] && [ -z "${DEPLOYMENT_OFFICIAL_AGENT_PROFILES_EXPLICIT:-}" ]
+      return 1
       ;;
     *)
       return 1
@@ -1646,7 +1646,6 @@ deployment_run_tui_configuration() {
         result=$?
         ;;
       4)
-        deployment_tui_multiselect_official_agents
         result=$?
         ;;
       *)

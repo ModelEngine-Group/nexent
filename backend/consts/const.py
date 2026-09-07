@@ -89,9 +89,6 @@ OFFICIAL_AGENTS_PATH = os.getenv(
     "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
 )
 
-# Container-internal official agent bundle directory. Bundles are maintained
-# outside of the Nexent source repository and selected by deployment profile.
-OFFICIAL_AGENTS_PATH = os.getenv("OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents")
 OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
 OFFICIAL_AGENT_TENANT_ID = "__nexent_official__"
 OFFICIAL_AGENT_USER_ID = "__nexent_system__"

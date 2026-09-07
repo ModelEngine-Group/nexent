@@ -1050,37 +1050,10 @@ prepare_directory_and_data() {
     echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
   fi
 
-  # Copy only the explicitly selected official agent profiles. The compose
-  # file mounts this directory read-only into nexent-config.
-  OFFICIAL_AGENT_PROFILES="${DEPLOYMENT_OFFICIAL_AGENT_PROFILES:-${OFFICIAL_AGENT_PROFILES:-}}"
-  if [ -n "$OFFICIAL_AGENT_PROFILES" ] && [ -z "${DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR:-}" ]; then
-    deployment_prepare_official_agent_catalog || true
-  fi
-  local official_agent_source_root="${DEPLOYMENT_OFFICIAL_AGENT_SOURCE_DIR:-$DOCKER_ASSETS_DIR/official-agents}"
-  if [ -d "$official_agent_source_root" ] && [ -n "$OFFICIAL_AGENT_PROFILES" ]; then
-    mkdir -p "$NEXENT_USER_DIR/official-agents"
-    local official_profile official_source official_target
-    IFS=',' read -r -a official_profiles <<< "$OFFICIAL_AGENT_PROFILES"
-    for official_profile in "${official_profiles[@]}"; do
-      official_profile="$(echo "$official_profile" | xargs)"
-      [ -n "$official_profile" ] || continue
-      case "$official_profile" in
-        *[!a-zA-Z0-9_-]*) echo "   ⚠️ Invalid official agent profile: $official_profile"; continue ;;
-      esac
-      official_source="$official_agent_source_root/$official_profile"
-      official_target="$NEXENT_USER_DIR/official-agents/$official_profile"
-      if [ -d "$official_source" ]; then
-        mkdir -p "$official_target"
-        cp -rf "$official_source/." "$official_target/"
-        chmod -R a-w "$official_target" 2>/dev/null || true
-        echo "   📦 Official agent profile copied: $official_profile"
-      else
-        echo "   ⚠️ Official agent profile not found: $official_profile"
-      fi
-    done
-    update_env_var "OFFICIAL_AGENT_PROFILES" "$OFFICIAL_AGENT_PROFILES"
-    update_env_var "OFFICIAL_AGENTS_PATH" "/mnt/nexent/official-agents"
-  fi
+  # Reserve the official-agent mount point. Official bundles are installed by
+  # the standalone official-agent deployment flow after Nexent is installed.
+  mkdir -p "$NEXENT_USER_DIR/official-agents"
+  chmod 775 "$NEXENT_USER_DIR/official-agents"
 
   # Export for docker-compose
   export NEXENT_USER_DIR
@@ -1111,18 +1084,6 @@ deploy_core_services() {
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
     echo "   ❌ ERROR Failed to start core services"
     return 1
-  fi
-}
-
-sync_official_agents_after_deploy() {
-  local profiles="${DEPLOYMENT_OFFICIAL_AGENT_PROFILES:-${OFFICIAL_AGENT_PROFILES:-}}"
-  [ -n "$profiles" ] || return 0
-
-  echo "🤖 Synchronizing official agent bundles ($profiles)..."
-  if docker exec nexent-config python backend/scripts/sync_official_agents.py; then
-    echo "   ✅ Official agent bundles synchronized"
-  else
-    echo "   ⚠️ Official agent synchronization failed; Nexent deployment will continue"
   fi
 }
 
@@ -1884,8 +1845,6 @@ main_deploy() {
       exit 1
     }
   fi
-
-  sync_official_agents_after_deploy
 
   persist_deploy_options
   deployment_persist_local_config

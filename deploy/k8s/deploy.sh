@@ -741,18 +741,6 @@ wait_for_deployment_ready() {
     kubectl rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s"
 }
 
-sync_official_agents_after_deploy() {
-    local profiles="${DEPLOYMENT_OFFICIAL_AGENT_PROFILES:-${OFFICIAL_AGENT_PROFILES:-}}"
-    [ -n "$profiles" ] || return 0
-
-    echo "Synchronizing official agent bundles ($profiles)..."
-    if kubectl exec deployment/nexent-config -n "$NAMESPACE" -- python backend/scripts/sync_official_agents.py; then
-        echo "Official agent bundles synchronized."
-    else
-        echo "Warning: official agent synchronization failed; deployment will continue."
-    fi
-}
-
 recreate_legacy_nexent_secret_for_helm_management() {
     local managers
     if ! kubectl get secret nexent-secrets -n "$NAMESPACE" >/dev/null 2>&1; then
@@ -1348,8 +1336,6 @@ apply() {
             exit 1
         fi
     fi
-
-    sync_official_agents_after_deploy
 
     # Save deployment options for future use
     persist_deploy_options
