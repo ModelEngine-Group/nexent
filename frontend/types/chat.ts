@@ -252,6 +252,11 @@ export interface ChatStreamMainProps {
     modelNames?: string[]
   ) => void;
   onCitationHover?: () => void;
+  onCitationClick?: (
+    messageId: string,
+    citationKey: string,
+    answerText: string
+  ) => void;
   onScroll?: () => void;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];
@@ -410,6 +415,8 @@ export interface ChatRightPanelProps {
   isVisible?: boolean;
   toggleRightPanel?: () => void;
   selectedMessageId?: string;
+  selectedCitationKey?: string;
+  selectedCitationContext?: string;
 }
 
 // Task message type

@@ -30,6 +30,15 @@ function parseImageMetadata(value: unknown): ImageMetadata | null {
   }
 }
 
+function getRetrievalHighlightTerms(scoreDetails: unknown): string[] {
+  if (!scoreDetails || typeof scoreDetails !== "object") return [];
+  const terms = (scoreDetails as { retrieval_highlight_terms?: unknown })
+    .retrieval_highlight_terms;
+  return Array.isArray(terms)
+    ? terms.filter((term): term is string => typeof term === "string")
+    : [];
+}
+
 // Backend SSE chunk format
 interface SseChunk {
   type: string;
@@ -951,6 +960,7 @@ export function attachSearchContentToTool(
     title: string;
     text?: string;
     sourceType?: string;
+    publishedDate?: string;
     filename?: string;
     sourceFile?: string;
     downloadUrl?: string;
@@ -959,6 +969,7 @@ export function attachSearchContentToTool(
     toolSign?: string;
     isImage?: boolean;
     imageKey?: string;
+    retrievalHighlightTerms?: string[];
   },
   toolCallId: string | undefined = undefined
 ): boolean {
@@ -1011,6 +1022,7 @@ export interface SearchSource {
   text?: string;
   sourceType?: string;
   searchType?: string;
+  publishedDate?: string;
   toolSign?: string;
   filename?: string;
   sourceFile?: string;
@@ -1018,6 +1030,7 @@ export interface SearchSource {
   objectName?: string;
   isImage?: boolean;
   imageKey?: string;
+  retrievalHighlightTerms?: string[];
 }
 export const searchSourcesRegistry = new Map<string, SearchSource[]>();
 
@@ -2367,6 +2380,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 const isImage =
                   result.score_details?.chunk_type === "image" ||
                   Boolean(imageMetadata);
+                const retrievalHighlightTerms = getRetrievalHighlightTerms(
+                  result.score_details,
+                );
                 const title =
                   result.title ||
                   filename ||
@@ -2380,6 +2396,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     text,
                     sourceType: result.source_type,
                     searchType: result.search_type,
+                    publishedDate: result.published_date,
                     toolSign: result.tool_sign,
                     filename,
                     sourceFile:
@@ -2388,6 +2405,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     objectName: result.object_name,
                     isImage,
                     imageKey: result.image_key,
+                    retrievalHighlightTerms,
                   });
                 }
                 attachSearchContentToTool(
@@ -2397,6 +2415,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     title,
                     text,
                     sourceType: result.source_type,
+                    publishedDate: result.published_date,
                     filename,
                     sourceFile:
                       result.source_file || imageMetadata?.source_file,
@@ -2406,6 +2425,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     toolSign: result.tool_sign,
                     isImage,
                     imageKey: result.image_key,
+                    retrievalHighlightTerms,
                   },
                   chunk.tool_call_id
                 );
@@ -2602,6 +2622,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   const isImage =
                     result.score_details?.chunk_type === "image" ||
                     Boolean(imageMetadata);
+                  const retrievalHighlightTerms = getRetrievalHighlightTerms(
+                    result.score_details,
+                  );
                   const title =
                     result.title ||
                     filename ||
@@ -2615,6 +2638,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       text,
                       sourceType: result.source_type,
                       searchType: result.search_type,
+                      publishedDate: result.published_date,
                       toolSign: result.tool_sign,
                       filename,
                       sourceFile:
@@ -2623,6 +2647,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       objectName: result.object_name,
                       isImage,
                       imageKey: result.image_key,
+                      retrievalHighlightTerms,
                     });
                   }
                   attachSearchContentToTool(
@@ -2632,6 +2657,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       title,
                       text,
                       sourceType: result.source_type,
+                      publishedDate: result.published_date,
                       filename,
                       sourceFile:
                         result.source_file || imageMetadata?.source_file,
@@ -2641,6 +2667,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       toolSign: result.tool_sign,
                       isImage,
                       imageKey: result.image_key,
+                      retrievalHighlightTerms,
                     },
                     chunk.tool_call_id
                   );
@@ -2764,6 +2791,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             downloadUrl: source.downloadUrl,
             objectName: source.objectName,
             citeIndex: source.citeIndex,
+            toolSign: source.toolSign,
+            retrievalHighlightTerms: source.retrievalHighlightTerms,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
           });
         }
@@ -2777,6 +2806,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           title: image.title,
           text: image.text,
           citeIndex: image.citeIndex,
+          toolSign: image.toolSign,
           isImage: true,
           imageKey: image.imageKey,
           messageId,
