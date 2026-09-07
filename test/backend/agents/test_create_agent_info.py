@@ -548,20 +548,10 @@ from backend.agents.create_agent_info import (
 )
 
 
-def test_ac_p3_25_external_search_switch_skips_provider_factory(monkeypatch):
-    factory = MagicMock()
-    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
-    monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", False)
-
-    assert _get_external_provider_service_for_search() is None
-    factory.assert_not_called()
-
-
-def test_ac_p3_25_external_search_switch_uses_provider_factory(monkeypatch):
+def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
     service = object()
     factory = MagicMock(return_value=service)
     monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
-    monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", True)
 
     assert _get_external_provider_service_for_search() is service
     factory.assert_called_once_with()

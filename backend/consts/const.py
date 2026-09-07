@@ -426,12 +426,8 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
     os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
 )
 
-# External memory transparent proxy master switches
-EXTERNAL_MEMORY_SEARCH_ENABLED = os.getenv(
-    "EXTERNAL_MEMORY_SEARCH_ENABLED", "false"
-).lower() in ("true", "1", "yes")
-# External provider toggles (configured per provider elsewhere; these constants
-# describe protocol-level defaults)
+# External provider protocol defaults. Provider records control whether each
+# configured integration participates in search and ingest.
 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
     "agent",
     "model_output",
