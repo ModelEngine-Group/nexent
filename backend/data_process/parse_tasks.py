@@ -608,8 +608,10 @@ def process_sync(
             meta={
                 "task_name": "process_sync",
                 "sync_mode": True,
+                "chunks_key": redis_key,
                 "chunks_count": len(chunks),
                 "text_length": text_length,
+                "processing_time": elapsed,
             },
         )
         return {
