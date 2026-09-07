@@ -2,8 +2,8 @@ import sys
 import os
 import pytest
 from unittest.mock import patch, MagicMock, ANY
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from fastapi import FastAPI, HTTPException
 from http import HTTPStatus
 
 # Add project root to sys.path so that the top-level `backend` package is importable
@@ -29,7 +29,7 @@ patch('backend.database.client.MinioClient', return_value=minio_client_mock).sta
 
 
 @pytest.fixture(scope="function")
-def client(mocker):
+async def client(mocker):
     """Create test client with mocked dependencies."""
     # Mock boto3 and MinioClient before importing
     mocker.patch('boto3.client')
@@ -53,7 +53,10 @@ def client(mocker):
     # Create test client
     app = FastAPI()
     app.include_router(router)
-    return TestClient(app)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as async_client:
+        yield async_client
 
 
 # Test fixtures
@@ -107,7 +110,7 @@ async def test_suggest_capacity_success(client, auth_header, user_credentials, m
         )
     )
 
-    response = client.post(
+    response = await client.post(
         "/model/suggest-capacity",
         json={
             "model_name": "gpt-4o",
@@ -142,7 +145,7 @@ async def test_suggest_capacity_real_serialization_uses_envelope(client, auth_he
     """
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
-    response = client.post(
+    response = await client.post(
         "/model/suggest-capacity",
         json={
             "model_name": "gpt-4o",
@@ -169,6 +172,11 @@ async def test_suggest_capacity_real_serialization_uses_envelope(client, auth_he
     assert data["canonical_model_name"] == "gpt-4o"
     assert data["capability_profile_version"] == "openai/gpt-4o@1"
     assert data["capacity_source_on_accept"] == "operator"
+    assert data["canonical_identity"]["canonical_id"] == "openai:gpt-4o"
+    assert data["capacity_match"]["selected_profile"] == "openai/gpt-4o@1"
+    assert data["capacity_match"]["auto_applicable"] is False
+    assert data["tokenizer_match"]["source"] == "unknown"
+    assert data["suggestions"]["tokenizer_family"] is None
     # Nested capacity dict is also envelope-free at this level: it sits
     # directly under data.suggestions, mirroring the snake_case wire format
     # that mapCapacitySuggestionFromApi expects.
@@ -201,7 +209,7 @@ async def test_capacity_coverage_real_serialization_uses_envelope(client, auth_h
         },
     )
 
-    response = client.get("/model/capacity-coverage", headers=auth_header)
+    response = await client.get("/model/capacity-coverage", headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     body = response.json()
@@ -225,7 +233,7 @@ async def test_suggest_capacity_bad_request(client, auth_header, user_credential
         side_effect=ValueError("model_name is required"),
     )
 
-    response = client.post(
+    response = await client.post(
         "/model/suggest-capacity",
         json={"model_name": "gpt-4o"},
         headers=auth_header,
@@ -233,6 +241,171 @@ async def test_suggest_capacity_bad_request(client, auth_header, user_credential
 
     assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "model_name is required" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_capacity_adoption_preview_success(client, auth_header, user_credentials, mocker):
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_user_tenant_by_user_id', return_value={"user_role": "ADMIN"})
+    preview = mocker.patch(
+        'backend.apps.model_managment_app.preview_capacity_adoption_for_tenant',
+        return_value={"matcher_version": "1.0.0", "fields": {}},
+    )
+    response = await client.post(
+        "/model/capacity-adoption-preview",
+        json={"display_name": "Qwen Plus", "expected_matcher_version": "1.0.0"},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"]["matcher_version"] == "1.0.0"
+    preview.assert_awaited_once_with(
+        "test_tenant", "Qwen Plus", expected_matcher_version="1.0.0"
+    )
+
+
+@pytest.mark.asyncio
+async def test_capacity_adopt_success(client, auth_header, user_credentials, mocker):
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_user_tenant_by_user_id', return_value={"user_role": "ADMIN"})
+    adopt = mocker.patch(
+        'backend.apps.model_managment_app.adopt_capacity_for_tenant',
+        return_value={"updated_fields": ["context_window_tokens"]},
+    )
+    response = await client.post(
+        "/model/capacity-adopt",
+        json={
+            "display_name": "Qwen Plus",
+            "expected_profile_version": "dashscope/qwen-plus@2",
+            "expected_matcher_version": "1.0.0",
+            "fields": ["context_window_tokens"],
+            "reset_manual_fields": [],
+        },
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.OK
+    adopt.assert_awaited_once_with(
+        "test_user",
+        "test_tenant",
+        "Qwen Plus",
+        expected_profile_version="dashscope/qwen-plus@2",
+        expected_matcher_version="1.0.0",
+        fields=["context_window_tokens"],
+        reset_manual_fields=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_token_count_probe_success_is_sanitized(client, auth_header, user_credentials, mocker):
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch('backend.apps.model_managment_app.get_user_tenant_by_user_id', return_value={"user_role": "ADMIN"})
+    probe = mocker.patch(
+        'backend.apps.model_managment_app.probe_token_count_for_tenant',
+        return_value={"schema_version": 1, "status": "unsupported", "reason": "unsupported_endpoint"},
+    )
+    response = await client.post(
+        "/model/token-count-probe",
+        json={"display_name": "Qwen Plus", "force": True},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.OK
+    assert "secret" not in response.text
+    probe.assert_awaited_once_with(
+        "test_user", "test_tenant", "Qwen Plus", force=True
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,payload",
+    [
+        ("/model/capacity-adoption-preview", {"display_name": "Qwen"}),
+        ("/model/capacity-adopt", {"display_name": "Qwen", "expected_profile_version": "v1"}),
+        ("/model/token-count-probe", {"display_name": "Qwen"}),
+    ],
+)
+async def test_p1_governance_actions_require_authorization(client, path, payload, mocker):
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        side_effect=HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized"),
+    )
+    response = await client.post(path, json=payload)
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,payload",
+    [
+        ("/model/capacity-adoption-preview", {"display_name": "Qwen"}),
+        ("/model/capacity-adopt", {"display_name": "Qwen", "expected_profile_version": "v1"}),
+        ("/model/token-count-probe", {"display_name": "Qwen"}),
+    ],
+)
+async def test_p3_governance_actions_require_model_manager_role(
+    client, auth_header, user_credentials, path, payload, mocker
+):
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    mocker.patch(
+        'backend.apps.model_managment_app.get_user_tenant_by_user_id',
+        return_value={"user_role": "USER"},
+    )
+    response = await client.post(path, json=payload, headers=auth_header)
+    assert response.status_code == HTTPStatus.FORBIDDEN
+
+
+@pytest.mark.asyncio
+async def test_p1_missing_token_domain_error_maps_to_401(client, mocker):
+    from consts.exceptions import UnauthorizedError
+
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        side_effect=UnauthorizedError("No authorization header provided"),
+    )
+    response = await client.post(
+        "/model/token-count-probe", json={"display_name": "Qwen"}
+    )
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert "authorization header" not in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_manage_probe_requires_super_admin(client, auth_header, user_credentials, mocker):
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.get_user_tenant_by_user_id',
+        return_value={"user_role": "ADMIN"},
+    )
+    probe = mocker.patch('backend.apps.model_managment_app.probe_token_count_for_tenant')
+    response = await client.post(
+        "/model/manage/token-count-probe",
+        json={"tenant_id": "other", "display_name": "Qwen"},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    probe.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manage_probe_super_admin_targets_requested_tenant(client, auth_header, user_credentials, mocker):
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mocker.patch(
+        'backend.apps.model_managment_app.get_user_tenant_by_user_id',
+        return_value={"user_role": "SU"},
+    )
+    probe = mocker.patch(
+        'backend.apps.model_managment_app.probe_token_count_for_tenant',
+        return_value={"schema_version": 1, "status": "supported", "reason": "supported"},
+    )
+    response = await client.post(
+        "/model/manage/token-count-probe",
+        json={"tenant_id": "target", "display_name": "Qwen", "force": True},
+        headers=auth_header,
+    )
+    assert response.status_code == HTTPStatus.OK
+    probe.assert_awaited_once_with("test_user", "target", "Qwen", force=True)
 
 
 @pytest.mark.asyncio
@@ -257,7 +430,7 @@ async def test_capacity_coverage_success(client, auth_header, user_credentials, 
         },
     )
 
-    response = client.get("/model/capacity-coverage", headers=auth_header)
+    response = await client.get("/model/capacity-coverage", headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     body = response.json()
@@ -281,7 +454,7 @@ async def test_create_model_success(client, auth_header, user_credentials, sampl
     
     mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     
-    response = client.post(
+    response = await client.post(
         "/model/create", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
@@ -314,7 +487,7 @@ async def test_create_model_records_accept_signal_when_present(client, auth_head
         "accepted_suggestion_match_kind": "catalog_exact",
         "accepted_capability_profile_version": "openai/gpt-4o@1",
     }
-    response = client.post("/model/create", json=payload, headers=auth_header)
+    response = await client.post("/model/create", json=payload, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
 
@@ -345,10 +518,43 @@ async def test_create_model_skips_accept_recorder_without_match_kind(client, aut
     mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
 
-    response = client.post("/model/create", json=sample_model_data, headers=auth_header)
+    response = await client.post("/model/create", json=sample_model_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     mock_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac_004_create_model_maps_capacity_error_to_bad_request(
+    client, auth_header, user_credentials, sample_model_data, mocker
+):
+    from consts.exceptions import ModelCapacityConfigError
+
+    mocker.patch(
+        "backend.apps.model_managment_app.get_current_user_id",
+        return_value=user_credentials,
+    )
+
+    async def _reject(*args, **kwargs):
+        raise ModelCapacityConfigError(
+            "capacity_config_invalid.max_output_not_below_context",
+            "max output must be lower than context",
+        )
+
+    mocker.patch(
+        "backend.apps.model_managment_app.create_model_for_tenant",
+        side_effect=_reject,
+    )
+
+    response = await client.post(
+        "/model/create", json=sample_model_data, headers=auth_header
+    )
+
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert (
+        "capacity_config_invalid.max_output_not_below_context"
+        in response.json()["detail"]
+    )
 
 
 @pytest.mark.asyncio
@@ -361,7 +567,7 @@ async def test_create_model_conflict(client, auth_header, user_credentials, samp
         side_effect=ValueError("Name 'Test Model' is already in use, please choose another display name")
     )
     
-    response = client.post(
+    response = await client.post(
         "/model/create", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.CONFLICT
@@ -381,7 +587,7 @@ async def test_create_model_exception(client, auth_header, user_credentials, sam
         side_effect=Exception("DB failure")
     )
     
-    response = client.post(
+    response = await client.post(
         "/model/create", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
@@ -404,7 +610,7 @@ async def test_create_provider_model_success(client, auth_header, user_credentia
     
     # Fix: Add required model_type field
     request_data = {"provider": "silicon", "model_type": "llm", "api_key": "test_key"}
-    response = client.post(
+    response = await client.post(
         "/model/provider/create", json=request_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
@@ -427,7 +633,7 @@ async def test_create_provider_model_exception(client, auth_header, user_credent
     
     # Fix: Add required model_type field
     request_data = {"provider": "silicon", "model_type": "llm", "api_key": "test_key"}
-    response = client.post(
+    response = await client.post(
         "/model/provider/create", json=request_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
@@ -454,7 +660,7 @@ async def test_provider_batch_create_success(client, auth_header, user_credentia
         "type": "llm",
         "api_key": "k",
     }
-    response = client.post(
+    response = await client.post(
         "/model/provider/batch_create", json=payload, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
@@ -479,7 +685,7 @@ async def test_provider_batch_create_exception(client, auth_header, user_credent
         "type": "llm",
         "api_key": "k",
     }
-    response = client.post(
+    response = await client.post(
         "/model/provider/batch_create", json=payload, headers=auth_header)
     
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
@@ -527,7 +733,7 @@ async def test_provider_batch_create_strips_accept_signal_and_records(
         "type": "llm",
         "api_key": "k",
     }
-    response = client.post(
+    response = await client.post(
         "/model/provider/batch_create", json=payload, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
@@ -549,7 +755,7 @@ async def test_delete_model_success(client, auth_header, user_credentials, mocke
     
     mock_del = mocker.patch('backend.apps.model_managment_app.delete_model_for_tenant', side_effect=_delete)
     
-    response = client.post(
+    response = await client.post(
         "/model/delete", params={"display_name": "Test Model"}, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
@@ -569,7 +775,7 @@ async def test_delete_model_not_found(client, auth_header, user_credentials, moc
         side_effect=LookupError("Model not found: Missing")
     )
     
-    response = client.post(
+    response = await client.post(
         "/model/delete", params={"display_name": "Missing"}, headers=auth_header)
     
     assert response.status_code == HTTPStatus.NOT_FOUND
@@ -605,7 +811,7 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
     
     mock_list = mocker.patch('backend.apps.model_managment_app.list_models_for_tenant', side_effect=mock_list_models)
     
-    response = client.get("/model/list", headers=auth_header)
+    response = await client.get("/model/list", headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -641,7 +847,7 @@ async def test_get_llm_model_list_success(client, auth_header, user_credentials,
     
     mock_list = mocker.patch('backend.apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
     
-    response = client.get("/model/llm_list", headers=auth_header)
+    response = await client.get("/model/llm_list", headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -664,7 +870,7 @@ async def test_get_llm_model_list_exception(client, auth_header, user_credential
     
     mocker.patch('backend.apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
     
-    response = client.get("/model/llm_list", headers=auth_header)
+    response = await client.get("/model/llm_list", headers=auth_header)
     
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
     data = response.json()
@@ -682,7 +888,7 @@ async def test_get_llm_model_list_empty(client, auth_header, user_credentials, m
     
     mock_list = mocker.patch('backend.apps.model_managment_app.list_llm_models_for_tenant', side_effect=mock_list_llm_models)
     
-    response = client.get("/model/llm_list", headers=auth_header)
+    response = await client.get("/model/llm_list", headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -702,7 +908,7 @@ async def test_check_model_health_success(client, auth_header, user_credentials,
         return_value={"connectivity": True, "connect_status": "available"}
     )
     
-    response = client.post(
+    response = await client.post(
         "/model/healthcheck",
         params={"display_name": "Test Model", "model_type": "embedding"},
         headers=auth_header
@@ -725,7 +931,7 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
         side_effect=LookupError("missing")
     )
     
-    response = client.post(
+    response = await client.post(
         "/model/healthcheck",
         params={"display_name": "X", "model_type": "embedding"},
         headers=auth_header
@@ -749,7 +955,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
         },
     )
     
-    response = client.post(
+    response = await client.post(
         "/model/temporary_healthcheck", json=sample_model_data)
     
     assert response.status_code == HTTPStatus.OK
@@ -776,7 +982,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     )
     mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
-    response = client.post(
+    response = await client.post(
         "/model/temporary_healthcheck", json=sample_model_data)
     
     assert response.status_code == HTTPStatus.OK
@@ -800,7 +1006,7 @@ async def test_verify_model_config_exception(client, auth_header, sample_model_d
         side_effect=Exception("err")
     )
     
-    response = client.post(
+    response = await client.post(
         "/model/temporary_healthcheck", json=sample_model_data)
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -825,7 +1031,7 @@ async def test_update_single_model_success(client, auth_header, user_credentials
         "model_type": "llm",
         "provider": "huggingface"
     }
-    response = client.post(
+    response = await client.post(
         "/model/update",
         params={"display_name": "Updated Test Model"},
         json=update_data,
@@ -840,6 +1046,8 @@ async def test_update_single_model_success(client, auth_header, user_credentials
         user_credentials[1],
         "Updated Test Model",
         update_data,
+        explicit_fields=set(update_data),
+        accepted_profile_version=None,
     )
 
 
@@ -862,7 +1070,7 @@ async def test_update_single_model_conflict(client, auth_header, user_credential
         "model_type": "llm",
         "provider": "huggingface"
     }
-    response = client.post(
+    response = await client.post(
         "/model/update",
         params={"display_name": "Conflicting Name"},
         json=update_data,
@@ -878,6 +1086,8 @@ async def test_update_single_model_conflict(client, auth_header, user_credential
         user_credentials[1],
         "Conflicting Name",
         update_data,
+        explicit_fields=set(update_data),
+        accepted_profile_version=None,
     )
 
 
@@ -896,7 +1106,7 @@ async def test_batch_update_models_success(client, auth_header, user_credentials
         {"model_id": "id1", "api_key": "k1", "max_tokens": 100},
         {"model_id": "id2", "api_key": "k2", "max_tokens": 200},
     ]
-    response = client.post(
+    response = await client.post(
         "/model/batch_update", json=models, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
@@ -916,7 +1126,7 @@ async def test_batch_update_models_exception(client, auth_header, user_credentia
     mock_batch_update = mocker.patch('backend.apps.model_managment_app.batch_update_models_for_tenant', side_effect=mock_batch_update)
     
     models = [{"model_id": "id1", "api_key": "k1"}]
-    response = client.post(
+    response = await client.post(
         "/model/batch_update", json=models, headers=auth_header)
     
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
@@ -966,7 +1176,7 @@ async def test_get_manage_model_list_success(client, auth_header, user_credentia
         "page": 1,
         "page_size": 20
     }
-    response = client.post("/model/manage/list", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/list", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1015,7 +1225,7 @@ async def test_get_manage_model_list_with_pagination(client, auth_header, user_c
         "page": 2,
         "page_size": 10
     }
-    response = client.post("/model/manage/list", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/list", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1043,7 +1253,7 @@ async def test_get_manage_model_list_exception(client, auth_header, user_credent
         "page": 1,
         "page_size": 20
     }
-    response = client.post("/model/manage/list", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/list", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
     data = response.json()
@@ -1074,7 +1284,7 @@ async def test_get_manage_model_list_empty(client, auth_header, user_credentials
         "page": 1,
         "page_size": 20
     }
-    response = client.post("/model/manage/list", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/list", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1105,7 +1315,7 @@ async def test_manage_create_model_success(client, auth_header, user_credentials
         "max_tokens": 4096,
         "display_name": "LLaMA Model"
     }
-    response = client.post("/model/manage/create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1115,7 +1325,9 @@ async def test_manage_create_model_success(client, auth_header, user_credentials
     mock_create.assert_called_once_with(
         user_credentials[0],
         "target_tenant",
-        ANY  # The dict may contain additional optional fields like chunk settings
+        ANY,  # The dict may contain additional optional fields like chunk settings
+        explicit_fields=ANY,
+        accepted_profile_version=None,
     )
 
 
@@ -1160,7 +1372,7 @@ async def test_manage_create_model_records_accept_signal_when_present(
         "accepted_suggestion_match_kind": "catalog_exact",
         "accepted_capability_profile_version": "openai/gpt-4o@1",
     }
-    response = client.post(
+    response = await client.post(
         "/model/manage/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
@@ -1187,7 +1399,7 @@ async def test_manage_create_model_conflict(client, auth_header, user_credential
         "base_url": "http://localhost:8000",
         "api_key": "test_key"
     }
-    response = client.post("/model/manage/create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.CONFLICT
     assert "Model name already exists" in response.json()["detail"]
@@ -1210,7 +1422,7 @@ async def test_manage_create_model_exception(client, auth_header, user_credentia
         "base_url": "http://localhost:8000",
         "api_key": "test_key"
     }
-    response = client.post("/model/manage/create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -1234,7 +1446,7 @@ async def test_manage_update_model_success(client, auth_header, user_credentials
         "api_key": "new_api_key",
         "max_tokens": 8192
     }
-    response = client.post("/model/manage/update", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/update", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1245,7 +1457,9 @@ async def test_manage_update_model_success(client, auth_header, user_credentials
         user_credentials[0],
         "target_tenant",
         "Old Model Name",
-        ANY  # The dict may contain additional optional fields like chunk settings
+        ANY,  # The dict may contain additional optional fields like chunk settings
+        explicit_fields=ANY,
+        accepted_profile_version=None,
     )
 
 
@@ -1287,7 +1501,7 @@ async def test_manage_update_model_records_accept_signal_when_present(
         "accepted_suggestion_match_kind": "catalog_fuzzy",
         "accepted_capability_profile_version": "openai/gpt-4o@1",
     }
-    response = client.post(
+    response = await client.post(
         "/model/manage/update", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
@@ -1312,7 +1526,7 @@ async def test_manage_update_model_not_found(client, auth_header, user_credentia
         "current_display_name": "nonexistent-model",
         "display_name": "Updated Name"
     }
-    response = client.post("/model/manage/update", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/update", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.NOT_FOUND
 
@@ -1332,7 +1546,7 @@ async def test_manage_update_model_conflict(client, auth_header, user_credential
         "current_display_name": "test-model",
         "display_name": "duplicate-name"
     }
-    response = client.post("/model/manage/update", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/update", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.CONFLICT
 
@@ -1352,7 +1566,7 @@ async def test_manage_delete_model_success(client, auth_header, user_credentials
         "tenant_id": "target_tenant",
         "display_name": "test-model"
     }
-    response = client.post("/model/manage/delete", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/delete", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1376,7 +1590,7 @@ async def test_manage_delete_model_not_found(client, auth_header, user_credentia
         "tenant_id": "target_tenant",
         "display_name": "nonexistent-model"
     }
-    response = client.post("/model/manage/delete", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/delete", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.NOT_FOUND
 
@@ -1395,7 +1609,7 @@ async def test_manage_delete_model_exception(client, auth_header, user_credentia
         "tenant_id": "target_tenant",
         "display_name": "test-model"
     }
-    response = client.post("/model/manage/delete", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/delete", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -1433,7 +1647,7 @@ async def test_manage_batch_create_models_success(client, auth_header, user_cred
             }
         ]
     }
-    response = client.post("/model/manage/batch_create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/batch_create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1487,7 +1701,7 @@ async def test_manage_batch_create_models_empty_list(client, auth_header, user_c
         "api_key": "",
         "models": []
     }
-    response = client.post("/model/manage/batch_create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/batch_create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1515,7 +1729,7 @@ async def test_manage_batch_create_models_exception(client, auth_header, user_cr
             {"id": "silicon/test-model", "max_tokens": 4096}
         ]
     }
-    response = client.post("/model/manage/batch_create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/batch_create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -1536,7 +1750,7 @@ async def test_manage_healthcheck_success(client, auth_header, user_credentials,
         "display_name": "test-model",
         "model_type": "llm"
     }
-    response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1561,7 +1775,7 @@ async def test_manage_healthcheck_without_model_type_is_backward_compatible(
         "tenant_id": "target_tenant",
         "display_name": "test-model"
     }
-    response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     mock_check.assert_called_once_with("test-model", "target_tenant", None)
@@ -1581,7 +1795,7 @@ async def test_manage_healthcheck_model_not_found(client, auth_header, user_cred
         "tenant_id": "target_tenant",
         "display_name": "nonexistent-model"
     }
-    response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.NOT_FOUND
     assert "Model configuration not found" in response.json()["detail"]
@@ -1601,7 +1815,7 @@ async def test_manage_healthcheck_invalid_config(client, auth_header, user_crede
         "tenant_id": "target_tenant",
         "display_name": "test-model"
     }
-    response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Invalid model configuration" in response.json()["detail"]
@@ -1621,7 +1835,7 @@ async def test_manage_healthcheck_exception(client, auth_header, user_credential
         "tenant_id": "target_tenant",
         "display_name": "test-model"
     }
-    response = client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/healthcheck", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -1661,7 +1875,7 @@ async def test_manage_provider_list_success(client, auth_header, user_credential
         "provider": "silicon",
         "model_type": "llm"
     }
-    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1685,7 +1899,7 @@ async def test_manage_provider_list_exception(client, auth_header, user_credenti
         "provider": "silicon",
         "model_type": "llm"
     }
-    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -1705,7 +1919,7 @@ async def test_manage_provider_list_empty(client, auth_header, user_credentials,
         "provider": "silicon",
         "model_type": "embedding"
     }
-    response = client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/provider/list", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1745,7 +1959,7 @@ async def test_manage_provider_create_success(client, auth_header, user_credenti
         "api_key": "test_api_key",
         "base_url": ""
     }
-    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1782,7 +1996,7 @@ async def test_manage_provider_create_with_base_url(client, auth_header, user_cr
         "api_key": "test_api_key",
         "base_url": "https://api.modelengine.example.com"
     }
-    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     mock_create.assert_called_once_with(
@@ -1808,7 +2022,7 @@ async def test_manage_provider_create_exception(client, auth_header, user_creden
         "api_key": "test_api_key",
         "base_url": ""
     }
-    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
@@ -1830,7 +2044,7 @@ async def test_manage_provider_create_empty(client, auth_header, user_credential
         "api_key": "test_api_key",
         "base_url": ""
     }
-    response = client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
+    response = await client.post("/model/manage/provider/create", json=request_data, headers=auth_header)
 
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -1870,7 +2084,10 @@ MODEL_TOKEN_EXPIRED_ENDPOINTS = [
 
 
 @pytest.mark.parametrize("method,url,kwargs", MODEL_TOKEN_EXPIRED_ENDPOINTS)
-def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker, method, url, kwargs):
+@pytest.mark.asyncio
+async def test_model_endpoints_return_401_on_token_expired(
+    client, auth_header, mocker, method, url, kwargs
+):
     """Expired token maps to 401 on every authenticated model endpoint."""
     from consts.exceptions import TokenExpiredError
 
@@ -1878,7 +2095,7 @@ def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker
         "backend.apps.model_managment_app.get_current_user_id",
         side_effect=TokenExpiredError("expired"),
     )
-    response = getattr(client, method)(url, headers=auth_header, **kwargs)
+    response = await getattr(client, method)(url, headers=auth_header, **kwargs)
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]

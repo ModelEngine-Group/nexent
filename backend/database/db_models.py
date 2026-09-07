@@ -461,6 +461,18 @@ class ModelRecord(TableBase):
         String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, default, unknown.")
     capability_profile_version = Column(
         String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
+    canonical_model_id = Column(
+        String(512), doc="Versioned canonical model identity used by profile matchers.")
+    capacity_field_metadata = Column(
+        JSONB, doc="Versioned field-level capacity provenance metadata without secrets.")
+    model_identity_metadata = Column(
+        JSONB, doc="Versioned canonical identity and capacity-match evidence.")
+    tokenizer_match_metadata = Column(
+        JSONB, doc="Versioned independent tokenizer match and conformance state.")
+    token_count_probe_metadata = Column(
+        JSONB, doc="Versioned sanitized Provider token-count probe state.")
+    feature_capability_metadata = Column(
+        JSONB, doc="Versioned reasoning and prompt-cache capability resolution without secrets.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -572,6 +584,9 @@ class ModelMonitoringRecord(SimpleTableBase):
     )
     budget_warnings = Column(
         JSONB, doc="Structured W2 budget warnings active for this request"
+    )
+    context_budget_evidence = Column(
+        JSONB, doc="Content-free P3 final request, compaction, overflow and recovery evidence"
     )
     generation_rate = Column(
         Float, doc="Token generation rate (tokens per second)")
