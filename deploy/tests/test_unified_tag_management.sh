@@ -242,7 +242,9 @@ CREATE TABLE nexent.ag_skill_info_t (
 
 CREATE TABLE nexent.ag_tenant_agent_t (
     agent_id INTEGER,
-    tenant_id VARCHAR(100)
+    tenant_id VARCHAR(100),
+    version_no INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, version_no)
 );
 
 CREATE TABLE nexent.ag_agent_repository_t (
@@ -667,6 +669,42 @@ SQL
   pass "canonical source mismatch rolls back all migration work"
 }
 
+test_agent_version_history_is_not_a_canonical_conflict() {
+  local database="utm_agent_version_history"
+  local preflight_output
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.user_tenant_t (tenant_id, created_by, delete_flag)
+VALUES ('tenant-version-history', 'owner-version-history', 'N');
+
+INSERT INTO nexent.ag_tenant_agent_t (agent_id, tenant_id, version_no) VALUES
+    (60, 'tenant-version-history', 0),
+    (60, 'tenant-version-history', 1);
+INSERT INTO nexent.ag_agent_repository_t VALUES
+    (61, 'tenant-version-history', 60, ARRAY['Marketing', 'VersionedAgentTag'], 'N');
+SQL
+
+  preflight_output="$(run_file "$database" "$PREFLIGHT_SQL")"
+  assert_not_contains "$preflight_output" "canonical_source_ambiguous" \
+    "multiple versions of one Agent must not be reported as ambiguous"
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) JOIN nexent.tag_value AS value USING (tenant_id, definition_id, value_id) WHERE assignment.tenant_id = 'tenant-version-history' AND assignment.resource_type = 'agent' AND assignment.resource_id = '60' AND definition.definition_key = 'keywords' AND value.normalized_value = 'versionedagenttag' AND assignment.delete_flag = 'N';" \
+    "1" "a versioned Agent must retain its Keywords assignment"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) JOIN nexent.tag_value AS value USING (tenant_id, definition_id, value_id) WHERE assignment.tenant_id = 'tenant-version-history' AND assignment.resource_type = 'agent' AND assignment.resource_id = '60' AND definition.definition_key = 'agent_category' AND value.normalized_value = 'marketing' AND assignment.delete_flag = 'N';" \
+    "1" "a versioned Agent must retain its Agent Category assignment"
+
+  preflight_output="$(run_file "$database" "$PREFLIGHT_SQL")"
+  assert_not_contains "$preflight_output" "canonical_source_ambiguous" \
+    "post-migration preflight must accept Agent version history"
+  assert_not_contains "$preflight_output" "legacy_missing_assignment" \
+    "post-migration preflight must find all versioned Agent assignments"
+  pass "Agent version history is accepted as one canonical Agent source"
+}
+
 test_value_capacity_preflight_roll_back() {
   local database="utm_value_overflow"
   create_database "$database"
@@ -1070,6 +1108,7 @@ main() {
   test_null_and_empty_tenant_roll_back
   test_non_string_json_roll_back
   test_source_mismatch_roll_back
+  test_agent_version_history_is_not_a_canonical_conflict
   test_value_capacity_preflight_roll_back
   test_assignment_capacity_preflight_roll_back
   test_indexes_and_hard_delete_semantics
