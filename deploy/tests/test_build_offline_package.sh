@@ -225,6 +225,9 @@ for target in docker k8s all; do
     k8s)
       [ -f "$package_dir/deploy/k8s/deploy.sh" ] || fail "k8s package should include deploy/k8s/deploy.sh"
       [ ! -e "$package_dir/deploy/docker/deploy.sh" ] || fail "k8s package should not include docker deploy script"
+      [ -d "$package_dir/deploy/docker/assets/official-skills-zip" ] || fail "k8s package should include official skill archives"
+      [ "$(find "$package_dir/deploy/docker/assets/official-skills-zip" -type f -name '*.zip' | wc -l | tr -d ' ')" -gt 0 ] || fail "k8s package should include at least one official skill archive"
+      grep -Fq 'deploy/docker/assets/official-skills-zip/' "$package_dir/checksums.txt" || fail "k8s package checksums should include official skill archives"
       ;;
     all)
       [ -f "$package_dir/deploy/docker/deploy.sh" ] || fail "all package should include deploy/docker/deploy.sh"
