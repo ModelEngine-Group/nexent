@@ -16,7 +16,7 @@ from fastapi import FastAPI
 
 from utils.logging_utils import configure_logging
 from consts.const import (
-    REDIS_URL, REDIS_PORT, FLOWER_PORT, DISABLE_CELERY_FLOWER,
+    REDIS_URL, REDIS_BACKEND_URL, REDIS_PORT, FLOWER_PORT, DISABLE_CELERY_FLOWER,
     DOCKER_ENVIRONMENT, DP_PARSE_MAX_PROCESSES, DP_PARSE_MIN_PROCESSES,
     DP_PARSE_THREADS_PER_PROCESS, DP_PARSE_MAX_TASKS_PER_CHILD, DP_PRELOAD_MODELS,
     DP_PARSER_STARTUP_TIMEOUT_S,
@@ -321,11 +321,12 @@ except Exception as e_exec:
 
     def _wait_for_parser_ready(self) -> None:
         """Wait until every configured parser child has loaded its preload models."""
-        if not REDIS_URL:
-            raise RuntimeError("REDIS_URL is required for parser readiness")
+        readiness_redis_url = REDIS_BACKEND_URL or REDIS_URL
+        if not readiness_redis_url:
+            raise RuntimeError("REDIS_BACKEND_URL or REDIS_URL is required for parser readiness")
         import redis
 
-        client = redis.from_url(REDIS_URL, decode_responses=True)
+        client = redis.from_url(readiness_redis_url, decode_responses=True)
         ready_key = f"dp:parser:bootstrap:{self.parser_generation}:ready"
         deadline = time.time() + DP_PARSER_STARTUP_TIMEOUT_S
         while time.time() < deadline:

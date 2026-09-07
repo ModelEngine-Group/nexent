@@ -31,6 +31,7 @@ def service_module(monkeypatch):
     logging_utils.configure_logging = MagicMock()
     constants = types.ModuleType("consts.const")
     constants.REDIS_URL = "redis://test:6379/0"
+    constants.REDIS_BACKEND_URL = "redis://test:6379/1"
     constants.REDIS_PORT = 6379
     constants.FLOWER_PORT = 5555
     constants.DISABLE_CELERY_FLOWER = False
@@ -71,6 +72,22 @@ def test_worker_configs_use_prefork_for_parser_and_threads_for_other_stages(serv
     assert configs[0]["min_processes"] == 1
     assert configs[0]["max_tasks_per_child"] == 1000
     assert all(config["pool"] == "threads" for config in configs[1:])
+
+
+def test_parser_readiness_uses_result_backend(service_module, monkeypatch):
+    redis_module = types.ModuleType("redis")
+    redis_client = MagicMock()
+    redis_client.get.return_value = "1"
+    redis_module.from_url = MagicMock(return_value=redis_client)
+    monkeypatch.setitem(sys.modules, "redis", redis_module)
+
+    manager = service_module.ServiceManager({})
+    manager.parser_generation = "generation"
+    manager._wait_for_parser_ready()
+
+    redis_module.from_url.assert_called_once_with(
+        "redis://test:6379/1", decode_responses=True
+    )
 
 
 def test_parse_arguments_exposes_supported_service_flags(service_module, monkeypatch):
