@@ -9,8 +9,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_REPO="${OFFICIAL_AGENTS_REPO_URL:-https://gitcode.com/ModelEngine/AgentsHub}"
 DEFAULT_REF="${OFFICIAL_AGENTS_REPO_REF:-main}"
+NEXENT_USER_DIR_EXPLICIT="${NEXENT_USER_DIR:-}"
 NEXENT_USER_DIR="${NEXENT_USER_DIR:-$HOME/nexent}"
 TARGET_DIR="$NEXENT_USER_DIR/official-agents"
+TARGET_CONTAINER="nexent-config"
+TARGET_CONTAINER_DIR="/mnt/nexent/official-agents"
 SOURCE_MODE=""
 SOURCE_PATH=""
 PROFILES=""
@@ -107,8 +110,9 @@ select_profiles() {
 }
 
 copy_profiles() {
-  mkdir -p "$TARGET_DIR"
-  local profile source target
+  local profile source target staged_root
+  staged_root="$TMP_ROOT/staged"
+  mkdir -p "$staged_root"
   IFS=',' read -r -a selected <<< "$PROFILES"
   for profile in "${selected[@]}"; do
     profile="$(printf '%s' "$profile" | xargs)"
@@ -117,19 +121,31 @@ copy_profiles() {
     source="$SOURCE_ROOT/$profile"
     [ -d "$source" ] || die "profile not found: $profile"
     find "$source" -type f -name agent.json -print -quit | grep -q . || die "profile has no agent.json: $profile"
-    target="$TARGET_DIR/$profile"
+    target="$staged_root/$profile"
+    rm -rf "$target"
     mkdir -p "$target"
     cp -R "$source/." "$target/"
+    if [ -n "$NEXENT_USER_DIR_EXPLICIT" ] || [ "${DEPLOY_OFFICIAL_K8S:-false}" = true ]; then
+      mkdir -p "$TARGET_DIR"
+      cp -R "$target" "$TARGET_DIR/"
+    else
+      command -v docker >/dev/null 2>&1 || die "docker is required for Docker deployment"
+      docker inspect "$TARGET_CONTAINER" >/dev/null 2>&1 || die "container not found: $TARGET_CONTAINER"
+      docker exec "$TARGET_CONTAINER" mkdir -p "$TARGET_CONTAINER_DIR"
+      docker cp "$target" "$TARGET_CONTAINER:$TARGET_CONTAINER_DIR/"
+    fi
   done
 }
 
 sync_repository() {
   if [ "${DEPLOY_OFFICIAL_K8S:-false}" = true ]; then
     kubectl exec deployment/nexent-config -n "$NAMESPACE" -- \
-      python backend/scripts/sync_official_agents.py --profiles "$PROFILES"
+      python backend/scripts/sync_official_agents.py \
+      --base-dir "$TARGET_CONTAINER_DIR" --profiles "$PROFILES"
   else
     docker exec -e "OFFICIAL_AGENT_PROFILES=$PROFILES" nexent-config \
-      python backend/scripts/sync_official_agents.py --profiles "$PROFILES"
+      python backend/scripts/sync_official_agents.py \
+      --base-dir "$TARGET_CONTAINER_DIR" --profiles "$PROFILES"
   fi
 }
 
