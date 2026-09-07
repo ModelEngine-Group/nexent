@@ -251,7 +251,7 @@ Docker Compose Orchestration:
 - **Configuration Management**: Environment-based configuration, dynamic updates
 - **Single Source of Truth**: Environment variables centralized in `backend/consts/const.py`
 
-## 🔄 Data Flow Architecture
+## 🔄 System Data Flow
 
 ### 📥 User Request Flow
 ```

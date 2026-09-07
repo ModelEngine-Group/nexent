@@ -51,15 +51,15 @@ uv pip install -e "../sdk[dev]"
 ```bash
 # 清华源
 uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install ../sdk --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 阿里云
 uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --default-index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # 多源（推荐）
 uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
 ```
 
 :::: info 镜像参考

@@ -105,6 +105,7 @@ class RetrievalPipeline:
             mmr_final_k=cfg.mmr_final_top_k,
             mmr_candidate_top_k=cfg.mmr_candidate_top_k,
             mmr_duplicate_threshold=cfg.mmr_duplicate_threshold,
+            mmr_candidate_max=cfg.mmr_candidate_max,
         )
         self._budget = TokenBudgetSelector(token_budget=cfg.token_budget)
         self._mmr_final_k = cfg.mmr_final_top_k

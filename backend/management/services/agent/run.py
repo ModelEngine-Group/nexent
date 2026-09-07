@@ -9,12 +9,21 @@ from typing import Any, Optional, Dict
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.agents.run_agent import agent_run
+from nexent.memory.models import MemoryIngestUnit
+from nexent.core.models import OpenAIModel
 
 from agents.agent_run_manager import AgentRunAlreadyActiveError, agent_run_manager
 from agents.create_agent_info import create_agent_run_info
 from agents.preprocess_manager import preprocess_manager
-from consts.const import LANGUAGE, MESSAGE_ROLE, STREAM_STATUS_EVENT, \
-    DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from consts.const import (
+    DEFAULT_EN_TITLE,
+    DEFAULT_ZH_TITLE,
+    LANGUAGE,
+    MESSAGE_ROLE,
+    MODEL_CONFIG_MAPPING,
+    RUNTIME_CANCEL_POLL_INTERVAL_SECONDS,
+    STREAM_STATUS_EVENT,
+)
 from consts.exceptions import (
     AppException,
     ConversationNotFoundError,
@@ -34,6 +43,7 @@ from database.agent_db import (
     search_agent_info_by_agent_id
 )
 from database.conversation_db import (
+    get_units_by_message,
     resolve_conversation_runtime_metadata,
 )
 from utils.runtime_metadata_utils import (
@@ -41,7 +51,6 @@ from utils.runtime_metadata_utils import (
 )
 from database.tool_db import (
     query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
-    
 )
 from utils.time_context_utils import prepend_current_time
 from services.conversation_management_service import (
@@ -64,6 +73,14 @@ from services.conversation_management_service import (
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
 from services.memory_config_service import build_memory_context
+from services.memory_backend_adapter import _build_ingestion_event_service
+from services.knowledge_scope_service import (
+    build_runtime_knowledge_policy,
+    build_runtime_knowledge_resources,
+    resolve_knowledge_scope,
+)
+from services.fa_memory_extractor import FaMemoryExtractor
+from services.memory_backend_adapter import build_memory_service_for_fa_extraction
 from services.streaming_channel import streaming_channel_manager
 from services.runtime_state_service import runtime_state_service
 from utils.auth_utils import get_current_user_info, get_user_language
@@ -76,6 +93,7 @@ from utils.agent_stream_utils import (
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
 )
 from utils.context_utils import build_authorized_context_input
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 from nexent.monitor import agent_monitoring_context
@@ -93,6 +111,8 @@ AGENT_ICON_CONTENT_TYPES = {
 }
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
+_external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
+_fa_extraction_tasks: set[asyncio.Task[None]] = set()
 
 
 def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int:
@@ -768,6 +788,106 @@ async def _stream_agent_chunks(
         # the new layered architecture (agents may only write to
         # ``agent.short_term``).
 
+        if (
+            terminal_status == "completed"
+            and streaming_message_id is not None
+            and memory_ctx is not None
+            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+        ):
+            async def _per_turn_supplement() -> None:
+                try:
+                    units = get_units_by_message(streaming_message_id)
+                    ingest_units = [
+                        MemoryIngestUnit(
+                            event_id=str(unit["unit_id"]),
+                            event_type="turn_completed",
+                            unit_type=unit["unit_type"],
+                            unit_content=unit["unit_content"],
+                            unit_index=unit["unit_index"],
+                        )
+                        for unit in units
+                        if unit["unit_type"] != "final_answer"
+                    ]
+                    if not ingest_units:
+                        return
+                    await _build_ingestion_event_service().send_ingest_all_enabled(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        agent_id=str(getattr(agent_request, "agent_id", "")),
+                        conversation_id=str(agent_request.conversation_id),
+                        event_type="turn_completed",
+                        event_id=str(streaming_message_id),
+                        units=ingest_units,
+                    )
+                except Exception as exc:
+                    logger.warning("Per-turn supplement failed: %s", exc)
+
+            supplement_task = asyncio.create_task(_per_turn_supplement())
+            _external_memory_ingest_tasks.add(supplement_task)
+            supplement_task.add_done_callback(_external_memory_ingest_tasks.discard)
+
+        if (
+            final_answer_content
+            and memory_ctx is not None
+            and getattr(getattr(memory_ctx, "user_config", None), "memory_switch", False)
+        ):
+            async def _run_fa_extraction() -> None:
+                try:
+                    config = tenant_config_manager.get_model_config(
+                        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id
+                    )
+                    if not config:
+                        logger.warning("fa_memory_extraction: no tenant LLM configured, skipping")
+                        return
+
+                    model = OpenAIModel(
+                        model_id=get_model_name_from_config(config),
+                        api_base=config.get("base_url", ""),
+                        api_key=config.get("api_key", ""),
+                        temperature=0.1,
+                        top_p=0.9,
+                        model_factory=config.get("model_factory"),
+                        ssl_verify=config.get("ssl_verify", True),
+                        display_name=config.get("display_name") or None,
+                        timeout_seconds=config.get("timeout_seconds"),
+                    )
+
+                    class _ModelAdapter:
+                        def __init__(self, sync_model):
+                            self._model = sync_model
+
+                        async def chat(self, messages):
+                            result = await asyncio.to_thread(self._model.generate, messages)
+                            content = getattr(result, "content", result)
+                            return content if isinstance(content, str) else str(content)
+
+                    extractor = FaMemoryExtractor(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        agent_id=str(getattr(agent_request, "agent_id", "")),
+                        conversation_id=str(getattr(agent_request, "conversation_id", "")),
+                        memory_service=build_memory_service_for_fa_extraction(),
+                        model_client=_ModelAdapter(model),
+                    )
+                    result = await extractor.extract_and_store(
+                        final_answer_content,
+                        user_query=str(getattr(agent_request, "query", "") or ""),
+                    )
+                    logger.info(
+                        "fa_memory_extraction: tenant=%s user=%s agent=%s items=%d reason=%s",
+                        tenant_id,
+                        user_id,
+                        str(getattr(agent_request, "agent_id", "")),
+                        len(result.items),
+                        result.reason,
+                    )
+                except Exception:
+                    logger.exception("fa_memory_extraction: unexpected error")
+
+            extraction_task = asyncio.create_task(_run_fa_extraction())
+            _fa_extraction_tasks.add(extraction_task)
+            extraction_task.add_done_callback(_fa_extraction_tasks.discard)
+
 
 def _agent_run_identifier(agent_request: AgentRequest) -> int | str | None:
     debug_run_id = getattr(agent_request, "_debug_run_id", None)
@@ -1190,12 +1310,6 @@ async def run_agent_stream(
 
     resolved_scope = None
     if source_scope is not None and not resume:
-        from services.knowledge_scope_service import (
-            build_runtime_knowledge_policy,
-            build_runtime_knowledge_resources,
-            resolve_knowledge_scope,
-        )
-
         if agent_request.agent_id is None:
             raise ValueError("agent_id is required when knowledge_scope is set")
         resolved_scope = resolve_knowledge_scope(
@@ -1756,4 +1870,3 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:
     return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
-

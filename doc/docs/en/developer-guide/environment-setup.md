@@ -51,15 +51,15 @@ When network access is limited, specify a package mirror for uv. For example:
 ```bash
 # Tsinghua mirror
 uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install ../sdk --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Alibaba Cloud mirror
 uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --default-index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # Multiple sources (recommended)
 uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install ../sdk --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
 ```
 
 :::: info Mirror References

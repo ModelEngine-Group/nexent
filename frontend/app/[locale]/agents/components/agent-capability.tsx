@@ -8,7 +8,6 @@ import { BlocksIcon, Plug, RefreshCw, Wrench } from "lucide-react";
 import { updateToolList } from "@/services/mcpService";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
-import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";

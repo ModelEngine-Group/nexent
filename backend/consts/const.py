@@ -300,6 +300,16 @@ RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
+# Logging Configuration
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# When IS_DEBUG=true, force DEBUG level for all loggers (overrides LOG_LEVEL).
+IS_DEBUG = os.getenv("IS_DEBUG", "false").lower() == "true"
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "1"))  # days
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
+
+
 # Service Control Flags
 DISABLE_RAY_DASHBOARD = os.getenv(
     "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
@@ -359,9 +369,11 @@ DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
 DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
 DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
+EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
 DEFAULT_MEMORY_SWITCH_KEY = "Y"
 DEFAULT_DREAMING_SWITCH_KEY = "Y"
 DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
+DEFAULT_EXTERNAL_PROVIDER_TOP_K = 20
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
@@ -414,9 +426,14 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
     os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
 )
 
+# External memory transparent proxy master switches
+EXTERNAL_MEMORY_SEARCH_ENABLED = os.getenv(
+    "EXTERNAL_MEMORY_SEARCH_ENABLED", "false"
+).lower() in ("true", "1", "yes")
 # External provider toggles (configured per provider elsewhere; these constants
 # describe protocol-level defaults)
 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "agent",
     "model_output",
     "model_output_thinking",
     "model_output_deep_thinking",
@@ -774,3 +791,6 @@ enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"
+
+# External Memory Provider Configuration
+MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

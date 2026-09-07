@@ -778,6 +778,43 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
         return list(map(as_dict, records))
 
 
+def get_units_by_message(message_id: int) -> List[Dict[str, Any]]:
+    """Query all completed units for a given assistant message.
+
+    Returns a list of dicts with keys: unit_id, unit_type, unit_content,
+    unit_index, message_id.  Used by the per-turn external memory supplement.
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = (
+            select(
+                ConversationMessageUnit.unit_id,
+                ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.unit_content,
+                ConversationMessageUnit.unit_index,
+                ConversationMessageUnit.message_id,
+            )
+            .where(
+                ConversationMessageUnit.message_id == message_id,
+                ConversationMessageUnit.unit_status == "completed",
+                ConversationMessageUnit.delete_flag == "N",
+            )
+            .order_by(ConversationMessageUnit.unit_index.asc())
+        )
+        results = session.execute(stmt).all()
+        return [
+            {
+                "unit_id": r.unit_id,
+                "unit_type": r.unit_type,
+                "unit_content": r.unit_content,
+                "unit_index": r.unit_index,
+                "message_id": r.message_id,
+            }
+            for r in results
+        ]
+
+
 def get_conversation_list(
     user_id: Optional[str] = None,
     limit: Optional[int] = None,
