@@ -389,9 +389,11 @@ INSERT INTO utm_legacy_source
 SELECT 'agent_repository.tags', repository.agent_repository_id::TEXT,
        repository.publisher_tenant_id, 'agent', repository.agent_id::TEXT,
        to_jsonb(repository.tags), 'text_array',
-       (SELECT count(*) FROM nexent.ag_tenant_agent_t AS agent
-        WHERE agent.agent_id = repository.agent_id
-          AND agent.tenant_id = repository.publisher_tenant_id),
+       CASE WHEN EXISTS (
+           SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+           WHERE agent.agent_id = repository.agent_id
+             AND agent.tenant_id = repository.publisher_tenant_id
+       ) THEN 1 ELSE 0 END,
        COALESCE(repository.delete_flag, 'N')
 FROM nexent.ag_agent_repository_t AS repository
 WHERE COALESCE(cardinality(repository.tags), 0) > 0;
@@ -1214,10 +1216,12 @@ SELECT repository.agent_repository_id::TEXT,
        repository.publisher_tenant_id,
        repository.agent_id::TEXT,
        aliases.category_key,
-       (SELECT count(*)
-        FROM nexent.ag_tenant_agent_t AS agent
-        WHERE agent.agent_id = repository.agent_id
-          AND agent.tenant_id = repository.publisher_tenant_id)
+       CASE WHEN EXISTS (
+           SELECT 1
+           FROM nexent.ag_tenant_agent_t AS agent
+           WHERE agent.agent_id = repository.agent_id
+             AND agent.tenant_id = repository.publisher_tenant_id
+       ) THEN 1 ELSE 0 END
 FROM nexent.ag_agent_repository_t AS repository
 CROSS JOIN LATERAL unnest(repository.tags) AS expanded(raw_value)
 JOIN utm_agent_category_alias AS aliases
@@ -1396,4 +1400,3 @@ ALTER TABLE nexent.tag_definition
     CHECK (selection_mode IN ('single_select', 'multi_select', 'no_value'));
 
 COMMIT;
-
