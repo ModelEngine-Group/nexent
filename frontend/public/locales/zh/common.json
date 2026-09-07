@@ -3922,6 +3922,7 @@
   "aidpKnowledge.kbName": "名称",
   "aidpKnowledge.kbNamePlaceholder": "知识库名称",
   "aidpKnowledge.kbNameRequired": "名称是必填项",
+  "aidpKnowledge.kbNameInvalid": "名称格式不正确：必须以中文或英文字母开头，后续只能包含中文、英文字母、数字或下划线，长度为 1-256 个字符",
   "aidpKnowledge.kbDescription": "描述",
   "aidpKnowledge.kbDescriptionPlaceholder": "可选描述信息",
   "aidpKnowledge.kbDescriptionRequired": "请输入知识库描述",

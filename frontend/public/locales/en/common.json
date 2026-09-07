@@ -4191,6 +4191,7 @@
   "aidpKnowledge.kbName": "Name",
   "aidpKnowledge.kbNamePlaceholder": "Knowledge base name",
   "aidpKnowledge.kbNameRequired": "Name is required",
+  "aidpKnowledge.kbNameInvalid": "Invalid name format: the name must start with a Chinese character or English letter, followed only by Chinese or English letters, digits, or underscores, and be 1–256 characters long.",
   "aidpKnowledge.kbDescription": "Description",
   "aidpKnowledge.kbDescriptionPlaceholder": "Optional description",
   "aidpKnowledge.kbDescriptionRequired": "Please enter a description",
