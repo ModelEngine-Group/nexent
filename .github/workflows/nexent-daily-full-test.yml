@@ -1,0 +1,109 @@
+name: Nexent Daily Full Test
+
+on:
+  # Only workflow changes pushed/merged into develop trigger integration runs.
+  push:
+    branches: [develop]
+    paths:
+      - ".github/workflows/nexent-daily-full-test.yml"
+  workflow_dispatch:
+  # UTC 16:00 = Beijing 00:00 the following day.
+  schedule:
+    - cron: "0 16 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexent-daily-full-test
+  cancel-in-progress: false
+
+jobs:
+  daily-full-test:
+    name: Daily D0-D6
+    runs-on: [self-hosted, linux, x64]
+    # Includes up to 12 hours waiting for the local Daily lock.
+    timeout-minutes: 1440
+    defaults:
+      run:
+        shell: bash
+    env:
+      TEST_ROOT: /home/jason/nexent-test-suite
+      REPO_ROOT: /root/project/nexent
+
+    steps:
+      - name: Verify local test environment
+        run: |
+          set -euo pipefail
+          test -d "$TEST_ROOT/auto_test"
+          test -x "$TEST_ROOT/scripts/run-daily-suite.sh"
+          test -x "$TEST_ROOT/scripts/doctor.sh"
+          for file in daily.env secrets.env opencode-daily.jsonc opencode-analysis.jsonc; do
+            test -f "$TEST_ROOT/config/$file"
+          done
+          test -d "$REPO_ROOT/.git"
+          test -x /home/jason/.opencode/bin/opencode
+          for tool in git docker flock grep mktemp; do
+            command -v "$tool" >/dev/null
+          done
+          current_branch="$(git -C "$REPO_ROOT" branch --show-current)"
+          if [[ "$current_branch" != develop ]]; then
+            echo "Expected develop branch, found: $current_branch" >&2
+            exit 2
+          fi
+          docker info >/dev/null
+          "$TEST_ROOT/scripts/doctor.sh"
+
+      - name: Run Nexent Daily D0-D6
+        run: |
+          set -euo pipefail
+          umask 027
+          workflow_log_root="$TEST_ROOT/runs/github-actions"
+          install -d -m 0750 "$workflow_log_root"
+          workflow_log="$workflow_log_root/run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.log"
+          {
+            echo "github_run_id=$GITHUB_RUN_ID"
+            echo "github_run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "github_event_name=$GITHUB_EVENT_NAME"
+            echo "github_ref=$GITHUB_REF"
+            echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >"$workflow_log"
+
+          lock_wait_deadline=$((SECONDS + 43200))
+          while true; do
+            # Each invocation has its own log: old lock messages cannot match.
+            attempt_log="$(mktemp "${workflow_log}.invocation.XXXXXX")"
+            set +e
+            "$TEST_ROOT/scripts/run-daily-suite.sh" \
+              --repo "$REPO_ROOT" >"$attempt_log" 2>&1
+            daily_status=$?
+            set -e
+            cat "$attempt_log" >>"$workflow_log"
+            echo "invocation_exit_code=$daily_status" >>"$workflow_log"
+
+            if ((daily_status == 0)); then
+              echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$workflow_log"
+              break
+            fi
+            if ((daily_status == 3)) &&
+               grep -qxF "another daily run is active" "$attempt_log"; then
+              if ((SECONDS >= lock_wait_deadline)); then
+                echo "Timed out waiting for local Daily. Log: $workflow_log" >&2
+                exit 3
+              fi
+              echo "Local Daily is active; retrying in 30 seconds."
+              sleep 30
+              continue
+            fi
+            echo "Daily failed with exit code $daily_status. Log: $workflow_log" >&2
+            exit "$daily_status"
+          done
+          echo "Daily completed. Local workflow log: $workflow_log"
+
+      - name: Show local result locations
+        if: always()
+        run: |
+          echo "No GitHub Artifact was uploaded."
+          echo "Daily runs: $TEST_ROOT/runs/daily/"
+          echo "Reports: $TEST_ROOT/reports/latest/"
+          echo "Workflow log: $TEST_ROOT/runs/github-actions/run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.log"

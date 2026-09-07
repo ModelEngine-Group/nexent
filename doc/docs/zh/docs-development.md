@@ -28,7 +28,7 @@ pnpm install
 启动本地开发服务器：
 
 ```bash
-pnpm vitepress dev docs
+pnpm run docs:dev
 ```
 
 启动成功后，请通过以下地址访问：

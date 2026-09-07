@@ -51,7 +51,13 @@ STARTUP_RECOVERY_DEPLOYMENTS = {
     "nexent-northbound",
     "nexent-runtime",
 }
-APPLICATION_PVCS = {"nexent-workspace", "nexent-skills", "nexent-supabase-db"}
+APPLICATION_PVCS = {
+    "nexent-workspace",
+    "nexent-skills",
+    "nexent-memory-plugins",
+    "nexent-logs",
+    "nexent-supabase-db",
+}
 INFRASTRUCTURE_PVCS = {
     "nexent-elasticsearch",
     "nexent-postgresql",

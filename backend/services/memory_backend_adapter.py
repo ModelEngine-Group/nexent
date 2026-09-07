@@ -26,18 +26,21 @@ from typing import Any, Dict, List, Optional
 
 from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import (
+    MemoryIngestUnit,
     MemoryLayer,
     MemorySearchRequest,
     MemorySearchResult,
 )
 from nexent.memory.service import MemoryService
 
-from .memory_record_service import (
+from services.memory_record_service import (
     MemoryRecordError,
     _resolve_tenant_embedding_model_info,
     get_memory_record_service,
 )
-from .memory_retrieval_service import get_memory_retrieval_service
+from services.memory_retrieval_service import get_memory_retrieval_service
+from services.memory_external_provider_service import get_memory_external_provider_service
+from services.memory_ingestion_event_service import MemoryIngestionEventService
 
 
 logger = logging.getLogger("memory_backend_adapter")
@@ -84,7 +87,88 @@ async def _backend_store_hook(
         embedding_model_info=embedding_model_info,
         actor="agent",
     )
+
+    try:
+        await _fanout_external_ingest(payload, result)
+    except Exception as exc:
+        logger.warning(
+            "event=external_memory_ingest_failed tenant_id=%s event_type=memory_stored "
+            "event_id=%s error_type=%s",
+            tenant_id,
+            result.get("memory_id", ""),
+            type(exc).__name__,
+            exc_info=True,
+        )
+
     return result
+
+
+def _build_ingestion_event_service():
+    """Lazily construct a MemoryIngestionEventService for transparent proxy."""
+    provider_service = get_memory_external_provider_service()
+    return MemoryIngestionEventService(
+        provider_service._config_service,
+        provider_service,
+    )
+
+
+async def _fanout_external_ingest(
+    payload: Dict[str, Any], result: Dict[str, Any]
+) -> None:
+    """Fan-out a store event to all enabled external providers."""
+    tenant_id = payload["tenant_id"]
+    provider_service = get_memory_external_provider_service()
+    enabled = provider_service._config_service.get_enabled_providers(tenant_id)
+    if not enabled:
+        logger.info(
+            "event=external_memory_ingest_skipped tenant_id=%s event_type=memory_stored "
+            "event_id=%s reason=no_enabled_providers",
+            tenant_id,
+            result.get("memory_id", ""),
+        )
+        return
+
+    provider_names = [str(config.get("provider_name", "unknown")) for config in enabled]
+    logger.info(
+        "event=external_memory_ingest_started tenant_id=%s event_type=memory_stored "
+        "event_id=%s provider_count=%d providers=%s unit_count=1",
+        tenant_id,
+        result.get("memory_id", ""),
+        len(enabled),
+        ",".join(provider_names),
+    )
+
+    layer = payload.get("layer", MemoryLayer.AGENT.value)
+    if hasattr(layer, "value"):
+        layer = layer.value
+
+    ingest_unit = MemoryIngestUnit(
+        event_id=str(result.get("memory_id", "")),
+        event_type="memory_stored",
+        unit_type=str(layer),
+        unit_content=payload["content"],
+    )
+
+    ingestion_service = _build_ingestion_event_service()
+    ingest_results = await ingestion_service.send_ingest_all_enabled(
+        tenant_id=tenant_id,
+        user_id=payload["user_id"],
+        agent_id=str(payload.get("agent_id", "")),
+        conversation_id=str(payload.get("conversation_id", "")),
+        event_type="memory_stored",
+        event_id=str(result.get("memory_id", "")),
+        units=[ingest_unit],
+    )
+    successful = sum(item.status in {"ok", "degraded"} for item in ingest_results)
+    logger.info(
+        "event=external_memory_ingest_completed tenant_id=%s event_type=memory_stored "
+        "event_id=%s provider_count=%d success_count=%d failure_count=%d",
+        tenant_id,
+        result.get("memory_id", ""),
+        len(enabled),
+        successful,
+        len(ingest_results) - successful,
+    )
 
 
 async def _backend_search_hook(
@@ -155,7 +239,6 @@ def build_memory_service_for_dreaming() -> MemoryService:
         backend_store=_backend_store_hook,
         backend_search=None,
     )
-
 
 def build_memory_service_for_fa_extraction() -> MemoryService:
     """Return a facade for final-answer memory extraction.

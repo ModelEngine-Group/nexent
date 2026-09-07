@@ -11,6 +11,8 @@ The current SDK includes the following tool types:
 - **TavilySearchTool**: Web search tool based on Tavily API  
 - **LinkupSearchTool**: Search tool based on Linkup API
 - **KnowledgeBaseSearchTool**: Local knowledge base search tool
+- **RAGFlowSearchTool**: RAGFlow knowledge retrieval
+- **HaotianSearchTool / IndependentAidpSearchTool / AidpSearchTool / DifySearchTool / DataMateSearchTool / IdataSearchTool**: Enterprise-grade retrieval source integrations
 
 ### File Management Tools
 - **CreateFileTool**: Create new files with content
@@ -31,6 +33,28 @@ The current SDK includes the following tool types:
 ### Multimodal Tools
 - **AnalyzeTextFileTool**: A document question-answering tool based on data processing and large language models
 - **AnalyzeImageTool**: An image question-answering tool based on visual language models
+- **AnalyzeAudioTool**: An audio understanding tool based on speech models
+- **AnalyzeVideoTool**: A video understanding tool based on visual language models
+
+### Memory Tools
+- **StoreMemoryTool**: Stores important information into the current agent's short-term memory (MemoryLayer.AGENT + SHORT_TERM), up to 3 entries per run
+- **SearchMemoryTool**: Retrieves the current agent's memories by natural language query, with top_k defaulting to 5
+
+### Orchestration Tools
+- **ParallelExecutorTool**: Executes multiple sub-agents concurrently
+- **CreatePlanTool / UpdatePlanStepTool**: Creation and update of plan todos
+
+### Data Tools
+- **MySqlTool / PostgreSqlTool / MsSqlTool**: Execute controlled SQL queries against databases
+- **UploadToS3Tool / DownloadFromS3Tool**: S3 object upload and download
+
+### Skill and Task Tools (system-managed internally)
+- **ReadSkillConfigTool / ReadSkillMdTool**: Read config.yaml and SKILL.md under the skill directory
+- **RunSkillScriptTool**: Execute skill scripts
+- **WriteSkillFileTool**: Write files into the tenant-isolated skill directory
+- **CreateScheduledTaskProposalTool**: Create scheduled task proposals pending user confirmation (only saves the proposal, does not execute business tasks)
+
+> Note: The tools above are managed internally by the system and are not exported uniformly in the `__init__.py` of `nexent.core.tools`.
 
 ## 🔧 Common Characteristics
 
@@ -45,19 +69,30 @@ Each tool class must include the following class attributes:
 
 ```python
 class ToolExample(Tool):
-    name = "tool_name"                    # Tool unique identifier
-    description = "Tool functionality description"  # Detailed feature description
-    inputs = {                           # Input parameter definition
-        "param": {"type": "string", "description": "Parameter description"}
+    name = "tool_name"                     # Tool unique identifier
+    description = "Tool function description"  # Detailed feature description (English)
+    description_zh = "工具功能描述"        # Detailed feature description (Chinese)
+    inputs = {                             # Input parameter definition
+        "param": {
+            "type": "string",
+            "description": "Parameter description",
+            "description_zh": "参数描述"
+        }
     }
-    output_type = "string"               # Output type
-    tool_sign = "x"                      # Tool identifier (optional)
+    init_param_descriptions = {            # Constructor parameter descriptions (corresponding to __init__ parameters)
+        "config_param": {"description": "Config parameter description", "description_zh": "配置参数说明"}
+    }
+    output_type = "string"                 # Output type
+    category = "search"                    # Tool category (ToolCategory enum value)
+    tool_sign = "b"                        # Tool identifier (ToolSign enum value)
 ```
 
 ### 3. Message Processing Mechanism
 - **ProcessType Enumeration**: Use different types to distinguish messages (TOOL, CARD, SEARCH_CONTENT, PICTURE_WEB, etc.)
 - **Observer Pattern**: Implement real-time message pushing through MessageObserver
 - **JSON Format**: All message content uses JSON format to ensure consistency
+- **Unified sending of running status messages**: `ProcessType.TOOL` running status messages are sent uniformly by the `_wrap_tool_for_observer` bridge in `core_agent.py` every time a tool is invoked (with a `tool_call_id` attached for context correlation). Tools no longer send TOOL messages themselves; they only need to send supplementary messages such as `CARD`, `SEARCH_CONTENT`, `PICTURE_WEB`, etc.
+- **Legacy**: Some earlier tools (e.g., the SQL tool base classes) still keep the `running_prompt_zh/en` attributes and send TOOL messages inside the tool; new tools should no longer use this pattern
 
 ### 4. Exception Handling Strategy
 - **Unified Exceptions**: Use Exception to throw error messages
@@ -79,15 +114,20 @@ class ToolExample(Tool):
 ### Attribute and Method Naming
 - **Format**: Lowercase letters, words connected by underscores
 - **Private Methods**: Start with single underscore (e.g., `_filter_images`)
-- **Examples**: `max_results`, `running_prompt_en`, `_decode_subject`
+- **Examples**: `max_results`, `description_zh`, `_decode_subject`
 
 ### Tool Identifier Conventions
-- **tool_sign**: Single letter identifier for distinguishing tool sources
-- **Assignment Rules**:
-  - `a`: Knowledge base search (KnowledgeBaseSearchTool)
-  - `b`: Web search (ExaSearchTool, TavilySearchTool)
-  - `l`: Linkup search (LinkupSearchTool)
-  - Other letters assigned by functional type
+- **tool_sign**: Single letter identifier for distinguishing tool sources (e.g., marking retrieval sources in frontend citation labels like `[b0]`, `[a1]`)
+- **How to set it**: Take values from the `ToolSign` enum in `nexent.core.utils.tools_common_message`, e.g., `tool_sign = ToolSign.EXA_SEARCH.value`
+- **Assignment Rules** (excerpted from the `ToolSign` enum definition):
+  - `a`: Knowledge base search (KNOWLEDGE_BASE, KnowledgeBaseSearchTool)
+  - `b`: EXA search (EXA_SEARCH, ExaSearchTool)
+  - `c`: Linkup search (LINKUP_SEARCH, LinkupSearchTool)
+  - `d`: Tavily search (TAVILY_SEARCH, TavilySearchTool)
+  - `e`: DataMate search (DATAMATE_SEARCH)
+  - `f`: File operations (FILE_OPERATION)
+  - `g` / `h` / `i` / `j` / `k` / `l`: Dify / iData / Haotian / AIDP / RAGFlow / IndependentAIDP search
+  - `m` / `n` / `p` / `s` / `t` / `z`: Multimodal / memory / planning / skills / terminal / database operations
 
 ## 🏗️ Code Structure Templates
 
@@ -101,30 +141,39 @@ from smolagents.tools import Tool
 from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.tools_common_message import ToolCategory, ToolSign
 
 logger = logging.getLogger("your_tool_name")
 
 class YourTool(Tool):
     name = "your_tool"
-    description = "Detailed description of tool functionality, explaining applicable scenarios and usage methods"
+    description = "Detailed description of the tool function, including applicable scenarios and usage"
+    description_zh = "工具功能的中文描述，说明适用场景和使用方法"
     inputs = {
         "param1": {
-            "type": "string", 
-            "description": "Detailed description of parameter 1"
+            "type": "string",
+            "description": "Detailed description of parameter 1",
+            "description_zh": "参数1的中文描述"
         },
         "param2": {
-            "type": "integer", 
-            "description": "Detailed description of parameter 2", 
-            "default": 10, 
+            "type": "integer",
+            "description": "Detailed description of parameter 2",
+            "description_zh": "参数2的中文描述",
+            "default": 10,
             "nullable": True
         }
     }
+    init_param_descriptions = {          # Constructor parameter descriptions (corresponding to __init__ parameters)
+        "config_param": {"description": "Config parameter description", "description_zh": "配置参数说明"},
+        "optional_param": {"description": "Optional parameter description", "description_zh": "可选参数说明"}
+    }
     output_type = "string"
-    tool_sign = "y"  # Choose appropriate identifier
+    category = ToolCategory.FILE.value  # Choose the ToolCategory enum member by tool type
+    tool_sign = ToolSign.FILE_OPERATION.value  # Choose the ToolSign enum member by tool type
 
     def __init__(
         self,
-        config_param: str = Field(description="Configuration parameter"),
+        config_param: str = Field(description="Config parameter"),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
         optional_param: int = Field(description="Optional parameter", default=5)
     ):
@@ -132,10 +181,6 @@ class YourTool(Tool):
         self.config_param = config_param
         self.observer = observer
         self.optional_param = optional_param
-        
-        # Multi-language prompts
-        self.running_prompt_zh = "正在执行..."
-        self.running_prompt_en = "Processing..."
         
         # Record operation sequence (if needed)
         self.record_ops = 0
@@ -154,14 +199,8 @@ class YourTool(Tool):
             Exception: Detailed error information
         """
         try:
-            # Send tool running message
+            # Send card information (optional)
             if self.observer:
-                running_prompt = (self.running_prompt_zh 
-                                if self.observer.lang == "zh" 
-                                else self.running_prompt_en)
-                self.observer.add_message("", ProcessType.TOOL, running_prompt)
-                
-                # Send card information (optional)
                 card_content = [{"icon": "your_icon", "text": param1}]
                 self.observer.add_message("", ProcessType.CARD, 
                                         json.dumps(card_content, ensure_ascii=False))
@@ -201,45 +240,44 @@ from smolagents.tools import Tool
 from pydantic import Field
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import SearchResultTextMessage
+from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 
 logger = logging.getLogger("search_tool_name")
 
 class SearchTool(Tool):
     name = "search_tool"
-    description = "Detailed description of search tool, including search scope and applicable scenarios"
+    description = "Detailed description of the search tool, including search scope and applicable scenarios"
+    description_zh = "搜索工具的中文描述，包括搜索范围和适用场景"
     inputs = {
-        "query": {"type": "string", "description": "Search query"},
-        "max_results": {"type": "integer", "description": "Maximum number of results", "default": 5, "nullable": True}
+        "query": {"type": "string", "description": "The search query to perform", "description_zh": "搜索查询词"},
+        "max_results": {"type": "integer", "description": "Maximum number of results", "description_zh": "最大结果数", "default": 5, "nullable": True}
+    }
+    init_param_descriptions = {          # Constructor parameter descriptions (corresponding to __init__ parameters)
+        "api_key": {"description": "API key", "description_zh": "API密钥"}
     }
     output_type = "string"
-    tool_sign = "s"
+    category = ToolCategory.SEARCH.value
+    tool_sign = ToolSign.EXA_SEARCH.value  # Choose the ToolSign enum member by actual search source
 
     def __init__(
         self,
         api_key: str = Field(description="API key"),
         observer: MessageObserver = Field(description="Message observer", default=None, exclude=True),
-        max_results: int = Field(description="Maximum search results", default=5)
+        max_results: int = Field(description="Maximum number of search results", default=5)
     ):
         super().__init__()
         self.api_key = api_key
         self.observer = observer
         self.max_results = max_results
-        self.record_ops = 0
-        
-        self.running_prompt_zh = "搜索中..."
-        self.running_prompt_en = "Searching..."
+        # Citation index starts from 1 (used by SearchResultTextMessage's cite_index)
+        self.record_ops = 1
 
     def forward(self, query: str, max_results: int = None) -> str:
         if max_results is None:
             max_results = self.max_results
-            
-        # Send search status message
+
+        # Send card information (optional; TOOL running status messages are sent uniformly by the core_agent bridge)
         if self.observer:
-            running_prompt = (self.running_prompt_zh 
-                            if self.observer.lang == "zh" 
-                            else self.running_prompt_en)
-            self.observer.add_message("", ProcessType.TOOL, running_prompt)
             card_content = [{"icon": "search", "text": query}]
             self.observer.add_message("", ProcessType.CARD, 
                                     json.dumps(card_content, ensure_ascii=False))
@@ -353,7 +391,7 @@ class SearchTool(Tool):
 1. **Version Compatibility**: Ensure tools are compatible with different versions of dependency libraries
 2. **Resource Cleanup**: Release network connections, file handles and other resources in time
 3. **Log Level**: Set log levels reasonably to avoid too much debug information
-4. **Configuration Management**: Support configuration of key parameters through environment variables
+4. **Configuration Management**: All configuration is passed in through constructor parameters (the SDK does not read environment variables directly; environment variables are read by the service layer and passed in)
 5. **Error Recovery**: Provide error recovery mechanisms when possible
 
 By following these guidelines, you can ensure that newly developed tools maintain consistency with existing tools and have good maintainability and extensibility. 

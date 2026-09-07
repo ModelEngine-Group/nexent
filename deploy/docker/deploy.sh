@@ -1097,6 +1097,7 @@ prepare_directory_and_data() {
   create_dir_with_permission "$ROOT_DIR/postgresql" 775
   create_dir_with_permission "$ROOT_DIR/minio/data" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
+  create_dir_with_permission "$ROOT_DIR/memory-provider-plugins" 775
 
   cp -rn "$DOCKER_ASSETS_DIR/volumes" "$ROOT_DIR"
   chmod -R 775 $ROOT_DIR/volumes

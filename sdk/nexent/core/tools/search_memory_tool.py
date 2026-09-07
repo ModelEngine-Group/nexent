@@ -125,6 +125,11 @@ class SearchMemoryTool(Tool):
             default=True,
             exclude=True,
         ),
+        external_results: Any = Field(
+            description="Pre-fetched external memory results to include in search",
+            default=None,
+            exclude=True,
+        ),
         observer: MessageObserver = Field(
             description="Message observer",
             default=None,
@@ -139,6 +144,7 @@ class SearchMemoryTool(Tool):
         self.agent_id = agent_id
         self.conversation_id = conversation_id
         self.embedding_configured = embedding_configured
+        self.external_results = external_results
         self.observer = observer
 
     def _format_context(self, context: Any) -> str:
@@ -202,9 +208,27 @@ class SearchMemoryTool(Tool):
                 query=query,
                 top_k=top_k,
                 layers=["agent"],
+                external_results=self.external_results,
             )
 
         context = _run_coroutine(_build())
+        existing_external = {
+            (
+                str(getattr(item, "id", None) or getattr(item, "external_id", None) or ""),
+                str(getattr(item, "content", "")),
+                str(getattr(item, "provider", None) or getattr(item, "source", "")),
+            )
+            for item in context.external
+        }
+        for item in self.external_results or []:
+            identity = (
+                str(getattr(item, "id", None) or getattr(item, "external_id", None) or ""),
+                str(getattr(item, "content", "")),
+                str(getattr(item, "provider", None) or getattr(item, "source", "")),
+            )
+            if identity not in existing_external:
+                context.external.append(item)
+                existing_external.add(identity)
         logger.info(
             "event=memory_tool_completed tool=search_memory tenant_id=%s user_id=%s "
             "agent_id=%s conversation_id=%s path=pipeline result_count=%d",
@@ -216,7 +240,8 @@ class SearchMemoryTool(Tool):
         )
         context.tenant_long_term = []
         context.user_long_term = []
-        context.external = []
+        # Keep external results - they were already searched in create_agent_info.py
+        # and passed to build_context via external_results parameter
         return self._format_context(context)
 
     def forward(self, query: str, top_k: int = 5) -> str:

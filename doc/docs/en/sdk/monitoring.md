@@ -70,6 +70,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - User feedback collection
 - Model cost tracking
 
+> Since v2.5.0, context management and prompt cache hit metrics (context/cache metrics) are also exposed, which can be used to evaluate compression effectiveness and caching benefits.
+
 ### LangSmith
 
 LangSmith supports online OTLP trace ingestion through the OpenTelemetry endpoint. Nexent can send traces to a local Collector first, and the Collector forwards them to LangSmith.
@@ -129,7 +131,7 @@ MONITORING_DASHBOARD_URL=http://localhost:9411
 | `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
 | `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar; visible in speed mode and to super administrators in standard mode |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
-| `MONITORING_TRACE_CONTENT_MODE` | `full` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
+| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | Maximum characters for each payload preview written to trace attributes |
 | `MONITORING_TRACE_MAX_ITEMS` | `20` | Maximum dict keys/list items included in payload previews |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | Service identifier |
@@ -179,7 +181,7 @@ Agent context metrics are emitted from the SDK lifecycle. Each action step recor
 
 ```python
 @monitoring_manager.monitor_llm_call("gpt-4", "chat_completion")
-def call_llm(messages):
+def call_llm(messages, **kwargs):
     return llm_response
 ```
 

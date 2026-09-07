@@ -8,7 +8,7 @@ focus on argument translation and policy enforcement.
 import asyncio
 import sys
 import types
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -63,26 +63,45 @@ sys.modules["nexent.storage"] = _storage_pkg
 sys.modules["nexent.storage.storage_client_factory"] = _storage_factory
 
 
-class _Singleton:
-    def __init__(self, name, value):
-        self.name = name
-        self.value = value
+class _EnumBase:
+    _registry: dict = {}
 
-
-class MemoryLayer:
-    TENANT = _Singleton("tenant", "tenant")
-    USER = _Singleton("user", "user")
-    AGENT = _Singleton("agent", "agent")
-    tenant = TENANT
-    user = USER
-    agent = AGENT
-    _registry = {"tenant": TENANT, "user": USER, "agent": AGENT}
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls._registry = {}
 
     def __new__(cls, value):
         inst = cls._registry.get(value)
         if inst is None:
             raise ValueError(value)
         return inst
+
+    def __init__(self, name=None, value=None):
+        if name is not None:
+            self.name = name
+            self.value = value
+
+    def __repr__(self):
+        return f"{type(self).__name__}.{self.name}"
+
+
+class MemoryLayer(_EnumBase):
+    pass
+
+
+MemoryLayer.TENANT = object.__new__(MemoryLayer)
+MemoryLayer.TENANT.name = "tenant"
+MemoryLayer.TENANT.value = "tenant"
+MemoryLayer.USER = object.__new__(MemoryLayer)
+MemoryLayer.USER.name = "user"
+MemoryLayer.USER.value = "user"
+MemoryLayer.AGENT = object.__new__(MemoryLayer)
+MemoryLayer.AGENT.name = "agent"
+MemoryLayer.AGENT.value = "agent"
+MemoryLayer.tenant = MemoryLayer.TENANT
+MemoryLayer.user = MemoryLayer.USER
+MemoryLayer.agent = MemoryLayer.AGENT
+MemoryLayer._registry = {"tenant": MemoryLayer.TENANT, "user": MemoryLayer.USER, "agent": MemoryLayer.AGENT}
 
 
 class MemorySearchRequest:
@@ -98,10 +117,37 @@ class MemorySearchResult:
         self.__dict__.update(kwargs)
 
 
+class MemoryIngestUnit:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class MemoryIngestRequest:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
 memory_models.MemoryLayer = MemoryLayer
-memory_models.MemoryType = type("MemoryType", (), {})  # placeholder for service imports
+class MemoryType(_EnumBase):
+    pass
+
+
+MemoryType.SHORT_TERM = object.__new__(MemoryType)
+MemoryType.SHORT_TERM.name = "short_term"
+MemoryType.SHORT_TERM.value = "short_term"
+MemoryType.LONG_TERM = object.__new__(MemoryType)
+MemoryType.LONG_TERM.name = "long_term"
+MemoryType.LONG_TERM.value = "long_term"
+MemoryType.short_term = MemoryType.SHORT_TERM
+MemoryType.long_term = MemoryType.LONG_TERM
+MemoryType._registry = {"short_term": MemoryType.SHORT_TERM, "long_term": MemoryType.LONG_TERM}
+
+
+memory_models.MemoryType = MemoryType
 memory_models.MemorySearchRequest = MemorySearchRequest
 memory_models.MemorySearchResult = MemorySearchResult
+memory_models.MemoryIngestUnit = MemoryIngestUnit
+memory_models.MemoryIngestRequest = MemoryIngestRequest
 
 
 class EmbeddingModelInfo:
@@ -128,6 +174,8 @@ memory_service.MemoryService = MemoryService
 # ---------------------------------------------------------------------------
 record_service_mod = types.ModuleType("services.memory_record_service")
 retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
+external_provider_service_mod = types.ModuleType("services.memory_external_provider_service")
+ingestion_event_service_mod = types.ModuleType("services.memory_ingestion_event_service")
 
 record_service_mod.get_memory_record_service = MagicMock(
     name="get_memory_record_service"
@@ -140,11 +188,21 @@ record_service_mod._resolve_tenant_embedding_model_info = MagicMock(
 retrieval_service_mod.get_memory_retrieval_service = MagicMock(
     name="get_memory_retrieval_service"
 )
+external_provider_service_mod.get_memory_external_provider_service = MagicMock(
+    name="get_memory_external_provider_service"
+)
+ingestion_event_service_mod.MemoryIngestionEventService = MagicMock(
+    name="MemoryIngestionEventService"
+)
 
 sys.modules["services.memory_record_service"] = record_service_mod
 sys.modules["services.memory_retrieval_service"] = retrieval_service_mod
 sys.modules["backend.services.memory_record_service"] = record_service_mod
 sys.modules["backend.services.memory_retrieval_service"] = retrieval_service_mod
+sys.modules["services.memory_external_provider_service"] = external_provider_service_mod
+sys.modules["backend.services.memory_external_provider_service"] = external_provider_service_mod
+sys.modules["services.memory_ingestion_event_service"] = ingestion_event_service_mod
+sys.modules["backend.services.memory_ingestion_event_service"] = ingestion_event_service_mod
 
 
 from backend.services import memory_backend_adapter
@@ -293,6 +351,225 @@ def test_build_memory_service_for_dreaming_returns_memory_service():
     assert isinstance(svc, MemoryService)
     assert callable(svc.kwargs.get("backend_store"))
     assert svc.kwargs.get("backend_search") is None
+
+
+def test_fanout_external_ingest_skips_without_enabled_providers(monkeypatch):
+    provider_service = MagicMock()
+    provider_service._config_service.get_enabled_providers.return_value = []
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "get_memory_external_provider_service",
+        MagicMock(return_value=provider_service),
+    )
+
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._fanout_external_ingest(
+            {"tenant_id": "t1", "user_id": "u1", "content": "remember me"},
+            {"memory_id": "m1"},
+        )
+    )
+
+    provider_service._config_service.get_enabled_providers.assert_called_once_with("t1")
+
+
+def test_build_ingestion_event_service_uses_shared_provider_config(monkeypatch):
+    provider_service = MagicMock()
+    constructor = MagicMock()
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "get_memory_external_provider_service",
+        MagicMock(return_value=provider_service),
+    )
+    monkeypatch.setattr(memory_backend_adapter, "MemoryIngestionEventService", constructor)
+
+    result = memory_backend_adapter._build_ingestion_event_service()
+
+    constructor.assert_called_once_with(
+        provider_service._config_service,
+        provider_service,
+    )
+    assert result is constructor.return_value
+
+
+def test_fanout_external_ingest_sends_agent_unit_to_all_enabled(monkeypatch):
+    provider_service = MagicMock()
+    provider_service._config_service.get_enabled_providers.return_value = [
+        {"provider_name": "mem0"},
+        {"provider_name": "partner"},
+    ]
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "get_memory_external_provider_service",
+        MagicMock(return_value=provider_service),
+    )
+    ingestion_service = MagicMock()
+    ingestion_service.send_ingest_all_enabled = AsyncMock(
+        return_value=[types.SimpleNamespace(status="ok"), types.SimpleNamespace(status="error")]
+    )
+    monkeypatch.setattr(
+        memory_backend_adapter,
+        "_build_ingestion_event_service",
+        MagicMock(return_value=ingestion_service),
+    )
+
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._fanout_external_ingest(
+            {
+                "tenant_id": "t1",
+                "user_id": "u1",
+                "agent_id": "a1",
+                "conversation_id": "c1",
+                "content": "remember me",
+                "layer": MemoryLayer.AGENT,
+            },
+            {"memory_id": "m1"},
+        )
+    )
+
+    kwargs = ingestion_service.send_ingest_all_enabled.await_args.kwargs
+    assert kwargs["tenant_id"] == "t1"
+    assert kwargs["event_id"] == "m1"
+    assert kwargs["units"][0].unit_type == "agent"
+    assert kwargs["units"][0].unit_content == "remember me"
+
+
+def test_backend_store_hook_normalizes_enum_layer(fake_record_service):
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "content": "hi",
+        "layer": MemoryLayer.AGENT,
+        "memory_type": "short_term",
+    }
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_store_hook(payload)
+    )
+    kwargs = fake_record_service.create_memory.call_args.kwargs
+    assert kwargs["layer"] == "agent"
+
+
+def test_backend_store_hook_normalizes_enum_memory_type(fake_record_service):
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "content": "hi",
+        "layer": "agent",
+        "memory_type": MemoryType.SHORT_TERM,
+    }
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_store_hook(payload)
+    )
+    kwargs = fake_record_service.create_memory.call_args.kwargs
+    assert kwargs["memory_type"] == "short_term"
+
+
+def test_backend_store_hook_skips_embedding_resolution_when_provided(fake_record_service):
+    resolver = record_service_mod._resolve_tenant_embedding_model_info
+    previous = resolver.return_value
+    resolver.return_value = None
+    try:
+        payload = {
+            "tenant_id": "t1",
+            "user_id": "u1",
+            "content": "hi",
+            "layer": "agent",
+            "memory_type": "short_term",
+            "embedding": [0.1, 0.2, 0.3],
+        }
+        result = asyncio.get_event_loop().run_until_complete(
+            memory_backend_adapter._backend_store_hook(payload)
+        )
+        assert result["memory_id"] == 1
+        fake_record_service.create_memory.assert_called_once()
+        kwargs = fake_record_service.create_memory.call_args.kwargs
+        assert kwargs["embedding"] == [0.1, 0.2, 0.3]
+    finally:
+        resolver.return_value = previous
+
+
+def test_backend_store_hook_none_conversation_id(fake_record_service):
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "content": "hi",
+        "layer": "agent",
+        "memory_type": "short_term",
+        "conversation_id": None,
+    }
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_store_hook(payload)
+    )
+    kwargs = fake_record_service.create_memory.call_args.kwargs
+    assert kwargs["conversation_id"] is None
+
+
+def test_backend_store_hook_empty_string_conversation_id(fake_record_service):
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "content": "hi",
+        "layer": "agent",
+        "memory_type": "short_term",
+        "conversation_id": "",
+    }
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_store_hook(payload)
+    )
+    kwargs = fake_record_service.create_memory.call_args.kwargs
+    assert kwargs["conversation_id"] is None
+
+
+def test_backend_store_hook_minimal_payload(fake_record_service):
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "content": "hi",
+        "layer": "agent",
+        "memory_type": "short_term",
+    }
+    asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_store_hook(payload)
+    )
+    kwargs = fake_record_service.create_memory.call_args.kwargs
+    assert kwargs["agent_id"] is None
+    assert kwargs["conversation_id"] is None
+    assert kwargs["idempotency_key"] is None
+
+
+def test_backend_search_hook_uses_defaults(fake_retrieval_service):
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "query": "hi",
+    }
+    results = asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_search_hook(payload)
+    )
+    assert len(results) == 1
+
+
+def test_backend_search_hook_serializes_string_layer(fake_retrieval_service):
+    retrieval_service_mod.get_memory_retrieval_service.reset_mock()
+    svc = MagicMock()
+    fake_result = MemorySearchResult(
+        memory_id="2", score=0.8, content="y", layer="user"
+    )
+
+    async def _search(*args, **kwargs):
+        return [fake_result]
+
+    svc.search = _search
+    retrieval_service_mod.get_memory_retrieval_service.return_value = svc
+
+    payload = {
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "query": "hi",
+    }
+    results = asyncio.get_event_loop().run_until_complete(
+        memory_backend_adapter._backend_search_hook(payload)
+    )
+    assert results[0]["layer"] == "user"
 
 
 def test_build_memory_service_for_fa_extraction_returns_memory_service():

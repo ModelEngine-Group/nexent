@@ -104,6 +104,7 @@ def _make_tool(
     conversation_id="c1",
     observer=None,
     embedding_configured=True,
+    external_results=None,
 ):
     """Construct the tool with every constructor kwarg supplied explicitly,
     matching how ``nexent_agent`` wires the runtime instance."""
@@ -116,6 +117,7 @@ def _make_tool(
         conversation_id=conversation_id,
         observer=observer,
         embedding_configured=embedding_configured,
+        external_results=external_results,
     )
 
 
@@ -208,8 +210,8 @@ class TestSearchMemoryToolPipelinePath:
         assert "Likes dark mode" in result
         assert "Owns two cats" in result
 
-    def test_pipeline_path_discards_non_agent_buckets(self):
-        """Only agent short-term memory may be returned by search_memory."""
+    def test_ac_p3_18_pipeline_path_preserves_external_bucket(self):
+        """AC-P3-18: fixed search includes prefetched external hits."""
         service = _async_context_service(_make_context({
             "tenant": [_StubRecord("Global policy X", score=0.99, source="es")],
             "user": [_StubRecord("Loves cats", score=0.88, source="es")],
@@ -223,10 +225,42 @@ class TestSearchMemoryToolPipelinePath:
         assert "#### Agent Short-term Memory" in out
         assert "Tenant Long-term Memory" not in out
         assert "User Long-term Memory" not in out
-        assert "External Memory" not in out
+        assert "#### External Memory" in out
         assert "Global policy X" not in out
         assert "Loves cats" not in out
         assert "Active thread Y" in out
+        assert "Web hit Z" in out
+
+    def test_ac_p3_18_passes_prefetched_external_results_to_context_service(self):
+        """AC-P3-18: runtime-prefetched hits reach context assembly unchanged."""
+        service = _async_context_service(_make_context({}))
+        external_results = [object()]
+        tool = _make_tool(
+            memory_context_service=service,
+            external_results=external_results,
+        )
+
+        tool.forward(query="sister Jules", top_k=5)
+
+        assert service.build_context.call_args.kwargs["external_results"] is external_results
+
+    def test_ac_p3_22_restores_external_results_dropped_by_global_top_k(self):
+        """Mixed-source output keeps prefetched external hits after fusion truncation."""
+        service = _async_context_service(_make_context({
+            "agent": [_StubRecord(f"Internal {index}", score=0.9 - index / 100)
+                      for index in range(5)],
+        }))
+        external = _StubRecord("Jules uses COMET-913", score=0.39, source="mem0")
+        tool = _make_tool(
+            memory_context_service=service,
+            external_results=[external],
+        )
+
+        out = tool.forward(query="ORBIT-742 and COMET-913", top_k=5)
+
+        assert "Found 6 relevant memories" in out
+        assert "#### External Memory" in out
+        assert "Jules uses COMET-913" in out
 
     def test_pipeline_path_no_results_renders_empty_message(self):
         """Empty context surfaces the standard empty marker."""

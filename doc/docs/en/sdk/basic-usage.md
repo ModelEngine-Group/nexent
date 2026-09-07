@@ -43,8 +43,9 @@ search_tool = ExaSearchTool(
     max_results=5
 )
 
-# Create knowledge base tool
+# Create knowledge base tool (index_names is a required parameter)
 kb_tool = KnowledgeBaseSearchTool(
+    index_names=["my_knowledge_base"],
     top_k=5, 
     observer=observer
 )
