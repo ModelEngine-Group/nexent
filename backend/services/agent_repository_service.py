@@ -1057,19 +1057,28 @@ def check_repository_import_precheck_impl(
         raise ValueError("Repository listing is not available for import")
 
     if record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID:
-        # Official dependencies are resolved from the mounted bundle at import
-        # time. The generic precheck cannot validate its logical KB names as
-        # tenant index names, so leave the dependency decision to the official
-        # installer (which can return needs_model and reuse existing resources).
-        return {
-            "agent_repository_id": agent_repository_id,
-            "display_name": str(record.get("display_name") or record.get("name") or "Agent"),
-            "total_count": 0,
-            "available_count": 0,
-            "percent": 100,
-            "has_abnormal": False,
-            "items": [],
-        }
+        # Re-read the mounted bundle so the precheck sees the same Skill,
+        # MCP, model and logical KB declarations that the official installer
+        # will use. The repository snapshot is intentionally not treated as
+        # the source of official seed documents.
+        from services.official_agent_service import _load_bundle
+
+        bundle_name = str(record.get("name") or "")
+        bundle = _load_bundle(bundle_name)
+        if bundle is None:
+            raise ValueError(f"Official agent bundle not found: {bundle_name}")
+        display_name = (
+            str(record.get("display_name") or "").strip()
+            or str(record.get("name") or "").strip()
+            or "Agent"
+        )
+        result = build_repository_import_precheck(
+            agent_repository_id=agent_repository_id,
+            display_name=display_name,
+            snapshot=bundle,
+            tenant_id=tenant_id,
+        )
+        return result.model_dump()
 
     agent_info_json = record.get("agent_info_json")
     if not isinstance(agent_info_json, dict):
