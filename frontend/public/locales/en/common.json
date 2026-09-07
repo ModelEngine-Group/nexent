@@ -1132,8 +1132,6 @@
   "document.error.code.990104.suggestion": "Ask an administrator to check the service before ingesting the file again.",
   "document.error.code.120104.message": "Knowledge base storage capacity has been reached",
   "document.error.code.120104.suggestion": "Remove unneeded files or ask an administrator to increase the quota.",
-  "document.error.code.ray_init_failed.message": "Failed to initialize Ray cluster",
-  "document.error.code.ray_init_failed.suggestion": "Please upgrade to the latest image version and redeploy.",
   "document.error.code.no_valid_chunks.message": "The data processing kernel could not extract valid text from the document",
   "document.error.code.no_valid_chunks.suggestion": "Please ensure the document format is supported and the content is not purely images.",
   "document.error.code.vector_service_busy.message": "Vectorization model service is busy and cannot return vectors",

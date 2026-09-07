@@ -1118,8 +1118,6 @@
   "document.error.code.990104.suggestion": "请联系管理员检查服务状态后重新入库。",
   "document.error.code.120104.message": "知识库可用存储空间已达上限",
   "document.error.code.120104.suggestion": "请清理不需要的文件或联系管理员提高配额。",
-  "document.error.code.ray_init_failed.message": "Ray集群初始化失败",
-  "document.error.code.ray_init_failed.suggestion": "请升级到最新版本并尝试重新部署",
   "document.error.code.no_valid_chunks.message": "数据处理内核无法从文档中提取有效文本",
   "document.error.code.no_valid_chunks.suggestion": "请确保文档内容非纯图像",
   "document.error.code.vector_service_busy.message": "向量化模型服务繁忙，无法获取文本向量",

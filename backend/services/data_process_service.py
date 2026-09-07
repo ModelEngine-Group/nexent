@@ -13,11 +13,8 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 import redis
-import torch
 from celery import states
-from nexent.data_process.core import DataProcessCore
 from PIL import Image
-from transformers import CLIPModel, CLIPProcessor
 
 from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
 from consts.error_code import ErrorCode
@@ -29,6 +26,24 @@ from data_process.utils import get_all_task_ids_from_redis, get_task_info
 from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
 from utils.file_management_utils import convert_office_to_pdf
 from utils.knowledge_ingestion_errors import classify_ingestion_exception
+
+# Optional heavy dependencies are loaded only when their feature is used.  The
+# names remain patchable for compatibility with existing tests/integrations.
+class _LazyModelFactory:
+    def __init__(self, attribute: str):
+        self.attribute = attribute
+
+    def from_pretrained(self, *args, **kwargs):
+        from transformers import CLIPModel as _CLIPModel, CLIPProcessor as _CLIPProcessor
+
+        factory = _CLIPModel if self.attribute == "CLIPModel" else _CLIPProcessor
+        return factory.from_pretrained(*args, **kwargs)
+
+
+torch = None
+CLIPModel = _LazyModelFactory("CLIPModel")
+CLIPProcessor = _LazyModelFactory("CLIPProcessor")
+DataProcessCore = None
 
 
 # Limit concurrent LibreOffice processes to avoid resource exhaustion
@@ -91,6 +106,7 @@ class DataProcessService:
         self.processor = None
         self.clip_available = False
         try:
+            global CLIPModel, CLIPProcessor
             self.model = CLIPModel.from_pretrained(CLIP_MODEL_PATH)
             self.processor = CLIPProcessor.from_pretrained(CLIP_MODEL_PATH)
             self.clip_available = True
@@ -485,6 +501,12 @@ class DataProcessService:
 
             # Try to use CLIP model with fallback to size-only filter
             try:
+                global torch
+                if torch is None:
+                    import torch as _torch
+
+                    torch = _torch
+
                 # Prepare inputs for CLIP
                 inputs = self.processor(
                     text=[negative_prompt, positive_prompt],
@@ -672,6 +694,12 @@ class DataProcessService:
         start_time = time.time()
         logger.info(
             f"Processing uploaded file: {filename} using SDK DataProcessCore")
+
+        global DataProcessCore
+        if DataProcessCore is None:
+            from nexent.data_process.core import DataProcessCore as _DataProcessCore
+
+            DataProcessCore = _DataProcessCore
 
         data_processor = DataProcessCore()
         chunks, _ = data_processor.file_process(

@@ -4,10 +4,10 @@ Focused tests for backend.data_process.utils.
 Targets the public async helpers (`get_task_info`, `get_task_details`) and the
 small parsing helpers `_parse_failure_info` / `get_all_task_ids_from_redis`.
 
-The data_process package requires a heavy set of dependencies (celery, ray,
+The data_process package requires a heavy set of dependencies (celery,
 consts, services.redis_service, etc.), so this module installs minimal stubs
 *before* importing backend.data_process.utils. We deliberately do NOT call
-`import_tasks_with_fake_ray` from `test_tasks.py` because that helper reloads
+the task module from `test_tasks.py` because that helper reloads
 celery — which fails when sibling tests have already installed MagicMock
 versions of the celery.* submodules.
 """
@@ -23,15 +23,6 @@ import pytest
 
 def _ensure_stubs(monkeypatch):
     """Install minimal stubs so `backend.data_process.utils` can be imported."""
-    # Stub ray (utils never touches ray, but the package __init__ chains through
-    # tasks → app → utils, so we still need it).
-    fake_ray = types.ModuleType("ray")
-    fake_ray.is_initialized = lambda: False
-    fake_ray.init = lambda **kw: None
-    fake_ray.get = lambda ref, *a, **kw: ref
-    fake_ray.remote = lambda **kw: (lambda obj: obj)
-    monkeypatch.setitem(sys.modules, "ray", fake_ray)
-
     # Stub celery.result with AsyncResult and allow_join_result (utils.py imports
     # both via `from celery.result import AsyncResult`).
     celery_result_mod = types.ModuleType("celery.result")

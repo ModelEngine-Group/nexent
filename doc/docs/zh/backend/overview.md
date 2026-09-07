@@ -8,7 +8,7 @@ Nexent 的后端采用 FastAPI 和 Python 构建，为 AI 智能体服务提供�
 - **语言**: Python 3.11+
 - **数据库**: PostgreSQL + Redis + Elasticsearch
 - **文件存储**: MinIO
-- **任务队列**: Celery + Ray
+- **任务队列**: Celery（解析使用 prefork，编排/转发使用 threads）
 - **AI框架**: smolagents
 - **向量数据库**: Elasticsearch
 

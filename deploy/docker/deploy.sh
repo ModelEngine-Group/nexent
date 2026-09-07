@@ -690,7 +690,6 @@ get_compose_version() {
 }
 
 disable_dashboard() {
-  update_env_var "DISABLE_RAY_DASHBOARD" "true"
   update_env_var "DISABLE_CELERY_FLOWER" "true"
 }
 

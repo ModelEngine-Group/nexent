@@ -30,7 +30,7 @@ nexent/
 - **Language**: Python 3.11+
 - **Database**: PostgreSQL + Redis + Elasticsearch
 - **File Storage**: MinIO
-- **Task Queue**: Celery + Ray
+- **Task Queue**: Celery (prefork parser workers and thread-based orchestration workers)
 - **AI Framework**: smolagents
 - **Vector Database**: Elasticsearch
 

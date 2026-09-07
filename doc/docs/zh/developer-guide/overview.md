@@ -30,7 +30,7 @@ nexent/
 - **语言**: Python 3.11+
 - **数据库**: PostgreSQL + Redis + Elasticsearch
 - **文件存储**: MinIO
-- **任务队列**: Celery + Ray
+- **任务队列**: Celery（prefork 解析 Worker 与线程编排 Worker）
 - **AI框架**: smolagents
 - **向量数据库**: Elasticsearch
 

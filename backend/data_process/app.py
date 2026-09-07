@@ -13,6 +13,7 @@ logger = logging.getLogger("data_process.app")
 
 # Determine package path dynamically
 import_path = 'data_process.tasks'
+parse_import_path = 'data_process.parse_tasks'
 logger.debug(f"Using import path: {import_path}")
 
 if not REDIS_URL or not REDIS_BACKEND_URL:
@@ -28,7 +29,7 @@ app = Celery(
     broker=REDIS_URL,
     backend=REDIS_BACKEND_URL,
     elasticsearch_service=ELASTICSEARCH_SERVICE,
-    include=[import_path]
+    include=[import_path, parse_import_path]
 )
 
 # Critical check: If backend is still DisabledBackend, it means configuration failed, crash immediately
@@ -47,9 +48,18 @@ app.conf.update(
     # Explicitly route the newly isolated forward child and aggregate tasks.
     # Other tasks keep their queue from the @app.task declaration.
     task_routes={
-        f'{import_path}.process': {'queue': 'process_q'},
+        f'{import_path}.process': {'queue': 'parse_q'},
+        f'{parse_import_path}.process': {'queue': 'parse_q'},
+        f'{import_path}.process_part': {'queue': 'parse_q'},
+        f'{parse_import_path}.process_part': {'queue': 'parse_q'},
+        f'{import_path}.aggregate_store_chunks': {'queue': 'process_q'},
+        f'{import_path}.aggregate_parts': {'queue': 'process_q'},
+        f'{parse_import_path}.aggregate_store_chunks': {'queue': 'process_q'},
+        f'{parse_import_path}.parser_bootstrap': {'queue': 'parse_q'},
         f'{import_path}.forward': {'queue': 'forward_q'},
         f'{import_path}.process_and_forward': {'queue': 'process_q'},
+        f'{import_path}.process_sync': {'queue': 'parse_q'},
+        f'{parse_import_path}.process_sync': {'queue': 'parse_q'},
         f'{import_path}.forward_part': {'queue': 'forward_part_q'},
         f'{import_path}.aggregate_forward_parts': {'queue': 'forward_aggregate_q'},
     },
@@ -65,7 +75,6 @@ app.conf.update(
     result_backend_max_retries=10,  # Max retries for backend operations
     task_time_limit=3600,      # 1 hour time limit per task
     worker_prefetch_multiplier=1,  # Fair scheduling; avoid batchy prefetch
-    worker_max_tasks_per_child=1000,  # Reduce restart frequency
     # Important for task chains
     task_acks_late=False,
     task_reject_on_worker_lost=False,

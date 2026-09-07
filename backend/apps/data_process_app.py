@@ -98,19 +98,25 @@ async def process_sync_endpoint(
                 'timeout': timeout
             },
             priority=0,  # High priority for real-time processing
-            queue='process_q'
+            queue='parse_q'
         )
         # Wait for the result with timeout
         result = task_result.get(timeout=timeout)
+        chunks = result.get("chunks") or []
+        if not chunks and result.get("chunks_key"):
+            from data_process.parse_tasks import load_chunks_from_redis
+
+            chunks = load_chunks_from_redis(result["chunks_key"])
+        text = "\n\n".join(str(chunk.get("content", "")) for chunk in chunks)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
                 "success": True,
                 "task_id": task_result.id,
                 "source": source,
-                "text": result.get("text", ""),
-                "chunks": result.get("chunks", []),
-                "chunks_count": result.get("chunks_count", 0),
+                "text": result.get("text", text),
+                "chunks": chunks,
+                "chunks_count": result.get("chunks_count", len(chunks)),
                 "processing_time": result.get("processing_time", 0),
                 "text_length": result.get("text_length", 0)
             }

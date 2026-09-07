@@ -20,7 +20,6 @@ os.environ['REDIS_BACKEND_URL'] = 'redis://mock:6379/0'
 sys.modules['data_process.app'] = MagicMock()
 sys.modules['data_process.app'].app = MagicMock()
 sys.modules['data_process.tasks'] = MagicMock()
-sys.modules['data_process.ray_actors'] = MagicMock()
 sys.modules['database.attachment_db'] = MagicMock()
 sys.modules['database.client'] = MagicMock()
 sys.modules['database.client'].minio_client = MagicMock()

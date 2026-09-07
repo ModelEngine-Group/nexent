@@ -7,31 +7,41 @@ from typing import List, Dict, Any, Optional
 import zipfile
 from xml.etree import ElementTree
 
-from pptx import Presentation
-
 from .base import FileProcessor
 
-from unstructured_inference.logger import logger
-from unstructured_inference.models import tables
-from unstructured.partition.auto import partition
-
-
-tables_agent = tables.tables_agent
+_PRESENTATION_UNSET = object()
+Presentation = _PRESENTATION_UNSET
+partition = None
+tables = None
+tables_agent = None
 TABLE_TRANSFORMER_MODEL_PATH = ""
+
+
+def get_tables_agent():
+    """Load and return the third-party table agent only when it is needed."""
+    global tables, tables_agent
+    if tables_agent is None:
+        from unstructured_inference.models import tables as tables_module
+
+        tables = tables_module
+        tables_agent = tables_module.tables_agent
+        tables_module.load_agent = custom_load_table_model
+    return tables_agent
+
 
 def custom_load_table_model():
     """Loads the Table agent."""
 
-    if getattr(tables_agent, "model", None) is None:
-        with tables_agent._lock:
-            if getattr(tables_agent, "model", None) is None:
+    agent = get_tables_agent()
+    if getattr(agent, "model", None) is None:
+        with agent._lock:
+            if getattr(agent, "model", None) is None:
+                from unstructured_inference.logger import logger
+
                 logger.info("Loading the Table agent ...")
-                print("path234: ", TABLE_TRANSFORMER_MODEL_PATH)
-                tables_agent.initialize(TABLE_TRANSFORMER_MODEL_PATH)
+                agent.initialize(TABLE_TRANSFORMER_MODEL_PATH)
 
     return
-
-tables.load_agent = lambda: custom_load_table_model()
 
 
 class UniversalImageExtractor(FileProcessor):
@@ -133,7 +143,11 @@ class UniversalImageExtractor(FileProcessor):
         results = []
         seen = set()
 
-        elements = partition(
+        partition_fn = partition
+        if partition_fn is None:
+            from unstructured.partition.auto import partition as partition_fn
+
+        elements = partition_fn(
             filename=pdf_path,
             strategy="hi_res",
             extract_images_in_pdf=True,
@@ -341,9 +355,17 @@ class UniversalImageExtractor(FileProcessor):
 
 
     def _extract_pptx(self, pptx_path: str, **params) -> List[Dict]:
-        if Presentation is None:
+        global Presentation
+        presentation_cls = Presentation
+        if presentation_cls is None:
             raise RuntimeError("python-pptx is required to extract images from PPTX files.")
-        prs = Presentation(pptx_path)
+        if presentation_cls is _PRESENTATION_UNSET:
+            try:
+                from pptx import Presentation as presentation_cls
+            except ImportError as exc:
+                raise RuntimeError("python-pptx is required to extract images from PPTX files.") from exc
+            Presentation = presentation_cls
+        prs = presentation_cls(pptx_path)
         results = []
         seen = set()
         emu_per_inch = params.get("emu_per_inch", 914400)

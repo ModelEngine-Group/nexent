@@ -132,7 +132,7 @@ Distributed Data Processing Pipeline:
 ├── Chunking & Processing
 │   ├── Semantic chunking algorithms
 │   ├── Batch processing with Celery
-│   └── Ray distributed computing
+│   └── Celery prefork parser children
 ├── Vectorization & Indexing
 │   ├── Embedding generation
 │   ├── Elasticsearch indexing
@@ -181,7 +181,7 @@ Agent-to-Agent Communication:
 ### ⚡ Asynchronous Processing Architecture
 - **Foundation**: asyncio-based high-performance async processing
 - **Task Queue**: Celery + Redis for distributed task execution
-- **Computing Framework**: Ray for distributed computing in data processing
+- **Computing Framework**: Celery prefork children isolate data-processing models
 - **Stream Processing**: Server-Sent Events (SSE) for real-time streaming
 - **Concurrency Control**: Thread-safe concurrent processing mechanisms
 

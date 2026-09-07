@@ -1693,7 +1693,7 @@ deployment_compute_docker_ports() {
     ports+=(5010 5014 5011 5015 5013 3000)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
-    ports+=(5012 5555 8265)
+    ports+=(5012 5555)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
     ports+=(8000 8443 "${SUPABASE_POSTGRES_PORT:-5436}")
@@ -1970,7 +1970,7 @@ deployment_render_k8s_port_values() {
   printf 'nexent-mcp:\n'
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
   printf 'nexent-data-process:\n'
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n      rayDashboard: 30265\n' "$internal_type"
+  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n' "$internal_type"
   printf 'nexent-elasticsearch:\n'
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30920\n      transport: 30930\n' "$internal_type"
   printf 'nexent-postgresql:\n'
@@ -2028,7 +2028,7 @@ deployment_render_helm_chart_values() {
   printf 'nexent-data-process:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled data-process)"
   printf '  images:\n    dataProcess:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_DATA_PROCESS_IMAGE")" "$(deployment_image_tag "$NEXENT_DATA_PROCESS_IMAGE")" "$local_pull_policy"
-  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n      rayDashboard: 30265\n' "$internal_type"
+  printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30012\n      flower: 30555\n' "$internal_type"
   printf 'nexent-elasticsearch:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled infrastructure)"
   printf '  image:\n    repository: "%s"\n    tag: "%s"\n    pullPolicy: "IfNotPresent"\n' "$(deployment_image_repo "$ELASTICSEARCH_IMAGE")" "$(deployment_image_tag "$ELASTICSEARCH_IMAGE")"
