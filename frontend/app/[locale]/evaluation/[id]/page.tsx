@@ -111,6 +111,17 @@ function getRunStatusColor(status: string): string {
   return RUN_STATUS_TAG_COLOR[status] || "red";
 }
 
+function getCaseTotalQueryKey(
+  tab: string,
+  filters?: Record<number, string>,
+  sessionId?: string | null
+): string {
+  const normalizedFilters = Object.entries(filters || {}).sort(
+    ([a], [b]) => Number(a) - Number(b)
+  );
+  return JSON.stringify([tab, normalizedFilters, sessionId || null]);
+}
+
 // ── component ────────────────────────────────────────────────
 
 export default function EvaluationDetailPage() {
@@ -133,6 +144,12 @@ export default function EvaluationDetailPage() {
   const [casePageSize, setCasePageSize] = useState(10);
   const [caseSortBy, setCaseSortBy] = useState<string | null>(null);
   const [caseSortOrder, setCaseSortOrder] = useState<"asc" | "desc">("asc");
+  // The total belongs to the query that produced it.  Keep the query key so
+  // a stale total from the previous tab is not rendered while the new tab is
+  // loading.
+  const [caseTotalQueryKey, setCaseTotalQueryKey] = useState<string | null>(
+    null
+  );
   // caseTab: "all" / "pass" / "fail" — becomes the `pass_filter` URL param.
   const [caseTab, setCaseTab] = useState<string>("all");
   const [caseLoading, setCaseLoading] = useState(true);
@@ -421,6 +438,7 @@ export default function EvaluationDetailPage() {
       abortRef.current = controller;
       setCaseLoading(true);
       const offset = (page - 1) * size;
+      const queryKey = getCaseTotalQueryKey(tab, filters, sessionId);
       let url = `/api/agent-evaluations/${id}/cases?limit=${size}&offset=${offset}`;
       if (sortBy)
         url += `&sort_by=${encodeURIComponent(sortBy)}&sort_order=${sortOrder}`;
@@ -468,6 +486,7 @@ export default function EvaluationDetailPage() {
           });
           setCases(items);
           setCaseTotal(data.total || 0);
+          setCaseTotalQueryKey(queryKey);
         })
         .catch((err) => {
           if (err.name !== "AbortError") throw err;
@@ -586,6 +605,12 @@ export default function EvaluationDetailPage() {
   const passCount = stats?.pass_count ?? 0;
   const failCount = stats?.fail_count ?? 0;
   const totalCases = stats?.total || run?.progress_total || caseTotal || 0;
+  const currentCaseTotalQueryKey = getCaseTotalQueryKey(
+    caseTab,
+    annoFilters,
+    sessionIdFilter
+  );
+  const hasCurrentCaseTotal = caseTotalQueryKey === currentCaseTotalQueryKey;
 
   // Evaluator names: from stats or fallback to evaluator_config
   const evaluatorNames = useMemo(() => {
@@ -1067,9 +1092,7 @@ export default function EvaluationDetailPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    router.push(
-                      `/evaluation?agent_id=${run?.agent_id || ""}`
-                    )
+                    router.push(`/evaluation?agent_id=${run?.agent_id || ""}`)
                   }
                   style={{ cursor: "pointer" }}
                 >
@@ -1755,15 +1778,15 @@ export default function EvaluationDetailPage() {
             items={[
               {
                 key: "all",
-                label: `${t("agentEvaluation.tabAll")} (${caseTab === "all" ? caseTotal : totalCases})`,
+                label: `${t("agentEvaluation.tabAll")} (${caseTab === "all" && hasCurrentCaseTotal ? caseTotal : totalCases})`,
               },
               {
                 key: "pass",
-                label: `${t("agentEvaluation.tabPass")} (${caseTab === "pass" ? caseTotal : passCount})`,
+                label: `${t("agentEvaluation.tabPass")} (${caseTab === "pass" && hasCurrentCaseTotal ? caseTotal : passCount})`,
               },
               {
                 key: "fail",
-                label: `${t("agentEvaluation.tabFail")} (${caseTab === "fail" ? caseTotal : failCount})`,
+                label: `${t("agentEvaluation.tabFail")} (${caseTab === "fail" && hasCurrentCaseTotal ? caseTotal : failCount})`,
               },
             ]}
           />
