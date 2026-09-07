@@ -281,7 +281,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -n "${DEPLOY_WRAPPER_EXPECT_ENV:-}" ]; then
   grep -Fqx "$DEPLOY_WRAPPER_EXPECT_ENV" "$script_dir/deploy/env/.env" || exit 1
 fi
-printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
+printf 'load-images:%s\n' "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$deploy_wrapper_dir/load-images.sh"
 cat > "$deploy_wrapper_dir/push-images.sh" <<'SH'
@@ -308,7 +308,7 @@ deploy_wrapper_log="$TMP_DIR/deploy-wrapper.log"
 DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" \
   DEPLOY_WRAPPER_EXPECT_ENV='WRAPPER_NEW_DEFAULT=merged-before-actions' \
   bash "$deploy_wrapper_dir/deploy.sh" docker --foo bar
-if grep -q '^load-images$' "$deploy_wrapper_log"; then
+if grep -q '^load-images:' "$deploy_wrapper_log"; then
   fail "deploy.sh should not load images by default"
 fi
 grep -q '^deploy::false:docker --foo bar$' "$deploy_wrapper_log" || fail "deploy.sh should forward args and mark an online deployment"
@@ -321,7 +321,7 @@ DEPLOY_WRAPPER_LOG="$deploy_wrapper_log" \
   bash "$deploy_wrapper_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$deploy_wrapper_log")"
 second_line="$(sed -n '2p' "$deploy_wrapper_log")"
-[ "$first_line" = "load-images" ] || fail "deploy.sh --load-images should load images before deploy"
+[ "$first_line" = "load-images:docker" ] || fail "deploy.sh --load-images should pass the docker target to the loader"
 [ "$second_line" = "deploy::false:docker --foo bar" ] || fail "deploy.sh --load-images should strip only the wrapper flag"
 
 mv "$deploy_wrapper_dir/deploy/env/.env.example" "$deploy_wrapper_dir/deploy/env/.env.example.saved"
@@ -442,7 +442,7 @@ fi
 if [ -n "${DEPLOY_WRAPPER_EXPECT_MERGED_ENV:-}" ]; then
   grep -Fqx "$DEPLOY_WRAPPER_EXPECT_MERGED_ENV" "$script_dir/deploy/env/.env" || exit 1
 fi
-printf 'load-images\n' >> "$DEPLOY_WRAPPER_LOG"
+printf 'load-images:%s\n' "$*" >> "$DEPLOY_WRAPPER_LOG"
 SH
 chmod +x "$latest_package_dir/load-images.sh"
 cat > "$latest_package_dir/push-images.sh" <<'SH'
@@ -509,7 +509,7 @@ DEPLOY_WRAPPER_LOG="$offline_deploy_log" \
   bash "$latest_package_dir/deploy.sh" docker --reuse-from "$reuse_source" --load-images --foo bar >"$TMP_DIR/reuse-docker.log" 2>&1
 first_line="$(sed -n '1p' "$offline_deploy_log")"
 second_line="$(sed -n '2p' "$offline_deploy_log")"
-[ "$first_line" = "load-images" ] || fail "--reuse-from should import files before loading images"
+[ "$first_line" = "load-images:docker" ] || fail "--reuse-from should import files before loading images with the target"
 [ "$second_line" = "deploy:defaults:true:docker --foo bar" ] || fail "--reuse-from should be consumed before forwarding Docker deploy arguments"
 grep -q '^REUSED_SECRET=do-not-print-this-value$' "$latest_package_dir/deploy/env/.env" || fail "Docker reuse should copy deploy/env/.env"
 grep -q '^OFFLINE_TEMPLATE_ONLY=merged-before-actions$' "$latest_package_dir/deploy/env/.env" || fail "Docker reuse should merge variables from the current .env.example"
@@ -585,7 +585,7 @@ grep -q '^deploy:defaults:true:docker --foo bar$' "$offline_deploy_log" || fail 
 DEPLOY_WRAPPER_LOG="$offline_deploy_log" bash "$latest_package_dir/deploy.sh" --load-images docker --foo bar
 first_line="$(sed -n '1p' "$offline_deploy_log")"
 second_line="$(sed -n '2p' "$offline_deploy_log")"
-[ "$first_line" = "load-images" ] || fail "offline deploy.sh --load-images should load images before deploy"
+[ "$first_line" = "load-images:docker" ] || fail "offline deploy.sh --load-images should load images with the target before deploy"
 [ "$second_line" = "deploy:defaults:true:docker --foo bar" ] || fail "offline deploy.sh --load-images should preserve defaults mode"
 
 : > "$offline_deploy_log"
