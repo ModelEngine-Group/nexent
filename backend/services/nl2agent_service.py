@@ -47,8 +47,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     RecommendResourcesOutput,
     RecommendedResource,
     ResourceCandidate,
+    ResourceCardSummary,
     ResourceInstallationOption,
+    ResourceMatch,
     ResourceRequirement,
+    RequirementResolution,
+    ResourceResolutionOutput,
+    ResourceResolutionPhase,
     ResourceSearchOutput,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
@@ -654,12 +659,36 @@ def _rank_resource_catalog(
         for requirement in requirements
         if requirement.requirement_id not in strong_requirement_ids
     ]
+    matches_by_requirement = {
+        requirement.requirement_id: sorted(
+            (
+                ResourceMatch(
+                    candidate_ref=item["candidate"].candidate_ref,
+                    score=round(
+                        item["relationships"][requirement.requirement_id], 4
+                    ),
+                    strength=(
+                        "strong"
+                        if item["relationships"][requirement.requirement_id]
+                        >= STRONG_RESOURCE_SCORE
+                        else "weak"
+                    ),
+                )
+                for item in scored
+                if item["relationships"][requirement.requirement_id]
+                >= MINIMUM_RESOURCE_SCORE
+            ),
+            key=lambda match: (-match.score, match.candidate_ref),
+        )
+        for requirement in requirements
+    }
     return ResourceSearchOutput(
         candidates=[
             item["candidate"]
             for item in selected[:MAX_BINDING_CANDIDATES]
         ],
         uncovered_requirement_ids=uncovered,
+        matches_by_requirement=matches_by_requirement,
     )
 
 
@@ -960,6 +989,156 @@ async def search_uninstalled_resources_impl(
         catalog=[
             item for item in catalog if item["candidate_ref"] not in excluded
         ],
+    )
+
+
+def _resource_resolution_summaries(
+    *search_results: ResourceSearchOutput,
+    included_refs: set[str],
+) -> list[ResourceCardSummary]:
+    """Deduplicate safe card metadata across installed and repository searches."""
+
+    summaries: list[ResourceCardSummary] = []
+    seen: set[str] = set()
+    for result in search_results:
+        for candidate in result.candidates:
+            if (
+                candidate.candidate_ref not in included_refs
+                or candidate.candidate_ref in seen
+            ):
+                continue
+            seen.add(candidate.candidate_ref)
+            summaries.append(ResourceCardSummary(
+                candidate_ref=candidate.candidate_ref,
+                resource_type=candidate.resource_type,
+                source=candidate.source,
+                name=candidate.name,
+                description=candidate.description,
+                requirement_ids=candidate.requirement_ids,
+                recommendation=(
+                    "recommended"
+                    if candidate.score >= STRONG_RESOURCE_SCORE
+                    else "optional"
+                ),
+                is_bound=False,
+            ))
+    return summaries
+
+
+async def resolve_resource_requirements_impl(
+    *,
+    requirements: list[ResourceRequirement],
+    phase: ResourceResolutionPhase,
+    exclude_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> ResourceResolutionOutput:
+    """Resolve every requirement into backend-owned coverage and next action."""
+
+    if phase == "INITIAL":
+        installed, installable = await asyncio.gather(
+            search_installed_resources_impl(
+                requirements=requirements,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
+            search_uninstalled_resources_impl(
+                requirements=requirements,
+                exclude_refs=exclude_refs,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
+        )
+    else:
+        installed = await search_installed_resources_impl(
+            requirements=requirements,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        installable = ResourceSearchOutput(
+            candidates=[],
+            uncovered_requirement_ids=[
+                requirement.requirement_id for requirement in requirements
+            ],
+            matches_by_requirement={
+                requirement.requirement_id: [] for requirement in requirements
+            },
+        )
+
+    resolutions: list[RequirementResolution] = []
+    for requirement in requirements:
+        requirement_id = requirement.requirement_id
+        installed_matches = [
+            match
+            for match in installed.matches_by_requirement.get(requirement_id, [])
+            if match.strength == "strong"
+        ]
+        installable_matches = [
+            match
+            for match in installable.matches_by_requirement.get(requirement_id, [])
+            if match.strength == "strong"
+        ]
+        weak_by_ref: dict[str, ResourceMatch] = {}
+        for match in [
+            *installed.matches_by_requirement.get(requirement_id, []),
+            *installable.matches_by_requirement.get(requirement_id, []),
+        ]:
+            if match.strength != "weak":
+                continue
+            previous = weak_by_ref.get(match.candidate_ref)
+            if previous is None or match.score > previous.score:
+                weak_by_ref[match.candidate_ref] = match
+        weak_references = sorted(
+            weak_by_ref.values(),
+            key=lambda match: (-match.score, match.candidate_ref),
+        )[:2]
+        state = (
+            "covered"
+            if installed_matches
+            else "installable"
+            if phase == "INITIAL" and installable_matches
+            else "uncovered"
+        )
+        resolutions.append(RequirementResolution(
+            requirement=requirement,
+            state=state,
+            installed_matches=installed_matches,
+            installable_matches=(
+                installable_matches if phase == "INITIAL" else []
+            ),
+            weak_references=weak_references,
+        ))
+
+    states = {resolution.state for resolution in resolutions}
+    next_action = (
+        "INSTALL"
+        if phase == "INITIAL" and "installable" in states
+        else "RESOLVE_GAP"
+        if "uncovered" in states
+        else "BIND"
+    )
+    search_results = (
+        (installed, installable) if phase == "INITIAL" else (installed,)
+    )
+    included_refs = {
+        match.candidate_ref
+        for resolution in resolutions
+        for match in (
+            resolution.installed_matches
+            if resolution.state == "covered"
+            else resolution.installable_matches
+            if resolution.state == "installable"
+            else resolution.weak_references
+        )
+    }
+    return ResourceResolutionOutput(
+        phase=phase,
+        next_action=next_action,
+        requirements=resolutions,
+        resources=_resource_resolution_summaries(
+            *search_results,
+            included_refs=included_refs,
+        ),
     )
 
 

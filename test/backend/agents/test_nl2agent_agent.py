@@ -15,6 +15,12 @@ from agents.nl2agent_agent import (
     build_nl2agent_system_prompt,
     create_nl2agent_agent_config,
 )
+from consts.model import (
+    NL2AgentResourceConfigField,
+    NL2AgentResourceConfigResponse,
+    NL2AgentResourceInstallationRequest,
+    NL2AgentResourceInstallationResponse,
+)
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
@@ -23,6 +29,12 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     RecommendResourcesInput,
     RequirementClarificationPayload,
     ResourceCandidate,
+    ResourceCardSummary,
+    ResourceGapRequirement,
+    ResourceGapResolutionPayloadV2,
+    ResourceMatch,
+    ResourceResolutionOutput,
+    RequirementResolution,
     ResourceGapResolutionPayload,
     ResourceRequirement,
     ResourceSearchOutput,
@@ -33,6 +45,210 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     build_nl2a_wrapper,
     get_resource_gap_requirements,
 )
+
+
+def test_resource_match_enforces_score_bounds_and_strength_contract():
+    """UT-BE-NL2A-DTO-001."""
+
+    assert ResourceMatch(
+        candidate_ref="tool:1", score=0.65, strength="strong"
+    ).strength == "strong"
+    assert ResourceMatch(
+        candidate_ref="tool:2", score=0.5, strength="weak"
+    ).strength == "weak"
+
+    with pytest.raises(ValidationError):
+        ResourceMatch(candidate_ref="tool:1", score=1.01, strength="strong")
+    with pytest.raises(ValidationError):
+        ResourceMatch(candidate_ref="tool:1", score=0.64, strength="strong")
+    with pytest.raises(ValidationError):
+        ResourceMatch(candidate_ref="tool:1", score=0.65, strength="weak")
+
+
+def test_resource_resolution_output_enforces_unique_requirements_and_next_action():
+    """UT-BE-NL2A-DTO-002 / UT-BE-NL2A-DTO-003."""
+
+    requirement = ResourceRequirement(requirement_id="weather", query="Weather")
+    covered = RequirementResolution(
+        requirement=requirement,
+        state="covered",
+        installed_matches=[
+            ResourceMatch(
+                candidate_ref="tool:1", score=0.8, strength="strong"
+            )
+        ],
+    )
+    output = ResourceResolutionOutput(
+        phase="INITIAL",
+        next_action="BIND",
+        requirements=[covered],
+        resources=[],
+    )
+    assert output.next_action == "BIND"
+
+    with pytest.raises(ValidationError):
+        ResourceResolutionOutput(
+            phase="INITIAL",
+            next_action="INSTALL",
+            requirements=[covered],
+            resources=[],
+        )
+    with pytest.raises(ValidationError):
+        RequirementResolution(
+            requirement=requirement,
+            state="covered",
+        )
+    with pytest.raises(ValidationError):
+        RequirementResolution(
+            requirement=requirement,
+            state="installable",
+            installed_matches=[
+                ResourceMatch(
+                    candidate_ref="tool:1", score=0.8, strength="strong"
+                )
+            ],
+            installable_matches=[
+                ResourceMatch(
+                    candidate_ref="tenant_mcp_repository:2",
+                    score=0.9,
+                    strength="strong",
+                )
+            ],
+        )
+    with pytest.raises(ValidationError):
+        ResourceResolutionOutput(
+            phase="INITIAL",
+            next_action="BIND",
+            requirements=[covered, covered],
+            resources=[],
+        )
+
+
+def test_v2_resource_cards_reject_configuration_fields():
+    """UT-BE-NL2A-CARD-001 / UT-BE-NL2A-CARD-002."""
+
+    safe_resource = {
+        "candidate_ref": "tool:1",
+        "resource_type": "tool",
+        "source": "MCP_TOOL",
+        "name": "weather",
+        "description": "Query weather",
+        "requirement_ids": ["weather"],
+        "recommendation": "recommended",
+        "is_bound": False,
+    }
+    assert ResourceCardSummary.model_validate(safe_resource).candidate_ref == "tool:1"
+
+    for forbidden in (
+        "config",
+        "installation_options",
+        "form_kind",
+        "url",
+        "token",
+        "headers",
+        "container_config",
+        "port",
+    ):
+        with pytest.raises(ValidationError):
+            ResourceCardSummary.model_validate({**safe_resource, forbidden: {}})
+
+
+def test_v2_gap_card_accepts_only_uncovered_requirements_and_weak_references():
+    """UT-BE-NL2A-CARD-003."""
+
+    payload = ResourceGapResolutionPayloadV2(
+        agent_id=42,
+        requirements=[
+            ResourceGapRequirement(
+                requirement_id="inventory",
+                query="Query ERP inventory",
+                weak_references=[
+                    {
+                        "candidate_ref": "tenant_skill_repository:15",
+                        "name": "Generic ERP Skill",
+                        "description": "Generic ERP lookup",
+                        "source": "TENANT_SKILL_REPOSITORY",
+                        "score": 0.61,
+                    }
+                ],
+            )
+        ],
+    )
+    assert payload.schema_version == 2
+
+    with pytest.raises(ValidationError):
+        ResourceGapResolutionPayloadV2(
+            agent_id=42,
+            requirements=[
+                ResourceGapRequirement(
+                    requirement_id="inventory",
+                    query="Query ERP inventory",
+                    weak_references=[
+                        {
+                            "candidate_ref": "tenant_skill_repository:15",
+                            "name": "Generic ERP Skill",
+                            "description": "Generic ERP lookup",
+                            "source": "TENANT_SKILL_REPOSITORY",
+                            "score": 0.65,
+                        }
+                    ],
+                )
+            ],
+        )
+
+
+def test_resource_installation_http_dto_accepts_only_candidate_reference():
+    """UT-BE-NL2A-DTO-004."""
+
+    request = NL2AgentResourceInstallationRequest(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:87",
+    )
+    response = NL2AgentResourceInstallationResponse(
+        status="installed",
+        candidate_ref=request.candidate_ref,
+        resource_type="mcp_server",
+        resource_id=321,
+    )
+    assert response.resource_id == 321
+
+    for forbidden in ("url", "authorization", "headers", "container_config"):
+        with pytest.raises(ValidationError):
+            NL2AgentResourceInstallationRequest.model_validate({
+                "agent_id": 42,
+                "candidate_ref": "tenant_mcp_repository:87",
+                forbidden: "secret",
+            })
+    with pytest.raises(ValidationError):
+        NL2AgentResourceInstallationRequest(
+            agent_id=42,
+            candidate_ref="tool:1",
+        )
+
+
+def test_resource_config_http_dto_separates_schema_defaults_from_values():
+    """UT-BE-NL2A-DTO-005."""
+
+    response = NL2AgentResourceConfigResponse(
+        candidate_ref="tool:123",
+        resource_type="tool",
+        schema=[
+            NL2AgentResourceConfigField(
+                name="city",
+                type="string",
+                required=True,
+                description="Query city",
+                default=None,
+                secret=False,
+                constraints={},
+            )
+        ],
+        values={"city": "Shanghai"},
+        enabled=False,
+        bound=False,
+    )
+    assert response.schema[0].default is None
+    assert response.values == {"city": "Shanghai"}
 
 
 @pytest.mark.parametrize(

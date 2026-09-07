@@ -221,6 +221,236 @@ class ResourceSearchOutput(BaseModel):
     status: Literal["success"] = "success"
     candidates: list[ResourceCandidate]
     uncovered_requirement_ids: list[str]
+    matches_by_requirement: dict[str, list["ResourceMatch"]] = Field(
+        default_factory=dict
+    )
+
+
+ResourceResolutionPhase = Literal["INITIAL", "POST_INSTALL", "POST_GAP"]
+ResourceResolutionState = Literal["covered", "installable", "uncovered"]
+ResourceResolutionNextAction = Literal["INSTALL", "RESOLVE_GAP", "BIND"]
+
+
+class ResourceMatch(BaseModel):
+    """One backend-computed requirement-to-resource relationship."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(min_length=1)
+    score: float = Field(ge=0, le=1)
+    strength: Literal["strong", "weak"]
+
+    @model_validator(mode="after")
+    def validate_strength(self) -> "ResourceMatch":
+        if self.strength == "strong" and self.score < 0.65:
+            raise ValueError("strong matches require score >= 0.65")
+        if self.strength == "weak" and not 0.50 <= self.score < 0.65:
+            raise ValueError("weak matches require 0.50 <= score < 0.65")
+        return self
+
+
+class ResourceCardSummary(BaseModel):
+    """Configuration-free resource metadata safe for NL2Agent cards."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(min_length=1)
+    resource_type: Literal["tool", "skill", "mcp_server"]
+    source: Literal[
+        "LOCAL_TOOL",
+        "MCP_TOOL",
+        "INSTALLED_SKILL",
+        "NEXENT_OFFICIAL_SKILL",
+        "TENANT_SKILL_REPOSITORY",
+        "TENANT_MCP_REPOSITORY",
+    ]
+    name: str = Field(min_length=1)
+    description: str = ""
+    requirement_ids: list[str] = Field(min_length=1, max_length=8)
+    recommendation: Literal["recommended", "optional"]
+    is_bound: bool = False
+
+    @model_validator(mode="after")
+    def validate_requirement_ids(self) -> "ResourceCardSummary":
+        if len(self.requirement_ids) != len(set(self.requirement_ids)):
+            raise ValueError("requirement_ids must be unique")
+        return self
+
+
+class RequirementResolution(BaseModel):
+    """Backend-owned state for one resource requirement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requirement: ResourceRequirement
+    state: ResourceResolutionState
+    installed_matches: list[ResourceMatch] = Field(default_factory=list)
+    installable_matches: list[ResourceMatch] = Field(default_factory=list)
+    weak_references: list[ResourceMatch] = Field(default_factory=list, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_matches(self) -> "RequirementResolution":
+        if any(match.strength != "strong" for match in self.installed_matches):
+            raise ValueError("installed_matches must contain strong matches")
+        if any(match.strength != "strong" for match in self.installable_matches):
+            raise ValueError("installable_matches must contain strong matches")
+        if any(match.strength != "weak" for match in self.weak_references):
+            raise ValueError("weak_references must contain weak matches")
+        for matches in (
+            self.installed_matches,
+            self.installable_matches,
+            self.weak_references,
+        ):
+            refs = [match.candidate_ref for match in matches]
+            if len(refs) != len(set(refs)):
+                raise ValueError("match candidate_ref values must be unique")
+        expected_state = (
+            "covered"
+            if self.installed_matches
+            else "installable"
+            if self.installable_matches
+            else "uncovered"
+        )
+        if self.state != expected_state:
+            raise ValueError(
+                f"state must be {expected_state} for the available strong matches"
+            )
+        return self
+
+
+class ResourceResolutionOutput(BaseModel):
+    """Complete backend resolution for one NL2Agent resource phase."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success"] = "success"
+    phase: ResourceResolutionPhase
+    next_action: ResourceResolutionNextAction
+    requirements: list[RequirementResolution]
+    resources: list[ResourceCardSummary]
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> "ResourceResolutionOutput":
+        requirement_ids = [
+            item.requirement.requirement_id for item in self.requirements
+        ]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        resource_refs = [item.candidate_ref for item in self.resources]
+        if len(resource_refs) != len(set(resource_refs)):
+            raise ValueError("resource candidate_ref values must be unique")
+        states = {item.state for item in self.requirements}
+        if self.phase != "INITIAL" and "installable" in states:
+            raise ValueError("post-install phases cannot contain installable state")
+        expected_action = (
+            "INSTALL"
+            if self.phase == "INITIAL" and "installable" in states
+            else "RESOLVE_GAP"
+            if "uncovered" in states
+            else "BIND"
+        )
+        if self.next_action != expected_action:
+            raise ValueError(
+                f"next_action must be {expected_action} for the resolved states"
+            )
+        return self
+
+
+class WeakResourceReference(BaseModel):
+    """Display-only weak candidate shown on a resource-gap card."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    description: str = ""
+    source: Literal[
+        "LOCAL_TOOL",
+        "MCP_TOOL",
+        "INSTALLED_SKILL",
+        "NEXENT_OFFICIAL_SKILL",
+        "TENANT_SKILL_REPOSITORY",
+        "TENANT_MCP_REPOSITORY",
+    ]
+    score: float = Field(ge=0.50, lt=0.65)
+
+
+class ResourceGapRequirement(BaseModel):
+    """One uncovered requirement and its optional weak references."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    requirement_id: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=500)
+    weak_references: list[WeakResourceReference] = Field(
+        default_factory=list, max_length=2
+    )
+
+
+class SuggestedResourceInstallationPayloadV2(BaseModel):
+    """Configuration-free resource installation card payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    subtype: Literal["suggested_resource_installation"] = (
+        "suggested_resource_installation"
+    )
+    agent_id: int = Field(gt=0)
+    resources: list[ResourceCardSummary] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_installable_sources(
+        self,
+    ) -> "SuggestedResourceInstallationPayloadV2":
+        if any(
+            resource.source not in UNINSTALLED_RESOURCE_SOURCES
+            for resource in self.resources
+        ):
+            raise ValueError("installation resources must be installable")
+        return self
+
+
+class InstalledResourceBindingPayloadV2(BaseModel):
+    """Configuration-free installed resource binding card payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    subtype: Literal["installed_resource_binding"] = "installed_resource_binding"
+    agent_id: int = Field(gt=0)
+    resources: list[ResourceCardSummary] = Field(max_length=12)
+    requirements: list[ResourceRequirement] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_installed_sources(self) -> "InstalledResourceBindingPayloadV2":
+        if any(
+            resource.source not in INSTALLED_RESOURCE_SOURCES
+            for resource in self.resources
+        ):
+            raise ValueError("binding resources must already be installed")
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        return self
+
+
+class ResourceGapResolutionPayloadV2(BaseModel):
+    """Configuration-free resource gap card payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    subtype: Literal["resource_gap_resolution"] = "resource_gap_resolution"
+    agent_id: int = Field(gt=0)
+    requirements: list[ResourceGapRequirement] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_requirement_ids(self) -> "ResourceGapResolutionPayloadV2":
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        return self
 
 
 def get_resource_gap_requirements(
