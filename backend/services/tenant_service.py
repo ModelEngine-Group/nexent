@@ -221,6 +221,45 @@ def get_tenants_paginated_for_user(
     return get_tenants_paginated(page=page, page_size=page_size)
 
 
+def backfill_workbench_main_agents() -> Dict[str, int]:
+    """Ensure the tenant-scoped workbench Agent for every existing real tenant.
+
+    The operation is deliberately reentrant. Each tenant is isolated so that a
+    malformed or temporarily unavailable tenant does not prevent the remaining
+    tenants from being upgraded.
+    """
+    tenant_ids = [
+        tenant_id
+        for tenant_id in get_all_tenant_ids()
+        if _is_displayable_tenant_id(tenant_id)
+    ]
+    succeeded = 0
+    failed = 0
+
+    for tenant_id in tenant_ids:
+        try:
+            ensure_workbench_main_agent(
+                tenant_id=tenant_id,
+                user_id="system",
+            )
+            succeeded += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning(
+                "Failed to backfill workbench_main for tenant %s: %s",
+                tenant_id,
+                exc,
+            )
+
+    result = {
+        "total": len(tenant_ids),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+    logger.info("Workbench system Agent backfill completed: %s", result)
+    return result
+
+
 def create_tenant(
     tenant_name: str,
     created_by: Optional[str] = None,

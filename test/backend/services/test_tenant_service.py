@@ -28,6 +28,7 @@ patch('backend.database.client.MinioClient',
 
 from consts.exceptions import ForbiddenError, ValidationError, NotFoundException
 from backend.services.tenant_service import (
+    backfill_workbench_main_agents,
     get_tenant_info,
     get_tenant_info_for_user,
     get_tenants_paginated,
@@ -483,6 +484,38 @@ class TestCreateTenant:
         # UUIDs are random and collision probability is astronomically low.
         # Keeping for reference - this scenario should never happen in practice.
         pass
+
+
+class TestWorkbenchMainBackfill:
+    """Test historical tenant bootstrap for the workbench system Agent."""
+
+    def test_backfill_filters_virtual_tenants_and_isolates_failures(self):
+        """UT-BE-SAL-006: one tenant failure does not block the batch."""
+        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+
+        tenant_ids = [
+            "tenant-a",
+            DEFAULT_TENANT_ID,
+            "",
+            ASSET_OWNER_TENANT_ID,
+            "tenant-b",
+        ]
+
+        with patch(
+            "backend.services.tenant_service.get_all_tenant_ids",
+            return_value=tenant_ids,
+        ), patch(
+            "backend.services.tenant_service.ensure_workbench_main_agent",
+            side_effect=[MagicMock(), RuntimeError("tenant bootstrap failed")],
+        ) as ensure:
+            result = backfill_workbench_main_agents()
+
+        assert result == {"total": 2, "succeeded": 1, "failed": 1}
+        assert [call.kwargs["tenant_id"] for call in ensure.call_args_list] == [
+            "tenant-a",
+            "tenant-b",
+        ]
+        assert all(call.kwargs["user_id"] == "system" for call in ensure.call_args_list)
 
 
 class TestUpdateTenantInfo:

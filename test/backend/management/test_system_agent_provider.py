@@ -487,7 +487,7 @@ def test_sal_016_publish_failure_does_not_advance_revision(mocker):
 def test_sal_014_migration_contains_nullable_system_revision():
     """UT-BE-SAL-014."""
     migration = (
-        "deploy/sql/migrations/v2.5.8_0902_agent_workbench_system_agents.sql"
+        "deploy/sql/migrations/v2.5.2_0902_agent_workbench_system_agents.sql"
     )
 
     with open(migration, encoding="utf-8") as file:
@@ -495,3 +495,10 @@ def test_sal_014_migration_contains_nullable_system_revision():
 
     assert "ADD COLUMN IF NOT EXISTS system_revision" in sql
     assert "system_revision VARCHAR" in sql
+    assert "INSERT INTO nexent.ag_tenant_agent_t" not in sql
+    assert "required_grants (role_permission_id" in sql
+    assert "(1701, 'SU'" in sql
+    assert "(1710, 'SPEED'" in sql
+    assert "INSERT INTO nexent.role_permission_t" in sql
+    assert "WHERE NOT EXISTS" in sql
+    assert "'USER', 'RESOURCE', 'SKILL', 'CREATE'" not in sql

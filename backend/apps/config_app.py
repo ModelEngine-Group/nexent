@@ -67,11 +67,13 @@ async def recover_config_tasks_on_startup():
     from services.startup_recovery_service import (
         recover_config_tasks,
         schedule_interrupted_upload_cleanup,
+        schedule_workbench_main_backfill,
     )
 
     await asyncio.to_thread(recover_config_tasks)
     start_eval_maintenance()
     await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
+    schedule_workbench_main_backfill()
 
 
 async def sync_default_prompt_template_on_startup():

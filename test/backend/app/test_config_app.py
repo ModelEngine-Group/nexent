@@ -197,12 +197,16 @@ class TestConfigAppRouterConfiguration:
 
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
+        schedule_workbench_main_backfill = MagicMock()
         startup_recovery_module = types.ModuleType(
             "services.startup_recovery_service"
         )
         startup_recovery_module.recover_config_tasks = recover_config_tasks
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
             schedule_upload_cleanup
+        )
+        startup_recovery_module.schedule_workbench_main_backfill = (
+            schedule_workbench_main_backfill
         )
         monkeypatch.setitem(
             sys.modules,
@@ -251,6 +255,7 @@ class TestConfigAppRouterConfiguration:
         recover_config_tasks.assert_called_once_with()
         start_evaluation_maintenance.assert_called_once_with()
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
+        schedule_workbench_main_backfill.assert_called_once_with()
         sync_defaults.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
