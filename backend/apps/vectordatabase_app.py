@@ -168,6 +168,9 @@ async def delete_index(
             tenant_id, "local", index_name, user_id
         )
         return result
+    except AppException:
+        # Preserve the EDS code/details for the common application handler.
+        raise
     except HTTPException:
         raise
     except TokenExpiredError as e:
@@ -680,8 +683,14 @@ async def delete_documents(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail="Either path_or_url or file_id is required",
             )
+        # Pass the durable ID when available so deletion cannot select an older
+        # tombstone that happens to reuse the same object path.  The optional
+        # arguments keep path-only clients on the legacy contract.
+        delete_kwargs = {}
+        if file_id:
+            delete_kwargs = {"file_id": file_id, "requested_by": user_id}
         result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core
+            index_name, path_or_url, scope, vdb_core, **delete_kwargs
         )
 
         if scope == "full":
@@ -690,38 +699,48 @@ async def delete_documents(
             TagManagementService.cleanup_document_assignments(
                 tenant_id, "local", index_name, path_or_url, user_id
             )
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(
-                    index_name, path_or_url
-                )
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for document %s in index %s: %s",
-                    path_or_url,
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}, but Redis cleanup encountered an error: "
-                    f"{str(redis_error)}"
-                )
+            # The deletion service performs Redis cleanup for new callers. Keep
+            # the legacy fallback only when an older service implementation did
+            # not include that result, and avoid duplicate deletion calls.
+            if "redis_cleanup" not in result and not result.get("deletion_pending"):
+                try:
+                    redis_service = get_redis_service()
+                    redis_cleanup_result = redis_service.delete_document_records(
+                        index_name, path_or_url
+                    )
+                    result["redis_cleanup"] = redis_cleanup_result
+                    if redis_cleanup_result.get("errors"):
+                        result["redis_warnings"] = redis_cleanup_result["errors"]
+                except Exception as redis_error:
+                    logger.warning(
+                        "Redis cleanup failed for document %s in index %s: %s",
+                        path_or_url,
+                        index_name,
+                        redis_error,
+                    )
+                    result["redis_cleanup_error"] = str(redis_error)
+
+            # Preserve the response message contract used by existing clients.
+            # The new deletion service may already provide redis_cleanup, while
+            # the fallback above adds it for older service implementations.
+            # Only terminal responses receive the summary; pending responses
+            # must keep their retry-oriented message.
+            if not result.get("deletion_pending"):
+                original_message = result.get("message", "Documents deleted successfully")
+                if result.get("redis_cleanup_error"):
+                    if "Redis cleanup encountered an error" not in original_message:
+                        result["message"] = (
+                            f"{original_message}, but Redis cleanup encountered an error: "
+                            f"{result['redis_cleanup_error']}"
+                        )
+                elif result.get("redis_cleanup") and "Cleaned up" not in original_message:
+                    redis_cleanup = result["redis_cleanup"]
+                    result["message"] = (
+                        f"{original_message}. "
+                        f"Cleaned up {redis_cleanup.get('total_deleted', 0)} Redis records "
+                        f"({redis_cleanup.get('celery_tasks_deleted', 0)} tasks, "
+                        f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
+                    )
 
         return result
 
