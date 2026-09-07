@@ -85,6 +85,7 @@ from consts.const import (
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -1622,6 +1623,10 @@ async def create_tool_config_list(
     tool_keys_seen = set()
     for tool in tools_list:
         tool_identifier = tool.get("name") or tool.get("class_name")
+        # System-managed tools are injected below with run-scoped metadata. Ignore
+        # legacy agent bindings so they cannot create duplicate tool definitions.
+        if tool_identifier in SYSTEM_MANAGED_TOOL_NAMES:
+            continue
         if tool_identifier in tool_keys_seen:
             raise ValidationError(
                 f"Duplicate tool identifier '{tool_identifier}' found in agent '{agent_name or agent_id}'."
