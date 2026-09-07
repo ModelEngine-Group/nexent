@@ -75,7 +75,6 @@ from consts.const import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
-    EXTERNAL_MEMORY_SEARCH_ENABLED,
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
@@ -98,9 +97,7 @@ def _create_fixed_search_memory_tool():
 
 
 def _get_external_provider_service_for_search():
-    """Resolve the external provider service only when the search kill switch is on."""
-    if not EXTERNAL_MEMORY_SEARCH_ENABLED:
-        return None
+    """Resolve the external provider service used to search enabled providers."""
     return get_memory_external_provider_service()
 
 
