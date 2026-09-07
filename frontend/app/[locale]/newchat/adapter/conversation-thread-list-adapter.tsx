@@ -45,11 +45,17 @@ import {
   skillFileUploadsRegistry,
   remoteChatModelAdapter,
   parseStepTokenCount,
+  parseContextBudget,
+  parseProviderCallUsage,
+  parseTurnUsage,
   parsePlan,
   parsePlanStepUpdate,
   planRegistry,
   type PlanData,
   type SearchSource,
+  type ContextBudgetEvent,
+  type ProviderCallUsageV2,
+  type TurnUsageV2,
   type StepTokenCount,
 } from "./remote-chat-model-adapter";
 
@@ -370,6 +376,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // the same data into the global registry, but historical restores have
       // no streaming run to read from.
       const stepTokenCounts: StepTokenCount[] = [];
+      const pendingContextBudgets = new Map<number, ContextBudgetEvent>();
+      const providerCallUsages: ProviderCallUsageV2[] = [];
+      let turnUsage: TurnUsageV2 | null = null;
 
       // Populate conversationSourcesRegistry for historical assistant messages
       // and build the matching `source` parts that drive the
@@ -570,7 +579,36 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           // `SingleTurnTokenUsage` via message metadata.
           if (part.type === "token_count") {
             const parsed = parseStepTokenCount(part.content);
-            if (parsed) stepTokenCounts.push(parsed);
+            if (parsed) {
+              const pendingBudget = pendingContextBudgets.get(
+                parsed.stepNumber
+              );
+              if (pendingBudget) {
+                parsed.contextBudget = pendingBudget;
+                pendingContextBudgets.delete(parsed.stepNumber);
+              }
+              stepTokenCounts.push(parsed);
+            }
+            continue;
+          }
+          if (part.type === "context_budget") {
+            const budget = parseContextBudget(part.content);
+            if (budget) {
+              const step = [...stepTokenCounts]
+                .reverse()
+                .find((item) => item.stepNumber === budget.step_number);
+              if (step) step.contextBudget = budget;
+              else pendingContextBudgets.set(budget.step_number, budget);
+            }
+            continue;
+          }
+          if (part.type === "llm_usage") {
+            const usage = parseProviderCallUsage(part.content);
+            if (usage) providerCallUsages.push(usage);
+            continue;
+          }
+          if (part.type === "turn_usage") {
+            turnUsage = parseTurnUsage(part.content);
             continue;
           }
 
@@ -995,6 +1033,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         custom: {
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
           ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
+          ...(providerCallUsages.length > 0 ? { providerCallUsages } : {}),
+          ...(turnUsage ? { turnUsage } : {}),
         },
       };
 

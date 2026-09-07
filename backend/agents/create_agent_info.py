@@ -8,7 +8,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
@@ -18,13 +18,22 @@ from nexent.core.agents.context import (
     resolve_policy,
 )
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
+try:
+    from nexent.core.models.provider_usage import resolve_provider_usage_profile
+except ImportError:  # Rolling-upgrade and lightweight test compatibility.
+    from nexent.core.models.prompt_cache import resolve_provider_usage_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
     ProviderCapabilityUnknown,
     ResolverError,
     resolve_capacity,
 )
+from nexent.core.models.feature_capability import (
+    normalize_feature_profile,
+    resolve_feature_capabilities,
+)
 from nexent.core.models.capacity_budget import (
+    BudgetResolverError,
     RequestBudgetOverrides,
     SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
@@ -35,6 +44,11 @@ from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
+from consts.model_feature_capabilities import (
+    CATALOG_REVISION as FEATURE_CATALOG_REVISION,
+    EXACT_CATALOG as FEATURE_EXACT_CATALOG,
+    FAMILY_RULES as FEATURE_FAMILY_RULES,
+)
 
 from services.file_management_service import validate_urls_access
 from management.services.model.resolver import get_rerank_model
@@ -84,7 +98,7 @@ from consts.const import (
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
 from consts.model import ToolParamsRequest
-from consts.exceptions import ValidationError
+from consts.exceptions import ModelCapacityConfigError, ValidationError
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -245,6 +259,58 @@ def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
     return overrides
 
 
+def _effective_feature_factory(model_info: Optional[dict]) -> str:
+    """Resolve a known provider only when a generic factory URL proves it."""
+    record = model_info if isinstance(model_info, dict) else {}
+    factory = str(record.get("model_factory") or "").strip().lower()
+    normalized_factory = re.sub(r"[^a-z0-9]+", "", factory)
+    if normalized_factory not in {
+        "openaiapicompatible",
+        "openaicompatible",
+        "openaiapi",
+    }:
+        return factory
+
+    raw_url = str(record.get("base_url") or "").strip()
+    parsed = urlparse(raw_url if "://" in raw_url else f"https://{raw_url}")
+    host = (parsed.hostname or "").lower().rstrip(".")
+    provider_hosts = (
+        ("dashscope", ("dashscope.aliyuncs.com",)),
+        ("silicon", ("api.siliconflow.cn", "siliconflow.cn")),
+        ("deepseek", ("api.deepseek.com",)),
+        ("openai", ("api.openai.com",)),
+        ("tokenpony", ("api.tokenpony.cn",)),
+    )
+    for provider, hosts in provider_hosts:
+        if host in hosts:
+            return provider
+    return factory
+
+
+def _resolve_model_feature_capabilities(model_info: Optional[dict]) -> dict:
+    """Use persisted sanitized metadata or a factory-scoped catalog fallback."""
+    record = model_info if isinstance(model_info, dict) else {}
+    persisted = normalize_feature_profile(record.get("feature_capability_metadata"))
+    if persisted and any(
+        persisted[branch]["supported"] is not None
+        for branch in ("reasoning", "prompt_cache")
+    ):
+        return persisted
+    model_name = str(record.get("model_name") or "")
+    model_repo = str(record.get("model_repo") or "")
+    full_model_name = (
+        model_name if "/" in model_name or not model_repo
+        else f"{model_repo}/{model_name}"
+    )
+    return resolve_feature_capabilities(
+        _effective_feature_factory(record),
+        full_model_name,
+        exact_catalog=FEATURE_EXACT_CATALOG,
+        family_rules=FEATURE_FAMILY_RULES,
+        catalog_revision=FEATURE_CATALOG_REVISION,
+    )
+
+
 def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
     values = [value for value in field_sources.values() if value]
     if not values:
@@ -321,6 +387,28 @@ def _resolve_safe_input_budget(
             exc,
         )
         return None
+    except BudgetResolverError as exc:
+        reason_by_type = {
+            "InvalidReservePolicy": "invalid_reserve_policy",
+            "RequestedOutputExceedsCapacity": "requested_output_exceeds_model",
+            "ReserveExceedsCapacity": "reserve_exceeds_capacity",
+            "NoSafeInputCapacity": "no_safe_input_capacity",
+            "SafeInputBudgetFingerprintMismatch": "budget_fingerprint_mismatch",
+            "CallerMaxTokensOverrideForbidden": "caller_output_override_forbidden",
+            "SafeInputBudgetCapacityMismatch": "capacity_snapshot_mismatch",
+        }
+        reason = reason_by_type.get(type(exc).__name__, "budget_resolution_failed")
+        logger.warning(
+            "W2 safe input budget rejected: tenant_id=%s model=%s reason=%s",
+            tenant_id,
+            capacity_snapshot.model_name,
+            reason,
+        )
+        raise ModelCapacityConfigError(
+            f"capacity_config_invalid.{reason}",
+            "The selected model capacity cannot produce a safe Agent input budget. "
+            "Review the model context, input, output, and reserve settings.",
+        ) from exc
     logger.debug(
         "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
         "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
@@ -351,6 +439,12 @@ def _resolve_input_budget(
     provider_raw = model_info.get("model_factory")
     provider = provider_raw.lower().strip() if isinstance(provider_raw, str) else ""
     model_id = model_info.get("model_name") or ""
+    persisted_profile_version = model_info.get("capability_profile_version")
+    if persisted_profile_version:
+        for (catalog_provider, catalog_model), profile in CAPABILITY_CATALOG.items():
+            if profile.capability_profile_version == persisted_profile_version:
+                provider, model_id = catalog_provider, catalog_model
+                break
     provider_missing_detail = None
     if not provider:
         provider_missing_detail = (
@@ -883,6 +977,8 @@ async def create_model_config_list(tenant_id):
     model_list = []
     extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     for record in records:
+        effective_feature_factory = _effective_feature_factory(record)
+        feature_capabilities = _resolve_model_feature_capabilities(record)
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
                         api_key=record.get("api_key", ""),
@@ -896,7 +992,12 @@ async def create_model_config_list(tenant_id):
                         timeout_seconds=record.get("timeout_seconds"),
                         concurrency_limit=record.get("concurrency_limit"),
                         prompt_cache=resolve_prompt_cache_profile(
-                            record.get("model_factory")),
+                            effective_feature_factory, feature_capabilities),
+                        feature_capabilities=feature_capabilities,
+                        provider_usage_profile=resolve_provider_usage_profile(
+                            effective_feature_factory,
+                            record.get("capability_profile_version"),
+                        ),
                         # W1 step 6: pass capacity columns through so SDK can
                         # honor operator-configured values end to end.
                         max_output_tokens=record.get("max_output_tokens"),
@@ -907,14 +1008,21 @@ async def create_model_config_list(tenant_id):
                         tokenizer_family=record.get("tokenizer_family"),
                         capacity_source=record.get("capacity_source"),
                         capability_profile_version=record.get("capability_profile_version"),
-                        extra_body=extra_body))
+                        extra_body=extra_body,
+                        canonical_model_id=record.get("canonical_model_id"),
+                        model_identity_metadata=record.get("model_identity_metadata"),
+                        tokenizer_match_metadata=record.get("tokenizer_match_metadata"),
+                        token_count_probe_metadata=record.get("token_count_probe_metadata")))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    main_effective_feature_factory = _effective_feature_factory(main_model_config)
+    main_feature_capabilities = _resolve_model_feature_capabilities(main_model_config)
     main_prompt_cache = resolve_prompt_cache_profile(
-        main_model_config.get("model_factory"))
-    model_list.append(
-        ModelConfig(cite_name="main_model",
+        main_effective_feature_factory, main_feature_capabilities)
+    for cite_name in ("main_model", "sub_model"):
+        model_list.append(
+            ModelConfig(cite_name=cite_name,
                     api_key=main_model_config.get("api_key", ""),
                     model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
                         "model_name") else "",
@@ -924,19 +1032,24 @@ async def create_model_config_list(tenant_id):
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
                     prompt_cache=main_prompt_cache,
-                    extra_body=extra_body))
-    model_list.append(
-        ModelConfig(cite_name="sub_model",
-                    api_key=main_model_config.get("api_key", ""),
-                    model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
-                        "model_name") else "",
-                    url=main_model_config.get("base_url", ""),
-                    ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory"),
-                    timeout_seconds=main_model_config.get("timeout_seconds"),
-                    concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache,
-                    extra_body=extra_body))
+                    extra_body=extra_body,
+                    feature_capabilities=main_feature_capabilities,
+                    provider_usage_profile=resolve_provider_usage_profile(
+                        main_effective_feature_factory,
+                        main_model_config.get("capability_profile_version"),
+                    ),
+                    max_output_tokens=main_model_config.get("max_output_tokens"),
+                    max_tokens=main_model_config.get("max_tokens"),
+                    context_window_tokens=main_model_config.get("context_window_tokens"),
+                    max_input_tokens=main_model_config.get("max_input_tokens"),
+                    default_output_reserve_tokens=main_model_config.get("default_output_reserve_tokens"),
+                    tokenizer_family=main_model_config.get("tokenizer_family"),
+                    capacity_source=main_model_config.get("capacity_source"),
+                    capability_profile_version=main_model_config.get("capability_profile_version"),
+                    canonical_model_id=main_model_config.get("canonical_model_id"),
+                    model_identity_metadata=main_model_config.get("model_identity_metadata"),
+                    tokenizer_match_metadata=main_model_config.get("tokenizer_match_metadata"),
+                    token_count_probe_metadata=main_model_config.get("token_count_probe_metadata")))
 
     return model_list
 
@@ -1345,10 +1458,6 @@ async def create_agent_config(
         include_empty_message=not bool(runtime_knowledge_context),
     )
 
-    # This compatibility flag controls compression only. ContextManager remains
-    # the single context assembly path when compression is disabled.
-    enable_context_manager = agent_info.get("enable_context_manager", False)
-
     # Get the skills included in ContextManager items.
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
@@ -1400,12 +1509,14 @@ async def create_agent_config(
         capacity_snapshot = None
         resolved_capacity_snapshot = None
 
-    requested_output_tokens = agent_info.get("requested_output_tokens")
+    # Legacy model/Agent/request output-reserve overrides no longer influence
+    # runtime. W1 derives one automatic protection value from model capacity.
+    requested_output_tokens = None
     safe_input_budget_snapshot = _resolve_safe_input_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
-        agent_requested_output_tokens=requested_output_tokens,
-        request_requested_output_tokens=request_requested_output_tokens,
+        agent_requested_output_tokens=None,
+        request_requested_output_tokens=None,
     )
     if safe_input_budget_snapshot is not None:
         soft_input_budget_tokens = safe_input_budget_snapshot["soft_input_budget_tokens"]
@@ -1462,13 +1573,10 @@ async def create_agent_config(
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
     )
+    # Automatic compaction is the single production policy. Persisted legacy
+    # tenant/Agent/request switches are ignored during the compatibility window.
     policy_layers = PolicyLayers.model_validate({
-        "platform": {
-            "processing_mode": "adaptive_compact" if enable_context_manager else "passthrough"
-        },
-        "tenant": tenant_config_manager.get_context_policy(tenant_id),
-        "agent": agent_info.get("context_policy"),
-        "request": request_context_policy,
+        "platform": {"processing_mode": "adaptive_compact"},
     })
     effective_context_policy = resolve_policy(policy_layers)
     effective_processing_mode = getattr(
@@ -2221,10 +2329,8 @@ async def create_agent_run_info(
         })
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
-    if requested_output_tokens is not None:
-        create_config_kwargs["request_requested_output_tokens"] = requested_output_tokens
-    if context_policy is not None:
-        create_config_kwargs["request_context_policy"] = context_policy
+    # Legacy per-run output/context overrides are accepted at the API boundary
+    # for rolling compatibility, but runtime policy is now automatic.
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 

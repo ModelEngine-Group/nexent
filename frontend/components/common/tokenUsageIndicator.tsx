@@ -28,6 +28,7 @@ export function TokenUsageIndicator({
   const processingMode = latestMetrics?.context_processing_mode ?? null;
   const outputFinishReason = latestMetrics?.output_finish_reason ?? null;
   const total_output_tokens = latestMetrics?.total_output_tokens ?? 0;
+  const budget = latestMetrics?.context_budget;
 
   // Prefer provider-reported input usage; fall back to the pre-call estimate.
   const contextTokens =
@@ -84,6 +85,42 @@ export function TokenUsageIndicator({
           <span className="text-gray-300">Policy</span>
           <span className="text-white">{processingMode}</span>
         </div>
+      )}
+      {budget && (
+        <>
+          <div className="border-t border-gray-600 pt-1 mt-1 font-medium text-white">
+            Final request breakdown
+          </div>
+          {Object.entries(budget.components)
+            .filter(([, value]) => value > 0)
+            .map(([name, value]) => (
+              <div key={name} className="flex justify-between gap-4">
+                <span className="text-gray-300">
+                  {name.replaceAll("_", " ")}
+                </span>
+                <span className="text-white">{formatNumber(value)}</span>
+              </div>
+            ))}
+          <div className="flex justify-between gap-4">
+            <span className="text-gray-300">Count source</span>
+            <span className="text-white">{budget.count_source}</span>
+          </div>
+          {budget.compression.attempted && (
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-300">Compaction saved</span>
+              <span className="text-green-300">
+                {formatNumber(budget.compression.saved_tokens)} (
+                {Math.round(budget.compression.ratio * 100)}%)
+              </span>
+            </div>
+          )}
+          {budget.recovery_state !== "not_needed" && (
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-300">Recovery</span>
+              <span className="text-white">{budget.recovery_state}</span>
+            </div>
+          )}
+        </>
       )}
       {isDefaultThreshold && (
         <div className="text-gray-400 text-xs">* estimated limit</div>

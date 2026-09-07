@@ -728,6 +728,36 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
     assert result.stop_event == nexent_agent_with_models.stop_event
 
 
+def test_ac_p2_011_create_model_threads_verified_count_identity_metadata(
+    nexent_agent_instance,
+):
+    """Managed and root agents share the same metadata-bearing model factory."""
+    config = ModelConfig(
+        cite_name="verified_model",
+        api_key="test_api_key",
+        model_name="qwen3.7-plus",
+        url="https://example.invalid/v1",
+        model_factory="openai",
+        canonical_model_id="qwen:qwen3.7-plus",
+        tokenizer_family="qwen",
+        model_identity_metadata={"status": "matched"},
+        tokenizer_match_metadata={"auto_applicable": True},
+        token_count_probe_metadata={"status": "supported"},
+    )
+    nexent_agent_instance.model_config_list = [config]
+    mock_openai_model_class.reset_mock()
+    mock_openai_model_class.return_value = MagicMock()
+
+    nexent_agent_instance.create_model("verified_model")
+
+    kwargs = mock_openai_model_class.call_args.kwargs
+    assert kwargs["canonical_model_id"] == "qwen:qwen3.7-plus"
+    assert kwargs["tokenizer_family"] == "qwen"
+    assert kwargs["model_identity_metadata"] == {"status": "matched"}
+    assert kwargs["tokenizer_match_metadata"] == {"auto_applicable": True}
+    assert kwargs["token_count_probe_metadata"] == {"status": "supported"}
+
+
 def test_create_model_not_found(nexent_agent_with_models):
     """Test create_model raises ValueError when model cite_name is not found."""
     with pytest.raises(ValueError, match="Model nonexistent_model not found"):
