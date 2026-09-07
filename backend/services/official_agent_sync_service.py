@@ -15,6 +15,7 @@ from consts.const import (
 )
 from database.agent_db import create_agent, search_agent_id_by_agent_name
 from database.agent_repository_db import upsert_agent_repository_record
+from database.agent_repository_db import update_agent_repository_by_id
 from services.official_agent_bundle_service import (
     OfficialAgentBundle,
     load_official_bundles,
@@ -91,7 +92,9 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
     repository_data = {
         "agent_id": snapshot.agent_id,
         "version_no": getattr(root, "version_no", 1) or 1,
-        "name": root.name,
+        # The repository name is the Bundle directory key. It is the stable
+        # value used later to reload the mounted official Bundle.
+        "name": bundle.name,
         "display_name": bundle.display_name or root.display_name,
         "description": bundle.description or root.description,
         "author": root.author or "Nexent",
@@ -108,6 +111,12 @@ def _sync_bundle(bundle: OfficialAgentBundle) -> dict[str, Any]:
         repository_data,
         publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
         publisher_user_id=OFFICIAL_AGENT_USER_ID,
+    )
+    update_agent_repository_by_id(
+        repository_id=repository_id,
+        publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
+        user_id=OFFICIAL_AGENT_USER_ID,
+        updates={"name": bundle.name},
     )
     return {"name": bundle.name, "agent_repository_id": repository_id, "updated": updated}
 
