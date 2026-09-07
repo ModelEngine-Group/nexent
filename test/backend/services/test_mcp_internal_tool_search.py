@@ -33,6 +33,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     RECOMMEND_RESOURCES_DESCRIPTION,
     RECOMMEND_RESOURCES_LOCAL_NAME,
     RECOMMEND_RESOURCES_NAME,
+    ResourceSearchOutput,
     RequirementClarificationQuestion,
     SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION,
     SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
@@ -255,6 +256,55 @@ async def test_nl2agent_mcp_service_owns_only_nl2agent_tools():
         tool.meta == NL2AGENT_MCP_TOOL_META
         for tool in registered_tools.values()
     )
+
+
+@pytest.mark.anyio
+async def test_registered_resource_gap_search_returns_text_without_structured_content(
+    mocker,
+):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
+    no_matches = ResourceSearchOutput(
+        candidates=[],
+        uncovered_requirement_ids=["train_ticket_query"],
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=no_matches),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "search_installed_resources_impl",
+        new=AsyncMock(return_value=no_matches),
+    )
+    tools = await nl2agent_mcp_service.get_tools()
+    tool = tools[SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME]
+
+    result = await tool.run({
+        "agent_id": 42,
+        "requirements": [{
+            "requirement_id": "train_ticket_query",
+            "query": "Query train ticket availability",
+        }],
+    })
+
+    assert result.structured_content is None
+    payload = _unwrap_nl2a(result.content[0].text)
+    assert payload["subtype"] == "resource_gap_resolution"
+    assert payload["agent_id"] == 42
+    assert payload["requirements"][0]["requirement_id"] == "train_ticket_query"
 
 
 @pytest.mark.asyncio

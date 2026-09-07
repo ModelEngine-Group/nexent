@@ -7,6 +7,7 @@ import unicodedata
 from typing import Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
+from fastmcp.tools.tool import ToolResult
 from nexent.core.agents.agent_model import ToolConfig
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -1182,10 +1183,12 @@ async def search_uninstalled_resources(
             installable=result,
         )
         if gap_requirements:
-            return build_nl2a_wrapper(
-                subtype="resource_gap_resolution",
-                agent_id=resolved_agent_id,
-                requirements=gap_requirements,
+            return ToolResult(
+                content=build_nl2a_wrapper(
+                    subtype="resource_gap_resolution",
+                    agent_id=resolved_agent_id,
+                    requirements=gap_requirements,
+                )
             )
         return result.model_dump(mode="json")
     except AgentDraftEditError as exc:
