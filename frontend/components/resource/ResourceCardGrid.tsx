@@ -140,7 +140,7 @@ export default function ResourceCardGrid<T>({
       >
         {headerItem != null && currentPage === 1 ? headerItem : null}
         {createCardNode}
-        {items.length === 0 ? (
+        {itemCount === 0 ? (
           <div className="col-span-full flex min-h-[220px] items-center justify-center">
             {emptyState}
           </div>
