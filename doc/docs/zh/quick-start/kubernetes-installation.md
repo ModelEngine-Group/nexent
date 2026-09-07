@@ -110,7 +110,7 @@ bash deploy.sh k8s
 
 1. 打开 [Nexent Releases](https://github.com/ModelEngine-Group/nexent/releases)。
 2. 在 Release 列表中找到需要的版本，并在该版本的 **Assets** 中下载与集群节点架构匹配的 `nexent-<version>-<platform>.zip`。
-3. 将压缩包复制到可以访问目标集群的管理节点并解压。
+3. 将压缩包复制到可以访问目标集群的管理节点并解压（v2.6.0及以后的版本支持此离线部署方法）。
 
 解压离线部署包：
 

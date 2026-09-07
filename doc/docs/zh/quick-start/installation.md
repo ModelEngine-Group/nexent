@@ -106,7 +106,7 @@ delete from nexent.user_tenant_t where user_id = 'your_user_id';
 目标服务器无法访问公网镜像仓库时，可从 Nexent Releases 下载已经打包好的离线部署包：
 
 1. 打开 [Nexent Releases](https://github.com/ModelEngine-Group/nexent/releases)。
-2. 在 Release 列表中找到需要的版本，并在该版本的 **Assets** 中下载与服务器架构匹配的压缩包。
+2. 在 Release 列表中找到需要的版本，并在该版本的 **Assets** 中下载与服务器架构匹配的压缩包（v2.6.0及以后的版本支持此离线部署方法）。
 3. `amd64` 服务器下载 `nexent-<version>-amd64.zip`，ARM64 服务器下载 `nexent-<version>-arm64.zip`。
 
 下载后，将压缩包复制到离线服务器并解压。压缩包内直接包含离线包文件，无需再次解压内层归档：

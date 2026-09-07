@@ -110,7 +110,7 @@ When the target cluster cannot access public image registries, download a prebui
 
 1. Open [Nexent Releases](https://github.com/ModelEngine-Group/nexent/releases).
 2. Find the required version in the release list and download `nexent-<version>-<platform>.zip` matching the cluster node architecture from that release's **Assets**.
-3. Copy the archive to a management host that can access the target cluster and extract it.
+3. Copy the archive to a management host that can access the target cluster and extract it (Versions v2.6.0 and later support this offline deployment method).
 
 Extract the offline deployment package:
 

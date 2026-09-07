@@ -108,7 +108,7 @@ delete from nexent.user_tenant_t where user_id = 'your_user_id';
 When the target host cannot access public image registries, download a prebuilt offline deployment package from Nexent Releases:
 
 1. Open [Nexent Releases](https://github.com/ModelEngine-Group/nexent/releases).
-2. Find the required version in the release list and download the archive matching the server architecture from that release's **Assets**.
+2. Find the required version in the release list and download the archive matching the server architecture from that release's **Assets** (Versions v2.6.0 and later support this offline deployment method).
 3. Download `nexent-<version>-amd64.zip` for AMD64 or `nexent-<version>-arm64.zip` for ARM64.
 
 Copy the downloaded archive to the offline host and extract it. The downloaded artifact contains the package files directly, with no nested archive:
