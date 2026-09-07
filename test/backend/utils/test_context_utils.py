@@ -7,7 +7,6 @@ import pytest
 
 from backend.utils.context_utils import (
     _build_execution_flow_text,
-    build_app_context_string,
     build_authorized_context_input,
     build_context_inputs,
 )
