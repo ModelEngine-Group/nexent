@@ -4099,5 +4099,19 @@
   "project.config.page.description": "Page description",
   "project.config.page.complete.logo": "Full logo",
   "project.config.page.simple.log": "System logo",
-  "project.config.description": "{productName} is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
+  "project.config.description": "{productName} is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities.",
+  "agentEvaluation.cases.title": "Test case details",
+  "agentEvaluation.cases.number": "No.",
+  "agentEvaluation.cases.question": "Question",
+  "agentEvaluation.cases.expected": "Expected answer",
+  "agentEvaluation.cases.answer": "Model answer",
+  "agentEvaluation.cases.result": "Pass status",
+  "agentEvaluation.cases.pass": "Pass",
+  "agentEvaluation.cases.fail": "Fail",
+  "agentEvaluation.cases.reason": "Reason / execution error",
+  "agentEvaluation.cases.notSaved": "Not saved",
+  "agentEvaluation.cases.saved": "Changes saved",
+  "agentEvaluation.cases.saveFailed": "Update failed",
+  "agentEvaluation.cases.loadFailed": "Failed to load cases",
+  "agentEvaluation.cases.retry": "Retry"
 }

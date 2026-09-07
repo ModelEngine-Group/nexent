@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -12,6 +12,7 @@ from services.agent_evaluation_service import (
     get_agent_evaluation_run_impl,
     list_agent_evaluation_cases_impl,
     list_agent_evaluations_by_agent_impl,
+    revise_agent_evaluation_case_impl,
 )
 from utils.auth_utils import get_current_user_id
 
@@ -145,3 +146,27 @@ async def delete_agent_evaluation_api(
     except Exception as exc:
         logger.exception("Delete agent evaluation error: %r", exc)
         raise HTTPException(status_code=500, detail="Delete agent evaluation error")
+
+
+@router.patch("/{agent_evaluation_id}/cases/{agent_evaluation_case_id}")
+async def revise_agent_evaluation_case_api(
+    agent_evaluation_id: int,
+    agent_evaluation_case_id: int,
+    pass_status: Literal["pass", "fail"] = Body(..., embed=True),
+    authorization: Optional[str] = Header(None),
+):
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        revise_agent_evaluation_case_impl(
+            agent_evaluation_id=agent_evaluation_id,
+            agent_evaluation_case_id=agent_evaluation_case_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            pass_status=pass_status,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Success"})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Revise evaluation case error: %r", exc)
+        raise HTTPException(status_code=500, detail="Revise evaluation case error")

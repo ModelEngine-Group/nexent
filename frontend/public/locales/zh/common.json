@@ -4101,5 +4101,19 @@
   "project.config.page.description": "页面描述",
   "project.config.page.complete.logo": "完整logo",
   "project.config.page.simple.log": "系统logo",
-  "project.config.description": "{productName} 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
+  "project.config.description": "{productName} 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。",
+  "agentEvaluation.cases.title": "测试用例明细",
+  "agentEvaluation.cases.number": "序号",
+  "agentEvaluation.cases.question": "问题",
+  "agentEvaluation.cases.expected": "期望答案",
+  "agentEvaluation.cases.answer": "模型答案",
+  "agentEvaluation.cases.result": "是否通过",
+  "agentEvaluation.cases.pass": "通过",
+  "agentEvaluation.cases.fail": "未通过",
+  "agentEvaluation.cases.reason": "判定原因 / 执行异常",
+  "agentEvaluation.cases.notSaved": "未保存",
+  "agentEvaluation.cases.saved": "修改已保存",
+  "agentEvaluation.cases.saveFailed": "修改失败",
+  "agentEvaluation.cases.loadFailed": "加载用例失败",
+  "agentEvaluation.cases.retry": "重试"
 }

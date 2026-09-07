@@ -1955,15 +1955,15 @@ class AgentEvaluationCase(TableBase):
     agent_evaluation_id = Column(BigInteger, nullable=False, doc="Evaluation run id")
     evaluation_set_case_id = Column(BigInteger, nullable=False, doc="Evaluation set case id")
 
-    inputs = Column(JSONB, nullable=False, doc="Case inputs snapshot (query only for pass cases)")
-    label = Column(JSONB, nullable=False, doc="Case label snapshot (cleared to {answer:''} for pass cases)")
-    predict = Column(JSONB, doc="Predict JSON (answer/raw); NULL for pass cases")
+    inputs = Column(JSONB, nullable=False, doc="Case inputs snapshot")
+    label = Column(JSONB, nullable=False, doc="Case label snapshot")
+    predict = Column(JSONB, doc="Predict JSON (answer/raw)")
 
     score = Column(Float, doc="Case score (0-1)")
-    reason = Column(Text, doc="Judge reason; NULL for pass cases")
+    reason = Column(Text, doc="Judge reason")
     pass_status = Column(
         String(16),
-        doc="Judge result: pass / fail. Pass cases have predict/reason/label.answer cleared to save space.",
+        doc="Judge result: pass / fail. Can be revised manually.",
     )
 
     status = Column(

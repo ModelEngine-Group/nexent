@@ -13,7 +13,11 @@ import EvaluationHistoryCard from "../components/EvaluationHistoryCard";
 import EvaluationReportCard from "../components/EvaluationReportCard";
 import TestCaseLibraryModal from "../components/TestCaseLibraryModal";
 import { useEvaluationHistory } from "@/hooks/evaluation/useEvaluationHistory";
-import type { AgentEvaluationRun, EvaluationSet, EvaluationHistoryItem } from "@/types/agentEvaluation";
+import type {
+  AgentEvaluationRun,
+  EvaluationSet,
+  EvaluationHistoryItem,
+} from "@/types/agentEvaluation";
 
 const { Text } = Typography;
 
@@ -21,7 +25,9 @@ interface AgentEvaluateClientProps {
   agentId: number;
 }
 
-export default function AgentEvaluateClient({ agentId }: AgentEvaluateClientProps) {
+export default function AgentEvaluateClient({
+  agentId,
+}: AgentEvaluateClientProps) {
   const params = useParams<{ locale: string }>();
   const router = useRouter();
   const { t } = useTranslation("common");
@@ -55,7 +61,9 @@ export default function AgentEvaluateClient({ agentId }: AgentEvaluateClientProp
     setHistory,
   } = useEvaluationHistory(agentId, handleEvaluationCompleted);
 
-  const [selectedRun, setSelectedRun] = useState<EvaluationHistoryItem | null>(null);
+  const [selectedRun, setSelectedRun] = useState<EvaluationHistoryItem | null>(
+    null
+  );
   const [reportOpen, setReportOpen] = useState(false);
 
   useEffect(() => {
@@ -103,20 +111,28 @@ export default function AgentEvaluateClient({ agentId }: AgentEvaluateClientProp
       setHistory((prev) => [item, ...prev]);
       loadHistory();
     },
-    [loadHistory]
+    [loadHistory, setHistory]
   );
 
-  const runningItem = history.find((r) => r.status === "RUNNING" || r.status === "PENDING");
+  const runningItem = history.find(
+    (r) => r.status === "RUNNING" || r.status === "PENDING"
+  );
   const runningProgress =
     runningItem && runningItem.progress_total
-      ? { done: runningItem.progress_done ?? 0, total: runningItem.progress_total }
+      ? {
+          done: runningItem.progress_done ?? 0,
+          total: runningItem.progress_total,
+        }
       : undefined;
 
   if (!Number.isFinite(agentId)) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <p className="text-slate-500">{t("agentEvaluation.invalidAgentId")}</p>
-        <Button icon={<ArrowLeft className="h-4 w-4" />} onClick={() => router.push(backHref)}>
+        <Button
+          icon={<ArrowLeft className="h-4 w-4" />}
+          onClick={() => router.push(backHref)}
+        >
           {t("common.back")}
         </Button>
       </div>
@@ -143,7 +159,9 @@ export default function AgentEvaluateClient({ agentId }: AgentEvaluateClientProp
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="truncate font-semibold text-gray-900 dark:text-white">
-                  {isLoadingAgent ? t("agentEvaluation.tab") : (agentName || t("agentEvaluation.tab"))}
+                  {isLoadingAgent
+                    ? t("agentEvaluation.tab")
+                    : agentName || t("agentEvaluation.tab")}
                 </h1>
                 <Text className="shrink-0 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
                   {t("agentEvaluation.badge")}
@@ -184,7 +202,22 @@ export default function AgentEvaluateClient({ agentId }: AgentEvaluateClientProp
         </div>
 
         {/* Step 2 - Report */}
-        {reportOpen && <EvaluationReportCard run={selectedRun} />}
+        {reportOpen && (
+          <EvaluationReportCard
+            run={selectedRun}
+            onUpdated={async () => {
+              const runs = await loadHistory();
+              setHistory(runs);
+              setSelectedRun(
+                (current) =>
+                  runs.find(
+                    (item) =>
+                      item.agent_evaluation_id === current?.agent_evaluation_id
+                  ) ?? null
+              );
+            }}
+          />
+        )}
       </div>
       <TestCaseLibraryModal
         open={libraryOpen}

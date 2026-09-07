@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import case as sql_case, func
 from database.client import as_dict, get_db_session
-from database.db_models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord
+from database.db_models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, EvaluationSetCase, ModelRecord
 
 logger = logging.getLogger("agent_evaluation_db")
 
@@ -247,27 +247,12 @@ def update_agent_evaluation_case_result(
     pass_status: Optional[str] = None,
     updated_by: Optional[str] = None,
 ) -> None:
-    """Update a case result.
-
-    Storage policy: when a case is judged as ``pass`` (either via an explicit
-    ``pass_status="pass"`` argument or an observed ``score == 1``), the heavy
-    detail fields (``predict``, ``reason``, ``label.answer``) are cleared to
-    save space. Only failed cases retain the full detail for debugging.
-    """
+    """Persist result details for both passed and failed cases."""
     updates: Dict[str, Any] = {"status": status, "updated_by": updated_by}
-
-    is_pass = (pass_status == "pass") or (score == 1)
-
-    if not is_pass:
-        if predict is not None:
-            updates["predict"] = predict
-        if reason is not None:
-            updates["reason"] = reason
-    else:
-        # Pass case: trim heavy fields regardless of what was passed in.
-        updates["predict"] = None
-        updates["reason"] = None
-        updates["label"] = {"answer": ""}
+    if predict is not None:
+        updates["predict"] = predict
+    if reason is not None:
+        updates["reason"] = reason
 
     if score is not None:
         updates["score"] = score
@@ -308,7 +293,18 @@ def list_agent_evaluation_cases(
             .offset(offset)
             .limit(limit)
         )
-        return [as_dict(x) for x in q.all()]
+        results = [as_dict(x) for x in q.all()]
+        missing_ids = [r["evaluation_set_case_id"] for r in results if not (r.get("label") or {}).get("answer")]
+        if missing_ids:
+            originals = session.query(EvaluationSetCase).filter(
+                EvaluationSetCase.tenant_id == tenant_id,
+                EvaluationSetCase.evaluation_set_case_id.in_(missing_ids),
+            ).all()
+            labels = {c.evaluation_set_case_id: c.label for c in originals}
+            for result in results:
+                if not (result.get("label") or {}).get("answer"):
+                    result["label"] = labels.get(result["evaluation_set_case_id"], result.get("label"))
+        return results
 
 
 def get_agent_evaluation_case(agent_evaluation_case_id: int, tenant_id: str) -> Dict[str, Any]:
@@ -343,3 +339,45 @@ def soft_delete_agent_evaluation(
         )
         if rows == 0:
             raise ValueError("agent evaluation not found or already deleted")
+
+
+def revise_agent_evaluation_case(
+    agent_evaluation_id: int,
+    agent_evaluation_case_id: int,
+    tenant_id: str,
+    user_id: str,
+    pass_status: str,
+) -> None:
+    """Revise a terminal case and aggregate score in one serialized transaction."""
+    if pass_status not in ("pass", "fail"):
+        raise ValueError("Invalid pass status")
+    with get_db_session() as session:
+        run = session.query(AgentEvaluation).filter(
+            AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
+            AgentEvaluation.tenant_id == tenant_id,
+            AgentEvaluation.delete_flag == "N",
+        ).with_for_update().first()
+        if run is None:
+            raise ValueError("Evaluation not found")
+        if run.status not in ("COMPLETED", "FAILED"):
+            raise ValueError("Evaluation is still running")
+        record = session.query(AgentEvaluationCase).filter(
+            AgentEvaluationCase.agent_evaluation_case_id == agent_evaluation_case_id,
+            AgentEvaluationCase.agent_evaluation_id == agent_evaluation_id,
+            AgentEvaluationCase.tenant_id == tenant_id,
+            AgentEvaluationCase.delete_flag == "N",
+        ).first()
+        if record is None:
+            raise ValueError("Evaluation case not found")
+        if record.status not in ("COMPLETED", "FAILED"):
+            raise ValueError("Evaluation case has not finished")
+        record.pass_status = pass_status
+        record.score = 1.0 if pass_status == "pass" else 0.0
+        record.updated_by = user_id
+        session.flush()
+        run.score_overall = session.query(func.avg(AgentEvaluationCase.score)).filter(
+            AgentEvaluationCase.agent_evaluation_id == agent_evaluation_id,
+            AgentEvaluationCase.tenant_id == tenant_id,
+            AgentEvaluationCase.delete_flag == "N",
+        ).scalar() or 0.0
+        run.updated_by = user_id

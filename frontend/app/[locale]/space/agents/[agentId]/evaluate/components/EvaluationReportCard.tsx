@@ -4,6 +4,7 @@ import { Button, Flex, Spin, Typography } from "antd";
 import { Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useEvaluationReport } from "@/hooks/evaluation/useEvaluationReport";
+import EvaluationCaseTable from "./EvaluationCaseTable";
 import MetricCard from "./MetricCard";
 import ResultDistributionBar from "./ResultDistributionBar";
 import EvaluationConclusion from "./EvaluationConclusion";
@@ -14,9 +15,14 @@ const { Text } = Typography;
 interface EvaluationReportCardProps {
   run: EvaluationHistoryItem | null;
   loading?: boolean;
+  onUpdated: () => Promise<void>;
 }
 
-export default function EvaluationReportCard({ run, loading }: EvaluationReportCardProps) {
+export default function EvaluationReportCard({
+  run,
+  loading,
+  onUpdated,
+}: EvaluationReportCardProps) {
   const { t } = useTranslation("common");
   const { exportReport, exporting } = useEvaluationReport();
 
@@ -26,7 +32,9 @@ export default function EvaluationReportCard({ run, loading }: EvaluationReportC
         <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
           <Flex align="center" gap={2}>
             <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-              <Text className="text-xs font-semibold text-white leading-none">2</Text>
+              <Text className="text-xs font-semibold text-white leading-none">
+                2
+              </Text>
             </div>
             <Text className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               {t("agentEvaluation.report.title")}
@@ -46,7 +54,9 @@ export default function EvaluationReportCard({ run, loading }: EvaluationReportC
         <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
           <Flex align="center" gap={2}>
             <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-              <Text className="text-xs font-semibold text-white leading-none">2</Text>
+              <Text className="text-xs font-semibold text-white leading-none">
+                2
+              </Text>
             </div>
             <Text className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               {t("agentEvaluation.report.title")}
@@ -75,7 +85,9 @@ export default function EvaluationReportCard({ run, loading }: EvaluationReportC
         <Flex align="center" justify="space-between">
           <Flex align="center" gap={2}>
             <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-              <Text className="text-xs font-semibold text-white leading-none">2</Text>
+              <Text className="text-xs font-semibold text-white leading-none">
+                2
+              </Text>
             </div>
             <Text className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               {t("agentEvaluation.report.title")}
@@ -99,9 +111,19 @@ export default function EvaluationReportCard({ run, loading }: EvaluationReportC
         <Flex vertical gap={5}>
           {/* Metrics row */}
           <Flex gap={3} justify="stretch" wrap>
-            <MetricCard label={t("agentEvaluation.report.metric.passRate")} value={`${passRate}%`} highlight />
-            <MetricCard label={t("agentEvaluation.report.metric.avgScore")} value={score} />
-            <MetricCard label={t("agentEvaluation.report.metric.caseCount")} value={total} />
+            <MetricCard
+              label={t("agentEvaluation.report.metric.passRate")}
+              value={`${passRate}%`}
+              highlight
+            />
+            <MetricCard
+              label={t("agentEvaluation.report.metric.avgScore")}
+              value={score}
+            />
+            <MetricCard
+              label={t("agentEvaluation.report.metric.caseCount")}
+              value={total}
+            />
           </Flex>
 
           {/* Distribution bar */}
@@ -109,6 +131,11 @@ export default function EvaluationReportCard({ run, loading }: EvaluationReportC
 
           {/* Conclusion */}
           <EvaluationConclusion passRate={passRate} />
+          <EvaluationCaseTable
+            key={run.agent_evaluation_id}
+            run={run}
+            onUpdated={onUpdated}
+          />
         </Flex>
       </div>
     </div>

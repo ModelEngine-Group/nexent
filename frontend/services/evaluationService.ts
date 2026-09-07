@@ -34,7 +34,9 @@ export const evaluationService = {
 
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "Upload evaluation set failed");
+      throw new Error(
+        result.detail || result.message || "Upload evaluation set failed"
+      );
     }
     return result.data;
   },
@@ -69,37 +71,59 @@ export const evaluationService = {
     });
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "Create evaluation set failed");
+      throw new Error(
+        result.detail || result.message || "Create evaluation set failed"
+      );
     }
     return result.data;
   },
 
-  listEvaluationSets: async (params?: { limit?: number; offset?: number }): Promise<EvaluationSet[]> => {
-    const url = new URL(API_ENDPOINTS.evaluationSets.list, window.location.origin);
-    if (params?.limit != null) url.searchParams.set("limit", String(params.limit));
-    if (params?.offset != null) url.searchParams.set("offset", String(params.offset));
+  listEvaluationSets: async (params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<EvaluationSet[]> => {
+    const url = new URL(
+      API_ENDPOINTS.evaluationSets.list,
+      window.location.origin
+    );
+    if (params?.limit != null)
+      url.searchParams.set("limit", String(params.limit));
+    if (params?.offset != null)
+      url.searchParams.set("offset", String(params.offset));
 
     const resp = await fetch(url.toString(), {
       headers: getAuthHeaders(),
     });
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "List evaluation sets failed");
+      throw new Error(
+        result.detail || result.message || "List evaluation sets failed"
+      );
     }
     return result.data || [];
   },
 
-  listEvaluationSetCases: async (evaluationSetId: number, params?: { limit?: number; offset?: number }): Promise<EvaluationSetCase[]> => {
-    const url = new URL(API_ENDPOINTS.evaluationSets.cases(evaluationSetId), window.location.origin);
-    if (params?.limit != null) url.searchParams.set("limit", String(params.limit));
-    if (params?.offset != null) url.searchParams.set("offset", String(params.offset));
+  listEvaluationSetCases: async (
+    evaluationSetId: number,
+    params?: { limit?: number; offset?: number }
+  ): Promise<EvaluationSetCase[]> => {
+    const url = new URL(
+      API_ENDPOINTS.evaluationSets.cases(evaluationSetId),
+      window.location.origin
+    );
+    if (params?.limit != null)
+      url.searchParams.set("limit", String(params.limit));
+    if (params?.offset != null)
+      url.searchParams.set("offset", String(params.offset));
 
     const resp = await fetch(url.toString(), {
       headers: getAuthHeaders(),
     });
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "List evaluation set cases failed");
+      throw new Error(
+        result.detail || result.message || "List evaluation set cases failed"
+      );
     }
     return result.data || [];
   },
@@ -116,40 +140,62 @@ export const evaluationService = {
     });
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "Create evaluation failed");
+      throw new Error(
+        result.detail || result.message || "Create evaluation failed"
+      );
     }
     return result.data;
   },
 
-  listAgentEvaluationsByAgent: async (agentId: number, params?: { limit?: number; offset?: number }): Promise<AgentEvaluationRun[]> => {
-    const url = new URL(API_ENDPOINTS.agentEvaluations.listByAgent, window.location.origin);
+  listAgentEvaluationsByAgent: async (
+    agentId: number,
+    params?: { limit?: number; offset?: number }
+  ): Promise<AgentEvaluationRun[]> => {
+    const url = new URL(
+      API_ENDPOINTS.agentEvaluations.listByAgent,
+      window.location.origin
+    );
     url.searchParams.set("agent_id", String(agentId));
-    if (params?.limit != null) url.searchParams.set("limit", String(params.limit));
-    if (params?.offset != null) url.searchParams.set("offset", String(params.offset));
+    if (params?.limit != null)
+      url.searchParams.set("limit", String(params.limit));
+    if (params?.offset != null)
+      url.searchParams.set("offset", String(params.offset));
 
     const resp = await fetch(url.toString(), { headers: getAuthHeaders() });
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "List evaluations failed");
+      throw new Error(
+        result.detail || result.message || "List evaluations failed"
+      );
     }
     return result.data || [];
   },
 
-  getAgentEvaluation: async (evaluationId: number): Promise<AgentEvaluationRun> => {
-    const resp = await fetch(API_ENDPOINTS.agentEvaluations.detail(evaluationId), {
-      headers: getAuthHeaders(),
-    });
+  getAgentEvaluation: async (
+    evaluationId: number
+  ): Promise<AgentEvaluationRun> => {
+    const resp = await fetch(
+      API_ENDPOINTS.agentEvaluations.detail(evaluationId),
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "Get evaluation failed");
+      throw new Error(
+        result.detail || result.message || "Get evaluation failed"
+      );
     }
     return result.data;
   },
 
   downloadEvaluationReport: async (evaluationId: number): Promise<Blob> => {
-    const resp = await fetch(API_ENDPOINTS.agentEvaluations.report(evaluationId), {
-      headers: getAuthHeaders(),
-    });
+    const resp = await fetch(
+      API_ENDPOINTS.agentEvaluations.report(evaluationId),
+      {
+        headers: getAuthHeaders(),
+      }
+    );
     if (!resp.ok) {
       let msg = "Download report failed";
       try {
@@ -163,17 +209,48 @@ export const evaluationService = {
     return await resp.blob();
   },
 
-  listAgentEvaluationCases: async (evaluationId: number, params?: { limit?: number; offset?: number }): Promise<AgentEvaluationCase[]> => {
-    const url = new URL(API_ENDPOINTS.agentEvaluations.cases(evaluationId), window.location.origin);
-    if (params?.limit != null) url.searchParams.set("limit", String(params.limit));
-    if (params?.offset != null) url.searchParams.set("offset", String(params.offset));
+  listAgentEvaluationCases: async (
+    evaluationId: number,
+    params?: { limit?: number; offset?: number }
+  ): Promise<AgentEvaluationCase[]> => {
+    const url = new URL(
+      API_ENDPOINTS.agentEvaluations.cases(evaluationId),
+      window.location.origin
+    );
+    if (params?.limit != null)
+      url.searchParams.set("limit", String(params.limit));
+    if (params?.offset != null)
+      url.searchParams.set("offset", String(params.offset));
 
     const resp = await fetch(url.toString(), { headers: getAuthHeaders() });
     const result = await resp.json();
     if (resp.status !== STATUS_CODES.SUCCESS) {
-      throw new Error(result.detail || result.message || "List evaluation cases failed");
+      throw new Error(
+        result.detail || result.message || "List evaluation cases failed"
+      );
     }
     return result.data || [];
+  },
+
+  reviseAgentEvaluationCase: async (
+    evaluationId: number,
+    caseId: number,
+    passStatus: "pass" | "fail"
+  ): Promise<void> => {
+    const resp = await fetch(
+      `${API_ENDPOINTS.agentEvaluations.cases(evaluationId)}/${caseId}`,
+      {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ pass_status: passStatus }),
+      }
+    );
+    if (!resp.ok) {
+      const result = await resp.json().catch(() => ({}));
+      throw new Error(
+        result.detail || result.message || "Update evaluation case failed"
+      );
+    }
   },
 
   deleteEvaluationSet: async (setId: number): Promise<void> => {
@@ -183,18 +260,25 @@ export const evaluationService = {
     });
     if (!resp.ok) {
       const result = await resp.json().catch(() => ({}));
-      throw new Error(result.detail || result.message || "Delete evaluation set failed");
+      throw new Error(
+        result.detail || result.message || "Delete evaluation set failed"
+      );
     }
   },
 
   deleteAgentEvaluation: async (evaluationId: number): Promise<void> => {
-    const resp = await fetch(API_ENDPOINTS.agentEvaluations.delete(evaluationId), {
-      method: "DELETE",
-      headers: getAuthHeaders(),
-    });
+    const resp = await fetch(
+      API_ENDPOINTS.agentEvaluations.delete(evaluationId),
+      {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }
+    );
     if (!resp.ok) {
       const result = await resp.json().catch(() => ({}));
-      throw new Error(result.detail || result.message || "Delete evaluation failed");
+      throw new Error(
+        result.detail || result.message || "Delete evaluation failed"
+      );
     }
   },
 };

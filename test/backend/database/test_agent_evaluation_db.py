@@ -4,7 +4,7 @@ Tests cover the persisted CRUD paths used by the agent evaluation feature:
 ``create_agent_evaluation`` (including the optional judge-model name lookup),
 ``update_agent_evaluation_status``, ``get_agent_evaluation`` (including the
 agent / judge-model name resolution branches), and the case-result update
-behaviour that distinguishes pass vs non-pass cases for storage optimisation.
+behaviour that preserves details for case review.
 """
 
 import sys
@@ -441,7 +441,7 @@ class TestCreateAgentEvaluationCases:
 # ---------------------------------------------------------------------------
 
 class TestUpdateAgentEvaluationCaseResult:
-    def test_pass_status_trims_heavy_fields(self, session_factory):
+    def test_pass_status_preserves_details(self, session_factory):
         from backend.database import agent_evaluation_db
 
         session, _ = session_factory
@@ -468,14 +468,14 @@ class TestUpdateAgentEvaluationCaseResult:
         # on the filter-chain return.  ``rows`` is the count of updated rows.
         assert q.update.called
         updates = q.update.call_args[0][0]
-        # Pass case: heavy fields cleared
-        assert updates["predict"] is None
-        assert updates["reason"] is None
-        assert updates["label"] == {"answer": ""}
+        # Passed cases retain their original details
+        assert updates["predict"] == {"answer": "x"}
+        assert updates["reason"] in ("looks fine", "no reason needed")
+        assert "label" not in updates
         assert updates["pass_status"] == "pass"
         assert updates["score"] == 1
 
-    def test_score_one_with_no_pass_status_also_trims(self, session_factory):
+    def test_score_one_preserves_details(self, session_factory):
         from backend.database import agent_evaluation_db
 
         session, _ = session_factory
@@ -495,10 +495,10 @@ class TestUpdateAgentEvaluationCaseResult:
         )
         assert q.update.called
         updates = q.update.call_args[0][0]
-        # Even without explicit pass_status, score==1 triggers pass-trim.
-        assert updates["predict"] is None
-        assert updates["reason"] is None
-        assert updates["label"] == {"answer": ""}
+        # A binary passing score also retains details.
+        assert updates["predict"] == {"answer": "x"}
+        assert updates["reason"] in ("looks fine", "no reason needed")
+        assert "label" not in updates
         assert "pass_status" not in updates
 
     def test_failure_keeps_heavy_fields(self, session_factory):
@@ -541,7 +541,7 @@ class TestListCases:
         rows = [MagicMock(name="r1"), MagicMock(name="r2")]
         _make_query_chain(session, rows)
         monkeypatch.setattr(agent_evaluation_db, "as_dict",
-                            lambda r: {"id": id(r)})
+                            lambda r: {"id": id(r), "label": {"answer": "expected"}})
 
         cases = agent_evaluation_db.list_agent_evaluation_cases(
             agent_evaluation_id=1, tenant_id="t1",
@@ -608,3 +608,98 @@ class TestSoftDeleteAgentEvaluation:
                 tenant_id="t1",
                 deleted_by="u1",
             )
+
+
+@pytest.mark.parametrize("value,score", [("pass", 1.0), ("fail", 0.0)])
+def test_revise_case_updates_score_without_erasing_details(session_factory, monkeypatch, value, score):
+    from backend.database import agent_evaluation_db
+
+    session, _ = session_factory
+    def column(name):
+        value = MagicMock()
+        value.__eq__.side_effect = lambda other: (name, other)
+        return value
+    monkeypatch.setattr(agent_evaluation_db, "AgentEvaluationCase", types.SimpleNamespace(**{
+        name: column(name) for name in (
+            "agent_evaluation_case_id", "agent_evaluation_id", "tenant_id", "delete_flag", "score",
+        )
+    }))
+    run = types.SimpleNamespace(status="COMPLETED")
+    record = types.SimpleNamespace(status="FAILED", predict={"answer": "original"}, reason="judge reason")
+    run_query, case_query, aggregate_query = MagicMock(), MagicMock(), MagicMock()
+    run_query.filter.return_value.with_for_update.return_value.first.return_value = run
+    case_query.filter.return_value.first.return_value = record
+    aggregate_query.filter.return_value.scalar.return_value = 0.5
+    session.query.side_effect = [run_query, case_query, aggregate_query]
+
+    agent_evaluation_db.revise_agent_evaluation_case(1, 2, "tenant", "user", value)
+
+    assert record.pass_status == value
+    assert record.score == score
+    assert record.status == "FAILED"
+    assert record.predict == {"answer": "original"}
+    assert record.reason == "judge reason"
+    assert record.updated_by == run.updated_by == "user"
+    assert run.score_overall == 0.5
+    session.flush.assert_called_once()
+    assert case_query.filter.call_args.args == (
+        ("agent_evaluation_case_id", 2), ("agent_evaluation_id", 1),
+        ("tenant_id", "tenant"), ("delete_flag", "N"),
+    )
+
+
+@pytest.mark.parametrize("status", ["PENDING", "RUNNING", None])
+def test_revise_case_rejects_running_or_missing_run(session_factory, status):
+    from backend.database import agent_evaluation_db
+
+    session, _ = session_factory
+    run = types.SimpleNamespace(status=status) if status else None
+    session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = run
+    with pytest.raises(ValueError):
+        agent_evaluation_db.revise_agent_evaluation_case(1, 2, "tenant", "user", "pass")
+    session.flush.assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["PENDING", "RUNNING", None])
+def test_revise_case_rejects_unfinished_or_missing_case(session_factory, status):
+    from backend.database import agent_evaluation_db
+
+    session, _ = session_factory
+    run_query, case_query = MagicMock(), MagicMock()
+    run_query.filter.return_value.with_for_update.return_value.first.return_value = types.SimpleNamespace(status="FAILED")
+    case_query.filter.return_value.first.return_value = types.SimpleNamespace(status=status) if status else None
+    session.query.side_effect = [run_query, case_query]
+    with pytest.raises(ValueError):
+        agent_evaluation_db.revise_agent_evaluation_case(1, 2, "tenant", "user", "pass")
+    session.flush.assert_not_called()
+
+
+def test_list_cases_restores_legacy_labels_and_keeps_pagination(session_factory, monkeypatch):
+    from backend.database import agent_evaluation_db
+
+    session, _ = session_factory
+    current_query, original_query = MagicMock(), MagicMock()
+    for name in ("filter", "order_by", "offset", "limit"):
+        getattr(current_query, name).return_value = current_query
+    current_query.all.return_value = [
+        {"evaluation_set_case_id": 11, "label": {"answer": ""}},
+        {"evaluation_set_case_id": 12, "label": {"answer": "snapshot"}},
+    ]
+    original_query.filter.return_value.all.return_value = [
+        types.SimpleNamespace(evaluation_set_case_id=11, label={"answer": "original answer"})
+    ]
+    session.query.side_effect = [current_query, original_query]
+    monkeypatch.setattr(agent_evaluation_db, "as_dict", lambda row: dict(row))
+    def column(name):
+        value = MagicMock()
+        value.__eq__.side_effect = lambda other: (name, other)
+        return value
+    monkeypatch.setattr(agent_evaluation_db, "EvaluationSetCase", types.SimpleNamespace(
+        tenant_id=column("tenant_id"), evaluation_set_case_id=column("evaluation_set_case_id"),
+    ))
+    rows = agent_evaluation_db.list_agent_evaluation_cases(1, "tenant", limit=10, offset=20)
+    assert rows[0]["label"]["answer"] == "original answer"
+    assert rows[1]["label"]["answer"] == "snapshot"
+    current_query.offset.assert_called_once_with(20)
+    current_query.limit.assert_called_once_with(10)
+    assert original_query.filter.call_args.args[0] == ("tenant_id", "tenant")

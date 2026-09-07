@@ -19,6 +19,7 @@ from database.agent_evaluation_db import (
     list_agent_evaluation_cases,
     list_agent_evaluations_by_agent,
     soft_delete_agent_evaluation,
+    revise_agent_evaluation_case,
     update_agent_evaluation_case_result,
     update_agent_evaluation_status,
 )
@@ -593,6 +594,7 @@ def execute_agent_evaluation_run(
             label = c["label"] or {}
 
             query = inputs.get("query", "")
+            predict = None
 
             try:
                 answer_text = asyncio.run(
@@ -636,6 +638,7 @@ def execute_agent_evaluation_run(
                     agent_evaluation_case_id=case_id,
                     tenant_id=tenant_id,
                     status="FAILED",
+                    predict=predict,
                     pass_status="fail",
                     error_message=friendly_msg,
                     updated_by=user_id,
@@ -693,6 +696,18 @@ def list_agent_evaluation_cases_impl(
     return list_agent_evaluation_cases(agent_evaluation_id=agent_evaluation_id, tenant_id=tenant_id, limit=limit, offset=offset)
 
 
+def revise_agent_evaluation_case_impl(
+    agent_evaluation_id: int,
+    agent_evaluation_case_id: int,
+    tenant_id: str,
+    user_id: str,
+    pass_status: str,
+) -> None:
+    revise_agent_evaluation_case(
+        agent_evaluation_id, agent_evaluation_case_id, tenant_id, user_id, pass_status,
+    )
+
+
 def delete_agent_evaluation_run_impl(
     agent_evaluation_id: int,
     tenant_id: str,
@@ -729,13 +744,12 @@ def generate_agent_evaluation_report_impl(
 
     failed_cases = [
         c for c in all_cases
-        if c.get("status") == "FAILED"
-        or c.get("score") == 0
-        or c.get("pass_status") == "fail"
+        if c.get("pass_status") == "fail"
+        or (not c.get("pass_status") and (c.get("status") == "FAILED" or c.get("score") == 0))
     ]
     pass_count = sum(
         1 for c in all_cases
-        if c.get("status") != "FAILED" and c.get("score") == 1
+        if c.get("pass_status") == "pass" or (not c.get("pass_status") and c.get("score") == 1)
     )
     fail_count = len(failed_cases)
     total = len(all_cases)

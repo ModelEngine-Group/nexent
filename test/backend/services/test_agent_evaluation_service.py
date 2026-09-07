@@ -399,6 +399,21 @@ def test_generate_report_only_contains_failed_cases(service_module):
     ]
 
 
+def test_generate_report_honors_manual_pass_for_execution_failure(service_module):
+    service_module.get_agent_evaluation.return_value = {
+        "agent_evaluation_id": 200, "status": "COMPLETED", "score_overall": 1.0,
+    }
+    service_module.list_agent_evaluation_cases.return_value = [
+        _make_case(10, status="FAILED", score=1, pass_status="pass"),
+    ]
+    _, fail_count = service_module.generate_agent_evaluation_report_impl(200, "t1")
+    assert fail_count == 0
+    rows = list(_workbook_holder["wb"]["概要"].iter_rows(values_only=True))
+    fields = {row[0]: row[1] for row in rows[1:] if row and row[0]}
+    assert fields["通过用例数"] == 1
+    assert fields["通过率"] == "100.00%"
+
+
 def test_generate_report_all_pass_results_in_empty_failed_sheet(service_module):
     cases = [
         _make_case(10, status="COMPLETED", score=1, pass_status="pass"),

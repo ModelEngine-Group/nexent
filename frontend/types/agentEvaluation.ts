@@ -73,11 +73,11 @@ export type AgentEvaluationCase = {
   };
   predict?: {
     answer?: string;
-    raw?: any;
+    raw?: unknown;
   } | null;
   score?: number | null;
   reason?: string | null;
-  pass_status?: "PASS" | "FAIL" | null;
+  pass_status?: "pass" | "fail" | null;
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
   error_message?: string | null;
 };
