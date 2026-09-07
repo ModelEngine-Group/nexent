@@ -23,13 +23,11 @@ export async function analyzeAutomationMessage({
   message,
   modelId,
 }: AutomationAnalysisRequest): Promise<AgentAutomationProposalData> {
-  const timezone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Shanghai";
   return agentAutomationService.createProposal({
     conversation_id: conversationId,
     agent_id: agentId,
     message,
-    timezone,
+    timezone: "Asia/Shanghai",
     model_id: modelId,
   });
 }

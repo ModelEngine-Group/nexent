@@ -1,30 +1,20 @@
 # 智能体开发
 
-在智能体开发页面中，您可以创建、配置和管理智能体。智能体是 Nexent 的核心功能，它们能够理解您的需求并执行相应的任务。
+在智能体开发页面中，您可以创建、配置和管理智能体。页面由“智能生成”和“配置”面板组成：智能生成负责把自然语言需求转换为配置草稿，配置面板用于手动调整参数，在配置完成后，可在配置页面右下角点击“调试”，调出“调试”面板用于验证实际运行效果。
+
+<div style="display: flex; justify-content: center;">
+  <img
+    src="../assets/agent-development/agent-config-overview.png"
+    alt="智能体配置页面概览"
+    style="width: 90%; height: auto;"
+  />
+</div>
 
 ## 🔧 创建智能体
 
-在智能体管理页签下，点击"创建 Agent"即可创建一个空白智能体，点击"退出创建"即可退出创建模式。
-如果您有现成的智能体配置，也可以导入使用：
+在“智能体开发”的“智能体配置”页签下，点击右上角的“新建”创建空白智能体。创建或选择一个可编辑的智能体后，可以在智能生成面板描述需求，也可以直接在配置面板中手动填写。若当前智能体只有只读权限，页面会显示配置内容，但不会允许生成或修改。
 
-1. 点击"导入 Agent"
-2. 在弹出的文件选择对话框中选择智能体配置文件（JSON 格式）
-3. 点击"打开"按钮，系统会验证配置文件的格式和内容，并显示导入的智能体信息
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/import.png" style="width: 80%; height: auto;" />
-</div>
-
-> ⚠️ **提示**：如果导入了重名的智能体，系统会弹出提示弹窗。您可以选择：
->
-> - **直接导入**：保留重复名称，导入后的智能体会处于不可用状态，需手动修改智能体名称和变量名后才能使用
-> - **重新生成并导入**：系统将调用 LLM 对智能体进行重命名，会消耗一定的模型 token 数，可能耗时较长
-
-> 📌 **重要说明**：通过导入创建的智能体，如果其工具中包含 `knowledge_base_search` 等知识库检索工具，这些工具只会检索**当前登录用户在本环境中有权限访问的知识库**。导入文件中原有的知识库配置不会自动继承，因此实际检索结果和回答效果，可能与智能体原作者环境下的表现存在差异。
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/duplicated_import.png" style="width: 80%; height: auto;" />
-</div>
+如果您有现成的智能体配置，也可以点击“导入”，使用 JSON 或 ZIP 文件创建智能体。有关导出文件、导入步骤、重名处理和依赖检查的完整说明，请参阅 [Agent 导出与导入](../../integration/integration-out/agents-export.md)。
 
 ## 👥 配置协作智能体/工具
 
@@ -49,101 +39,23 @@
 
 #### 🌐 添加外部 A2A Agent
 
-Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过以下两种方式发现外部 A2A Agent：
+Nexent 支持通过 URL 或 Nacos 发现第三方 A2A Agent，再将其添加为协作智能体。有关发现、认证、协议配置、连通性测试和 DataAgent 接入示例，请参阅 [添加外部 A2A Agent](./a2a-external.md)。如需了解 A2A 接入流程和协议概念，请参阅 [Agent 智能体接入](../../integration/integration-in/agents.md)。
 
-##### 通过 URL 发现 Agent
+### 🛠️ 选择智能体的工具或技能
 
-如果您知道目标 Agent 的 Agent Card 地址，可以使用 URL 发现方式：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-url-discovery.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. 在外部 A2A Agent 列表中，点击"添加外部 Agent"按钮
-2. 选择"URL 发现"页签
-3. 填写 Agent Card URL 地址，例如：`https://example.com/.well-known/agent.json`
-4. 如果目标 Agent Card 需要认证，在"自定义请求头"中填写 JSON 对象，例如：`{"Authorization": "Bearer <token>"}`
-5. 点击"发现"按钮，系统会自动获取 Agent 的相关信息
-6. 发现成功后，可以查看 Agent 的名称、描述、能力等信息
-7. 点击"添加到列表"完成添加
-
-> 💡 **提示**：自定义请求头会随该外部 Agent 保存，仅用于获取和刷新 Agent Card，不会用于后续调用 Agent。再次发现同一 URL 时，留空会保留现有配置，填写 `{}` 可清空配置。
-
-> 💡 **提示**：Agent Card 是符合 A2A 1.0 规范的 Agent 描述文件，包含了 Agent 的名称、描述、调用地址、能力等信息。
-
-##### 通过 Nacos 发现 Agent
-
-如果您的 Agent 注册在 Nacos 服务发现平台，可以使用 Nacos 发现方式：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-nacos-discovery.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. 在外部 A2A Agent 列表中，点击"添加外部 Agent"按钮
-2. 选择"Nacos 发现"页签
-3. 首次使用时，需要先配置 Nacos 连接信息：
-   - **Nacos 服务器地址**：填写 Nacos 服务器地址，如 `http://127.0.0.1:8848`
-   - **命名空间 ID**：填写 Nacos 命名空间 ID（可选）
-   - **分组名**：填写服务分组名，默认为 `DEFAULT_GROUP`
-   - **用户名/密码**：填写 Nacos 访问凭证（可选）
-4. 点击"保存配置"保存 Nacos 连接信息
-5. 填写要扫描的 Agent 服务名称
-6. 点击"扫描"按钮，系统会从 Nacos 中获取匹配的 Agent 信息
-7. 扫描结果会列出所有匹配的 Agent，可以选择需要的 Agent 添加到列表
-
-> ⚠️ **注意**：确保 Nacos 服务正常运行，且目标 Agent 已正确注册到 Nacos。
-
-##### 管理已发现的外部 Agent
-
-在外部 A2A Agent 列表中，您可以查看和管理所有已发现的外部 Agent：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-discovery-list.jpg" style="width: 80%; height: auto;" />
-</div>
-
-1. **查看 Agent 详情**：点击 Agent 卡片，可以查看其完整信息，包括名称、描述、URL、能力列表等
-2. **测试 Agent**：点击"测试"按钮，可以向该 Agent 发送测试消息，验证其是否正常工作
-3. **与 Agent 对话**：点击"对话"按钮，可以打开对话窗口，与该 Agent 进行实时交互
-4. **配置调用协议**：点击"协议配置"按钮，可以选择该 Agent 的调用协议：
-   - **HTTP + JSON**：使用 REST API 风格调用
-   - **JSON-RPC**：使用 JSON-RPC 协议调用
-5. **配置调用认证**：如果 Agent Card 声明了 `securitySchemes` 和 `securityRequirements`，点击"Agent 认证"按钮，填写所需认证值。系统会按 Card 声明将值放入请求头、查询参数或 Cookie；同一认证组合中的字段必须同时填写。
-6. **刷新 Agent 信息**：如果 Agent 信息发生变化，可以点击"刷新"按钮重新获取最新的 Agent Card
-7. **移除 Agent**：点击"移除"按钮，可以将该 Agent 从已发现列表中删除
-
-> 💡 **使用场景**：
->
-> - 通过 URL 发现快速接入已知的第三方 Agent 服务
-> - 通过 Nacos 发现批量接入同一服务注册中心的所有 Agent
-> - 配置协议以兼容不同 Agent 服务提供商的要求
-
-###### 通过URL对接[DataAgent](https://gitcode.com/datagallery/dataagent) A2A Agent
-
-1. 参考[DataAgent文档](https://gitcode.com/datagallery/dataagent#%F0%9F%8C%90-a2a-10-%E6%9C%8D%E5%8A%A1%E6%A8%A1%E5%BC%8F)以A2A服务模式启动DataAgent
-
-   > 当前Nexent不支持带认证的agent，启动DataAgent时请勿设置auth-token
-
-   <div style="display: flex; justify-content: left;">
-     <img src="../assets/agent-development/dataagent_deploy.png" style="width: 80%; height: auto;" />
-   </div>
-
-2. 参考[通过 URL 发现 Agent](#通过-url-发现-agent)接入agent，url为http://\<IP\>:9999/.well-known/agent-card.json
-3. 参考[管理已发现的外部 Agent](#管理已发现的外部-agent)配置调用协议，选择HTTP+JSON方式接入
-
-### 🛠️ 选择智能体的工具
-
-智能体可以使用各种工具来完成任务，如知识库检索、文件解析、图片解析、收发邮件、文件管理等本地工具，也可接入第三方 MCP 工具，或自定义工具。
+智能体可以使用各种工具与技能来完成任务，如知识库检索、文件解析、图片解析、收发邮件、文件管理等本地工具，也可接入第三方或自行开发的 MCP 工具或技能。
 
 1. 在"选择智能体的工具"页签右侧，点击"刷新工具"来刷新可用工具列表
-2. 选择想要添加工具所在的分组
-3. 查看分组下可选用的所有工具，可点击 ⚙️ 查看工具描述，进行工具参数配置
-4. 点击工具名即可选中该工具，再次点击可取消选择
-   - 如果工具有必备参数没有配置，选择时会弹出弹窗引导进行参数配置
+2. 点击"选择工具"或"选择技能"按钮，可根据标签分组浏览当前可用的工具或技能清单
+3. 点击 ⚙️ 查看工具或技能的描述，并配置工具或技能参数
+4. 点击即可选中工具或技能，回到智能体已选择工具或已选择技能处可执行删除
+   - 如果工具有必填参数没有配置，选择时会弹出弹窗引导进行参数配置
    - 如果所有必备参数已配置完成，选择则会直接选中
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/set-tool.png" style="width: 50%; height: auto;" />
-</div>
+![image-20260805052952538](./../assets/agent-development/set-tools-1.png)
+
+![image-20260805053822083](./../assets/agent-development/set-tools-2.png)
+
 
 > 💡 **小贴士**：
 >
@@ -151,86 +63,14 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 > 2. 请选择 `analyze_text_file` 工具，启用文档类、文本类文件的解析功能。
 > 3. 请选择 `analyze_image` 工具，启用图片类文件的解析功能。
 >
-> ⚠️ **向量化模型配置**：使用 `knowledge_base_search` 工具时，需要确保知识库已配置向量化模型。对于存量知识库，系统会提示选择向量化模型，请务必选择**创建该知识库时使用的向量化模型**。若选择的模型与知识库创建时使用的模型不一致，可能导致检索失败或结果不准确。
+> ⚠️ **注意**：使用 `knowledge_base_search` 工具时，需要事先创建知识库。请务必确保**创建知识库时使用的向量化模型**与当前生效的向量化模型一致。否则将会导致检索失败或结果不准确。
 >
 > 📚 想了解系统已经内置的所有本地工具能力？请参阅 [本地工具概览](../local-tools/index.md)。
 > 📚 想了解技能能力？请参阅 [技能管理](../resource-repository/skill-repository.md)。
 
 ### 🔌 添加 MCP 工具
 
-在"选择智能体的工具"页签右侧，点击"MCP 配置"，可在弹窗中进行 MCP 服务器的配置，查看已配置的 MCP 服务器
-
-您可以通过以下两种方式在 Nexent 中添加 MCP 服务
-
-**1️⃣ 通过 URL 添加 MCP 服务**
-
-🔔 该方法适用于已有独立部署的 MCP 服务（支持 SSE 与 Streamble HTTP 协议）：
-
-> 1.  在界面上方的 **Add MCP Server** 区域填写 **Server name** 、 **Server URL**
->
-> ⚠️ **注意**：服务器名称只能包含英文字母和数字，不能包含空格、下划线等其他字符
->
-> 2.  点击 右侧 **+ Add** 按钮，完成单个服务添加
-
-**2️⃣ 通过 JSON 配置添加容器化 MCP 服务**
-
-🔔 该方法适用于 npx 部署的容器化 MCP 服务
-
-> 1.  在 **Add Containerized MCP Service** 输入框中，填写符合示例格式的 JSON 配置
->
-> ```json
-> {
->   "mcpServers": {
->     "service-name": {
->       "args": ["mcp-package-name@version", "additional-parameters"],
->       "command": "npx"
->     }
->   }
-> }
-> ```
->
-> 2.  在下方 **Port** 输入框中，填写容器化服务对应的端口号
-> 3.  点击右侧 **+ Add** 按钮，完成容器化服务添加
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/mcp.png" style="width: 80%; height: auto;" />
-</div>
-
-有许多第三方服务如 [ModelScope](https://www.modelscope.cn/mcp) 提供了 MCP 服务，您可以快速接入使用。
-您也可以自行开发 MCP 服务并接入 Nexent 使用，参考文档 [MCP 工具开发](../../backend/tools/mcp)。
-
-**3️⃣ 存量 API 转换为 MCP 服务**
-
-🔔 该方法适用于将已有的 REST API 接口快速转换为 MCP 工具，无需额外开发即可让智能体调用现有 API 能力：
-
-> 1.  在 MCP 配置模块选择 **"API 转换为 MCP"** 接入类型
-> 2.  在下方的输入框中填写 API 基础信息：
->
-> - **服务名称**：MCP 服务的展示名称
-> - **OpenAPI JSON**：OpenAPI 3.x 规范的 JSON 内容
-> - **基础服务 URL**：API 服务的基础地址（支持 http/https）
->
-> 3.  点击右下角 **+ 添加** 按钮，完成对应 MCP 服务的转换
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/add_mcp_from_api.png" style="width: 80%; height: auto;" />
-</div>
-
-> 4.  转换完成后，可在 **Outer APIs** 页签下查看所有外部 API 转换的 MCP 工具
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/add_mcp_from_api_1.png" style="width: 80%; height: auto;" />
-</div>
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/add_mcp_from_api_2.png" style="width: 80%; height: auto;" />
-</div>
-
-> 💡 **使用场景**：
->
-> - 快速接入企业内部的 REST API 接口
-> - 将第三方服务的 HTTP API 转换为 MCP 工具
-> - 无需编写 MCP Server 代码，直接通过 OpenAPI 规范生成工具
+在“选择智能体的工具”页签中点击“MCP 配置”，可以接入远程 MCP、容器化 MCP，或将已有 API 转换为 MCP 工具。有关三种接入方式、OpenAPI 要求、服务管理和工具测试，请参阅 [MCP 服务接入](../../integration/integration-in/mcp.md)。
 
 ### ⚙️ 自定义工具
 
@@ -239,6 +79,12 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 - [LangChain 工具指南](../../backend/tools/langchain)
 - [MCP 工具开发](../../backend/tools/mcp)
 - [SDK 工具文档](../../sdk/core/tools.md)
+
+### 🔌 创建或导入技能
+
+在智能体的高级配置中切换到“选择技能”页签，点击“构建技能”，可以通过对话创建 Skill，也可以上传 `.md` 或 `.zip` 文件。创建完成后，需要选择该 Skill 并保存智能体配置，智能体才能使用它。
+
+有关文件格式、`SKILL.md` 结构、上传限制和关联步骤，请参阅 [Skill 技能接入](../../integration/integration-in/skills.md)。有关技能的查看、编辑、权限和删除，请参阅 [技能管理](../resource-repository/skill-repository.md)。
 
 ### 🧪 工具测试
 
@@ -265,181 +111,148 @@ Nexent 支持通过 A2A 协议与第三方 Agent 进行通信。您可以通过�
 
 ### ✍️ 描述智能体应该如何工作
 
-根据选择的协作智能体和工具，您现在可以用简洁的语言来描述，您希望这个智能体应该如何工作。Nexent 会根据您的描述，自动为您生成智能体配置以及提示词等信息。
+在“智能生成”面板中直接描述业务目标、使用对象、输入输出和限制条件。系统既可以生成完整配置，也可以只优化指定字段或资源。
 
-1. 在"描述智能体应该如何工作"下的编辑框中，输入简洁描述，如"你是一个专业的知识问答小助手，具备本地知识检索和联网检索能力，综合信息以回答用户问题"
-2. 选择模型（生成提示词时选择更聪明的模型以优化回复逻辑），点击"生成智能体"按钮，Nexent 会为您生成智能体详细内容，包括基础信息以及提示词（角色、使用要求、示例）
-3. 您可在下方智能体详细内容中，针对自动生成的内容（包括基础信息和提示词）进行编辑微调
+首次生成完整配置时，按以下步骤操作：
+
+1. **描述需求**：说明智能体要解决的问题，例如“创建一个面向售后人员的产品问答助手，优先使用内部知识库，回答时给出来源”。
+2. **澄清需求**：系统在信息不足时显示问题卡片。选择合适的选项，也可以在“其他”中补充说明后提交。
+3. **应用草稿**：系统生成智能体描述、职责提示词、约束提示词、示例、开场白和示例问题后，点击“应用到草稿”，再在配置面板中检查结果。
+
+生成或资源绑定进行中时，配置表单会暂时锁定，避免人工编辑与生成结果互相覆盖。如生成异常或不想继续等待，可点击“解除锁定”；该操作会停止当前生成，再恢复手动编辑。
+
+对于已有配置，可以使用智能生成面板中的快捷操作进行局部优化。点击卡片后，系统会把对应指令填入输入框；您可以直接发送，也可以先补充要求再发送。
+
+| 快捷操作 | 处理内容 |
+| --- | --- |
+| **生成提示词** | 根据当前角色以及已绑定的工具和 Skill，生成职责提示词、约束提示词和示例提示词，其他配置保持不变 |
+| **推荐可用工具** | 根据当前角色搜索并推荐工具；确认绑定后，重新生成受资源变化影响的提示词 |
+| **推荐可用技能** | 根据当前角色搜索并推荐 Skill；确认绑定后，重新生成受资源变化影响的提示词 |
+| **生成会话引导** | 生成开场白和示例问题，其他配置保持不变 |
+
+智能生成会根据本轮要求执行最小范围的修改，不会自动重新生成整套配置。如果新增或替换资源，系统会同步更新与该资源相关的提示词；如需移除工具或 Skill，请在右侧配置面板的“工具与技能”区域操作。
+
+<div style="display: flex; justify-content: center;">
+  <img
+    src="../assets/agent-development/nl2agent-requirement.png"
+    alt="智能体配置页面概览"
+    style="width: 90%; height: auto;"
+  />
+</div>
+
 
 #### 📋 智能体基础信息配置
 
-在基础信息区域，若您对自动生成的内容不满意，您可以手工修改以下各项：
+配置面板的“基本设置”包含五个可折叠区域：
 
-| 配置项                   | 说明                                                                                                                                                                                                                             |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **智能体名称**           | 智能体的展示名称，用于界面显示和用户识别。                                                                                                                                                                                       |
-| **智能体变量名**         | 智能体的内部标识名称，用于代码中引用该智能体。只能包含字母、数字和下划线，且必须以字母或下划线开头。                                                                                                                             |
-| **作者**                 | 智能体的创建者名称，默认值为当前登录用户的邮箱。                                                                                                                                                                                 |
-| **用户组**               | 智能体所属的用户组，用于权限管理和组织管理。若为空，则表示无所属用户组。                                                                                                                                                         |
-| **组内权限**             | 控制同组用户对该智能体的访问权限：<br>- **同组可编辑**：同组用户可以查看和编辑该智能体<br>- **同组只读**：同组用户只能查看，不能编辑<br>- **私有**：只有创建者和管理员可以访问                                                   |
-| **大语言模型**           | 智能体运行时使用的大语言模型，用于处理推理和生成回复。                                                                                                                                                                           |
-| **智能体运行最大步骤数** | 智能体在单次对话中最多可以执行的思考-行动循环次数。步数越多，智能体可以处理更复杂的任务，但也会消耗更多资源。                                                                                                                    |
-| **提供运行摘要**         | 控制智能体在被用作子智能体时，是否向主智能体提供运行细节：<br>- **开启（默认）**：当此智能体被用作子智能体时，会向主智能体提供详细的运行过程摘要<br>- **关闭**：当此智能体被用作子智能体时，只返回最终结果，不提供详细的运行过程 |
-| **智能体描述**           | 智能体的功能描述，用于说明智能体的用途和能力。                                                                                                                                                                                   |
+| 区域 | 主要配置 |
+| --- | --- |
+| **展示信息** | 图标、展示名称、变量名、作者和简介 |
+| **模型与提示词** | 大语言模型、职责提示词、约束提示词和示例提示词 |
+| **工具与技能** | 智能体可以调用的工具、Skill 及其参数 |
+| **运行策略** | 最大步数、输出预留、运行摘要、自验证和会话 Metadata 开关 |
+| **发布属性** | 用户组、组内权限、是否为主智能体以及 A2A 发布设置 |
 
-> 💡 **使用建议**：
->
-> - 智能体变量名应使用有意义的英文命名，如 `code_assistant`、`data_analyst` 等
-> - 智能体运行最大步骤数建议根据任务复杂度设置，简单的问答任务可设为 3-5 步，复杂的推理任务可设为 10-20 步
-> - 如果子智能体的运行过程对主智能体的决策有参考价值，建议开启"提供运行摘要"选项。如果只需要子智能体的最终结果以减少上下文消耗，建议关闭此选项
+智能体变量名只能包含字母、数字和下划线，且必须以字母或下划线开头。建议使用能体现用途的英文名称，例如 `code_assistant` 或 `data_analyst`。
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/generate-agent.png" style="width: 50%; height: auto;" />
-</div>
+如果智能体原先配置的模型已被删除，配置面板顶部会显示“智能体不可用：部分已配置的模型已删除”。点击提示中的“刷新”可以重新检查可用状态；随后需要在“模型与提示词”区域选择可用模型并保存配置。刷新只更新状态，不会恢复已删除的模型。
+
+“允许会话 Metadata”默认关闭。开启后，使用者可以在开始问答页面为每个会话填写 JSON 对象，并把业务标识、渠道或其他运行参数传给模型。Metadata 对模型可见，大小不能超过 64 KiB；不要在其中填写密码、访问令牌或其他敏感信息。
+
+![智能体基础配置](./../assets/agent-development/agent-basic-setting.png)
+
+
+
+#### ⚙️ 高级设置
+
+“高级设置”页签用于配置智能体与其他资源之间的关系：
+
+##### 高级配置区域
+
+| 区域 | 主要配置 |
+| --- | --- |
+| **协作智能体** | 添加内部智能体或外部 A2A Agent，并配置协作关系 |
+| **知识库** | 选择智能体可检索的知识库；选择后会启用知识库检索能力并建立关联 |
+| **会话引导** | 设置用户首次进入问答页面时看到的开场白和示例问题 |
+| **安全护栏** | 配置内容匹配规则、命中后的处理动作和规则测试 |
+
+知识库和协作智能体必须在当前账号的可访问范围内。导入或复制智能体后，应重新检查这些关联资源，因为其他环境中的资源标识和权限不会自动迁移。
+
+![智能体基础配置](./../assets/agent-development/agent-advanced-setting.png)
+
+##### 🚧安全护栏
+
+安全护栏使用按顺序执行的正则表达式规则，检查发送给模型的内容以及工具调用过程中的数据。安全护栏默认关闭，且不依赖"自验证"开关；需要单独打开"规则列表"旁的开关，并至少配置一条有效规则。规则按列表顺序匹配，同一段内容以首个命中的规则为准。
+
+每条规则包含以下配置：
+
+| 配置项           | 说明                                                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **规则名称**     | 规则的唯一标识。名称重复时界面会给出提示，建议使用能表达检测目标的名称。                                                  |
+| **正则表达式**   | 使用 Python `re` 语法描述要匹配的内容。运行时默认忽略大小写；语法无效的规则不会参与运行时检查。                          |
+| **严重级别**     | 指定命中后的处理方式：**阻断**、**脱敏**或**放行**。新建规则默认为"阻断"。                                             |
+| **说明**         | 可选的规则用途说明，便于维护和审查。                                                                                      |
+
+不同严重级别在各检查位置的实际行为如下：
+
+| 严重级别 | 最新用户输入             | 历史消息                   | 工具入参                         | 工具输出                         |
+| -------- | ------------------------ | -------------------------- | -------------------------------- | -------------------------------- |
+| **阻断** | 终止本次运行并返回拒绝说明 | 降级为脱敏后再发送给模型   | 阻止本次工具调用                 | 因工具已经执行，降级为脱敏       |
+| **脱敏** | 将命中内容替换为 `***` 后继续 | 将命中内容替换为 `***` 后继续 | 将命中的字符串参数替换为 `***` 后调用工具 | 将命中内容替换为 `***` 后写入智能体上下文 |
+| **放行** | 不修改内容，继续运行     | 不修改内容，继续运行       | 不修改参数，继续调用             | 不修改输出，继续运行             |
+
+安全护栏还提供以下辅助能力：
+
+- **智能生成**：选择用于生成的模型，并用自然语言描述要匹配或拦截的内容。系统会自动判断生成单个候选表达式还是多条规则；确认候选或勾选规则后再导入列表。
+- **规则管理**：支持手动添加、编辑、复制、单条删除和批量删除规则，并显示阻断、脱敏、放行规则的数量分布。
+- **正则测试预览**：粘贴样本文本后，可以实时查看命中的文本、规则名称和命中次数。预览仅用于验证匹配效果，不会执行阻断或脱敏动作。
+
+> ⚠️ **注意**：安全护栏是基于正则表达式的内容筛查，不等同于完整的语义安全审核。AI 生成的规则也可能存在误报或漏报；请先在"正则测试预览"中使用正常样本和风险样本进行验证，再保存配置。
 
 ## 🐛 调试与保存
 
-在完成初步智能体配置后，您可以对智能体进行调试，根据调试结果微调提示词，持续提升智能体表现。
+配置面板顶部的“草稿”表示当前修改尚未形成正式发布版本。完成初步配置后：
 
-1. 在页面右下角点击"调试"按钮，弹出智能体调试页面
-2. 与智能体进行测试对话，观察智能体的响应和行为
-3. 查看对话表现和错误信息，根据测试结果优化智能体提示词
+1. 点击“调试”。系统先校验并保存当前草稿，再打开调试面板。
+2. 使用具有代表性的问题验证提示词、知识检索、工具调用和协作流程。
+3. 根据运行过程和错误提示修改配置，然后再次调试。
+4. 点击“发布”。系统再次保存草稿，并打开版本发布窗口。
 
-调试成功后，可点击右下角"保存"按钮，此智能体将会被保存并出现在智能体列表中。
+只有发布成功的主智能体才会出现在“开始问答”等正式使用入口中。调试不会启用记忆检索和写入，因此跨会话记忆效果需要在“开始问答”中验证。
+
 
 ## 🐛 版本管理
 
 Nexent 支持智能体的版本管理，您可以在调试过程中，保存不同版本的智能体配置。
 
-确认智能体配置无误后，您可发布智能体。发布后智能体将在智能体空间、开始问答中可见。
+确认智能体配置无误后，您可点击"发布"按钮正式发布智能体。发布后智能体将在 Agent 仓库、开始问答中可见，并可进行历史版本管理。
 
-![版本管理1](../assets/agent-development/version_management_1.png)
+点击"版本管理"栏目右下角的版本对比按钮，可以回顾历史版本的信息，并与最新版本的问答效果进行对比。
 
-若需回滚到其他版本，可在版本管理页面点击"回滚"按钮。
+![image-20260805130308885](./../assets/agent-development/version_management_1.png)
 
-![版本管理2](../assets/agent-development/version_management_2.png)
+若需回滚到其他版本，可在版本右侧的菜单中点击"回滚"。
+
+![image-20260805132354244](./../assets/agent-development/version_management_2.png)
 
 ### 🚀 发布为 A2A Agent
 
-Nexent 支持将已发布的智能体作为 A2A Agent 暴露给外部系统调用。在发布版本时，您可以勾选"发布为 A2A Agent"选项，将当前智能体注册为符合 A2A 1.0 规范的 Agent。
+发布版本时勾选“发布为 A2A Agent”，可以让外部系统通过 REST 或 JSON-RPC 协议发现并调用该智能体。发布步骤、调用信息、认证和版本更新方法请参阅 [发布为 A2A Agent](./a2a-publish.md)。
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-published-as.jpg" style="width: 50%; height: auto;" />
-</div>
+如果需要通过普通北向 RESTful API 开放智能体，请参阅 [Agent 发布](../../integration/integration-out/agents-publish.md)；接口参数和完整请求示例请参阅 [调用 Agent 北向 API](../../integration/integration-out/northbound-api.md)。
 
-发布成功后，系统会显示 A2A Agent 的调用信息，包括：
 
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-detail.jpg" style="width: 50%; height: auto;" />
-</div>
+## 🔧 管理智能体清单
 
-| 信息项             | 说明                                              |
-| ------------------ | ------------------------------------------------- |
-| **Endpoint ID**    | A2A Agent 的唯一标识符                            |
-| **Agent Card URL** | Agent 发现端点，外部系统通过此地址获取 Agent 描述 |
-| **协议版本**       | A2A 协议版本，当前为 1.0                          |
-| **REST 端点**      | 基于 REST 风格的 API 端点                         |
-| **JSON-RPC 端点**  | 基于 JSON-RPC 2.0 协议的调用端点                  |
+点击"选择智能体"，您可浏览当前环境中可以编辑的完整智能体清单。你可以在上方的搜索框中
 
-#### 调用方式
+![image-20260805115401285](./../assets/agent-development/agent-list.png)
 
-发布后的 A2A Agent 支持以下两种调用协议：
+智能体条目右侧的一系列icon按钮代表了你可以对智能体执行的所有管理操作。从左至右分别为：
 
-##### REST API
+### 📋 复制
 
-```bash
-# 获取 Agent Card（用于 Agent 发现）
-GET /nb/a2a/{endpoint_id}/.well-known/agent-card.json
-
-# 发送同步消息
-POST /nb/a2a/{endpoint_id}/message:send
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "请帮我完成某个任务"
-  }
-}
-
-# 发送流式消息（SSE）
-POST /nb/a2a/{endpoint_id}/message:stream
-Content-Type: application/json
-
-{
-  "message": {
-    "role": "user",
-    "content": "请帮我完成某个任务"
-  }
-}
-
-# 获取任务状态
-GET /nb/a2a/{endpoint_id}/tasks/{task_id}
-```
-
-##### JSON-RPC 2.0
-
-```bash
-POST /nb/a2a/{endpoint_id}/v1
-Content-Type: application/json
-
-# 发送同步消息
-{
-  "jsonrpc": "2.0",
-  "method": "SendMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "请帮我完成某个任务"
-    }
-  },
-  "id": 1
-}
-
-# 发送流式消息
-{
-  "jsonrpc": "2.0",
-  "method": "SendStreamingMessage",
-  "params": {
-    "message": {
-      "role": "user",
-      "content": "请帮我完成某个任务"
-    }
-  },
-  "id": 2
-}
-
-# 获取任务状态
-{
-  "jsonrpc": "2.0",
-  "method": "GetTask",
-  "params": {
-    "taskId": "task_abc123"
-  },
-  "id": 3
-}
-```
-
-> 💡 **提示**：
->
-> - 本地开发时，如果使用 docker 启动：请将路径前面的 `/nb/a2a` 部分替换为 `http://localhost:5013/nb/a2a`；如果通过 k8s 启动，请使用 `http://localhost:30013/nb/a2a`
-> - 生产环境请将路径替换为您的服务器域名或公网 IP 地址
-
-> ⚠️ **注意事项**：
->
-> - 调用 A2A Agent 需要在请求头中携带有效的认证信息
-> - Agent Card 信息会被缓存，刷新间隔为 1 小时
-> - 如需更新 Agent 信息，需要重新发布智能体版本
-
-当发布的Agent为符合A2A协议的Agent时，在智能体列表中，用户可以在智能体列表中点击下面这个按钮查看A2A Agent调用具体信息：
-
-<div style="display: flex; justify-content: left;">
-  <img src="../assets/agent-development/a2a-find-detail.jpg" style="width: 50%; height: auto;" />
-</div>
-
-## 🔧 管理智能体
-
-在左侧智能体列表中，您可对已有的智能体进行以下操作：
+创建完全一致的 Agent 克隆体，便于多版本备份或并行测试。
 
 ### 🔗 查看调用关系
 
@@ -451,21 +264,17 @@ Content-Type: application/json
 
 ### 📤 导出
 
-可将调试成功的智能体导出为 JSON 配置文件，在创建智能体时可以使用此 JSON 文件以导入的方式创建副本。
-
-### 📋 复制
-
-复制 Agent，便于智能体的实验、多版本调试与并行开发。
+可将调试成功的智能体导出为 JSON 或 ZIP 文件，并在其他环境中重新导入。有关格式选择、依赖处理和导入限制，请参阅 [Agent 导出与导入](../../integration/integration-out/agents-export.md)。
 
 ### 🗑️ 删除
 
-删除智能体（不可撤销，请谨慎操作）。
+从本地环境中彻底删除智能体。
 
 ## 🚀 下一步
 
 完成智能体开发后，您可以：
 
-1. 在 **[智能体空间](../agent-development.md)** 中查看和管理所有智能体
+1. 在 **[Agent仓库](../agent-development.md)** 中管理、发布你的智能体，或获取更多其他开发者的智能体
 2. 在 **[开始问答](../start-chat.md)** 中与智能体进行交互
 3. 在 **[记忆管理](./memory-configuration.md)** 配置记忆以提升智能体的个性化能力
 

@@ -6,6 +6,8 @@ import { useContainerPortAvailability } from "@/hooks/mcpTools/useContainerPortA
 interface ContainerPortFieldProps {
   scope: string;
   enabled?: boolean;
+  /** When false, hide the "Suggest Port" button; the user types the port directly. */
+  showSuggestButton?: boolean;
   containerPort: number | undefined;
   setContainerPort: (value: number | undefined) => void;
 }
@@ -13,6 +15,7 @@ interface ContainerPortFieldProps {
 export default function ContainerPortField({
   scope,
   enabled = true,
+  showSuggestButton = true,
   containerPort,
   setContainerPort,
 }: ContainerPortFieldProps) {
@@ -38,7 +41,7 @@ export default function ContainerPortField({
           className="w-full"
           placeholder={t("mcpTools.addModal.containerPortPlaceholder")}
         />
-        {enabled ? (
+        {enabled && showSuggestButton ? (
           <Button
             onClick={suggestPort}
             loading={suggesting}

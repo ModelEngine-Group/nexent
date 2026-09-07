@@ -248,9 +248,12 @@ class TestGetPromptTemplate:
         assert set(template_config) == {"system_prompt"}
         parsed_template = Environment().parse(template_config["system_prompt"])
         assert meta.find_undeclared_variables(parsed_template) == {
-            "tool_name",
-            "wrapper_name",
+            "installed_tool_name",
+            "recommend_tool_name",
+            "save_tool_name",
             "max_results",
+            "uninstalled_tool_name",
+            "wrapper_name",
         }
 
     def test_get_prompt_template_unsupported_type(self, mocker):
@@ -692,35 +695,36 @@ class TestSkillCreationSimplePromptTemplateJinja:
         assert "existing-skill-name" in result["user_prompt"]
         assert "Update" in result["user_prompt"]
 
-    def test_jinja_rendering_conditional_blocks(self, mocker):
-        """Test Jinja2 conditional blocks are properly handled"""
+    def test_jinja_rendering_conditional_blocks_uses_skill_content(self, mocker):
+        """Test empty interactive drafts render as creation mode."""
         mock_yaml_load = mocker.patch('yaml.load')
-        mock_file = mocker.patch('builtins.open', mock_open(
-            read_data='system_prompt: "{% if existing_skill %}UPDATE{% else %}CREATE{% endif %} mode"\n'
-                     'user_prompt: "{% if existing_skill %}Modify {{ existing_skill.name }}{% else %}Create new{% endif %}"'
+        mocker.patch('builtins.open', mock_open(
+            read_data='system_prompt: "{% if has_existing_skill_content %}UPDATE{% else %}CREATE{% endif %} mode"\n'
+                     'user_prompt: "{% if has_existing_skill_content %}Modify {{ existing_skill.name }}{% else %}Create new{% endif %}"'
         ))
 
         mock_yaml_load.return_value = {
-            "system_prompt": "{% if existing_skill %}UPDATE{% else %}CREATE{% endif %} mode",
-            "user_prompt": "{% if existing_skill %}Modify {{ existing_skill.name }}{% else %}Create new{% endif %}"
+            "system_prompt": "{% if has_existing_skill_content %}UPDATE{% else %}CREATE{% endif %} mode",
+            "user_prompt": "{% if has_existing_skill_content %}Modify {{ existing_skill.name }}{% else %}Create new{% endif %}"
         }
 
-        # Test with existing_skill
+        result_with_empty_snapshot = get_skill_creation_simple_prompt_template(
+            language='zh',
+            existing_skill={"name": "", "description": "", "tags": [], "content": ""},
+        )
+        assert "CREATE" in result_with_empty_snapshot["system_prompt"]
+        assert "UPDATE" not in result_with_empty_snapshot["system_prompt"]
+        assert "Create new" in result_with_empty_snapshot["user_prompt"]
+        assert "Modify" not in result_with_empty_snapshot["user_prompt"]
+
         result_with_skill = get_skill_creation_simple_prompt_template(
             language='zh',
-            existing_skill={"name": "test", "description": "desc", "tags": [], "content": ""}
+            existing_skill={"name": "test", "description": "desc", "tags": [], "content": "# Existing skill"},
         )
         assert "UPDATE" in result_with_skill["system_prompt"]
         assert "CREATE" not in result_with_skill["system_prompt"]
         assert "Modify test" in result_with_skill["user_prompt"]
         assert "Create new" not in result_with_skill["user_prompt"]
-
-        # Test without existing_skill
-        result_without_skill = get_skill_creation_simple_prompt_template(language='zh', existing_skill=None)
-        assert "CREATE" in result_without_skill["system_prompt"]
-        assert "UPDATE" not in result_without_skill["system_prompt"]
-        assert "Create new" in result_without_skill["user_prompt"]
-        assert "Modify" not in result_without_skill["user_prompt"]
 
     def test_jinja_rendering_error_fallback(self, mocker):
         """Test Jinja2 rendering error falls back to raw content"""

@@ -7,9 +7,10 @@ It provides a unified interface for invoking remote A2A endpoints.
 import json
 import logging
 import uuid
-from typing import Any, AsyncIterator, Dict, List, Optional
+from copy import deepcopy
 from dataclasses import dataclass
 from threading import Event
+from typing import Any, AsyncIterator, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -34,6 +35,7 @@ class A2AAgentInfo:
     protocol_type: str = PROTOCOL_JSONRPC
     timeout: float = 300.0
     raw_card: Optional[Dict[str, Any]] = None
+    custom_headers: Optional[Dict[str, str]] = None
 
     def get_protocol_type(self) -> str:
         """Get the protocol type for calling this agent.
@@ -120,6 +122,8 @@ class ExternalA2AAgentProxy:
         }
         if self.agent_info.api_key:
             headers["Authorization"] = f"Bearer {self.agent_info.api_key}"
+        if self.agent_info.custom_headers:
+            headers.update(self.agent_info.custom_headers)
         return headers
 
     def _build_message_payload(
@@ -148,8 +152,8 @@ class ExternalA2AAgentProxy:
             "message": message
         }
 
-        if context:
-            payload["metadata"] = context
+        if context is not None:
+            message["metadata"] = deepcopy(context)
 
         if history:
             payload["history"] = history
@@ -226,7 +230,11 @@ class ExternalA2AAgentProxy:
         try:
             parsed_url = urlparse(endpoint_url)
             logger.info(f"[A2A-SDK] Connecting to host={parsed_url}, port={parsed_url.port or 80}")
-            logger.info(f"[A2A-SDK] Requst body ={request_body}, headers={headers}")
+            logger.info(
+                "[A2A-SDK] Sending non-streaming request: protocol=%s, url=%s",
+                protocol_type,
+                endpoint_url,
+            )
             response = await self._client.post(
                 endpoint_url,
                 json=request_body,
@@ -372,7 +380,7 @@ class ExternalA2AAgentProxy:
         logger.info(
             f"[A2A-SDK] === Calling external A2A agent (streaming) === "
             f"name={self.agent_info.name}, protocol={protocol_type}, "
-            f"url={endpoint_url}, request_body={request_body}"
+            f"url={endpoint_url}"
         )
 
         try:
@@ -734,6 +742,7 @@ class ExternalA2AAgentWrapper:
         self.stop_event = stop_event or Event()
         self.observer = observer
         self._proxy: Optional[ExternalA2AAgentProxy] = None
+        self._runtime_metadata: Dict[str, Any] = {}
         # Required by smolagents for managed agents
         self.inputs = {
             "task": {"type": "string", "description": "Task description for the external agent."},
@@ -744,6 +753,16 @@ class ExternalA2AAgentWrapper:
             },
         }
         self.output_type = "string"
+
+    def get_runtime_metadata(self) -> Dict[str, Any]:
+        """Return an isolated copy of metadata attached to the current run."""
+        return deepcopy(self._runtime_metadata)
+
+    def set_runtime_metadata(self, metadata: Optional[Dict[str, Any]]) -> None:
+        """Attach one run's metadata without retaining caller-owned references."""
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError("runtime metadata must be a dictionary")
+        self._runtime_metadata = deepcopy(metadata or {})
 
     def __call__(self, task: str = None, **kwargs) -> str:
         """Call external A2A agent synchronously.
@@ -771,7 +790,11 @@ class ExternalA2AAgentWrapper:
             return "Error: No task provided"
 
         try:
-            result = self._proxy.sync_call(query, history)
+            result = self._proxy.sync_call(
+                query,
+                history,
+                context=self.get_runtime_metadata(),
+            )
             return result
         except Exception as e:
             logger.error(f"External A2A agent '{self.name}' call failed: {e}")

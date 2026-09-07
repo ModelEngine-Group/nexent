@@ -271,3 +271,18 @@ def test_preview_share_asset_endpoint_resolve_file_error(mocker):
 
     assert response.status_code == HTTPStatus.BAD_REQUEST
     assert response.json()["detail"] == "unsupported"
+
+def test_create_conversation_share_endpoint_token_expired(mocker):
+    """Expired token maps to 401 instead of falling through to 500."""
+    from consts.exceptions import TokenExpiredError
+
+    mocker.patch(
+        "apps.conversation_share_app.get_current_user_id",
+        side_effect=TokenExpiredError("expired"),
+    )
+
+    response = client.post("/share/conversation/7", json={"mode": "all"})
+
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert "expired" in response.json()["detail"]
+

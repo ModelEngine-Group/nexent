@@ -18,6 +18,7 @@ import {
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
+import { handleSessionExpired } from "@/lib/session";
 import { STATUS_CODES } from "@/const/auth";
 import {
   MODEL_TYPES,
@@ -192,12 +193,27 @@ export class ModelError extends Error {
   }
 }
 
+// Any 401 from a modelService request triggers the session-expired redirect,
+// so token-expiry handling is uniform across all methods.
+const authedFetch = async (
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> => {
+  const response = await globalThis.fetch(input, init);
+  if (response.status === 401) handleSessionExpired();
+  return response;
+};
+
+// True for a modelService error caused by an expired session (HTTP 401).
+export const isSessionExpiredError = (error: unknown): boolean =>
+  error instanceof ModelError && error.code === 401;
+
 // Model service
 export const modelService = {
   // Get all models (unified method)
   getAllModels: async (): Promise<ModelOption[]> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.customModelList, {
+      const response = await authedFetch(API_ENDPOINTS.model.customModelList, {
         headers: getAuthHeaders(),
       });
       const result = await response.json();
@@ -304,7 +320,7 @@ export const modelService = {
         requestBody.access_token = model.accessToken;
       }
 
-      const response = await fetch(API_ENDPOINTS.model.customModelCreate, {
+      const response = await authedFetch(API_ENDPOINTS.model.customModelCreate, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(requestBody),
@@ -331,7 +347,7 @@ export const modelService = {
     baseUrl?: string;
   }): Promise<any[]> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.customModelCreateProvider,
         {
           method: "POST",
@@ -367,7 +383,7 @@ export const modelService = {
     models: any[];
   }): Promise<number> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.customModelBatchCreate, {
+      const response = await authedFetch(API_ENDPOINTS.model.customModelBatchCreate, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -399,7 +415,7 @@ export const modelService = {
     baseUrl?: string;
   }): Promise<any[]> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.getProviderSelectedModalList,
         {
           method: "POST",
@@ -438,7 +454,7 @@ export const modelService = {
     baseUrl?: string;
   }): Promise<any[]> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.manageProviderModelList,
         {
           method: "POST",
@@ -505,7 +521,7 @@ export const modelService = {
     extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.updateSingleModel(model.currentDisplayName),
         {
           method: "POST",
@@ -586,7 +602,7 @@ export const modelService = {
     provider?: string
   ): Promise<any> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.updateBatchModel, {
+      const response = await authedFetch(API_ENDPOINTS.model.updateBatchModel, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(
@@ -655,7 +671,7 @@ export const modelService = {
       const url = provider
         ? `${baseUrl}&provider=${encodeURIComponent(provider)}`
         : baseUrl;
-      const response = await fetch(url, {
+      const response = await authedFetch(url, {
         method: "POST",
         headers: getAuthHeaders(),
       });
@@ -680,7 +696,7 @@ export const modelService = {
   ): Promise<boolean> => {
     try {
       if (!displayName) return false;
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.customModelHealthcheck(displayName, modelType),
         {
           method: "POST",
@@ -711,7 +727,7 @@ export const modelService = {
   ): Promise<ModelConnectivityResult> => {
     try {
       if (!displayName) return { connectivity: false };
-      const response = await fetch(API_ENDPOINTS.model.manageModelHealthcheck, {
+      const response = await authedFetch(API_ENDPOINTS.model.manageModelHealthcheck, {
         method: "POST",
         headers: {
           ...getAuthHeaders(),
@@ -756,7 +772,7 @@ export const modelService = {
   ): Promise<boolean> => {
     try {
       if (!displayName) return false;
-      const response = await fetch(API_ENDPOINTS.model.manageModelHealthcheck, {
+      const response = await authedFetch(API_ENDPOINTS.model.manageModelHealthcheck, {
         method: "POST",
         headers: {
           ...getAuthHeaders(),
@@ -828,7 +844,7 @@ export const modelService = {
         requestBody.access_token = config.accessToken;
       }
 
-      const response = await fetch(API_ENDPOINTS.model.verifyModelConfig, {
+      const response = await authedFetch(API_ENDPOINTS.model.verifyModelConfig, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(requestBody),
@@ -880,7 +896,7 @@ export const modelService = {
     modelType?: ModelType;
   }): Promise<CapacitySuggestion> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.suggestCapacity, {
+      const response = await authedFetch(API_ENDPOINTS.model.suggestCapacity, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -918,7 +934,7 @@ export const modelService = {
 
   getCapacityCoverage: async (): Promise<CapacityCoverage> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.capacityCoverage, {
+      const response = await authedFetch(API_ENDPOINTS.model.capacityCoverage, {
         headers: getAuthHeaders(),
       });
       const result = await response.json();
@@ -935,7 +951,7 @@ export const modelService = {
   // Get LLM model list for generation
   getLLMModels: async (): Promise<ModelOption[]> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.llmModelList, {
+      const response = await authedFetch(API_ENDPOINTS.model.llmModelList, {
         headers: getAuthHeaders(),
       });
       const result = await response.json();
@@ -977,7 +993,7 @@ export const modelService = {
     tenantName: string;
   }> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.manageModelList, {
+      const response = await authedFetch(API_ENDPOINTS.model.manageModelList, {
         method: "POST",
         headers: {
           ...getAuthHeaders(),
@@ -1109,7 +1125,7 @@ export const modelService = {
         requestBody.access_token = params.accessToken;
       }
 
-      const response = await fetch(API_ENDPOINTS.model.manageModelCreate, {
+      const response = await authedFetch(API_ENDPOINTS.model.manageModelCreate, {
         method: "POST",
         headers: {
           ...getAuthHeaders(),
@@ -1166,7 +1182,7 @@ export const modelService = {
     extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.manageModelUpdate(params.currentDisplayName),
         {
           method: "POST",
@@ -1238,7 +1254,7 @@ export const modelService = {
     displayName: string;
   }): Promise<void> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.manageModelDelete(params.displayName),
         {
           method: "POST",
@@ -1293,7 +1309,7 @@ export const modelService = {
     modelsCount: number;
   }> => {
     try {
-      const response = await fetch(API_ENDPOINTS.model.manageModelBatchCreate, {
+      const response = await authedFetch(API_ENDPOINTS.model.manageModelBatchCreate, {
         method: "POST",
         headers: {
           ...getAuthHeaders(),
@@ -1339,7 +1355,7 @@ export const modelService = {
     baseUrl?: string;
   }): Promise<any[]> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.manageProviderModelCreate,
         {
           method: "POST",
@@ -1381,7 +1397,7 @@ export const modelService = {
     type?: ModelType; // v2.6.0: optional — when omitted, returns all types
   }): Promise<any[]> => {
     try {
-      const response = await fetch(
+      const response = await authedFetch(
         API_ENDPOINTS.model.manageProviderModelList,
         {
           method: "POST",

@@ -202,6 +202,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     info_with_metadata.setdefault("verification_config", None)
     info_with_metadata.setdefault("context_policy", None)
     info_with_metadata.setdefault("model_params_override", None)
+    info_with_metadata.setdefault("is_a2a", False)
     info_with_metadata.update({
         "tenant_id": tenant_id,
         "version_no": 0,  # Default to draft version
@@ -231,6 +232,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "enabled": new_agent.enabled,
             "is_main_agent": new_agent.is_main_agent,
             "provide_run_summary": new_agent.provide_run_summary,
+            "allow_chat_metadata": bool(new_agent.allow_chat_metadata),
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,
@@ -239,6 +241,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,
+            "is_a2a": getattr(new_agent, "is_a2a", False),
             "requested_output_tokens": new_agent.requested_output_tokens,
             "verification_config": new_agent.verification_config,
             "context_policy": getattr(new_agent, "context_policy", None),
@@ -292,6 +295,60 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
         agent.updated_by = user_id
 
 
+def update_agent_icon(agent_id: int, tenant_id: str, icon_url: str, user_id: str) -> None:
+    """Update the icon URL on every active version of an agent."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == "N",
+            )
+            .values(icon_url=icon_url, updated_by=user_id)
+        )
+        if result.rowcount == 0:
+            raise ValueError("ag_tenant_agent_t Agent not found")
+
+
+def query_agent_records_for_nl2agent(agent_id: int, tenant_id: str) -> list[dict]:
+    """Return all tenant-owned records for NL2Agent draft validation.
+
+    Deleted rows are intentionally included so the service can return a stable
+    deleted-draft error without weakening the tenant boundary.
+    """
+    with get_db_session() as session:
+        records = session.query(AgentInfo).filter(
+            AgentInfo.agent_id == agent_id,
+            AgentInfo.tenant_id == tenant_id,
+        ).order_by(AgentInfo.version_no.asc()).all()
+        return [as_dict(record) for record in records]
+
+
+def update_agent_draft_fields(
+    agent_id: int,
+    tenant_id: str,
+    fields: dict,
+) -> int:
+    """Update only explicit AgentInfo draft fields within one tenant."""
+    if not fields:
+        return 0
+
+    values = filter_property(fields, AgentInfo)
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != "Y",
+            )
+            .values(**values)
+        )
+        return result.rowcount
+
+
 def delete_agent_by_id(agent_id, tenant_id: str, user_id: str):
     """
     Delete an agent in the database (all versions).
@@ -341,7 +398,32 @@ def query_all_agent_info_by_tenant_id(tenant_id: str, version_no: int = 0):
         return [as_dict(agent) for agent in agents]
 
 
-def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0) -> bool:
+def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> dict:
+    """
+    Batch query agent display names by agent IDs.
+    Returns a dict mapping agent_id -> display_name (falls back to name).
+
+    Args:
+        agent_ids: List of agent IDs to query
+        tenant_id: Tenant ID
+    """
+    if not agent_ids:
+        return {}
+    with get_db_session() as session:
+        agents = session.query(
+            AgentInfo.agent_id,
+            AgentInfo.display_name,
+            AgentInfo.name
+        ).filter(
+            AgentInfo.agent_id.in_(agent_ids),
+            AgentInfo.tenant_id == tenant_id,
+            AgentInfo.version_no == 0,
+            AgentInfo.delete_flag != 'Y'
+        ).all()
+        return {a.agent_id: (a.display_name or a.name) for a in agents}
+
+
+def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: str, user_id: str, version_no: int = 0, selected_agent_version_no: Optional[int] = None) -> bool:
     """
     Insert a related agent.
     Default version_no=0 creates the draft version.
@@ -351,7 +433,8 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         child_agent_id: Child agent ID
         tenant_id: Tenant ID
         user_id: User ID
-        version_no: Version number. Default 0 = draft/editing state
+        version_no: Parent agent version number. Default 0 = draft/editing state
+        selected_agent_version_no: Pinned version of child agent. None = runtime fallback to child current_version_no
     """
     try:
         relation_info = {
@@ -359,6 +442,7 @@ def insert_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
             "selected_agent_id": child_agent_id,
             "tenant_id": tenant_id,
             "version_no": version_no,
+            "selected_agent_version_no": selected_agent_version_no,
             "created_by": user_id,
             "updated_by": user_id
         }
@@ -400,22 +484,77 @@ def delete_related_agent(parent_agent_id: int, child_agent_id: int, tenant_id: s
         return False
 
 
-def update_related_agents(parent_agent_id: int, related_agent_ids: List[int], tenant_id: str, user_id: str, version_no: int = 0):
+def _parse_related_agents(related_agents: Optional[List[dict]]) -> tuple:
+    """Extract agent_id set and version_map from related_agents list."""
+    new_related_ids: set = set()
+    version_map: dict = {}
+    if not related_agents:
+        return new_related_ids, version_map
+    for rel in related_agents:
+        agent_id = rel.get("agent_id")
+        if agent_id is None:
+            continue
+        new_related_ids.add(agent_id)
+        version_no_val = rel.get("version_no")
+        if version_no_val is not None:
+            version_map[agent_id] = version_no_val
+    return new_related_ids, version_map
+
+
+def _add_new_relations(session, parent_agent_id, tenant_id, user_id, version_no, ids_to_add, version_map):
+    """Insert new agent relations into the database."""
+    for child_agent_id in ids_to_add:
+        relation_info = {
+            "parent_agent_id": parent_agent_id,
+            "selected_agent_id": child_agent_id,
+            "tenant_id": tenant_id,
+            "version_no": version_no,
+            "created_by": user_id,
+            "updated_by": user_id,
+        }
+        if child_agent_id in version_map:
+            relation_info["selected_agent_version_no"] = version_map[child_agent_id]
+        new_relation = AgentRelation(**filter_property(relation_info, AgentRelation))
+        session.add(new_relation)
+
+
+def _update_existing_relations(current_relations, ids_to_update, version_map, user_id):
+    """Update version_no for existing relations."""
+    if not ids_to_update or not version_map:
+        return
+    for rel in current_relations:
+        if rel.selected_agent_id not in ids_to_update:
+            continue
+        new_version_no = version_map.get(rel.selected_agent_id)
+        if new_version_no is not None:
+            rel.selected_agent_version_no = new_version_no
+            rel.updated_by = user_id
+
+
+def update_related_agents(
+    parent_agent_id: int,
+    tenant_id: str,
+    user_id: str,
+    related_agents: Optional[List[dict]] = None,
+    version_no: int = 0,
+):
     """
     Update related agents for a parent agent by replacing all existing relations.
     Default version_no=0 updates the draft version.
 
     This function handles both creation and deletion of relations in a single transaction.
+    related_agents is the single source of truth: each item has 'agent_id' and optional 'version_no'.
 
     Args:
         parent_agent_id: ID of the parent agent
-        related_agent_ids: List of child agent IDs to be related
         tenant_id: Tenant ID
         user_id: User ID for audit trail
+        related_agents: List of dicts with 'agent_id' and optional 'version_no' keys
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    new_related_ids, version_map = _parse_related_agents(related_agents)
+
     with get_db_session() as session:
-        # Get current relations
         current_relations = session.query(AgentRelation).filter(
             AgentRelation.parent_agent_id == parent_agent_id,
             AgentRelation.tenant_id == tenant_id,
@@ -423,17 +562,12 @@ def update_related_agents(parent_agent_id: int, related_agent_ids: List[int], te
             AgentRelation.delete_flag != 'Y'
         ).all()
 
-        current_related_ids = {
-            rel.selected_agent_id for rel in current_relations}
-        new_related_ids = set(
-            related_agent_ids) if related_agent_ids else set()
+        current_related_ids = {rel.selected_agent_id for rel in current_relations}
 
-        # Find IDs to delete (in current but not in new)
         ids_to_delete = current_related_ids - new_related_ids
-        # Find IDs to add (in new but not in current)
         ids_to_add = new_related_ids - current_related_ids
+        ids_to_update = current_related_ids & new_related_ids
 
-        # Soft delete removed relations
         if ids_to_delete:
             session.query(AgentRelation).filter(
                 AgentRelation.parent_agent_id == parent_agent_id,
@@ -445,19 +579,11 @@ def update_related_agents(parent_agent_id: int, related_agent_ids: List[int], te
                 synchronize_session=False
             )
 
-        # Add new relations
-        for child_agent_id in ids_to_add:
-            relation_info = {
-                "parent_agent_id": parent_agent_id,
-                "selected_agent_id": child_agent_id,
-                "tenant_id": tenant_id,
-                "version_no": version_no,
-                "created_by": user_id,
-                "updated_by": user_id
-            }
-            new_relation = AgentRelation(
-                **filter_property(relation_info, AgentRelation))
-            session.add(new_relation)
+        _add_new_relations(
+            session, parent_agent_id, tenant_id, user_id, version_no, ids_to_add, version_map
+        )
+
+        _update_existing_relations(current_relations, ids_to_update, version_map, user_id)
 
 
 def delete_agent_relationship(agent_id: int, tenant_id: str, user_id: str, version_no: int = 0):

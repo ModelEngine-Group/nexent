@@ -44,8 +44,9 @@ OPTIMIZE_USER_PROMPT: |-
   No available assistants.
   {% endif %}
 
-  {% if knowledge_base_names %}
-  ### Knowledge Base Configuration Note
-  When optimizing few-shot examples that use `knowledge_base_search`, you must use these actual configured knowledge base names:
-  {{ knowledge_base_names | default('') }}
+  {% if has_local_knowledge_tool or has_aidp_knowledge_tool %}
+  ### Knowledge Tool Optimization Rules
+  - Do not add or retain concrete knowledge base names, IDs, index names, or KDS IDs.
+  - Do not fix `index_names` or `kds_list` in few-shot examples.
+  - Rewrite concrete knowledge base references as "the scope allowed for the current conversation."
   {% endif %}

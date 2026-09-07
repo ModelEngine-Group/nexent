@@ -42,6 +42,7 @@ import {
 import { agentAutomationService } from "@/services/agentAutomationService";
 import AutomationDateTimePicker from "@/features/agentAutomation/components/AutomationDateTimePicker";
 import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
+import { formatDateTimeLocale } from "@/lib/date";
 import type {
   AgentAutomationRun,
   AgentAutomationTask,
@@ -231,15 +232,7 @@ export default function AgentTasksPage() {
   const loadRequestIdRef = useRef(0);
 
   const formatDateTime = (value?: string | null) =>
-    value
-      ? new Intl.DateTimeFormat(
-          i18n.language.startsWith("zh") ? "zh-CN" : "en-US",
-          {
-            dateStyle: "medium",
-            timeStyle: "medium",
-          }
-        ).format(new Date(value))
-      : "-";
+    formatDateTimeLocale(value, i18n.language);
 
   const formatTaskStatus = (status: string) =>
     t(`agentAutomation.status.${status}`, { defaultValue: status });
@@ -575,7 +568,7 @@ export default function AgentTasksPage() {
       render: (_, task) => (
         <div className="min-w-0">
           <Link
-            href={`/${params.locale}/chat?conversation_id=${task.conversation_id}`}
+            href={`/${params.locale}/newchat?conversation_id=${task.conversation_id}`}
             className="block w-fit max-w-full truncate font-medium !text-gray-900 transition-colors hover:!text-blue-600 hover:underline"
             title={t("agentAutomation.page.openConversation")}
           >
@@ -791,7 +784,9 @@ export default function AgentTasksPage() {
           <Button
             type="primary"
             icon={<MessageCirclePlus size={16} />}
-            onClick={() => router.push(`/${params.locale}/chat`)}
+            onClick={() =>
+              router.push(`/${params.locale}/newchat?entry=automation`)
+            }
           >
             {t("agentAutomation.page.createInChat")}
           </Button>

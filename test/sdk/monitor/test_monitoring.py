@@ -954,6 +954,32 @@ class TestAgentObservability:
             assert attrs["context.compression.calls.total"] == 3
             assert attrs["context.compression.cache_hits.total"] == 1
 
+    @patch('sdk.nexent.monitor.monitoring.trace')
+    def test_record_final_context_evidence_adds_content_free_event(self, mock_trace):
+        from nexent.core.context_runtime.contracts import ContextEvidence
+        with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
+            manager = self._enabled_manager()
+            mock_span = MagicMock()
+            mock_trace.get_current_span.return_value = mock_span
+            evidence = ContextEvidence(
+                purpose="final_answer", selected_item_types=("system", "conversation_turn"),
+                stable_message_count=1, dynamic_message_count=2,
+                stable_prefix_fingerprint="stable-fp", prefix_change_reasons=("initial_request",),
+                soft_budget=100, hard_budget=120, raw_token_estimate=110, final_token_estimate=80,
+                messages_fingerprint="messages-fp", tools_fingerprint="tools-fp",
+                message_roles=("system", "user", "assistant"),
+                history_message_roles=("user", "assistant"), compression_attempted=True,
+            )
+            manager.record_final_context_evidence(evidence, step_number=3)
+            event_name, event_attrs = mock_span.add_event.call_args.args
+            assert event_name == "agent.final_context"
+            assert event_attrs["agent.step.number"] == 3
+            assert event_attrs["context.messages.fingerprint"] == "messages-fp"
+            assert event_attrs["context.budget.soft"] == 100
+            assert event_attrs["context.tokens.pre_compression"] == 110
+            assert event_attrs["context.tokens.post_compression"] == 80
+            assert event_attrs["context.compression.attempted"] is True
+
 
 class TestLLMTokenTracker:
     """Test LLMTokenTracker with OpenInference semantics."""

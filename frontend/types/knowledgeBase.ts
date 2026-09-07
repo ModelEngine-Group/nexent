@@ -10,6 +10,7 @@ import {
 // Knowledge base basic type
 export interface KnowledgeBase {
   id: string; // Internal index_name
+  knowledge_id?: number | string; // Stable local knowledge base business ID
   name: string; // User-facing knowledge_name
   index_name?: string; // Internal index_name (same as id for nexent KBs), used for API calls
   display_name?: string; // User-friendly display name, falls back to name if not available
@@ -68,7 +69,11 @@ export interface Document {
   status: string;
   selected?: boolean; // For UI selection status
   latest_task_id: string; // For marking the latest celery task
+  file_id?: string;
+  error_code?: string;
   error_reason?: string; // Error reason for failed documents
+  error_stage?: string;
+  failed_at?: string;
   // Optional ingestion progress metrics
   processed_chunk_num?: number | null;
   total_chunk_num?: number | null;
@@ -219,4 +224,24 @@ export class DataMateSyncError extends Error {
 export interface KnowledgeBasesWithDataMateStatus {
   knowledgeBases: KnowledgeBase[];
   dataMateSyncError?: string;
+  total?: number;
+  pageCount?: number;
+  hasMore?: boolean;
+  nextOffset?: number | null;
+  facets?: KnowledgeBaseListFacets;
+  estimatedRowHeight?: number;
+  estimatedItemHeights?: Record<string, number> | null;
+}
+
+export interface KnowledgeBaseListFacets {
+  sources: string[];
+  models: string[];
+}
+
+export interface KnowledgeBaseListQuery {
+  offset?: number;
+  limit?: number;
+  keyword?: string;
+  sources?: string[];
+  models?: string[];
 }

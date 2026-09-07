@@ -15,11 +15,8 @@ hit so Dreaming can aggregate recall statistics in batch.
 
 from __future__ import annotations
 
-import json
 import hashlib
 import logging
-import os
-import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -27,7 +24,7 @@ from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import MemoryLayer, MemorySearchRequest, MemorySearchResult
 from nexent.memory.policy import MemoryRetrievalPolicy
 
-from database import memory_record_db, memory_retrieval_hit_db
+from database import memory_long_term_db, memory_record_db, memory_retrieval_hit_db
 from services.memory_index_service import (
     MemoryIndexService,
     get_memory_index_service,
@@ -41,7 +38,7 @@ from services.memory_record_service import (
 
 
 logger = logging.getLogger("memory_retrieval_service")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def _hash_query(query: str) -> str:
@@ -78,6 +75,29 @@ def _serialize_record_as_result(
             "memory_type": record.get("memory_type"),
             "status": record.get("status"),
             "concept_tags": record.get("concept_tags") or [],
+        },
+    )
+
+
+def _serialize_long_term_version_as_result(
+    version: Dict[str, Any],
+) -> MemorySearchResult:
+    layer = MemoryLayer(version["scope"])
+    return MemorySearchResult(
+        memory_id=None,
+        external_id=f"long-term-version:{version['version_id']}",
+        content=version.get("content", ""),
+        score=1.0,
+        layer=layer,
+        source=version.get("source", "manual"),
+        is_external=False,
+        metadata={
+            "source_type": version.get("source"),
+            "memory_type": "long_term",
+            "status": "active",
+            "version_id": version.get("version_id"),
+            "version_no": version.get("version_no"),
+            "source_evidence_ids": version.get("evidence_ids") or [],
         },
     )
 
@@ -133,12 +153,12 @@ class MemoryRetrievalService:
                     )
                 )
             else:
-                logger.debug("search: unsupported layer %s", layer)
+                logger.warning("Unsupported layer: %s", layer)
 
         if write_hits and results:
             self._record_hits(request=request, results=results)
 
-        return results[:top_k]
+        return results
 
     async def search_memories(
         self,
@@ -174,26 +194,15 @@ class MemoryRetrievalService:
             try:
                 resolved_layers.append(MemoryLayer(value.strip().lower()))
             except ValueError:
-                logger.debug("search_memories: skipping unknown layer=%s", value)
+                logger.warning("Skipping unknown layer: %s", value)
 
         # Resolve embedding model for the agent layer.
         embedding_model_info = _resolve_tenant_embedding_model_info(tenant_id)
-        logger.debug(
-            "[SEARCH] tenant_id=%s embedding_model=%s hybrid=%s",
-            tenant_id,
-            embedding_model_info.model_name if embedding_model_info else None,
-            hybrid,
-        )
 
         # Compute query embedding when a model is available.
         embedding: Optional[List[float]] = None
         if query and embedding_model_info:
             embedding = _compute_content_embedding(query, embedding_model_info)
-            logger.debug(
-                "[SEARCH] query_embedding computed=%s dimension=%s",
-                embedding is not None,
-                len(embedding) if embedding else None,
-            )
 
         request = MemorySearchRequest(
             tenant_id=tenant_id,
@@ -223,15 +232,11 @@ class MemoryRetrievalService:
         request: MemorySearchRequest,
         layer: str,
     ) -> List[MemorySearchResult]:
-        rows = self.record_service.list_memories(
-            tenant_id=request.tenant_id,
-            user_id=request.user_id,
-            layer=layer,
-            memory_type="long_term",
-            status="active",
-            limit=1000,
-        )
-        return [_serialize_record_as_result(row, score=1.0) for row in rows]
+        subject_id = request.tenant_id if layer == MemoryLayer.TENANT.value else request.user_id
+        active_version = memory_long_term_db.get_active(request.tenant_id, layer, subject_id)
+        if not active_version or not active_version.get("content", "").strip():
+            return []
+        return [_serialize_long_term_version_as_result(active_version)]
 
     def _vector_search(
         self,
@@ -242,17 +247,13 @@ class MemoryRetrievalService:
         embedding_model_info: Optional[EmbeddingModelInfo],
     ) -> List[MemorySearchResult]:
         embedding = request.embedding
-        logger.debug("[VECTOR_SEARCH] layer=%s embedding=%s embedding_model_info=%s hybrid=%s",
-                    layer, embedding is not None, embedding_model_info is not None,
-                    getattr(request, "hybrid", False))
         if embedding is None or not embedding_model_info:
-            logger.debug("[VECTOR_SEARCH] early_return: embedding or model_info is None")
+            logger.warning("Early return: embedding or model_info is None")
             return []
 
         index_name = embedding_model_info.get_index_name()
-        logger.debug("[VECTOR_SEARCH] index_name=%s", index_name)
         if not index_name:
-            logger.debug("[VECTOR_SEARCH] early_return: no index_name")
+            logger.warning("No index name found")
             return []
 
         # The hybrid branch in ``search_similar`` needs an actual
@@ -273,8 +274,7 @@ class MemoryRetrievalService:
                 )
             except Exception:
                 logger.exception(
-                    "[VECTOR_SEARCH] failed to build embedding client for hybrid; "
-                    "search_similar will fall back to kNN.",
+                    "Failed to build embedding client for hybrid: search_similar will fall back to kNN.",
                 )
 
         raw_hits = self.index_service.search_similar(
@@ -291,7 +291,6 @@ class MemoryRetrievalService:
             embedding_model=embedding_client,
         )
 
-        logger.debug("[VECTOR_SEARCH] raw_hits_count=%d", len(raw_hits))
         if not raw_hits:
             return []
 
@@ -301,19 +300,17 @@ class MemoryRetrievalService:
             if request.threshold is not None
             else MemoryRetrievalPolicy.DEFAULT_THRESHOLD
         )
-        logger.debug("[VECTOR_SEARCH] threshold=%s", threshold)
 
         results: List[MemorySearchResult] = []
         memory_ids: List[int] = []
         for hit in raw_hits:
-            logger.debug("[VECTOR_SEARCH] processing hit: score=%s threshold=%s", hit["score"], threshold)
             if hit["score"] < threshold:
                 continue
             try:
                 memory_id_int = int(hit["memory_id"])
             except (TypeError, ValueError):
                 logger.warning(
-                    "vector_search: ignoring non-integer memory_id from ES: %r",
+                    "Ignoring non-integer memory_id from ES: %r",
                     hit.get("memory_id"),
                 )
                 continue
@@ -334,14 +331,12 @@ class MemoryRetrievalService:
                     metadata=hit.get("metadata", {}),
                 )
             )
-        logger.debug("[VECTOR_SEARCH] results_after_threshold=%d", len(results))
 
         # Backfill the PG row so callers can fetch full record details.
         if memory_ids:
             rows = memory_record_db.get_memory_records_by_ids(
                 memory_ids, request.tenant_id
             )
-            logger.debug("[VECTOR_SEARCH] pg_records_fetched=%d", len(rows))
             by_id = {row["memory_id"]: row for row in rows}
             enriched: List[MemorySearchResult] = []
             for result in results:

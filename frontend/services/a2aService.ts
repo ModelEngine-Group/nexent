@@ -736,7 +736,8 @@ export const a2aClientService = {
    */
   async sendChatMessage(
     agentId: string,
-    message: string
+    message: string,
+    metadata?: Record<string, unknown>
   ): Promise<{
     success: boolean;
     data?: any;
@@ -746,7 +747,7 @@ export const a2aClientService = {
       const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.agentChat(agentId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, ...(metadata !== undefined ? { metadata } : {}) }),
       });
       const data = await response.json();
 

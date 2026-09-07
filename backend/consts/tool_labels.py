@@ -13,7 +13,7 @@ Why not in SQL?
   - This module is the only hook that fires at the exact moment tools are
     inserted — the earliest lifecycle point where the data exists.
 
-Keep in sync with: deploy/sql/migrations/v2.3.0_0624_add_labels_to_ag_tool_info.sql
+Keep in sync with: deploy/sql/migrations/v2.3_merged_migrations.sql
 """
 
 # tool_name → [label, ...]
@@ -23,6 +23,7 @@ _category_database = {
 }
 _category_file = {
     "read_file": ["file"], "create_file": ["file"], "delete_file": ["file"],
+    "download_from_s3": ["file"], "upload_to_s3": ["file"],
     "create_directory": ["file"], "delete_directory": ["file"],
     "list_directory": ["file"], "move_item": ["file"],
 }

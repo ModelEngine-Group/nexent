@@ -6,8 +6,9 @@ from fastapi.responses import StreamingResponse
 from nexent.vector_database.base import VectorDatabaseCore
 
 from consts.model import ChangeSummaryRequest
+from consts.exceptions import TokenExpiredError
 from apps.permission_utils import require_knowledge_base_edit_permission
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from utils.auth_utils import get_current_user_id, get_current_user_info
 from utils.config_utils import tenant_config_manager
 
@@ -57,6 +58,9 @@ async def auto_summary(
         )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         logger.error(
             f"Knowledge base summary generation failed: {e}", exc_info=True)
@@ -83,6 +87,9 @@ def change_summary(
         return ElasticSearchService().change_summary(index_name=index_name, summary_result=summary_result, user_id=user_id)
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Knowledge base summary update failed: {str(e)}")

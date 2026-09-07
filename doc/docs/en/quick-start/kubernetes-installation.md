@@ -10,7 +10,7 @@
 | **Architecture** | x86_64 / ARM64 | x86_64 |
 | **Software** | Kubernetes 1.24+, Helm 3+, kubectl configured | Kubernetes 1.28+ |
 
-> **💡 Note**: The recommended configuration of **8 cores and 64 GiB RAM** provides optimal performance for production workloads.
+> **💡 Note**: The recommended configuration is suitable for a complete deployment. Actual resource requirements also depend on the replica count, knowledge-base size, and number of concurrent agents. Set requests and limits in production according to load-test results.
 
 ## 🚀 Quick Start
 
@@ -43,6 +43,16 @@ Run the deployment script:
 bash deploy.sh k8s
 ```
 
+The default flow uses two independent Helm releases. It installs `nexent-infrastructure` (Elasticsearch, PostgreSQL, Redis, and MinIO), waits for all four services, initializes the Elasticsearch API key, and only then installs the application-side `nexent` release for the first time. Application Pods therefore do not roll a second time to receive the key. Use `--release-scope all|infrastructure|nexent` for the complete flow or either release independently:
+
+```bash
+bash deploy.sh k8s --release-scope all
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
+```
+
+The `nexent` scope requires an existing, healthy infrastructure release. Infrastructure-only uninstall is rejected while the Nexent release exists. If a legacy single `nexent` release still owns infrastructure resources, deployment stops because automatic migration is not supported; this version supports fresh dual-release installations only.
+
 After running the command, the script opens Bash TUI menus for configuration. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
 
 **Deployment Components:**
@@ -52,6 +62,8 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
+
+The `application` component also prepares the agent sandbox image configuration. The Runtime service uses a shared workspace to process uploaded and generated files, and synchronizes artifacts that must be retained to MinIO.
 
 **Port Policy:**
 - **development (default)**: uses NodePort for Web and selected debug/internal services
@@ -103,7 +115,7 @@ When the target cluster cannot access public image registries, download a prebui
 Extract the offline deployment package:
 
 ```bash
-unzip nexent-v2.2.1-amd64.zip -d nexent
+unzip nexent-<version>-amd64.zip -d nexent
 cd nexent
 ```
 
@@ -160,10 +172,10 @@ Nexent uses a microservices architecture deployed via Helm charts:
 **Application Services:**
 | Service | Description | Default Port |
 |---------|-------------|--------------|
-| nexent-config | Configuration service | 5010 |
-| nexent-runtime | Runtime service | 5010 |
-| nexent-mcp | MCP container service | 5010 |
-| nexent-northbound | Northbound API service | 5010 |
+| nexent-config | Configuration and management API | 5010 |
+| nexent-runtime | Agent runtime API | 5014 |
+| nexent-mcp | MCP management and tool service | 5011 |
+| nexent-northbound | Northbound API service | 5013 |
 | nexent-web | Web frontend | 3000 |
 | nexent-data-process | Data processing service | 5012 |
 
@@ -172,7 +184,7 @@ Nexent uses a microservices architecture deployed via Helm charts:
 |---------|-------------|
 | nexent-elasticsearch | Search and indexing engine |
 | nexent-postgresql | Relational database |
-| nexent-redis | Caching layer |
+| nexent-redis | Cache, distributed locks, and task message broker |
 | nexent-minio | S3-compatible object storage |
 
 **Supabase Services (when `supabase` is selected):**
@@ -187,6 +199,8 @@ Nexent uses a microservices architecture deployed via Helm charts:
 |---------|-------------|
 | nexent-openssh-server | SSH terminal for AI agents |
 | nexent-monitoring | Optional observability stack |
+
+Sandboxes are not persistent business Pods. The Runtime service creates isolated execution environments according to the deployment configuration to run model-generated code and Skill scripts.
 
 ## 🔌 Port Mapping
 
@@ -212,6 +226,8 @@ Nexent uses PersistentVolumes for data persistence:
 | Shared workspace | nexent-workspace-pv | `/var/lib/nexent` |
 | Shared skills | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
+By default, `nexent-workspace` requests 10 GiB of `ReadWriteMany` storage and transfers the inputs and outputs of each run between application services. When using a custom StorageClass, make sure it supports the configured access mode. In multi-replica deployments, all related Pods must be able to access the same workspace.
+
 Helm uninstall does not delete local hostPath data by default. Use `bash deploy/k8s/uninstall.sh --delete-local-data true` or `bash uninstall.sh k8s --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`; use `--keep-local-data` to preserve them explicitly.
 
 ### Uninstall Kubernetes Deployment
@@ -219,8 +235,14 @@ Helm uninstall does not delete local hostPath data by default. Use `bash deploy/
 Use the root uninstall entrypoint from the repository root:
 
 ```bash
-# Remove Helm release; prompts before deleting namespace or local data in interactive shells
+# Remove nexent first, then nexent-infrastructure
 bash uninstall.sh k8s
+
+# Remove only the application release
+bash uninstall.sh k8s --release-scope nexent --keep-namespace
+
+# Remove only infrastructure (the application release must already be absent)
+bash uninstall.sh k8s --release-scope infrastructure --keep-namespace
 
 # Clean only Helm release state, useful for stuck releases
 bash uninstall.sh k8s clean
@@ -242,6 +264,10 @@ bash uninstall.sh k8s delete-all
 ```bash
 # Deploy with interactive prompts
 bash deploy.sh k8s
+
+# Upgrade only infrastructure or only the application release
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
 
 # Non-interactive deployment with the default component set
 bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
@@ -410,16 +436,23 @@ Configurable CAS values:
 | `nexent-common.config.cas.userAttribute` | `CAS_USER_ATTRIBUTE` | User identifier attribute. Empty means use `<cas:user>` |
 | `nexent-common.config.cas.emailAttribute` | `CAS_EMAIL_ATTRIBUTE` | Email attribute |
 | `nexent-common.config.cas.roleAttribute` | `CAS_ROLE_ATTRIBUTE` | Role attribute |
+| `nexent-common.config.cas.defaultRole` | `CAS_DEFAULT_ROLE` | Default Nexent role when the CAS role is missing, empty, or unsupported; default `USER` |
 | `nexent-common.config.cas.tenantAttribute` | `CAS_TENANT_ATTRIBUTE` | Tenant attribute |
+| `nexent-common.config.cas.defaultTenantId` | `CAS_DEFAULT_TENANT_ID` | Default tenant when CAS omits the tenant attribute or returns it empty |
 | `nexent-common.config.cas.roleMapJson` | `CAS_ROLE_MAP_JSON` | JSON mapping from CAS roles to Nexent roles |
 | `nexent-common.config.cas.sessionMaxAgeSeconds` | `CAS_SESSION_MAX_AGE_SECONDS` | Maximum local CAS session lifetime |
 | `nexent-common.config.cas.localSessionMaxAgeSeconds` | `LOCAL_SESSION_MAX_AGE_SECONDS` | Nexent local session lifetime |
+| `nexent-common.config.cas.heartbeatUrl` | `CAS_HEARTBEAT_URL` | Activity-driven CAS Server heartbeat GET URL; empty disables heartbeat |
+| `nexent-common.config.cas.heartbeatIntervalSeconds` | `CAS_HEARTBEAT_INTERVAL_SECONDS` | Minimum heartbeat interval for active CAS users, default 300 seconds |
+| `nexent-common.config.cas.heartbeatCookieName` | `CAS_HEARTBEAT_COOKIE_NAME` | Readable browser Cookie copied to the `X-Auth-Token` heartbeat header |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | Trigger silent renewal within this many seconds before expiry |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | Silent renewal timeout |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | Domain used when CAS does not return an email |
 | `nexent-common.config.cas.logoutUrl` | `CAS_LOGOUT_URL` | CAS logout URL. Empty means Nexent logout will not call the CAS Server logout endpoint |
 | `nexent-common.config.cas.sslVerify` | `CAS_SSL_VERIFY` | Whether to verify CAS Server TLS certificates |
 | `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | Custom CA bundle path |
+
+CAS heartbeat runs only for CAS users with a valid local session and visible-page activity. The first activity sends a GET immediately, then browser tabs share the configured minimum interval. A readable configured Cookie is sent as `X-Auth-Token: <cookie-name>=<cookie-value>`; if it cannot be read, the request is sent without the header. Because the browser calls the heartbeat URL directly, the endpoint must allow the Nexent origin, GET, OPTIONS, and `X-Auth-Token` through CORS. Heartbeat failures do not log the user out or refresh the local JWT.
 
 Common CAS URLs:
 
@@ -465,10 +498,15 @@ nexent-common:
       userAttribute: "userName"
       emailAttribute: "email"
       roleAttribute: "userType"
+      defaultRole: "USER"
       tenantAttribute: "tenant_id"
+      defaultTenantId: "tenant_id"
       roleMapJson: '{"1":"ADMIN","3":"DEV"}'
       sessionMaxAgeSeconds: 3600
       localSessionMaxAgeSeconds: 3600
+      heartbeatUrl: "https://<ModelEngine IP>:5443/<heartbeat-path>"
+      heartbeatIntervalSeconds: 300
+      heartbeatCookieName: "<cookie-name>"
       renewBeforeSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"

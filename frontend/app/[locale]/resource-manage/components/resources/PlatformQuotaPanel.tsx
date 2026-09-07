@@ -66,7 +66,13 @@ function getProgressColor(usagePct: number | null | undefined): string {
   return STROKE_COLORS.normal;
 }
 
-export function PlatformQuotaPanel() {
+interface PlatformQuotaPanelProps {
+  showTenantAllocations?: boolean;
+}
+
+export function PlatformQuotaPanel({
+  showTenantAllocations = true,
+}: PlatformQuotaPanelProps) {
   const { t } = useTranslation("common");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PlatformQuotaOverview | null>(null);
@@ -418,6 +424,10 @@ export function PlatformQuotaPanel() {
               ? ` / ${record.hard_limit_readable}`
               : ""}
           </Text>
+          <Text type="secondary" style={{ display: "block", fontSize: 11 }}>
+            {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
+            {record.es_physical_readable || "0 B"}
+          </Text>
         </div>
       ),
     },
@@ -448,7 +458,7 @@ export function PlatformQuotaPanel() {
               {t("quota.platformOverview", "Platform Quota Overview")}
             </Text>
             <Row gutter={[24, 16]} style={{ marginTop: 16 }}>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.platformCapacity", "Platform Capacity")}
@@ -460,7 +470,7 @@ export function PlatformQuotaPanel() {
                   </Text>
                 </Space>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.allocated", "Allocated")}
@@ -470,13 +480,23 @@ export function PlatformQuotaPanel() {
                   </Text>
                 </Space>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.used", "Used")}
                   </Text>
                   <Text strong style={{ fontSize: 20 }}>
                     {data?.total_actual_readable || "0 B"}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={6}>
+                <Space direction="vertical" size={2}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("quota.esPhysicalIndex", "ES Physical Index")}
+                  </Text>
+                  <Text strong style={{ fontSize: 20 }}>
+                    {data?.total_es_physical_readable || "0 B"}
                   </Text>
                 </Space>
               </Col>
@@ -534,7 +554,8 @@ export function PlatformQuotaPanel() {
         </Row>
       </Card>
 
-      {data?.platform_capacity_bytes != null &&
+      {showTenantAllocations &&
+        data?.platform_capacity_bytes != null &&
         !data.capacity_management_enforced && (
           <Alert
             type="info"
@@ -551,7 +572,7 @@ export function PlatformQuotaPanel() {
           />
         )}
 
-      {isOversubscribed && data && (
+      {showTenantAllocations && isOversubscribed && data && (
         <Alert
           type="warning"
           showIcon
@@ -573,16 +594,18 @@ export function PlatformQuotaPanel() {
       )}
 
       {/* Per-Tenant Table */}
-      <Table
-        dataSource={displayTenants}
-        columns={columns}
-        rowKey="tenant_id"
-        loading={loading}
-        pagination={false}
-        size="small"
-        scroll={{ x: 890 }}
-        locale={{ emptyText: t("tenantResources.tenants.emptyTable") }}
-      />
+      {showTenantAllocations && (
+        <Table
+          dataSource={displayTenants}
+          columns={columns}
+          rowKey="tenant_id"
+          loading={loading}
+          pagination={false}
+          size="small"
+          scroll={{ x: 890 }}
+          locale={{ emptyText: t("tenantResources.tenants.emptyTable") }}
+        />
+      )}
 
       {/* Capacity Settings Modal */}
       <Modal

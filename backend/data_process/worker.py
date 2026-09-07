@@ -45,7 +45,7 @@ from consts.const import (
     REDIS_URL,
     WORKER_CONCURRENCY,
     WORKER_NAME,
-    RAY_GLOBAL_ACTOR_POOL_SIZE,
+    DP_PART_PROCESSOR_COUNT,
 )
 
 from .app import app
@@ -155,6 +155,21 @@ def setup_worker_process_resources(**kwargs):
     logger.info(f"⚙️ Initialize worker process {process_id}")
 
     try:
+        # Celery prefork children need their own OTLP provider/exporter. Importing
+        # monitoring here avoids inheriting a dead BatchSpanProcessor thread.
+        try:
+            from utils.monitoring import monitoring_manager
+
+            logger.info(
+                "Knowledge telemetry initialized in worker process: enabled=%s",
+                monitoring_manager.is_enabled,
+            )
+        except Exception:
+            logger.warning(
+                "Knowledge telemetry initialization failed; worker will continue",
+                exc_info=True,
+            )
+
         # Initialize process-specific resources
         # e.g. database connection pool, cache client, etc.
 
@@ -211,7 +226,7 @@ def worker_ready_handler(**kwargs):
 
             # Prewarm a cluster-global shared actor pool once at startup.
             # Multiple workers may trigger this, but pool manager is idempotent.
-            target = RAY_GLOBAL_ACTOR_POOL_SIZE
+            target = DP_PART_PROCESSOR_COUNT
 
             def _prewarm_in_background():
                 try:
@@ -344,6 +359,21 @@ def validate_redis_connection() -> bool:
 # ============================================================================
 def start_worker():
     """Start Celery worker with appropriate settings"""
+
+    # The current worker uses a thread pool, so worker_process_init is not
+    # guaranteed to fire. Initialize the exporter in the worker main process.
+    try:
+        from utils.monitoring import monitoring_manager
+
+        logger.info(
+            "Knowledge telemetry initialized before worker start: enabled=%s",
+            monitoring_manager.is_enabled,
+        )
+    except Exception:
+        logger.warning(
+            "Knowledge telemetry initialization failed; worker will continue",
+            exc_info=True,
+        )
 
     # Read from runtime env first, so launcher-assigned values always win.
     queues = QUEUES

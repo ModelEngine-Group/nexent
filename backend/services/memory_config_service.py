@@ -3,10 +3,12 @@ from typing import Dict, List, Union
 
 from consts.const import (
 	MEMORY_SWITCH_KEY,
+	DREAMING_SWITCH_KEY,
 	MEMORY_AGENT_SHARE_KEY,
 	DISABLE_AGENT_ID_KEY,
 	DISABLE_USERAGENT_ID_KEY,
 	DEFAULT_MEMORY_SWITCH_KEY,
+	DEFAULT_DREAMING_SWITCH_KEY,
 	DEFAULT_MEMORY_AGENT_SHARE_KEY,
 )
 from consts.model import MemoryAgentShareMode
@@ -58,6 +60,8 @@ def get_user_configs(user_id: str) -> Dict[str, Union[str, List[str]]]:
 		aggregated[MEMORY_SWITCH_KEY] = DEFAULT_MEMORY_SWITCH_KEY
 	if MEMORY_AGENT_SHARE_KEY not in aggregated:
 		aggregated[MEMORY_AGENT_SHARE_KEY] = DEFAULT_MEMORY_AGENT_SHARE_KEY
+	if DREAMING_SWITCH_KEY not in aggregated:
+		aggregated[DREAMING_SWITCH_KEY] = DEFAULT_DREAMING_SWITCH_KEY
 
 	return aggregated
 
@@ -155,6 +159,10 @@ def get_memory_switch(user_id: str) -> bool:
 
 def set_memory_switch(user_id: str, enabled: bool) -> bool:
 	return _update_single_config(user_id, MEMORY_SWITCH_KEY, "Y" if enabled else "N")
+
+
+def set_dreaming_switch(user_id: str, enabled: bool) -> bool:
+	return _update_single_config(user_id, DREAMING_SWITCH_KEY, "Y" if enabled else "N")
 
 
 # Agent share (single string among always/ask/never)

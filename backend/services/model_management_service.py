@@ -53,8 +53,8 @@ except Exception as _exc:  # noqa: BLE001
 
 logger = logging.getLogger("model_management_service")
 
-INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3"}
-CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
+INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3", "vlm4"}
+CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
 
 
 # OpenTelemetry counter for silent catalog-matcher failures during the
@@ -324,6 +324,12 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
         # Set model_factory to modelengine when using open/router URL
         if "open/router" in model_base_url:
             model_data["model_factory"] = "modelengine"
+
+        if model_data.get("model_type") in ("vlm", "vlm2", "vlm3", "vlm4"):
+            model_data["model_factory"] = _infer_model_factory(
+                model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
+            )
+
         # Split model_name into repo and name
         model_repo, model_name = split_repo_name(
             model_data["model_name"]) if model_data.get("model_name") else ("", "")
@@ -352,17 +358,25 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 raise ValueError(
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
 
-        # If embedding or multi_embedding, ensure base_url ends with /embeddings
+        # If embedding or multi_embedding, verify connectivity and get dimension.
+        # Try the user-provided URL first; if that fails, fall back to
+        # appending /embeddings (some providers serve embeddings at the
+        # bare base URL while others require the explicit endpoint).
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
             base_url = model_data.get("base_url", "")
-            if base_url and "/embeddings" not in base_url:
-                model_data["base_url"] = f"{base_url.rstrip('/')}/embeddings"
             # Infer model_factory from base_url if not set
             model_data["model_factory"] = _infer_model_factory(
                 model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
             )
-            # Get embedding dimension
+            # Try original URL first
             dimension = await embedding_dimension_check(model_data)
+            # If failed and URL doesn't already contain /embeddings, retry with it appended
+            if dimension is None and base_url and "/embeddings" not in base_url:
+                model_data["base_url"] = f"{base_url.rstrip('/')}/embeddings"
+                model_data["model_factory"] = _infer_model_factory(
+                    model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
+                )
+                dimension = await embedding_dimension_check(model_data)
             if dimension is None:
                 raise ValueError(
                     f"Failed to get embedding dimension for model '{model_data.get('display_name', model_data.get('model_name'))}'. "

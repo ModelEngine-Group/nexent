@@ -119,6 +119,7 @@ class CapacitySuggestionResult:
 # PROVIDER_HINTS in `frontend/const/modelConfig.ts` so backend provider-by-URL
 # detection stays consistent with the icon the user sees in the UI.
 HOST_PROVIDER_PATTERNS = (
+    ("open/router", "modelengine"),
     ("dashscope", "dashscope"),
     ("aliyuncs", "dashscope"),
     ("siliconflow", "silicon"),
@@ -131,7 +132,7 @@ HOST_PROVIDER_PATTERNS = (
     ("bytedance", "volcengine"),
 )
 
-SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3"}
+SUPPORTED_SUGGESTION_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
 
 
 def pick_provider_from_base_url(base_url: Optional[str]) -> Optional[str]:

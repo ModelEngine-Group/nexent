@@ -6,6 +6,11 @@ from typing import Any, Dict, List, Optional, Union
 from database.client import as_dict, get_db_session
 from database.db_models import TenantGroupInfo, TenantGroupUser
 from utils.str_utils import convert_string_to_list
+from consts.exceptions import TenantResourceLimitError
+from consts.const import MAX_GROUPS_PER_TENANT
+from sqlalchemy import text
+
+_GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
 
 
 def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -50,7 +55,8 @@ def query_groups(group_id: Union[int, str, List[int]]) -> Union[Optional[Dict[st
 
 
 def query_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
-                           sort_by: str = "created_at", sort_order: str = "desc") -> Dict[str, Any]:
+                           sort_by: str = "created_at", sort_order: str = "desc",
+                           search: Optional[str] = None) -> Dict[str, Any]:
     """
     Query groups for a tenant with pagination and sorting
 
@@ -65,17 +71,18 @@ def query_groups_by_tenant(tenant_id: str, page: Optional[int] = 1, page_size: O
         Dict[str, Any]: Dictionary containing groups list and total count
     """
     with get_db_session() as session:
-        # Get total count
-        total = session.query(TenantGroupInfo).filter(
+        filters = [
             TenantGroupInfo.tenant_id == tenant_id,
             TenantGroupInfo.delete_flag == "N"
-        ).count()
+        ]
+        if search and search.strip():
+            filters.append(TenantGroupInfo.group_name.ilike(f"%{search.strip()}%"))
+
+        # Count after filtering, before pagination.
+        total = session.query(TenantGroupInfo).filter(*filters).count()
 
         # Build base query
-        query = session.query(TenantGroupInfo).filter(
-            TenantGroupInfo.tenant_id == tenant_id,
-            TenantGroupInfo.delete_flag == "N"
-        )
+        query = session.query(TenantGroupInfo).filter(*filters)
 
         # Add sorting
         if sort_by == "created_at":
@@ -113,6 +120,19 @@ def add_group(tenant_id: str, group_name: str, group_description: Optional[str] 
         int: Created group ID
     """
     with get_db_session() as session:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": f"tenant-group-limit:{tenant_id}"},
+        )
+        group_count = session.query(TenantGroupInfo).filter(
+            getattr(TenantGroupInfo, "tenant_id", None) == tenant_id,
+            getattr(TenantGroupInfo, "delete_flag", None) == "N",
+        ).count()
+        group_count = group_count if isinstance(group_count, int) else 0
+        if group_count >= _GROUP_LIMIT:
+            raise TenantResourceLimitError(
+                f"Tenant group limit reached: maximum {_GROUP_LIMIT} groups per tenant"
+            )
         group = TenantGroupInfo(
             tenant_id=tenant_id,
             group_name=group_name,

@@ -109,3 +109,12 @@ def test_missing_metrics_never_reports_a_provider_cache_hit():
     assert result.cached_input_tokens == 0
     assert result.provider_cache_hit is False
     assert result.metrics_source == "capability_unknown"
+
+
+def test_deepseek_profile_extracts_prompt_cache_hit_tokens():
+    profile = resolve_prompt_cache_profile("deepseek")
+    result = extract_prompt_cache_usage({"prompt_cache_hit_tokens": 75}, 100, capability_profile=profile)
+    assert profile["serialization_version"] == "deepseek_chat_completions.v1"
+    assert result.cached_input_tokens == 75
+    assert result.uncached_input_tokens == 25
+    assert result.metrics_source == "deepseek_prompt_cache_tokens"

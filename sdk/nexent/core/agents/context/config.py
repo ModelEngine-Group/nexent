@@ -17,6 +17,7 @@ class ContextManagerConfig:
     soft_input_budget_tokens: int = 0
     hard_input_budget_tokens: int = 0
     keep_recent_steps: int = 4
+    enable_long_term_memory_selection: bool = True
 
     summary_system_prompt: str = (
         "You are a conversation summarization assistant. Compress the following "

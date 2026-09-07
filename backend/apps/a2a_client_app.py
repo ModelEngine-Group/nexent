@@ -6,12 +6,18 @@ Used internally for configuring A2A sub-agents.
 """
 import logging
 import uuid
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 from http import HTTPStatus
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
+from consts.exceptions import (
+    AppException,
+    RuntimeMetadataValidationError,
+)
 
 from services.a2a_client_service import (
     a2a_client_service,
@@ -21,6 +27,9 @@ from services.a2a_client_service import (
 from services.a2a_server_service import a2a_server_service
 from database import a2a_agent_db
 from utils.auth_utils import get_current_user_info
+from utils.runtime_metadata_utils import (
+    validate_runtime_metadata,
+)
 
 router = APIRouter(prefix="/a2a/client", tags=["A2A Client"])
 logger = logging.getLogger("a2a_client_app")
@@ -831,13 +840,14 @@ async def test_nacos_connection(
 class ChatRequest(BaseModel):
     """Request to send a chat message to an external A2A agent."""
     message: str = Field(..., description="The chat message to send")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional runtime metadata sent as A2A Message.metadata",
+    )
     include_metadata: bool = Field(
         default=False,
-        description="Whether to include user_id and tenant_id in metadata sent to the agent. "
-                    "Defaults to False to prevent leaking sensitive information to third-party agents. "
-                    "Only set to True for trusted internal agents."
+        description="Deprecated compatibility field. Internal identity is never sent as runtime metadata.",
     )
-
 
 @router.post("/agents/{external_agent_id}/chat")
 async def chat_with_external_agent(
@@ -860,6 +870,20 @@ async def chat_with_external_agent(
                 detail="Message cannot be empty"
             )
 
+        if request_body.metadata is not None:
+            try:
+                validate_runtime_metadata(request_body.metadata)
+            except RuntimeMetadataValidationError as exc:
+                error_code = (
+                    ErrorCode.CHAT_METADATA_TOO_LARGE
+                    if exc.code == RuntimeMetadataValidationCode.METADATA_TOO_LARGE
+                    else ErrorCode.CHAT_METADATA_INVALID
+                )
+                raise AppException(
+                    error_code,
+                    details={"reason": exc.code.value},
+                ) from exc
+
         # Build A2A message format following A2A protocol with parts array
         a2a_message = {
             "message_id": f"msg_{uuid.uuid4().hex}",
@@ -871,16 +895,8 @@ async def chat_with_external_agent(
             ],
         }
 
-        # Only include metadata if explicitly requested by the caller
-        # This prevents leaking user_id and tenant_id to untrusted external agents
-        if request_body.include_metadata:
-            a2a_message["metadata"] = {
-                "user_id": user_id,
-                "tenant_id": tenant_id,
-            }
-            logger.debug(f"Including user metadata for external agent {external_agent_id}")
-        else:
-            logger.debug(f"Skipping user metadata for external agent {external_agent_id} (include_metadata=False)")
+        if request_body.metadata is not None:
+            a2a_message["metadata"] = request_body.metadata
 
         # Call the external agent
         result = await a2a_client_service.call_agent(
@@ -906,7 +922,7 @@ async def chat_with_external_agent(
             status_code=HTTPStatus.NOT_FOUND,
             detail=str(e)
         )
-    except HTTPException:
+    except (AppException, HTTPException):
         raise
     except Exception as e:
         logger.error(f"Chat with external agent failed: {e}", exc_info=True)

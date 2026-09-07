@@ -21,7 +21,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from consts.const import LANGUAGE
 from database.model_management_db import get_model_by_model_id
 from nexent.core.utils.observer import MessageObserver
-from nexent.core.models import OpenAIModel
 from nexent.vector_database.base import VectorDatabaseCore
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (

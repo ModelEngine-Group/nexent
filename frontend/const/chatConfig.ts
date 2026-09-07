@@ -147,7 +147,7 @@ export const chatConfig = {
     SEARCH_CONTENT_PLACEHOLDER: "search_content_placeholder" as const,
     VIRTUAL: "virtual" as const,
     PREPROCESS: "preprocess" as const,
-    SKILL_FILES: "skill_files" as const,
+    FILES: "files" as const,
     HISTORY_SUMMARY: "history_summary" as const,
   },
 

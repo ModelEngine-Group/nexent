@@ -709,6 +709,53 @@ async def test_prepare_model_dict_vlm():
 
 
 @pytest.mark.asyncio
+async def test_prepare_model_dict_vlm_keeps_factory_when_inference_yields_none():
+    """VLM factory is left untouched when no provider can be inferred."""
+    with mock.patch(
+        "backend.services.model_provider_service.split_repo_name",
+        return_value=("tokenpony", "qwen-vl-plus"),
+    ) as mock_split_repo, mock.patch(
+        "backend.services.model_provider_service.add_repo_to_name",
+        return_value="tokenpony/qwen-vl-plus",
+    ) as mock_add_repo_to_name, mock.patch(
+        "backend.services.model_provider_service.ModelRequest"
+    ) as mock_model_request, mock.patch(
+        "backend.services.model_provider_service._infer_model_factory",
+        return_value=None,
+    ) as mock_infer_factory:
+
+        mock_model_req_instance = mock.MagicMock()
+        dump_dict = {
+            "model_factory": "tokenpony",
+            "model_name": "qwen-vl-plus",
+            "model_type": "vlm3",
+            "api_key": "test-key",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+            "display_name": "tokenpony/qwen-vl-plus",
+        }
+        mock_model_req_instance.model_dump.return_value = dump_dict
+        mock_model_request.return_value = mock_model_req_instance
+
+        provider = "tokenpony"
+        model = {
+            "id": "tokenpony/qwen-vl-plus",
+            "model_type": "vlm3",
+            "max_tokens": sys.modules["consts.const"].DEFAULT_LLM_MAX_TOKENS,
+        }
+        base_url = "https://api.tokenpony.cn/v1/"
+        api_key = "test-key"
+
+        result = await prepare_model_dict(provider, model, base_url, api_key)
+
+        mock_split_repo.assert_called_once_with("tokenpony/qwen-vl-plus")
+        mock_add_repo_to_name.assert_called_once_with("tokenpony", "qwen-vl-plus")
+        mock_infer_factory.assert_called_once_with(
+            "vlm3", "https://api.tokenpony.cn/v1/", "tokenpony"
+        )
+        assert result["model_factory"] == "tokenpony"
+
+
+@pytest.mark.asyncio
 async def test_prepare_model_dict_embedding():
     """Embedding models should call embedding_dimension_check and adjust base_url & max_tokens."""
     with mock.patch(
@@ -1852,7 +1899,7 @@ async def test_modelengine_get_models_all_types():
         type_map = {model["id"]: model["model_type"] for model in result}
         assert type_map["gpt-4"] == "llm"
         assert type_map["text-embedding-ada"] == "embedding"
-        assert type_map["whisper"] == "stt"
+        assert type_map["whisper"] == "vlm4"
         assert type_map["tts-model"] == "tts"
         assert type_map["rerank-model"] == "rerank"
         assert type_map["vlm-model"] == "vlm"

@@ -4,14 +4,14 @@ import os
 from typing import List, Optional
 
 from pydantic import Field
-from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...vector_database.base import VectorDatabaseCore
-from ..models.embedding_model import BaseEmbedding
-from ..models.rerank_model import BaseRerank
+from ..gateway.modality import EmbeddingAdapter
+from ..gateway.modality import RerankAdapter
 from ..utils.constants import RERANK_OVERSEARCH_MULTIPLIER
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import (
     SearchResultTextMessage,
     ToolCategory,
@@ -21,25 +21,11 @@ from ..utils.tools_common_message import (
 logger = logging.getLogger("knowledge_base_search_tool")
 
 
-def _unwrap_field_info(value):
-    """Resolve a value that may be wrapped in a Pydantic FieldInfo.
-
-    Parameters declared with `Field(...)` and `exclude=True` are not expanded by
-    smolagents' Tool wrapper, so they arrive at `__init__` as raw FieldInfo
-    instances instead of their declared defaults. This helper extracts the
-    concrete value so callers can safely treat the result as plain data.
-    """
-    if isinstance(value, FieldInfo):
-        if value.default_factory is not None:
-            return value.default_factory()
-        return value.default
-    return value
-
-
 class KnowledgeBaseSearchTool(Tool):
     """Knowledge base search tool"""
 
     name = "knowledge_base_search"
+    is_user_selectable: bool = False
     description = (
         "Performs a local knowledge base search based on your query then returns the top search results. "
         "A tool for retrieving domain-specific knowledge, documents, and information stored in the local knowledge base. "
@@ -85,7 +71,7 @@ class KnowledgeBaseSearchTool(Tool):
     def __init__(
         self,
         top_k: int = Field(
-            description="Maximum number of search results", default=3
+            description="Maximum number of search results", default=3, ge=1, le=100
         ),
         index_names: List[str] = Field(
             description="The list of index names to search"
@@ -104,10 +90,10 @@ class KnowledgeBaseSearchTool(Tool):
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
         ),
-        embedding_model: BaseEmbedding = Field(
+        embedding_model: EmbeddingAdapter = Field(
             description="The embedding model to use", default=None, exclude=True
         ),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="The rerank model to use", default=None, exclude=True
         ),
         vdb_core: VectorDatabaseCore = Field(
@@ -139,7 +125,7 @@ class KnowledgeBaseSearchTool(Tool):
             ValueError: If language is not supported
         """
         super().__init__()
-        self.top_k = top_k
+        self.top_k = max(1, min(int(unwrap_field_info(top_k) or 3), 100))
         self.observer = observer
         self.vdb_core = vdb_core
         self.index_names = [] if index_names is None else index_names
@@ -153,9 +139,9 @@ class KnowledgeBaseSearchTool(Tool):
         # `document_paths` is declared with `exclude=True` so smolagents passes the
         # raw FieldInfo default when no value is supplied. Unwrap it here so the
         # internal filter is always a concrete list (or None), never a FieldInfo.
-        self._internal_document_paths = _unwrap_field_info(document_paths)
+        self._internal_document_paths = unwrap_field_info(document_paths)
         # `allowed_index_names` is `exclude=True`; unwrap in case smolagents passed FieldInfo.
-        raw_allowed = _unwrap_field_info(allowed_index_names)
+        raw_allowed = unwrap_field_info(allowed_index_names)
         self._allowed_index_names: Optional[set] = (
             set(raw_allowed) if isinstance(raw_allowed, list) else None
         )
@@ -171,7 +157,17 @@ class KnowledgeBaseSearchTool(Tool):
         Args:
             document_paths: List of allowed document path_or_urls. If None, no filtering is applied.
         """
-        self._internal_document_paths = _unwrap_field_info(document_paths)
+        self._internal_document_paths = unwrap_field_info(document_paths)
+
+    def set_allowed_index_names(self, index_names: Optional[List[str]]) -> None:
+        """Install the backend-computed execution whitelist.
+
+        ``None`` preserves legacy SDK-only behavior. An empty list is an
+        installed deny-all whitelist and must not be treated as unset.
+        """
+        self._allowed_index_names = (
+            None if index_names is None else {str(name) for name in index_names}
+        )
 
     def _convert_to_index_names(self, names: List[str]) -> List[str]:
         """Convert display names (knowledge_name) to index names if necessary.
@@ -185,12 +181,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             List of actual index_names for ES queries
         """
-        display_map = self.display_name_to_index_map
-        if isinstance(display_map, FieldInfo):
-            if display_map.default_factory is not None:
-                display_map = display_map.default_factory()
-            else:
-                display_map = display_map.default
+        display_map = unwrap_field_info(self.display_name_to_index_map)
         if not display_map:
             return names
 
@@ -215,7 +206,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             Filtered list containing only results with allowed document paths
         """
-        allowed_paths = _unwrap_field_info(self._internal_document_paths)
+        allowed_paths = unwrap_field_info(self._internal_document_paths)
         if not allowed_paths:
             return results
 
@@ -273,18 +264,8 @@ class KnowledgeBaseSearchTool(Tool):
         # Compute effective top_k for initial search:
         # When rerank is enabled, retrieve more candidates to allow rerank to select the best ones.
         # Note: smolagents Tool may not expand Field defaults, so use getattr with FieldInfo fallback.
-        effective_top_k = self.top_k
-        is_rerank = self.rerank
-        if isinstance(effective_top_k, FieldInfo):
-            if effective_top_k.default_factory is not None:
-                effective_top_k = effective_top_k.default_factory()
-            else:
-                effective_top_k = effective_top_k.default
-        if isinstance(is_rerank, FieldInfo):
-            if is_rerank.default_factory is not None:
-                is_rerank = is_rerank.default_factory()
-            else:
-                is_rerank = is_rerank.default
+        effective_top_k = unwrap_field_info(self.top_k)
+        is_rerank = unwrap_field_info(self.rerank)
         if is_rerank:
             effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 
@@ -303,7 +284,17 @@ class KnowledgeBaseSearchTool(Tool):
         kb_search_results = self._filter_by_document_paths(kb_search_results)
 
         if not kb_search_results:
-            raise Exception("No results found! Try a less restrictive/shorter query.")
+            logger.info(
+                "Knowledge base search returned no results for query '%s' in indexes %s",
+                query,
+                search_index_names,
+            )
+            return json.dumps(
+                "No relevant information was found in the selected knowledge bases. "
+                "Try a broader or shorter query, or explain that the selected scope "
+                "does not contain enough evidence.",
+                ensure_ascii=False,
+            )
 
         if self.rerank and self.rerank_model and kb_search_results:
             kb_search_results = self._apply_rerank(
@@ -615,4 +606,3 @@ class KnowledgeBaseSearchTool(Tool):
 
         # Return the final list to the caller
         return final_filtered_images
-

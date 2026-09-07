@@ -53,10 +53,10 @@ from database.db_models import RolePermission
 from services.invitation_service import use_invitation_code, check_invitation_available, get_invitation_by_code
 from services.group_service import add_user_to_groups
 from services.tool_configuration_service import init_tool_list_for_tenant
-from services.skill_service import init_skill_list_for_tenant
+from management.services.skill.service import init_skill_list_for_tenant
 
 
-logging.getLogger("user_management_service").setLevel(logging.DEBUG)
+logging.getLogger("user_management_service").setLevel(logging.INFO)
 
 
 def set_auth_token_to_client(client: Client, token: str) -> None:
@@ -229,12 +229,8 @@ async def signup_user_with_invitation(email: EmailStr,
         is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
         # Create user tenant relationship
-        logging.debug(
-            f"Creating user tenant relationship: user_id={user_id}, tenant_id={tenant_id}, user_role={user_role}")
         insert_user_tenant(
             user_id=user_id, tenant_id=tenant_id, user_role=user_role, user_email=email)
-        logging.debug(
-            f"User tenant relationship created successfully for user {user_id}")
 
         # Use invitation code now that we have the real user_id
         if invitation_info:
@@ -272,8 +268,6 @@ async def signup_user_with_invitation(email: EmailStr,
         logging.info(
             f"User {email} registered successfully, role: {user_role}, tenant: {tenant_id}, auto_login={auto_login}")
 
-        if user_role == "ADMIN":
-            await generate_tts_stt_4_admin(tenant_id, user_id)
 
         # Initialize tool list for the new tenant (only once per tenant)
         if not is_asset_owner_registration:
@@ -310,38 +304,6 @@ async def parse_supabase_response(is_admin, response, user_role, auto_login: boo
         "session": session_data,
         "registration_type": "admin" if is_admin else "user"
     }
-
-
-async def generate_tts_stt_4_admin(tenant_id, user_id):
-    tts_model_data = {
-        "model_repo": "",
-        "model_name": "volcano_tts",
-        "model_factory": "OpenAI-API-Compatible",
-        "model_type": "tts",
-        "api_key": "",
-        "base_url": "",
-        "max_tokens": 0,
-        "used_token": 0,
-        "display_name": "volcano_tts",
-        "connect_status": "unavailable",
-        "delete_flag": "N"
-    }
-    stt_model_data = {
-        "model_repo": "",
-        "model_name": "volcano_stt",
-        "model_factory": "OpenAI-API-Compatible",
-        "model_type": "stt",
-        "api_key": "",
-        "base_url": "",
-        "max_tokens": 0,
-        "used_token": 0,
-        "display_name": "volcano_stt",
-        "connect_status": "unavailable",
-        "delete_flag": "N"
-    }
-    create_model_record(tts_model_data, user_id, tenant_id)
-    create_model_record(stt_model_data, user_id, tenant_id)
-
 
 async def verify_invite_code(invite_code):
     logging.info(
@@ -541,9 +503,10 @@ def format_role_permissions(permissions: List[Dict[str, Any]]) -> Dict[str, List
         permission_subtype = perm.get("permission_subtype", "")
 
         if permission_category == "RESOURCE" and permission_type and permission_subtype:
-            # Format as "permission_type:permission_subtype"
+            # Normalize to lower-case "type:subtype" so backend RBAC, frontend
+            # Can checks, and user info responses share one permission format.
             formatted_permissions.append(
-                f"{permission_type}:{permission_subtype}")
+                f"{permission_type}:{permission_subtype}".lower())
         elif permission_type == "LEFT_NAV_MENU" and permission_subtype:
             # Add permission_subtype to accessible routes for LEFT_NAV_MENU type
             accessible_routes.append(permission_subtype)
@@ -571,20 +534,45 @@ def create_token(user_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the API token information including token_id.
     """
+    from database.client import get_db_session
+    from database.token_db import soft_delete_tokens_by_user
+
     access_key = generate_access_key()
-    return create_token_record(access_key, user_id)
+    with get_db_session() as session:
+        soft_delete_tokens_by_user(user_id, user_id, session)
+        token = create_token_record(access_key, user_id, created_by=user_id, db_session=session)
+    return {**token, "can_copy": True}
 
 
-def list_tokens_by_user(user_id: str) -> List[Dict[str, Any]]:
+def _mask_access_key(access_key: str) -> str:
+    """Keep the key prefix and suffix visible while hiding its secret middle."""
+    if len(access_key) <= 8:
+        return "*" * len(access_key)
+    prefix_length = min(10, len(access_key) - 5)
+    return f"{access_key[:prefix_length]}{'*' * (len(access_key) - prefix_length - 4)}{access_key[-4:]}"
+
+
+def list_tokens_by_user(user_id: str, actor_role: str) -> List[Dict[str, Any]]:
     """List all tokens for the specified user.
 
     Args:
         user_id: The user ID to query token pairs for.
+        actor_role: Role of the authenticated user requesting the list.
 
     Returns:
-        List of token information with masked access keys.
+        List of token information. Administrators can view and copy complete
+        keys; other roles receive masked, non-copyable values.
     """
-    return list_tokens_by_user_record(user_id)
+    can_copy = (actor_role or "").upper() in {"ADMIN", "SU"}
+    tokens = list_tokens_by_user_record(user_id)
+    return [
+        {
+            **token,
+            "access_key": token["access_key"] if can_copy else _mask_access_key(token["access_key"]),
+            "can_copy": can_copy,
+        }
+        for token in tokens
+    ]
 
 
 def delete_token(token_id: int, user_id: str) -> bool:

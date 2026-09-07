@@ -21,10 +21,12 @@ sys.modules["consts.model"] = consts_model
 # Stub consts.const values used by service
 consts_const = types.ModuleType("consts.const")
 consts_const.MEMORY_SWITCH_KEY = "MEMORY_SWITCH"
+consts_const.DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 consts_const.MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
 consts_const.DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
 consts_const.DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
 consts_const.DEFAULT_MEMORY_SWITCH_KEY = "N"
+consts_const.DEFAULT_DREAMING_SWITCH_KEY = "Y"
 consts_const.DEFAULT_MEMORY_AGENT_SHARE_KEY = MemoryAgentShareMode.NEVER.value
 sys.modules["consts.const"] = consts_const
 

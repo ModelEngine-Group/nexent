@@ -34,7 +34,6 @@ export interface StreamUpdatePayload {
 }
 
 export interface UseAgentGenerationProps {
-  setActiveTab: (tab: string) => void;
   onStreamUpdate?: (payload: StreamUpdatePayload) => void;
 }
 
@@ -44,7 +43,6 @@ export interface UseAgentGenerationReturn {
 }
 
 export function useAgentGeneration({
-  setActiveTab,
   onStreamUpdate,
 }: UseAgentGenerationProps): UseAgentGenerationReturn {
   const { t } = useTranslation("common");
@@ -83,7 +81,6 @@ export function useAgentGeneration({
     const effectiveAgentId = currentAgentId ?? 0;
 
     setIsGenerating(true);
-    setActiveTab("few-shots");
 
     // Mark generation as in progress in cache
     setAgentGenerationStatus(effectiveAgentId, true);
@@ -245,7 +242,6 @@ export function useAgentGeneration({
     updateAgentConfig,
     businessInfo,
     setIsGenerating,
-    setActiveTab,
     onStreamUpdate,
     t,
     message,

@@ -12,7 +12,8 @@ export type ToolKbType =
   | "idata_search"
   | "haotian_search"
   | "ragflow_search"
-  | "aidp_search";
+  | "aidp_search"
+  | "ind_aidp_search";
 
 /**
  * Configuration for Dify tool
@@ -52,6 +53,7 @@ export interface IdataConfig {
 export interface AidpConfig {
   serverUrl: string;
   apiKey: string;
+  tenantId?: string;
 }
 
 /**
@@ -59,7 +61,13 @@ export interface AidpConfig {
  */
 export interface UseKnowledgeBaseConfigChangeHandlerOptions {
   toolKbType: ToolKbType | null;
-  config: DifyConfig | DatamateConfig | IdataConfig | AidpConfig | RagflowConfig | undefined;
+  config:
+    | DifyConfig
+    | DatamateConfig
+    | IdataConfig
+    | AidpConfig
+    | RagflowConfig
+    | undefined;
   onConfigChange: () => void;
 }
 
@@ -98,6 +106,7 @@ export function useKnowledgeBaseConfigChangeHandler({
   const prevAidpConfig = useRef<AidpConfig>({
     serverUrl: "",
     apiKey: "",
+    tenantId: "aidp",
   });
 
   const aidpDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,13 +117,15 @@ export function useKnowledgeBaseConfigChangeHandler({
   // Generic handler for tools that use serverUrl + apiKey config
   // (dify_search and ragflow_search share the same config shape and change-detection logic)
   useEffect(() => {
-    const isRelevantTool = toolKbType === "dify_search" || toolKbType === "ragflow_search";
+    const isRelevantTool =
+      toolKbType === "dify_search" || toolKbType === "ragflow_search";
     if (!isRelevantTool || !config) {
       return;
     }
 
     const typedConfig = config as { serverUrl: string; apiKey: string };
-    const prevRef = toolKbType === "dify_search" ? prevDifyConfig : prevRagflowConfig;
+    const prevRef =
+      toolKbType === "dify_search" ? prevDifyConfig : prevRagflowConfig;
 
     // Skip initial load — only handle actual config changes
     if (!prevRef.current.serverUrl && !prevRef.current.apiKey) {
@@ -146,7 +157,8 @@ export function useKnowledgeBaseConfigChangeHandler({
       return;
     }
 
-    const hasUrlChanged = datamateConfig.serverUrl !== prevDatamateServerUrl.current;
+    const hasUrlChanged =
+      datamateConfig.serverUrl !== prevDatamateServerUrl.current;
 
     // If URL has changed, trigger callback
     if (hasUrlChanged) {
@@ -196,7 +208,10 @@ export function useKnowledgeBaseConfigChangeHandler({
   }, [toolKbType, config, onConfigChange]);
 
   useEffect(() => {
-    if (toolKbType !== "aidp_search" || !config) {
+    if (
+      (toolKbType !== "aidp_search" && toolKbType !== "ind_aidp_search") ||
+      !config
+    ) {
       return;
     }
 
@@ -209,9 +224,13 @@ export function useKnowledgeBaseConfigChangeHandler({
 
     const hasServerUrlChanged =
       aidpConfig.serverUrl !== prevAidpConfig.current.serverUrl;
-    const hasApiKeyChanged = aidpConfig.apiKey !== prevAidpConfig.current.apiKey;
+    const hasApiKeyChanged =
+      aidpConfig.apiKey !== prevAidpConfig.current.apiKey;
+    const hasTenantIdChanged =
+      (aidpConfig.tenantId || "aidp") !==
+      (prevAidpConfig.current.tenantId || "aidp");
 
-    if (hasServerUrlChanged || hasApiKeyChanged) {
+    if (hasServerUrlChanged || hasApiKeyChanged || hasTenantIdChanged) {
       // Clear existing debounce timer
       if (aidpDebounceRef.current) {
         clearTimeout(aidpDebounceRef.current);
@@ -231,7 +250,7 @@ export function useKnowledgeBaseConfigChangeHandler({
     prevRagflowConfig.current = { serverUrl: "", apiKey: "" };
     prevDatamateServerUrl.current = "";
     prevIdataConfig.current = { serverUrl: "", apiKey: "", userId: "" };
-    prevAidpConfig.current = { serverUrl: "", apiKey: "" };
+    prevAidpConfig.current = { serverUrl: "", apiKey: "", tenantId: "aidp" };
     isInitialLoadComplete.current = false;
     if (aidpDebounceRef.current) {
       clearTimeout(aidpDebounceRef.current);

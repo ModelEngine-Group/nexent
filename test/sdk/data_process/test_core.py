@@ -14,10 +14,17 @@ fake_logger = types.ModuleType("unstructured_inference.logger")
 fake_logger.logger = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None)
 fake_models.tables = fake_tables
 fake_unstructured.models = fake_models
+fake_partition = types.ModuleType("unstructured.partition")
+fake_partition_auto = types.ModuleType("unstructured.partition.auto")
+fake_partition_auto.partition = lambda *args, **kwargs: []
+fake_partition.auto = fake_partition_auto
 sys.modules.setdefault("unstructured_inference", fake_unstructured)
 sys.modules.setdefault("unstructured_inference.models", fake_models)
 sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
 sys.modules.setdefault("unstructured_inference.logger", fake_logger)
+sys.modules.setdefault("unstructured", types.ModuleType("unstructured"))
+sys.modules.setdefault("unstructured.partition", fake_partition)
+sys.modules.setdefault("unstructured.partition.auto", fake_partition_auto)
 
 from sdk.nexent.data_process.core import DataProcessCore
 
@@ -403,8 +410,8 @@ class TestDataProcessCore:
         assert isinstance(parts[0], BytesIO)
         assert parts[0].getvalue() == data
 
-    def test_file_split_uses_splitter_with_default_max_size(self, core):
-        """file_split should call FileSplitter with default max_size when omitted."""
+    def test_file_split_passes_optional_split_parameters(self, core):
+        """file_split should pass optional split parameters explicitly."""
         splitter = Mock()
         splitter.file_process.return_value = [BytesIO(b"p1"), BytesIO(b"p2")]
         core.processors["FileSplitter"] = splitter
@@ -413,7 +420,19 @@ class TestDataProcessCore:
 
         assert len(parts) == 2
         splitter.file_process.assert_called_once_with(
-            b"csv-data", "data.csv", max_size=5 * 1024 * 1024
+            b"csv-data", "data.csv", max_size=None, target_parts=None
+        )
+
+    def test_file_split_passes_target_parts(self, core):
+        splitter = Mock()
+        splitter.file_process.return_value = [BytesIO(b"p1"), BytesIO(b"p2")]
+        core.processors["FileSplitter"] = splitter
+
+        parts = core.file_split(b"csv-data", "data.csv", target_parts=2)
+
+        assert len(parts) == 2
+        splitter.file_process.assert_called_once_with(
+            b"csv-data", "data.csv", max_size=None, target_parts=2
         )
 
     def test_file_split_invalid_split_result_falls_back(self, core):
@@ -436,6 +455,15 @@ class TestDataProcessCore:
 
         data = b"hello"
         parts = core.file_split(data, "data.txt", max_size=10)
+
+        assert len(parts) == 1
+        assert parts[0].getvalue() == data
+
+    def test_file_split_unknown_splitter_falls_back(self, core):
+        """A requested splitter that is unavailable should retain the input bytes."""
+        data = b"hello"
+
+        parts = core.file_split(data, "data.txt", splitter="MissingSplitter")
 
         assert len(parts) == 1
         assert parts[0].getvalue() == data

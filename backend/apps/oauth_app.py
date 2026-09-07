@@ -9,7 +9,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from consts.const import JWT_EXPIRY_SECONDS
 from consts.model import OAuthCompleteRequest
-from consts.exceptions import OAuthLinkError, OAuthProviderError, UnauthorizedError
+from consts.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError
 from consts.oauth_providers import get_all_provider_definitions
 from database.oauth_account_db import get_oauth_account_by_provider
 from services.oauth_service import (
@@ -228,6 +228,18 @@ async def callback(
             },
         )
 
+    except TenantResourceLimitError as e:
+        logger.warning(f"OAuth callback rejected by tenant resource limit for provider={provider}: {e}")
+        return JSONResponse(
+            status_code=HTTPStatus.BAD_REQUEST,
+            content={
+                "message": str(e),
+                "data": {
+                    "oauth_error": "tenant_resource_limit_exceeded",
+                    "oauth_error_description": str(e),
+                },
+            },
+        )
     except OAuthLinkError as e:
         logger.warning(f"OAuth callback link failed for provider={provider}: {e}")
         return JSONResponse(
@@ -300,6 +312,8 @@ async def complete(
             else HTTPStatus.BAD_REQUEST
         )
         raise HTTPException(status_code=status_code, detail=str(e))
+    except TenantResourceLimitError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except PydanticValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,

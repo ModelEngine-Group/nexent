@@ -166,6 +166,12 @@ def test_pick_provider_from_base_url_uses_shared_host_map():
     assert pick_provider_from_base_url("http://localhost:8000/v1") is None
 
 
+def test_pick_provider_from_base_url_recognises_modelengine_by_open_router_path():
+    # Private deployments are IP-only (no DNS); /open/router is the signal.
+    assert pick_provider_from_base_url("https://120.253.225.102:50001/open/router/v1") == "modelengine"
+    assert pick_provider_from_base_url("http://10.0.0.5:8080/open/router/v1/models") == "modelengine"
+
+
 def test_pick_provider_from_base_url_recognises_extended_patterns():
     # Patterns added to mirror frontend PROVIDER_HINTS (modelConfig.ts).
     assert pick_provider_from_base_url("https://api.deepseek.com/v1") == "deepseek"

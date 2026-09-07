@@ -2,7 +2,11 @@ import asyncio
 import copy
 import json
 import logging
+import os
+import re
 import threading
+import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -27,21 +31,23 @@ from nexent.core.models.capacity_budget import (
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
-from services.file_management_service import get_llm_model, validate_urls_access
-from services.vectordatabase_service import (
+from services.file_management_service import validate_urls_access
+from management.services.model.resolver import get_rerank_model
+from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
-    get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
-from services.image_service import get_video_understanding_model, get_vlm_model
+from services.ind_aidp_service import create_ind_aidp_image_url_builder
+from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
 from database.agent_db import (
     search_agent_info_by_agent_id,
     query_sub_agent_relations,
@@ -57,24 +63,28 @@ from utils.model_name_utils import add_repo_to_name
 from utils.prompt_template_utils import get_agent_prompt_template
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.memory_tool_prompt import build_memory_tool_policy
+from utils.automation_tool_prompt import build_automation_tool_policy
 from utils.context_utils import build_context_inputs
+from utils.http_client_utils import create_httpx_client
 from utils.redis_utils import get_redis_client
 from consts.const import (
+    AGENT_WORKSPACE_ROOT,
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
     LANGUAGE,
+    LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
+    NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
-logger.setLevel(logging.DEBUG)
-
+logger.setLevel(logging.INFO)
 
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
@@ -83,33 +93,69 @@ def _create_fixed_search_memory_tool():
     return SearchMemoryTool()
 
 
-def _format_long_term_memory_prompt(search_context: Any, language: str) -> str:
-    """Render tenant and user long-term memories as a system prompt block."""
-    sections = []
-    section_specs = (
-        (
-            "tenant_long_term",
-            "### 租户长期记忆" if language == "zh" else "### Tenant Long-term Memory",
-        ),
-        (
-            "user_long_term",
-            "### 用户长期记忆" if language == "zh" else "### User Long-term Memory",
-        ),
-    )
-    for attribute, heading in section_specs:
-        entries = []
-        for item in getattr(search_context, attribute, ()) or ():
-            content = (
-                item.get("content", "")
-                if isinstance(item, dict)
-                else getattr(item, "content", "")
+def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
+    """Return at most one structured active document for each long-term scope."""
+    result = []
+    for attribute, scope in (("tenant_long_term", "tenant"), ("user_long_term", "user")):
+        for item in (getattr(search_context, attribute, ()) or ())[:1]:
+            content = item.get("content", "") if isinstance(item, dict) else getattr(item, "content", "")
+            metadata = item.get("metadata", {}) if isinstance(item, dict) else getattr(item, "metadata", {})
+            source = item.get("source") if isinstance(item, dict) else getattr(item, "source", None)
+            if str(content or "").strip():
+                result.append({
+                    "memory": str(content).strip(), "memory_level": scope, "scope": scope,
+                    "version_id": (metadata or {}).get("version_id"), "source": source or "manual",
+                })
+            break
+    return result
+
+
+def _build_effective_knowledge_base_summary(
+    tool_list: List[ToolConfig],
+    language: str,
+    include_empty_message: bool = True,
+) -> tuple[str, List[str]]:
+    """Build routing summaries from the final, permission-filtered tool scope."""
+    knowledge_base_summary = ""
+    kb_ids: List[str] = []
+    try:
+        for tool in tool_list:
+            if tool.class_name != "KnowledgeBaseSearchTool":
+                continue
+            index_names = tool.params.get("index_names") or []
+            if not index_names:
+                if not include_empty_message:
+                    return "", []
+                empty_message = (
+                    "当前没有可用的知识库索引。\n"
+                    if language == LANGUAGE["ZH"]
+                    else "No knowledge base indexes are currently available.\n"
+                )
+                return empty_message, []
+            display_map = (
+                tool.metadata.get("index_name_to_display_map", {})
+                if isinstance(tool.metadata, dict)
+                else {}
             )
-            normalized = str(content or "").strip()
-            if normalized:
-                entries.append(f"- {normalized}")
-        if entries:
-            sections.append("\n".join((heading, *entries)))
-    return "\n\n".join(sections)
+            for index_name in index_names:
+                try:
+                    display_name = display_map.get(index_name, index_name)
+                    message = ElasticSearchService().get_summary(
+                        index_name=index_name
+                    )
+                    summary = message.get("summary", "")
+                    knowledge_base_summary += (
+                        f"**{display_name}**: {summary}\n\n"
+                    )
+                    kb_ids.append(index_name)
+                except Exception as exc:
+                    logger.warning(
+                        f"Failed to get summary for knowledge base {index_name}: {exc}"
+                    )
+            break
+    except Exception as exc:
+        logger.error(f"Failed to build knowledge base summary: {exc}")
+    return knowledge_base_summary, kb_ids
 
 
 # Safe fallback for context-manager token_threshold when no capacity is known.
@@ -268,7 +314,7 @@ def _resolve_safe_input_budget(
     except UncertaintyReserveBasisUnknown as exc:
         # W2 uncertainty reserve needs context_window_tokens as the 10% basis.
         # Falls through here when a model row has max_input_tokens set but
-        # context_window_tokens is NULL — possible for rows imported before
+        # context_window_tokens is NULL - possible for rows imported before
         # W11 V1 save-time defaults landed, or for rows written directly via
         # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
         # caller already handles (falls back to W1 input_budget).
@@ -281,7 +327,7 @@ def _resolve_safe_input_budget(
             exc,
         )
         return None
-    logger.info(
+    logger.debug(
         "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
         "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
         tenant_id,
@@ -303,7 +349,7 @@ def _resolve_input_budget(
     Calls ModelCapacityResolver with the catalog + operator overrides. Returns
     snapshot.provider_input_limit_tokens and monitoring fields on success.
     Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
-    capacity is unknown — this is the migration-window behavior before all
+    capacity is unknown - this is the migration-window behavior before all
     model rows are backfilled.
     """
     if not isinstance(model_info, dict):
@@ -471,6 +517,36 @@ def _build_internal_s3_url(file: dict) -> str:
     return "s3:/" + url
 
 
+def _safe_workspace_segment(value: Any, fallback: str) -> str:
+    """Return a filesystem-safe user path segment."""
+    normalized = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
+    return normalized or fallback
+
+
+def _build_run_workspace(user_id: str, run_id: str) -> str:
+    """Build an isolated workspace path without creating persistent state yet."""
+    root = Path(AGENT_WORKSPACE_ROOT).resolve()
+    return str(
+        root
+        / _safe_workspace_segment(user_id, "anonymous")
+        / run_id
+    )
+
+
+def _validate_run_minio_files(
+    minio_files: Optional[List[Dict[str, Any]]],
+    user_id: str,
+    tenant_id: str,
+) -> None:
+    """Authorize every current-request MinIO object with the canonical backend policy."""
+    urls = [
+        url
+        for item in (minio_files or [])
+        if isinstance(item, dict) and (url := _build_internal_s3_url(item))
+    ]
+    validate_urls_access(urls, user_id, tenant_id)
+
+
 def _get_skills_for_template(
     agent_id: int,
     tenant_id: str,
@@ -487,7 +563,7 @@ def _get_skills_for_template(
         List of skill dicts with name and description
     """
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
         skill_service = SkillService()
         enabled_skills = skill_service.get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -529,6 +605,70 @@ def _extract_url_from_card(raw_card: Optional[dict]) -> str:
     return raw_card.get("url", "")
 
 
+def _resolve_scheme_field(scheme: dict, wrapper_key: str) -> Optional[dict]:
+    """Get a security scheme field from wrapper or flat format."""
+    field = scheme.get(wrapper_key)
+    if isinstance(field, dict) and field:
+        return field
+    # Flat format fallback: scheme itself has the fields
+    if wrapper_key == "httpAuthSecurityScheme" and isinstance(scheme.get("scheme"), str):
+        return scheme if scheme["scheme"].strip() else None
+    if wrapper_key == "apiKeySecurityScheme" and scheme.get("name") and scheme.get("location"):
+        return scheme
+    return None
+
+
+def _build_auth_header_for_scheme(scheme: dict, credential: str) -> Optional[tuple]:
+    """Build a single (header_name, header_value) pair from a security scheme.
+
+    Supports httpAuth (Bearer/basic) and apiKey (header location).
+    """
+    # HTTP auth (bearer, basic)
+    http_auth = _resolve_scheme_field(scheme, "httpAuthSecurityScheme")
+    if http_auth:
+        auth_scheme = http_auth.get("scheme", "")
+        if http_auth.get("bearerFormat", "").lower() == "jwt":
+            auth_scheme = "Bearer"
+        return ("Authorization", f"{auth_scheme} {credential}") if auth_scheme else None
+
+    # API key in header
+    api_key = _resolve_scheme_field(scheme, "apiKeySecurityScheme")
+    if api_key:
+        location = (api_key.get("location") or "").lower()
+        name = api_key.get("name")
+        if location == "header" and name:
+            return (name, credential)
+
+    return None
+
+
+def _collect_auth_headers(requirements, schemes, credentials):
+    """Collect (header_name, value) pairs from security requirements."""
+    pairs = []
+    for req in requirements:
+        if not isinstance(req, dict):
+            continue
+        for scheme_id in req.get("schemes", {}):
+            credential = credentials.get(scheme_id)
+            scheme = schemes.get(scheme_id)
+            if credential and isinstance(scheme, dict):
+                pair = _build_auth_header_for_scheme(scheme, credential)
+                if pair:
+                    pairs.append(pair)
+    return pairs
+
+
+def _build_security_headers(agent: dict) -> dict:
+    """Build auth headers from securitySchemes + security_credentials."""
+    schemes = agent.get("security_schemes") or {}
+    requirements = agent.get("security_requirements") or []
+    credentials = agent.get("security_credentials") or {}
+    if not requirements or not credentials:
+        return {}
+    return dict(_collect_auth_headers(requirements, schemes, credentials))
+
+
+
 def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgentConfig:
     """Build an ExternalA2AAgentConfig from agent data."""
     return ExternalA2AAgentConfig(
@@ -542,6 +682,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
         timeout=300.0,
         raw_card=agent.get("raw_card"),
+        custom_headers=_build_security_headers(agent) or None,
     )
 
 
@@ -560,7 +701,6 @@ def _get_external_a2a_agents(
     Returns:
         List of ExternalA2AAgentConfig for external A2A sub-agents
     """
-    logger.info(f"[_get_external_a2a_agents] START - agent_id={agent_id}, tenant_id={tenant_id}")
     try:
         from database import a2a_agent_db
 
@@ -569,33 +709,29 @@ def _get_external_a2a_agents(
             tenant_id=tenant_id,
             version_no=version_no,
         )
-        logger.info(f"[_get_external_a2a_agents] DB query returned {len(external_agents)} agents")
-        logger.debug(f"[_get_external_a2a_agents] agent details: {external_agents}")
 
         result = []
         for agent in external_agents:
             agent_url = agent.get("agent_url", "") or _extract_url_from_card(agent.get("raw_card"))
             if not agent_url:
                 logger.warning(
-                    f"[_get_external_a2a_agents] Skipping agent '{agent.get('name')}' - no URL available"
+                    f"Skipping agent '{agent.get('name')}' - no URL available"
                 )
                 continue
 
             result.append(_build_external_agent_config(agent, agent_url))
 
-        logger.info(f"[_get_external_a2a_agents] returning {len(result)} ExternalA2AAgentConfig")
-        for i, config in enumerate(result):
-            logger.info(f"  [{i}] name={config.name}, description={config.description}")
         return result
     except Exception as e:
-        logger.error(f"[_get_external_a2a_agents] FAILED: {e}", exc_info=True)
+        logger.error(f"Get external A2A agents failed: {e}", exc_info=True)
         return []
 
 
 def _get_skill_script_tools(
     agent_id: int,
     tenant_id: str,
-    version_no: int = 0
+    version_no: int = 0,
+    runtime_file_context: Optional[Dict[str, Any]] = None,
 ) -> List[ToolConfig]:
     """Get tool config for skill script execution and skill reading.
 
@@ -614,10 +750,11 @@ def _get_skill_script_tools(
         "tenant_id": tenant_id,
         "version_no": version_no,
     }
+    file_context = dict(runtime_file_context or {})
 
     skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
 
         enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -630,17 +767,31 @@ def _get_skill_script_tools(
             if skill.get("name")
         }
     except Exception as exc:
-        logger.debug("Failed to resolve effective skill configuration: %s", exc)
+        logger.warning(f"Failed to resolve effective skill configuration: {exc}", exc_info=True)
 
     try:
         return [
             ToolConfig(
                 class_name="RunSkillScriptTool",
                 name="run_skill_script",
-                description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
-                inputs='{"skill_name": "str", "script_path": "str", "params": "dict"}',
+                description=(
+                    "Execute an enabled skill's bundled script, or a generated Python/Node.js "
+                    "script in the current run workspace, inside the Docker sandbox. For "
+                    "workspace scripts written as bare filenames by the code executor, pass "
+                    "script_path='outputs/<filename>'. Ordinary agent code must not use "
+                    "subprocess, os.system, or shell calls for system commands; use a "
+                    "skill-bundled wrapper or a shell-free language API."
+                ),
+                inputs=(
+                    '{"skill_name": "str", "script_path": "str", '
+                    '"params": "str", "source": "str"}'
+                ),
                 output_type="string",
-                params={"local_skills_dir": CONTAINER_SKILLS_PATH},
+                params={
+                    "local_skills_dir": CONTAINER_SKILLS_PATH,
+                    "workspace_path": file_context.get("workspace_path"),
+                    "authorized_skill_names": sorted(skill_config_values),
+                },
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
@@ -673,14 +824,60 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="WriteSkillFileTool",
                 name="write_skill_file",
-                description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
+                description=(
+                    "Edit an installed tenant-scoped skill file. This does not create files in "
+                    "the current run workspace or outputs directory."
+                ),
                 inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
                 source="builtin",
                 usage="builtin",
                 metadata=skill_context,
-            )
+            ),
+            ToolConfig(
+                class_name="DownloadFromS3Tool",
+                name="download_from_s3",
+                description=(
+                    "Download an authorized S3/MinIO object into this run's isolated workspace. "
+                    "Files uploaded with the current request are downloaded automatically."
+                ),
+                inputs=json.dumps({
+                    "s3_path": {"type": "string", "description": "Authorized S3/MinIO path"},
+                    "local_filename": {
+                        "type": "string",
+                        "description": "Optional path relative to the run workspace",
+                        "nullable": True,
+                    },
+                }),
+                output_type="string",
+                params={"workspace_path": file_context.get("workspace_path", "/mnt/nexent/workdir")},
+                source="builtin",
+                usage="builtin",
+                metadata=file_context,
+            ),
+            ToolConfig(
+                class_name="UploadToS3Tool",
+                name="upload_to_s3",
+                description=(
+                    "Upload a generated file from this run's isolated workspace to MinIO and "
+                    "return frontend-compatible download metadata. Remaining output files are "
+                    "uploaded automatically when the run finishes."
+                ),
+                inputs=json.dumps({
+                    "file_path": {"type": "string", "description": "Path inside the run workspace"},
+                    "target_filename": {
+                        "type": "string",
+                        "description": "Optional output filename",
+                        "nullable": True,
+                    },
+                }),
+                output_type="string",
+                params={"workspace_path": file_context.get("workspace_path", "/mnt/nexent/workdir")},
+                source="builtin",
+                usage="builtin",
+                metadata=file_context,
+            ),
         ]
     except Exception as e:
         logger.warning(f"Failed to load skill script tool: {e}")
@@ -690,6 +887,7 @@ def _get_skill_script_tools(
 async def create_model_config_list(tenant_id):
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = []
+    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     for record in records:
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
@@ -735,7 +933,8 @@ async def create_model_config_list(tenant_id):
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+                    prompt_cache=main_prompt_cache,
+                    extra_body=extra_body))
     model_list.append(
         ModelConfig(cite_name="sub_model",
                     api_key=main_model_config.get("api_key", ""),
@@ -746,7 +945,8 @@ async def create_model_config_list(tenant_id):
                     model_factory=main_model_config.get("model_factory"),
                     timeout_seconds=main_model_config.get("timeout_seconds"),
                     concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache))
+                    prompt_cache=main_prompt_cache,
+                    extra_body=extra_body))
 
     return model_list
 
@@ -768,7 +968,7 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
             description="为当前任务创建执行计划。开始执行前调用一次，传入 3-8 个功能块步骤。"
             "每个步骤必须有稳定的 id（step-1、step-2、...）、简短标题和详细描述。"
             "返回创建的计划 id 和步骤数量。",
-            inputs='{"plan_id": "string", "title": "string", "steps": "array"}',
+            inputs='{"title": "string", "steps": "array"}',
             output_type="object",
             params={},
             source="builtin",
@@ -801,6 +1001,12 @@ async def create_agent_config(
     conversation_id: Optional[int] = None,
     request_context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
+    include_automation_tool: bool = False,
+    automation_user_message: Optional[str] = None,
+    automation_model_id: Optional[int] = None,
+    automation_has_attachments: bool = False,
+    runtime_knowledge_context: Optional[Dict[str, str]] = None,
+    runtime_file_context: Optional[Dict[str, Any]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -828,6 +1034,9 @@ async def create_agent_config(
             override_model_id=None,
             tool_params=normalized_tool_params,
             conversation_id=conversation_id,
+            include_automation_tool=False,
+            runtime_knowledge_context=runtime_knowledge_context,
+            runtime_file_context=runtime_file_context,
         )
         managed_agents.append(sub_agent_config)
 
@@ -857,6 +1066,29 @@ async def create_agent_config(
         source="local",
     ))
 
+    if (
+        include_automation_tool
+        and conversation_id is not None
+        and automation_user_message
+    ):
+        from services.agent_automation.tool_adapter import (
+            agent_loop_automation_tool_adapter,
+        )
+        tool_list.append(
+            agent_loop_automation_tool_adapter.build_tool_config(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                conversation_id=int(conversation_id),
+                agent_id=int(agent_id),
+                user_message=automation_user_message,
+                agent_version_no=version_no,
+                model_id=automation_model_id,
+                tool_params=normalized_tool_params.model_dump(mode="json"),
+                has_attachments=automation_has_attachments,
+                language=language,
+            )
+        )
+
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
     constraint_prompt = agent_info.get("constraint_prompt", "")
@@ -864,26 +1096,19 @@ async def create_agent_config(
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
 
-    # Get app information
-    default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
-    app_name = tenant_config_manager.get_app_config(
-        'APP_NAME', tenant_id=tenant_id) or "Nexent"
-    app_description = tenant_config_manager.get_app_config(
-        'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
-
     # Memory list population: in the new Memory system this is performed by
     # the backend's ``memory_context_service`` via the
     # ``MemoryService.search_memory`` facade. The legacy
     # ``search_memory_in_levels`` multi-level fan-out has been removed; the
     # streaming layer and tool wiring below remain in place.
     memory_list: list = []
-    long_term_memory_prompt = ""
+    long_term_memory_items: list[dict[str, Any]] = []
     pre_run_tool_events: list[dict[str, Any]] = []
     memory_context = build_memory_context(
         user_id, tenant_id, agent_id, skip_query=not allow_memory_search
     )
 
-    # Append active memory tools if memory is enabled
+    # The memory capability switch controls tenant, user, and agent memory.
     if memory_context.user_config.memory_switch:
         try:
             from services.memory_record_service import (
@@ -913,121 +1138,131 @@ async def create_agent_config(
             # and dispatches persistence/retrieval to
             # ``services.memory_record_service`` /
             # ``services.memory_retrieval_service``.
+            memory_service = None
             try:
                 from services.memory_backend_adapter import build_memory_service_for_agent
-                memory_metadata["memory_service"] = (
-                    build_memory_service_for_agent(
-                        tenant_id=memory_context.tenant_id,
-                        user_id=memory_context.user_id,
-                        agent_id=str(memory_context.agent_id or ""),
-                    )
+
+                memory_service = build_memory_service_for_agent(
+                    tenant_id=memory_context.tenant_id,
+                    user_id=memory_context.user_id,
+                    agent_id=str(memory_context.agent_id or ""),
                 )
+                if memory_service is None:
+                    raise RuntimeError("MemoryService builder returned no service")
+                memory_metadata["memory_service"] = memory_service
             except Exception as exc:
                 logger.warning(
-                    "Failed to build MemoryService for agent: %s. "
-                    "Memory tools will fall back to legacy path.", exc
-                )
-
-            # Hand the internal fixed SearchMemoryTool a backend
-            # ``MemoryContextService`` so the pre-run search executes
-            # through the retrieval pipeline (normalize / fusion /
-            # decay / MMR / token-budget selection) instead of
-            # bypassing it. The service is reused for prompt injection,
-            # so a single instance per agent is sufficient.
-            try:
-                from services.memory_context_service import get_memory_context_service
-
-                memory_metadata["memory_context_service"] = (
-                    get_memory_context_service()
-                )
-                logger.debug(
-                    "MemoryContextService attached to memory tools "
-                    "for agent_id=%s", memory_context.agent_id
-                )
-                long_term_search_context = await memory_metadata[
-                    "memory_context_service"
-                ].build_context(
-                    tenant_id=str(memory_context.tenant_id or ""),
-                    user_id=str(memory_context.user_id or ""),
-                    agent_id=str(memory_context.agent_id or "") or None,
-                    conversation_id=(
-                        str(conversation_id)
-                        if conversation_id is not None
-                        else None
-                    ),
-                    query=None,
-                    layers=["tenant", "user"],
-                )
-                long_term_memory_prompt = _format_long_term_memory_prompt(
-                    long_term_search_context,
-                    language,
-                )
-                logger.info(
-                    "event=long_term_memory_prompt_loaded tenant_id=%s "
-                    "user_id=%s agent_id=%s context_char_count=%d",
+                    "event=memory_service_init_failed tenant_id=%s user_id=%s "
+                    "agent_id=%s error_type=%s",
                     tenant_id,
                     user_id,
                     agent_id,
-                    len(long_term_memory_prompt),
+                    type(exc).__name__,
                 )
+
+            memory_context_service = None
+            try:
+                from services.memory_context_service import get_memory_context_service
+
+                memory_context_service = get_memory_context_service()
+                if memory_context_service is None:
+                    raise RuntimeError("MemoryContextService provider returned no service")
+                memory_metadata["memory_context_service"] = memory_context_service
             except Exception as exc:
                 logger.warning(
-                    "Failed to attach MemoryContextService to memory "
-                    "tools: %s. Fixed search_memory will fall back to "
-                    "the legacy MemoryService path.", exc
+                    "event=memory_context_service_init_failed tenant_id=%s "
+                    "user_id=%s agent_id=%s error_type=%s",
+                    tenant_id,
+                    user_id,
+                    agent_id,
+                    type(exc).__name__,
                 )
 
-            store_tool_config = ToolConfig(
-                class_name="StoreMemoryTool",
-                name="store_memory",
-                description=(
-                    "Store one model-selected and summarized short-term memory extracted only "
-                    "from the conversation between the user and the current agent. Eligible "
-                    "information is limited to user preferences, task goals, action plans and "
-                    "latest progress, or reflections on user feedback and errors. Consider the "
-                    "user question, tool or code execution results, and the final answer. Do not "
-                    "store whole conversations, transient calculations, unverified guesses, "
-                    "duplicates, secrets, or information the user asks to forget. Before every "
-                    "final answer, assess whether an eligible memory was added or updated; if so, "
-                    "calling this tool is mandatory."
-                ),
-                inputs=json.dumps({
-                    "content": {
-                        "type": "string",
-                        "description": (
-                            "One concise, reusable short-term memory entry already judged, "
-                            "summarized, and deduplicated by the model"
-                        ),
-                        "description_zh": (
-                            "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
-                        )
-                    }
-                }, ensure_ascii=False),
-                output_type="string",
-                params={},
-                source="local",
-                usage=None,
-                metadata=memory_metadata,
-            )
-            tool_list.append(store_tool_config)
+            if memory_context_service is not None:
+                try:
+                    long_term_search_context = await memory_context_service.build_context(
+                        tenant_id=str(memory_context.tenant_id or ""),
+                        user_id=str(memory_context.user_id or ""),
+                        agent_id=str(memory_context.agent_id or "") or None,
+                        conversation_id=(str(conversation_id) if conversation_id is not None else None),
+                        query=None,
+                        layers=["tenant", "user"],
+                    )
+                    long_term_memory_items = _build_long_term_memory_items(long_term_search_context)
+                except Exception as exc:
+                    logger.warning(
+                        "event=long_term_memory_load_failed tenant_id=%s user_id=%s "
+                        "agent_id=%s error_type=%s",
+                        tenant_id,
+                        user_id,
+                        agent_id,
+                        type(exc).__name__,
+                    )
 
-            fixed_search_tool = _create_fixed_search_memory_tool()
-            fixed_search_tool.memory_service = memory_metadata.get("memory_service")
-            fixed_search_tool.memory_context_service = memory_metadata.get(
-                "memory_context_service"
-            )
-            fixed_search_tool.tenant_id = str(memory_context.tenant_id or "")
-            fixed_search_tool.user_id = str(memory_context.user_id or "")
-            fixed_search_tool.agent_id = str(memory_context.agent_id or "")
-            fixed_search_tool.conversation_id = (
-                str(conversation_id) if conversation_id is not None else ""
-            )
-            fixed_search_tool.embedding_configured = embedding_configured
-            fixed_search_result = await asyncio.to_thread(
-                fixed_search_tool.forward,
-                last_user_query or "",
-                5,
-            )
+            if memory_service is not None:
+                store_tool_config = ToolConfig(
+                    class_name="StoreMemoryTool",
+                    name="store_memory",
+                    description=(
+                        "Store one model-selected and summarized short-term memory extracted only "
+                        "from the conversation between the user and the current agent. Eligible "
+                        "information is limited to user preferences, task goals, action plans and "
+                        "latest progress, or reflections on user feedback and errors. Consider the "
+                        "user question, tool or code execution results, and the final answer. Do not "
+                        "store whole conversations, transient calculations, unverified guesses, "
+                        "duplicates, secrets, or information the user asks to forget. Before every "
+                        "final answer, assess whether an eligible memory was added or updated; if so, "
+                        "calling this tool is mandatory."
+                    ),
+                    inputs=json.dumps({
+                        "content": {
+                            "type": "string",
+                            "description": (
+                                "One concise, reusable short-term memory entry already judged, "
+                                "summarized, and deduplicated by the model"
+                            ),
+                            "description_zh": (
+                                "由模型判断、总结并去重后的一条简洁、可复用的短期记忆"
+                            )
+                        }
+                    }, ensure_ascii=False),
+                    output_type="string",
+                    params={},
+                    source="local",
+                    usage=None,
+                    metadata=memory_metadata,
+                )
+                tool_list.append(store_tool_config)
+
+            if memory_context_service is not None:
+                fixed_search_tool = _create_fixed_search_memory_tool()
+                fixed_search_tool.memory_context_service = memory_context_service
+                fixed_search_tool.tenant_id = str(memory_context.tenant_id or "")
+                fixed_search_tool.user_id = str(memory_context.user_id or "")
+                fixed_search_tool.agent_id = str(memory_context.agent_id or "")
+                fixed_search_tool.conversation_id = (
+                    str(conversation_id) if conversation_id is not None else ""
+                )
+                fixed_search_tool.embedding_configured = embedding_configured
+                fixed_search_result = await asyncio.to_thread(
+                    fixed_search_tool.forward,
+                    last_user_query or "",
+                    5,
+                )
+            else:
+                fixed_search_result = (
+                    "Memory search unavailable: retrieval pipeline is not configured. "
+                    "Continuing without memory results."
+                )
+                logger.warning(
+                    "event=memory_presearch_skipped tenant_id=%s user_id=%s "
+                    "agent_id=%s conversation_id=%s "
+                    "reason=context_service_unavailable",
+                    tenant_id,
+                    user_id,
+                    agent_id,
+                    conversation_id,
+                )
             pre_run_tool_events.extend([
                 {
                     "type": "tool",
@@ -1048,66 +1283,17 @@ async def create_agent_config(
                     "memory": fixed_search_result,
                     "memory_level": "agent",
                 })
-
-            loaded_memory_tools = [store_tool_config.name]
-            logger.info(
-                "event=memory_tools_loaded tenant_id=%s user_id=%s agent_id=%s "
-                "conversation_id=%s tool_names=%s fixed_search_enabled=true "
-                "pipeline_enabled=%s",
-                tenant_id,
-                user_id,
-                agent_id,
-                conversation_id,
-                loaded_memory_tools,
-                "memory_context_service" in memory_metadata,
-            )
         except Exception as e:
-            logger.warning(
-                "event=memory_tools_load_failed tenant_id=%s user_id=%s "
-                "agent_id=%s conversation_id=%s error_type=%s",
-                tenant_id,
-                user_id,
-                agent_id,
-                conversation_id,
-                type(e).__name__,
-            )
-    else:
-        logger.info(
-            "event=memory_tools_skipped tenant_id=%s user_id=%s agent_id=%s "
-            "conversation_id=%s reason=memory_disabled",
-            tenant_id,
-            user_id,
-            agent_id,
-            conversation_id,
-        )
+            logger.error(f"Failed to load memory tools: {e}", exc_info=True)
 
-    # Build knowledge base summary
-    knowledge_base_summary = ""
-    kb_ids = []
-    try:
-        for tool in tool_list:
-            if "KnowledgeBaseSearchTool" == tool.class_name:
-                index_names = tool.params.get("index_names")
-                if index_names:
-                    # Reuse the index_name -> display_name mapping from tool.metadata
-                    # (already computed in create_tool_config_list to avoid redundant DB query)
-                    index_name_to_display_map = tool.metadata.get("index_name_to_display_map", {}) if tool.metadata else {}
-                    for index_name in index_names:
-                        try:
-                            display_name = index_name_to_display_map.get(index_name, index_name)
-                            message = ElasticSearchService().get_summary(index_name=index_name)
-                            summary = message.get("summary", "")
-                            knowledge_base_summary += f"**{display_name}**: {summary}\n\n"
-                            kb_ids.append(index_name)
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to get summary for knowledge base {index_name}: {e}")
-                else:
-                    # TODO: Prompt should be refactored to yaml file
-                    knowledge_base_summary = "当前没有可用的知识库索引。\n" if language == 'zh' else "No knowledge base indexes are currently available.\n"
-                break  # Only process the first KnowledgeBaseSearchTool found
-    except Exception as e:
-        logger.error(f"Failed to build knowledge base summary: {e}")
+    # The final tool params already contain the conversation selection and ACL
+    # intersection. Summaries therefore restore semantic routing without
+    # expanding beyond the effective per-run knowledge-base whitelist.
+    knowledge_base_summary, kb_ids = _build_effective_knowledge_base_summary(
+        tool_list,
+        language,
+        include_empty_message=not bool(runtime_knowledge_context),
+    )
 
     # This compatibility flag controls compression only. ContextManager remains
     # the single context assembly path when compression is disabled.
@@ -1117,7 +1303,12 @@ async def create_agent_config(
     skills = _get_skills_for_template(agent_id, tenant_id, version_no)
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
-    builtin_tools = _get_skill_script_tools(agent_id, tenant_id, version_no)
+    builtin_tools = _get_skill_script_tools(
+        agent_id,
+        tenant_id,
+        version_no,
+        runtime_file_context=runtime_file_context,
+    )
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
@@ -1125,12 +1316,9 @@ async def create_agent_config(
         language,
         (tool.name for tool in available_tools),
     )
-    logger.info(
-        "event=memory_tool_policy_context enabled=%s item_id=%s "
-        "policy_char_count=%s",
-        bool(memory_tool_policy),
-        "system:memory_tool_policy" if memory_tool_policy else None,
-        len(memory_tool_policy),
+    automation_tool_policy = build_automation_tool_policy(
+        language,
+        (tool.name for tool in available_tools),
     )
 
     render_kwargs = {
@@ -1141,11 +1329,6 @@ async def create_agent_config(
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
-        "APP_NAME": app_name,
-        "APP_DESCRIPTION": app_description,
-        "memory_list": memory_list,
-        "knowledge_base_summary": knowledge_base_summary,
-        "user_id": user_id,
     }
     # AgentInfo stores model_ids (a list); pick the first for the primary model lookup
     agent_model_ids = agent_info.get("model_ids")
@@ -1190,21 +1373,19 @@ async def create_agent_config(
         else input_budget
     )
 
-    logger.info(
-        "Agent main LLM: agent_id=%s, model_id=%s, display_name=%s, model_name=%s",
-        agent_id,
-        model_id_to_use,
-        model_info.get("display_name") if model_info else model_name,
-        model_info.get("model_name") if model_info else model_name,
+    sandbox_policy = agent_info.get("sandbox_policy")
+    configured_sandbox_level = (
+        sandbox_policy.get("level") if isinstance(sandbox_policy, dict) else None
+    )
+    is_local_python_executor = (
+        str(configured_sandbox_level or os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local"))
+        .strip().lower() == "local"
     )
 
     context_items = build_context_inputs(
         duty=duty_prompt,
         constraint=constraint_prompt,
         few_shots=few_shots_prompt,
-        app_name=app_name,
-        app_description=app_description,
-        user_id=user_id,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,
@@ -1215,12 +1396,18 @@ async def create_agent_config(
         memory_list=memory_list,
         memory_search_query=last_user_query,
         memory_tool_policy=memory_tool_policy,
-        long_term_memory_prompt=long_term_memory_prompt,
+        automation_tool_policy=automation_tool_policy,
+        long_term_memory_items=long_term_memory_items,
         knowledge_base_summary=knowledge_base_summary,
         kb_ids=kb_ids,
+        knowledge_scope_policy=(runtime_knowledge_context or {}).get("policy"),
+        knowledge_scope_resources=(runtime_knowledge_context or {}).get("resources"),
+        restricted_python_authorized_imports=(
+            get_local_python_authorized_imports() if is_local_python_executor else None
+        ),
     )
 
-    logger.info(
+    logger.debug(
         f"Agent {agent_id} context assembly: "
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
@@ -1272,6 +1459,7 @@ async def create_agent_config(
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
         provide_run_summary=agent_info.get("provide_run_summary", False),
+        allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
         managed_agents=managed_agents,
         external_a2a_agents=external_a2a_agents,
         context_manager_config=cm_config,
@@ -1281,16 +1469,6 @@ async def create_agent_config(
         safe_input_budget_snapshot=safe_input_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
-    )
-    logger.info(
-        "Agent metadata | name=%s | tool_list=%s | managed_agents=%s | model_name=%s | max_steps=%s | enable_planning=%s | has_plan_tools=%s",
-        agent_config.name,
-        [t.name for t in agent_config.tools],
-        [a.name for a in agent_config.managed_agents],
-        agent_config.model_name,
-        agent_config.max_steps,
-        agent_config.enable_planning,
-        any(t.name in {"create_plan", "update_plan_step"} for t in agent_config.tools),
     )
     return agent_config
 
@@ -1406,7 +1584,15 @@ async def create_tool_config_list(
         elif tool.get("class_name") in agent_tool_overrides:
             override_params = agent_tool_overrides[tool.get("class_name")]
 
-        param_dict = _merge_tool_params(tool, override_params)
+        # Independent AIDP endpoint, credential, and default KDS scope are
+        # instance configuration. Request-level config overrides must not
+        # rewrite them; forward() may still receive a per-call kds_list.
+        effective_override_params = (
+            None
+            if tool.get("class_name") == "IndependentAidpSearchTool"
+            else override_params
+        )
+        param_dict = _merge_tool_params(tool, effective_override_params)
         if tool.get("class_name") == "AidpSearchTool":
             # Credentials are backend-owned since the v7.1 permission
             # redesign; populate them from the central constants (the
@@ -1420,30 +1606,58 @@ async def create_tool_config_list(
                 "tenant_id": AIDP_TENANT_ID,
             })
 
-        # v7.1: inject the runtime whitelist for AidpSearchTool. The
-        # permission service recomputes it on every agent call so per-KB
-        # permission changes take effect immediately without re-publishing
-        # the agent. Falls back to the configured ``kds_list`` when the
-        # whitelist lookup fails (defensive path).
+        if tool.get("class_name") == "IndependentAidpSearchTool":
+            if not param_dict.get("server_url") or not param_dict.get("api_key"):
+                raise ValidationError(
+                    "Independent AIDP search requires server_url and api_key in its tool configuration."
+                )
+
+        # Inject the runtime whitelist for AidpSearchTool. ``param_dict``
+        # already contains the resolved per-run range (inherit/override/
+        # disabled). Intersect it with the current remote catalog and local
+        # permissions, but never intersect it with the agent defaults again.
         _allowed_kds_set: set[str] = set()
         _kds_name_to_id_map: dict[str, str] = {}
         if tool.get("class_name") == "AidpSearchTool":
             try:
-                from ext_components.aidp.services import (
-                    aidp_permission_service as _aidp_perms,
+                from ext_components.aidp.services.aidp_access_service import (
+                    resolve_current_aidp_access,
                 )
-                _allowed_kds_set = set(
-                    _aidp_perms.get_allowed_kds_list(
-                        user_id=user_id, tenant_id=tenant_id,
-                    )
+                _snapshot = resolve_current_aidp_access(
+                    server_url=AIDP_SERVER_URL,
+                    api_key=AIDP_API_KEY,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    aidp_tenant_id=AIDP_TENANT_ID,
                 )
-                _kds_name_to_id_map = _aidp_perms.get_kds_name_to_id_map(
-                    user_id=user_id, tenant_id=tenant_id,
-                )
+                _allowed_kds_set = set(_snapshot.accessible_id_set)
+                _kds_name_to_id_map = dict(_snapshot.name_to_id)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
-                    "Aidp permission lookup failed: %s", exc,
+                    "AIDP access snapshot lookup failed: %s", exc,
                 )
+
+            configured_kds = param_dict.get("kds_list") or []
+            if isinstance(configured_kds, str):
+                try:
+                    configured_kds = json.loads(configured_kds)
+                except json.JSONDecodeError:
+                    configured_kds = []
+            if not isinstance(configured_kds, list):
+                configured_kds = []
+            configured_kds = [str(kds_id) for kds_id in configured_kds]
+            # The execution whitelist is the effective tool range, not every
+            # KDS the user could access. This prevents model-supplied arguments
+            # from expanding a conversation-scoped selection.
+            _allowed_kds_set.intersection_update(configured_kds)
+            param_dict["kds_list"] = [
+                kds_id for kds_id in configured_kds if kds_id in _allowed_kds_set
+            ]
+            _kds_name_to_id_map = {
+                name: kds_id
+                for name, kds_id in _kds_name_to_id_map.items()
+                if kds_id in _allowed_kds_set
+            }
 
         tool_config = ToolConfig(
             class_name=tool.get("class_name"),
@@ -1464,7 +1678,7 @@ async def create_tool_config_list(
             existing = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
             tool_config.metadata = {
                 **existing,
-                "allowed_kds_set": _allowed_kds_set,
+                "allowed_kds_set": sorted(_allowed_kds_set),
                 "kds_name_to_id_map": _kds_name_to_id_map,
             }
             tool_class_name = tool.get("class_name")
@@ -1476,6 +1690,19 @@ async def create_tool_config_list(
                         "langchain_tool": langchain_tool,
                     }
                     break
+
+        if tool.get("class_name") == "IndependentAidpSearchTool":
+            existing = tool_config.metadata if isinstance(tool_config.metadata, dict) else {}
+            tool_config.metadata = {
+                **existing,
+                "image_url_builder": create_ind_aidp_image_url_builder(
+                    agent_id=agent_id,
+                    tool_id=tool.get("tool_id"),
+                    tenant_id=tenant_id,
+                    version_no=version_no,
+                    aidp_tenant_id=param_dict.get("tenant_id") or "aidp",
+                ),
+            }
 
         if tool.get("source") == "langchain" and tool.get("class_name") != "AidpSearchTool":
             tool_class_name = tool.get("class_name")
@@ -1515,16 +1742,9 @@ async def create_tool_config_list(
             # so the tool, its display-name mapping, and the injected KB summary all honour
             # the per-KB ACL.
             if index_names:
-                original_count = len(index_names)
                 index_names = ElasticSearchService.filter_accessible_indices(
                     index_names, user_id=user_id, tenant_id=tenant_id,
                 )
-                filtered_count = original_count - len(index_names)
-                if filtered_count > 0:
-                    logger.info(
-                        "Filtered %d inaccessible knowledge base(s) for user '%s' in agent '%s'",
-                        filtered_count, user_id, agent_name or agent_id,
-                    )
                 # Persist the filtered list back into params so downstream consumers
                 # (knowledge_base_summary builder, metadata) see only accessible indices.
                 tool_config.params["index_names"] = index_names
@@ -1592,7 +1812,7 @@ async def create_tool_config_list(
         elif tool_config.class_name == "AnalyzeTextFileTool":
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "llm_model": get_llm_model(tenant_id=tenant_id, model_id=selected_model_id),
+                "llm_model": get_llm_adapter(tenant_id, selected_model_id, modality="llm_long_context"),
                 "storage_client": minio_client,
                 "data_process_service_url": DATA_PROCESS_SERVICE,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
@@ -1600,17 +1820,29 @@ async def create_tool_config_list(
         elif tool_config.class_name == "AnalyzeImageTool":
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                # get_vlm_model reads the first multimodal slot, now shown as image understanding.
-                "vlm_model": get_vlm_model(tenant_id=tenant_id, model_id=selected_model_id),
+                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm"),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
             }
-        elif tool_config.class_name in ["AnalyzeAudioTool", "AnalyzeVideoTool"]:
+        elif tool_config.class_name == "AnalyzeAudioTool":
             selected_model_id = param_dict.get("selected_model_id")
             tool_config.metadata = {
-                "vlm_model": get_video_understanding_model(tenant_id=tenant_id, model_id=selected_model_id),
+                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm4"),
                 "storage_client": minio_client,
                 "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+            }
+        elif tool_config.class_name == "AnalyzeVideoTool":
+            selected_model_id = param_dict.get("selected_model_id")
+            tool_config.metadata = {
+                "vlm_model": get_vlm_adapter(tenant_id, selected_model_id, slot="vlm3"),
+                "storage_client": minio_client,
+                "validate_url_access": lambda urls: validate_urls_access(urls, user_id)
+            }
+        elif tool_config.class_name in ["DownloadFromS3Tool", "UploadToS3Tool"]:
+            tool_config.metadata = {
+                "minio_client": minio_client,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
             }
 
         tool_config_list.append(tool_config)
@@ -1737,7 +1969,7 @@ async def join_minio_file_description_to_query(
     # Enforce file count limit (keep most recent files by truncating from the end)
     if len(all_files) > max_files:
         all_files = all_files[:max_files]
-        logger.debug(f"File list truncated from {len(all_files)} to {max_files} files")
+        logger.info(f"File list truncated from {len(all_files)} to {max_files} files")
 
     if all_files:
         file_descriptions: list[str] = []
@@ -1767,7 +1999,7 @@ async def join_minio_file_description_to_query(
 
             # Check if adding this description would exceed the character limit
             if total_len > max_chars:
-                logger.debug(
+                logger.info(
                     f"File descriptions truncated at {len(file_descriptions)} files "
                     f"to stay within {max_chars} character limit"
                 )
@@ -1882,7 +2114,21 @@ async def create_agent_run_info(
     conversation_id: Optional[int] = None,
     context_policy: Optional[Dict[str, Any]] = None,
     enable_planning: bool = False,
+    enable_automation_tool: bool = True,
+    runtime_knowledge_context: Optional[Dict[str, str]] = None,
 ):
+    workspace_run_id = uuid.uuid4().hex
+    workspace_path = _build_run_workspace(user_id, workspace_run_id)
+    _validate_run_minio_files(minio_files, user_id, tenant_id)
+    runtime_file_context = {
+        "workspace_path": workspace_path,
+        "minio_client": minio_client,
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "run_id": workspace_run_id,
+        "validate_url_access": lambda urls: validate_urls_access(urls, user_id, tenant_id),
+    }
+
     # Determine which version_no to use based on is_debug flag
     # If is_debug=false, use the current published version (current_version_no)
     # If is_debug=true, use version 0 (draft/editing state)
@@ -1912,7 +2158,17 @@ async def create_agent_run_info(
         "version_no": version_no,
         "conversation_id": conversation_id,
         "enable_planning": enable_planning,
+        "runtime_file_context": runtime_file_context,
     }
+    if runtime_knowledge_context is not None:
+        create_config_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
+    if enable_automation_tool and not is_debug and conversation_id is not None:
+        create_config_kwargs.update({
+            "include_automation_tool": True,
+            "automation_user_message": query,
+            "automation_model_id": override_model_id,
+            "automation_has_attachments": bool(minio_files),
+        })
     if override_model_id is not None:
         create_config_kwargs["override_model_id"] = override_model_id
     if requested_output_tokens is not None:
@@ -1989,6 +2245,8 @@ async def create_agent_run_info(
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http"
             }
+            if url == default_mcp_url:
+                mcp_config["httpx_client_factory"] = create_httpx_client
             headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:
@@ -2009,12 +2267,31 @@ async def create_agent_run_info(
     # Resolve sandbox config: DB policy overrides env-var defaults.
     # build_sandbox_policy returns None when level=local (backward-compatible).
     # Import inside function body to avoid circular dependency.
-    from services.agent_service import build_sandbox_policy, get_sandbox_minio_client
+    from management.services.agent.service import build_sandbox_policy, get_sandbox_minio_client
     sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
     agent_db_policy = getattr(agent_config, "sandbox_policy", None)
     merged_policy = sandbox_policy if sandbox_policy else agent_db_policy
     sandbox_config = SandboxConfig.from_dict(merged_policy) if merged_policy else None
-    minio_client = get_sandbox_minio_client() if sandbox_config and sandbox_config.auto_sync_outputs else None
+    sandbox_minio_client = (
+        get_sandbox_minio_client()
+        if sandbox_config and sandbox_config.auto_sync_outputs
+        else None
+    )
+    if sandbox_config is not None:
+        sandbox_config.output_dir = str(Path(workspace_path) / "outputs")
+        sandbox_config.extra_kwargs = {
+            **sandbox_config.extra_kwargs,
+            "workspace_root": str(Path(AGENT_WORKSPACE_ROOT).resolve()),
+            "workspace_path": workspace_path,
+        }
+        if (
+            getattr(sandbox_config.level, "value", sandbox_config.level) == "docker"
+            and getattr(sandbox_config.scope, "value", sandbox_config.scope) == "system"
+        ):
+            sandbox_config.extra_kwargs.update({
+                "workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME,
+                "shared_workspace": True,
+            })
 
     agent_run_info = AgentRunInfo(
         query=final_query,
@@ -2031,7 +2308,11 @@ async def create_agent_run_info(
             None,
         ),
         sandbox_config=sandbox_config,
-        minio_client=minio_client,
+        minio_client=sandbox_minio_client,
+        workspace_path=workspace_path,
+        workspace_run_id=workspace_run_id,
+        tenant_id=tenant_id,
+        minio_files=minio_files,
         redis_client=get_redis_client(),
     )
     return agent_run_info

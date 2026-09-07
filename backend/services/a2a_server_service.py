@@ -14,9 +14,12 @@ from uuid import uuid4
 from database import a2a_agent_db
 from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 from database.client import get_db_session
-from services.a2a_agent_adapter import A2AAgentAdapter, A2AExecutionContext
 from consts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
 from consts.const import NORTHBOUND_EXTERNAL_URL
+from consts.exceptions import RuntimeUpstreamError
+from consts.model import AgentRequest
+from services.a2a_agent_adapter import A2AAgentAdapter, A2AExecutionContext
+from services.runtime_proxy_service import forward_agent_run
 
 logger = logging.getLogger(__name__)
 
@@ -493,22 +496,59 @@ class A2AServerService:
 
     async def _collect_stream_events(self, stream_response) -> List[Dict[str, Any]]:
         """Collect parsed agent/run SSE payloads without dropping event types."""
-        events = []
-        async for chunk in stream_response.body_iterator:
-            if isinstance(chunk, bytes):
-                chunk = chunk.decode("utf-8")
-            if not chunk.startswith("data: "):
-                continue
-            data_str = chunk[6:].strip()
-            if not data_str:
-                continue
-            try:
-                event = json.loads(data_str)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict):
-                events.append(event)
-        return events
+        return [event async for event in self._iter_stream_events(stream_response)]
+
+    async def _iter_stream_events(self, stream_response) -> AsyncIterator[Dict[str, Any]]:
+        """Yield parsed agent/run SSE payloads and always close the proxied stream."""
+        try:
+            async for chunk in stream_response.body_iterator:
+                if isinstance(chunk, bytes):
+                    chunk = chunk.decode("utf-8")
+                if not chunk.startswith("data: "):
+                    continue
+                data_str = chunk[6:].strip()
+                if not data_str:
+                    continue
+                try:
+                    event = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict):
+                    yield event
+        finally:
+            await self._close_stream_response(stream_response)
+
+    async def _ensure_runtime_stream_success(self, stream_response) -> None:
+        """Turn non-success runtime responses into protocol-safe domain errors."""
+        status_code = stream_response.status_code
+        if 200 <= status_code < 300:
+            return
+
+        content = bytearray()
+        try:
+            async for chunk in stream_response.body_iterator:
+                content.extend(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8"))
+        except Exception as exc:
+            logger.warning("Failed to read runtime error response body: %s", exc)
+        finally:
+            await self._close_stream_response(stream_response)
+
+        raise RuntimeUpstreamError(
+            status_code=status_code,
+            content=bytes(content),
+            headers=dict(stream_response.headers),
+        )
+
+    @staticmethod
+    async def _close_stream_response(stream_response) -> None:
+        """Close a proxied body iterator so its upstream response and client are released."""
+        close = getattr(stream_response.body_iterator, "aclose", None)
+        if close is None:
+            return
+        try:
+            await close()
+        except Exception as exc:
+            logger.warning("Failed to close runtime response stream: %s", exc)
 
     def _extract_final_answer(self, events: List[Dict[str, Any]]) -> str:
         """Extract the final answer for task persistence and completion metadata."""
@@ -646,6 +686,7 @@ class A2AServerService:
             AgentNotEnabledError: If agent is not enabled.
         """
         server_agent = self._validate_endpoint(endpoint_id)
+        effective_tenant_id = tenant_id or server_agent.get("tenant_id")
         parsed_message = self.adapter.parse_a2a_message(message)
         message_obj = parsed_message.get("message", {})
 
@@ -658,9 +699,9 @@ class A2AServerService:
             endpoint_id=endpoint_id,
             token_id=token_id,
             user_id=user_id,
-            tenant_id=tenant_id or server_agent.get("tenant_id"),
+            tenant_id=effective_tenant_id,
             correlation_id=message.get("correlationId"),
-            metadata=message.get("metadata", {}),
+            metadata=self.adapter.extract_runtime_metadata(parsed_message),
             is_debug=True
         )
 
@@ -673,34 +714,23 @@ class A2AServerService:
         )
 
         try:
-            from services.agent_service import run_agent_stream
-            from consts.model import AgentRequest
-            from starlette.requests import Request
-
             agent_request = AgentRequest(
                 conversation_id=None,
                 agent_id=internal_request["agent_id"],
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
-                is_debug=internal_request.get("is_debug", True)
+                is_debug=internal_request.get("is_debug", True),
+                metadata=internal_request.get("metadata", {}),
             )
+            agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
 
-            mock_request = Request({
-                "type": "http",
-                "method": "POST",
-                "path": f"/a2a/{endpoint_id}/message:send",
-                "headers": [],
-                "query_string": b""
-            })
-
-            stream_response = await run_agent_stream(
+            stream_response = await forward_agent_run(
                 agent_request=agent_request,
-                http_request=mock_request,
-                authorization=None,
                 user_id=user_id,
-                tenant_id=tenant_id or server_agent.get("tenant_id")
+                tenant_id=effective_tenant_id,
             )
+            await self._ensure_runtime_stream_success(stream_response)
 
             events = await self._collect_stream_events(stream_response)
             final_answer = self._extract_final_answer(events)
@@ -764,6 +794,7 @@ class A2AServerService:
             AgentNotEnabledError: If agent is not enabled.
         """
         server_agent = self._validate_endpoint(endpoint_id)
+        effective_tenant_id = tenant_id or server_agent.get("tenant_id")
         parsed_message = self.adapter.parse_a2a_message(message)
         message_obj = parsed_message.get("message", {})
 
@@ -776,9 +807,9 @@ class A2AServerService:
             endpoint_id=endpoint_id,
             token_id=token_id,
             user_id=user_id,
-            tenant_id=tenant_id or server_agent.get("tenant_id"),
+            tenant_id=effective_tenant_id,
             correlation_id=message.get("correlationId"),
-            metadata=message.get("metadata", {}),
+            metadata=self.adapter.extract_runtime_metadata(parsed_message),
             is_debug=True
         )
 
@@ -799,62 +830,41 @@ class A2AServerService:
         )
 
         try:
-            from consts.model import AgentRequest
-            from starlette.requests import Request
-
             agent_request = AgentRequest(
                 conversation_id=None,
                 agent_id=internal_request["agent_id"],
                 query=internal_request["query"],
                 history=internal_request.get("history", []),
                 minio_files=None,
-                is_debug=internal_request.get("is_debug", True)
+                is_debug=internal_request.get("is_debug", True),
+                metadata=internal_request.get("metadata", {}),
             )
+            agent_request.__dict__["_runtime_metadata_entrypoint"] = "a2a"
 
-            mock_request = Request({
-                "type": "http",
-                "method": "POST",
-                "path": f"/a2a/{endpoint_id}/message:stream",
-                "headers": [],
-                "query_string": b""
-            })
-
-            from services.agent_service import run_agent_stream
-            stream_response = await run_agent_stream(
+            stream_response = await forward_agent_run(
                 agent_request=agent_request,
-                http_request=mock_request,
-                authorization=None,
                 user_id=user_id,
-                tenant_id=tenant_id or server_agent.get("tenant_id")
+                tenant_id=effective_tenant_id,
             )
+            await self._ensure_runtime_stream_success(stream_response)
 
             events = []
-            async for chunk in stream_response.body_iterator:
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode("utf-8")
-                if not chunk.startswith("data: "):
-                    continue
-                data_str = chunk[6:].strip()
-                if not data_str:
-                    continue
-                try:
-                    chunk_data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(chunk_data, dict):
-                    continue
-
-                events.append(chunk_data)
-                yield self.adapter.build_a2a_task_event(
-                    task_id=task_id or "simple",
-                    event_type="taskArtifact",
-                    data={
-                        "artifact": {"parts": self._build_agent_run_event_parts([chunk_data])},
-                        "append": True,
-                        "lastChunk": False,
-                    },
-                    context_id=context_id
-                )
+            event_iterator = self._iter_stream_events(stream_response)
+            try:
+                async for chunk_data in event_iterator:
+                    events.append(chunk_data)
+                    yield self.adapter.build_a2a_task_event(
+                        task_id=task_id or "simple",
+                        event_type="taskArtifact",
+                        data={
+                            "artifact": {"parts": self._build_agent_run_event_parts([chunk_data])},
+                            "append": True,
+                            "lastChunk": False,
+                        },
+                        context_id=context_id
+                    )
+            finally:
+                await event_iterator.aclose()
 
             final_answer = self._extract_final_answer(events)
             self._store_agent_response(task_id, final_answer, endpoint_id)

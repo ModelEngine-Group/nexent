@@ -25,6 +25,15 @@ export interface AidpKbDetail {
   is_multimodal?: boolean;
   created_at?: string;
   updated_at?: string;
+  permission?: "EDIT" | "READ_ONLY" | null;
+  ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
+  group_ids?: number[];
+  resource_status?:
+    | "ACTIVE"
+    | "CREATING"
+    | "DELETE_PENDING"
+    | "ORPHANED"
+    | "UNAVAILABLE";
 }
 
 export interface AidpDocumentItem {
@@ -43,6 +52,30 @@ export interface AidpDocumentListResponse {
    *  fallback estimate when Count fails (false). When false the frontend
    *  should treat the total as approximate and avoid displaying "共 N 条". */
   total_reliable?: boolean;
+}
+
+export interface AidpUploadSuccessItem {
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  file_ino_no: number;
+  first_upload_time: number;
+}
+
+export interface AidpUploadFailedItem {
+  file_name: string;
+  reason_zh: string;
+  reason_en: string;
+}
+
+export interface AidpUploadResponse {
+  summary: {
+    total: number;
+    success: number;
+    failed: number;
+  };
+  success_list: AidpUploadSuccessItem[];
+  failed_list: AidpUploadFailedItem[];
 }
 
 export interface AidpModelItem {
@@ -152,14 +185,13 @@ class AidpKnowledgeService {
       value: Array.isArray(result.value) ? result.value : [],
       total_count:
         typeof result.total_count === "number" ? result.total_count : undefined,
-      next_link:
-        typeof result.next_link === "string" ? result.next_link : null,
+      next_link: typeof result.next_link === "string" ? result.next_link : null,
       has_more:
         typeof result.has_more === "boolean" ? result.has_more : undefined,
       total_reliable:
         typeof result.total_reliable === "boolean"
           ? result.total_reliable
-          : (typeof result.total_count === "number"),
+          : typeof result.total_count === "number",
     };
   }
 
@@ -188,9 +220,7 @@ class AidpKnowledgeService {
   /**
    * Get a single knowledge base detail.
    */
-  async getKb(
-    id: string
-  ): Promise<AidpKbDetail> {
+  async getKb(id: string): Promise<AidpKbDetail> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {});
 
     const response = await fetchWithErrorHandling(url, {
@@ -205,9 +235,7 @@ class AidpKnowledgeService {
   /**
    * Create a knowledge base.
    */
-  async createKb(
-    payload: AidpCreateKbPayload
-  ): Promise<AidpKbDetail> {
+  async createKb(payload: AidpCreateKbPayload): Promise<AidpKbDetail> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.knowledgeBases, {});
 
     const response = await fetchWithErrorHandling(url, {
@@ -248,9 +276,7 @@ class AidpKnowledgeService {
   /**
    * Delete a knowledge base.
    */
-  async deleteKb(
-    id: string
-  ): Promise<void> {
+  async deleteKb(id: string): Promise<void> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {});
 
     await fetchWithErrorHandling(url, {
@@ -263,10 +289,7 @@ class AidpKnowledgeService {
    * Upload documents to a knowledge base (multipart).
    * Bypasses fetchWithErrorHandling since it expects JSON.
    */
-  async uploadDocs(
-    id: string,
-    files: File[]
-  ): Promise<{ success: number; failed: number; errors: string[] }> {
+  async uploadDocs(id: string, files: File[]): Promise<AidpUploadResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {});
 
     const formData = new FormData();
@@ -277,7 +300,8 @@ class AidpKnowledgeService {
     // Strip Content-Type from getAuthHeaders(): when body is FormData,
     // the browser must set "multipart/form-data; boundary=..." itself.
     // getAuthHeaders() hardcodes "application/json" which breaks multipart parsing.
-    const { "Content-Type": _ignored, ...restHeaders } = getAuthHeaders() as Record<string, string>;
+    const { "Content-Type": _ignored, ...restHeaders } =
+      getAuthHeaders() as Record<string, string>;
 
     const response = await fetch(url, {
       method: "POST",
@@ -288,21 +312,54 @@ class AidpKnowledgeService {
     if (!response.ok) {
       const errorText = await response.text();
       log.error("AIDP document upload failed:", errorText);
-      throw new Error(
-        `Upload failed (${response.status}): ${errorText || response.statusText}`
-      );
+      let errorMessage = response.statusText || `HTTP ${response.status}`;
+      if (errorText) {
+        try {
+          const payload = JSON.parse(errorText) as {
+            message?: unknown;
+            details?: { upstream_reason?: unknown } | null;
+          };
+          const upstreamReason = payload.details?.upstream_reason;
+          if (typeof upstreamReason === "string" && upstreamReason.trim()) {
+            errorMessage = upstreamReason.trim();
+          } else if (
+            typeof payload.message === "string" &&
+            payload.message.trim()
+          ) {
+            errorMessage = payload.message.trim();
+          }
+        } catch {
+          errorMessage = errorText;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    const result = (await response.json()) as Partial<AidpUploadResponse>;
+    const successList = Array.isArray(result.success_list)
+      ? result.success_list
+      : [];
+    const failedList = Array.isArray(result.failed_list)
+      ? result.failed_list
+      : [];
 
     return {
-      success:
-        typeof result.success_count === "number"
-          ? result.success_count
-          : files.length,
-      failed:
-        typeof result.failed_count === "number" ? result.failed_count : 0,
-      errors: Array.isArray(result.errors) ? result.errors : [],
+      summary: {
+        total:
+          typeof result.summary?.total === "number"
+            ? result.summary.total
+            : successList.length + failedList.length,
+        success:
+          typeof result.summary?.success === "number"
+            ? result.summary.success
+            : successList.length,
+        failed:
+          typeof result.summary?.failed === "number"
+            ? result.summary.failed
+            : failedList.length,
+      },
+      success_list: successList,
+      failed_list: failedList,
     };
   }
 
@@ -323,8 +380,7 @@ class AidpKnowledgeService {
     const result = await response.json();
 
     return {
-      service:
-        typeof result.service === "string" ? result.service : service,
+      service: typeof result.service === "string" ? result.service : service,
       app: typeof result.app === "string" ? result.app : app,
       models: Array.isArray(result.models) ? result.models : [],
       total_count:
@@ -344,10 +400,7 @@ class AidpKnowledgeService {
     id: string,
     payload: AidpSetPermissionPayload
   ): Promise<void> {
-    const url = buildUrl(
-      API_ENDPOINTS.aidpMgmt.kbPermission(id),
-      {}
-    );
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbPermission(id), {});
 
     await fetchWithErrorHandling(url, {
       method: "PATCH",
@@ -387,7 +440,7 @@ class AidpKnowledgeService {
       total_reliable:
         typeof result.total_reliable === "boolean"
           ? result.total_reliable
-          : (typeof result.total_count === "number"),
+          : typeof result.total_count === "number",
     };
   }
 }

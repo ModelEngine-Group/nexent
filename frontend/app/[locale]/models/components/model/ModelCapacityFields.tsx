@@ -90,6 +90,7 @@ interface ModelCapacityFieldsProps {
   applyDefaultsOnEmpty?: boolean;
   /** Currently accepted suggestion, used to detect fuzzy canonicalization mismatch */
   acceptedSuggestion?: CapacitySuggestion | null;
+  disabled?: boolean;
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -279,6 +280,7 @@ export const ModelCapacityFields = ({
   legacyMaxTokensCandidate,
   applyDefaultsOnEmpty = true,
   acceptedSuggestion,
+  disabled = false,
 }: ModelCapacityFieldsProps) => {
   const { t } = useTranslation();
 
@@ -354,6 +356,7 @@ export const ModelCapacityFields = ({
         options={presetOptions}
         placeholder={defaultPlaceholders[field]}
         onChange={(next) => onChange(field, String(next ?? ""))}
+        disabled={disabled}
         filterOption={(input, option) =>
           String(option?.label ?? "")
             .toLowerCase()
@@ -361,7 +364,7 @@ export const ModelCapacityFields = ({
           String(option?.value ?? "").includes(input)
         }
       >
-        <Input inputMode="numeric" pattern="[0-9]*" />
+        <Input inputMode="numeric" pattern="[0-9]*" disabled={disabled} />
       </AutoComplete>
     ) : (
       <Input
@@ -371,6 +374,7 @@ export const ModelCapacityFields = ({
         value={value[field]}
         placeholder={defaultPlaceholders[field]}
         onChange={(event) => onChange(field, event.target.value)}
+        disabled={disabled}
       />
     );
     return (
@@ -442,6 +446,7 @@ export const ModelCapacityFields = ({
                     onClick={() =>
                       onChange(fieldName, String(legacyMaxTokensCandidate))
                     }
+                    disabled={disabled}
                   >
                     {t(labelKey)}
                   </Button>
@@ -487,6 +492,7 @@ export const ModelCapacityFields = ({
                       type="primary"
                       loading={suggestionLoading}
                       onClick={onUseSuggestion}
+                      disabled={disabled}
                     >
                       {t("model.dialog.capacity.suggestion.use")}
                     </Button>

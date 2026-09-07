@@ -27,6 +27,16 @@ Format: XXYYZZ (6 digits, string)
 from enum import Enum
 
 
+class RuntimeMetadataValidationCode(str, Enum):
+    """Internal runtime metadata validation reason codes."""
+
+    INVALID_METADATA_TYPE = "INVALID_METADATA_TYPE"
+    METADATA_TOO_DEEP = "METADATA_TOO_DEEP"
+    METADATA_TOO_MANY_ITEMS = "METADATA_TOO_MANY_ITEMS"
+    METADATA_TOO_LARGE = "METADATA_TOO_LARGE"
+
+
+
 class ErrorCode(Enum):
     """Business error codes (stored as strings to preserve leading zeros)."""
 
@@ -64,6 +74,10 @@ class ErrorCode(Enum):
     CHAT_MESSAGE_NOT_FOUND = "010102"  # Message not found
     CHAT_CONVERSATION_SAVE_FAILED = "010103"  # Failed to save conversation
     CHAT_TITLE_GENERATION_FAILED = "010104"  # Failed to generate title
+    CHAT_METADATA_NOT_ALLOWED = "010105"  # Runtime metadata input is disabled
+    CHAT_METADATA_INVALID = "010106"  # Runtime metadata is invalid
+    CHAT_METADATA_TOO_LARGE = "010107"  # Runtime metadata is too large
+    CHAT_METADATA_VERSION_CONFLICT = "010108"  # Runtime metadata version conflict
 
     # ==================== 02 QuickConfig / 快速配置 ====================
     # 01 - Configuration
@@ -94,6 +108,9 @@ class ErrorCode(Enum):
     KNOWLEDGE_SYNC_FAILED = "060103"  # Sync failed
     KNOWLEDGE_INDEX_NOT_FOUND = "060104"  # Index not found
     KNOWLEDGE_SEARCH_FAILED = "060105"  # Search failed
+    KNOWLEDGE_INDEX_WRITE_BLOCKED = "060106"  # Index write blocked by storage protection
+    KNOWLEDGE_STORAGE_COMMIT_FAILED = "060107"  # Source object ledger commit failed
+    KNOWLEDGE_TASK_SUBMIT_FAILED = "060108"  # Data-process task submission failed
 
     # ==================== 07 MCPTools / MCP 工具 ====================
     # 01 - Tool
@@ -107,6 +124,7 @@ class ErrorCode(Enum):
 
     # 03 - Configuration
     MCP_NAME_ILLEGAL = "070301"  # Illegal MCP name
+    MCP_PARAM_CONSTRAINT_ERROR_MESSAGES = "070302"  # MCP parameter constraint error messages
 
     # ==================== 08 MonitorOps / 监控与运维 ====================
     # 01 - Monitoring
@@ -165,6 +183,9 @@ class ErrorCode(Enum):
     TENANT_DISABLED = "120102"  # Tenant disabled
     TENANT_CONFIG_ERROR = "120103"  # Tenant configuration error
     TENANT_RESOURCE_EXCEEDED = "120104"  # Tenant resource exceeded
+    TENANT_PERSONAL_KB_QUOTA_EXCEEDED = "120105"  # Personal KB quota exceeded
+    TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE = "120106"  # Personal KB quota usage unavailable
+    TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE = "120107"  # Personal KB quota below current usage
 
     # ==================== 13 External / 外部服务 ====================
     # 01 - DataMate
@@ -217,6 +238,41 @@ class ErrorCode(Enum):
     DATAPROCESS_TASK_FAILED = "150101"  # Data process task failed
     DATAPROCESS_PARSE_FAILED = "150102"  # Data parse failed
 
+    # ==================== 16 AgentEvaluation / 智能体评估 ====================
+    # 01 - Run limits
+    AGENT_EVALUATION_CONCURRENT_LIMIT = "160101"
+    AGENT_EVALUATION_TOTAL_LIMIT = "160102"
+    # 02 - Validation
+    AGENT_EVALUATION_EVALUATOR_COUNT = "160201"
+    AGENT_EVALUATION_EVALUATOR_NOT_FOUND = "160202"
+    AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED = "160203"
+    AGENT_EVALUATION_SET_EMPTY = "160204"
+    AGENT_EVALUATION_QUERY_COUNT_RANGE = "160205"
+    AGENT_EVALUATION_AGENT_NOT_FOUND = "160206"
+    AGENT_EVALUATION_JUDGE_MODEL_REQUIRED = "160207"
+    AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE = "160208"
+    # 03 - AI generation
+    AGENT_EVALUATION_QUERY_GENERATION_FAILED = "160301"
+    AGENT_EVALUATION_QUERY_GENERATION_FORMAT = "160302"
+    AGENT_EVALUATION_QUERY_GENERATION_EMPTY = "160303"
+    AGENT_EVALUATION_CASE_GENERATION_FAILED = "160304"
+    AGENT_EVALUATION_CASE_GENERATION_FORMAT = "160305"
+    AGENT_EVALUATION_CASE_GENERATION_EMPTY = "160306"
+    # 04 - Generation
+    AGENT_EVALUATION_GENERATION_FAILED = "160401"
+    AGENT_EVALUATION_GENERATION_BAD_FORMAT = "160402"
+    AGENT_EVALUATION_GENERATION_NO_VALID_CASES = "160403"
+    # 05 - Resource in use
+    AGENT_EVALUATION_SET_IN_USE = "160501"
+    AGENT_EVALUATION_EVALUATOR_IN_USE = "160502"
+    AGENT_EVALUATION_VERSION_NOT_FOUND = "160503"
+    AGENT_EVALUATION_ANALYSIS_FAILED = "160504"
+    AGENT_EVALUATION_ANALYSIS_NOT_READY = "160505"
+    AGENT_EVALUATION_ANNOTATION_SCHEMA_IN_USE = "160506"
+    AGENT_EVALUATION_TURN_ORDER_MISMATCH = "160507"
+    AGENT_EVALUATION_TURN_DELETE_NOT_LAST = "160508"
+    AGENT_EVALUATION_TURN_DELETE_NOT_CONTIGUOUS = "160509"
+
     # ==================== 99 System / 系统级 ====================
     # 01 - System Errors
     SYSTEM_UNKNOWN_ERROR = "990101"  # Unknown error
@@ -247,6 +303,15 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.COMMON_RESOURCE_NOT_FOUND: 404,
     ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS: 409,
     ErrorCode.COMMON_RESOURCE_DISABLED: 403,
+    # Chat - Runtime metadata
+    ErrorCode.CHAT_METADATA_NOT_ALLOWED: 400,
+    ErrorCode.CHAT_METADATA_INVALID: 422,
+    ErrorCode.CHAT_METADATA_TOO_LARGE: 413,
+    ErrorCode.CHAT_METADATA_VERSION_CONFLICT: 409,
+    # Tenant resource - personal KB quota
+    ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED: 403,
+    ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE: 503,
+    ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE: 400,
     # Common - File
     ErrorCode.FILE_NOT_FOUND: 404,
     ErrorCode.FILE_UPLOAD_FAILED: 500,
@@ -300,4 +365,33 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.PROFILE_INVALID_CREDENTIALS: 400,
     ErrorCode.PROFILE_PASSWORD_WEAK: 400,
     ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD: 400,
+    # Agent Evaluation (module 16)
+    ErrorCode.AGENT_EVALUATION_CONCURRENT_LIMIT: 429,
+    ErrorCode.AGENT_EVALUATION_TOTAL_LIMIT: 400,
+    ErrorCode.AGENT_EVALUATION_EVALUATOR_COUNT: 400,
+    ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_FOUND: 404,
+    ErrorCode.AGENT_EVALUATION_EVALUATOR_NOT_PUBLISHED: 400,
+    ErrorCode.AGENT_EVALUATION_SET_EMPTY: 400,
+    ErrorCode.AGENT_EVALUATION_QUERY_COUNT_RANGE: 400,
+    ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND: 404,
+    ErrorCode.AGENT_EVALUATION_JUDGE_MODEL_REQUIRED: 400,
+    ErrorCode.AGENT_EVALUATION_ONLY_CREATOR_CAN_DELETE: 403,
+    ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FAILED: 500,
+    ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_FORMAT: 500,
+    ErrorCode.AGENT_EVALUATION_QUERY_GENERATION_EMPTY: 400,
+    ErrorCode.AGENT_EVALUATION_CASE_GENERATION_FAILED: 500,
+    ErrorCode.AGENT_EVALUATION_CASE_GENERATION_FORMAT: 500,
+    ErrorCode.AGENT_EVALUATION_CASE_GENERATION_EMPTY: 400,
+    ErrorCode.AGENT_EVALUATION_GENERATION_FAILED: 500,
+    ErrorCode.AGENT_EVALUATION_GENERATION_BAD_FORMAT: 500,
+    ErrorCode.AGENT_EVALUATION_GENERATION_NO_VALID_CASES: 400,
+    ErrorCode.AGENT_EVALUATION_SET_IN_USE: 409,
+    ErrorCode.AGENT_EVALUATION_EVALUATOR_IN_USE: 409,
+    ErrorCode.AGENT_EVALUATION_VERSION_NOT_FOUND: 404,
+    ErrorCode.AGENT_EVALUATION_ANALYSIS_FAILED: 500,
+    ErrorCode.AGENT_EVALUATION_ANALYSIS_NOT_READY: 400,
+    ErrorCode.AGENT_EVALUATION_ANNOTATION_SCHEMA_IN_USE: 409,
+    ErrorCode.AGENT_EVALUATION_TURN_ORDER_MISMATCH: 400,
+    ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_LAST: 400,
+    ErrorCode.AGENT_EVALUATION_TURN_DELETE_NOT_CONTIGUOUS: 400,
 }

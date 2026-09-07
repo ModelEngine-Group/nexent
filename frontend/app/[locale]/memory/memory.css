@@ -2,6 +2,7 @@
 .memory-page-inner {
   width: 100%;
   height: 100%;
+  min-height: 0;
 }
 
 .memory-page-inner {
@@ -14,6 +15,17 @@
   border-radius: 12px;
   background: #ffffff;
   box-shadow: 0 1px 3px rgb(23 32 51 / 5%);
+}
+
+.memory-panel-long-term {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.memory-panel-long-term > .ant-tabs {
+  flex: 0 0 auto;
 }
 
 .memory-panel > .ant-tabs {
@@ -59,6 +71,65 @@
 .panel-body,
 .memory-config-content {
   padding: 24px;
+}
+
+.long-term-memory-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.long-term-memory-panel > .ant-flex,
+.long-term-version-row {
+  flex: 0 0 auto;
+}
+
+.long-term-version-row {
+  margin: 16px 0;
+}
+
+.long-term-memory-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.long-term-memory-card > .ant-card-head {
+  flex: 0 0 auto;
+}
+
+.long-term-memory-card > .ant-card-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.long-term-memory-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.long-term-memory-editor-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.long-term-memory-editor {
+  height: 100% !important;
+  resize: none;
+}
+
+.long-term-memory-card .ant-empty {
+  margin: auto;
 }
 
 .scope-intro {
@@ -150,18 +221,9 @@
   color: #98a2b3;
 }
 
-.memory-panel
-  .ant-table-tbody
-  > tr.memory-row-incompatible
-  .memory-content,
-.memory-panel
-  .ant-table-tbody
-  > tr.memory-row-incompatible
-  .memory-time,
-.memory-panel
-  .ant-table-tbody
-  > tr.memory-row-incompatible
-  a {
+.memory-panel .ant-table-tbody > tr.memory-row-incompatible .memory-content,
+.memory-panel .ant-table-tbody > tr.memory-row-incompatible .memory-time,
+.memory-panel .ant-table-tbody > tr.memory-row-incompatible a {
   color: #98a2b3;
 }
 

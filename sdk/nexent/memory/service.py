@@ -8,7 +8,7 @@ Architecture constraints:
 - The SDK layer **must not** depend on PostgreSQL, Elasticsearch or any
   other database/storage implementation.
 - All persistence and vector retrieval for internal memory is delegated to
-  the backend layer (see ``backend/services/vectordatabase_service.py``).
+  the backend layer (see ``backend/management/services/knowledge_base/service.py``).
 - This facade is therefore intentionally thin: it validates inputs against
   the access policy, computes idempotency keys, optionally generates
   embeddings via an injected embedding model, builds the protocol-level
@@ -31,7 +31,6 @@ import hashlib
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from ..core.models.embedding_model import OpenAICompatibleEmbedding
 from .embedding_model import EmbeddingModelInfo
 from .models import (
     MemoryLayer,
@@ -80,7 +79,7 @@ class MemoryService:
 
     def __init__(
         self,
-        embedding_model: Optional[OpenAICompatibleEmbedding] = None,
+        embedding_model: Optional[OpenAICompatibleEmbeddingAdapter] = None,
         embedding_model_info: Optional[EmbeddingModelInfo] = None,
         backend_store: Optional[BackendStoreHook] = None,
         backend_search: Optional[BackendSearchHook] = None,

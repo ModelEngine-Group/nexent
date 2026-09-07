@@ -72,6 +72,11 @@ const PAGE_SIZE = 10;
 
 const TABS_ROOT_CLASS = "document-chunk-tabs";
 
+const CHUNK_TAG_LAYOUT_STYLE: React.CSSProperties = {
+  flexShrink: 0,
+  whiteSpace: "nowrap",
+};
+
 const { TextArea } = Input;
 
 const DocumentChunk: React.FC<DocumentChunkProps> = ({
@@ -160,6 +165,15 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   const isReadOnlyMode = React.useMemo(() => {
     return permission === "READ_ONLY" || isEmbeddingModelMismatch;
   }, [permission, isEmbeddingModelMismatch]);
+
+  const isSearchDisabled = isEmbeddingModelMismatch;
+
+  useEffect(() => {
+    if (isSearchDisabled) {
+      setSearchValue("");
+      resetChunkSearch();
+    }
+  }, [isSearchDisabled, resetChunkSearch]);
 
   // Set active document when documents change
   useEffect(() => {
@@ -298,26 +312,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   }, [resetChunkSearch]);
 
   const handleSearch = React.useCallback(async () => {
+    if (isSearchDisabled) {
+      return;
+    }
+
     const trimmedValue = searchValue.trim();
 
     if (!trimmedValue) {
       resetChunkSearch();
-      return;
-    }
-
-    // Check embedding model consistency before searching
-    if (
-      isEmbeddingModelMismatch &&
-      currentEmbeddingModel &&
-      knowledgeBaseEmbeddingModel &&
-      knowledgeBaseEmbeddingModel !== "unknown"
-    ) {
-      message.error(
-        t("document.chunk.error.searchFailed", {
-          currentModel: currentEmbeddingModel,
-          knowledgeBaseModel: knowledgeBaseEmbeddingModel,
-        })
-      );
       return;
     }
 
@@ -338,23 +340,56 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         }
       );
 
-      const parsedChunks = (response.results || []).map((item) => {
-        // Backend returns document fields at the top level
-        return {
-          id: item.id || "",
-          content: item.content || "",
-          path_or_url: item.path_or_url || item.url || item.pathOrUrl,
-          filename: item.filename,
-          create_time: item.create_time,
-          score: item.score, // Preserve search score for display
-          source_type:
-            item.source_type === "local" || item.source_type === "minio"
-              ? "file"
-              : item.source_type, // Preserve source type for display
-        };
-      });
+      const parsedChunks = (response.results || [])
+        .map((item) => {
+          // Backend returns document fields at the top level
+          return {
+            id: item.id || "",
+            content: item.content || "",
+            path_or_url: item.path_or_url || item.url || item.pathOrUrl,
+            filename: item.filename,
+            create_time: item.create_time,
+            score: item.score, // Preserve search score for display
+            source_type:
+              item.source_type === "local" || item.source_type === "minio"
+                ? "file"
+                : item.source_type, // Preserve source type for display
+          };
+        })
+        .sort((left, right) => {
+          const leftScore =
+            typeof left.score === "number" && Number.isFinite(left.score)
+              ? left.score
+              : Number.NEGATIVE_INFINITY;
+          const rightScore =
+            typeof right.score === "number" && Number.isFinite(right.score)
+              ? right.score
+              : Number.NEGATIVE_INFINITY;
+          if (rightScore === leftScore) {
+            return 0;
+          }
+          return rightScore > leftScore ? 1 : -1;
+        });
 
       setChunkSearchResult(parsedChunks);
+
+      const matchedDocumentIds = new Set(
+        parsedChunks
+          .map((chunk) => chunk.path_or_url)
+          .filter((docId): docId is string => Boolean(docId))
+      );
+      if (
+        matchedDocumentIds.size > 0 &&
+        !matchedDocumentIds.has(activeDocumentKey)
+      ) {
+        const firstMatchedDocument = documents.find((doc) =>
+          matchedDocumentIds.has(doc.id)
+        );
+        if (firstMatchedDocument) {
+          setActiveDocumentKey(firstMatchedDocument.id);
+          setPagination((prev) => ({ ...prev, page: 1 }));
+        }
+      }
 
       if (parsedChunks.length === 0) {
         message.info(t("document.chunk.search.noChunk"));
@@ -368,9 +403,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }
   }, [
     effectiveIndexName,
-    currentEmbeddingModel,
-    isEmbeddingModelMismatch,
-    knowledgeBaseEmbeddingModel,
+    activeDocumentKey,
+    documents,
+    isSearchDisabled,
     message,
     pagination.pageSize,
     resetChunkSearch,
@@ -609,7 +644,13 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }, {});
   }, [chunkSearchResult]);
 
-  const tabItems = documents.map((doc) => {
+  const visibleDocuments = isChunkSearchActive && !chunkSearchLoading
+    ? documents.filter(
+        (doc) => (chunkSearchResultMap?.[doc.id]?.length ?? 0) > 0
+      )
+    : documents;
+
+  const tabItems = visibleDocuments.map((doc) => {
     const chunkCount = isChunkSearchActive
       ? (chunkSearchResultMap?.[doc.id]?.length ?? 0)
       : (documentChunkCounts[doc.id] ?? doc.chunk_num ?? 0);
@@ -658,34 +699,53 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                     title={
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex flex-wrap gap-1">
-                          <Tag className="inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md">
-                            <FieldNumberOutlined className="text-[12px]" />
-                            <span>
-                              {(pagination.page - 1) * pagination.pageSize +
-                                index +
-                                1}
+                          <Tag
+                            className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md"
+                            style={CHUNK_TAG_LAYOUT_STYLE}
+                          >
+                            <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
+                              <span className="inline-flex shrink-0 items-center justify-center leading-none">
+                                <FieldNumberOutlined className="text-[12px] leading-none" />
+                              </span>
+                              <span>
+                                {(pagination.page - 1) * pagination.pageSize +
+                                  index +
+                                  1}
+                              </span>
                             </span>
                           </Tag>
-                          <Tag className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md">
-                            <ScanText size={14} />
-                            <span>
-                              {t("document.chunk.characterCount", {
-                                count: (chunk.content || "").length,
-                              })}
+                          <Tag
+                            className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium bg-gray-200 text-gray-800 border border-gray-200 rounded-md"
+                            style={CHUNK_TAG_LAYOUT_STYLE}
+                          >
+                            <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
+                              <span className="inline-flex shrink-0 items-center justify-center leading-none">
+                                <ScanText size={14} className="block" />
+                              </span>
+                              <span>
+                                {t("document.chunk.characterCount", {
+                                  count: (chunk.content || "").length,
+                                })}
+                              </span>
                             </span>
                           </Tag>
                           {chunk.score !== undefined && (
                             <Tag
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium border rounded-md"
+                              className="shrink-0 whitespace-nowrap px-1.5 text-xs font-medium border rounded-md"
                               style={{
+                                ...CHUNK_TAG_LAYOUT_STYLE,
                                 backgroundColor: getScoreColor(chunk.score),
                                 color: "#000",
                                 borderColor: getScoreColor(chunk.score),
                               }}
                             >
-                              <Goal size={14} />
-                              <span>
-                                {formatScoreAsPercentage(chunk.score)}
+                              <span className="inline-flex items-center gap-1 align-middle whitespace-nowrap">
+                                <span className="inline-flex shrink-0 items-center justify-center leading-none">
+                                  <Goal size={14} className="block" />
+                                </span>
+                                <span>
+                                  {formatScoreAsPercentage(chunk.score)}
+                                </span>
                               </span>
                             </Tag>
                           )}
@@ -806,9 +866,14 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
         <div className="flex items-center justify-end gap-2 px-2 py-3 border-b border-gray-200 shrink-0">
           <div className="flex items-center gap-2">
             <Input
-              placeholder={t("document.chunk.search.placeholder")}
+              placeholder={t(
+                isSearchDisabled
+                  ? "document.chunk.search.disabledPlaceholder"
+                  : "document.chunk.search.placeholder"
+              )}
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
+              disabled={isSearchDisabled}
               onPressEnter={() => {
                 void handleSearch();
               }}
@@ -832,6 +897,7 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                     }}
                     size="small"
                     loading={chunkSearchLoading}
+                    disabled={isSearchDisabled}
                   />
                 </div>
               }

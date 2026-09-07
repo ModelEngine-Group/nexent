@@ -290,6 +290,43 @@ def test_batch_tasks_success():
     assert resp.json()["task_ids"] == ["tid-1", "tid-2"]
 
 
+def test_batch_tasks_preserves_per_file_submission_results(monkeypatch):
+    from backend.apps import data_process_app as app_module
+
+    async def detailed_result(*args, **kwargs):
+        return {
+            "status": "partial_success",
+            "task_ids": ["tid-1"],
+            "results": [
+                {"file_id": "fid-1", "status": "SUBMITTED", "task_id": "tid-1"},
+                {
+                    "file_id": "fid-2",
+                    "status": "FAILED",
+                    "error_code": "TASK_SUBMIT_FAILED",
+                    "error_message": "broker unavailable",
+                },
+            ],
+            "submitted_count": 1,
+            "failed_count": 1,
+        }
+
+    monkeypatch.setattr(app_module.service, "create_batch_tasks_impl", detailed_result, raising=True)
+    app = _build_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/tasks/batch",
+        json={"sources": [
+            {"source": "s1", "source_type": "local"},
+            {"source": "s2", "source_type": "local"},
+        ]},
+        headers={"Authorization": "Bearer t"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "partial_success"
+    assert resp.json()["results"][1]["file_id"] == "fid-2"
+
+
 def test_batch_tasks_error(monkeypatch):
     # Make service raise
     from backend.apps import data_process_app as app_module

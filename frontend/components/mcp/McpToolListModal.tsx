@@ -10,6 +10,7 @@ interface McpToolListModalProps {
   loading: boolean;
   tools: McpTool[];
   serverName: string;
+  zIndex?: number;
 }
 
 export default function McpToolListModal({
@@ -18,6 +19,7 @@ export default function McpToolListModal({
   loading,
   tools,
   serverName,
+  zIndex,
 }: McpToolListModalProps) {
   const { t } = useTranslation("common");
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set());
@@ -71,6 +73,7 @@ export default function McpToolListModal({
       open={open}
       onCancel={onCancel}
       width={800}
+      zIndex={zIndex}
       footer={[<Button key="close" onClick={onCancel}>{t("mcpConfig.modal.close")}</Button>]}
     >
       <Table
@@ -86,4 +89,3 @@ export default function McpToolListModal({
     </Modal>
   );
 }
-

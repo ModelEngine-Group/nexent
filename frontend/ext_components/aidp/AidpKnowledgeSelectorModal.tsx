@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Button,
   Checkbox,
@@ -25,10 +31,27 @@ const { Text } = Typography;
 interface AidpKnowledgeSelectorModalProps {
   readonly isOpen: boolean;
   readonly onClose: () => void;
-  readonly onConfirm: (selected: { datasetIds: string[]; displayNames: string[] }) => void;
+  readonly onConfirm: (selected: {
+    datasetIds: string[];
+    displayNames: string[];
+  }) => void;
   readonly selectedDatasetIds: string[];
   readonly title?: string;
   readonly maxSelect?: number;
+  /**
+   * Optional page provider to override the default managed-AIDP fetch.
+   * Used by tools backed by a different endpoint (e.g. the independent
+   * AIDP search tool) while keeping the same selection UX.
+   */
+  readonly itemsProvider?: (
+    page: number,
+    pageSize: number
+  ) => Promise<{ value: AidpKnowledgeBaseItem[]; total_count?: number }>;
+  /**
+   * Optional hook fired when the user clicks Sync. Defaults to reloading the
+   * current page through itemsProvider / the managed fetch.
+   */
+  readonly onSync?: () => void | Promise<void>;
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -40,6 +63,8 @@ export default function AidpKnowledgeSelectorModal({
   selectedDatasetIds,
   title,
   maxSelect = 10,
+  itemsProvider,
+  onSync,
 }: AidpKnowledgeSelectorModalProps) {
   const { t } = useTranslation("common");
 
@@ -90,11 +115,14 @@ export default function AidpKnowledgeSelectorModal({
     }
     // Apply removals made by the parent's permission filter while preserving
     // any selections the user has made in this open modal.
-    const previousParentIds = new Set(initialSelectedIdsRef.current.map(String));
+    const previousParentIds = new Set(
+      initialSelectedIdsRef.current.map(String)
+    );
     const nextParentIds = new Set(selectedDatasetIds.map(String));
     setTempSelectedIds((currentIds) => {
       return currentIds.filter(
-        (id) => !previousParentIds.has(String(id)) || nextParentIds.has(String(id))
+        (id) =>
+          !previousParentIds.has(String(id)) || nextParentIds.has(String(id))
       );
     });
     initialSelectedIdsRef.current = selectedDatasetIds;
@@ -107,10 +135,14 @@ export default function AidpKnowledgeSelectorModal({
     async (pageNum: number) => {
       setLoading(true);
       try {
-        const result = await knowledgeBaseService.getAidpKnowledgeBases(
-          pageNum,
-          DEFAULT_PAGE_SIZE
-        );
+        // Prefer the injected provider (independent AIDP), otherwise fall
+        // back to the managed AIDP fetch used by aidp_search.
+        const result = itemsProvider
+          ? await itemsProvider(pageNum, DEFAULT_PAGE_SIZE)
+          : await knowledgeBaseService.getAidpKnowledgeBases(
+              pageNum,
+              DEFAULT_PAGE_SIZE
+            );
 
         const items: AidpKnowledgeBaseItem[] = result.value || [];
 
@@ -140,7 +172,7 @@ export default function AidpKnowledgeSelectorModal({
         setLoading(false);
       }
     },
-    [t]
+    [t, itemsProvider]
   );
 
   // ------------------------------------------------------------------
@@ -168,7 +200,12 @@ export default function AidpKnowledgeSelectorModal({
   // ------------------------------------------------------------------
   // Sync / Reload current page
   // ------------------------------------------------------------------
-  const handleSync = () => {
+  const handleSync = async () => {
+    if (onSync) {
+      await onSync();
+      await loadPage(currentPage);
+      return;
+    }
     loadPage(currentPage);
   };
 
@@ -204,8 +241,7 @@ export default function AidpKnowledgeSelectorModal({
   const renderRow = (item: AidpKnowledgeBaseItem) => {
     const id = String(item.kds_id);
     const checked = tempSelectedIds.includes(id);
-    const disableUnchecked =
-      !checked && tempSelectedIds.length >= maxSelect;
+    const disableUnchecked = !checked && tempSelectedIds.length >= maxSelect;
     return (
       <div key={id} className="px-4 py-3">
         <div className="flex w-full items-start justify-between gap-4 flex-wrap">
@@ -227,10 +263,11 @@ export default function AidpKnowledgeSelectorModal({
               </label>
             </div>
             {item.description && (
-              <Text type="secondary" className="break-words">{item.description}</Text>
+              <Text type="secondary" className="break-words">
+                {item.description}
+              </Text>
             )}
           </div>
-
         </div>
       </div>
     );
@@ -290,9 +327,7 @@ export default function AidpKnowledgeSelectorModal({
               max: maxSelect,
             })}
           </Text>
-          <Button onClick={handleSync}>
-            {t("knowledgeBase.button.sync")}
-          </Button>
+          <Button onClick={handleSync}>{t("knowledgeBase.button.sync")}</Button>
         </div>
 
         {tempSelectedIds.length > 0 && (
@@ -312,9 +347,7 @@ export default function AidpKnowledgeSelectorModal({
           </div>
         )}
 
-        <div style={{ minHeight: 420 }}>
-          {renderListContent()}
-        </div>
+        <div style={{ minHeight: 420 }}>{renderListContent()}</div>
 
         <div className="flex items-center justify-center">
           <Pagination

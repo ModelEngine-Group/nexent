@@ -17,6 +17,7 @@ interface DeploymentContextType {
   appVersion: string;
   deploymentVersion: string;
   enableAidpKnowledge: boolean;
+  aidpEnabled: boolean;
 }
 
 const DeploymentContext = createContext<DeploymentContextType>({
@@ -24,7 +25,8 @@ const DeploymentContext = createContext<DeploymentContextType>({
   isDeploymentReady: false,
   appVersion: APP_VERSION,
   deploymentVersion: "",
-  enableAidpKnowledge: true,
+  enableAidpKnowledge: false,
+  aidpEnabled: false,
 });
 
 interface DeploymentVersionResponse {
@@ -39,7 +41,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
   const [isDeploymentReady, setIsDeploymentReady] = useState(false);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
   const [deploymentVersion, setDeploymentVersion] = useState("");
-  const [enableAidpKnowledge, setEnableAidpKnowledge] = useState(true);
+  const [enableAidpKnowledge, setEnableAidpKnowledge] = useState(false);
 
   useEffect(() => {
     const fetchDeploymentInfo = async () => {
@@ -50,7 +52,7 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
         const data: DeploymentVersionResponse = await response.json();
         setDeploymentVersion(data.deployment_version);
         setIsSpeedMode(data.deployment_version === "speed");
-        setEnableAidpKnowledge(data.enable_aidp_knowledge ?? true);
+        setEnableAidpKnowledge(data.enable_aidp_knowledge ?? false);
         if (data.app_version) {
           setAppVersion(data.app_version);
         }
@@ -67,7 +69,14 @@ export function DeploymentProvider({ children }: { children: ReactNode }) {
 
   return (
     <DeploymentContext.Provider
-      value={{ isSpeedMode, isDeploymentReady, appVersion, deploymentVersion, enableAidpKnowledge }}
+      value={{
+        isSpeedMode,
+        isDeploymentReady,
+        appVersion,
+        deploymentVersion,
+        enableAidpKnowledge,
+        aidpEnabled: enableAidpKnowledge,
+      }}
     >
       {children}
     </DeploymentContext.Provider>

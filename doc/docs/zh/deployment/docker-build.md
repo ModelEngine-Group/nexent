@@ -41,6 +41,22 @@ bash build.sh --web --version v2.2.1 --no-cache
 - `--dependency-variant cpu|gpu` 控制数据处理依赖，默认 `cpu`。`gpu` 会构建带 GPU/CUDA 依赖的镜像，并使用 `-gpu` 镜像名后缀。
 - `--terminal-variant slim|conda` 控制终端镜像，默认 `slim`。`conda` 会保留 Miniconda、`vim` 和编译工具链，并使用 `-conda` 镜像名后缀。
 
+沙箱提供两个独立镜像：
+
+- `nexent/nexent-sandbox` 是标准默认的轻量镜像，Dockerfile 位于 `deploy/images/dockerfiles/sandbox/`。它保留 Python、Jupyter Kernel Gateway、Nexent SDK、非 root 用户和工作区协议。
+- `nexent/nexent-sandbox-full` 是按需提供的技能镜像，Dockerfile 位于 `deploy/images/dockerfiles/sandbox-full/`。它只面向 `docx`、`pdf`、`pptx`、`xlsx`、`canvas-design`、`frontend-design`、`slack-gif-creator`、`mcp-builder`、`web-artifacts-builder` 和 `skill-creator`，包含 Node.js 20、pnpm 离线缓存、LibreOffice、Pandoc、Poppler、Tesseract 以及这些技能的 Python/Node 依赖。未包含 Playwright/Chromium。
+
+`--all` 只包含默认轻量沙箱，完整镜像必须显式构建：
+
+```bash
+bash build.sh --sandbox --version latest --load
+bash build.sh --sandbox-full --version latest --load
+```
+
+手动触发 `docker-deploy.yml` 时，默认同样只构建轻量沙箱；勾选 `build_full_sandbox` 才会同时构建完整镜像。
+
+部署机制不区分镜像变体。标准配置保持 `NEXENT_SANDBOX_DOCKER_IMAGE=nexent/nexent-sandbox:latest`；需要完整能力时，将它改为 `nexent/nexent-sandbox-full:latest` 后滚动重启运行服务。轻量镜像支持普通 Python 代码以及在启用沙箱网络时通过 pip 安装纯 Python/有可用 wheel 的依赖，但不能在运行期以非 root 用户补装系统程序，也不能执行需要 Node.js 的 workspace 脚本。
+
 构建 `data-process` 时，`deploy/images/build.sh` 会自动准备 `model-assets`：优先使用仓库根目录已有的 `model-assets`，其次复用 `~/model-assets`，否则从 Hugging Face 仓库拉取并执行 `git lfs pull`。如果直接执行 `docker build`，需要先在仓库根目录准备好 `model-assets`。
 
 镜像选项：
@@ -50,6 +66,8 @@ bash build.sh --web --version v2.2.1 --no-cache
 - `--mcp` 构建 `nexent-mcp`
 - `--terminal` 构建 `nexent-ubuntu-terminal`
 - `--docs` 构建 `nexent-docs`
+- `--sandbox` 构建默认轻量 `nexent-sandbox`
+- `--sandbox-full` 构建可选完整 `nexent-sandbox-full`
 
 ```bash
 # 🛠️ 创建并使用支持多架构构建的新构建器实例
@@ -84,7 +102,7 @@ docker buildx build --progress=plain --platform linux/amd64,linux/arm64 -t ccr.c
 
 ```bash
 # 🚀 构建应用程序镜像（仅当前架构）
-docker build --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
+docker build --no-cache --progress=plain -t nexent/nexent -f deploy/images/dockerfiles/main/Dockerfile .
 
 # 📊 构建数据处理镜像（仅当前架构）
 docker build --progress=plain -t nexent/nexent-data-process -f deploy/images/dockerfiles/data-process/Dockerfile .

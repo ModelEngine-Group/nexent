@@ -46,7 +46,6 @@ for entry in (str(PROJECT_ROOT), str(PROJECT_ROOT / "sdk"), str(PROJECT_ROOT / "
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
-
 # --------------------------------------------------------------------------- #
 # Module bootstrapping                                                         #
 # --------------------------------------------------------------------------- #
@@ -261,17 +260,14 @@ class TestSearchMemoryToolPipelinePath:
 
         observer.add_message.assert_not_called()
 
-    def test_pipeline_exception_falls_back_to_legacy_memory_service(self, observer, caplog):
-        """When the pipeline raises, the tool falls back to the
-        ``memory_service.search_memory`` legacy path."""
+    def test_pipeline_exception_does_not_switch_to_direct_service(self, observer, caplog):
+        """A pipeline failure degrades to no memory without changing modes."""
         bad_service = AsyncMock(name="bad_service")
         bad_service.build_context = AsyncMock(
             side_effect=RuntimeError("pipeline exploded"),
         )
-        legacy_records = [_StubRecord("Fallback hit", score=0.42, source="es")]
-
         async def _search(**kwargs):
-            return legacy_records
+            raise AssertionError("direct service must not be called")
 
         legacy_service = MagicMock(name="legacy_memory_service")
         legacy_service.search_memory = _search
@@ -284,16 +280,15 @@ class TestSearchMemoryToolPipelinePath:
 
         out = t.forward(query="anything", top_k=3)
 
-        # Legacy path produced one record with the standard formatting.
-        assert "Found 1 relevant memories" in out
-        assert "Fallback hit" in out
-        assert "event=memory_tool_degraded tool=search_memory" in caplog.text
-        assert "fallback=memory_service" in caplog.text
+        assert out == "Memory search failed. Continuing without memory results."
+        assert "event=memory_tool_failed tool=search_memory" in caplog.text
+        assert "path=pipeline" in caplog.text
+        assert "fallback=memory_service" not in caplog.text
         assert "pipeline exploded" not in caplog.text
 
 
-class TestSearchMemoryToolLegacyFallback:
-    """The legacy path remains intact when no ``memory_context_service``."""
+class TestSearchMemoryToolDirectMode:
+    """Direct mode remains available when explicitly configured by callers."""
 
     def test_no_services_configured(self, observer, caplog):
         """With neither backend service wired, the tool returns the
@@ -318,9 +313,8 @@ class TestSearchMemoryToolLegacyFallback:
         service.search_memory.assert_not_called()
         assert "reason=embedding_not_configured" in caplog.text
 
-    def test_legacy_memory_service_path(self, observer, caplog):
-        """The legacy direct ``memory_service.search_memory`` path still
-        produces the historical output format."""
+    def test_direct_memory_service_path(self, observer, caplog):
+        """Explicit direct mode preserves its established output format."""
         caplog.set_level("INFO")
         legacy_records = [
             _StubRecord("Legacy alpha", score=0.55, source="es"),
@@ -341,15 +335,15 @@ class TestSearchMemoryToolLegacyFallback:
         assert "Found 2 relevant memories" in out
         assert "Legacy alpha" in out
         assert "Legacy beta" in out
-        # Legacy format did not render the per-layer section header.
+        # Direct mode does not render the per-layer section header.
         assert "#### Agent Short-term Memory" not in out
         assert "event=memory_tool_invoked tool=search_memory" in caplog.text
         assert "event=memory_tool_completed tool=search_memory" in caplog.text
         assert "path=memory_service result_count=2" in caplog.text
         assert "agent query" not in caplog.text
 
-    def test_legacy_exception_returns_graceful_error(self, observer, caplog):
-        """A failure in the legacy path still surfaces as a soft error."""
+    def test_direct_mode_exception_returns_graceful_error(self, observer, caplog):
+        """A failure in direct mode still surfaces as a soft error."""
         async def _boom(**kwargs):
             raise RuntimeError("backend unreachable")
 

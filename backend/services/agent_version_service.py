@@ -66,7 +66,6 @@ def publish_version_impl(
     release_note: Optional[str] = None,
     source_type: str = SOURCE_TYPE_NORMAL,
     source_version_no: Optional[int] = None,
-    publish_as_a2a: bool = False,
 ) -> dict:
     """
     Publish a new version
@@ -79,6 +78,8 @@ def publish_version_impl(
     agent_draft, tools_draft, relations_draft = query_agent_draft(agent_id, tenant_id)
     if not agent_draft:
         raise ValueError("Agent draft not found")
+
+    publish_as_a2a = bool(agent_draft.get("is_a2a", False))
 
     # Calculate new version number
     new_version_no = get_next_version_no(agent_id, tenant_id)
@@ -146,7 +147,6 @@ def publish_version_impl(
         'source_type': source_type,
         'source_version_no': source_version_no,
         'status': STATUS_RELEASED,
-        'is_a2a': publish_as_a2a,
         'created_by': user_id,
         'updated_by': user_id,
     }
@@ -816,16 +816,15 @@ async def list_published_agents_impl(
         from database.agent_db import (
             query_all_agent_info_by_tenant_id,
         )
-        from services.agent_service import (
-            CAN_EDIT_ALL_USER_ROLES,
-            get_user_tenant_by_user_id,
-            query_group_ids_by_user,
-            get_model_by_model_id,
-            check_agent_availability,
-            _apply_duplicate_name_availability_rules,
+        from consts.const import CAN_EDIT_ALL_USER_ROLES
+        from database.user_tenant_db import get_user_tenant_by_user_id
+        from database.group_db import query_group_ids_by_user
+        from database.model_management_db import get_model_by_model_id
+        from management.services.agent.read import (
+            check_agent_availability, apply_duplicate_name_availability_rules,
         )
         from services.asset_owner_visibility import resolve_agent_list_permission
-        from database.agent_version_db import query_agent_snapshot
+        from database.agent_version_db import query_agent_snapshot, query_version_list
 
         # Get user role for permission check
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
@@ -868,6 +867,21 @@ async def list_published_agents_impl(
             if not current_version_no or current_version_no <= 0:
                 continue
 
+            # Verify current_version_no exists, if not find the latest available version
+            available_versions = query_version_list(agent_id=agent_id, tenant_id=tenant_id)
+            
+            if not available_versions:
+                logger.warning(f"No available versions found for agent_id={agent_id}")
+                continue
+            
+            available_version_nos = {v["version_no"] for v in available_versions}
+            
+            if current_version_no not in available_version_nos:
+                logger.warning(
+                    f"Current version {current_version_no} not found for agent_id={agent_id}, using latest available version"
+                )
+                current_version_no = available_versions[0]["version_no"]
+
             # Get the published version snapshot
             agent_snapshot, tools_snapshot, relations_snapshot = query_agent_snapshot(
                 agent_id=agent_id,
@@ -888,6 +902,11 @@ async def list_published_agents_impl(
             for key, value in agent_snapshot.items():
                 if key != 'current_version_no':
                     agent_info[key] = value
+
+            # Add version_name from version metadata
+            current_version_info = next((v for v in available_versions if v["version_no"] == current_version_no), None)
+            if current_version_info:
+                agent_info['version_name'] = current_version_info.get("version_name")
 
             # Add tools
             agent_info['tools'] = tools_snapshot
@@ -920,7 +939,7 @@ async def list_published_agents_impl(
 
         # Handle duplicate name/display_name: keep the earliest created agent available,
         # mark later ones as unavailable due to duplication.
-        _apply_duplicate_name_availability_rules(enriched_agents)
+        apply_duplicate_name_availability_rules(enriched_agents)
 
         # Build the final simple agent list
         simple_agent_list: list[dict] = []
@@ -966,8 +985,10 @@ async def list_published_agents_impl(
                 "group_ids": agent.get("group_ids", []),
                 "permission": permission,
                 "current_version_no": agent.get("current_version_no"),
+                "version_name": agent.get("version_name"),
                 "greeting_message": agent.get("greeting_message"),
                 "example_questions": agent.get("example_questions"),
+                "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
             })
 
         return simple_agent_list

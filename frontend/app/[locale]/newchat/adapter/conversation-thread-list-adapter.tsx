@@ -17,11 +17,19 @@ import type {
   RemoteThreadListAdapter,
   ThreadHistoryAdapter,
 } from "@assistant-ui/react";
-import { conversationService } from "@/services/conversationService";
+
+import {
+  CONVERSATION_PAGE_SIZE,
+  conversationService,
+} from "@/services/conversationService";
+import { getConversationDateBoundaries } from "@/lib/conversationViewport";
+import { toMessageCreatedAt } from "@/lib/messageDate";
+
 import { storageService } from "@/services/storageService";
-import type { AgentAutomationProposalData } from "@/types/agentAutomation";
+import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { ConversationListItem } from "@/types/conversation";
 import type { ApiConversationDetail, ApiMessage } from "@/types/conversation";
+import { collapseRefreshUserMessages } from "./history-branching";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
@@ -118,18 +126,57 @@ const toAttachmentType = (rawType: string): AttachmentType => {
   return "file";
 };
 
-const toToolSearchItem = (
-  value: unknown
-): { url: string; title: string } | null => {
+const parseImageMetadata = (value: unknown) => {
+  if (typeof value !== "string") return null;
+
+  try {
+    const metadata = JSON.parse(value) as {
+      source_file?: string;
+      image_url?: string;
+    };
+    return typeof metadata.image_url === "string" ? metadata : null;
+  } catch {
+    return null;
+  }
+};
+
+const toToolSearchItem = (value: unknown) => {
   if (typeof value !== "object" || value === null) return null;
 
   const item = value as Record<string, unknown>;
   const url = typeof item.url === "string" ? item.url : "";
+  const filename = typeof item.filename === "string" ? item.filename : "";
+  const sourceFile = typeof item.source_file === "string" ? item.source_file : "";
+  const imageMetadata = parseImageMetadata(item.text);
+  const resolvedUrl = imageMetadata?.image_url || url;
   const title =
     (typeof item.title === "string" && item.title) ||
-    (typeof item.filename === "string" && item.filename) ||
-    url;
-  return url ? { url, title } : null;
+    filename ||
+    sourceFile ||
+    imageMetadata?.source_file ||
+    resolvedUrl;
+  const citeIndex =
+    typeof item.cite_index === "number"
+      ? item.cite_index
+      : typeof item.citeIndex === "number"
+        ? item.citeIndex
+        : undefined;
+  const toolSign = typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+
+  return resolvedUrl || sourceFile
+    ? {
+        url: resolvedUrl,
+        title,
+        text: imageMetadata ? undefined : typeof item.text === "string" ? item.text : undefined,
+        sourceType: typeof item.source_type === "string" ? item.source_type : undefined,
+        filename: filename || undefined,
+        sourceFile: sourceFile || imageMetadata?.source_file || undefined,
+        objectName: typeof item.object_name === "string" ? item.object_name : undefined,
+        citeIndex,
+        toolSign,
+        isImage: Boolean(imageMetadata),
+      }
+    : null;
 };
 
 const parseSearchPlaceholderUnitId = (content: string): string | null => {
@@ -154,22 +201,6 @@ const parseSearchImageUrls = (content: string): string[] => {
       : [];
   } catch {
     return [];
-  }
-};
-
-const parseAutomationProposal = (
-  content: string
-): AgentAutomationProposalData | null => {
-  try {
-    const value = JSON.parse(content) as unknown;
-    if (typeof value !== "object" || value === null) return null;
-
-    const proposal = value as AgentAutomationProposalData;
-    return typeof proposal.proposal_id === "number" && proposal.task
-      ? proposal
-      : null;
-  } catch {
-    return null;
   }
 };
 
@@ -206,41 +237,6 @@ const buildBranchableHistory = (
   }
 
   return branchableMessages;
-};
-
-const areSameUserMessages = (left: ApiMessage, right: ApiMessage): boolean =>
-  left.role === "user" &&
-  right.role === "user" &&
-  JSON.stringify(left.message) === JSON.stringify(right.message) &&
-  JSON.stringify(left.minio_files ?? []) ===
-    JSON.stringify(right.minio_files ?? []);
-
-/**
- * Collapse refresh-generated duplicate user messages while preserving every
- * assistant response as a branch under the first user message.
- *
- * Assistant messages do not reset the comparison. A different user message
- * does reset it, so identical questions from separate turns remain distinct.
- */
-const collapseRefreshUserMessages = (messages: ApiMessage[]): ApiMessage[] => {
-  const collapsed: ApiMessage[] = [];
-  let activeUserMessage: ApiMessage | undefined;
-
-  for (const message of messages) {
-    if (message.role !== "user") {
-      collapsed.push(message);
-      continue;
-    }
-
-    if (activeUserMessage && areSameUserMessages(activeUserMessage, message)) {
-      continue;
-    }
-
-    collapsed.push(message);
-    activeUserMessage = message;
-  }
-
-  return collapsed;
 };
 
 const restoreAttachments = (
@@ -301,7 +297,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
   constructor(
     private readonly getRemoteId: () => string | undefined,
     private readonly initializeThread: () => Promise<RemoteThreadInitializeResponse>,
-    private readonly loadDetail?: () => Promise<ApiConversationDetail | undefined>,
+    private readonly loadDetail?: () => Promise<
+      ApiConversationDetail | undefined
+    >
   ) {}
 
   async load(): Promise<
@@ -363,8 +361,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           (part.type === "final_answer" || part.type === "text") &&
           typeof part.content === "string"
             ? [part.content]
-            : [],
-        ),
+            : []
+        )
       );
 
       // Collect token_count units so the per-message `SingleTurnTokenUsage`
@@ -486,9 +484,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         };
 
         const flushReasoning = (invocationId?: string) => {
-          const entry = invocationId
-            ? activeSubAgents.get(invocationId)
-            : null;
+          const entry = invocationId ? activeSubAgents.get(invocationId) : null;
           if (entry?.reasoningText) {
             content.push({
               type: "reasoning",
@@ -519,23 +515,22 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         const persistedImageSources = Array.isArray(msg.search)
           ? msg.search.filter(
               (searchItem) =>
-                typeof searchItem === "object" && searchItem !== null,
+                typeof searchItem === "object" && searchItem !== null
             )
           : [];
         const restoredImageUrls = new Set<string>();
         const restoredImages: any[] = [];
-        const appendHistoricalImage = (
-          imageUrl: string,
-        ) => {
+        const appendHistoricalImage = (imageUrl: string) => {
           if (!imageUrl || restoredImageUrls.has(imageUrl)) return;
           const imageIndex = restoredImageUrls.size;
           const imageKey = answerImageKeys[imageIndex];
           const metadata = persistedImageSources.find((searchItem) => {
             const item = searchItem as Record<string, unknown>;
-            return imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+            return (
+              imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`
+            );
           }) as Record<string, unknown> | undefined;
-          const title =
-            (metadata?.title as string | undefined) || imageUrl;
+          const title = (metadata?.title as string | undefined) || imageUrl;
           const imagePart: any = {
             type: "source",
             sourceType: "url",
@@ -556,6 +551,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (meta) imagePart.metadata = meta;
           restoredImageUrls.add(imageUrl);
           restoredImages.push(imagePart);
+          return imagePart;
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
@@ -620,7 +616,20 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              appendHistoricalImage(imageUrl);
+              const imagePart = appendHistoricalImage(imageUrl);
+              if (imagePart) {
+                attachSearchContentToTool(
+                  content,
+                  {
+                    url: imagePart.url,
+                    title: imagePart.title,
+                    text: imagePart.text,
+                    isImage: true,
+                    imageKey: imagePart.imageKey,
+                  },
+                  part.tool_call_id,
+                );
+              }
             }
             continue;
           }
@@ -920,13 +929,13 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                | Record<string, unknown>
-                | undefined;
+                Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||
                 answerImageKeys.includes(searchImageKey)
-              ) continue;
+              )
+                continue;
               const url = (item.url as string | undefined) ?? "";
               const filename = (item.filename as string | undefined) ?? "";
               const title =
@@ -981,14 +990,19 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // requires `metadata.custom` to be present on every message, so we
       // always include the field and only set the token bucket when we have
       // historical step data.
+      const createdAt = toMessageCreatedAt(msg.create_time);
       const metadata = {
-        custom: stepTokenCounts.length > 0 ? { stepTokenCounts } : {},
+        custom: {
+          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
+        },
       };
 
       messages.push({
         id: messageId,
         role: msg.role,
         content,
+        ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }
           : {}),
@@ -1089,6 +1103,19 @@ const toRemoteThreadMetadata = (
   };
 };
 
+const INITIAL_CONVERSATION_PAGE_SIZE = 30;
+
+const parseConversationListOffset = (after: string | undefined): number => {
+  if (after === undefined) return 0;
+
+  const offset = Number(after);
+  return Number.isSafeInteger(offset) &&
+    offset >= 0 &&
+    offset <= Number.MAX_SAFE_INTEGER - CONVERSATION_PAGE_SIZE
+    ? offset
+    : 0;
+};
+
 const createHistoryProvider = (): FC<PropsWithChildren> => {
   const Provider: FC<PropsWithChildren> = ({ children }) => {
     const aui = useAui();
@@ -1096,8 +1123,8 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
     const history = useMemo(
       () =>
         new RemoteConversationHistoryAdapter(
-          () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize()
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize()
         ),
       [aui]
     );
@@ -1115,21 +1142,25 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
 };
 
 const createShareHistoryProvider = (
-  snapshot: ApiConversationDetail,
+  snapshot: ApiConversationDetail
 ): FC<PropsWithChildren> => {
   const Provider: FC<PropsWithChildren> = ({ children }) => {
     const aui = useAui();
     const history = useMemo(
       () =>
         new RemoteConversationHistoryAdapter(
-          () => aui.threadListItem().getState().remoteId,
-          () => aui.threadListItem().initialize(),
-          async () => snapshot,
+          () => aui.threadListItem.getState().remoteId,
+          () => aui.threadListItem.initialize(),
+          async () => snapshot
         ),
-      [aui],
+      [aui]
     );
     const adapters = useMemo(() => ({ history }), [history]);
-    return <RuntimeAdapterProvider adapters={adapters}>{children}</RuntimeAdapterProvider>;
+    return (
+      <RuntimeAdapterProvider adapters={adapters}>
+        {children}
+      </RuntimeAdapterProvider>
+    );
   };
   return Provider;
 };
@@ -1141,11 +1172,12 @@ const createShareHistoryProvider = (
  * attachment mapping used by a normal historical conversation.
  */
 export const createShareThreadListAdapter = (
-  snapshot: ApiConversationDetail,
+  snapshot: ApiConversationDetail
 ): RemoteThreadListAdapter => {
   const remoteId = String(snapshot.conversation_id);
-  const title = (snapshot as ApiConversationDetail & { conversation_title?: string })
-    .conversation_title || "Shared conversation";
+  const title =
+    (snapshot as ApiConversationDetail & { conversation_title?: string })
+      .conversation_title || "Shared conversation";
   const metadata: RemoteThreadMetadata = {
     remoteId,
     status: "regular",
@@ -1230,6 +1262,12 @@ export const setServerConversationIdState = (
   serverConversationIdState = state;
 };
 
+let pendingThreadOperationId: string | undefined;
+
+export const setPendingThreadOperationId = (threadId: string | undefined) => {
+  pendingThreadOperationId = threadId;
+};
+
 const MAX_TITLE_WAIT_MS = 5_000;
 const TITLE_POLL_INTERVAL_MS = 50;
 
@@ -1242,17 +1280,28 @@ const waitForServerConversationId = async (
   const { idsRef, getActiveThreadId } = state;
   const startedAt = Date.now();
 
-  // Fast path: the ref is already populated (subsequent runs in a thread
-  // that already has a server-side conversation, or an existing thread
-  // opened from the sidebar).
+  const isValidConversationId = (value: string | undefined): value is string =>
+    Boolean(value) && Number.isInteger(Number(value)) && Number(value) > 0;
+
+  // Existing threads already have a server id in `remoteId`, which is more
+  // reliable than the active-thread registry while the sidebar is switching.
+  if (isValidConversationId(fallbackRemoteId)) return fallbackRemoteId;
+
+  // New threads use an empty remoteId until they are reloaded from the
+  // backend. The sidebar captures the local ID before calling rename/delete,
+  // because assistant-ui may switch the active thread as part of that action.
   const readNow = (): string | undefined => {
+    if (pendingThreadOperationId) {
+      const fromPendingThread = idsRef.current.get(pendingThreadOperationId);
+      if (isValidConversationId(fromPendingThread)) return fromPendingThread;
+    }
+
     const activeThreadId = getActiveThreadId();
     if (!activeThreadId) return undefined;
-    const fromRef = idsRef.current.get(activeThreadId);
-    if (fromRef && Number.isInteger(Number(fromRef)) && Number(fromRef) > 0) {
-      return fromRef;
-    }
-    return undefined;
+    const fromActiveThread = idsRef.current.get(activeThreadId);
+    return isValidConversationId(fromActiveThread)
+      ? fromActiveThread
+      : undefined;
   };
 
   const immediate = readNow();
@@ -1272,15 +1321,24 @@ const waitForServerConversationId = async (
 export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   unstable_Provider: createHistoryProvider(),
 
-  async list(): Promise<RemoteThreadListResponse> {
-    try {
-      const data = await conversationService.getList();
-      return {
-        threads: data.map(toRemoteThreadMetadata),
-      };
-    } catch (error) {
-      return { threads: [] };
-    }
+  async list({ after } = {}): Promise<RemoteThreadListResponse> {
+    const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
+    const offset = parseConversationListOffset(after);
+    const limit =
+      offset === 0 ? INITIAL_CONVERSATION_PAGE_SIZE : CONVERSATION_PAGE_SIZE;
+    const data = await conversationService.getList({
+      offset,
+      limit,
+      todayStartMs,
+      weekStartMs,
+    });
+    const nextOffset = offset + data.items.length;
+
+    return {
+      threads: data.items.map(toRemoteThreadMetadata),
+      nextCursor:
+        nextOffset < data.metadata.total ? String(nextOffset) : undefined,
+    };
   },
 
   async initialize(_threadId: string): Promise<RemoteThreadInitializeResponse> {
@@ -1295,19 +1353,6 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     // doing so would create a second, empty conversation that the agent
     // run never reuses (see commit history for details).
     //
-    // We return an empty-string `remoteId` rather than `undefined` because
-    // the assistant-ui `RemoteThreadListAdapter["initialize"]` contract
-    // requires a string. The empty string is a safe placeholder: the page
-    // resolves `activeConversationId` with priority
-    // `serverConversationIdsRef → remoteId → activeThreadId`, so as soon as
-    // the adapter captures the server id from the response header the page
-    // starts using the real id instead of this placeholder.
-    //
-    // `generateTitle` follows the same priority chain: it consults the page's
-    // `serverConversationIdsRef` via `waitForServerConversationId` before
-    // falling back to the raw `remoteId`, so a brand-new thread no longer
-    // triggers a `conversation_id: 0` request (which would silently fail on
-    // the backend's `WHERE conversation_id = 0` filter).
     return {
       remoteId: "",
       externalId: "",
@@ -1345,27 +1390,30 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
   },
 
   async delete(remoteId: string): Promise<void> {
-    await conversationService.delete(Number(remoteId));
+    const candidateId = await waitForServerConversationId(remoteId);
+    const conversationId = Number(candidateId);
+    if (
+      !candidateId ||
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0
+    ) {
+      throw new Error(
+        "Cannot delete a conversation without a backend conversation ID."
+      );
+    }
+    await conversationService.delete(conversationId);
   },
 
   async fetch(threadId: string): Promise<RemoteThreadMetadata> {
-    const [detail, conversations] = await Promise.all([
-      conversationService.getById(threadId),
-      conversationService.getList(),
-    ]);
-    const conversation = conversations.find(
-      (item) => String(item.conversation_id) === String(detail.conversation_id)
-    );
+    const detail = await conversationService.getById(threadId);
 
-    return toRemoteThreadMetadata(
-      conversation ?? {
-        conversation_id: detail.conversation_id,
-        conversation_title: "Untitled conversation",
-        agent_id: detail.agent_id,
-        create_time: detail.create_time,
-        update_time: detail.create_time,
-      }
-    );
+    return toRemoteThreadMetadata({
+      conversation_id: Number(detail.conversation_id),
+      conversation_title: detail.conversation_title ?? "Untitled conversation",
+      agent_id: detail.agent_id,
+      create_time: detail.create_time,
+      update_time: detail.create_time,
+    });
   },
 
   async generateTitle(_remoteId, _messages) {

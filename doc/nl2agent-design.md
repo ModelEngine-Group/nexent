@@ -2,8 +2,10 @@
 
 ## 1. Current Flow
 
-NL2Agent is embedded in the `/agents` creation page. Opening the generation
-assistant enters create mode and starts a page-local assistant runtime.
+The NL2Agent runtime, API, and reusable frontend components remain available,
+but the `/agents` management page no longer exposes an NL2Agent entry point or
+mounts the generation assistant panel. The following sections document the
+retained flow and contracts.
 
 The flow is:
 

@@ -8,6 +8,31 @@ from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
 
+_SUPPORTED_ENCODINGS = ("utf-8-sig", "gb18030")
+
+
+def _read_text_file(file_path: str) -> str:
+    """Read text using strict, deterministic encoding fallbacks.
+
+    UTF-8 is preferred for skill files. GB18030 is the fallback because it is a
+    superset of GBK and GB2312. Decoding remains strict so unsupported or
+    corrupted input is reported instead of being replaced silently.
+    """
+    with open(file_path, "rb") as file:
+        data = file.read()
+
+    decode_errors = []
+    for encoding in _SUPPORTED_ENCODINGS:
+        try:
+            return data.decode(encoding, errors="strict")
+        except UnicodeDecodeError as exc:
+            decode_errors.append(exc)
+
+    attempted_encodings = ", ".join(_SUPPORTED_ENCODINGS)
+    raise UnicodeError(
+        f"Unable to decode '{file_path}' using supported encodings: {attempted_encodings}"
+    ) from decode_errors[-1]
+
 
 class ReadSkillMdTool(Tool):
     """Tool for reading skill markdown files."""
@@ -86,16 +111,11 @@ class ReadSkillMdTool(Tool):
         for path in possible_paths:
             full_path = os.path.join(skill_dir, path)
             if os.path.exists(full_path):
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    # Strip frontmatter if it's a markdown file
-                    if full_path.endswith('.md'):
-                        content = self._strip_frontmatter(content)
-                    return content, True
-                except Exception as e:
-                    logger.warning(f"Failed to read file {path}: {e}")
-                    continue
+                content = _read_text_file(full_path)
+                # Strip frontmatter if it's a markdown file
+                if full_path.endswith('.md'):
+                    content = self._strip_frontmatter(content)
+                return content, True
 
         return f"File not found: {file_path}", False
 
@@ -188,8 +208,7 @@ class ReadSkillMdTool(Tool):
             return f"File not found: {file_path}"
 
         try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            content = _read_text_file(full_path)
             # Strip frontmatter if it's a markdown file
             if full_path.endswith('.md'):
                 content = self._strip_frontmatter(content)

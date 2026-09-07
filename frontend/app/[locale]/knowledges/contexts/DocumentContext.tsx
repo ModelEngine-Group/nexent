@@ -139,10 +139,13 @@ export const DocumentContext = createContext<{
   ) => Promise<void>;
   uploadDocuments: (
     kbId: string,
-    files: File[],
-    modelId?: number
+    files: File[]
   ) => Promise<{ quota_status?: QuotaStatusResponse } | undefined>;
-  deleteDocument: (kbId: string, docId: string) => Promise<void>;
+  deleteDocument: (
+    kbId: string,
+    docId: string,
+    fileId?: string
+  ) => Promise<void>;
 }>({
   state: {
     documentsMap: {},
@@ -263,15 +266,13 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
   // Upload documents to a knowledge base
   const uploadDocuments = useCallback(
-    async (kbId: string, files: File[], modelId?: number) => {
+    async (kbId: string, files: File[]) => {
       dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOADING, payload: true });
 
       try {
         const uploadResult = await knowledgeBaseService.uploadDocuments(
           kbId,
-          files,
-          undefined,
-          modelId
+          files
         );
 
         // Set loading state before fetching latest documents
@@ -302,7 +303,17 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
         dispatch({ type: DOCUMENT_ACTION_TYPES.SET_UPLOAD_FILES, payload: [] });
         return uploadResult;
       } catch (error) {
-        log.error(t("document.error.upload"), error);
+        // A rejected upload can still have a durable FAILED lifecycle row;
+        // refresh so the user can see its timestamp and reason immediately.
+        try {
+          const latestDocuments = await knowledgeBaseService.getAllFiles(kbId);
+          dispatch({
+            type: DOCUMENT_ACTION_TYPES.FETCH_SUCCESS,
+            payload: { kbId, documents: latestDocuments },
+          });
+        } catch (refreshError) {
+          log.error("Failed to refresh documents after upload error", refreshError);
+        }
         dispatch({
           type: DOCUMENT_ACTION_TYPES.ERROR,
           payload: `${t("document.error.upload")}. ${t("document.error.retry")}`,
@@ -321,9 +332,9 @@ export const DocumentProvider: React.FC<DocumentProviderProps> = ({
 
   // Delete a document
   const deleteDocument = useCallback(
-    async (kbId: string, docId: string) => {
+    async (kbId: string, docId: string, fileId?: string) => {
       try {
-        await knowledgeBaseService.deleteDocument(docId, kbId);
+        await knowledgeBaseService.deleteDocument(docId, kbId, fileId);
         dispatch({
           type: DOCUMENT_ACTION_TYPES.DELETE_DOCUMENT,
           payload: { kbId, docId },

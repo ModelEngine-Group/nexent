@@ -18,6 +18,7 @@ export type AgentConfigUpdate = Partial<
     | "requested_output_tokens"
     | "is_main_agent"
     | "provide_run_summary"
+    | "allow_chat_metadata"
     | "description"
     | "duty_prompt"
     | "constraint_prompt"
@@ -30,6 +31,7 @@ export type AgentConfigUpdate = Partial<
     | "verification_config"
     | "group_ids"
     | "ingroup_permission"
+    | "is_a2a"
     | "greeting_message"
     | "example_questions"
     | "model_params_override"
@@ -129,6 +131,8 @@ export interface PublishedAgent {
   current_version_no?: number;
   greeting_message?: string;
   example_questions?: string[];
+  allow_chat_metadata?: boolean;
+  icon_url?: string;
 }
 
 export interface Agent {
@@ -160,7 +164,9 @@ export interface Agent {
   > | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
+  allow_chat_metadata?: boolean;
   enable_context_manager?: boolean;
+  is_a2a?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[]; // Skills configured for this agent
@@ -175,6 +181,12 @@ export interface Agent {
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
+  sub_agent_relations?: Array<{
+    agent_id: number;
+    agent_name?: string;
+    version_no: number | null;
+    version_name?: string;
+  }>;
   external_sub_agent_id_list?: number[]; // External A2A agent IDs
   group_ids?: number[];
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
@@ -186,9 +198,11 @@ export interface Agent {
   /** When true, system prompts were withheld (ASSET_OWNER agent viewed by non-ASSET_OWNER caller). */
   prompts_hidden?: boolean;
   current_version_no?: number;
+  version_name?: string;
   is_a2a_server?: boolean;
   greeting_message?: string;
   example_questions?: string[];
+  icon_url?: string;
 }
 
 export interface Tool {
@@ -200,6 +214,7 @@ export interface Tool {
   source?: string;
   initParams: ToolParam[];
   is_available?: boolean;
+  is_user_selectable?: boolean;
   create_time?: string;
   usage?: string;
   inputs?: string;
@@ -227,6 +242,18 @@ export interface ToolParam {
   description_zh?: string;
   default?: string;
   depends_on?: string;
+  /** Pydantic Field validation constraints (ge/le/gt/lt/...) persisted by the backend. */
+  constraints?: ToolParamConstraints;
+}
+
+export interface ToolParamConstraints {
+  ge?: number;
+  gt?: number;
+  le?: number;
+  lt?: number;
+  min_length?: number;
+  max_length?: number;
+  // multiple_of?: number;
 }
 
 export interface AidpKnowledgeBaseItem {
@@ -244,13 +271,20 @@ export interface AidpKnowledgeBaseItem {
   /** Nexent user_id of the KB creator (owner). */
   created_by?: string;
   /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
-  resource_status?: "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
+  resource_status?:
+    | "ACTIVE"
+    | "CREATING"
+    | "DELETE_PENDING"
+    | "ORPHANED"
+    | "UNAVAILABLE";
   /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
   created_at?: string;
   /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
   updated_at?: string;
   /** Embedding model name configured for this KB in AIDP. */
   embedding_model?: string;
+  /** Whether this AIDP knowledge base supports multimodal content. */
+  is_multimodal?: boolean;
 }
 
 export interface AidpKnowledgeBaseListResponse {
@@ -326,7 +360,9 @@ export interface SkillGroup {
 
 // Skill with installation status for tenant creation flow
 export type SkillInstallStatus =
-  "installable" | "installed" | "resource_missing";
+  | "installable"
+  | "installed"
+  | "resource_missing";
 
 export interface InstallableSkill {
   skill_id: number;
@@ -564,6 +600,7 @@ export interface McpServer {
   service_name: string;
   mcp_url: string;
   status: boolean;
+  enabled: boolean;
   remote_mcp_server_name?: string;
   remote_mcp_server?: string;
   authorization_token?: string | null;

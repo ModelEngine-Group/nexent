@@ -35,6 +35,36 @@ def search_version_by_version_no(
         return as_dict(version) if version else None
 
 
+def batch_search_version_names(
+    agent_ids: List[int],
+    tenant_id: str,
+    version_nos: List[int],
+) -> List[dict]:
+    """
+    Batch query version names for multiple (agent_id, version_no) pairs.
+
+    Returns list of dicts: [{"agent_id": int, "version_no": int, "version_name": Optional[str]}]
+    """
+    if not agent_ids or not version_nos:
+        return []
+
+    with get_db_session() as session:
+        versions = session.query(AgentVersion).filter(
+            AgentVersion.agent_id.in_(agent_ids),
+            AgentVersion.version_no.in_(version_nos),
+            AgentVersion.tenant_id == tenant_id,
+        ).all()
+
+        result = []
+        for v in versions:
+            result.append({
+                "agent_id": v.agent_id,
+                "version_no": v.version_no,
+                "version_name": v.version_name,
+            })
+        return result
+
+
 def search_version_by_id(
     version_id: int,
     tenant_id: str,
@@ -85,6 +115,42 @@ def query_current_version_no(
             AgentInfo.delete_flag == 'N',
         ).first()
         return agent.current_version_no if agent else None
+
+
+def batch_query_current_version_nos(
+    agent_ids: List[int],
+    tenant_id: str,
+) -> dict:
+    """
+    Batch query current published version_no for multiple agents.
+
+    Returns a dict mapping agent_id -> current_version_no (only includes agents
+    that have a non-null current_version_no).
+
+    Args:
+        agent_ids: List of agent IDs to query
+        tenant_id: Tenant ID
+    """
+    if not agent_ids:
+        return {}
+    with get_db_session() as session:
+        agents = session.query(
+            AgentInfo.agent_id,
+            AgentInfo.current_version_no,
+        ).filter(
+            AgentInfo.agent_id.in_(agent_ids),
+            or_(
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID,
+            ),
+            AgentInfo.version_no == 0,
+            AgentInfo.delete_flag == 'N',
+        ).all()
+        return {
+            a.agent_id: a.current_version_no
+            for a in agents
+            if a.current_version_no is not None
+        }
 
 
 def query_agent_snapshot(

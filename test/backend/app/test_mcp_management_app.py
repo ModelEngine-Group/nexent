@@ -48,50 +48,6 @@ AUTH_HEADER = {"Authorization": "Bearer test_token"}
 
 
 # ============================================================================
-# GET /mcp-tools/registry/list
-# ============================================================================
-
-class TestRegistryList:
-    """Test GET /mcp-tools/registry/list"""
-
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_registry_mcp_services')
-    def test_list_success(self, mock_list, mock_auth):
-        """Test successful registry list retrieval."""
-        mock_auth.return_value = ("uid", "tid", "en")
-        mock_list.return_value = {"servers": [{"name": "s1"}], "metadata": {}}
-        resp = client.get("/mcp-tools/registry/list", headers=AUTH_HEADER)
-        assert resp.status_code == HTTPStatus.OK
-        assert len(resp.json()["servers"]) == 1
-
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_registry_mcp_services')
-    def test_list_with_filters(self, mock_list, mock_auth):
-        """Test registry list with search and limit filters."""
-        mock_auth.return_value = ("uid", "tid", "en")
-        mock_list.return_value = {"servers": [], "metadata": {}}
-        resp = client.get("/mcp-tools/registry/list?search=test&limit=10", headers=AUTH_HEADER)
-        assert resp.status_code == HTTPStatus.OK
-
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_registry_mcp_services')
-    def test_list_unauthorized(self, mock_list, mock_auth):
-        """Test registry list returns 401 on UnauthorizedError."""
-        mock_auth.side_effect = UnauthorizedError("unauthorized")
-        resp = client.get("/mcp-tools/registry/list", headers=AUTH_HEADER)
-        assert resp.status_code == HTTPStatus.UNAUTHORIZED
-
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_registry_mcp_services')
-    def test_list_server_error(self, mock_list, mock_auth):
-        """Test registry list returns 500 on unexpected error."""
-        mock_auth.return_value = ("uid", "tid", "en")
-        mock_list.side_effect = RuntimeError("unexpected")
-        resp = client.get("/mcp-tools/registry/list", headers=AUTH_HEADER)
-        assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
-
-
-# ============================================================================
 # GET /mcp-tools/community/list
 # ============================================================================
 
@@ -123,6 +79,30 @@ class TestCommunityList:
             headers=AUTH_HEADER,
         )
         assert resp.status_code == HTTPStatus.OK
+
+    @patch('apps.mcp_management_app.get_current_user_info')
+    @patch('apps.mcp_management_app.list_community_mcp_services')
+    def test_list_with_offset_pagination(self, mock_list, mock_auth):
+        """Test community list forwards offset pagination parameters."""
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_list.return_value = {
+            "count": 1,
+            "total": 7,
+            "page": 2,
+            "items": [],
+        }
+
+        resp = client.get(
+            "/mcp-tools/community/list?page=2&limit=6",
+            headers=AUTH_HEADER,
+        )
+
+        assert resp.status_code == HTTPStatus.OK
+        assert resp.json()["data"]["total"] == 7
+        mock_list.assert_called_once_with(
+            tenant_id="tid", user_id="uid", search=None, tag=None,
+            transport_type=None, cursor=None, page=2, limit=6,
+        )
 
     @patch('apps.mcp_management_app.get_current_user_info')
     @patch('apps.mcp_management_app.list_community_mcp_services')

@@ -7,7 +7,7 @@ from backend.database.db_models import SkillInfo
 
 MIGRATION_PATH = Path(
     "deploy/sql/migrations/"
-    "v2.4.0_0722_add_skill_permission_and_repository_snapshots.sql"
+    "v2.4_merged_migrations.sql"
 )
 
 

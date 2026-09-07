@@ -44,8 +44,9 @@ OPTIMIZE_USER_PROMPT: |-
   当前没有可用助手。
   {% endif %}
 
-  {% if knowledge_base_names %}
-  ### 知识库配置说明
-  如果优化后的 few-shot 示例中需要使用 `knowledge_base_search`，必须使用以下已配置的真实知识库名称：
-  {{ knowledge_base_names | default('') }}
+  {% if has_local_knowledge_tool or has_aidp_knowledge_tool %}
+  ### 知识库工具优化规则
+  - 不得新增或保留具体知识库名称、知识库 ID、索引名称或 KDS ID。
+  - 不得在 few-shot 中固定 `index_names` 或 `kds_list`。
+  - 将具体知识库引用改写为“当前会话允许的知识库范围”。
   {% endif %}

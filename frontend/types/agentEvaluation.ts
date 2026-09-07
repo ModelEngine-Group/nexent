@@ -22,6 +22,8 @@ export type EvaluationSetCase = {
     answer: string;
   };
   order_no?: number;
+  session_id?: string | null;
+  turn_order?: number;
 };
 
 export type AgentEvaluationRun = {
@@ -80,4 +82,6 @@ export type AgentEvaluationCase = {
   pass_status?: "PASS" | "FAIL" | null;
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
   error_message?: string | null;
+  session_id?: string | null;
+  turn_order?: number;
 };

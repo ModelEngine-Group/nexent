@@ -2,11 +2,9 @@ import logging
 from typing import Optional
 
 from nexent.core import MessageObserver
-from nexent.core.models import OpenAIModel, OpenAIVLModel
-from nexent.core.models.embedding_model import JinaEmbedding, OpenAICompatibleEmbedding, DashScopeMultimodalEmbedding, SiliconflowMultimodalEmbedding
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from nexent.core.models.rerank_model import OpenAICompatibleRerank
 
+from services.model_gateway_service import build_adapter_fresh
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
@@ -19,7 +17,6 @@ DASHSCOPE_MODEL_FACTORY = "dashscope"
 TOKENPONY_MODEL_FACTORY = "tokenpony"
 SILICONFLOW_MODEL_FACTORY = "silicon"
 PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {DASHSCOPE_MODEL_FACTORY, TOKENPONY_MODEL_FACTORY}
-PROVIDER_CATALOG_HEALTHCHECK_TYPES = {"vlm", "vlm2", "vlm3"}
 
 EMBEDDING_TYPES = {"embedding", "multi_embedding"}
 
@@ -80,13 +77,9 @@ async def _embedding_dimension_check(
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
 
     if model_type == "embedding":
-        # DashScope text embedding models use OpenAI-compatible endpoint, same as generic
-        embedding = await OpenAICompatibleEmbedding(
-            model_name=model_name,
-            base_url=model_base_url,
-            api_key=model_api_key,
-            embedding_dim=0,
-            ssl_verify=ssl_verify,
+        embedding = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
+            "embedding", "embedding", None, model_name=model_name,
         ).dimension_check(timeout=effective_timeout)
         if len(embedding) > 0:
             return len(embedding[0])
@@ -94,24 +87,10 @@ async def _embedding_dimension_check(
             f"Embedding dimension check for {model_name} gets empty response")
         return 0
     elif model_type == "multi_embedding":
-        model_factory_lower = (model_factory or "").lower()
-        if model_factory_lower == "dashscope":
-            embedding_instance = DashScopeMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        else:
-            embedding_instance = SiliconflowMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        embedding = await embedding_instance.dimension_check(timeout=effective_timeout)
+        embedding = await build_adapter_fresh(
+            {"model_factory": model_factory, "base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
+            "multi_embedding", "multiEmbedding", None, model_name=model_name,
+        ).dimension_check(timeout=effective_timeout)
         if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
             return len(embedding[0])
         logging.warning(
@@ -183,77 +162,55 @@ async def _perform_connectivity_check(
     connectivity: bool
 
     if model_type == "embedding":
-        emb = await OpenAICompatibleEmbedding(
-            model_name=model_name,
-            base_url=model_base_url,
-            api_key=model_api_key,
-            embedding_dim=0,
-            ssl_verify=ssl_verify,
+        emb = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
+            "embedding", "embedding", None, model_name=model_name,
         ).dimension_check(timeout=effective_timeout)
         connectivity = len(emb) > 0 and len(emb[0]) > 0
     elif model_type == "multi_embedding":
-        model_factory_lower = (model_factory or "").lower()
-        if model_factory_lower == "dashscope":
-            embedding = DashScopeMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        else:
-            embedding = SiliconflowMultimodalEmbedding(
-                api_key=model_api_key,
-                base_url=model_base_url,
-                model_name=model_name,
-                embedding_dim=0,
-                ssl_verify=ssl_verify,
-            )
-        emb = await embedding.dimension_check(timeout=effective_timeout)
+        emb = await build_adapter_fresh(
+            {"model_factory": model_factory, "base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
+            "multi_embedding", "multiEmbedding", None, model_name=model_name,
+        ).dimension_check(timeout=effective_timeout)
         connectivity = len(emb) > 0 and len(emb[0]) > 0
     elif model_type == "llm":
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
-        connectivity = await OpenAIModel(
-            observer,
-            model_id=model_name,
-            api_base=model_base_url,
-            api_key=model_api_key,
-            ssl_verify=ssl_verify,
-            timeout_seconds=timeout_seconds,
-        ).check_connectivity()
-    elif model_type == "rerank":
-        rerank_model = OpenAICompatibleRerank(
+        connectivity = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key,
+             "ssl_verify": ssl_verify, "timeout_seconds": timeout_seconds,
+             "display_name": display_name},
+            "llm", "llm", None,
+            observer=observer,
             model_name=model_name,
-            base_url=model_base_url,
-            api_key=model_api_key,
-            ssl_verify=ssl_verify,
-        )
-        connectivity = await rerank_model.connectivity_check()
-    elif model_type in ("vlm", "vlm2", "vlm3"):
-        if (
-            model_type in PROVIDER_CATALOG_HEALTHCHECK_TYPES
-            and (model_factory or "").lower() in PROVIDER_CATALOG_HEALTHCHECK_FACTORIES
+            timeout_seconds=timeout_seconds,
+            display_name=display_name,
+        ).health_check()
+    elif model_type == "rerank":
+        connectivity = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key,
+             "ssl_verify": ssl_verify},
+            "rerank", "rerank", None, model_name=model_name,
+        ).health_check()
+    elif model_type in ("vlm", "vlm2", "vlm3", "vlm4"):
+        if await _provider_catalog_connectivity_check(
+            model_name=model_name,
+            model_type=model_type,
+            model_api_key=model_api_key,
+            model_factory=model_factory,
         ):
-            connectivity = await _provider_catalog_connectivity_check(
-                model_name=model_name,
-                model_type=model_type,
-                model_api_key=model_api_key,
-                model_factory=model_factory,
-            )
-            return connectivity
+            return True
 
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
-        connectivity = await OpenAIVLModel(
-            observer,
-            model_id=model_name,
-            api_base=model_base_url,
-            api_key=model_api_key,
-            ssl_verify=ssl_verify
-        ).check_connectivity()
+        connectivity = await build_adapter_fresh(
+            {"base_url": model_base_url, "api_key": model_api_key,
+             "ssl_verify": ssl_verify, "model_factory": model_factory},
+            "vlm", model_type, None, model_name=model_name,
+            observer=observer, display_name=display_name,
+        ).health_check()
     elif model_type == 'stt':
         voice_service = get_voice_service()
 

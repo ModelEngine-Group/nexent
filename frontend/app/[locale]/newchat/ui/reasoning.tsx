@@ -336,6 +336,7 @@ const StreamingReasoning = () => {
   if (!isRunning) {
     return (
       <MarkdownTextPrimitive
+        remarkPlugins={[remarkGfm]}
         className="aui-md prose prose-sm max-w-none dark:prose-invert"
         components={{ ...defaultComponents, img: () => null }}
         preprocess={normalizeReasoningCodeBlocks}

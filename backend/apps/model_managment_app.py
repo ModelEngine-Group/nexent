@@ -60,6 +60,7 @@ from services.model_management_service import (
     _record_capacity_suggestion_accept,
 )
 from utils.auth_utils import get_current_user_id
+from consts.exceptions import TokenExpiredError
 
 # Model Catalog loader (with graceful fallback)
 try:
@@ -179,6 +180,9 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         logging.error(f"Failed to create model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
                             detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise HTTPException(
@@ -210,6 +214,9 @@ async def suggest_model_capacity(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to suggest model capacity: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -231,6 +238,9 @@ async def get_model_capacity_coverage(authorization: Optional[str] = Header(None
         })
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get model capacity coverage: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -256,8 +266,9 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
             "message": "Provider model created successfully",
             "data": model_list
         })
-    except HTTPException:
-        raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create provider model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -295,6 +306,9 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully"
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -319,6 +333,9 @@ async def get_provider_list(request: ProviderModelRequest, authorization: Option
             "message": "Successfully retrieved provider list",
             "data": jsonable_encoder(model_list)
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to get provider list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -364,6 +381,9 @@ async def update_single_model(
         logging.error(f"Failed to update model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
                             detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to update model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -384,6 +404,9 @@ async def batch_update_models(request: List[dict], authorization: Optional[str] 
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch update models successfully"
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -415,6 +438,9 @@ async def delete_model(display_name: str = Query(..., embed=True), authorization
         logging.error(f"Failed to delete model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to delete model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -438,6 +464,9 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
             "message": "Successfully retrieved model list",
             "data": jsonable_encoder(model_list)
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to list models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -454,6 +483,9 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
             "message": "Successfully retrieved LLM list",
             "data": jsonable_encoder(llm_list)
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to retrieve LLM list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -487,6 +519,9 @@ async def check_model_health(
         logging.error(f"Invalid model configuration: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                             detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to check model connectivity: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -494,13 +529,17 @@ async def check_model_health(
 
 
 @router.post("/temporary_healthcheck")
-async def check_temporary_model_health(request: ModelRequest):
+async def check_temporary_model_health(
+    request: ModelRequest, authorization: Optional[str] = Header(None)
+):
     """Verify connectivity for the provided model configuration without persisting it.
 
     Args:
         request: Model configuration to verify.
+        authorization: Bearer token header used to enforce authentication.
     """
     try:
+        get_current_user_id(authorization)
         result = await verify_model_config_connectivity(request.model_dump())
         result["capacity_suggestion"] = (
             _capacity_suggestion_for_model_request(request)
@@ -512,6 +551,9 @@ async def check_temporary_model_health(request: ModelRequest):
             "data": result
         },
         )
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to verify model connectivity: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -558,6 +600,9 @@ async def manage_check_model_health(
     except ValueError as e:
         logging.error(f"Invalid model configuration: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to check model connectivity for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -604,6 +649,9 @@ async def manage_create_model(
     except ValueError as e:
         logging.error(f"Failed to create model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create model for tenant: {str(e)}")
         raise HTTPException(
@@ -653,6 +701,9 @@ async def manage_update_model(
     except ValueError as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
         raise HTTPException(
@@ -694,6 +745,9 @@ async def manage_delete_model(
     except LookupError as e:
         logging.error(f"Failed to delete model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to delete model for tenant: {str(e)}")
         raise HTTPException(
@@ -744,6 +798,9 @@ async def manage_batch_create_models(
                 "models_count": len(request.models)
             }
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -781,6 +838,9 @@ async def manage_list_models(
             "message": "Successfully retrieved model list",
             "data": jsonable_encoder(result)
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to list models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -817,6 +877,9 @@ async def manage_list_provider_models(
             "message": "Successfully retrieved provider model list",
             "data": jsonable_encoder(model_list)
         })
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to list provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -860,8 +923,9 @@ async def manage_create_provider_models(
             "message": "Successfully created provider models",
             "data": jsonable_encoder(model_list)
         })
-    except HTTPException:
-        raise
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to create provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

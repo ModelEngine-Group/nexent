@@ -100,6 +100,7 @@ class MCPContainerManager:
         host_port: Optional[int] = None,
         image: Optional[str] = None,
         full_command: Optional[List[str]] = None,
+        wait_for_ready: bool = True,
     ) -> Dict[str, str]:
         """
         Start MCP container and return access URL
@@ -117,14 +118,22 @@ class MCPContainerManager:
             MCPContainerError: If container startup fails
         """
         try:
+            start_kwargs = {
+                "service_name": service_name,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "full_command": full_command,
+                "env_vars": env_vars,
+                "host_port": host_port,
+                "image": image,
+            }
+            # The SDK defaults to waiting for readiness. Omit the default
+            # keyword to preserve compatibility with older client adapters.
+            if not wait_for_ready:
+                start_kwargs["wait_for_ready"] = False
+
             result = await self.client.start_container(
-                service_name=service_name,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                full_command=full_command,
-                env_vars=env_vars,
-                host_port=host_port,
-                image=image,
+                **start_kwargs,
             )
             # Map SDK response to existing interface (mcp_url instead of service_url)
             return {
@@ -151,6 +160,7 @@ class MCPContainerManager:
         env_vars: Optional[Dict[str, str]] = None,
         host_port: Optional[int] = None,
         full_command: Optional[List[str]] = None,
+        wait_for_ready: bool = True,
     ) -> Dict[str, str]:
         """
         Load image from tar file and start MCP container
@@ -174,15 +184,23 @@ class MCPContainerManager:
             # Load image from tar file
             image_name = await self.load_image_from_tar_file(tar_file_path)
 
-            # Start container with the loaded image
+            # Start container with the loaded image. Keep the default
+            # readiness behavior implicit for compatibility with older
+            # adapters, while still forwarding an explicit opt-out.
+            start_kwargs = {
+                "service_name": service_name,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "env_vars": env_vars,
+                "host_port": host_port,
+                "image": image_name,
+                "full_command": full_command,
+            }
+            if not wait_for_ready:
+                start_kwargs["wait_for_ready"] = False
+
             return await self.start_mcp_container(
-                service_name=service_name,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                env_vars=env_vars,
-                host_port=host_port,
-                image=image_name,
-                full_command=full_command,
+                **start_kwargs,
             )
 
         except Exception as e:

@@ -41,7 +41,7 @@ from utils.auth_utils import get_current_user_id
 
 
 logger = logging.getLogger("memory_record_app")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 router = APIRouter(prefix="/memory")
 
 
@@ -122,8 +122,11 @@ def create_record(
     manual management and for Dreaming promotion.
     """
     user_id, tenant_id = get_current_user_id(authorization)
-    if payload.layer.strip().lower() == "tenant":
-        _require_tenant_admin(user_id)
+    if payload.layer.strip().lower() in {"tenant", "user"}:
+        raise HTTPException(
+            status_code=HTTPStatus.GONE,
+            detail="Tenant and user memory use /memory/long-term/{scope}",
+        )
     service = get_memory_record_service()
     try:
         result = service.create_memory(
@@ -142,13 +145,6 @@ def create_record(
     except MemoryRecordError as exc:
         raise HTTPException(
             status_code=HTTPStatus.NOT_ACCEPTABLE, detail=str(exc)
-        )
-
-    if not result.get("indexed") and result.get("layer") == "agent":
-        logger.debug(
-            "Created agent short-term memory memory_id=%s without ES indexing; "
-            "check tenant embedding model configuration.",
-            result.get("memory_id"),
         )
 
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
@@ -184,6 +180,11 @@ def list_records(
 ):
     user_id, tenant_id = get_current_user_id(authorization)
     normalized_layer = layer.strip().lower() if layer else None
+    if normalized_layer in {"tenant", "user"}:
+        raise HTTPException(
+            status_code=HTTPStatus.GONE,
+            detail="Tenant and user memory use /memory/long-term/{scope}",
+        )
     service = get_memory_record_service()
     rows = service.list_memories(
         tenant_id,

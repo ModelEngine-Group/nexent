@@ -57,10 +57,15 @@ class _UnauthorizedError(Exception):
     pass
 
 
+class _TenantResourceLimitError(Exception):
+    pass
+
+
 exceptions_mock = MagicMock()
 exceptions_mock.OAuthProviderError = _OAuthProviderError
 exceptions_mock.OAuthLinkError = _OAuthLinkError
 exceptions_mock.UnauthorizedError = _UnauthorizedError
+exceptions_mock.TenantResourceLimitError = _TenantResourceLimitError
 sys.modules["consts.exceptions"] = exceptions_mock
 
 sys.modules["database"] = MagicMock()
@@ -280,6 +285,7 @@ class TestLink(unittest.TestCase):
 class TestCallback(unittest.TestCase):
     def setUp(self):
         oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+        oauth_service_mock.ensure_user_tenant_exists.side_effect = None
 
     def test_returns_error_when_provider_error(self):
         response = client.get(
@@ -344,6 +350,29 @@ class TestCallback(unittest.TestCase):
         )
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
+
+    def test_returns_readable_error_when_tenant_user_limit_is_reached(self):
+        oauth_service_mock.reset_mock()
+        oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
+        database_oauth_mock.get_oauth_account_by_provider.return_value = {
+            "provider": "github",
+            "provider_user_id": "12345",
+            "user_id": "user-uuid-123",
+        }
+        oauth_service_mock.exchange_code_for_provider_token.return_value = {"access_token": "token"}
+        oauth_service_mock.get_provider_user_info.return_value = {
+            "id": "12345", "email": "octocat@github.com", "username": "octocat"
+        }
+        oauth_service_mock.ensure_user_tenant_exists.side_effect = _TenantResourceLimitError(
+            "Tenant user limit reached: maximum 10000 users per tenant"
+        )
+
+        response = client.get("/user/oauth/callback?provider=github&code=limit_code")
+
+        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        data = response.json()
+        self.assertEqual(data["data"]["oauth_error"], "tenant_resource_limit_exceeded")
+        self.assertIn("maximum 10000", data["message"])
 
     def test_new_unbound_oauth_requires_account_completion(self):
         oauth_service_mock.reset_mock()

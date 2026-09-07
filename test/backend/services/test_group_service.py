@@ -226,6 +226,24 @@ def test_get_groups_by_tenant_empty_list(mock_query_groups_by_tenant, mock_count
 
 @patch('backend.services.group_service.count_group_users')
 @patch('backend.services.group_service.query_groups_by_tenant')
+def test_get_groups_by_tenant_with_search(mock_query_groups_by_tenant, mock_count_users):
+    """Test that a group search term is forwarded to the database layer."""
+    mock_query_groups_by_tenant.return_value = {
+        "groups": [{"group_id": 1, "group_name": "Engineering"}], "total": 1
+    }
+    mock_count_users.return_value = 2
+
+    result = get_groups_by_tenant("test_tenant", 1, 10, search="eng")
+
+    assert result["total"] == 1
+    assert result["groups"][0]["user_count"] == 2
+    mock_query_groups_by_tenant.assert_called_once_with(
+        "test_tenant", 1, 10, "created_at", "desc", "eng"
+    )
+
+
+@patch('backend.services.group_service.count_group_users')
+@patch('backend.services.group_service.query_groups_by_tenant')
 def test_get_groups_by_tenant_with_missing_group_id(mock_query_groups_by_tenant, mock_count_users):
     """Test getting groups by tenant when group_id is missing in result"""
     mock_result = {

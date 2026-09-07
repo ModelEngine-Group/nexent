@@ -31,7 +31,7 @@ from .memory_index_service import MemoryIndexService, get_memory_index_service
 
 
 logger = logging.getLogger("memory_record_service")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 def _generate_idempotency_key() -> str:
@@ -101,17 +101,14 @@ def _resolve_tenant_embedding_model_info(
     tenant_id: str,
 ) -> Optional[EmbeddingModelInfo]:
     """Return the embedding model selected by the tenant, or ``None``."""
-    logger.debug("[EMBEDDING_MODEL_LOOKUP] tenant_id=%s", tenant_id)
-
     try:
         from database.tenant_config_db import get_single_config_info
         from utils.config_utils import tenant_config_manager
 
         record = get_single_config_info(tenant_id, "EMBEDDING_ID")
         if not record or not record.get("config_value"):
-            logger.info(
-                "[EMBEDDING_MODEL_LOOKUP] EMBEDDING_ID is not configured "
-                "for tenant=%s",
+            logger.warning(
+                "No embedding model configured for tenant %s",
                 tenant_id,
             )
             return None
@@ -128,8 +125,7 @@ def _resolve_tenant_embedding_model_info(
 
     if not model_config:
         logger.warning(
-            "[EMBEDDING_MODEL_LOOKUP] configured EMBEDDING_ID does not "
-            "resolve to a model for tenant=%s",
+            "Configured EMBEDDING_ID does not resolve to a model for tenant=%s",
             tenant_id,
         )
         return None
@@ -139,8 +135,7 @@ def _resolve_tenant_embedding_model_info(
     dimension = model_config.get("max_tokens")
     if not all([model_name, base_url, dimension]):
         logger.warning(
-            "[EMBEDDING_MODEL_LOOKUP] configured model is incomplete for "
-            "tenant=%s model_name=%s",
+            "Configured model is incomplete for tenant=%s: model_name=%s",
             tenant_id,
             model_name,
         )
@@ -157,8 +152,7 @@ def _resolve_tenant_embedding_model_info(
         )
     except (TypeError, ValueError):
         logger.exception(
-            "[EMBEDDING_MODEL_LOOKUP] configured model has invalid dimension "
-            "for tenant=%s",
+            "Configured model has invalid dimension for tenant=%s",
             tenant_id,
         )
         return None

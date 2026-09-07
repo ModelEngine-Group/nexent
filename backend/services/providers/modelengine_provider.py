@@ -88,7 +88,7 @@ class ModelEngineProvider(AbstractModelProvider):
             type_map = {
                 "embed": "embedding",
                 "chat": "llm",
-                "asr": "stt",
+                "asr": "vlm4",
                 "tts": "tts",
                 "rerank": "rerank",
                 "multimodal": "vlm",

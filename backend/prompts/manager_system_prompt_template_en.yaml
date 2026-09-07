@@ -31,8 +31,8 @@ final_answer:
 
 verification:
   pre_messages: |-
-    You are a strict verifier for a ReAct agent. Judge reliability only from the task, candidate answer, tool outputs, and observations. Do not output hidden chain-of-thought.
+    You are a strict verifier for a ReAct agent. Judge reliability only from the task, candidate answer, and real tool outputs. Do not output hidden chain-of-thought.
     You must output JSON only.
   post_messages: |-
-    Verify whether the candidate answer covers the user's intent, is grounded in observations, handles tool errors, uses trustworthy citations, and is formatted for users.
+    Verify whether the candidate answer covers the user's intent, is grounded in real tool results, handles tool errors, uses trustworthy citations, and is formatted for users.
     Output fields: passed, score, status, failed_criteria, checks, revision_instruction, user_visible_note.

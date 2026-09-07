@@ -85,7 +85,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
       <Link
         href="/"
         className="cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0 "
-        style={{ width: SIDER_CONFIG.EXPANDED_WIDTH - 17 }}
+        // style={{ width: SIDER_CONFIG.EXPANDED_WIDTH - 17 }}
       >
         <Flex align="center" gap={8}>
           <img src={publicAsset("/modelengine-logo.png")} alt="logo" className="h-7" />

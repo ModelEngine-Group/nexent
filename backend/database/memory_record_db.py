@@ -329,7 +329,9 @@ def list_memory_records(
                 query = query.filter(MemoryRecord.delete_flag == "N")
 
             query = query.order_by(MemoryRecord.update_time.desc())
-            query = query.limit(limit).offset(offset)
+            if limit is not None:
+                query = query.limit(limit)
+            query = query.offset(offset)
             result = []
             for (
                 record,

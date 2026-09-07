@@ -5,7 +5,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from jinja2 import StrictUndefined, Template
@@ -53,6 +53,8 @@ class _LLMIntentPayload(BaseModel):
     instruction: str = ""
     schedule: Optional[_LLMSchedulePayload] = None
     schedule_error: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    clarification_question: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class AutomationIntentContext:
     timezone: str = "Asia/Shanghai"
     model_id: Optional[int] = None
     reference_time: Optional[datetime] = None
+    force_llm: bool = False
 
 
 def _analysis_time(context: AutomationIntentContext) -> datetime:
@@ -108,6 +111,8 @@ def _invalid_llm_schedule(payload: _LLMIntentPayload, reason: str) -> Dict[str, 
         "output_requirements": {},
         "analysis_source": "llm",
         "task_content_generated": True,
+        "missing_fields": payload.missing_fields,
+        "clarification_question": payload.clarification_question or reason,
     }
 
 
@@ -220,6 +225,8 @@ def _payload_to_result(
         "analysis_source": "llm",
         "task_content_generated": True,
         "task_content_source": task_content_source,
+        "missing_fields": [],
+        "clarification_question": None,
     }
 
 
@@ -251,7 +258,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
 
     async def analyze(self, context: AutomationIntentContext) -> Dict[str, Any]:
         fallback = await self._fallback.analyze(context)
-        if not has_automation_schedule_signal(context.message):
+        if not context.force_llm and not has_automation_schedule_signal(context.message):
             return fallback
         try:
             content = await asyncio.to_thread(self._generate_sync, context)
@@ -266,6 +273,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
 
     def _generate_sync(self, context: AutomationIntentContext) -> str:
         from nexent.core.models import OpenAIModel
+        from nexent.core.utils.observer import MessageObserver
         from utils.config_utils import get_model_name_from_config
 
         language = detect_instruction_language(context.message)
@@ -282,6 +290,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             undefined=StrictUndefined,
         ).render(**values).strip()
         llm = OpenAIModel(
+            observer=MessageObserver(),
             model_id=get_model_name_from_config(self._model_config),
             api_base=self._model_config.get("base_url", ""),
             api_key=self._model_config.get("api_key", ""),
@@ -294,7 +303,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             timeout_seconds=self._model_config.get("timeout_seconds"),
             stream=False,
         )
-        response = llm.generate([
+        response = llm([
             {
                 "role": MESSAGE_ROLE["SYSTEM"],
                 "content": prompt_template["INTENT_ANALYSIS_SYSTEM_PROMPT"],

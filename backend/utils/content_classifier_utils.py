@@ -27,6 +27,9 @@ class ContentClassifier:
         self.current_file_path: Optional[str] = None
         self.buffer = ""
         self.tag_count = 0
+        self.saw_control_tag = False
+        self._origin_type: Optional[str] = None
+        self._state_before_file = "others"
         self._known_tags = {
             "<SKILL>",
             "</SKILL>",
@@ -36,22 +39,60 @@ class ContentClassifier:
         }
         self._pending_file_path: Optional[str] = None
 
-    def classify(self, chunk: str) -> List[Dict[str, Any]]:
-        """Process streaming chunk and return list of classified events."""
+    def classify(
+        self,
+        chunk: str,
+        origin_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Process one streaming chunk and return classified delta events.
+
+        ``origin_type`` preserves the upstream observer type for content outside
+        the XML control blocks. Content inside a control block is emitted with
+        a semantic NL2Skill type and carries the upstream type as metadata.
+        """
         results = []
+        self._origin_type = origin_type
         self.buffer += chunk
+
+        if len(self.buffer) > self.MAX_BUFFER_SIZE:
+            overflow = self.buffer[:-self.MAX_BUFFER_SIZE]
+            self.buffer = self.buffer[-self.MAX_BUFFER_SIZE:]
+            event = self._create_event(overflow)
+            if event:
+                results.append(event)
 
         while self.buffer:
             if self.buffer.startswith("<"):
                 if ">" not in self.buffer:
                     break
-                results.extend(self._process_tag_start())
+                events = self._process_tag_start()
+                if events is None:
+                    break
+                results.extend(events)
             else:
                 results.extend(self._process_non_tag_content())
 
         return results
 
-    def _process_tag_start(self) -> List[Dict[str, Any]]:
+    def flush(self, origin_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Emit any non-tag tail left in the incremental buffer."""
+        if origin_type is not None:
+            self._origin_type = origin_type
+        results = []
+        while self.buffer:
+            if self.buffer.startswith("<") and ">" in self.buffer:
+                events = self._process_tag_start(final=True)
+                if events is not None:
+                    results.extend(events)
+                    continue
+            content = self.buffer
+            self.buffer = ""
+            event = self._create_event(content)
+            if event:
+                results.append(event)
+        return results
+
+    def _process_tag_start(self, final: bool = False) -> Optional[List[Dict[str, Any]]]:
         """Process buffer when it starts with '<' - extracts and handles tags."""
         results = []
         gt_pos = self.buffer.index(">")
@@ -59,6 +100,11 @@ class ContentClassifier:
         matched = self._match_known_tag_with_buffer(potential_tag)
 
         if matched:
+            content_after_tag = self.buffer[gt_pos + 1:]
+            if not content_after_tag and not final:
+                return None
+            if content_after_tag and not content_after_tag.startswith(("\n", "\r\n")):
+                return self._emit_potential_tag_start()
             results.extend(self._handle_matched_tag(gt_pos, potential_tag, matched))
         elif len(potential_tag) > self.MAX_TAG_LENGTH:
             results.extend(self._emit_dos_protected_content())
@@ -71,11 +117,20 @@ class ContentClassifier:
         """Handle a successfully matched tag and process following content."""
         results = []
         if self.tag_count >= self.MAX_TAG_COUNT:
-            self.buffer = self.buffer[gt_pos + 1:]
+            remaining = self.buffer[gt_pos + 1:]
+            if remaining.startswith("\r\n"):
+                remaining = remaining[2:]
+            elif remaining.startswith("\n"):
+                remaining = remaining[1:]
+            self.buffer = remaining
             return results
 
         self.tag_count += 1
         content_after_tag = self.buffer[gt_pos + 1:]
+        if content_after_tag.startswith("\r\n"):
+            content_after_tag = content_after_tag[2:]
+        elif content_after_tag.startswith("\n"):
+            content_after_tag = content_after_tag[1:]
         self.buffer = ""
 
         event = self._handle_tag(matched_tag)
@@ -178,22 +233,38 @@ class ContentClassifier:
         if not content:
             return {}
 
+        metadata = (
+            {"origin_type": self._origin_type}
+            if self._origin_type
+            else {}
+        )
         if self.state == "skill_body":
-            return {"type": "skill_body", "content": content}
+            return {"type": "skill_body", "content": content, "path": "SKILL.md", **metadata}
         elif self.state == "file":
-            return {"type": "file_content", "content": content, "path": self.current_file_path}
+            return {
+                "type": "file_content",
+                "content": content,
+                "path": self.current_file_path,
+                **metadata,
+            }
         elif self.state == "summary":
-            return {"type": "summary", "content": content}
+            return {"type": "summary", "content": content, **metadata}
         else:
-            return {"type": "others", "content": content}
+            return {
+                "type": self._origin_type or "others",
+                "content": content,
+                **metadata,
+            }
 
     def _handle_tag(self, tag: str) -> Optional[Dict[str, Any]]:
         """Handle matched tag and update state."""
         if tag == "<SKILL>":
+            self.saw_control_tag = True
             self.state = "skill_body"
             return None
 
         elif tag == "<SUMMARY>":
+            self.saw_control_tag = True
             self.state = "summary"
             return None
 
@@ -205,15 +276,26 @@ class ContentClassifier:
             return None
 
         elif tag == "<FILE>":
+            self.saw_control_tag = True
+            self._state_before_file = self.state
             self.state = "file"
             self.current_file_path = self._pending_file_path
             self._pending_file_path = None
-            return {"type": "file_content", "content": "", "path": self.current_file_path, "is_new_file": True}
+            event = {
+                "type": "file_content",
+                "content": "",
+                "path": self.current_file_path,
+                "is_new_file": True,
+            }
+            if self._origin_type:
+                event["origin_type"] = self._origin_type
+            return event
 
         elif tag == "</FILE>":
             if self.state == "file":
-                self.state = "skill_body"
+                self.state = self._state_before_file
             self.current_file_path = None
+            self._state_before_file = "others"
             return None
 
         return None

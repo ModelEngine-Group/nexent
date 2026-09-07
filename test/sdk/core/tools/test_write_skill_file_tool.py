@@ -82,6 +82,16 @@ class MockSkillManager:
     def resolve_tenant_dir(self, tenant_id=None):
         return self.local_skills_dir or ""
 
+    def write_skill_file(self, skill_name, file_path, content, tenant_id=None):
+        skill_dir = self.resolve_skill_dir(skill_name, tenant_id=tenant_id)
+        target = os.path.realpath(os.path.join(skill_dir, file_path))
+        root = os.path.realpath(skill_dir)
+        if os.path.commonpath([root, target]) != root:
+            raise ValueError("file_path resolves outside the skill directory")
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as file_obj:
+            file_obj.write(content)
+
     def save_skill(self, skill_data, tenant_id=None):
         """Mock save_skill that does nothing."""
         return skill_data
@@ -396,50 +406,14 @@ class TestWriteArbitraryFile:
             assert f.read() == "new content"
 
 
-class TestWriteDirectFile:
-    """Test _write_direct_file method for empty skill_name."""
-
-    def test_write_direct_file_creates_file(self, temp_skills_dir):
-        """Test _write_direct_file creates file directly in local_skills_dir."""
+    def test_execute_empty_skill_name_is_rejected(self, temp_skills_dir):
+        """Test execute rejects writes without a skill name."""
         tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
-        tool.skill_manager = MockSkillManager(temp_skills_dir)
-
-        result = tool._write_direct_file("direct-file.txt", "direct content")
-
-        assert "Successfully" in result
-        file_path = os.path.join(temp_skills_dir, "direct-file.txt")
-        assert os.path.exists(file_path)
-        with open(file_path, 'r', encoding='utf-8') as f:
-            assert f.read() == "direct content"
-
-    def test_write_direct_file_nested_path(self, temp_skills_dir):
-        """Test _write_direct_file creates nested directories."""
-        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
-        tool.skill_manager = MockSkillManager(temp_skills_dir)
-
-        result = tool._write_direct_file("subdir/nested/file.py", "print('hello')")
-
-        assert "Successfully" in result
-        file_path = os.path.join(temp_skills_dir, "subdir", "nested", "file.py")
-        assert os.path.exists(file_path)
-
-
-class TestExecuteEmptySkillName:
-    """Test execute with empty skill_name (writes directly to local_skills_dir)."""
-
-    def test_execute_empty_skill_name_direct_write(self, temp_skills_dir):
-        """Test execute with empty skill_name writes directly to local_skills_dir."""
-        tool = WriteSkillFileTool(local_skills_dir=temp_skills_dir)
-        tool.skill_manager = MockSkillManager(temp_skills_dir)
 
         result = tool.execute("", "root-file.txt", "root content")
 
-        assert "Successfully" in result
-        file_path = os.path.join(temp_skills_dir, "root-file.txt")
-        assert os.path.exists(file_path)
-        with open(file_path, 'r', encoding='utf-8') as f:
-            assert f.read() == "root content"
-
+        assert result == "[Error] skill_name is required"
+        assert not os.path.exists(os.path.join(temp_skills_dir, "root-file.txt"))
 
 class TestModuleFunctions:
     """Test module-level tool functions."""

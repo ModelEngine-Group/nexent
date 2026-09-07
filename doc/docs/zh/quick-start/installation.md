@@ -8,9 +8,9 @@
 | **内存**  | 8 GiB | 16 GiB |
 | **磁盘** | 40 GiB | 100 GiB |
 | **架构** | x86_64 / ARM64 | |
-| **软件** | 已安装 Docker 和 Docker Compose | Docker 24+, Docker Compose v2+ |
+| **软件** | Docker Engine 18.09+、Docker Compose v2 | 使用仍受维护的 Docker Engine 和 Compose v2 |
 
-> **💡 注意**：推荐的 **8 核 16 GiB 内存** 配置可确保生产环境下的良好性能。
+> **💡 注意**：推荐配置适合启用完整应用、数据处理和 Docker 沙箱的环境。模型服务通常独立部署，不计入上表资源。
 
 ## 🚀 快速开始
 
@@ -26,7 +26,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **💡 提示**: Docker 和 Kubernetes 共用 `deploy/env/.env`。每次部署前，脚本会保留已有值、注释和旧版变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板；部署时必须存在可读的 `.env.example`。若需要配置语音模型（STT/TTS），请部署前或部署后修改 `deploy/env/.env` 中的相关参数。
+> **💡 提示**：Docker 和 Kubernetes 共用 `deploy/env/.env`。部署脚本会保留已有配置，并补充 `deploy/env/.env.example` 中新增的变量。如果 `.env` 不存在，脚本会优先复用旧版 `docker/.env`，否则从当前模板创建。部署前请确认 `.env.example` 可读。
 
 #### 2. 部署选项
 
@@ -45,6 +45,8 @@ bash deploy.sh docker
 - **supabase（默认选中，可选）**: 启用用户、租户和认证能力
 - **terminal（可选）**: 启用 OpenSSH 终端工具
 - **monitoring（可选）**: 启用观测组件，选择后会继续选择 provider
+
+`application` 会同时准备 `nexent-sandbox` 镜像。v2.5.0 的 Docker 部署默认在系统级 Docker 沙箱中执行模型生成的代码和 Skill 脚本；沙箱不是固定的 Compose 服务，而是由 Runtime 按运行策略创建和复用。
 
 **端口策略:**
 - **development（默认）**: 暴露调试和内部服务端口，便于本地排查
@@ -80,7 +82,7 @@ bash deploy.sh docker --image-source local-latest
 #### ⚠️ 重要提示
 
 1️⃣ **首次部署 v1.8.0 及以上版本时**，系统会创建 `suadmin@nexent.com` 超级管理员账号，默认密码为 `Nexent@123`，无需交互输入，创建成功后会在终端显示。可在首次部署前通过 `deploy/env/.env` 中的 `NEXENT_SUPER_ADMIN_PASSWORD` 覆盖默认值，非交互创建时终端会显示实际使用的密码。使用离线部署包并显式指定 `--config` 时例外：部署脚本会要求输入并确认密码，并以本次输入为准；手动输入的密码不会在终端显示。
-> 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/user-management)
+> 该账号仅用于权限管理，无权开发智能体或创建知识库。请登录该账号，依次完成：访问租户资源→创建租户→创建租户管理员，然后使用租户管理员账号登录,即可使用全部功能。角色权限详情参见 [用户管理](../user-guide/resource-management)
 
 2️⃣ 如需重建 `suadmin` 账号，请按照以下步骤操作：
 ```bash
@@ -112,7 +114,7 @@ GitHub Actions 构建产物默认保留 30 天。如果目标版本的产物已�
 下载后，将压缩包复制到离线服务器并解压。压缩包内直接包含离线包文件，无需再次解压内层归档：
 
 ```bash
-unzip nexent-v2.2.1-amd64.zip -d nexent
+unzip nexent-<version>-amd64.zip -d nexent
 cd nexent
 bash deploy.sh --load-images docker
 ```
@@ -164,10 +166,12 @@ bash deploy.sh \
 
 Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 
-**应用服务:**
+**应用服务：**
 | 服务 | 描述 | 默认端口 |
 |---------|-------------|--------------|
-| nexent | 后端服务 | 5010 |
+| nexent-config | 配置与管理 API | 5010 |
+| nexent-runtime | 智能体运行时 API | 5014 |
+| nexent-mcp | MCP 管理与工具服务 | 5011/5015 |
 | nexent-web | Web 前端 | 3000 |
 | nexent-data-process | 数据处理服务 | 5012 |
 | nexent-northbound | 北向 API 服务 | 5013 |
@@ -178,7 +182,7 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | nexent-postgresql | 关系型数据库 |
 | nexent-elasticsearch | 搜索引擎和索引服务 |
 | nexent-minio | S3 兼容对象存储 |
-| redis | 缓存层 |
+| redis | 缓存、分布式锁和任务消息代理 |
 
 **Supabase 服务（选择 `supabase` 组件时）:**
 | 服务 | 描述 |
@@ -193,6 +197,12 @@ Nexent 采用微服务架构，通过 Docker Compose 进行部署。
 | nexent-openssh-server | AI 智能体 SSH 终端 |
 | nexent-monitoring | 可选观测组件 |
 
+**按需执行环境：**
+
+| 组件 | 描述 |
+|---------|-------------|
+| nexent-sandbox | Runtime 按策略创建的隔离执行环境，用于运行模型生成的代码和 Skill 脚本 |
+
 ## 💾 数据持久化
 
 Nexent 使用 Docker volumes 进行数据持久化：
@@ -203,6 +213,7 @@ Nexent 使用 Docker volumes 进行数据持久化：
 | Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
+| 智能体运行工作区 | nexent-agent-workspace | Docker 命名卷，由 `NEXENT_SANDBOX_WORKSPACE_VOLUME` 配置 |
 | Supabase DB（选择 supabase 时）| nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 默认 `dataDir` 为 `./volumes`（可在 `deploy/env/.env` 中配置 `ROOT_DIR`）。
@@ -233,6 +244,8 @@ Docker 卸载脚本会读取 `deploy/env/.env` 中的 `ROOT_DIR` 并清理 Compo
 |---------|---------------|---------------|-------------|
 | Web 界面 | 3000 | 3000 | 主应用程序访问 |
 | 后端 API | 5010 | 5010 | 后端服务 |
+| Runtime API | 5014 | 5014 | 智能体运行时服务 |
+| MCP API | 5011/5015 | 5011/5015 | MCP 管理与工具服务 |
 | 数据处理 | 5012 | 5012 | 数据处理 API |
 | 北向 API | 5013 | 5013 | 北向接口服务 (A2A/MCP 集成) |
 | PostgreSQL | 5432 | 5434 | 数据库连接 |
@@ -245,6 +258,26 @@ Docker 卸载脚本会读取 `deploy/env/.env` 中的 `ROOT_DIR` 并清理 Compo
 有关完整的端口映射详细信息，请参阅我们的 [开发容器指南](../deployment/devcontainer.md#port-mapping)。
 
 ## 🔧 高级配置
+
+v2.5.0 的部署模板默认使用 Docker 沙箱，并复用系统级容器以减少冷启动时间。Runtime 通过独立工作区卷交换上传文件和生成文件；运行结束后，需要保留的产物会同步到 MinIO。
+
+常用配置位于 `deploy/env/.env`：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NEXENT_SANDBOX_DEFAULT_LEVEL` | `docker` | 隔离级别，可选 `local`、`docker`、`wasm` |
+| `NEXENT_SANDBOX_DEFAULT_SCOPE` | `system` | 容器生命周期，可选 `session` 或 `system` |
+| `NEXENT_SANDBOX_DOCKER_IMAGE` | `nexent/nexent-sandbox:latest` | Docker 沙箱镜像 |
+| `NEXENT_SANDBOX_WORKSPACE_VOLUME` | `nexent-agent-workspace` | Runtime 与沙箱共享的 Docker 卷 |
+| `NEXENT_SANDBOX_MEMORY_LIMIT_MB` | `2048` | 沙箱内存上限，单位为 MiB |
+| `NEXENT_SANDBOX_CPU_QUOTA` | `1.0` | 沙箱 CPU 配额 |
+| `NEXENT_SANDBOX_TIMEOUT_S` | `30` | 单步执行超时，单位为秒 |
+| `NEXENT_SANDBOX_NETWORK` | `disabled` | 是否允许沙箱访问网络 |
+| `NEXENT_SANDBOX_SHELL_POLICY` | `disabled` | Shell 调用策略，可选 `disabled`、`restricted`、`boxed` |
+| `NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS` | `true` | 是否自动将输出文件同步到 MinIO |
+| `AGENT_WORKSPACE_ROOT` | `/mnt/nexent/workdir` | 每次运行的临时文件工作区 |
+
+生产环境不建议将隔离级别改为 `local`。调整资源、网络或 Shell 策略后，需要重新部署 Runtime。
 
 ### 监控配置
 
@@ -374,10 +407,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=role
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -388,6 +426,12 @@ CAS_LOGOUT_URL=/logout
 CAS_SSL_VERIFY=true
 CAS_CA_BUNDLE=
 ```
+
+CAS 未返回 `CAS_ROLE_ATTRIBUTE` 指定的角色属性、属性为空或映射后的角色不受支持时，使用 `CAS_DEFAULT_ROLE`。支持的默认角色为 `SU`、`ADMIN`、`DEV` 和 `USER`；配置无效时回退到 `USER`。
+
+CAS 未返回 `CAS_TENANT_ATTRIBUTE` 指定的租户属性或属性为空时，使用 `CAS_DEFAULT_TENANT_ID`。
+
+`CAS_HEARTBEAT_URL` 用于启用独立的 CAS 用户活动心跳。页面可见时，首次用户活动立即发送 GET；之后点击、键盘、鼠标、触摸、窗口聚焦或页面可见性变化在所有浏览器标签页中每 `CAS_HEARTBEAT_INTERVAL_SECONDS` 最多发送一次。若配置的 Cookie 可被前端读取，请求会携带 `X-Auth-Token: <cookie-name>=<cookie-value>`；读取不到时仍发送心跳，但不带该 Header。由于浏览器直接访问心跳地址，认证源必须通过 CORS 允许 Nexent Origin、GET、OPTIONS 和 `X-Auth-Token`。心跳只保活认证源会话，现有无感续期仍负责刷新 Nexent 本地会话。
 
 常用 CAS 地址：
 
@@ -426,10 +470,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=userType
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local

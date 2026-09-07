@@ -103,13 +103,19 @@ if grep -Eq '^COMMENT ON COLUMN .*conversation_message_unit_t.*step_index' "$DEP
   fail "init SQL should not comment conversation_message_unit_t.step_index before its migration adds the column"
 fi
 
-HISTORY_PROJECTION_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.3.0_0703_history_projection_fields.sql"
+HISTORY_PROJECTION_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.3_merged_migrations.sql"
 assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
   "ADD COLUMN IF NOT EXISTS step_index INTEGER DEFAULT NULL;" \
   "history projection migration should add conversation_message_unit_t.step_index"
 assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
   "COMMENT ON COLUMN nexent.conversation_message_unit_t.step_index" \
   "history projection migration should comment conversation_message_unit_t.step_index"
+assert_file_not_contains "$HISTORY_PROJECTION_MIGRATION" \
+  "CREATE UNIQUE INDEX IF NOT EXISTS uq_skill_repository_skill_active" \
+  "v2.3 merged migration should not recreate the obsolete skill repository unique index"
+assert_file_contains "$HISTORY_PROJECTION_MIGRATION" \
+  "multiple active snapshots may exist across statuses" \
+  "v2.3 merged migration should document support for multiple active skill snapshots"
 
 PLAN_FILE="$TMP_DIR/plan.sql"
 PATH="$BIN_DIR:$PATH" \
@@ -138,7 +144,7 @@ assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] check v1_merged_migra
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] skip v1_merged_migrations.sql" "plan should skip matching checksums"
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] apply v1_merged_migrations.sql" "plan should apply new migration files"
 assert_file_contains "$PLAN_FILE" "\\echo [sql-migrations] reapply v1_merged_migrations.sql" "plan should reapply changed migration files"
-assert_file_contains "$PLAN_FILE" "migration_checksum_matched" "plan should compare recorded checksum with current file checksum"
+assert_file_contains "$PLAN_FILE" "migration_skip_eligible" "plan should compute skip eligibility from checksum and cascade flag"
 assert_file_contains "$PLAN_FILE" "executed_at = now()" "plan should refresh execution time on reapply"
 assert_file_contains "$PLAN_FILE" "SET search_path TO \"nexent\", public;" "plan should set search path for legacy migrations"
 

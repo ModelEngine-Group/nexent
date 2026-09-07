@@ -13,7 +13,7 @@ from services.datamate_service import (
     check_datamate_connection
 )
 from utils.auth_utils import get_current_user_id
-from consts.exceptions import DataMateConnectionError
+from consts.exceptions import DataMateConnectionError, TokenExpiredError
 
 router = APIRouter(prefix="/datamate")
 logger = logging.getLogger("datamate_app")
@@ -41,6 +41,9 @@ async def sync_datamate_knowledges(
     except DataMateConnectionError as e:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error syncing DataMate knowledge bases and creating records: {str(e)}")
@@ -57,6 +60,9 @@ async def get_datamate_knowledge_base_files_endpoint(
         user_id, tenant_id = get_current_user_id(authorization)
         result = await fetch_datamate_knowledge_base_file_list(knowledge_base_id, tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error fetching DataMate knowledge base files: {str(e)}")
@@ -92,6 +98,9 @@ async def test_datamate_connection_endpoint(
             )
     except HTTPException:
         raise
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

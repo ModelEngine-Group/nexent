@@ -198,6 +198,7 @@ def _make_step_agent(rule, messages, model_output="ok"):
     """
     controller = _make_controller(rule)
     agent = object.__new__(CoreAgent)
+    agent.workspace_path = None
     agent.name = "test"
     agent.agent_name = "test"
     agent.observer = MagicMock()

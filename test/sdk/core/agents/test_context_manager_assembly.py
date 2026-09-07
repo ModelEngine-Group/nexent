@@ -80,7 +80,42 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.evidence.stable_message_count == 1
     assert final.evidence.dynamic_message_count == 3
     assert final.evidence.stable_prefix_fingerprint
+    assert final.evidence.purpose == "step"
+    assert final.evidence.messages_fingerprint
+    assert final.evidence.tools_fingerprint
+    assert final.evidence.system_messages_fingerprint
+    assert final.evidence.history_messages_fingerprint
+    assert final.evidence.message_roles == ("system", "user", "user", "user")
+    assert final.evidence.history_message_roles == ("user", "user", "user")
     assert final.tools == [{"name": "a"}, {"name": "z"}]
+
+
+def test_context_fingerprint_bounds_cycles_and_excessive_depth():
+    manager = ContextManager()
+    cyclic = {}
+    cyclic["self"] = cyclic
+    deeply_nested = current = {}
+    for _ in range(40):
+        child = {}
+        current["child"] = child
+        current = child
+
+    normalized_cycle = manager._normalize(cyclic)
+    normalized_depth = manager._normalize(deeply_nested)
+
+    assert normalized_cycle["self"]["__cycle__"] == "builtins.dict"
+    assert "__max_depth__" in str(normalized_depth)
+    assert len(manager._fingerprint(cyclic)) == 64
+
+
+def test_context_fingerprint_degrades_when_normalization_fails():
+    class BrokenDump:
+        def model_dump(self):
+            raise RuntimeError("broken observational payload")
+
+    fingerprint = ContextManager()._fingerprint([BrokenDump()])
+
+    assert len(fingerprint) == 64
 
 
 def test_prepare_run_projects_fallback_system_prompt_without_mutating_memory():
@@ -133,7 +168,7 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "system",
         "user",
-        "assistant",
+        "user",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -141,6 +176,13 @@ def test_context_manager_owns_final_answer_assembly():
         "final instruction",
         "memory fact",
     ]
+    action_history = _message_text(final.messages[3])
+    assert '<completed_action_history read_only="true">' in action_history
+    assert "recorded_result:\nwork trace" in action_history
+    assert "Calling tools:" not in action_history
+    assert "Observation:" not in action_history
+    assert final.evidence.purpose == "final_answer"
+    assert final.evidence.final_answer_prompt_fingerprint
     assert _message_text(final.messages[-1]) == "answer task: original task"
     assert final.evidence.stable_message_count == 2
     assert "context_purpose" in final.evidence.prefix_change_reasons or (

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nexent.core.gateway import EmbeddingContext
 from nexent.memory.embedding_model import (
     EmbeddingModelInfo,
     _sanitize_index_component,
@@ -111,7 +112,7 @@ class TestEmbeddingClientCache:
     def test_cache_miss_creates_instance(self, mocker):
         """First call with a given key must create and cache the client."""
         mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
         )
         mock_instance = MagicMock()
         mock_init.return_value = mock_instance
@@ -124,18 +125,24 @@ class TestEmbeddingClientCache:
         )
 
         assert client is mock_instance
+        # The migrated client is constructed from an EmbeddingContext (one
+        # positional arg); dataclass equality verifies every field.
         mock_init.assert_called_once_with(
-            model_name="text-embedding-3-small",
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-            embedding_dim=1536,
-            ssl_verify=True,
+            EmbeddingContext(
+                model_name="text-embedding-3-small",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                modality="embedding",
+                factory="openai",
+                embedding_dim=1536,
+                ssl_verify=True,
+            )
         )
 
     def test_cache_hit_returns_same_instance(self, mocker):
         """Subsequent calls with the same key must return the cached instance."""
         mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
         )
         mock_instance = MagicMock()
         mock_init.return_value = mock_instance
@@ -161,7 +168,7 @@ class TestEmbeddingClientCache:
     def test_different_dimension_returns_different_instance(self, mocker):
         """Different dimensions are separate cache entries."""
         mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
         )
         mock1 = MagicMock()
         mock2 = MagicMock()
@@ -191,7 +198,7 @@ class TestEmbeddingClientCache:
         ``local``) get their own client instances.
         """
         mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
         )
         mock_instance = MagicMock()
         mock_init.return_value = mock_instance
@@ -219,7 +226,7 @@ class TestEmbeddingClientCache:
     def test_same_model_repo_hits_cache(self, mocker):
         """Same (model_repo, model_name, dimension) returns the cached client."""
         mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
         )
         mock_instance = MagicMock()
         mock_init.return_value = mock_instance
@@ -245,7 +252,7 @@ class TestEmbeddingClientCache:
         """reset_embedding_client_cache() must empty the cache so the next call
         creates a fresh instance."""
         mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
         )
         mock_instance = MagicMock()
         mock_init.return_value = mock_instance

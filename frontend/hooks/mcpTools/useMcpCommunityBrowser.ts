@@ -29,18 +29,15 @@ const INITIAL_FILTERS: CommunityFilters = {
 };
 
 /**
- * Browsing state (search + filters + cursor pagination + tag stats) for the
+ * Browsing state (search + filters + offset pagination + tag stats) for the
  * community MCP list.
  */
-export function useMcpCommunityBrowser(enabled: boolean) {
+export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
   const [filters, setFilters] = useState<CommunityFilters>(INITIAL_FILTERS);
   const [debouncedSearch, setDebouncedSearch] = useState(
     INITIAL_FILTERS.search
   );
-  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([
-    null,
-  ]);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -51,8 +48,7 @@ export function useMcpCommunityBrowser(enabled: boolean) {
   }, [filters.search]);
 
   useEffect(() => {
-    setCursorHistory([null]);
-    setPageIndex(0);
+    setPage(1);
   }, [debouncedSearch, filters.transport, filters.tag]);
 
   const query = useQuery({
@@ -61,15 +57,18 @@ export function useMcpCommunityBrowser(enabled: boolean) {
       debouncedSearch,
       filters.transport,
       filters.tag,
-      cursorHistory[pageIndex],
+      page,
+      pageSize,
     ],
     enabled,
     queryFn: async () => {
       const result = await fetchCommunityMcpCards({
         search: debouncedSearch || undefined,
-        transportType: filters.transport === FILTER_ALL ? undefined : filters.transport,
+        transportType:
+          filters.transport === FILTER_ALL ? undefined : filters.transport,
         tag: filters.tag === FILTER_ALL ? undefined : filters.tag,
-        cursor: cursorHistory[pageIndex],
+        page,
+        limit: pageSize,
       });
       return result.data;
     },
@@ -91,26 +90,24 @@ export function useMcpCommunityBrowser(enabled: boolean) {
     () => query.data?.items ?? [],
     [query.data?.items]
   );
-  const nextCursor = query.data?.nextCursor ?? null;
+  const total = query.data?.total ?? 0;
   const tagStats: McpTagStat[] = useMemo(
     () => tagStatsQuery.data ?? [],
     [tagStatsQuery.data]
   );
 
-  const hasPrevPage = pageIndex > 0;
-  const hasNextPage = Boolean(nextCursor);
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    if (page > lastPage) setPage(lastPage);
+  }, [page, pageSize, total]);
 
+  const hasPrevPage = page > 1;
+  const hasNextPage = page * pageSize < total;
   const nextPage = useCallback(() => {
-    if (!nextCursor) return;
-    setCursorHistory((prev) => {
-      const truncated = prev.slice(0, pageIndex + 1);
-      return [...truncated, nextCursor];
-    });
-    setPageIndex((prev) => prev + 1);
-  }, [nextCursor, pageIndex]);
-
+    if (page * pageSize < total) setPage((current) => current + 1);
+  }, [page, pageSize, total]);
   const prevPage = useCallback(() => {
-    setPageIndex((prev) => Math.max(0, prev - 1));
+    setPage((current) => Math.max(1, current - 1));
   }, []);
 
   const updateFilter = <K extends keyof CommunityFilters>(
@@ -127,7 +124,10 @@ export function useMcpCommunityBrowser(enabled: boolean) {
       loading: query.isLoading || query.isFetching,
       filters,
       updateFilter,
-      page: pageIndex + 1,
+      page,
+      total,
+      pageSize,
+      setPage,
       hasPrevPage,
       hasNextPage,
       nextPage,
@@ -140,7 +140,9 @@ export function useMcpCommunityBrowser(enabled: boolean) {
       query.isLoading,
       query.isFetching,
       filters,
-      pageIndex,
+      page,
+      total,
+      pageSize,
       hasPrevPage,
       hasNextPage,
       nextPage,

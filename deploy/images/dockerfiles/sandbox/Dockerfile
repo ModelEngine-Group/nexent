@@ -2,8 +2,9 @@
 # Sandbox runtime image for LLM-generated Python execution.
 #
 # Design reference: doc/docs/zh/backend/sandbox-design.md#6-docker镜像设计
-# This image is consumed by smolagents DockerExecutor; it is NOT a
-# long-running service and is created/destroyed per agent run.
+# This image is consumed by smolagents DockerExecutor. Depending on the
+# configured sandbox scope, it either serves one agent run or hosts isolated
+# per-run Jupyter kernels in a long-running system container.
 # =====================================================================
 
 # ---------------------------------------------------------------------
@@ -61,7 +62,7 @@ RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv
 # Stage 2: runtime - minimal Python image with Jupyter Kernel Gateway
 # (smolagents DockerExecutor's default IPC channel) and a non-root
 # `sandbox` user. The DockerExecutor will run this image with
-# network_mode=none and per-run resource limits; the image itself only
+# the configured network mode and per-run resource limits; the image itself
 # enforces the in-container invariants (non-root, workdir, libs).
 # ---------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
@@ -69,6 +70,9 @@ FROM python:3.11-slim AS runtime
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
+LABEL org.opencontainers.image.title="Nexent Sandbox" \
+      org.opencontainers.image.description="Default lightweight Nexent sandbox runtime" \
+      io.nexent.sandbox.variant="lightweight"
 
 USER root
 RUN umask 0022
@@ -130,6 +134,17 @@ RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/p
         "beautifulsoup4>=4.12,<5.0" \
         "lxml>=4.9,<5.0" \
         "openpyxl>=3.1,<4.0" \
+        "xlsxwriter>=3.2,<4.0" \
+        "xlrd>=2.0,<3.0" \
+        "pyxlsb>=1.0,<2.0" \
+        "python-docx>=1.1,<2.0" \
+        "docx2txt>=0.9,<1.0" \
+        "python-pptx>=1.0,<2.0" \
+        "pypdf>=6.0,<7.0" \
+        "pdfplumber>=0.11,<1.0" \
+        "reportlab>=4.2,<5.1" \
+        "odfpy>=1.4,<2.0" \
+        "defusedxml>=0.7,<1.0" \
         "matplotlib>=3.7,<4.0" \
         "scipy>=1.11,<2.0" \
         "scikit-learn>=1.3,<2.0" \
@@ -139,17 +154,20 @@ RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/p
         "tabulate>=0.9,<1.0" \
         "python-dateutil>=2.8,<3.0" \
     $(test -n "$MIRROR" && echo "-i $MIRROR") \
-    && python -c "import numpy, pandas, requests, PIL, bs4, lxml, openpyxl, matplotlib, scipy, sklearn, pydantic, sympy, statsmodels, tabulate, dateutil; print('OK')"
+    && python -c "import numpy, pandas, requests, PIL, bs4, lxml, openpyxl, xlsxwriter, xlrd, pyxlsb, docx, docx2txt, pptx, pypdf, pdfplumber, reportlab, odf, defusedxml, matplotlib, scipy, sklearn, pydantic, sympy, statsmodels, tabulate, dateutil; print('OK')" \
+    && pip check
 
-# Create a non-root user so the LLM code cannot write outside /home/sandbox
-# (combined with network_mode=none + run-scoped resource limits, this is
-# the in-container half of the security boundary; the host-side halves
-# are enforced by the DockerExecutor at run start).
+# Create a non-root user and the fixed workspace mount root. Runtime creates
+# /mnt/nexent/workdir/<user_id>/<run_id> for each run and grants access only
+# after mounting or copying that run's workspace into the container. Keep a
+# private home workdir as the kernel's neutral default cwd; a Dockerfile cannot
+# select a dynamic per-run directory as WORKDIR.
 RUN useradd --uid 1000 --create-home --shell /bin/bash sandbox && \
     mkdir -p /home/sandbox/workdir/input \
              /home/sandbox/workdir/output \
-             /home/sandbox/workdir/tmp && \
-    chown -R sandbox:sandbox /home/sandbox
+             /home/sandbox/workdir/tmp \
+             /mnt/nexent/workdir && \
+    chown -R sandbox:sandbox /home/sandbox /mnt/nexent
 
 WORKDIR /home/sandbox/workdir
 USER sandbox

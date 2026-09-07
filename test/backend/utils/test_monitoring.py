@@ -4,8 +4,40 @@ Unit tests for backend monitoring utilities (OTLP-based).
 Tests the actual functionality and integration of the OTLP monitoring system.
 """
 
-import pytest
+import sys
+import types
 from unittest.mock import MagicMock
+
+import pytest
+
+fake_consts = types.ModuleType("consts.const")
+for name, value in {
+    "ENABLE_TELEMETRY": False,
+    "MONITORING_PROVIDER": "",
+    "MONITORING_PROJECT_NAME": "",
+    "OTEL_SERVICE_NAME": "test-service",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http",
+    "OTEL_EXPORTER_OTLP_METRICS_ENABLED": True,
+    "MONITORING_INSTRUMENT_REQUESTS": False,
+    "MONITORING_FASTAPI_INCLUDED_URLS": "",
+    "MONITORING_FASTAPI_EXCLUDED_URLS": "",
+    "MONITORING_FASTAPI_EXCLUDE_SPANS": "receive,send",
+    "MONITORING_TRACE_CONTENT_MODE": "summary",
+    "MONITORING_TRACE_MAX_CHARS": "4000",
+    "MONITORING_TRACE_MAX_ITEMS": "20",
+    "OTLP_HEADERS": {},
+    "TELEMETRY_SAMPLE_RATE": 1.0,
+}.items():
+    setattr(fake_consts, name, value)
+
+fake_consts_package = types.ModuleType("consts")
+fake_consts_package.const = fake_consts
+sys.modules.setdefault("consts", fake_consts_package)
+sys.modules.setdefault("consts.const", fake_consts)
+
 from backend.utils.monitoring import monitoring_manager
 
 
@@ -214,3 +246,41 @@ class TestMonitoringUtilsModule:
     def test_get_tracer(self):
         """Test getting tracer property."""
         tracer = monitoring_manager.tracer
+
+    def test_module_uses_backend_constants_when_top_level_import_is_unavailable(self, monkeypatch):
+        """The module should support imports from the backend package namespace."""
+        import importlib
+        import backend.utils.monitoring as monitoring_module
+
+        backend_consts = types.ModuleType("backend.consts.const")
+        for name, value in {
+            "ENABLE_TELEMETRY": False,
+            "MONITORING_PROVIDER": "",
+            "MONITORING_PROJECT_NAME": "",
+            "OTEL_SERVICE_NAME": "fallback-service",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "",
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "",
+            "OTEL_EXPORTER_OTLP_PROTOCOL": "http",
+            "OTEL_EXPORTER_OTLP_METRICS_ENABLED": True,
+            "MONITORING_INSTRUMENT_REQUESTS": False,
+            "MONITORING_FASTAPI_INCLUDED_URLS": "",
+            "MONITORING_FASTAPI_EXCLUDED_URLS": "",
+            "MONITORING_FASTAPI_EXCLUDE_SPANS": "receive,send",
+            "MONITORING_TRACE_CONTENT_MODE": "summary",
+            "MONITORING_TRACE_MAX_CHARS": "4000",
+            "MONITORING_TRACE_MAX_ITEMS": "20",
+            "OTLP_HEADERS": {},
+            "TELEMETRY_SAMPLE_RATE": 1.0,
+        }.items():
+            setattr(backend_consts, name, value)
+
+        monkeypatch.delitem(sys.modules, "consts", raising=False)
+        monkeypatch.delitem(sys.modules, "consts.const", raising=False)
+        monkeypatch.setitem(sys.modules, "consts", types.ModuleType("consts"))
+        monkeypatch.setitem(sys.modules, "backend.consts.const", backend_consts)
+
+        reloaded_module = importlib.reload(monitoring_module)
+
+        assert reloaded_module.monitoring_manager is not None
+        assert reloaded_module.__all__ == ["monitoring_manager"]

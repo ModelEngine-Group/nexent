@@ -1,10 +1,6 @@
 import logging
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Tuple
-from urllib.parse import urlencode
-
-import aiohttp
-
 from consts.const import CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
     MCPConnectionError,
@@ -39,7 +35,6 @@ from database.market_mcp_db import (
 )
 from database.remote_mcp_db import (
     clear_mcp_record_market_id,
-    get_mcp_record_by_id_and_tenant,
     update_mcp_record_market_id_by_id,
     update_mcp_record_manage_fields_by_id,
 )
@@ -54,7 +49,13 @@ from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger("mcp_management_service")
 
-MCP_REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1/servers"
+
+def get_mcp_record_by_id_and_tenant(*args, **kwargs):
+    """Load a source MCP record through the database module boundary."""
+    from database.remote_mcp_db import get_mcp_record_by_id_and_tenant as load_record
+
+    return load_record(*args, **kwargs)
+
 ADMIN_ROLES = {"ADMIN", "SUPER_ADMIN", "SU"}
 SUPER_ADMIN_ROLES = {"SUPER_ADMIN", "SU"}
 
@@ -123,29 +124,32 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         STATUS_SHARED: "approved",
         STATUS_REJECTED: "rejected",
     }
-    # Look up authorization_token and custom_headers from the source MCP record
+    shared_fields = row.get("shared_fields") if isinstance(row.get("shared_fields"), dict) else {}
+    # Only expose connection credentials that the publisher explicitly shared.
     source_authorization_token = None
     source_custom_headers = None
     source_container_port = None
     source_mcp_id = row.get("source_mcp_id")
     if source_mcp_id is not None:
         try:
-            from database.remote_mcp_db import get_mcp_record_by_id_and_tenant
             mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=source_mcp_id, tenant_id=row.get("tenant_id", ""))
             if mcp_record:
                 source_authorization_token = mcp_record.get("authorization_token")
                 source_custom_headers = mcp_record.get("custom_headers")
                 source_container_port = mcp_record.get("container_port")
         except Exception:
-            pass
+            # Keep the lookup failure distinguishable from a valid empty policy.
+            # Callers can then avoid treating unavailable source data as an
+            # explicit publisher choice to share no fields.
+            shared_fields = None
     return {
         "communityId": row.get("market_id"),
         "marketId": row.get("market_id"),
         "reviewId": row.get("market_id"),
         "sourceMcpId": source_mcp_id,
-        "sharedFields": row.get("shared_fields"),
-        "authorizationToken": source_authorization_token,
-        "customHeaders": source_custom_headers,
+        "sharedFields": shared_fields,
+        "authorizationToken": source_authorization_token if (shared_fields or {}).get("authorizationToken") else None,
+        "customHeaders": source_custom_headers if (shared_fields or {}).get("customHeaders") else None,
         "containerPort": source_container_port,
         "name": row.get("mcp_name"),
         "description": row.get("description"),
@@ -232,6 +236,7 @@ async def list_community_mcp_services(
     tag: str | None = None,
     transport_type: str | None = None,
     cursor: str | None = None,
+    page: int | None = None,
     limit: int = 30,
 ) -> Dict[str, Any]:
     """List shared (approved) community MCP services scoped to a tenant with permission filtering."""
@@ -243,7 +248,7 @@ async def list_community_mcp_services(
         except Exception as e:
             logger.warning(f"Failed to query user group ids: user_id={user_id}, err={e}")
 
-    db_result = get_mcp_market_records(
+    list_kwargs = dict(
         tenant_id=tenant_id,
         search=search,
         tag=tag,
@@ -253,8 +258,13 @@ async def list_community_mcp_services(
         user_id=user_id if user_role not in CAN_EDIT_ALL_USER_ROLES else None,
         user_group_ids=user_group_ids,
     )
+    if page is not None:
+        list_kwargs["page"] = page
+    db_result = get_mcp_market_records(**list_kwargs)
     return {
         "count": db_result.get("count", 0),
+        "total": db_result.get("total"),
+        "page": db_result.get("page"),
         "nextCursor": db_result.get("nextCursor"),
         "items": [_to_community_card(item) for item in db_result.get("items", [])],
     }
@@ -732,68 +742,4 @@ async def reject_community_mcp_service(
         market_id=market_id,
         new_status=STATUS_REJECTED,
         content=content,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Registry Functions
-# ---------------------------------------------------------------------------
-
-async def _list_official_registry_mcp_services(
-    *,
-    search: str | None = None,
-    include_deleted: bool = False,
-    updated_since: str | None = None,
-    version: str | None = None,
-    cursor: str | None = None,
-    limit: int = 30,
-) -> Dict[str, Any]:
-    """List MCP services from the official MCP Registry."""
-    params: Dict[str, Any] = {"limit": limit}
-    if search:
-        params["search"] = search
-    if include_deleted:
-        params["include_deleted"] = "true"
-    if updated_since:
-        params["updated_since"] = updated_since
-    if version:
-        params["version"] = version
-    if cursor:
-        params["cursor"] = cursor
-
-    request_url = f"{MCP_REGISTRY_BASE_URL}?{urlencode(params)}"
-    timeout = aiohttp.ClientTimeout(total=20)
-
-    async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-        async with session.get(request_url) as response:
-            if response.status >= 400:
-                raise RuntimeError(f"Registry request failed with status {response.status}")
-            payload = await response.json(content_type=None)
-
-    raw_servers = payload.get("servers") if isinstance(payload, dict) else []
-    metadata = payload.get("metadata") if isinstance(payload, dict) and isinstance(payload.get("metadata"), dict) else {}
-
-    return {
-        "servers": raw_servers if isinstance(raw_servers, list) else [],
-        "metadata": metadata,
-    }
-
-
-async def list_registry_mcp_services(
-    *,
-    search: str | None = None,
-    include_deleted: bool = False,
-    updated_since: str | None = None,
-    version: str | None = None,
-    cursor: str | None = None,
-    limit: int = 30,
-) -> Dict[str, Any]:
-    """List MCP services from the official registry."""
-    return await _list_official_registry_mcp_services(
-        search=search,
-        include_deleted=include_deleted,
-        updated_since=updated_since,
-        version=version,
-        cursor=cursor,
-        limit=limit,
     )

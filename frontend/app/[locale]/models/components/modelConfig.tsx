@@ -8,6 +8,7 @@ import {
   useMemo,
   useCallback,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -54,7 +55,6 @@ import {
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import log from "@/lib/logger";
 
-import { ModelAddDialog } from "./model/ModelAddDialog";
 import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
 import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
 import { ModelEditDialogV2 } from "./model/ModelEditDialogV2";
@@ -62,6 +62,63 @@ import { DefaultModelDialog } from "./model/DefaultModelDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
 import { ModelError } from "@/services/modelService";
+import { useModelList } from "@/hooks/model/useModelList";
+
+// ModelConnectStatus type definition
+type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
+
+// Model data structure
+const getModelData = (t: any) => ({
+  llm: {
+    title: t("modelConfig.category.llm"),
+    options: [{ id: "main", name: t("modelConfig.option.mainModel") }],
+  },
+  embedding: {
+    title: t("modelConfig.category.embedding"),
+    options: [
+      {
+        id: MODEL_TYPES.EMBEDDING,
+        name: t("modelConfig.option.embeddingModel"),
+      },
+      {
+        id: MODEL_TYPES.MULTI_EMBEDDING,
+        name: t("modelConfig.option.multiEmbeddingModel"),
+      },
+    ],
+  },
+  reranker: {
+    title: t("modelConfig.category.reranker"),
+    options: [{ id: "reranker", name: t("modelConfig.option.rerankerModel") }],
+  },
+  multimodal: {
+    title: t("modelConfig.category.multimodal"),
+    options: [
+      {
+        id: MODEL_TYPES.VLM,
+        name: t("modelConfig.option.imageUnderstandingModel"),
+      },
+      {
+        id: MODEL_TYPES.VLM2,
+        name: t("modelConfig.option.imageGenerationModel"),
+      },
+      {
+        id: MODEL_TYPES.VLM3,
+        name: t("modelConfig.option.videoUnderstandingModel"),
+      },
+      {
+        id: MODEL_TYPES.VLM4,
+        name: t("modelConfig.option.audioUnderstandingModel"),
+      },
+    ],
+  },
+  voice: {
+    title: t("modelConfig.category.voice"),
+    options: [
+      { id: MODEL_TYPES.TTS, name: t("modelConfig.option.ttsModel") },
+      { id: MODEL_TYPES.STT, name: t("modelConfig.option.sttModel") },
+    ],
+  },
+});
 
 // Define the methods exposed by the component
 export interface ModelConfigSectionRef {
@@ -88,6 +145,7 @@ export const ModelConfigSection = forwardRef<
 >((props, ref): ReactNode => {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
+  const queryClient = useQueryClient();
 
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
@@ -97,8 +155,6 @@ export const ModelConfigSection = forwardRef<
 
   /* ------------------ State ------------------ */
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  // v2.6.0: new ModelAddDialogV2 (Tabs: batch import / custom access)
   const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] =
     useState<boolean>(false);
@@ -124,6 +180,7 @@ export const ModelConfigSection = forwardRef<
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(12);
 
+  const { invalidate } = useModelList();
   // Error state management
   const [errorFields, setErrorFields] = useState<{ [key: string]: boolean }>({
     "llm.main": false,
@@ -152,7 +209,7 @@ export const ModelConfigSection = forwardRef<
     llm: { main: "" },
     embedding: { embedding: "", multi_embedding: "" },
     reranker: { reranker: "" },
-    multimodal: { vlm: "", vlm2: "", vlm3: "" },
+    multimodal: { vlm: "", vlm2: "", vlm3: "", vlm4: "" },
     voice: { tts: "", stt: "" },
   });
 
@@ -533,10 +590,14 @@ export const ModelConfigSection = forwardRef<
     },
   }));
 
-  /* ------------------ Load model lists ------------------ */
-  const loadModelLists = async (skipVerify: boolean = false) => {
+  // Load model lists
+  const loadModelLists = async (
+    skipVerify: boolean = false,
+    refreshAgentQueries: boolean = false
+  ) => {
     if (!modelConfig) return;
     try {
+      await invalidate();
       const [allModels, coverage] = await Promise.all([
         modelService.getAllModels(),
         modelService.getCapacityCoverage(),
@@ -552,6 +613,11 @@ export const ModelConfigSection = forwardRef<
           ? allModels.some((m) => m.displayName === disp && typeChecker(m))
           : true;
 
+      if (refreshAgentQueries) {
+        await queryClient.invalidateQueries({ queryKey: ["agents"] });
+      }
+
+      // Load selected models from configuration and check if models still exist
       const llmMain = modelConfig.llm.displayName;
       const llmMainExists = exists(llmMain, (m) => m.type === MODEL_TYPES.LLM);
       const embedding = modelConfig.embedding.displayName;
@@ -567,9 +633,11 @@ export const ModelConfigSection = forwardRef<
       const vlm = modelConfig.vlm.displayName;
       const vlm2 = modelConfig.vlm2?.displayName || "";
       const vlm3 = modelConfig.vlm3?.displayName || "";
+      const vlm4 = modelConfig.vlm4?.displayName || "";
       const vlmExists = exists(vlm, (m) => m.type === MODEL_TYPES.VLM);
       const vlm2Exists = exists(vlm2, (m) => m.type === MODEL_TYPES.VLM2);
       const vlm3Exists = exists(vlm3, (m) => m.type === MODEL_TYPES.VLM3);
+      const vlm4Exists = exists(vlm4, (m) => m.type === MODEL_TYPES.VLM4);
       const stt = modelConfig.stt.displayName;
       const sttExists = exists(stt, (m) => m.type === MODEL_TYPES.STT);
       const tts = modelConfig.tts.displayName;
@@ -586,6 +654,7 @@ export const ModelConfigSection = forwardRef<
           vlm: vlmExists ? vlm : "",
           vlm2: vlm2Exists ? vlm2 : "",
           vlm3: vlm3Exists ? vlm3 : "",
+          vlm4: vlm4Exists ? vlm4 : "",
         },
         voice: { tts: ttsExists ? tts : "", stt: sttExists ? stt : "" },
       };
@@ -607,9 +676,21 @@ export const ModelConfigSection = forwardRef<
       if (!rerankExists && rerank) {
         configUpdates.rerank = { modelName: "", displayName: "" };
       }
-      if (!vlmExists && vlm) configUpdates.vlm = blank();
-      if (!vlm2Exists && vlm2) configUpdates.vlm2 = blank();
-      if (!vlm3Exists && vlm3) configUpdates.vlm3 = blank();
+      if (!vlmExists && vlm) {
+        configUpdates.vlm = { modelName: "", displayName: "" };
+      }
+
+      if (!vlm2Exists && vlm2) {
+        configUpdates.vlm2 = { modelName: "", displayName: "" };
+      }
+
+      if (!vlm3Exists && vlm3) {
+        configUpdates.vlm3 = { modelName: "", displayName: "" };
+      }
+
+      if (!vlm4Exists && vlm4) {
+        configUpdates.vlm4 = { modelName: "", displayName: "" };
+      }
       if (!sttExists && stt) {
         configUpdates.stt = {
           modelName: "",
@@ -641,6 +722,7 @@ export const ModelConfigSection = forwardRef<
         !!modelConfig.vlm.modelName ||
         !!modelConfig.vlm2?.modelName ||
         !!modelConfig.vlm3?.modelName ||
+        !!modelConfig.vlm4?.modelName ||
         !!modelConfig.tts.modelName ||
         !!modelConfig.stt.modelName;
 
@@ -672,33 +754,52 @@ export const ModelConfigSection = forwardRef<
         }
       }
     }
-    if (!hasSelectedModels && modelConfig) {
-      const has =
-        !!modelConfig.llm.modelName ||
-        !!modelConfig.embedding.modelName ||
-        !!modelConfig.multiEmbedding.modelName ||
-        !!modelConfig.rerank.modelName ||
-        !!modelConfig.vlm.modelName ||
-        !!modelConfig.vlm2?.modelName ||
-        !!modelConfig.vlm3?.modelName ||
-        !!modelConfig.tts.modelName ||
-        !!modelConfig.stt.modelName;
-      if (!has) return;
-      currentSelectedModels.llm.main = modelConfig.llm.modelName;
-      currentSelectedModels.embedding.embedding =
-        modelConfig.embedding.modelName;
-      currentSelectedModels.embedding.multi_embedding =
-        modelConfig.multiEmbedding.modelName || "";
-      currentSelectedModels.reranker.reranker = modelConfig.rerank.modelName;
-      currentSelectedModels.multimodal.vlm = modelConfig.vlm.modelName;
-      currentSelectedModels.multimodal.vlm2 =
-        modelConfig.vlm2?.modelName || "";
-      currentSelectedModels.multimodal.vlm3 =
-        modelConfig.vlm3?.modelName || "";
-      currentSelectedModels.voice.tts = modelConfig.tts.modelName;
-      currentSelectedModels.voice.stt = modelConfig.stt.modelName;
-    } else if (!hasSelectedModels) {
-      return;
+
+    // If no selected models in state, try to get directly from configuration
+    if (!hasSelectedModels) {
+      if (!modelConfig) return;
+
+      // Directly check if each model exists in configuration
+      const hasLlmMain = !!modelConfig.llm.modelName;
+      const hasEmbedding = !!modelConfig.embedding.modelName;
+      const hasReranker = !!modelConfig.rerank.modelName;
+      const hasVlm = !!modelConfig.vlm.modelName;
+      const hasVlm2 = !!modelConfig.vlm2?.modelName;
+      const hasVlm3 = !!modelConfig.vlm3?.modelName;
+      const hasVlm4 = !!modelConfig.vlm4?.modelName;
+      const hasTts = !!modelConfig.tts.modelName;
+      const hasStt = !!modelConfig.stt.modelName;
+
+      hasSelectedModels =
+        hasLlmMain ||
+        hasEmbedding ||
+        hasReranker ||
+        hasVlm ||
+        hasVlm2 ||
+        hasVlm3 ||
+        hasVlm4 ||
+        hasTts ||
+        hasStt;
+
+      if (hasSelectedModels) {
+        currentSelectedModels.llm.main = modelConfig.llm.modelName;
+        currentSelectedModels.embedding.embedding =
+          modelConfig.embedding.modelName;
+        currentSelectedModels.embedding.multi_embedding =
+          modelConfig.multiEmbedding.modelName || "";
+        currentSelectedModels.reranker.reranker = modelConfig.rerank.modelName;
+        currentSelectedModels.multimodal.vlm = modelConfig.vlm.modelName;
+        currentSelectedModels.multimodal.vlm2 =
+          modelConfig.vlm2?.modelName || "";
+        currentSelectedModels.multimodal.vlm3 =
+          modelConfig.vlm3?.modelName || "";
+        currentSelectedModels.multimodal.vlm4 =
+          modelConfig.vlm4?.modelName || "";
+        currentSelectedModels.voice.tts = modelConfig.tts.modelName;
+        currentSelectedModels.voice.stt = modelConfig.stt.modelName;
+      } else {
+        return;
+      }
     }
 
     setIsVerifying(true);
@@ -792,7 +893,7 @@ export const ModelConfigSection = forwardRef<
   /* ------------------ Sync ModelEngine ------------------ */
   const handleSyncModels = () => {
     setAddModalDefaultIsBatch(true);
-    setIsAddModalOpen(true);
+    setIsAddModalV2Open(true);
   };
 
   /* ------------------ Verify single ------------------ */
@@ -1115,21 +1216,6 @@ export const ModelConfigSection = forwardRef<
               </span>
             </Button>
           )}
-          <Can permission="model:create">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<Plus size={16} />}
-              onClick={() => {
-                setAddModalDefaultIsBatch(false);
-                setIsAddModalOpen(true);
-              }}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.addCustomModel")}
-              </span>
-            </Button>
-          </Can>
           {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
           <Can permission="model:create">
             <Button
@@ -1318,22 +1404,6 @@ export const ModelConfigSection = forwardRef<
           onVerifyModel={verifyOneModel}
         />
 
-        <ModelAddDialog
-          isOpen={isAddModalOpen}
-          onClose={() => setIsAddModalOpen(false)}
-          onSuccess={async (newModel) => {
-            await loadModelLists(true);
-            message.success(t("modelConfig.message.addSuccess"));
-            if (newModel && newModel.name && newModel.type) {
-              setTimeout(() => {
-                verifyOneModel(newModel.name, newModel.type);
-              }, 100);
-            }
-          }}
-          defaultProvider="modelengine"
-          defaultIsBatchImport={addModalDefaultIsBatch}
-        />
-
         {/* v2.6.0: new Add Model dialog (Tabs: batch import / custom access) */}
         <ModelAddDialogV2
           isOpen={isAddModalV2Open}
@@ -1353,7 +1423,8 @@ export const ModelConfigSection = forwardRef<
           isOpen={isDeleteModalOpen}
           onClose={() => setIsDeleteModalOpen(false)}
           onSuccess={async () => {
-            await loadModelLists(true);
+            await loadModelLists(true, true);
+            return;
           }}
           models={models}
           capacityCoverage={capacityCoverage}

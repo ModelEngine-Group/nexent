@@ -121,6 +121,18 @@ class TestMemoryEmbeddingStatus:
 
 
 class TestSetSingleConfig:
+    def test_set_dreaming_switch(self):
+        with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")), patch(
+            "apps.memory_config_app.set_dreaming_switch", return_value=True
+        ) as dreaming_switch:
+            resp = client.post(
+                "/memory/config/set",
+                json={"key": "DREAMING_SWITCH", "value": "true"},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == HTTPStatus.OK
+        dreaming_switch.assert_called_once_with("u", True)
+
     def test_set_memory_switch_true_string(self):
         with patch("apps.memory_config_app.get_current_user_id", return_value=("u", "t")):
             with patch("apps.memory_config_app.set_memory_switch", return_value=True) as m_set:
@@ -203,6 +215,45 @@ class TestSetSingleConfig:
                 assert resp.status_code == HTTPStatus.BAD_REQUEST
                 assert resp.json()[
                     "detail"] == "Failed to update configuration"
+
+
+class TestDreamingConfig:
+    def test_disable_stops_schedule_and_deletes_history(self):
+        schedule = {
+            "rule_type": "INTERVAL", "timezone": "Asia/Shanghai",
+            "start_at": "2026-01-01T00:00:00", "cron_expr": None,
+            "interval_seconds": 3600,
+        }
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ), patch(
+            "apps.memory_config_app.set_dreaming_switch", return_value=True
+        ), patch(
+            "apps.memory_config_app.memory_dreaming_db.get_schedule", return_value=schedule
+        ), patch(
+            "apps.memory_config_app.memory_dreaming_db.upsert_schedule"
+        ) as upsert, patch(
+            "apps.memory_config_app.memory_dreaming_db.delete_user_dreaming_history"
+        ) as delete_history:
+            resp = client.post(
+                "/memory/config/dreaming",
+                json={"enabled": False, "delete_history": True},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == HTTPStatus.OK
+        assert upsert.call_args.kwargs["enabled"] is False
+        delete_history.assert_called_once_with("t", "u")
+
+    def test_dreaming_switch_failure(self):
+        with patch(
+            "apps.memory_config_app.get_current_user_id", return_value=("u", "t")
+        ), patch("apps.memory_config_app.set_dreaming_switch", return_value=False):
+            resp = client.post(
+                "/memory/config/dreaming",
+                json={"enabled": True},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == HTTPStatus.BAD_REQUEST
 
 
 class TestDisableAgentEndpoints:

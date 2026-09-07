@@ -112,7 +112,7 @@ stub_nl2agent_mcp_tools = types.ModuleType(
     "tool_collection.mcp.nl2agent_mcp_tools"
 )
 stub_nl2agent_mcp_tools.SEARCH_INSTALLED_MCP_TOOLS_NAME = (
-    "search_installed_mcp_tools"
+    "nl2a_search_installed_mcp_tools"
 )
 stub_nl2agent_mcp_tools.NL2A_WRAPPER_NAME = "nl2a_wrapper"
 stub_local_mcp = types.ModuleType("tool_collection.mcp.local_mcp_service")

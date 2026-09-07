@@ -47,6 +47,22 @@ sys.modules["nexent"] = nexent_pkg
 sys.modules["nexent.memory"] = memory_pkg
 
 
+# Stub the gateway bridge: ``sdk.nexent.memory.embedding_model`` is imported by
+# ``sdk/nexent/__init__.py`` and now references the gateway adapters. The real
+# gateway eagerly registers every vendor adapter, which pulls absolute
+# ``nexent.*`` imports that these mocked modules cannot satisfy.
+gateway_pkg = types.ModuleType("sdk.nexent.core.gateway")
+gateway_pkg.__path__ = []
+modality_pkg = types.ModuleType("sdk.nexent.core.gateway.modality")
+modality_pkg.__path__ = []
+for _name in ("OpenAICompatibleEmbeddingAdapter", "EmbeddingAdapter", "RerankAdapter"):
+    setattr(modality_pkg, _name, MagicMock(name=f"gateway.modality.{_name}"))
+gateway_pkg.modality = modality_pkg
+gateway_pkg.EmbeddingContext = MagicMock(name="gateway.EmbeddingContext")
+sys.modules["sdk.nexent.core.gateway"] = gateway_pkg
+sys.modules["sdk.nexent.core.gateway.modality"] = modality_pkg
+
+
 from sdk.nexent.memory.policy import MemoryRetrievalPolicy
 
 

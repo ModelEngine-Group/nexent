@@ -10,10 +10,11 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import { useAuiState } from "@assistant-ui/react";
-import { type FC, memo, useState } from "react";
+import { type FC, memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
+import { defaultUrlTransform, type UrlTransform } from "react-markdown";
 
 import { MermaidDiagram } from "./mermaid-diagram";
 
@@ -23,6 +24,10 @@ import { cn } from "@/lib/utils";
 import { remarkCite } from "./remark-cite";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
+import {
+  getLocalFileDownloadUrl,
+  isLocalStorageObjectUrl,
+} from "@/services/storageService";
 import { useSourcesPanel } from "./sources-panel-context";
 import type { PanelSourceItem } from "./sources-panel";
 import {
@@ -51,6 +56,15 @@ interface MessageSourcePart {
   imageKey?: string;
 }
 
+const markdownUrlTransform: UrlTransform = (url) => {
+  // React Markdown rejects non-web protocols by default. s3:// is Nexent's
+  // permanent file-reference protocol and is converted by custom renderers.
+  if (url.startsWith("s3://")) {
+    return url;
+  }
+  return defaultUrlTransform(url);
+};
+
 function normalizeCiteIndex(value: unknown): number | undefined {
   const citeIndex = typeof value === "number" ? value : Number(value);
   return Number.isFinite(citeIndex) ? citeIndex : undefined;
@@ -58,7 +72,7 @@ function normalizeCiteIndex(value: unknown): number | undefined {
 
 function resolveCiteSources(
   messageId: string | undefined,
-  content: readonly MessageSourcePart[],
+  content: readonly MessageSourcePart[]
 ): SearchSource[] {
   const contentSources = content.flatMap((part) => {
     const citeIndex = normalizeCiteIndex(part.citeIndex);
@@ -66,18 +80,20 @@ function resolveCiteSources(
       return [];
     }
 
-    return [{
-      citeIndex,
-      url: part.url ?? "",
-      title: part.title || part.filename || part.url || `Source ${citeIndex}`,
-      text: part.text,
-      sourceType: part.sourceType,
-      filename: part.filename,
-      downloadUrl: part.downloadUrl,
-      objectName: part.objectName,
-      isImage: part.isImage,
-      imageKey: part.imageKey,
-    }];
+    return [
+      {
+        citeIndex,
+        url: part.url ?? "",
+        title: part.title || part.filename || part.url || `Source ${citeIndex}`,
+        text: part.text,
+        sourceType: part.sourceType,
+        filename: part.filename,
+        downloadUrl: part.downloadUrl,
+        objectName: part.objectName,
+        isImage: part.isImage,
+        imageKey: part.imageKey,
+      },
+    ];
   });
 
   if (contentSources.length > 0) return contentSources;
@@ -94,6 +110,25 @@ function getCiteIndex(citekey: string): number | undefined {
   const numericPart = citekey.replace(/^[a-z]+/i, "");
   const citeIndex = Number.parseInt(numericPart, 10);
   return Number.isNaN(citeIndex) ? undefined : citeIndex;
+}
+
+function buildCitationDisplayIndexMap(
+  content: readonly MessageSourcePart[]
+): Map<string, number> {
+  const displayIndexMap = new Map<string, number>();
+
+  for (const part of content) {
+    if (part.type !== "text" || typeof part.text !== "string") continue;
+
+    for (const match of part.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+      const citekey = match[1];
+      if (!displayIndexMap.has(citekey)) {
+        displayIndexMap.set(citekey, displayIndexMap.size + 1);
+      }
+    }
+  }
+
+  return displayIndexMap;
 }
 
 function toPanelSource(source: SearchSource): PanelSourceItem {
@@ -117,12 +152,12 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
  * Custom cite component rendered for [[citekey]] markers in markdown.
  * Looks up the source from the registry and renders a CiteMarker with hover.
  */
-const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = ({
-  citekey,
-}) => {
+const CiteComponent: FC<
+  React.ComponentProps<"cite"> & { citekey?: string }
+> = ({ citekey }) => {
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState(
-    (s) => s.message.content as readonly MessageSourcePart[],
+    (s) => s.message.content as readonly MessageSourcePart[]
   );
   const { open } = useSourcesPanel();
 
@@ -131,7 +166,9 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
   const citeIndex = getCiteIndex(citekey);
   const messageSources = resolveCiteSources(messageId, content);
   const source = messageSources.find((item) => item.citeIndex === citeIndex);
-  const resolvedCiteIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const citationDisplayIndexMap = buildCitationDisplayIndexMap(content);
+  const displayIndex = citationDisplayIndexMap.get(citekey) ?? sourceIndex;
   const panelItems = messageSources.map(toPanelSource);
   const sources = panelItems.filter((item) => !item.isImage);
   const images = panelItems.filter((item) => item.isImage);
@@ -139,9 +176,10 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
   return (
     <CiteMarker
       citekey={citekey}
-      citeIndex={resolvedCiteIndex}
+      displayIndex={displayIndex}
+      sourceIndex={sourceIndex}
       url={source?.url}
-      title={source?.title ?? `Source ${resolvedCiteIndex}`}
+      title={source?.title ?? `Source ${sourceIndex}`}
       text={source?.text}
       loading={!source}
       onClick={
@@ -163,6 +201,10 @@ const CiteComponent: FC<React.ComponentProps<"cite"> & { citekey?: string }> = (
 // Wrapper component that safely renders MarkdownTextPrimitive
 // Guards against rendering for non-text parts or when text is not a valid string
 const MarkdownTextImpl = () => {
+  const messageId = useAuiState((s) => s.message.id as string | undefined);
+  const content = useAuiState(
+    (s) => s.message.content as readonly MessageSourcePart[]
+  );
   // Check if we have a valid text part context using useAuiState
   const isValidTextPart = useAuiState((s) => {
     const part = s.part;
@@ -173,22 +215,42 @@ const MarkdownTextImpl = () => {
       part.text.length > 0
     );
   });
+  const citationDisplayIndexMap = useMemo(
+    () => buildCitationDisplayIndexMap(content),
+    [content]
+  );
+  const citationIndexMapAttribute = useMemo(
+    () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),
+    [citationDisplayIndexMap]
+  );
+
+  useEffect(() => {
+    if (citationDisplayIndexMap.size === 0) return;
+
+    console.info("[Nexent] Citation display index mapping", {
+      messageId,
+      citationIndexMap: Object.fromEntries(citationDisplayIndexMap),
+    });
+  }, [citationDisplayIndexMap, messageId]);
 
   if (!isValidTextPart) {
     return null;
   }
 
   return (
-    <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm, remarkCite]}
-      className="aui-md"
-      components={defaultComponents}
-      componentsByLanguage={{
-        mermaid: {
-          SyntaxHighlighter: MermaidDiagram,
-        },
-      }}
-    />
+    <div data-citation-index-map={citationIndexMapAttribute}>
+      <MarkdownTextPrimitive
+        remarkPlugins={[remarkGfm, remarkCite]}
+        urlTransform={markdownUrlTransform}
+        className="aui-md"
+        components={defaultComponents}
+        componentsByLanguage={{
+          mermaid: {
+            SyntaxHighlighter: MermaidDiagram,
+          },
+        }}
+      />
+    </div>
   );
 };
 
@@ -241,16 +303,16 @@ const useCopyToClipboard = ({
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), copiedDuration);
       },
-      () => {},
+      () => {}
     );
   };
 
   return { isCopied, copyToClipboard };
 };
 
-const MarkdownSyntaxHighlighter: FC<
-  Omit<SyntaxHighlighterProps, "node">
-> = (props) => <SyntaxHighlighter {...props} />;
+const MarkdownSyntaxHighlighter: FC<Omit<SyntaxHighlighterProps, "node">> = (
+  props
+) => <SyntaxHighlighter {...props} />;
 
 const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   src,
@@ -259,26 +321,26 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
 }) => {
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const messageContent = useAuiState(
-    (s) => s.message.content as readonly MessageSourcePart[],
+    (s) => s.message.content as readonly MessageSourcePart[]
   );
   const trustedImages = Array.isArray(messageContent)
     ? messageContent.filter(
         (part): part is MessageSourcePart & { url: string } =>
           part.type === "source" &&
           part.isImage === true &&
-          typeof part.url === "string",
+          typeof part.url === "string"
       )
     : [];
-  const markerMatch = src?.match(
-    /\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i,
-  );
+  const markerMatch = src?.match(/\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i);
   if (markerMatch) {
     const contentImage = trustedImages.find(
-      (image) => image.imageKey === markerMatch[1],
+      (image) => image.imageKey === markerMatch[1]
     );
-    const image = contentImage ?? (messageId
-      ? searchImagesRegistry.get(messageId)?.get(markerMatch[1])
-      : undefined);
+    const image =
+      contentImage ??
+      (messageId
+        ? searchImagesRegistry.get(messageId)?.get(markerMatch[1])
+        : undefined);
     if (!image) return null;
     return (
       <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
@@ -292,11 +354,54 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
     );
   }
 
+  // Local knowledge-base and web-search images use their real URL in the
+  // answer markdown instead of an AIDP marker. Public URLs must also arrive
+  // through PICTURE_WEB. Local storage URLs can be resolved directly because
+  // the authenticated file endpoint performs its own access check; this also
+  // covers relevant S3 images that were omitted by optional image filtering.
+  const trustedImage = src
+    ? trustedImages.find((image) => image.url === src)
+    : undefined;
+  const verifiedImageUrl =
+    trustedImage?.url ||
+    (src && isLocalStorageObjectUrl(src) ? src : undefined);
+  if (verifiedImageUrl) {
+    return (
+      <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
+        <AuthenticatedImage
+          src={verifiedImageUrl}
+          alt={alt || trustedImage?.title}
+          className="max-h-[32rem] w-full cursor-zoom-in object-contain"
+          preview
+          proxy={Boolean(trustedImage)}
+        />
+      </figure>
+    );
+  }
+
   if (trustedImages.length > 0 || !src) {
     return null;
   }
 
   return <AuthenticatedImage src={src} alt={alt} {...props} />;
+};
+
+const PermanentFileLink: FC<React.ComponentProps<"a">> = ({
+  href,
+  className,
+  ...props
+}) => {
+  const resolvedHref = getLocalFileDownloadUrl(href) || href;
+  return (
+    <a
+      href={resolvedHref}
+      className={cn(
+        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+        className
+      )}
+      {...props}
+    />
+  );
 };
 
 const defaultComponents = memoizeMarkdownComponents({
@@ -306,7 +411,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h1
       className={cn(
         "aui-md-h1 mt-5 mb-2 scroll-m-20 text-xl font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -315,7 +420,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h2
       className={cn(
         "aui-md-h2 mt-5 mb-2 scroll-m-20 text-lg font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -324,7 +429,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h3
       className={cn(
         "aui-md-h3 mt-4 mb-1.5 scroll-m-20 text-base font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -333,7 +438,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h4
       className={cn(
         "aui-md-h4 mt-3.5 mb-1 scroll-m-20 text-base font-medium first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -342,7 +447,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h5
       className={cn(
         "aui-md-h5 mt-3 mb-1 text-sm font-semibold first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -351,7 +456,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <h6
       className={cn(
         "aui-md-h6 mt-3 mb-1 text-sm font-medium first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
@@ -360,25 +465,17 @@ const defaultComponents = memoizeMarkdownComponents({
     <p
       className={cn(
         "aui-md-p my-3 leading-relaxed first:mt-0 last:mb-0",
-        className,
+        className
       )}
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
-    <a
-      className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
-        className,
-      )}
-      {...props}
-    />
-  ),
+  a: PermanentFileLink,
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(
         "aui-md-blockquote border-muted-foreground/30 text-muted-foreground my-3 border-s-2 ps-4",
-        className,
+        className
       )}
       {...props}
     />
@@ -387,7 +484,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <ul
       className={cn(
         "aui-md-ul marker:text-muted-foreground my-3 ms-5 list-disc [&>li]:mt-1",
-        className,
+        className
       )}
       {...props}
     />
@@ -396,7 +493,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <ol
       className={cn(
         "aui-md-ol marker:text-muted-foreground my-3 ms-5 list-decimal [&>li]:mt-1",
-        className,
+        className
       )}
       {...props}
     />
@@ -411,7 +508,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <table
       className={cn(
         "aui-md-table my-3 w-full border-separate border-spacing-0 overflow-y-auto",
-        className,
+        className
       )}
       {...props}
     />
@@ -420,7 +517,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <th
       className={cn(
         "aui-md-th bg-muted px-3 py-1.5 text-start font-medium first:rounded-ss-lg last:rounded-se-lg [[align=center]]:text-center [[align=right]]:text-right",
-        className,
+        className
       )}
       {...props}
     />
@@ -429,7 +526,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <td
       className={cn(
         "aui-md-td border-muted-foreground/20 border-s border-b px-3 py-1.5 text-start last:border-e [[align=center]]:text-center [[align=right]]:text-right",
-        className,
+        className
       )}
       {...props}
     />
@@ -438,7 +535,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <tr
       className={cn(
         "aui-md-tr m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-es-lg [&:last-child>td:last-child]:rounded-ee-lg",
-        className,
+        className
       )}
       {...props}
     />
@@ -462,7 +559,7 @@ const defaultComponents = memoizeMarkdownComponents({
     <pre
       className={cn(
         "aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-t-none rounded-b-xl border border-t-0 p-3.5 text-[13px] leading-relaxed",
-        className,
+        className
       )}
       {...props}
     />
@@ -476,7 +573,7 @@ const defaultComponents = memoizeMarkdownComponents({
     if (isCiteSequence) {
       const citekeys = Array.from(
         inlineValue.matchAll(/\[\[([^\]]+)\]\]/g),
-        (match) => match[1],
+        (match) => match[1]
       );
       return (
         <>
@@ -492,7 +589,7 @@ const defaultComponents = memoizeMarkdownComponents({
         className={cn(
           !isCodeBlock &&
             "aui-md-inline-code bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.85em]",
-          className,
+          className
         )}
         {...props}
       >

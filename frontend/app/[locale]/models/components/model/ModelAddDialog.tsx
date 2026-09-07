@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+﻿import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -22,7 +22,7 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { useCapacitySuggestion } from "@/hooks/useCapacitySuggestion";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
-import { modelService } from "@/services/modelService";
+import { modelService, isSessionExpiredError } from "@/services/modelService";
 import {
   ModelType,
   SingleModelConfig,
@@ -102,17 +102,13 @@ const DEFAULT_FORM_STATE = {
   ...emptyCapacityForm,
 };
 
-const resolveConnectivityModelType = (type: ModelType): ModelType =>
-  type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3
-    ? (MODEL_TYPES.VLM as ModelType)
-    : type;
-
 const resolveConfigKey = (type: ModelType): string => type;
 
 const isVlmConfigType = (type: ModelType): boolean =>
   type === MODEL_TYPES.VLM ||
   type === MODEL_TYPES.VLM2 ||
-  type === MODEL_TYPES.VLM3;
+  type === MODEL_TYPES.VLM3 ||
+  type === MODEL_TYPES.VLM4;
 
 const emptyModelConfig = {
   modelName: "",
@@ -660,18 +656,11 @@ export const ModelAddDialog = ({
       const modelType =
         form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-          : resolveConnectivityModelType(form.type);
+          : form.type;
 
       let connectivity = false;
 
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        connectivity = await modelService.checkManageTenantModelConnectivity(
-          tenantId,
-          form.displayName || form.name,
-          modelType
-        );
-      } else if (form.type === MODEL_TYPES.STT) {
+      if (form.type === MODEL_TYPES.STT) {
         // For STT models, build the appropriate config based on provider
         const sttConfig: any = {
           modelType: modelType,
@@ -761,6 +750,8 @@ export const ModelAddDialog = ({
         });
       }
     } catch (error) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       setConnectivityStatus({
@@ -941,7 +932,7 @@ export const ModelAddDialog = ({
       },
     };
 
-    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3]) {
+    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3, MODEL_TYPES.VLM4]) {
       if (
         key !== configKey &&
         currentModelConfig?.[key]?.displayName === selectedDisplayName
@@ -981,6 +972,8 @@ export const ModelAddDialog = ({
       }));
       await onSuccess(addedModels.length > 0 ? addedModels[0] : undefined);
     } catch (error: any) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error?.message || t("model.dialog.error.addFailedLog");
       const translatedError = translateError(errorMessage, t);
@@ -1329,11 +1322,13 @@ export const ModelAddDialog = ({
         case MODEL_TYPES.VLM:
         case MODEL_TYPES.VLM2:
         case MODEL_TYPES.VLM3:
+        case MODEL_TYPES.VLM4:
           configUpdate = { [configKey]: modelConfig };
           for (const key of [
             MODEL_TYPES.VLM,
             MODEL_TYPES.VLM2,
             MODEL_TYPES.VLM3,
+            MODEL_TYPES.VLM4,
           ]) {
             if (
               key !== configKey &&
@@ -1373,6 +1368,8 @@ export const ModelAddDialog = ({
       // Close the dialog
       handleClose();
     } catch (error) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const translatedError = translateError(errorMessage, t);
@@ -1419,6 +1416,7 @@ export const ModelAddDialog = ({
             <Switch
               checked={form.isBatchImport}
               onChange={(checked) => handleFormChange("isBatchImport", checked)}
+              disabled={verifyingConnectivity}
             />
           </div>
           <div className="text-xs text-gray-500 mt-1">
@@ -1439,6 +1437,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.provider}
               onChange={(value) => handleFormChange("provider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="modelengine">
                 {t("model.provider.modelengine")}
@@ -1459,6 +1458,7 @@ export const ModelAddDialog = ({
                   onChange={(e) =>
                     handleFormChange("modelEngineUrl", e.target.value)
                   }
+                  disabled={verifyingConnectivity}
                 />
               </div>
             )}
@@ -1477,6 +1477,7 @@ export const ModelAddDialog = ({
               value={form.apiKey}
               onChange={(e) => handleFormChange("apiKey", e.target.value)}
               autoComplete="new-password"
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1491,6 +1492,7 @@ export const ModelAddDialog = ({
             style={{ width: "100%" }}
             value={form.type}
             onChange={(value) => handleFormChange("type", value)}
+            disabled={verifyingConnectivity}
           >
             <Option value={MODEL_TYPES.LLM}>{t("model.type.llm")}</Option>
             <Option value={MODEL_TYPES.EMBEDDING}>
@@ -1504,6 +1506,9 @@ export const ModelAddDialog = ({
             </Option>
             <Option value={MODEL_TYPES.VLM3}>
               {t("model.type.videoUnderstanding")}
+            </Option>
+            <Option value={MODEL_TYPES.VLM4}>
+              {t("model.type.audioUnderstanding")}
             </Option>
             <Option value={MODEL_TYPES.RERANK}>{t("model.type.rerank")}</Option>
             <Option
@@ -1539,6 +1544,7 @@ export const ModelAddDialog = ({
                 onChange={(checked) =>
                   handleFormChange("isMultimodal", checked)
                 }
+                disabled={verifyingConnectivity}
               />
             </div>
             <div className="text-xs text-gray-500 mt-1">
@@ -1564,6 +1570,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.name")}
               value={form.name}
               onChange={handleModelNameChange}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1582,6 +1589,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.displayName")}
               value={form.displayName}
               onChange={(e) => handleFormChange("displayName", e.target.value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1609,6 +1617,7 @@ export const ModelAddDialog = ({
               }
               value={form.url}
               onChange={(e) => handleFormChange("url", e.target.value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1624,6 +1633,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.sttProvider}
               onChange={(value) => handleFormChange("sttProvider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">
@@ -1654,6 +1664,7 @@ export const ModelAddDialog = ({
                     handleFormChange("modelAppid", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
               <div>
@@ -1672,6 +1683,7 @@ export const ModelAddDialog = ({
                     handleFormChange("accessToken", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
             </>
@@ -1695,6 +1707,7 @@ export const ModelAddDialog = ({
                 value={form.apiKey}
                 onChange={(e) => handleFormChange("apiKey", e.target.value)}
                 autoComplete="new-password"
+                disabled={verifyingConnectivity}
               />
             </div>
           )}
@@ -1710,6 +1723,7 @@ export const ModelAddDialog = ({
               style={{ width: "100%" }}
               value={form.ttsProvider}
               onChange={(value) => handleFormChange("ttsProvider", value)}
+              disabled={verifyingConnectivity}
             >
               <Option value="dashscope">{t("model.provider.dashscope")}</Option>
               <Option value="volcengine">
@@ -1740,6 +1754,7 @@ export const ModelAddDialog = ({
                     handleFormChange("modelAppid", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
               <div>
@@ -1758,6 +1773,7 @@ export const ModelAddDialog = ({
                     handleFormChange("accessToken", e.target.value)
                   }
                   autoComplete="new-password"
+                  disabled={verifyingConnectivity}
                 />
               </div>
             </>
@@ -1781,6 +1797,7 @@ export const ModelAddDialog = ({
                 value={form.apiKey}
                 onChange={(e) => handleFormChange("apiKey", e.target.value)}
                 autoComplete="new-password"
+                disabled={verifyingConnectivity}
               />
             </div>
           )}
@@ -1801,6 +1818,7 @@ export const ModelAddDialog = ({
               value={form.apiKey}
               onChange={(e) => handleFormChange("apiKey", e.target.value)}
               autoComplete="new-password"
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1819,6 +1837,7 @@ export const ModelAddDialog = ({
                   chunkSizeRange: value,
                 }));
               }}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1841,6 +1860,7 @@ export const ModelAddDialog = ({
               onChange={(e) =>
                 handleFormChange("chunkingBatchSize", e.target.value)
               }
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1881,6 +1901,7 @@ export const ModelAddDialog = ({
                   size="small"
                   checked={capacitySuggestionEnabled}
                   onChange={setCapacitySuggestionEnabled}
+                  disabled={verifyingConnectivity}
                 />
               </div>
             )}
@@ -1900,6 +1921,7 @@ export const ModelAddDialog = ({
               suggestionLoading={topChecking}
               onUseSuggestion={() => applyCapacitySuggestion(topSuggestion)}
               acceptedSuggestion={topAccepted}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -1919,6 +1941,7 @@ export const ModelAddDialog = ({
               placeholder={t("model.dialog.placeholder.maxTokens")}
               value={form.maxTokens}
               onChange={(value) => handleFormChange("maxTokens", value)}
+              disabled={verifyingConnectivity}
             />
           </div>
         )}
@@ -2088,6 +2111,7 @@ export const ModelAddDialog = ({
                             size="small"
                             checked={checked}
                             onChange={toggleSelect}
+                            disabled={verifyingConnectivity}
                           />
                         </div>
                       </div>
@@ -2447,7 +2471,7 @@ export const ModelAddDialog = ({
               !isFormValid() ||
               (!form.isBatchImport && connectivityStatus.status !== "available")
             }
-            loading={loading}
+            loading={loading || verifyingConnectivity}
           >
             {t("model.dialog.button.add")}
           </Button>
@@ -2487,6 +2511,7 @@ export const ModelAddDialog = ({
                       size="small"
                       checked={gearCapacitySuggestionEnabled}
                       onChange={setGearCapacitySuggestionEnabled}
+                      disabled={verifyingConnectivity}
                     />
                     <Button
                       size="small"

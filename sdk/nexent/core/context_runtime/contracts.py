@@ -30,6 +30,7 @@ _UNCONFIGURED_RUNTIME_ERROR = "CoreAgent requires a context runtime from the age
 
 @dataclass(frozen=True)
 class ContextEvidence:
+    purpose: str = "step"
     selected_item_ids: tuple[str, ...] = ()
     selected_item_types: tuple[str, ...] = ()
     stable_message_count: int = 0
@@ -57,6 +58,15 @@ class ContextEvidence:
     over_hard_budget: bool = False
     model_call_count: int = 0
     loop_status: str | None = None
+    messages_fingerprint: str | None = None
+    tools_fingerprint: str | None = None
+    system_messages_fingerprint: str | None = None
+    history_messages_fingerprint: str | None = None
+    final_answer_prompt_fingerprint: str | None = None
+    message_roles: tuple[str, ...] = ()
+    history_message_roles: tuple[str, ...] = ()
+    compression_attempted: bool = False
+    fallback_compaction_used: bool = False
 
 
 @dataclass(frozen=True)

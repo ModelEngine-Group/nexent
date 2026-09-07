@@ -13,6 +13,9 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import {
   extractObjectNameFromUrl,
+  fetchImageBlob,
+  isLocalStorageObjectUrl,
+  getLocalFilePreviewUrl,
   storageService,
 } from "@/services/storageService";
 import { AuthenticatedImage } from "./authenticated-image";
@@ -63,7 +66,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
 }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<PanelTab>(
-    sources.length > 0 ? "sources" : "images",
+    sources.length > 0 ? "sources" : "images"
   );
 
   useEffect(() => {
@@ -91,12 +94,14 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       data-slot="sources-panel"
       className={cn(
         "flex h-full w-80 shrink-0 flex-col border-l bg-background",
-        className,
+        className
       )}
       aria-label={t("chat.sources.panel")}
     >
       <header className="flex items-center justify-between gap-2 border-b px-4 py-2">
-        <h2 className="text-sm font-semibold text-foreground">{t("chat.sources.title")}</h2>
+        <h2 className="text-sm font-semibold text-foreground">
+          {t("chat.sources.title")}
+        </h2>
         <Button
           variant="ghost"
           size="icon"
@@ -131,7 +136,9 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            {showSources ? t("chat.sources.noSources") : t("chat.sources.noImages")}
+            {showSources
+              ? t("chat.sources.noSources")
+              : t("chat.sources.noImages")}
           </p>
         ) : showSources ? (
           <ul className="flex flex-col gap-2">
@@ -165,7 +172,13 @@ interface TabButtonProps {
   onClick: () => void;
 }
 
-const TabButton: FC<TabButtonProps> = ({ label, count, icon, active, onClick }) => {
+const TabButton: FC<TabButtonProps> = ({
+  label,
+  count,
+  icon,
+  active,
+  onClick,
+}) => {
   return (
     <button
       type="button"
@@ -176,7 +189,7 @@ const TabButton: FC<TabButtonProps> = ({ label, count, icon, active, onClick }) 
         "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
         active
           ? "bg-primary/10 text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
       )}
     >
       {icon}
@@ -184,7 +197,9 @@ const TabButton: FC<TabButtonProps> = ({ label, count, icon, active, onClick }) 
       <span
         className={cn(
           "ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[10px]",
-          active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+          active
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted text-muted-foreground"
         )}
       >
         {count}
@@ -255,7 +270,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
       if (!objectName) {
         throw new Error("Cannot determine the file location.");
       }
-      await storageService.downloadFile(objectName, filename);
+      await storageService.downloadFileWithAuth(objectName, filename);
     } catch {
       setDownloadError(t("chat.sources.downloadError"));
     } finally {
@@ -266,38 +281,58 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   const selectedClassName = selected
     ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
     : undefined;
+  const previewUrl = getLocalFilePreviewUrl(
+    item.url,
+    item.filename || item.title,
+    item.objectName
+  );
 
   if (item.sourceType === "document") {
     return (
       <li ref={itemRef} className={cn("rounded-md", selectedClassName)}>
-        <button
-          type="button"
-          onClick={handleDocumentDownload}
-          disabled={isDownloading}
-          className="group flex w-full items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm transition-colors hover:border-primary/40 hover:bg-accent/40 disabled:cursor-wait disabled:opacity-70"
-          aria-label={t("chat.sources.download", { name: item.filename || item.title || t("chat.sources.document") })}
-        >
-          <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-2">
-              <span className="min-w-0 flex-1 wrap-break-word font-medium text-foreground">
+        <div className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm">
+          <button
+            type="button"
+            onClick={() =>
+              previewUrl &&
+              window.open(previewUrl, "_blank", "noopener,noreferrer")
+            }
+            disabled={!previewUrl}
+            className="group flex min-w-0 flex-1 items-start gap-2 text-left transition-colors hover:text-primary disabled:cursor-default disabled:hover:text-foreground"
+            aria-label={t("chat.sources.preview", {
+              name: item.filename || item.title || t("chat.sources.document"),
+            })}
+          >
+            <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <span className="block wrap-break-word font-medium text-foreground">
                 {item.title || item.filename || t("chat.sources.document")}
               </span>
-              {isDownloading ? (
-                <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
-              ) : (
-                <DownloadIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-              )}
+              <span className="block truncate text-xs text-muted-foreground">
+                {t("chat.sources.knowledgeBase")}
+              </span>
+              <SourceSummary text={item.text} />
             </div>
-            <span className="block truncate text-xs text-muted-foreground">
-              {t("chat.sources.knowledgeBase")}
-            </span>
-            <SourceSummary text={item.text} />
-            {downloadError && (
-              <p className="mt-1 text-xs text-destructive">{downloadError}</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDocumentDownload()}
+            disabled={isDownloading}
+            className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+            aria-label={t("chat.sources.download", {
+              name: item.filename || item.title || t("chat.sources.document"),
+            })}
+          >
+            {isDownloading ? (
+              <LoaderCircleIcon className="size-4 animate-spin" />
+            ) : (
+              <DownloadIcon className="size-4" />
             )}
-          </div>
-        </button>
+          </button>
+        </div>
+        {downloadError && (
+          <p className="px-3 pb-2 text-xs text-destructive">{downloadError}</p>
+        )}
       </li>
     );
   }
@@ -333,10 +368,12 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
       ref={itemRef}
       className={cn(
         "rounded-md border bg-card px-3 py-2 text-sm text-foreground",
-        selectedClassName,
+        selectedClassName
       )}
     >
-      <span className="font-medium">{item.title || t("chat.sources.untitled")}</span>
+      <span className="font-medium">
+        {item.title || t("chat.sources.untitled")}
+      </span>
       <SourceSummary text={item.text} />
     </li>
   );
@@ -344,14 +381,62 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
 
 const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
   const imageUrl = item.url || "";
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const usesBackendStream = isLocalStorageObjectUrl(imageUrl);
+
+  useEffect(() => {
+    if (!imageUrl || !usesBackendStream) {
+      setResolvedUrl(null);
+      setLoadError(false);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setResolvedUrl(null);
+    setLoadError(false);
+
+    fetchImageBlob(imageUrl)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setResolvedUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [imageUrl, usesBackendStream]);
+
   if (!imageUrl) return null;
+  if (usesBackendStream && !resolvedUrl && !loadError) {
+    return (
+      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50">
+        <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50 px-2 text-center text-xs text-muted-foreground">
+        {item.title || imageUrl}
+      </div>
+    );
+  }
+
   return (
     <div className="aui-global-search-image overflow-hidden rounded-md border bg-muted/50">
       <AuthenticatedImage
-        src={imageUrl}
+        src={resolvedUrl || imageUrl}
         alt={item.title || imageUrl}
         loading="lazy"
         preview
+        proxy={!resolvedUrl}
         className="aspect-square w-full object-cover"
       />
     </div>

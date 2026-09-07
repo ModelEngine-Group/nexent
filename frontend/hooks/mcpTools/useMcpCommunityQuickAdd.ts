@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import log from "@/lib/logger";
 import {
-  addContainerMcpToolService,
+  addContainerMcpToolServiceStream,
   addMcpToolService,
   incrementCommunityMcpDownloadCount,
   parseContainerMcpConfigJson,
@@ -15,7 +15,10 @@ import { checkContainerPortAvailable } from "./useContainerPortAvailability";
 import { getMcpAddErrorMessage } from "@/lib/mcpTools";
 import { McpSource, McpTransportType } from "@/const/mcpTools";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
-import type { CommunityMcpCard, CommunityQuickAddDraft } from "@/types/mcpTools";
+import type {
+  CommunityMcpCard,
+  CommunityQuickAddDraft,
+} from "@/types/mcpTools";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 
@@ -29,11 +32,21 @@ const draftFromSource = (
   name: service.name || "",
   description: service.description || "",
   transportType:
-    service.transportType === McpTransportType.CONTAINER ? McpTransportType.CONTAINER : McpTransportType.URL,
+    service.transportType === McpTransportType.CONTAINER
+      ? McpTransportType.CONTAINER
+      : McpTransportType.URL,
   serverUrl: service.serverUrl || "",
-  authorizationToken: "",
-  customHeaders: "",
-  containerConfigJson: service.configJson ? JSON.stringify(service.configJson, null, 2) : "",
+  authorizationToken: service.sharedFields?.authorizationToken
+    ? service.authorizationToken || ""
+    : "",
+  customHeaders: service.sharedFields?.customHeaders
+    ? typeof service.customHeaders === "string"
+      ? service.customHeaders
+      : JSON.stringify(service.customHeaders || {}, null, 2)
+    : "",
+  containerConfigJson: service.configJson
+    ? JSON.stringify(service.configJson, null, 2)
+    : "",
   containerPort: service.containerPort ?? undefined,
   tags: service.tags || [],
   version: service.version || undefined,
@@ -55,17 +68,23 @@ export function useMcpCommunityQuickAdd({
   const [draft, setDraft] = useState<CommunityQuickAddDraft | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
+  const [deploymentStarted, setDeploymentStarted] = useState(false);
+  const [containerId, setContainerId] = useState<string | null>(null);
 
   const open = useCallback((service: CommunityMcpCard) => {
     setSource(service);
     setDraft(draftFromSource(service));
     setNameError(null);
+    setDeploymentStarted(false);
+    setContainerId(null);
   }, []);
 
   const close = useCallback(() => {
     setSource(null);
     setDraft(null);
     setNameError(null);
+    setDeploymentStarted(false);
+    setContainerId(null);
   }, []);
 
   const updateDraft = useCallback((patch: Partial<CommunityQuickAddDraft>) => {
@@ -74,7 +93,10 @@ export function useMcpCommunityQuickAdd({
   }, []);
 
   /** Parse optional custom headers JSON, returning an error signal instead of throwing. */
-  function tryParseCustomHeaders(raw: string | undefined): { value?: Record<string, string>; error?: true } {
+  function tryParseCustomHeaders(raw: string | undefined): {
+    value?: Record<string, string>;
+    error?: true;
+  } {
     if (!raw?.trim()) return {};
     try {
       return { value: JSON.parse(raw.trim()) };
@@ -86,58 +108,41 @@ export function useMcpCommunityQuickAdd({
   function buildRegistryJson(): Record<string, unknown> {
     return {
       ...(draft!.registryJson || {}),
-      ...(source!.authorDisplayName ? { _authorDisplayName: source!.authorDisplayName } : {}),
+      ...(source!.authorDisplayName
+        ? { _authorDisplayName: source!.authorDisplayName }
+        : {}),
       ...(source!.authorName ? { _authorName: source!.authorName } : {}),
     };
   }
 
   async function submitMcpService(
     customHeaders: Record<string, string> | undefined,
-    registryJson: Record<string, unknown>,
-    asUrlFallback: boolean = false,
-  ): Promise<boolean> {
-    if (asUrlFallback) {
-      // Community container MCP with unchanged default port —
-      // the service is already running on that port; add as a URL reference
-      // without starting a new container. Keep the container config for display.
-      const serverUrl = `http://localhost:${draft!.containerPort}/mcp`;
-      const containerConfig = draft!.containerConfigJson
-        ? (JSON.parse(draft!.containerConfigJson) as Record<string, unknown>)
-        : undefined;
-      await addMcpToolService({
-        name: draft!.name.trim(),
-        description: draft!.description ?? "",
-        source: McpSource.COMMUNITY,
-        server_url: serverUrl,
-        authorization_token: draft!.authorizationToken?.trim() || undefined,
-        custom_headers: customHeaders,
-        container_config: containerConfig,
-        container_port: draft!.containerPort,
-        tags: draft!.tags,
-        version: draft!.version,
-        registry_json: registryJson,
-        market_id: source!.marketId,
-        skip_health_check: true,
-        enabled: true,
-        group_ids: "",
-      });
-    } else if (draft!.transportType === McpTransportType.CONTAINER) {
-      const mcpConfig = parseContainerMcpConfigJson(draft!.containerConfigJson ?? "");
+    registryJson: Record<string, unknown>
+  ): Promise<false> {
+    if (draft!.transportType === McpTransportType.CONTAINER) {
+      const mcpConfig = parseContainerMcpConfigJson(
+        draft!.containerConfigJson ?? ""
+      );
       if (!mcpConfig) {
         message.error(t("mcpTools.add.error.containerJsonInvalid"));
         return false;
       }
-      await addContainerMcpToolService({
-        name: draft!.name.trim(),
-        description: draft!.description ?? "",
-        tags: draft!.tags,
-        source: McpSource.COMMUNITY,
-        authorization_token: draft!.authorizationToken?.trim() || undefined,
-        registry_json: registryJson,
-        market_id: source!.marketId,
-        port: draft!.containerPort as number,
-        mcp_config: mcpConfig,
-      });
+      await addContainerMcpToolServiceStream(
+        {
+          name: draft!.name.trim(),
+          description: draft!.description ?? "",
+          tags: draft!.tags,
+          source: McpSource.COMMUNITY,
+          authorization_token: draft!.authorizationToken?.trim() || undefined,
+          registry_json: registryJson,
+          market_id: source!.marketId,
+          port: draft!.containerPort as number,
+          mcp_config: mcpConfig,
+        },
+        (result) => {
+          if (result.container_id) setContainerId(result.container_id);
+        }
+      );
     } else {
       await addMcpToolService({
         name: draft!.name.trim(),
@@ -152,7 +157,7 @@ export function useMcpCommunityQuickAdd({
         market_id: source!.marketId,
       });
     }
-    return true;
+    return false;
   }
 
   function handleAddError(error: unknown) {
@@ -166,51 +171,62 @@ export function useMcpCommunityQuickAdd({
       return;
     }
 
-    // For a community container MCP whose port is unchanged (still the default),
-    // the MCP service is assumed already running on that port — add as a URL
-    // reference instead of starting a new container.
-    const isDefaultPortCommunityMcp =
-      draft.transportType === McpTransportType.CONTAINER &&
-      source.marketId != null &&
-      draft.containerPort != null &&
-      draft.containerPort === source.containerPort;
-
-    if (draft.transportType === McpTransportType.CONTAINER && !isDefaultPortCommunityMcp) {
-      const available = await checkContainerPortAvailable(draft.containerPort);
-      if (!available) {
-        message.error(t("mcpTools.addModal.portOccupied", { port: draft.containerPort }));
-        return;
-      }
+    const isContainerDeployment =
+      draft.transportType === McpTransportType.CONTAINER;
+    if (isContainerDeployment) {
+      setDeploymentStarted(true);
+      setContainerId(null);
     }
-
-    const parsedHeaders = tryParseCustomHeaders(draft.customHeaders);
-    if (parsedHeaders.error) {
-      message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
-      return;
-    }
-
-    const registryJson = buildRegistryJson();
-
     setSubmitting(true);
     try {
-      const ok = await submitMcpService(parsedHeaders.value, registryJson, isDefaultPortCommunityMcp);
-      if (!ok) return;
+      if (isContainerDeployment) {
+        const available = await checkContainerPortAvailable(
+          draft.containerPort
+        );
+        if (!available) {
+          message.error(
+            t("mcpTools.addModal.portOccupied", { port: draft.containerPort })
+          );
+          return;
+        }
+      }
+
+      const parsedHeaders = tryParseCustomHeaders(draft.customHeaders);
+      if (parsedHeaders.error) {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return;
+      }
+
+      const registryJson = buildRegistryJson();
+      const failed = await submitMcpService(parsedHeaders.value, registryJson);
+      if (failed) return;
 
       message.success(t("mcpTools.add.success"));
-      queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
+      queryClient.invalidateQueries({
+        queryKey: MCP_TOOLS_QUERY_KEYS.services,
+      });
       queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
-      await refreshToolListWithToast({ message, t, toastKey: "mcp-tools-refresh-tools-add-community" });
+      await refreshToolListWithToast({
+        message,
+        t,
+        toastKey: "mcp-tools-refresh-tools-add-community",
+      });
 
       if (source.marketId) {
         incrementCommunityMcpDownloadCount(source.marketId).catch((err) =>
-          log.warn("[useMcpCommunityQuickAdd] Failed to increment download count", err)
+          log.warn(
+            "[useMcpCommunityQuickAdd] Failed to increment download count",
+            err
+          )
         );
       }
 
       onSuccess();
       close();
     } catch (error) {
-      log.error("[useMcpCommunityQuickAdd] Failed to add community service", { error });
+      log.error("[useMcpCommunityQuickAdd] Failed to add community service", {
+        error,
+      });
       // If it's a name conflict, show inline in the modal so user can rename
       const errMsg = getMcpAddErrorMessage(error, t);
       const normalized = errMsg.toLowerCase();
@@ -234,5 +250,7 @@ export function useMcpCommunityQuickAdd({
     confirm,
     submitting,
     nameError,
+    deploymentStarted,
+    containerId,
   };
 }

@@ -178,6 +178,12 @@
   background-color: #fafafa !important;
 }
 
+/* Keep Ant Design Tag content consistently left-aligned across layouts. */
+.ant-tag {
+  text-align: left !important;
+  justify-content: flex-start !important;
+}
+
 /* Ant Design Button Icon with Lucide icons */
 .ant-btn-icon {
   display: inline-flex !important;

@@ -2,9 +2,41 @@ import JSZip from "jszip";
 import yaml from "js-yaml";
 import type { SkillFileNode, ExtendedSkillFileNode } from "@/types/skill";
 import React from "react";
-import { FileTerminal, FileText, FileCog, Folder, File } from "lucide-react";
+import {
+  FileTerminal,
+  FileText,
+  FileCog,
+  Folder,
+  File,
+  FileQuestion as FileQuestionMark,
+} from "lucide-react";
 
 export type { ExtendedSkillFileNode } from "@/types/skill";
+
+const decodeSkillText = (bytes: Uint8Array): string => {
+  for (const encoding of ["utf-8", "gb18030", "big5"]) {
+    try {
+      return new TextDecoder(encoding, { fatal: true }).decode(bytes);
+    } catch {
+      // Try the next supported character encoding.
+    }
+  }
+  throw new Error("Unable to decode skill text");
+};
+
+const decodeLegacyZipFileName = (input: Uint8Array | string[]): string => {
+  const bytes = Array.isArray(input)
+    ? Uint8Array.from(input, (value) => value.charCodeAt(0))
+    : new Uint8Array(input);
+  for (const encoding of ["utf-8", "gb18030"]) {
+    try {
+      return new TextDecoder(encoding, { fatal: true }).decode(bytes);
+    } catch {
+      // Try the next supported ZIP filename encoding.
+    }
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+};
 
 /**
  * Result of extracting skill information from file content.
@@ -169,7 +201,7 @@ export const extractSkillInfo = async (file: File): Promise<SkillInfo | null> =>
  * Extract skill name and description from a SKILL.md file.
  */
 const extractFromMd = async (file: File): Promise<SkillInfo | null> => {
-  const content = await file.text();
+  const content = decodeSkillText(new Uint8Array(await file.arrayBuffer()));
   return extractFromContent(content);
 };
 
@@ -179,7 +211,9 @@ const extractFromMd = async (file: File): Promise<SkillInfo | null> => {
 const extractFromZip = async (file: File): Promise<SkillInfo | null> => {
   let zip;
   try {
-    zip = await JSZip.loadAsync(file);
+    zip = await JSZip.loadAsync(file, {
+      decodeFileName: decodeLegacyZipFileName,
+    });
   } catch {
     return null;
   }
@@ -205,7 +239,8 @@ const extractFromZip = async (file: File): Promise<SkillInfo | null> => {
 
   if (!skillMdPath) return null;
 
-  const content = await zip.file(skillMdPath)?.async("string");
+  const rawContent = await zip.file(skillMdPath)?.async("uint8array");
+  const content = rawContent ? decodeSkillText(rawContent) : null;
   return content ? extractFromContent(content) : null;
 };
 
@@ -430,9 +465,16 @@ export const normalizeSkillFiles = (data: unknown): SkillFileNode[] => {
  * @param type File type (file or directory)
  * @returns React icon component
  */
-export const getFileIcon = (name: string, type: string): React.ReactNode => {
+export const getFileIcon = (
+  name: string,
+  type: string,
+  previewStatus?: "readable" | "unsupported"
+): React.ReactNode => {
   if (type === "directory") {
     return <Folder size={14} color="#f59e0b" />;
+  }
+  if (previewStatus === "unsupported") {
+    return <FileQuestionMark size={14} color="#9ca3af" />;
   }
   const lower = name.toLowerCase();
   if (lower.endsWith(".md") || lower.endsWith(".mdx") || lower.endsWith(".markdown")) {
@@ -468,7 +510,7 @@ export const buildTreeData = (files: SkillFileNode[], parentPath: string = ""): 
     return {
       key: uniqueKey,
       title: file.name,
-      icon: getFileIcon(file.name, file.type),
+      icon: getFileIcon(file.name, file.type, file.preview_status),
       isLeaf: file.type === "file",
       children: file.children ? buildTreeData(file.children, fullPath) : undefined,
       data: file,

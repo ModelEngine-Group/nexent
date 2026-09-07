@@ -16,6 +16,7 @@ class ToolSign(Enum):
     HAOTIAN_SEARCH = "i"  # Haotian search tool identifier
     RAGFLOW_SEARCH = "k"  # RAGFlow search tool identifier
     AIDP_SEARCH = "j"  # AIDP search tool identifier
+    INDEPENDENT_AIDP_SEARCH = "l"  # Independent AIDP search tool identifier
     MEMORY_OPERATION = "n"      # Memory operation tool identifier
     SKILL_OPERATION = "s"     # Skill script / file tool identifier
     TERMINAL_OPERATION = "t"  # Terminal operation tool identifier
@@ -36,6 +37,7 @@ TOOL_SIGN_MAPPING = {
     "haotian_search": ToolSign.HAOTIAN_SEARCH.value,
     "ragflow_search": ToolSign.RAGFLOW_SEARCH.value,
     "aidp_search": ToolSign.AIDP_SEARCH.value,
+    "ind_aidp_search": ToolSign.INDEPENDENT_AIDP_SEARCH.value,
     "file_operation": ToolSign.FILE_OPERATION.value,
     "terminal_operation": ToolSign.TERMINAL_OPERATION.value,
     "multimodal_operation": ToolSign.MULTIMODAL_OPERATION.value,

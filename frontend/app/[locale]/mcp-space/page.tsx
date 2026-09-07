@@ -3,10 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, ConfigProvider, Empty, Modal, Spin } from "antd";
+import { App, Button, ConfigProvider, Empty, Modal, Popover, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
-import { CheckCircle, ChevronLeft, ChevronRight, Clock, CloudUpload, Download, Eye, Inbox, Plus, Puzzle, ShieldCheck, User, XCircle } from "lucide-react";
+import {
+  CheckCircle,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  CloudUpload,
+  Download,
+  Eye,
+  Inbox,
+  Plus,
+  Puzzle,
+  ShieldCheck,
+  Tag,
+  User,
+  XCircle,
+} from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { parseMcpReviewDeepLinkParams } from "@/lib/notificationNavigation";
@@ -53,6 +68,13 @@ import {
   resolveDeploymentType,
 } from "@/lib/mcpTools";
 import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import RepositoryTagFilter from "@/components/tag/RepositoryTagFilter";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
+import type { TagResourcePredicate } from "@/types/tagManagement";
+import { tagManagementApi } from "@/services/tagManagementService";
 import AddMcpServiceCard from "./components/AddMcpServiceCard";
 import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
 import McpCommunityDetailModal from "./components/add/community/McpCommunityDetailModal";
@@ -136,13 +158,18 @@ export default function McpToolsPage() {
     McpToolsServicesTab.REPOSITORY
   );
   const [showAddModal, setShowAddModal] = useState(false);
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultLibrary =
+    tagLibraries?.find((lib) => lib.bucket_key === "default_resource") ?? null;
   const [selectedLocal, setSelectedLocal] = useState<McpServiceItem | null>(
     null
   );
   const [selectedRepository, setSelectedRepository] =
     useState<CommunityMcpCard | null>(null);
-  const [selectedReview, setSelectedReview] =
-    useState<CommunityMcpCard | null>(null);
+  const [selectedReview, setSelectedReview] = useState<CommunityMcpCard | null>(
+    null
+  );
   const [selectedPublished, setSelectedPublished] =
     useState<CommunityMcpCard | null>(null);
 
@@ -171,23 +198,27 @@ export default function McpToolsPage() {
     tab === McpToolsServicesTab.MINE || Boolean(reviewDeepLink)
   );
   const repositoryBrowser = useMcpCommunityBrowser(
-    tab === McpToolsServicesTab.REPOSITORY
+    tab === McpToolsServicesTab.REPOSITORY,
+    6
   );
   const reviewBrowser = useMcpCommunityReview(isAdmin);
   const quickAdd = useMcpCommunityQuickAdd({
     onSuccess: () => setShowAddModal(false),
   });
-  const isRepositoryInstalled = useCallback((service: CommunityMcpCard) => {
-    return localList.services.some((localService) => {
-      if (localService.permission !== "EDIT") return false;
-      if (
-        service.communityId &&
-        localService.communityId === service.communityId
-      )
-        return true;
-      return localService.name === service.name;
-    });
-  }, [localList.services]);
+  const isRepositoryInstalled = useCallback(
+    (service: CommunityMcpCard) => {
+      return localList.services.some((localService) => {
+        if (localService.permission !== "EDIT") return false;
+        if (
+          service.communityId &&
+          localService.communityId === service.communityId
+        )
+          return true;
+        return localService.name === service.name;
+      });
+    },
+    [localList.services]
+  );
   const detailMcpIdRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -254,17 +285,26 @@ export default function McpToolsPage() {
     (s) => (s.reviewStatus || "pending") === "pending"
   ).length;
 
-  const searchActions = tab === McpToolsServicesTab.MINE ? (
-    <Button
-      type="primary"
-      className="flex h-11 shrink-0 items-center gap-1.5"
-      icon={<Plus className="size-4" />}
-      onClick={openAddModal}
-    >
-      {t("mcpTools.addModal.title")}
-    </Button>
-  ) : null;
-
+  const searchActions =
+    tab === McpToolsServicesTab.MINE ? (
+      <>
+        <Button
+          type="primary"
+          className="flex h-11 shrink-0 items-center gap-1.5"
+          icon={<Plus className="size-4" />}
+          onClick={openAddModal}
+        >
+          {t("mcpTools.addModal.title")}
+        </Button>
+        <Button
+          className="flex h-11 shrink-0 items-center gap-1.5"
+          icon={<Tag className="size-4" />}
+          onClick={() => setTagManagementOpen(true)}
+        >
+          {t("mcpTools.tagManagement")}
+        </Button>
+      </>
+    ) : null;
 
   return (
     <ConfigProvider theme={mcpToolsTheme}>
@@ -295,20 +335,42 @@ export default function McpToolsPage() {
                 </div>
               </section>
 
-              <Tabs value={tab} onValueChange={(value) => setTab(value as McpToolsServicesTab)} className="w-full">
-                <TabsList className={cn("mb-6 grid h-auto w-full gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2", isAdmin ? "grid-cols-3" : "grid-cols-2")}>
-                  <TabsTrigger value={McpToolsServicesTab.REPOSITORY} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
+              <Tabs
+                value={tab}
+                onValueChange={(value) => setTab(value as McpToolsServicesTab)}
+                className="w-full"
+              >
+                <TabsList
+                  className={cn(
+                    "mb-6 grid h-auto w-full gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2",
+                    isAdmin ? "grid-cols-3" : "grid-cols-2"
+                  )}
+                >
+                  <TabsTrigger
+                    value={McpToolsServicesTab.REPOSITORY}
+                    className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                  >
                     <Inbox className="size-4" aria-hidden />
                     {t("repository.page.tab.repository")}
-                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{repositoryCount}</span>
+                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
+                      {repositoryCount}
+                    </span>
                   </TabsTrigger>
-                  <TabsTrigger value={McpToolsServicesTab.MINE} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
+                  <TabsTrigger
+                    value={McpToolsServicesTab.MINE}
+                    className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                  >
                     <User className="size-4" aria-hidden />
                     {t("mcpTools.page.tab.mine")}
-                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">{mineCount}</span>
+                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
+                      {mineCount}
+                    </span>
                   </TabsTrigger>
                   {isAdmin ? (
-                    <TabsTrigger value={McpToolsServicesTab.REVIEW} className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm">
+                    <TabsTrigger
+                      value={McpToolsServicesTab.REVIEW}
+                      className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                    >
                       <ShieldCheck className="size-4" aria-hidden />
                       {t("repository.page.tab.review")}
                       {pendingReviewCount > 0 ? (
@@ -401,6 +463,14 @@ export default function McpToolsPage() {
                 open={showAddModal}
                 onClose={() => setShowAddModal(false)}
               />
+
+              <TagDefinitionManagementModal
+                open={tagManagementOpen}
+                onClose={() => setTagManagementOpen(false)}
+                bucketId={defaultLibrary?.bucket_id ?? 0}
+                bucketName={defaultLibrary?.bucket_name ?? ""}
+                canManage={true}
+              />
             </div>
           </motion.div>
         </div>
@@ -453,6 +523,17 @@ function RepositoryView({
       <McpToolsSearchFilterBar
         search={browser.filters.search}
         actions={actions}
+        searchActions={
+          <RepositoryTagFilter
+            value={
+              browser.filters.tag === FILTER_ALL ? undefined : browser.filters.tag
+            }
+            tags={browser.tagStats}
+            onChange={(value) =>
+              browser.updateFilter("tag", value ?? FILTER_ALL)
+            }
+          />
+        }
         onSearchChange={(value) => browser.updateFilter("search", value)}
       />
 
@@ -486,13 +567,11 @@ function RepositoryView({
 
       {filteredServices.length > 0 ? (
         <McpToolsPagination
-          mode="cursor"
-          page={browser.page}
-          resultCount={filteredServices.length}
-          hasPrevPage={browser.hasPrevPage}
-          hasNextPage={browser.hasNextPage}
-          onPrevPage={browser.prevPage}
-          onNextPage={browser.nextPage}
+          mode="offset"
+          current={browser.page}
+          pageSize={browser.pageSize}
+          total={browser.total}
+          onChange={browser.setPage}
         />
       ) : null}
     </div>
@@ -528,10 +607,26 @@ function MineView({
   const [deploymentType, setDeploymentType] =
     useState<DeploymentFilter>(FILTER_ALL);
   const [tag, setTag] = useState(FILTER_ALL);
+  const { data: mineTagLibraries } = useTagLibraries();
+  const mineDefaultLibrary =
+    mineTagLibraries?.find((lib) => lib.bucket_key === "default_resource") ??
+    null;
+  const { data: mineTagDefinitions } = useTagDefinitions(
+    mineDefaultLibrary?.bucket_id ?? null
+  );
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [matchedTagIds, setMatchedTagIds] = useState<Set<string> | null>(null);
+  const [matchedSearchTagIds, setMatchedSearchTagIds] = useState<
+    Set<string> | null
+  >(null);
   const [page, setPage] = useState(1);
   const [publishingKey, setPublishingKey] = useState<string | null>(null);
   const [unpublishingKey, setUnpublishingKey] = useState<string | null>(null);
-  const [refreshingMineKey, setRefreshingMineKey] = useState<string | null>(null);
+  const [refreshingMineKey, setRefreshingMineKey] = useState<string | null>(
+    null
+  );
   const [reviewProgressItem, setReviewProgressItem] = useState<{
     item: MineMcpCardItem;
     onlineService?: CommunityMcpCard;
@@ -646,10 +741,81 @@ function MineView({
     [items, t]
   );
 
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(mineTagDefinitions, search, t),
+    [mineTagDefinitions, search, t]
+  );
+
+  useEffect(() => {
+    if (tagPredicates.length === 0) {
+      setMatchedTagIds(null);
+      return;
+    }
+    const localItems = items
+      .filter((item) => item.kind === "local")
+      .map((item) => String(item.service.mcpId))
+      .filter(Boolean);
+    if (localItems.length === 0) {
+      setMatchedTagIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    tagManagementApi
+      .filterResourceIds("mcp_service", localItems, tagPredicates)
+      .then((result) => {
+        if (cancelled) return;
+        setMatchedTagIds(new Set(result.matched_resource_ids ?? []));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMatchedTagIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagPredicates, items]);
+
+  useEffect(() => {
+    if (searchTagPredicates.length === 0) {
+      setMatchedSearchTagIds(null);
+      return;
+    }
+    const localItems = items
+      .filter((item) => item.kind === "local")
+      .map((item) => String(item.service.mcpId))
+      .filter(Boolean);
+    if (localItems.length === 0) {
+      setMatchedSearchTagIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    Promise.all(
+      searchTagPredicates.map((predicate) =>
+        tagManagementApi.filterResourceIds("mcp_service", localItems, [predicate])
+      )
+    )
+      .then((results) => {
+        if (cancelled) return;
+        setMatchedSearchTagIds(
+          new Set(results.flatMap((result) => result.matched_resource_ids ?? []))
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMatchedSearchTagIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [items, searchTagPredicates]);
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const service = item.service;
-      if (!matchesNameOrTag(service, search)) return false;
+      const matchesStructuredTag =
+        item.kind === "local" &&
+        matchedSearchTagIds?.has(String(item.service.mcpId));
+      if (!matchesNameOrTag(service, search) && !matchesStructuredTag)
+        return false;
       if (tag !== FILTER_ALL && !(service.tags || []).includes(tag))
         return false;
       if (
@@ -657,13 +823,17 @@ function MineView({
         resolveDeploymentType(service) !== deploymentType
       )
         return false;
+      if (matchedTagIds !== null) {
+        if (item.kind !== "local") return false;
+        if (!matchedTagIds.has(String(item.service.mcpId))) return false;
+      }
       return true;
     });
-  }, [items, search, tag, deploymentType]);
+  }, [items, search, tag, deploymentType, matchedTagIds, matchedSearchTagIds]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, tag, deploymentType]);
+  }, [search, tag, deploymentType, tagPredicates]);
 
   const firstPageSize = MINE_PAGE_SIZE - 1;
 
@@ -684,36 +854,27 @@ function MineView({
   };
 
   const refreshMineData = async () => {
-    await queryClient.invalidateQueries({
+    // Refetch the review query immediately so the admin tab badge updates
+    // without requiring a full page reload.
+    await queryClient.refetchQueries({
       queryKey: MCP_TOOLS_QUERY_KEYS.communityReview,
+      type: "all",
     });
-    await Promise.all([
-      localList.refetch(),
-      myPublished.refetch(),
-    ]);
+    await Promise.all([localList.refetch(), myPublished.refetch()]);
   };
 
   const handleSubmitVersionUpdate = (
     item: MineMcpCardItem,
     onlineService?: CommunityMcpCard
   ) => {
-    const sharedFields = item.service.sharedFields;
-    if (!sharedFields || !Object.values(sharedFields).some(Boolean)) {
-      message.warning(t("mcpTools.mine.sharedFieldsRequired"));
-      return;
-    }
-    if (item.kind === "community") {
-      // Community items: submit directly with optional listing note
-      setApplyListingItem({ item, onlineService });
-      return;
-    }
     setApplyListingItem({ item, onlineService });
   };
 
   const doSubmitVersionUpdate = async (
     item: MineMcpCardItem,
     onlineService: CommunityMcpCard | undefined,
-    content?: string
+    content?: string,
+    sharedFields?: Record<string, boolean>
   ) => {
     const key = getMineItemKey(item);
     setPublishingKey(key);
@@ -728,7 +889,7 @@ function MineView({
           version: (service.version || "").trim(),
           tags: service.tags || [],
           registry_json: service.registryJson,
-          shared_fields: item.service.sharedFields,
+          shared_fields: sharedFields,
           content,
         });
       } else if (onlineService?.marketId) {
@@ -746,7 +907,7 @@ function MineView({
             ? McpTransportType.CONTAINER
             : McpTransportType.URL,
           config_json: configJson,
-          shared_fields: item.service.sharedFields,
+          shared_fields: sharedFields,
           content,
         });
       } else if (item.kind === "local") {
@@ -760,11 +921,12 @@ function MineView({
           tags: service.tags || [],
           mcp_server: configJson ? undefined : service.serverUrl,
           config_json: configJson,
-          shared_fields: item.service.sharedFields,
+          shared_fields: sharedFields,
           content,
         });
       }
-      const isInitialPublish = item.kind === "local" && !onlineService?.marketId;
+      const isInitialPublish =
+        item.kind === "local" && !onlineService?.marketId;
       message.success(
         isInitialPublish
           ? t("mcpTools.mine.publishApplySuccess")
@@ -774,9 +936,9 @@ function MineView({
       updateLocalReviewStatus(item, "pending");
     } catch {
       message.error(t("mcpTools.mine.publishApplyFailed"));
+      return;
     } finally {
       setPublishingKey(null);
-      return;
     }
     // Refresh caches after successful submission; never fail the submission
     // when a cache refresh has a transient error.
@@ -819,7 +981,9 @@ function MineView({
         : t("mcpTools.mine.unpublishOnlineVersionDescription", {
             name: onlineService.name || item.service.name,
           }),
-      okText: isPendingReview ? t("repository.listingStatus.cancelApply") : t("mcpTools.mine.unpublishOnlineVersion"),
+      okText: isPendingReview
+        ? t("repository.listingStatus.cancelApply")
+        : t("mcpTools.mine.unpublishOnlineVersion"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       centered: true,
@@ -871,7 +1035,10 @@ function MineView({
             queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY }),
             queryClient.invalidateQueries({ queryKey: ["tools"] }),
             queryClient.invalidateQueries({ queryKey: ["agents"] }),
-            queryClient.refetchQueries({ queryKey: MCP_SERVERS_QUERY_KEY, type: 'all' }),
+            queryClient.refetchQueries({
+              queryKey: MCP_SERVERS_QUERY_KEY,
+              type: "all",
+            }),
           ]);
         } catch {
           message.error(t("repository.mine.deleteFailed"));
@@ -881,7 +1048,8 @@ function MineView({
   };
 
   const handleHealthCheck = async (item: MineMcpCardItem) => {
-    const mcpId = item.kind === "local" ? item.service.mcpId : item.service.sourceMcpId;
+    const mcpId =
+      item.kind === "local" ? item.service.mcpId : item.service.sourceMcpId;
     if (!mcpId) return;
     const key = getMineItemKey(item);
     setRefreshingMineKey(key);
@@ -892,7 +1060,10 @@ function MineView({
       } else {
         message.error(t("mcpConfig.message.healthCheckFailed"));
         // If MCP is enabled and health check fails, auto-disable it
-        if (item.kind === "local" && item.service.enabled === McpServiceStatus.ENABLED) {
+        if (
+          item.kind === "local" &&
+          item.service.enabled === McpServiceStatus.ENABLED
+        ) {
           await toggle.toggle(item.service);
         }
       }
@@ -908,7 +1079,8 @@ function MineView({
     item: MineMcpCardItem,
     onlineService?: CommunityMcpCard
   ) => {
-    const communityRecord = item.kind === "community" ? item.service : onlineService;
+    const communityRecord =
+      item.kind === "community" ? item.service : onlineService;
     const reviewId = communityRecord?.reviewId;
     if (!reviewId) return;
     try {
@@ -935,13 +1107,43 @@ function MineView({
         deploymentType={deploymentType}
         categoryStats={categoryStats}
         actions={actions}
+        filterActions={
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <div className="w-72">
+                <TagFilterControls
+                  definitions={mineTagDefinitions ?? []}
+                  value={tagPredicates}
+                  onChange={setTagPredicates}
+                />
+                {tagPredicates.length > 0 ? (
+                  <button
+                    type="button"
+                    className="mt-2 text-xs text-blue-600 hover:underline"
+                    onClick={() => setTagPredicates([])}
+                  >
+                    {t("mcpTools.tagFilter.clear")}
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            <Button
+              type={tagPredicates.length > 0 ? "primary" : "default"}
+              icon={<Tag className="size-3.5" aria-hidden />}
+              aria-label={t("mcpTools.tagFilter.button")}
+            >
+              {t("mcpTools.tagFilter.button")}
+            </Button>
+          </Popover>
+        }
         onSearchChange={setSearch}
         onDeploymentTypeChange={setDeploymentType}
       />
 
-      <p className="text-sm text-slate-500">
-        {t("mcpTools.mine.publishHint")}
-      </p>
+      <p className="text-sm text-slate-500">{t("mcpTools.mine.publishHint")}</p>
 
       {loading ? (
         <PlaceholderBox>
@@ -994,7 +1196,10 @@ function MineView({
       )}
 
       {(() => {
-        const remainingItems = Math.max(0, filteredItems.length - firstPageSize);
+        const remainingItems = Math.max(
+          0,
+          filteredItems.length - firstPageSize
+        );
         const totalPages = 1 + Math.ceil(remainingItems / MINE_PAGE_SIZE);
         if (totalPages <= 1) return null;
         return (
@@ -1052,12 +1257,13 @@ function MineView({
             : false
         }
         onClose={() => setApplyListingItem(null)}
-        onConfirm={async (content) => {
+        onConfirm={async (content, sharedFields) => {
           if (!applyListingItem) return;
           await doSubmitVersionUpdate(
             applyListingItem.item,
             applyListingItem.onlineService,
-            content
+            content,
+            sharedFields
           );
         }}
       />
@@ -1132,7 +1338,10 @@ function resolveOnlineService(
   if (reviewService) return reviewService;
   if (service.communityId) {
     const marketService = serviceByCommunityId.get(service.communityId);
-    if (marketService?.sourceMcpId == null || marketService.sourceMcpId === service.mcpId) {
+    if (
+      marketService?.sourceMcpId == null ||
+      marketService.sourceMcpId === service.mcpId
+    ) {
       return marketService;
     }
   }
@@ -1290,8 +1499,7 @@ function ReviewTableRow({
   const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
   const reviewStatus = service.reviewStatus || "pending";
   const isPending = reviewStatus === "pending";
-  const author =
-    service.authorDisplayName || service.authorName || "-";
+  const author = service.authorDisplayName || service.authorName || "-";
   const submitDate = formatRegistryDate(service.createdAt || "");
   const listingNote = service.content?.trim() || "—";
 

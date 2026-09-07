@@ -1,10 +1,15 @@
 import sys
 import asyncio
 import json
+import io
 import types
 from contextlib import contextmanager
-from unittest.mock import patch, MagicMock, mock_open, call, Mock, AsyncMock
+from unittest.mock import ANY, patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
+
+imghdr_mock = types.ModuleType("imghdr")
+imghdr_mock.what = MagicMock(return_value=None)
+sys.modules["imghdr"] = imghdr_mock
 
 import pytest
 from fastapi.responses import StreamingResponse
@@ -85,8 +90,6 @@ sys.modules['nexent.monitor.monitoring'] = MagicMock()
 # Mock external dependencies
 sys.modules['boto3'] = MagicMock()
 sys.modules['elasticsearch'] = MagicMock()
-sys.modules['sqlalchemy'] = MagicMock()
-sys.modules['sqlalchemy.create_engine'] = MagicMock()
 
 # Mock database submodules (do not replace the parent `database` package to avoid breaking other tests)
 sys.modules['database.agent_db'] = MagicMock()
@@ -101,6 +104,20 @@ sys.modules['database.model_management_db'] = MagicMock()
 sys.modules['database.a2a_agent_db'] = MagicMock()
 sys.modules['database.skill_db'] = MagicMock()
 
+# Mock conversation_db and db_models (newly imported by agent_service.py for
+# runtime metadata support) so the real sqlalchemy-based modules are not loaded
+# during collection - the pre-existing sqlalchemy stub conflicts with
+# sqlalchemy.dialects.postgresql.
+sys.modules['database.conversation_db'] = MagicMock()
+sys.modules['database.db_models'] = MagicMock()
+
+# Mock conversation_db and db_models (newly imported by agent_service.py for
+# runtime metadata support) so the real sqlalchemy-based modules are not loaded
+# during collection - the pre-existing sqlalchemy stub conflicts with
+# sqlalchemy.dialects.postgresql.
+sys.modules['database.conversation_db'] = MagicMock()
+sys.modules['database.db_models'] = MagicMock()
+
 # Stub database.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
@@ -112,8 +129,15 @@ sys.modules['backend.database.client'] = _mock_db_client
 
 # Mock services submodules
 services_module = types.ModuleType("services")
-services_module.__path__ = []
+services_module.__path__ = [
+    os.path.join(os.path.dirname(__file__), "../../../backend/services")
+]
 sys.modules['services'] = services_module
+
+tag_management_service_module = types.ModuleType("services.tag_management_service")
+tag_management_service_module.TagManagementService = MagicMock()
+sys.modules['services.tag_management_service'] = tag_management_service_module
+setattr(services_module, 'tag_management_service', tag_management_service_module)
 
 runtime_state_service_module = types.ModuleType("services.runtime_state_service")
 runtime_state_service_mock = MagicMock()
@@ -130,7 +154,8 @@ sys.modules['services.runtime_state_service'] = runtime_state_service_module
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
 agent_version_service_mock = MagicMock()
-skill_service_mock = MagicMock()
+skill_service_mock = types.ModuleType("management.services.skill.service")
+skill_service_mock.SkillService = MagicMock()
 skill_service_mock.SkillService.return_value.list_skill_instances.return_value = []
 prompt_template_service_mock = MagicMock()
 prompt_template_service_mock.SYSTEM_PROMPT_TEMPLATE_ID = 0
@@ -141,27 +166,78 @@ prompt_template_service_mock.resolve_prompt_generate_template = MagicMock(return
 sys.modules['services.conversation_management_service'] = conversation_management_service_mock
 sys.modules['services.memory_config_service'] = memory_config_service_mock
 sys.modules['services.agent_version_service'] = agent_version_service_mock
-sys.modules['services.skill_service'] = skill_service_mock
+sys.modules['management.services.skill.service'] = skill_service_mock
 sys.modules['services.prompt_template_service'] = prompt_template_service_mock
 sys.modules['services.file_management_service'] = MagicMock()
-sys.modules['services.skill_service'] = MagicMock()
 sys.modules['services.streaming_channel'] = MagicMock()
+
+model_gateway_service_mock = types.ModuleType("services.model_gateway_service")
+model_gateway_service_mock.build_adapter_fresh = MagicMock()
+sys.modules["services.model_gateway_service"] = model_gateway_service_mock
+setattr(services_module, "model_gateway_service", model_gateway_service_mock)
 
 # Mock streaming_channel_manager with async methods
 class AsyncChannelMock:
     """Async mock for StreamingChannel that can be awaited."""
-    async def publish(self, *args, **kwargs):
-        pass
+
+    def __init__(self):
+        self._history = []
+        self._completed = False
+        self._event = asyncio.Event()
+
+    @property
+    def is_completed(self):
+        return self._completed
+
+    async def publish(self, chunk, *args, **kwargs):
+        if not self._completed:
+            self._history.append(chunk)
+            self._event.set()
+
+    async def subscribe_with_history(self, start_from_index=0):
+        index = start_from_index
+        while True:
+            while index < len(self._history):
+                chunk = self._history[index]
+                index += 1
+                yield chunk
+            if self._completed:
+                break
+            self._event.clear()
+            await self._event.wait()
+
+    def complete(self, status="completed"):
+        self._completed = True
+        self._event.set()
+
     async def close(self, *args, **kwargs):
         pass
 
 streaming_channel_manager_mock = MagicMock()
-streaming_channel_manager_mock.get_or_create_channel = AsyncMock(return_value=AsyncChannelMock())
+
+
+async def _get_test_streaming_channel(*args, **kwargs):
+    channel = AsyncChannelMock()
+    streaming_channel_manager_mock._latest_channel = channel
+    return channel
+
+
+async def _complete_test_streaming_channel(*args, **kwargs):
+    channel = getattr(streaming_channel_manager_mock, "_latest_channel", None)
+    if isinstance(channel, AsyncChannelMock):
+        channel.complete(kwargs.get("status", "completed"))
+
+
+streaming_channel_manager_mock.get_or_create_channel = AsyncMock(
+    side_effect=_get_test_streaming_channel
+)
 streaming_channel_manager_mock.remove_channel = AsyncMock(return_value=None)
 streaming_channel_manager_mock.publish = AsyncMock(return_value=None)
-streaming_channel_manager_mock.complete_channel = AsyncMock(return_value=None)
+streaming_channel_manager_mock.complete_channel = AsyncMock(
+    side_effect=_complete_test_streaming_channel
+)
 sys.modules['services.streaming_channel'].streaming_channel_manager = streaming_channel_manager_mock
-setattr(services_module, 'skill_service', sys.modules['services.skill_service'])
+setattr(services_module, 'skill_service', sys.modules['management.services.skill.service'])
 
 # Load real asset_owner_visibility (agent_service imports resolve_agent_list_permission)
 import importlib.util
@@ -188,10 +264,15 @@ mock_create_agent_info.create_tool_config_list = AsyncMock(return_value=[])
 sys.modules['agents.create_agent_info'].create_agent_info = mock_create_agent_info
 
 # Mock utils submodules
-sys.modules['utils'] = MagicMock()
+utils_module = types.ModuleType("utils")
+utils_module.__path__ = [
+    os.path.join(os.path.dirname(__file__), "../../../backend/utils")
+]
+sys.modules['utils'] = utils_module
 sys.modules['utils.auth_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 sys.modules['utils.context_utils'] = MagicMock()
+sys.modules['utils.knowledge_telemetry'] = MagicMock()
 sys.modules['utils.context_utils'].build_authorized_context_input = (
     lambda agent_run_info, historical_context=None: MockContextInput(
         items=tuple(agent_run_info.agent_config.context_items or ())
@@ -205,40 +286,17 @@ def mock_convert_list_to_string(items):
         return ""
     return ",".join(str(item) for item in items)
 
-    import backend.services.agent_service as agent_service
-    from backend.services.agent_service import update_agent_info_impl
-    from backend.services.agent_service import get_creating_sub_agent_info_impl
-    from backend.services.agent_service import list_all_agent_info_impl
-    from backend.services.agent_service import get_agent_info_impl
-    from backend.services.agent_service import get_creating_sub_agent_id_service
-    from backend.services.agent_service import get_enable_tool_id_by_agent_id
-    from backend.services.agent_service import (
-        get_agent_call_relationship_impl,
-        delete_agent_impl,
-        export_agent_impl,
-        export_agent_by_agent_id,
-        import_agent_by_agent_id,
-        insert_related_agent_impl,
-        load_default_agents_json_file,
-        clear_agent_memory,
-        import_agent_impl,
-        get_agent_id_by_name,
-        save_messages,
-        prepare_agent_run,
-        run_agent_stream,
-        stop_agent_tasks,
-        _resolve_user_tenant_language,
-        _apply_duplicate_name_availability_rules,
-        _check_single_model_availability,
-        _normalize_language_key,
-        _render_prompt_template,
-        _format_existing_values,
-        _generate_unique_agent_name_with_suffix,
-        _generate_unique_display_name_with_suffix,
-        _generate_unique_value_with_suffix,
-        _regenerate_agent_value_with_llm,
-        clear_agent_new_mark_impl,
-    )
+    import management.services.agent.service as agent_service
+    from management.services.agent.service import update_agent_info_impl
+    from management.services.agent.service import get_creating_sub_agent_info_impl
+    from management.services.agent.service import list_all_agent_info_impl
+    from management.services.agent.service import get_agent_info_impl
+    from management.services.agent.service import get_creating_sub_agent_id_service
+    from management.services.agent.service import get_enable_tool_id_by_agent_id
+    from management.services.agent.service import (get_agent_call_relationship_impl, delete_agent_impl, export_agent_impl, export_agent_by_agent_id, import_agent_by_agent_id, insert_related_agent_impl, load_default_agents_json_file, clear_agent_memory, import_agent_impl, get_agent_id_by_name, save_messages, prepare_agent_run, run_agent_stream, stop_agent_tasks, _resolve_user_tenant_language, clear_agent_new_mark_impl)
+    from utils.time_context_utils import prepend_current_time
+    from management.services.agent.read import apply_duplicate_name_availability_rules as _apply_duplicate_name_availability_rules
+    from management.services.agent.naming import _render_prompt_template
     from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
     # Ensure db_client is set to our mock after import
@@ -274,6 +332,9 @@ class MockProcessType:
 
     class SKILL_ARTIFACT:
         value = "skill_artifact"
+
+    class FILE_ARTIFACT:
+        value = "file_artifact"
 
 sys.modules['nexent.core.utils.observer'] = MagicMock()
 sys.modules['nexent.core.utils.observer'].ProcessType = MockProcessType
@@ -369,47 +430,29 @@ sys.modules['backend.database.client'] = mock_backend_database_client
 # Mock storage client factory
 sys.modules['nexent.storage.storage_client_factory'].create_storage_client_from_config = MagicMock(return_value=MagicMock())
 
+# Other test modules may have imported the production model module before this
+# file installs its lightweight SDK types. Reload it against this file's
+# ``MockToolConfig`` so model validation uses one consistent class identity.
+sys.modules.pop('consts.model', None)
+if hasattr(sys.modules.get('consts'), 'model'):
+    delattr(sys.modules['consts'], 'model')
+
 # Now import backend modules
-import backend.services.agent_service as agent_service
-from backend.services.agent_service import update_agent_info_impl
-from backend.services.agent_service import get_creating_sub_agent_info_impl
-from backend.services.agent_service import list_all_agent_info_impl
-from backend.services.agent_service import get_agent_info_impl
-from backend.services.agent_service import get_creating_sub_agent_id_service
-from backend.services.agent_service import get_enable_tool_id_by_agent_id
-from backend.services.agent_service import (
-        get_agent_call_relationship_impl,
-        delete_agent_impl,
-        delete_related_agent_impl,
-        export_agent_impl,
-        export_agent_by_agent_id,
-        import_agent_by_agent_id,
-        insert_related_agent_impl,
-        load_default_agents_json_file,
-        import_agent_impl,
-        get_agent_id_by_name,
-        get_agent_by_name_impl,
-        save_messages,
-        prepare_agent_run,
-        run_agent_stream,
-        stop_agent_tasks,
-        _resolve_user_tenant_language,
-        _apply_duplicate_name_availability_rules,
-        _check_single_model_availability,
-        _normalize_language_key,
-        _render_prompt_template,
-        _format_existing_values,
-        _generate_unique_agent_name_with_suffix,
-        _generate_unique_display_name_with_suffix,
-        _generate_unique_value_with_suffix,
-        _regenerate_agent_value_with_llm,
-        _resolve_model_ids_with_fallback,
-        clear_agent_new_mark_impl,
-        save_message,
-        save_message_unit,
-        update_unit_status,
-        update_message_status,
-    )
+import management.services.agent.naming as naming_service
+import management.services.agent.run as agent_run_service
+import management.services.agent.service as agent_service
+from management.services.agent.service import update_agent_info_impl
+from management.services.agent.service import get_creating_sub_agent_info_impl
+from management.services.agent.service import list_all_agent_info_impl
+from management.services.agent.service import get_agent_info_impl
+from management.services.agent.service import get_creating_sub_agent_id_service
+from management.services.agent.service import get_enable_tool_id_by_agent_id
+from management.services.agent.service import (get_agent_call_relationship_impl, delete_agent_impl, delete_related_agent_impl, export_agent_impl, export_agent_by_agent_id, import_agent_by_agent_id, insert_related_agent_impl, load_default_agents_json_file, import_agent_impl, get_agent_id_by_name, get_agent_by_name_impl, save_messages, prepare_agent_run, run_agent_stream, stop_agent_tasks, _resolve_user_tenant_language, _resolve_model_ids_with_fallback, clear_agent_new_mark_impl)
+from management.services.agent.run import save_message, save_message_unit, update_unit_status, update_message_status
+from utils.time_context_utils import prepend_current_time
+from utils.agent_stream_utils import SAFE_AGENT_STREAM_ERROR_MESSAGE
+from management.services.agent.read import apply_duplicate_name_availability_rules as _apply_duplicate_name_availability_rules
+from management.services.agent.naming import _render_prompt_template
 from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
 # =============================================================================
@@ -429,6 +472,8 @@ def apply_default_prompt_template_request_fields(request, prompt_template_id=Non
     request.enabled_skill_ids = None
     if not hasattr(request, "related_agent_ids"):
         request.related_agent_ids = None
+    if not hasattr(request, "related_agents"):
+        request.related_agents = None
     if not hasattr(request, "enabled_tool_ids"):
         request.enabled_tool_ids = None
     if not hasattr(request, "example_questions"):
@@ -455,7 +500,7 @@ async def test_get_enable_tool_id_by_agent_id():
         {"tool_id": 4, "enabled": True}
     ]
 
-    with patch('backend.services.agent_service.query_all_enabled_tool_instances') as mock_query:
+    with patch('management.services.agent.service.query_all_enabled_tool_instances') as mock_query:
         mock_query.return_value = mock_tool_instances
 
         # Execute
@@ -472,8 +517,8 @@ async def test_get_enable_tool_id_by_agent_id():
         )
 
 
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.search_blank_sub_agent_by_main_agent_id')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.service.search_blank_sub_agent_by_main_agent_id')
 @pytest.mark.asyncio
 async def test_get_creating_sub_agent_id_service_existing_agent(mock_search, mock_create):
     """
@@ -498,8 +543,8 @@ async def test_get_creating_sub_agent_id_service_existing_agent(mock_search, moc
     mock_create.assert_not_called()
 
 
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.search_blank_sub_agent_by_main_agent_id')
+@patch('management.services.agent.service.create_agent')
+@patch('management.services.agent.service.search_blank_sub_agent_by_main_agent_id')
 @pytest.mark.asyncio
 async def test_get_creating_sub_agent_id_service_new_agent(mock_search, mock_create):
     """
@@ -529,13 +574,13 @@ async def test_get_creating_sub_agent_id_service_new_agent(mock_search, mock_cre
     )
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
@@ -571,7 +616,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
 
     # skill_db.get_valid_skill_ids is hit as a fallback check; mock it to keep the
     # flow self-contained without requiring a live DB.
-    with patch("backend.services.agent_service.skill_db.get_valid_skill_ids",
+    with patch("management.services.agent.service.skill_db.get_valid_skill_ids",
                return_value={1}):
         # Mock check_agent_availability - agent is available
         mock_check_availability.return_value = (True, [])
@@ -586,6 +631,7 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [{"skill_id": 1, "enabled": True}],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
@@ -606,14 +652,14 @@ async def test_get_agent_info_impl_success(mock_search_agent_info, mock_search_t
     mock_check_availability.assert_called_once()
 
 
-@patch('backend.services.agent_service.query_current_version_no')
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.query_current_version_no')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service, mock_query_current_version_no):
     """
@@ -665,6 +711,7 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
         "business_description": "Test agent",
         "tools": expected_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_ids": [],  # Added for get_valid_model_ids integration
@@ -689,12 +736,12 @@ async def test_get_agent_info_impl_with_version_no(mock_search_agent_info, mock_
     mock_query_current_version_no.assert_called_once_with(123, "test_tenant")
 
 
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_enable_tool_id_by_agent_id')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.get_creating_sub_agent_id_service')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.get_enable_tool_id_by_agent_id')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.get_creating_sub_agent_id_service')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_info, mock_get_creating_sub_agent,
                                                         mock_search_agent_info, mock_get_enable_tools,
@@ -759,11 +806,11 @@ async def test_get_creating_sub_agent_info_impl_success(mock_get_current_user_in
     assert result == expected_result
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_id')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_update_agent,
                                                 mock_query_all_tools, mock_query_tool_instances_by_id,
@@ -796,12 +843,13 @@ async def test_update_agent_info_impl_success(mock_get_current_user_info, mock_u
         123, request, "test_user")
 
 
-@patch('backend.services.agent_service.delete_tools_by_agent_id')
-@patch('backend.services.agent_service.delete_agent_relationship')
-@patch('backend.services.agent_service.delete_agent_by_id')
+@patch('management.services.agent.management.delete_tools_by_agent_id')
+@patch('management.services.agent.management.delete_agent_relationship')
+@patch('management.services.agent.management.delete_agent_by_id')
+@patch('management.services.agent.service.skill_db.delete_skills_by_agent_id')
 @pytest.mark.asyncio
-async def test_delete_agent_impl_success(mock_delete_agent, mock_delete_related,
-                                         mock_delete_tools):
+async def test_delete_agent_impl_success(mock_delete_skills, mock_delete_agent,
+                                         mock_delete_related, mock_delete_tools):
     """
     Test successful deletion of an agent.
 
@@ -818,9 +866,31 @@ async def test_delete_agent_impl_success(mock_delete_agent, mock_delete_related,
     mock_delete_related.assert_called_once_with(
         123, "test_tenant", "test_user")
     mock_delete_tools.assert_called_once_with(123, "test_tenant", "test_user")
+    mock_delete_skills.assert_called_once_with(123, "test_tenant", "test_user")
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.delete_tools_by_agent_id')
+@patch('management.services.agent.management.delete_agent_relationship')
+@patch('management.services.agent.management.delete_agent_by_id')
+@patch('management.services.agent.management.skill_db.delete_skills_by_agent_id')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_delete_agent_impl_cleans_up_tags_for_tenant_owned_agent(
+    mock_search_agent,
+    mock_delete_skills,
+    _mock_delete_agent,
+    _mock_delete_related,
+    _mock_delete_tools,
+):
+    mock_search_agent.return_value = {"tenant_id": "test_tenant"}
+    cleanup = tag_management_service_module.TagManagementService.cleanup_resource_assignments
+
+    await delete_agent_impl(123, "test_tenant", "test_user")
+
+    cleanup.assert_called_once_with("test_tenant", "agent", "123", "test_user")
+
+
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_exception_handling(mock_search_agent_info):
     """
@@ -842,8 +912,8 @@ async def test_get_agent_info_impl_exception_handling(mock_search_agent_info):
     mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_exception_handling(mock_get_current_user_info, mock_update_agent):
     """
@@ -875,10 +945,10 @@ async def test_update_agent_info_impl_exception_handling(mock_get_current_user_i
     assert "Failed to update agent info" in str(context.value)
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_agent_id')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_with_enabled_tool_ids(
     mock_get_current_user_info,
@@ -933,10 +1003,10 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     assert tool_info.params == {}
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_agent_id')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null_tool_id(
     mock_get_current_user_info,
@@ -981,10 +1051,10 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null
     assert tool_info.enabled is True
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_agent_id')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_with_enabled_tool_ids_disabled_existing_tool(
     mock_get_current_user_info,
@@ -1039,10 +1109,10 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_disabled_existing_to
     assert tool_info.params == {}
 
 
-@patch('backend.services.agent_service.update_related_agents')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.update_related_agents')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_with_related_agent_ids(
     mock_get_current_user_info,
@@ -1066,6 +1136,7 @@ async def test_update_agent_info_impl_with_related_agent_ids(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456, 789]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute
@@ -1076,15 +1147,15 @@ async def test_update_agent_info_impl_with_related_agent_ids(
     mock_update_agent.assert_called_once()
     mock_update_related_agents.assert_called_once_with(
         parent_agent_id=123,
-        related_agent_ids=[456, 789],
         tenant_id="test_tenant",
-        user_id="test_user"
+        user_id="test_user",
+        related_agents=[{"agent_id": 456, "version_no": None}, {"agent_id": 789, "version_no": None}],
     )
 
 
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_circular_dependency_detection(
     mock_get_current_user_info,
@@ -1120,12 +1191,12 @@ async def test_update_agent_info_impl_circular_dependency_detection(
         await update_agent_info_impl(request, authorization="Bearer token")
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
-@patch('backend.services.agent_service.update_related_agents')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_agent_id')
+@patch('management.services.agent.service.update_related_agents')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     mock_get_current_user_info,
@@ -1151,6 +1222,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     request.agent_id = 123
     request.enabled_tool_ids = [1]
     request.related_agent_ids = [456]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute
@@ -1162,16 +1234,16 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     mock_create_or_update_tool.assert_called_once()
     mock_update_related_agents.assert_called_once_with(
         parent_agent_id=123,
-        related_agent_ids=[456],
         tenant_id="test_tenant",
-        user_id="test_user"
+        user_id="test_user",
+        related_agents=[{"agent_id": 456, "version_no": None}],
     )
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_agent_id')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_agent_id')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_tool_update_exception(
     mock_get_current_user_info,
@@ -1201,10 +1273,10 @@ async def test_update_agent_info_impl_tool_update_exception(
         await update_agent_info_impl(request, authorization="Bearer token")
 
 
-@patch('backend.services.agent_service.update_related_agents')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.update_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.update_related_agents')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_related_agent_update_exception(
     mock_get_current_user_info,
@@ -1227,6 +1299,7 @@ async def test_update_agent_info_impl_related_agent_update_exception(
     request.agent_id = 123
     request.enabled_tool_ids = None
     request.related_agent_ids = [456]
+    request.related_agents = None
     apply_default_prompt_template_request_fields(request)
 
     # Execute & Assert
@@ -1234,8 +1307,8 @@ async def test_update_agent_info_impl_related_agent_update_exception(
         await update_agent_info_impl(request, authorization="Bearer token")
 
 
-@patch('backend.services.agent_service.get_user_language')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.run.get_user_language')
+@patch('management.services.agent.run.get_current_user_info')
 def test_resolve_user_tenant_language_with_overrides(mock_get_current_user_info, mock_get_user_language):
     """
     Test _resolve_user_tenant_language with user_id and tenant_id overrides.
@@ -1259,7 +1332,7 @@ def test_resolve_user_tenant_language_with_overrides(mock_get_current_user_info,
     mock_get_user_language.assert_called_once_with(mock_request)
 
 
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.run.get_current_user_info')
 def test_resolve_user_tenant_language_without_overrides(mock_get_current_user_info):
     """
     Test _resolve_user_tenant_language without user_id and tenant_id overrides.
@@ -1282,8 +1355,8 @@ def test_resolve_user_tenant_language_without_overrides(mock_get_current_user_in
     mock_get_current_user_info.assert_called_once_with("Bearer token", mock_request)
 
 
-@patch('backend.services.agent_service.get_user_language')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.run.get_user_language')
+@patch('management.services.agent.run.get_current_user_info')
 def test_resolve_user_tenant_language_partial_override(mock_get_current_user_info, mock_get_user_language):
     """
     Test _resolve_user_tenant_language with partial override (only user_id).
@@ -1307,7 +1380,7 @@ def test_resolve_user_tenant_language_partial_override(mock_get_current_user_inf
     mock_get_current_user_info.assert_called_once_with("Bearer token", mock_request)
 
 
-@patch('backend.services.agent_service.delete_agent_by_id')
+@patch('management.services.agent.management.delete_agent_by_id')
 @pytest.mark.asyncio
 async def test_delete_agent_impl_exception_handling(mock_delete_agent):
     """
@@ -1327,7 +1400,7 @@ async def test_delete_agent_impl_exception_handling(mock_delete_agent):
     assert "Failed to delete agent" in str(context.value)
 
 
-@patch('backend.services.agent_service.query_group_ids_by_user')
+@patch('management.services.agent.management.query_group_ids_by_user')
 def test_get_user_group_ids_success(mock_get_group_ids):
     """
     Test successful retrieval of user's group IDs as comma-separated string.
@@ -1338,7 +1411,7 @@ def test_get_user_group_ids_success(mock_get_group_ids):
     3. Uses convert_list_to_string utility function
     """
     # Setup
-    from backend.services.agent_service import _get_user_group_ids
+    from management.services.agent.service import _get_user_group_ids
     mock_get_group_ids.return_value = [1, 2, 3]
 
     # Execute
@@ -1349,7 +1422,7 @@ def test_get_user_group_ids_success(mock_get_group_ids):
     mock_get_group_ids.assert_called_once_with("test_user")
 
 
-@patch('backend.services.agent_service.query_group_ids_by_user')
+@patch('management.services.agent.management.query_group_ids_by_user')
 def test_get_user_group_ids_empty_groups(mock_get_group_ids):
     """
     Test _get_user_group_ids with empty group list.
@@ -1358,7 +1431,7 @@ def test_get_user_group_ids_empty_groups(mock_get_group_ids):
     1. When user has no groups, returns empty string
     """
     # Setup
-    from backend.services.agent_service import _get_user_group_ids
+    from management.services.agent.service import _get_user_group_ids
     mock_get_group_ids.return_value = []
 
     # Execute
@@ -1369,7 +1442,7 @@ def test_get_user_group_ids_empty_groups(mock_get_group_ids):
     mock_get_group_ids.assert_called_once_with("test_user")
 
 
-@patch('backend.services.agent_service.query_group_ids_by_user')
+@patch('management.services.agent.management.query_group_ids_by_user')
 def test_get_user_group_ids_exception_handling(mock_get_group_ids):
     """
     Test _get_user_group_ids exception handling.
@@ -1378,7 +1451,7 @@ def test_get_user_group_ids_exception_handling(mock_get_group_ids):
     1. When get_group_ids_by_user raises exception, logs warning and returns empty string
     """
     # Setup
-    from backend.services.agent_service import _get_user_group_ids
+    from management.services.agent.service import _get_user_group_ids
     mock_get_group_ids.side_effect = Exception("Database error")
 
     # Execute
@@ -1389,9 +1462,9 @@ def test_get_user_group_ids_exception_handling(mock_get_group_ids):
     mock_get_group_ids.assert_called_once_with("test_user")
 
 
-@patch('backend.services.agent_service.query_group_ids_by_user')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.query_group_ids_by_user')
+@patch('management.services.agent.service.create_agent')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_create_agent_auto_group_ids(mock_get_current_user_info, mock_create_agent, mock_get_group_ids):
     """
@@ -1403,7 +1476,7 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(mock_get_curre
     3. The create_agent function is called with the correct parameters including group_ids
     """
     # Setup
-    from backend.services.agent_service import update_agent_info_impl
+    from management.services.agent.service import update_agent_info_impl
     mock_get_current_user_info.return_value = (
         "test_user", "test_tenant", "en")
     mock_get_group_ids.return_value = [1, 2, 3]
@@ -1445,10 +1518,10 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(mock_get_curre
     assert call_args["group_ids"] == "1,2,3"
 
 
-@patch('backend.services.agent_service.get_mcp_server_by_name_and_tenant')
-@patch('backend.services.agent_service.ExportAndImportDataFormat')
-@patch('backend.services.agent_service.export_agent_by_agent_id')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.get_mcp_server_by_name_and_tenant')
+@patch('management.services.agent.management.ExportAndImportDataFormat')
+@patch('management.services.agent.management.export_agent_by_agent_id')
+@patch('management.services.agent.management.get_current_user_info')
 @pytest.mark.asyncio
 async def test_export_agent_impl_success(mock_get_current_user_info, mock_export_agent_by_id, mock_export_data_format,
                                          mock_get_mcp_server):
@@ -1558,10 +1631,10 @@ async def test_export_agent_impl_success(mock_get_current_user_info, mock_export
     mock_export_data_format.assert_called_once()
 
 
-@patch('backend.services.agent_service.get_mcp_server_by_name_and_tenant')
-@patch('backend.services.agent_service.ExportAndImportDataFormat')
-@patch('backend.services.agent_service.export_agent_by_agent_id')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.get_mcp_server_by_name_and_tenant')
+@patch('management.services.agent.management.ExportAndImportDataFormat')
+@patch('management.services.agent.management.export_agent_by_agent_id')
+@patch('management.services.agent.management.get_current_user_info')
 @pytest.mark.asyncio
 async def test_export_agent_impl_no_mcp_tools(mock_get_current_user_info, mock_export_agent_by_id,
                                               mock_export_data_format, mock_get_mcp_server):
@@ -1638,9 +1711,9 @@ async def test_export_agent_impl_no_mcp_tools(mock_get_current_user_info, mock_e
     mock_export_data_format.assert_called_once()
 
 
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_get_model_by_model_id, mock_check_availability):
     """
     Test get_agent_info_impl with an error in retrieving tool information.
@@ -1660,8 +1733,8 @@ async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_
     mock_check_availability.return_value = (True, [])
 
     # Mock the search_tools_for_sub_agent function to raise an exception
-    with patch('backend.services.agent_service.search_tools_for_sub_agent') as mock_search_tools, \
-            patch('backend.services.agent_service.query_sub_agents_id_list') as mock_query_sub_agents_id:
+    with patch('management.services.agent.service.search_tools_for_sub_agent') as mock_search_tools, \
+            patch('management.services.agent.service.query_sub_agents_id_list') as mock_query_sub_agents_id:
         mock_search_tools.side_effect = Exception("Tool search error")
         mock_query_sub_agents_id.return_value = []
         mock_get_model_by_model_id.return_value = None
@@ -1679,11 +1752,11 @@ async def test_get_agent_info_impl_with_tool_error(mock_search_agent_info, mock_
         mock_search_agent_info.assert_called_once_with(123, "test_tenant", 0)
 
 
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability):
     """
@@ -1727,13 +1800,13 @@ async def test_get_agent_info_impl_sub_agent_error(mock_search_agent_info, mock_
         main_agent_id=123, tenant_id="test_tenant")
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
@@ -1789,6 +1862,7 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_name": "GPT-4",
@@ -1799,17 +1873,16 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "unavailable_reasons": []
     }
     assert result == expected_result
-    # Source calls get_model_by_model_id twice for the single model id:
-    # once while collecting model_names and once when deriving legacy model_name.
-    assert mock_get_model_by_model_id.call_count == 2
+    # The model projection resolves each model id once and reuses the result.
+    assert mock_get_model_by_model_id.call_count == 1
     mock_get_model_by_model_id.assert_any_call(456)
 
 
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.service.convert_string_to_list")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_converts_group_ids_when_present(
     mock_search_agent_info,
@@ -1837,13 +1910,13 @@ async def test_get_agent_info_impl_converts_group_ids_when_present(
     mock_convert_string_to_list.assert_called_once_with("1,2")
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
@@ -1895,6 +1968,7 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": [],
@@ -1908,17 +1982,17 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
     assert result == expected_result
     # Source calls get_model_by_model_id twice for the single model id:
     # once while collecting model_names and once when deriving legacy model_name.
-    assert mock_get_model_by_model_id.call_count == 2
+    assert mock_get_model_by_model_id.call_count == 1
     mock_get_model_by_model_id.assert_any_call(456)
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
@@ -1965,6 +2039,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": [],
@@ -1978,17 +2053,17 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
     assert result == expected_result
     # Source calls get_model_by_model_id twice for the single model id:
     # once while collecting model_names and once when deriving legacy model_name.
-    assert mock_get_model_by_model_id.call_count == 2
+    assert mock_get_model_by_model_id.call_count == 1
     mock_get_model_by_model_id.assert_any_call(456)
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.agent.service.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
@@ -2059,6 +2134,7 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -2076,18 +2152,18 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     # - once for main model_ids[0]
     # - once again to derive legacy model_name from model_ids[0]
     # - once for business_logic_model_id
-    assert mock_get_model_by_model_id.call_count == 3
+    assert mock_get_model_by_model_id.call_count == 2
     mock_get_model_by_model_id.assert_any_call(456)
     mock_get_model_by_model_id.assert_any_call(789)
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.agent.service.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
@@ -2150,6 +2226,7 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -2167,18 +2244,18 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     # - once for main model_ids[0]
     # - once again to derive legacy model_name from model_ids[0]
     # - once for business_logic_model_id
-    assert mock_get_model_by_model_id.call_count == 3
+    assert mock_get_model_by_model_id.call_count == 2
     mock_get_model_by_model_id.assert_any_call(456)
     mock_get_model_by_model_id.assert_any_call(789)
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.agent.service.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_with_business_logic_model_no_display_name(mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id, mock_get_model_by_model_id, mock_check_availability, mock_query_external_sub_agents, mock_skill_service):
     """
@@ -2248,6 +2325,7 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
+        "sub_agent_relations": [],
         "skills": [],
         "external_sub_agent_id_list": [],
         "model_names": ["GPT-4"],
@@ -2265,20 +2343,20 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     # - once for main model_ids[0]
     # - once again to derive legacy model_name from model_ids[0]
     # - once for business_logic_model_id
-    assert mock_get_model_by_model_id.call_count == 3
+    assert mock_get_model_by_model_id.call_count == 2
     mock_get_model_by_model_id.assert_any_call(456)
     mock_get_model_by_model_id.assert_any_call(789)
 
 
-@patch("backend.services.agent_service.query_current_version_no")
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.query_current_version_no")
+@patch("management.services.agent.management.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_marks_mcp_model_unavailable_when_deleted(
     mock_search_agent_info,
@@ -2333,14 +2411,14 @@ async def test_get_agent_info_impl_marks_mcp_model_unavailable_when_deleted(
     assert result["tools"][1]["unavailable_reasons"] == []
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.management.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_handles_tools_without_params(
     mock_search_agent_info,
@@ -2382,14 +2460,14 @@ async def test_get_agent_info_impl_handles_tools_without_params(
     mock_get_model_by_model_id_ignore_delete.assert_not_called()
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_skips_unset_selected_model_default(
     mock_search_agent_info,
@@ -2424,14 +2502,14 @@ async def test_get_agent_info_impl_skips_unset_selected_model_default(
     mock_get_model_by_model_id_ignore_delete.assert_not_called()
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_selected_model_not_found(
     mock_search_agent_info,
@@ -2464,14 +2542,14 @@ async def test_get_agent_info_impl_selected_model_not_found(
     mock_get_model_by_model_id_ignore_delete.assert_called_once_with(555, "test_tenant")
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_selected_model_not_deleted(
     mock_search_agent_info,
@@ -2503,14 +2581,14 @@ async def test_get_agent_info_impl_selected_model_not_deleted(
     assert result["tools"][0]["unavailable_reasons"] == []
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_skips_non_list_params(
     mock_search_agent_info,
@@ -2545,14 +2623,14 @@ async def test_get_agent_info_impl_skips_non_list_params(
     mock_get_model_by_model_id_ignore_delete.assert_not_called()
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_param_loop_skips_non_dict_entries(
     mock_search_agent_info,
@@ -2598,14 +2676,14 @@ async def test_get_agent_info_impl_param_loop_skips_non_dict_entries(
     mock_get_model_by_model_id_ignore_delete.assert_called_once_with(9, "test_tenant")
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id_ignore_delete")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.agent.read.get_model_by_model_id_ignore_delete")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_breaks_after_selected_model_id(
     mock_search_agent_info,
@@ -2647,12 +2725,12 @@ async def test_get_agent_info_impl_breaks_after_selected_model_id(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_success(
     mock_query_agents,
     mock_query_groups,
@@ -2731,12 +2809,12 @@ async def test_list_all_agent_info_impl_success(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_is_published_field(
     mock_query_agents,
     mock_query_groups,
@@ -2819,12 +2897,12 @@ async def test_list_all_agent_info_impl_is_published_field(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
     mock_query_all,
     mock_query_groups,
@@ -2865,12 +2943,12 @@ async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_with_unavailable_tools(
     mock_query_agents,
     mock_query_groups,
@@ -2938,8 +3016,8 @@ async def test_list_all_agent_info_impl_with_unavailable_tools(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_query_error(
     mock_query_agents,
     mock_get_user_tenant,
@@ -2964,12 +3042,12 @@ async def test_list_all_agent_info_impl_query_error(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_model_unavailable(
     mock_query_agents,
     mock_query_groups,
@@ -3010,12 +3088,12 @@ async def test_list_all_agent_info_impl_model_unavailable(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_duplicate_names(
     mock_query_agents,
     mock_query_groups,
@@ -3074,12 +3152,12 @@ async def test_list_all_agent_info_impl_duplicate_names(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_user_permission_read_only(
     mock_query_agents,
     mock_query_groups,
@@ -3147,12 +3225,12 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_group_filtering(
     mock_query_agents,
     mock_query_groups,
@@ -3230,12 +3308,12 @@ async def test_list_all_agent_info_impl_group_filtering(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_creator_can_see_own_agent_without_group_overlap(
     mock_query_agents,
     mock_query_groups,
@@ -3314,12 +3392,12 @@ async def test_list_all_agent_info_impl_creator_can_see_own_agent_without_group_
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_disabled_agents_filtered(
     mock_query_agents,
     mock_query_groups,
@@ -3370,12 +3448,12 @@ async def test_list_all_agent_info_impl_disabled_agents_filtered(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_group_query_error_handled(
     mock_query_agents,
     mock_query_groups,
@@ -3419,12 +3497,12 @@ async def test_list_all_agent_info_impl_group_query_error_handled(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_group_query_error_for_user_role(
     mock_query_agents,
     mock_query_groups,
@@ -3482,9 +3560,9 @@ async def test_list_all_agent_info_impl_group_query_error_for_user_role(
     mock_query_groups.assert_called_once_with("user1")
 
 
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.query_sub_agents_id_list')
+@patch('management.services.agent.management.create_tool_config_list', new_callable=AsyncMock)
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_create_tool_config,
                                                 mock_query_sub_agents_id):
@@ -3576,7 +3654,7 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     mock_query_sub_agents_id.return_value = mock_sub_agent_ids
 
     # Execute
-    with patch('backend.services.agent_service.ExportAndImportAgentInfo', new=ExportAndImportAgentInfo):
+    with patch('management.services.agent.management.ExportAndImportAgentInfo', new=ExportAndImportAgentInfo):
         result = await export_agent_by_agent_id(
             agent_id=123,
             tenant_id="test_tenant",
@@ -3587,7 +3665,6 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     assert result.agent_id == 123
     assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
-    assert result.business_description == "For testing purposes"
     assert len(result.tools) == 5
     assert result.managed_agents == mock_sub_agent_ids
 
@@ -3618,9 +3695,9 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
         main_agent_id=123, tenant_id="test_tenant", version_no=0)
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
 @pytest.mark.asyncio
 async def test_import_agent_by_agent_id_success(mock_query_all_tools, mock_create_agent, mock_create_tool):
     """
@@ -3693,8 +3770,8 @@ async def test_import_agent_by_agent_id_success(mock_query_all_tools, mock_creat
     mock_create_tool.assert_called_once()
 
 
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
 @pytest.mark.asyncio
 async def test_import_agent_by_agent_id_invalid_tool(mock_query_all_tools, mock_create_tool):
     """
@@ -3759,9 +3836,9 @@ async def test_import_agent_by_agent_id_invalid_tool(mock_query_all_tools, mock_
     mock_create_tool.assert_not_called()
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
 @pytest.mark.asyncio
 async def test_import_agent_by_agent_id_with_mcp_tool(mock_query_all_tools, mock_create_agent, mock_create_tool):
     """
@@ -3828,8 +3905,8 @@ async def test_import_agent_by_agent_id_with_mcp_tool(mock_query_all_tools, mock
     mock_create_tool.assert_called_once()
 
 
-@patch('backend.services.agent_service.insert_related_agent')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.insert_related_agent')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_insert_related_agent_impl_success(mock_query_sub_agents_id, mock_insert_related):
     """
     Test successful insertion of related agent relationship.
@@ -3857,7 +3934,7 @@ def test_insert_related_agent_impl_success(mock_query_sub_agents_id, mock_insert
     mock_insert_related.assert_called_once_with(123, 456, "test_tenant")
 
 
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_insert_related_agent_impl_circular_dependency(mock_query_sub_agents_id):
     """
     Test insertion of related agent with circular dependency.
@@ -3967,7 +4044,7 @@ def test_load_default_agents_json_file(mock_file, mock_listdir, mock_join):
         ]
 
         # Execute
-        with patch('backend.services.agent_service.ExportAndImportAgentInfo', new=ExportAndImportAgentInfo):
+        with patch('management.services.agent.management.ExportAndImportAgentInfo', new=ExportAndImportAgentInfo):
             result = load_default_agents_json_file("default/path")
 
         # Assert
@@ -3978,9 +4055,9 @@ def test_load_default_agents_json_file(mock_file, mock_listdir, mock_join):
         mock_listdir.assert_called_once_with("default/path")
 
 
-@patch('backend.services.agent_service.insert_related_agent')
-@patch('backend.services.agent_service.import_agent_by_agent_id')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.insert_related_agent')
+@patch('management.services.agent.management.import_agent_by_agent_id')
+@patch('management.services.agent.management.get_current_user_info')
 @pytest.mark.asyncio
 async def test_import_agent_impl_imports_all_agents_and_links_relations(
     mock_get_current_user_info,
@@ -4061,11 +4138,12 @@ async def test_import_agent_impl_imports_all_agents_and_links_relations(
         child_agent_id=101,
         tenant_id="test_tenant",
         user_id="test_user",
+        selected_agent_version_no=1,
     )
 
 
-@patch('backend.services.agent_service.import_agent_by_agent_id')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.import_agent_by_agent_id')
+@patch('management.services.agent.management.get_current_user_info')
 @pytest.mark.asyncio
 async def test_import_agent_impl_force_import_passes_skip_flag(
     mock_get_current_user_info,
@@ -4131,9 +4209,9 @@ def mock_http_request():
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.build_memory_context')
-@patch('backend.services.agent_service.create_agent_run_info', new_callable=AsyncMock)
-@patch('backend.services.agent_service.agent_run_manager')
+@patch('management.services.agent.run.build_memory_context')
+@patch('management.services.agent.run.create_agent_run_info', new_callable=AsyncMock)
+@patch('management.services.agent.run.agent_run_manager')
 async def test_prepare_agent_run(
     mock_agent_run_manager,
     mock_create_run_info,
@@ -4158,6 +4236,7 @@ async def test_prepare_agent_run(
         mock_agent_request,
         user_id="test_user",
         tenant_id="test_tenant",
+        reservation_token="reservation-1",
     )
 
     # Assert
@@ -4184,21 +4263,57 @@ async def test_prepare_agent_run(
         enable_planning=False,
     )
     mock_agent_run_manager.register_agent_run.assert_called_once_with(
-        123, mock_run_info, "test_user")
+        123,
+        mock_run_info,
+        "test_user",
+        reservation_token="reservation-1",
+    )
     mock_agent_run_manager.create_context_manager.assert_not_called()
     assert mock_run_info.context_input.items == ()
 
 
-@patch('backend.services.agent_service.save_conversation_user')
+@pytest.mark.asyncio
+@patch('management.services.agent.run.build_memory_context')
+@patch('management.services.agent.run.create_agent_run_info', new_callable=AsyncMock)
+@patch('management.services.agent.run.agent_run_manager')
+async def test_prepare_agent_run_can_disable_automation_tool(
+    mock_agent_run_manager,
+    mock_create_run_info,
+    mock_build_memory_context,
+    mock_agent_request,
+):
+    mock_agent_request.enable_automation_tool = False
+    mock_run_info = MagicMock()
+    mock_run_info.agent_config.context_items = []
+    mock_run_info.agent_config.context_manager_config.policy_layers = {
+        "platform": {"processing_mode": "passthrough"}
+    }
+    mock_run_info.history = []
+    mock_create_run_info.return_value = mock_run_info
+
+    await prepare_agent_run(
+        mock_agent_request,
+        user_id="test_user",
+        tenant_id="test_tenant",
+    )
+
+    assert mock_create_run_info.await_args.kwargs["enable_automation_tool"] is False
+    mock_agent_run_manager.register_agent_run.assert_called_once_with(
+        123,
+        mock_run_info,
+        "test_user",
+    )
+
+
+@patch('management.services.agent.run.save_conversation_user')
 def test_save_messages(mock_save_user, mock_agent_request):
     """Test save_messages function."""
     # Test user message saving
     save_messages(mock_agent_request, "user", user_id="u", tenant_id="t")
     mock_save_user.assert_called_once_with(mock_agent_request, "u", "t")
 
-    # Test assistant message saving now raises because incremental
-    # persistence has replaced the old batch path.
-    with pytest.raises(ValueError, match="incremental"):
+    # Assistant output is finalized by the stream-level batch path.
+    with pytest.raises(ValueError, match="final batch"):
         save_messages(
             mock_agent_request,
             "assistant",
@@ -4225,7 +4340,7 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
     mock_http_request,
 ):
     monkeypatch.setattr(
-        agent_service,
+        agent_run_service,
         "_resolve_user_tenant_language",
         lambda **kwargs: ("user-a", "tenant-a", "en"),
     )
@@ -4233,10 +4348,10 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
     update_agent = MagicMock()
     save_user_message = MagicMock()
     reset_stream = AsyncMock()
-    monkeypatch.setattr(agent_service, "get_conversation_service", access_lookup)
-    monkeypatch.setattr(agent_service, "update_conversation_agent_id_service", update_agent)
-    monkeypatch.setattr(agent_service, "save_messages", save_user_message)
-    monkeypatch.setattr(agent_service.runtime_state_service, "reset_stream_async", reset_stream)
+    monkeypatch.setattr(agent_run_service, "get_conversation_service", access_lookup)
+    monkeypatch.setattr(agent_run_service, "update_conversation_agent_id_service", update_agent)
+    monkeypatch.setattr(agent_run_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_run_service.runtime_state_service, "reset_stream_async", reset_stream)
 
     with pytest.raises(agent_service.ForbiddenError, match="not accessible"):
         await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
@@ -4253,12 +4368,12 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
 
 @pytest.mark.asyncio
 @patch(
-    "backend.services.agent_service._resolve_user_tenant_language",
+    "management.services.agent.run._resolve_user_tenant_language",
     return_value=(None, None, "en"),
 )
-@patch("backend.services.agent_service.build_memory_context")
-@patch('backend.services.agent_service.save_messages')
-@patch("backend.services.agent_service.generate_stream")
+@patch("management.services.agent.run_context.build_memory_context")
+@patch('management.services.agent.run.save_messages')
+@patch("management.services.agent.run.generate_stream")
 async def test_run_agent_stream(
     mock_generate_stream,
     mock_save_messages,
@@ -4296,6 +4411,8 @@ async def test_run_agent_stream(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
+        channel=streaming_channel_manager_mock._latest_channel,
     )
 
     # Test debug mode
@@ -4317,13 +4434,89 @@ async def test_run_agent_stream(
 
 @pytest.mark.asyncio
 @patch(
-    "backend.services.agent_service._resolve_user_tenant_language",
+    "management.services.agent.run._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("backend.services.agent_service.create_new_conversation")
-@patch("backend.services.agent_service.generate_stream")
-@patch('backend.services.agent_service.save_messages')
-@patch("backend.services.agent_service.build_memory_context")
+async def test_run_agent_stream_releases_reservation_when_setup_fails(
+    mock_resolve,
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    reserve = MagicMock(return_value="reservation-1")
+    release = MagicMock()
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "reserve_agent_run", reserve)
+    monkeypatch.setattr(
+        agent_run_service.agent_run_manager,
+        "release_agent_run_reservation",
+        release,
+    )
+    monkeypatch.setattr(
+        agent_run_service.runtime_state_service,
+        "reset_stream_async",
+        AsyncMock(side_effect=RuntimeError("reset failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="reset failed"):
+        await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    release.assert_called_once_with(123, "u", "reservation-1")
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_rejects_concurrent_run_with_sse_error(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    class ActiveRunError(RuntimeError):
+        pass
+
+    monkeypatch.setattr(agent_run_service, "AgentRunAlreadyActiveError", ActiveRunError)
+    monkeypatch.setattr(
+        agent_run_service,
+        "_resolve_user_tenant_language",
+        lambda **_kwargs: ("user-a", "tenant-a", "zh"),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_conversation_service",
+        MagicMock(return_value={"conversation_id": mock_agent_request.conversation_id}),
+    )
+    monkeypatch.setattr(
+        agent_run_service.agent_run_manager,
+        "reserve_agent_run",
+        MagicMock(side_effect=ActiveRunError("active")),
+    )
+    save_user_message = MagicMock()
+    reset_stream = AsyncMock()
+    monkeypatch.setattr(agent_run_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_run_service.runtime_state_service, "reset_stream_async", reset_stream)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+    body = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
+
+    assert response.headers["x-stream-status"] == "conflict"
+    assert '"type": "error"' in body
+    assert "已有智能体任务正在运行" in body
+    save_user_message.assert_not_called()
+    reset_stream.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch(
+    "management.services.agent.run._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+@patch("management.services.agent.run.create_new_conversation")
+@patch("management.services.agent.run.generate_stream")
+@patch('management.services.agent.run.save_messages')
+@patch("management.services.agent.run_context.build_memory_context")
 async def test_run_agent_stream_auto_creates_conversation_when_missing(
     mock_build_mem_ctx,
     mock_save_messages,
@@ -4378,12 +4571,12 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
 
 @pytest.mark.asyncio
 @patch(
-    "backend.services.agent_service._resolve_user_tenant_language",
+    "management.services.agent.run._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.save_messages")
-@patch("backend.services.agent_service.generate_stream")
+@patch("management.services.agent.run_context.build_memory_context")
+@patch("management.services.agent.run.save_messages")
+@patch("management.services.agent.run.generate_stream")
 async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
     mock_generate_stream,
     mock_save_messages,
@@ -4409,14 +4602,162 @@ async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
     async for chunk in response.body_iterator:
         chunks.append(chunk)
 
-    assert chunks == [agent_service._safe_agent_stream_error_chunk()]
+    assert chunks == [agent_run_service._safe_agent_stream_error_chunk()]
     assert "secret traceback detail" not in chunks[0]
     assert "Agent stream response error: RuntimeError('secret traceback detail')" in caplog.text
     assert "Traceback" in caplog.text
+    assert streaming_channel_manager_mock._latest_channel.is_completed
+    assert streaming_channel_manager_mock.complete_channel.await_args.kwargs == {
+        "conversation_id": mock_agent_request.conversation_id,
+        "user_id": "u",
+        "status": "failed",
+    }
 
 
-@patch('backend.services.agent_service.agent_run_manager')
-@patch('backend.services.agent_service.preprocess_manager')
+@pytest.mark.asyncio
+@patch(
+    "management.services.agent.run._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+@patch("management.services.agent.run_context.build_memory_context")
+@patch("management.services.agent.run.save_messages")
+async def test_non_debug_producer_survives_sse_disconnect(
+    mock_save_messages,
+    mock_build_mem_ctx,
+    mock_resolve,
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    """Closing a non-debug subscriber must not cancel the agent producer."""
+    channel = AsyncChannelMock()
+    continue_producing = asyncio.Event()
+    producer_finished = asyncio.Event()
+
+    async def complete_channel(*args, **kwargs):
+        channel.complete(kwargs.get("status", "completed"))
+
+    get_channel = AsyncMock(return_value=channel)
+    complete_channel_mock = AsyncMock(side_effect=complete_channel)
+    monkeypatch.setattr(
+        agent_run_service.streaming_channel_manager,
+        "get_or_create_channel",
+        get_channel,
+    )
+    monkeypatch.setattr(
+        agent_run_service.streaming_channel_manager,
+        "complete_channel",
+        complete_channel_mock,
+    )
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=False)
+    )
+
+    async def stream_chunks():
+        await channel.publish("data: first\n\n")
+        yield "data: first\n\n"
+        await continue_producing.wait()
+        await channel.publish("data: second\n\n")
+        yield "data: second\n\n"
+        await complete_channel_mock(
+            conversation_id=mock_agent_request.conversation_id,
+            user_id="u",
+            status="completed",
+        )
+        producer_finished.set()
+
+    generate_stream_mock = MagicMock(return_value=stream_chunks())
+    monkeypatch.setattr(agent_run_service, "generate_stream", generate_stream_mock)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+    )
+    assert await asyncio.wait_for(anext(response.body_iterator), timeout=1) == "data: first\n\n"
+    assert not producer_finished.is_set()
+    producer_tasks = set(agent_run_service._agent_stream_producer_tasks)
+    assert len(producer_tasks) == 1
+    assert all(not task.done() for task in producer_tasks)
+
+    await response.body_iterator.aclose()
+    continue_producing.set()
+    await asyncio.wait_for(producer_finished.wait(), timeout=1)
+    await asyncio.sleep(0)
+
+    assert channel._history == ["data: first\n\n", "data: second\n\n"]
+    assert producer_tasks.isdisjoint(agent_run_service._agent_stream_producer_tasks)
+    complete_channel_mock.assert_awaited_once_with(
+        conversation_id=mock_agent_request.conversation_id,
+        user_id="u",
+        status="completed",
+    )
+    generate_stream_mock.assert_called_once_with(
+        mock_agent_request,
+        user_id="u",
+        tenant_id="t",
+        language="en",
+        enable_memory=False,
+        reservation_token=ANY,
+        channel=channel,
+    )
+
+
+@pytest.mark.asyncio
+@patch(
+    "management.services.agent.run._resolve_user_tenant_language",
+    return_value=("u", "t", "en"),
+)
+@patch("management.services.agent.run_context.build_memory_context")
+@patch("management.services.agent.run.save_messages")
+async def test_debug_stream_keeps_direct_execution_path(
+    mock_save_messages,
+    mock_build_mem_ctx,
+    mock_resolve,
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    """Debug/A2A execution must not create the detached Chat producer."""
+    mock_agent_request.is_debug = True
+    mock_build_mem_ctx.return_value = MagicMock(
+        user_config=MagicMock(memory_switch=True)
+    )
+    get_channel = AsyncMock()
+    monkeypatch.setattr(
+        agent_run_service.streaming_channel_manager,
+        "get_or_create_channel",
+        get_channel,
+    )
+
+    async def stream_chunks():
+        yield "data: debug\n\n"
+
+    generate_stream_mock = MagicMock(return_value=stream_chunks())
+    monkeypatch.setattr(agent_run_service, "generate_stream", generate_stream_mock)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert chunks == ["data: debug\n\n"]
+    get_channel.assert_not_awaited()
+    mock_save_messages.assert_not_called()
+    generate_stream_mock.assert_called_once_with(
+        mock_agent_request,
+        user_id="u",
+        tenant_id="t",
+        language="en",
+        enable_memory=False,
+        reservation_token=ANY,
+    )
+
+
+@patch('management.services.agent.run.agent_run_manager')
+@patch('management.services.agent.run.preprocess_manager')
 def test_stop_agent_tasks(mock_preprocess_manager, mock_agent_run_manager):
     """Test stop_agent_tasks function."""
     # Test both stopped
@@ -4446,7 +4787,7 @@ def test_stop_agent_tasks(mock_preprocess_manager, mock_agent_run_manager):
     assert result.get("already_stopped") is True
 
 
-@patch('backend.services.agent_service.search_agent_id_by_agent_name')
+@patch('management.services.agent.management.search_agent_id_by_agent_name')
 async def test_get_agent_id_by_name(mock_search):
     """Test get_agent_id_by_name function."""
     # Test success
@@ -4466,9 +4807,9 @@ async def test_get_agent_id_by_name(mock_search):
     assert "agent_name required" in str(excinfo.value)
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.search_tools_for_sub_agent')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_get_agent_call_relationship_impl_success(mock_query_sub_agents, mock_search_tools, mock_search_agent_info):
     """
     Test successful retrieval of agent call relationship tree.
@@ -4559,9 +4900,9 @@ def test_get_agent_call_relationship_impl_success(mock_query_sub_agents, mock_se
     mock_query_sub_agents.assert_called()
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.search_tools_for_sub_agent')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_get_agent_call_relationship_impl_with_unknown_source(mock_query_sub_agents, mock_search_tools,
                                                               mock_search_agent_info):
     """
@@ -4601,9 +4942,9 @@ def test_get_agent_call_relationship_impl_with_unknown_source(mock_query_sub_age
     assert len(result["sub_agents"]) == 0
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.search_tools_for_sub_agent')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_get_agent_call_relationship_impl_with_none_source(mock_query_sub_agents, mock_search_tools,
                                                            mock_search_agent_info):
     """
@@ -4643,9 +4984,9 @@ def test_get_agent_call_relationship_impl_with_none_source(mock_query_sub_agents
     assert len(result["sub_agents"]) == 0
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.search_tools_for_sub_agent')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_get_agent_call_relationship_impl_with_empty_tools(mock_query_sub_agents, mock_search_tools,
                                                            mock_search_agent_info):
     """
@@ -4676,7 +5017,7 @@ def test_get_agent_call_relationship_impl_with_empty_tools(mock_query_sub_agents
     assert len(result["sub_agents"]) == 0
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
 def test_get_agent_call_relationship_impl_agent_not_found(mock_search_agent_info):
     """
     Test agent call relationship when agent is not found.
@@ -4695,9 +5036,9 @@ def test_get_agent_call_relationship_impl_agent_not_found(mock_search_agent_info
     mock_search_agent_info.assert_called_once_with(999, "test_tenant")
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.search_tools_for_sub_agent')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_get_agent_call_relationship_impl_sub_agent_error_handling(mock_query_sub_agents, mock_search_tools,
                                                                    mock_search_agent_info):
     """
@@ -4739,9 +5080,9 @@ def test_get_agent_call_relationship_impl_sub_agent_error_handling(mock_query_su
     assert mock_search_agent_info.call_count >= 2
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.search_tools_for_sub_agent')
+@patch('management.services.agent.management.query_sub_agents_id_list')
 def test_get_agent_call_relationship_impl_tool_name_fallback(mock_query_sub_agents, mock_search_tools,
                                                              mock_search_agent_info):
     """
@@ -4799,7 +5140,7 @@ def test_get_agent_call_relationship_impl_tool_name_fallback(mock_query_sub_agen
 
 @pytest.mark.asyncio
 async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
-    """Ensure _stream_agent_chunks yields chunks and completes without errors."""
+    """Chunks stay real-time while PostgreSQL receives one final batch."""
     # Prepare fake AgentRequest
     agent_request = AgentRequest(
         agent_id=1,
@@ -4819,7 +5160,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     monkeypatch.setitem(
         sys.modules, "nexent.core.agents.run_agent", MagicMock())
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     # Track save_message calls to verify streaming message creation
@@ -4830,27 +5171,38 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
+        raising=False,
+    )
+    persisted_batches = []
+    monkeypatch.setattr(
+        "management.services.agent.run.persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
         unregister_called["user_id"] = user_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
     # Collect streamed chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+    async for out in agent_run_service._stream_agent_chunks(
+        agent_request, "u", "t", agent_run_info, MagicMock(), channel=channel
     ):
         collected.append(out)
 
@@ -4861,10 +5213,21 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
     assert 'pass' in collected[1]
     assert 'final_answer' in collected[2]
     assert 'All done.' in collected[2]
+    assert channel.publish.await_count == 3
 
     # Verify save_message was called to create the streaming message row
     assert len(save_message_calls) == 1
     assert save_message_calls[0][3] == "streaming"
+
+    assert len(persisted_batches) == 1
+    persisted = persisted_batches[0]
+    assert persisted["terminal_status"] == "completed"
+    assert persisted["message_content"] == "All done."
+    assert [unit["unit_type"] for unit in persisted["message_units"]] == [
+        "model_output_code",
+        "final_answer",
+    ]
+    assert persisted["message_units"][0]["unit_content"] == "def f(): pass"
 
     # Verify unregister was called
     assert unregister_called.get("conv_id") == 999
@@ -4895,51 +5258,41 @@ async def test__stream_agent_chunks_persists_tool_metadata(monkeypatch):
             "type": "tool",
             "content": "",
             "tool_name": "create_plan",
-            "tool_arguments": {"plan_id": "hainan_travel_plan"},
+            "tool_arguments": {},
             "role": "tool",
         })
         yield json.dumps({"type": "plan", "content": plan_content})
 
-    class ImmediateFuture:
-        def __init__(self, value):
-            self.value = value
-
-        def result(self):
-            return self.value
-
-    save_unit = MagicMock(return_value=4243)
-    monkeypatch.setattr("backend.services.agent_service.agent_run", fake_agent_run, raising=False)
-    monkeypatch.setattr("backend.services.agent_service.save_message", MagicMock(return_value=4242), raising=False)
-    monkeypatch.setattr("backend.services.agent_service.save_message_unit", save_unit, raising=False)
+    persisted_batches = []
+    monkeypatch.setattr("management.services.agent.run.agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr("management.services.agent.run.save_message", MagicMock(return_value=4242), raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service.submit",
-        lambda fn, *args, **kwargs: ImmediateFuture(fn(*args, **kwargs)),
+        "management.services.agent.run.persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
-    monkeypatch.setattr("backend.services.agent_service.update_unit_content", MagicMock(), raising=False)
-    monkeypatch.setattr("backend.services.agent_service.update_unit_status", MagicMock(), raising=False)
-    monkeypatch.setattr("backend.services.agent_service.update_message_status", MagicMock(), raising=False)
+    monkeypatch.setattr("management.services.agent.run.update_message_status", MagicMock(), raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         MagicMock(),
         raising=False,
     )
 
     memory_context = MagicMock()
     memory_context.user_config.memory_switch = False
-    [chunk async for chunk in agent_service._stream_agent_chunks(
+    [chunk async for chunk in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), memory_context
     )]
 
-    tool_call = next(
-        call_item for call_item in save_unit.call_args_list
-        if call_item.kwargs["unit_type"] == "tool"
+    tool_unit = next(
+        unit for unit in persisted_batches[0]["message_units"]
+        if unit["unit_type"] == "tool"
     )
-    persisted = json.loads(tool_call.kwargs["unit_content"])
+    persisted = json.loads(tool_unit["unit_content"])
     assert persisted == {
         "content": "",
         "tool_name": "create_plan",
-        "tool_arguments": {"plan_id": "hainan_travel_plan"},
+        "tool_arguments": {},
         "role": "tool",
     }
 
@@ -4969,18 +5322,18 @@ async def test__stream_agent_chunks_does_not_persist_history_summary_event(monke
 
     save_unit = MagicMock(return_value=42)
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False)
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         MagicMock(return_value=4242), raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message_unit",
+        "management.services.agent.run.save_message_unit",
         save_unit, raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         MagicMock(), raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         MagicMock(), raising=False)
 
     class _FakeFuture:
@@ -4988,13 +5341,13 @@ async def test__stream_agent_chunks_does_not_persist_history_summary_event(monke
             return 42
 
     monkeypatch.setattr(
-        "backend.services.agent_service.submit",
+        "management.services.agent.service.submit",
         lambda fn, *args, **kwargs: _FakeFuture(), raising=False)
     memory_context = MagicMock()
     memory_context.user_config.memory_switch = False
 
     chunks = []
-    async for chunk in agent_service._stream_agent_chunks(
+    async for chunk in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), memory_context
     ):
         chunks.append(chunk)
@@ -5020,24 +5373,24 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
         raise Exception("oops")
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", failing_agent_run, raising=False
+        "management.services.agent.run.agent_run", failing_agent_run, raising=False
     )
 
     called = {"unregistered": None, "user_id": None}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         called["unregistered"] = conv_id
         called["user_id"] = user_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect streamed chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -5045,7 +5398,7 @@ async def test__stream_agent_chunks_emits_error_chunk_on_run_failure(monkeypatch
     # Expect a single error payload chunk and unregister called
     assert collected and collected[0].startswith(
         "data: {") and "\"type\": \"error\"" in collected[0]
-    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[0]
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[0]
     assert "oops" not in collected[0]
     assert "Agent run error: Exception('oops')" in caplog.text
     assert "Traceback" in caplog.text
@@ -5069,32 +5422,32 @@ async def test__stream_agent_chunks_skips_memory_when_switch_off(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "ans"}, ensure_ascii=False)
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", yield_one, raising=False
+        "management.services.agent.run.agent_run", yield_one, raising=False
     )
 
     # Mock the new incremental persistence path.
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         MagicMock(return_value=9001),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message_unit",
+        "management.services.agent.run.save_message_unit",
         MagicMock(return_value=42),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_content",
+        "management.services.agent.run.update_message_content",
         MagicMock(),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
+        "management.services.agent.run.update_unit_status",
         MagicMock(),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         MagicMock(),
         raising=False,
     )
@@ -5104,7 +5457,7 @@ async def test__stream_agent_chunks_skips_memory_when_switch_off(monkeypatch):
             return 42
 
     monkeypatch.setattr(
-        "backend.services.agent_service.submit",
+        "management.services.agent.service.submit",
         lambda fn, *a, **kw: _FakeFuture(),
         raising=False,
     )
@@ -5116,13 +5469,13 @@ async def test__stream_agent_chunks_skips_memory_when_switch_off(monkeypatch):
         return {"results": []}
 
     monkeypatch.setattr(
-        "backend.services.agent_service.add_memory_in_levels", track_add, raising=False
+        "management.services.agent.run.add_memory_in_levels", track_add, raising=False
     )
 
     memory_ctx = MagicMock()
     memory_ctx.user_config = MagicMock(memory_switch=False)
 
-    async for _ in agent_service._stream_agent_chunks(
+    async for _ in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(query="q"), memory_ctx
     ):
         pass
@@ -5147,14 +5500,14 @@ async def test__stream_agent_chunks_background_add_exception(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "A"}, ensure_ascii=False)
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", yield_final, raising=False
+        "management.services.agent.run.agent_run", yield_final, raising=False
     )
 
     async def raise_in_add(**kwargs):
         raise RuntimeError("mem add fail")
 
     monkeypatch.setattr(
-        "backend.services.agent_service.add_memory_in_levels", raise_in_add, raising=False
+        "management.services.agent.run.add_memory_in_levels", raise_in_add, raising=False
     )
 
     memory_ctx = MagicMock()
@@ -5176,7 +5529,7 @@ async def test__stream_agent_chunks_background_add_exception(monkeypatch):
 
     monkeypatch.setattr(asyncio, "create_task", capture_task)
 
-    async for _ in agent_service._stream_agent_chunks(
+    async for _ in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(query="q"), memory_ctx
     ):
         pass
@@ -5202,7 +5555,7 @@ async def test__stream_agent_chunks_schedule_task_failure(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "A"}, ensure_ascii=False)
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", yield_final, raising=False
+        "management.services.agent.run.agent_run", yield_final, raising=False
     )
 
     # Force asyncio.create_task to fail - the exception propagates up
@@ -5221,7 +5574,7 @@ async def test__stream_agent_chunks_schedule_task_failure(monkeypatch):
 
     # When create_task fails, the exception propagates
     with pytest.raises(RuntimeError, match="schedule fail"):
-        async for out in agent_service._stream_agent_chunks(
+        async for out in agent_run_service._stream_agent_chunks(
             agent_request, "u", "t", MagicMock(query="q"), memory_ctx
         ):
             pass
@@ -5230,9 +5583,9 @@ async def test__stream_agent_chunks_schedule_task_failure(monkeypatch):
 def test_insert_related_agent_impl_failure_returns_400():
     """When insertion fails, should return 400 JSONResponse."""
     with patch(
-        "backend.services.agent_service.query_sub_agents_id_list", return_value=[]
+        "management.services.agent.service.query_sub_agents_id_list", return_value=[]
     ) as _, patch(
-        "backend.services.agent_service.insert_related_agent", return_value=False
+        "management.services.agent.management.insert_related_agent", return_value=False
     ) as __:
         resp = insert_related_agent_impl(
             parent_agent_id=1, child_agent_id=2, tenant_id="t")
@@ -5259,7 +5612,7 @@ async def test_generate_stream_unexpected_exception_emits_error(monkeypatch, cap
         yield  # pragma: no cover - keeps this an async generator
 
     monkeypatch.setattr(
-        "backend.services.agent_service._stream_agent_chunks",
+        "management.services.agent.run._stream_agent_chunks",
         fail_stream,
     )
 
@@ -5268,7 +5621,7 @@ async def test_generate_stream_unexpected_exception_emits_error(monkeypatch, cap
     fake_run_info.context_input = MagicMock()
     fake_run_info.agent_config.context_manager_config = MagicMock()
     monkeypatch.setattr(
-        "backend.services.agent_service.prepare_agent_run",
+        "management.services.agent.run.prepare_agent_run",
         AsyncMock(return_value=(fake_run_info, MagicMock())),
     )
 
@@ -5276,21 +5629,21 @@ async def test_generate_stream_unexpected_exception_emits_error(monkeypatch, cap
     fake_channel = MagicMock()
     fake_channel.publish = AsyncMock()
     monkeypatch.setattr(
-        agent_service.streaming_channel_manager,
+        agent_run_service.streaming_channel_manager,
         "get_or_create_channel",
         AsyncMock(return_value=fake_channel),
         raising=False,
     )
 
     out = []
-    async for d in agent_service.generate_stream(
+    async for d in agent_run_service.generate_stream(
         agent_request, user_id="u", tenant_id="t", enable_memory=True
     ):
         out.append(d)
 
     assert out and out[0].startswith(
         "data: {") and "\"type\": \"error\"" in out[0]
-    assert agent_service.SAFE_AGENT_STREAM_ERROR_MESSAGE in out[0]
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in out[0]
     assert "unexpected" not in out[0]
     assert "Generate stream error: Exception('unexpected')" in caplog.text
     assert "Traceback" in caplog.text
@@ -5311,20 +5664,26 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
 
     # Monkeypatch helpers - create_agent_run_info is called by prepare_agent_run
     monkeypatch.setattr(
-        "backend.services.agent_service.create_agent_run_info",
+        "management.services.agent.run.create_agent_run_info",
         AsyncMock(return_value=MagicMock()),
     )
 
     registered = {}
 
-    def fake_register(conv_id, run_info, user_id):
+    def fake_register(conv_id, run_info, user_id, **kwargs):
         registered["conv_id"] = conv_id
         registered["run_info"] = run_info
         registered["user_id"] = user_id
+        registered["kwargs"] = kwargs
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.register_agent_run",
+        "management.services.agent.run.agent_run_manager.register_agent_run",
         fake_register,
+    )
+    release_reservation = MagicMock()
+    monkeypatch.setattr(
+        "management.services.agent.run.agent_run_manager.release_agent_run_reservation",
+        release_reservation,
     )
 
     # Stream helper will yield chunks
@@ -5333,31 +5692,80 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
         yield "data: body2\n\n"
 
     monkeypatch.setattr(
-        "backend.services.agent_service._stream_agent_chunks",
+        "management.services.agent.run._stream_agent_chunks",
         fake_stream_chunks,
     )
 
     # Collect output
     collected = []
-    async for d in agent_service.generate_stream(
-        agent_request, user_id="u", tenant_id="t", enable_memory=False
+    async for d in agent_run_service.generate_stream(
+        agent_request,
+        user_id="u",
+        tenant_id="t",
+        enable_memory=False,
+        reservation_token="reservation-1",
     ):
         collected.append(d)
 
     assert registered.get("conv_id") == 555
     assert registered.get("user_id") == "u"
     assert registered.get("run_info") is not None
+    assert registered.get("kwargs") == {"reservation_token": "reservation-1"}
     assert collected == ["data: body1\n\n", "data: body2\n\n"]
+    release_reservation.assert_called_once_with(555, "u", "reservation-1")
+
+
+@pytest.mark.asyncio
+async def test_generate_stream_preserves_active_run_error_and_releases_reservation(
+    monkeypatch,
+):
+    agent_request = AgentRequest(
+        agent_id=2,
+        conversation_id=556,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    active_error = agent_run_service.AgentRunAlreadyActiveError("active")
+    monkeypatch.setattr(
+        agent_run_service,
+        "prepare_agent_run",
+        AsyncMock(side_effect=active_error),
+    )
+    release_reservation = MagicMock()
+    monkeypatch.setattr(
+        agent_run_service.agent_run_manager,
+        "release_agent_run_reservation",
+        release_reservation,
+    )
+    channel = MagicMock(publish=AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_run_service.generate_stream(
+            agent_request,
+            user_id="u",
+            tenant_id="t",
+            enable_memory=False,
+            channel=channel,
+            reservation_token="reservation-2",
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[0]
+    release_reservation.assert_called_once_with(556, "u", "reservation-2")
 
 
 @pytest.mark.asyncio
 @patch(
-    "backend.services.agent_service._resolve_user_tenant_language",
+    "management.services.agent.run._resolve_user_tenant_language",
     return_value=(None, None, "en"),
 )
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.save_messages")
-@patch("backend.services.agent_service.generate_stream")
+@patch("management.services.agent.run_context.build_memory_context")
+@patch("management.services.agent.run.save_messages")
+@patch("management.services.agent.run.generate_stream")
 async def test_run_agent_stream_no_memory(
     mock_gen_no_mem,
     mock_save_messages,
@@ -5382,17 +5790,19 @@ async def test_run_agent_stream_no_memory(
         tenant_id=None,
         language="en",
         enable_memory=False,
+        reservation_token=ANY,
+        channel=streaming_channel_manager_mock._latest_channel,
     )
 
 
 @pytest.mark.asyncio
 @patch(
-    "backend.services.agent_service._resolve_user_tenant_language",
+    "management.services.agent.run._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("backend.services.agent_service.build_memory_context")
-@patch("backend.services.agent_service.save_messages")
-@patch("backend.services.agent_service.generate_stream")
+@patch("management.services.agent.run_context.build_memory_context")
+@patch("management.services.agent.run.save_messages")
+@patch("management.services.agent.run.generate_stream")
 async def test_run_agent_stream_skip_user_save(
     mock_gen_no_mem,
     mock_save_messages,
@@ -5433,7 +5843,7 @@ async def test_generate_stream_loads_memory_tools_without_presearch_tokens(monke
 
     # Enable memory switch in preview (memory enabled)
     monkeypatch.setattr(
-        "backend.services.agent_service.build_memory_context",
+        "management.services.agent.run.build_memory_context",
         MagicMock(return_value=MagicMock(
             user_config=MagicMock(memory_switch=True))),
         raising=False,
@@ -5441,7 +5851,7 @@ async def test_generate_stream_loads_memory_tools_without_presearch_tokens(monke
 
     # Prepare run returned values (agent_run_info, memory_context)
     monkeypatch.setattr(
-        "backend.services.agent_service.prepare_agent_run",
+        "management.services.agent.run.prepare_agent_run",
         AsyncMock(return_value=(MagicMock(), MagicMock())),
         raising=False,
     )
@@ -5452,21 +5862,21 @@ async def test_generate_stream_loads_memory_tools_without_presearch_tokens(monke
         yield "data: bodyB\n\n"
 
     monkeypatch.setattr(
-        "backend.services.agent_service._stream_agent_chunks",
+        "management.services.agent.run._stream_agent_chunks",
         fake_chunks,
         raising=False,
     )
 
     # Collect output
     out = []
-    async for d in agent_service.generate_stream(
+    async for d in agent_run_service.generate_stream(
         agent_request, user_id="u", tenant_id="t", enable_memory=True
     ):
         out.append(d)
 
     assert not any("memory_search" in chunk for chunk in out)
     assert "data: bodyA\n\n" in out and "data: bodyB\n\n" in out
-    agent_service.prepare_agent_run.assert_awaited_once_with(
+    agent_run_service.prepare_agent_run.assert_awaited_once_with(
         agent_request=agent_request,
         user_id="u",
         tenant_id="t",
@@ -5490,7 +5900,7 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
 
     # Enable memory
     monkeypatch.setattr(
-        "backend.services.agent_service.build_memory_context",
+        "management.services.agent.run.build_memory_context",
         MagicMock(return_value=MagicMock(
             user_config=MagicMock(memory_switch=True))),
         raising=False,
@@ -5501,7 +5911,7 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
         raise Exception("prep failed")
 
     monkeypatch.setattr(
-        "backend.services.agent_service.prepare_agent_run",
+        "management.services.agent.run.prepare_agent_run",
         raise_prepare,
         raising=False,
     )
@@ -5511,13 +5921,13 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
         yield "data: fb1\n\n"
 
     monkeypatch.setattr(
-        "backend.services.agent_service.generate_stream",
+        "management.services.agent.run.generate_stream",
         fallback_gen,
         raising=False,
     )
 
     out = []
-    async for d in agent_service.generate_stream(
+    async for d in agent_run_service.generate_stream(
         agent_request, user_id="u", tenant_id="t", enable_memory=True
     ):
         out.append(d)
@@ -5528,12 +5938,12 @@ async def test_generate_stream_fallback_on_failure(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_with_disabled_agents(
     mock_query_agents,
     mock_query_groups,
@@ -5612,12 +6022,12 @@ async def test_list_all_agent_info_impl_with_disabled_agents(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_all_disabled_agents(
     mock_query_agents,
     mock_query_groups,
@@ -5743,10 +6153,10 @@ def test_apply_duplicate_name_availability_rules_handles_missing_fields():
 # ============================================================================
 
 
-@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.create_tool_config_list', new_callable=AsyncMock)
+@patch('management.services.agent.management.query_sub_agents_id_list')
+@patch('management.services.agent.management.get_model_by_model_id')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_export_agent_includes_model_names(
     mock_search_agent_info,
@@ -5810,10 +6220,10 @@ async def test_export_agent_includes_model_names(
     assert exported_agent.display_name == "Test Agent"
 
 
-@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.create_tool_config_list', new_callable=AsyncMock)
+@patch('management.services.agent.management.query_sub_agents_id_list')
+@patch('management.services.agent.management.get_model_by_model_id')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_export_agent_with_null_model_id(
     mock_search_agent_info,
@@ -5862,14 +6272,14 @@ async def test_export_agent_with_null_model_id(
     mock_get_model_by_model_id.assert_not_called()
 
 
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management.create_tool_config_list', new_callable=AsyncMock)
+@patch('management.services.agent.management.query_sub_agents_id_list')
+@patch('management.services.agent.management.get_model_by_model_id')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_export_then_import_preserves_model_names(
     mock_search_agent_info,
@@ -5995,10 +6405,10 @@ async def test_export_then_import_preserves_model_names(
     assert second_call[0][1] == "target_tenant"  # tenant_id
 
 
-@patch('backend.services.agent_service.create_tool_config_list', new_callable=AsyncMock)
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.create_tool_config_list', new_callable=AsyncMock)
+@patch('management.services.agent.management.query_sub_agents_id_list')
+@patch('management.services.agent.management.get_model_by_model_id')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_export_agent_model_not_found(
     mock_search_agent_info,
@@ -6051,12 +6461,12 @@ async def test_export_agent_model_not_found(
     assert exported_agent.business_logic_model_name is None
 
 
-@patch('backend.services.agent_service.tenant_config_manager')
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management.get_model_by_model_id')
 @pytest.mark.asyncio
 async def test_import_agent_model_name_consistency(
     mock_get_model_by_model_id,
@@ -6203,11 +6613,11 @@ def mock_import_agent_info(sample_agent_info):
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_all_tools")
-@patch("backend.services.agent_service.get_model_id_by_display_name")
-@patch("backend.services.agent_service.tenant_config_manager")
-@patch("backend.services.agent_service.create_agent")
+@patch("management.services.agent.management.get_model_by_model_id")
+@patch("management.services.agent.management.query_all_tools")
+@patch("management.services.agent.management.get_model_id_by_display_name")
+@patch("management.services.agent.management.tenant_config_manager")
+@patch("management.services.agent.management.create_agent")
 async def test_main_model_fallback_to_quick_config(
     mock_create_agent,
     mock_tenant_config_manager,
@@ -6271,11 +6681,11 @@ async def test_main_model_fallback_to_quick_config(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_all_tools")
-@patch("backend.services.agent_service.get_model_id_by_display_name")
-@patch("backend.services.agent_service.tenant_config_manager")
-@patch("backend.services.agent_service.create_agent")
+@patch("management.services.agent.management.get_model_by_model_id")
+@patch("management.services.agent.management.query_all_tools")
+@patch("management.services.agent.management.get_model_id_by_display_name")
+@patch("management.services.agent.management.tenant_config_manager")
+@patch("management.services.agent.management.create_agent")
 async def test_business_logic_model_fallback_to_quick_config(
     mock_create_agent,
     mock_tenant_config_manager,
@@ -6341,11 +6751,11 @@ async def test_business_logic_model_fallback_to_quick_config(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_all_tools")
-@patch("backend.services.agent_service.get_model_id_by_display_name")
-@patch("backend.services.agent_service.tenant_config_manager")
-@patch("backend.services.agent_service.create_agent")
+@patch("management.services.agent.management.get_model_by_model_id")
+@patch("management.services.agent.management.query_all_tools")
+@patch("management.services.agent.management.get_model_id_by_display_name")
+@patch("management.services.agent.management.tenant_config_manager")
+@patch("management.services.agent.management.create_agent")
 async def test_both_models_fallback_to_quick_config(
     mock_create_agent,
     mock_tenant_config_manager,
@@ -6405,11 +6815,11 @@ async def test_both_models_fallback_to_quick_config(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_all_tools")
-@patch("backend.services.agent_service.get_model_id_by_display_name")
-@patch("backend.services.agent_service.tenant_config_manager")
-@patch("backend.services.agent_service.create_agent")
+@patch("management.services.agent.management.get_model_by_model_id")
+@patch("management.services.agent.management.query_all_tools")
+@patch("management.services.agent.management.get_model_id_by_display_name")
+@patch("management.services.agent.management.tenant_config_manager")
+@patch("management.services.agent.management.create_agent")
 async def test_no_quick_config_model_available(
     mock_create_agent,
     mock_tenant_config_manager,
@@ -6472,11 +6882,11 @@ async def test_no_quick_config_model_available(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_all_tools")
-@patch("backend.services.agent_service.get_model_id_by_display_name")
-@patch("backend.services.agent_service.tenant_config_manager")
-@patch("backend.services.agent_service.create_agent")
+@patch("management.services.agent.management.get_model_by_model_id")
+@patch("management.services.agent.management.query_all_tools")
+@patch("management.services.agent.management.get_model_id_by_display_name")
+@patch("management.services.agent.management.tenant_config_manager")
+@patch("management.services.agent.management.create_agent")
 async def test_model_found_no_fallback_needed(
     mock_create_agent,
     mock_tenant_config_manager,
@@ -6539,12 +6949,12 @@ async def test_model_found_no_fallback_needed(
 # ============================================================================
 
 
-@patch('backend.services.agent_service.tenant_config_manager')
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management.get_model_by_model_id')
 @pytest.mark.asyncio
 async def test_import_agent_includes_model_names(
     mock_get_model_by_model_id,
@@ -6654,10 +7064,10 @@ async def test_import_agent_includes_model_names(
     assert agent_info_dict["max_steps"] == 5
 
 
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
 @pytest.mark.asyncio
 async def test_import_agent_without_business_logic_model(
     mock_query_all_tools,
@@ -6716,12 +7126,12 @@ async def test_import_agent_without_business_logic_model(
     assert agent_info_dict["business_logic_model_id"] is None
 
 
-@patch('backend.services.agent_service.tenant_config_manager')
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management.get_model_by_model_id')
 @pytest.mark.asyncio
 async def test_import_agent_model_lookup_by_display_name(
     mock_get_model_by_model_id,
@@ -6808,12 +7218,12 @@ async def test_import_agent_model_lookup_by_display_name(
     assert agent_info_dict["business_logic_model_name"] == "Qwen/QwQ-32B"
 
 
-@patch('backend.services.agent_service.tenant_config_manager')
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management.get_model_by_model_id')
 @pytest.mark.asyncio
 async def test_import_agent_model_not_found_in_target_tenant(
     mock_get_model_by_model_id,
@@ -6878,12 +7288,12 @@ async def test_import_agent_model_not_found_in_target_tenant(
     assert "model_names" not in agent_info_dict
 
 
-@patch('backend.services.agent_service.tenant_config_manager')
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management.get_model_by_model_id')
 @pytest.mark.asyncio
 async def test_import_agent_all_model_fields_in_database(
     mock_get_model_by_model_id,
@@ -6965,7 +7375,7 @@ async def test_import_agent_all_model_fields_in_database(
     assert agent_info_dict["name"] == "complete_agent"
     assert agent_info_dict["display_name"] == "Complete Agent"
     assert agent_info_dict["description"] == "Agent with all fields"
-    assert agent_info_dict["business_description"] == "Complete test"
+    assert "business_description" not in agent_info_dict
     assert agent_info_dict["max_steps"] == 5
     assert agent_info_dict["provide_run_summary"] is True
     assert agent_info_dict["duty_prompt"] == "Complete duty"
@@ -6979,17 +7389,6 @@ async def test_import_agent_all_model_fields_in_database(
 # =====================================================================
 
 
-def test_normalize_language_key_variants():
-    """_normalize_language_key should normalize various language inputs."""
-    from consts.const import LANGUAGE as LANG
-
-    assert _normalize_language_key("zh-CN") == LANG["ZH"]
-    assert _normalize_language_key("ZH") == LANG["ZH"]
-    assert _normalize_language_key("en") == LANG["EN"]
-    assert _normalize_language_key("EN-us") == LANG["EN"]
-    # Fallback when language is None or empty
-    assert _normalize_language_key("") == LANG["EN"]
-    assert _normalize_language_key(None) == LANG["EN"]
 
 
 def test_render_prompt_template_success(monkeypatch):
@@ -7004,7 +7403,7 @@ def test_render_prompt_template_success(monkeypatch):
             return self.template_str.format(**context)
 
     monkeypatch.setattr(
-        agent_service, "Template", FakeTemplate, raising=False
+        naming_service, "Template", FakeTemplate, raising=False
     )
 
     tpl = "Hello {name}"
@@ -7023,7 +7422,7 @@ def test_render_prompt_template_on_error_returns_original(monkeypatch):
             raise ValueError("render failed")
 
     monkeypatch.setattr(
-        agent_service, "Template", FailingTemplate, raising=False
+        naming_service, "Template", FailingTemplate, raising=False
     )
 
     tpl = "Broken {template"
@@ -7031,19 +7430,6 @@ def test_render_prompt_template_on_error_returns_original(monkeypatch):
     assert _render_prompt_template(tpl, name="x") == tpl
 
 
-def test_format_existing_values_for_languages():
-    """_format_existing_values should format values and handle empty cases."""
-    from consts.const import LANGUAGE as LANG
-
-    # Non-empty set
-    values = {"b", "a"}
-    formatted = _format_existing_values(values, LANG["EN"])
-    assert formatted in {"a, b", "b, a"}  # order not guaranteed
-
-    # Empty set, English
-    assert _format_existing_values(set(), LANG["EN"]) == "None"
-    # Empty set, Chinese
-    assert _format_existing_values(set(), LANG["ZH"]).startswith("无")
 
 
 def test_check_agent_value_duplicate_with_and_without_exclude():
@@ -7054,35 +7440,35 @@ def test_check_agent_value_duplicate_with_and_without_exclude():
     ]
 
     # Duplicate found
-    assert agent_service._check_agent_value_duplicate(
+    assert naming_service.check_agent_value_duplicate(
         "name", "agent_one", tenant_id="t", agents_cache=agents
     )
     # No duplicate
-    assert not agent_service._check_agent_value_duplicate(
+    assert not naming_service.check_agent_value_duplicate(
         "name", "agent_three", tenant_id="t", agents_cache=agents
     )
     # Exclude matching id should skip that record
-    assert not agent_service._check_agent_value_duplicate(
+    assert not naming_service.check_agent_value_duplicate(
         "name", "agent_one", tenant_id="t", exclude_agent_id=1, agents_cache=agents
     )
 
 
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
+@patch('management.services.agent.naming.query_all_agent_info_by_tenant_id')
 def test_check_agent_value_duplicate_empty_value(mock_query_all):
     """_check_agent_value_duplicate should return False when value is empty."""
     # Test empty string
-    assert not agent_service._check_agent_value_duplicate(
+    assert not naming_service.check_agent_value_duplicate(
         "name", "", tenant_id="t", agents_cache=[]
     )
     # Test None value
-    assert not agent_service._check_agent_value_duplicate(
+    assert not naming_service.check_agent_value_duplicate(
         "name", None, tenant_id="t", agents_cache=[]
     )
     # Should not call query_all_agent_info_by_tenant_id when value is empty
     mock_query_all.assert_not_called()
 
 
-@patch('backend.services.agent_service.query_all_agent_info_by_tenant_id')
+@patch('management.services.agent.naming.query_all_agent_info_by_tenant_id')
 def test_check_agent_value_duplicate_cache_none(mock_query_all):
     """_check_agent_value_duplicate should query database when agents_cache is None."""
     mock_query_all.return_value = [
@@ -7091,7 +7477,7 @@ def test_check_agent_value_duplicate_cache_none(mock_query_all):
     ]
 
     # Should query database when cache is None
-    assert agent_service._check_agent_value_duplicate(
+    assert naming_service.check_agent_value_duplicate(
         "name", "agent_one", tenant_id="t", agents_cache=None
     )
     mock_query_all.assert_called_once_with("t")
@@ -7104,386 +7490,30 @@ def test_check_agent_value_duplicate_cache_none(mock_query_all):
     ]
 
     # Should query database when cache is None and no duplicate found
-    assert not agent_service._check_agent_value_duplicate(
+    assert not naming_service.check_agent_value_duplicate(
         "name", "agent_three", tenant_id="t", agents_cache=None
     )
     mock_query_all.assert_called_once_with("t")
 
 
-def test_generate_unique_value_with_suffix_success():
-    """_generate_unique_value_with_suffix should find first available suffix."""
-
-    taken = {"base_1"}
-
-    def dup_check(candidate, **_):
-        return candidate in taken
-
-    result = _generate_unique_value_with_suffix(
-        "base",
-        tenant_id="tenant",
-        duplicate_check_fn=dup_check,
-        agents_cache=[],
-        max_suffix_attempts=5,
-    )
-    # base_1 is taken, so should start from base_2
-    assert result == "base_2"
-
-
-def test_generate_unique_value_with_suffix_exhausts_attempts():
-    """When all candidates are duplicates, _generate_unique_value_with_suffix should raise."""
-
-    def always_duplicate(*args, **kwargs):
-        return True
-
-    with pytest.raises(ValueError, match="Failed to generate unique value"):
-        _generate_unique_value_with_suffix(
-            "dup",
-            tenant_id="tenant",
-            duplicate_check_fn=always_duplicate,
-            agents_cache=[],
-            max_suffix_attempts=3,
-        )
-
-
-def test_generate_unique_agent_and_display_name_wrappers(monkeypatch):
-    """Wrapper helpers should delegate to _generate_unique_value_with_suffix."""
-    calls = []
-
-    def fake_generate(base_value, tenant_id, duplicate_check_fn, agents_cache, exclude_agent_id=None, max_suffix_attempts=100):
-        calls.append(
-            (base_value, tenant_id, duplicate_check_fn, tuple(agents_cache), exclude_agent_id, max_suffix_attempts)
-        )
-        return f"{base_value}_unique"
-
-    monkeypatch.setattr(
-        agent_service, "_generate_unique_value_with_suffix", fake_generate, raising=False
-    )
-
-    name = _generate_unique_agent_name_with_suffix(
-        "agent", tenant_id="t", agents_cache=[{"agent_id": 1}], exclude_agent_id=1
-    )
-    display = _generate_unique_display_name_with_suffix(
-        "Agent Display", tenant_id="t2", agents_cache=[{"agent_id": 2}]
-    )
-
-    assert name == "agent_unique"
-    assert display == "Agent Display_unique"
-    # Ensure both calls delegated correctly
-    assert len(calls) == 2
-    assert calls[0][0] == "agent"
-    assert calls[1][0] == "Agent Display"
-
-
-def test_regenerate_agent_value_with_llm_success(monkeypatch):
-    """_regenerate_agent_value_with_llm should return first non-duplicate LLM value."""
-
-    # Avoid dependency on real prompt templates
-    monkeypatch.setattr(
-        agent_service,
-        "get_prompt_generate_prompt_template",
-        lambda lang: {},
-        raising=False,
-    )
-
-    # Provide a fake LLM call that returns a new unique value
-    def fake_call_llm(model_id, user_prompt, system_prompt, callback, tenant_id):
-        assert model_id == 1
-        assert tenant_id == "tenant"
-        # Callback is not used in this helper, but should be passed through
-        return "new_name\nextra"
-
-    # Ensure the dynamic import `from services.prompt_service import ...` in
-    # `_regenerate_agent_value_with_llm` can succeed by registering a fake
-    # module in `sys.modules` with the expected attribute.
-    monkeypatch.setattr(
-        agent_service,
-        "call_llm_for_system_prompt",
-        fake_call_llm,
-        raising=False,
-    )
-
-    result = _regenerate_agent_value_with_llm(
-        original_value="old",
-        existing_values=["existing"],
-        task_description="task",
-        model_id=1,
-        tenant_id="tenant",
-        language="en",
-        system_prompt_key="SYS_KEY",
-        user_prompt_key="USER_KEY",
-        default_system_prompt="sys",
-        default_user_prompt_builder=lambda ctx: "user",
-        fallback_fn=lambda base: f"fallback_{base}",
-    )
-    assert result == "new_name"
-
-
-def test_regenerate_agent_value_with_llm_fallback_on_error(monkeypatch):
-    """When LLM keeps failing, _regenerate_agent_value_with_llm should use fallback."""
-
-    monkeypatch.setattr(
-        agent_service,
-        "get_prompt_generate_prompt_template",
-        lambda lang: {},
-        raising=False,
-    )
-
-    def failing_llm(*args, **kwargs):
-        raise RuntimeError("llm failed")
-
-    monkeypatch.setattr(
-        agent_service,
-        "call_llm_for_system_prompt",
-        failing_llm,
-        raising=False,
-    )
-
-    used = {}
-
-    def fallback(base):
-        used["called"] = True
-        return f"fb_{base}"
-
-    result = _regenerate_agent_value_with_llm(
-        original_value="orig",
-        existing_values=["a", "b"],
-        task_description="task",
-        model_id=1,
-        tenant_id="tenant",
-        language="en",
-        system_prompt_key="SYS_KEY",
-        user_prompt_key="USER_KEY",
-        default_system_prompt="sys",
-        default_user_prompt_builder=lambda ctx: "user",
-        fallback_fn=fallback,
-    )
-
-    assert result == "fb_orig"
-    assert used.get("called") is True
-
-
-def test_regenerate_agent_value_with_llm_empty_system_prompt(monkeypatch):
-    """_regenerate_agent_value_with_llm should use default_system_prompt when system_prompt is empty."""
-
-    monkeypatch.setattr(
-        agent_service,
-        "get_prompt_generate_prompt_template",
-        lambda lang: {},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        agent_service,
-        "_render_prompt_template",
-        lambda template_str, **kwargs: "",  # Return empty string
-        raising=False,
-    )
-
-    def fake_call_llm(model_id, user_prompt, system_prompt, callback, tenant_id):
-        # Verify that default_system_prompt was used
-        assert system_prompt == "default_system"
-        return "new_name"
-
-    monkeypatch.setattr(
-        agent_service,
-        "call_llm_for_system_prompt",
-        fake_call_llm,
-        raising=False,
-    )
-
-    result = _regenerate_agent_value_with_llm(
-        original_value="old",
-        existing_values=["existing"],
-        task_description="task",
-        model_id=1,
-        tenant_id="tenant",
-        language="en",
-        system_prompt_key="SYS_KEY",
-        user_prompt_key="USER_KEY",
-        default_system_prompt="default_system",
-        default_user_prompt_builder=lambda ctx: "user",
-        fallback_fn=lambda base: f"fallback_{base}",
-    )
-    assert result == "new_name"
-
-
-def test_regenerate_agent_value_with_llm_empty_user_prompt(monkeypatch):
-    """_regenerate_agent_value_with_llm should use default_user_prompt_builder when user_prompt is empty (line 302)."""
-
-    monkeypatch.setattr(
-        agent_service,
-        "get_prompt_generate_prompt_template",
-        lambda lang: {},
-        raising=False,
-    )
-
-    call_count = {"render_count": 0}
-
-    def mock_render(template_str, **kwargs):
-        call_count["render_count"] += 1
-        # First call is for system_prompt, return non-empty
-        if call_count["render_count"] == 1:
-            return "system_prompt"
-        # Second call is for user_prompt, return empty string to trigger line 302
-        return ""
-
-    monkeypatch.setattr(
-        agent_service,
-        "_render_prompt_template",
-        mock_render,
-        raising=False,
-    )
-
-    builder_called = {"called": False}
-
-    def default_user_prompt_builder(ctx):
-        builder_called["called"] = True
-        # Verify context is passed correctly
-        assert "task_description" in ctx
-        assert "original_value" in ctx
-        assert "existing_values" in ctx
-        return "default_user"
-
-    def fake_call_llm(model_id, user_prompt, system_prompt, callback, tenant_id):
-        # Verify that default_user_prompt_builder was used (line 302-303)
-        assert user_prompt == "default_user"
-        assert builder_called["called"], "default_user_prompt_builder should have been called"
-        return "new_name"
-
-    monkeypatch.setattr(
-        agent_service,
-        "call_llm_for_system_prompt",
-        fake_call_llm,
-        raising=False,
-    )
-
-    result = _regenerate_agent_value_with_llm(
-        original_value="old",
-        existing_values=["existing"],
-        task_description="task",
-        model_id=1,
-        tenant_id="tenant",
-        language="en",
-        system_prompt_key="SYS_KEY",
-        user_prompt_key="USER_KEY",
-        default_system_prompt="system_prompt",
-        default_user_prompt_builder=default_user_prompt_builder,
-        fallback_fn=lambda base: f"fallback_{base}",
-    )
-    assert result == "new_name"
-    assert builder_called["called"], "default_user_prompt_builder should have been called to cover line 302"
-
-
-def test_regenerate_agent_value_with_llm_duplicate_candidate(monkeypatch):
-    """_regenerate_agent_value_with_llm should raise ValueError when generated candidate is duplicate."""
-
-    monkeypatch.setattr(
-        agent_service,
-        "get_prompt_generate_prompt_template",
-        lambda lang: {},
-        raising=False,
-    )
-
-    attempt_count = {"count": 0}
-
-    def fake_call_llm(model_id, user_prompt, system_prompt, callback, tenant_id):
-        attempt_count["count"] += 1
-        # Return a value that exists in existing_values
-        if attempt_count["count"] == 1:
-            return "existing"  # This is a duplicate
-        # On retry, return a unique value
-        return "new_unique_name"
-
-    monkeypatch.setattr(
-        agent_service,
-        "call_llm_for_system_prompt",
-        fake_call_llm,
-        raising=False,
-    )
-
-    result = _regenerate_agent_value_with_llm(
-        original_value="old",
-        existing_values=["existing", "another"],
-        task_description="task",
-        model_id=1,
-        tenant_id="tenant",
-        language="en",
-        system_prompt_key="SYS_KEY",
-        user_prompt_key="USER_KEY",
-        default_system_prompt="sys",
-        default_user_prompt_builder=lambda ctx: "user",
-        fallback_fn=lambda base: f"fallback_{base}",
-    )
-    # Should retry and eventually return a unique value
-    assert result == "new_unique_name"
-    assert attempt_count["count"] == 2
-
-
-def test_regenerate_agent_name_with_llm(monkeypatch):
-    """_regenerate_agent_name_with_llm should call _regenerate_agent_value_with_llm with correct parameters."""
-
-    monkeypatch.setattr(
-        agent_service,
-        "get_prompt_generate_prompt_template",
-        lambda lang: {},
-        raising=False,
-    )
-
-    def fake_call_llm(model_id, user_prompt, system_prompt, callback, tenant_id):
-        return "new_agent_name"
-
-    monkeypatch.setattr(
-        agent_service,
-        "call_llm_for_system_prompt",
-        fake_call_llm,
-        raising=False,
-    )
-
-    result = agent_service._regenerate_agent_name_with_llm(
-        original_name="old_name",
-        existing_names=["existing1", "existing2"],
-        task_description="task desc",
-        model_id=1,
-        tenant_id="tenant",
-        language="en",
-        agents_cache=[],
-        exclude_agent_id=None
-    )
-
-    assert result == "new_agent_name"
-
-
-def test_regenerate_agent_display_name_with_llm(monkeypatch):
-    """_regenerate_agent_display_name_with_llm should call _regenerate_agent_value_with_llm with correct parameters."""
-
-    monkeypatch.setattr(
-        agent_service,
-        "get_prompt_generate_prompt_template",
-        lambda lang: {},
-        raising=False,
-    )
-
-    def fake_call_llm(model_id, user_prompt, system_prompt, callback, tenant_id):
-        return "New Display Name"
-
-    monkeypatch.setattr(
-        agent_service,
-        "call_llm_for_system_prompt",
-        fake_call_llm,
-        raising=False,
-    )
-
-    result = agent_service._regenerate_agent_display_name_with_llm(
-        original_display_name="Old Display Name",
-        existing_display_names=["Display1", "Display2"],
-        task_description="task desc",
-        model_id=1,
-        tenant_id="tenant",
-        language="en",
-        agents_cache=[],
-        exclude_agent_id=None
-    )
-
-    assert result == "New Display Name"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @pytest.mark.asyncio
@@ -7494,7 +7524,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     """
     # Mock user and tenant
     monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
+        "management.services.agent.management.get_current_user_info",
         lambda authorization: ("user1", "tenant1", "en"),
         raising=False,
     )
@@ -7542,7 +7572,13 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Track import order and relationship creation
     imported_ids = []
 
-    async def fake_import_agent_by_agent_id(import_agent_info, tenant_id, user_id, skip_duplicate_regeneration=False):
+    async def fake_import_agent_by_agent_id(
+        import_agent_info,
+        tenant_id,
+        user_id,
+        skip_duplicate_regeneration=False,
+        resolve_name_conflicts=False,
+    ):
         # Assign synthetic new IDs based on source id
         new_id = 100 + import_agent_info.agent_id
         imported_ids.append(import_agent_info.agent_id)
@@ -7550,24 +7586,24 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 
     relationships = []
 
-    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id):
-        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id))
+    def fake_insert_related_agent(parent_agent_id, child_agent_id, tenant_id, user_id, selected_agent_version_no=None):
+        relationships.append((parent_agent_id, child_agent_id, tenant_id, user_id, selected_agent_version_no))
 
     async def fake_update_tool_list(tenant_id, user_id):
         return None
 
     monkeypatch.setattr(
-        "backend.services.agent_service.import_agent_by_agent_id",
+        "management.services.agent.management.import_agent_by_agent_id",
         fake_import_agent_by_agent_id,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.insert_related_agent",
+        "management.services.agent.management.insert_related_agent",
         fake_insert_related_agent,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_tool_list",
+        "management.services.agent.service.update_tool_list",
         fake_update_tool_list,
         raising=False,
     )
@@ -7578,7 +7614,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     # Child (2) must be imported before parent (1)
     assert imported_ids == [2, 1]
     # Relationship should be created between new IDs 101 (child) and 100 (parent)
-    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1")]
+    assert relationships == [(100 + 1, 100 + 2, "tenant1", "user1", 1)]
 
 
 # =====================================================================
@@ -7589,7 +7625,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 @pytest.mark.asyncio
 async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
+        "management.services.agent.service.get_current_user_info",
         lambda authorization: ("user-x", "tenant-x", "en"),
         raising=False,
     )
@@ -7598,7 +7634,7 @@ async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatc
         {"agent_id": 11, "name": "unique", "display_name": "Unique"},
     ]
     monkeypatch.setattr(
-        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.service.query_all_agent_info_by_tenant_id",
         lambda tenant_id: existing_agents,
         raising=False,
     )
@@ -7627,9 +7663,39 @@ async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_check_agent_name_conflict_batch_impl_checks_display_name_without_name(monkeypatch):
+    monkeypatch.setattr(
+        "management.services.agent.service.get_current_user_info",
+        lambda authorization: ("user-x", "tenant-x", "en"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.service.query_all_agent_info_by_tenant_id",
+        lambda tenant_id: [
+            {"agent_id": 3, "name": "alpha", "display_name": "Shown"},
+        ],
+        raising=False,
+    )
+
+    request = AgentNameBatchCheckRequest(
+        items=[AgentNameBatchCheckItem(display_name="Shown")]
+    )
+
+    result = await agent_service.check_agent_name_conflict_batch_impl(
+        request, authorization="Bearer token"
+    )
+
+    assert result[0]["name_conflict"] is False
+    assert result[0]["display_name_conflict"] is True
+    assert result[0]["conflict_agents"] == [
+        {"name": "alpha", "display_name": "Shown"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_check_agent_name_conflict_batch_impl_display_conflict(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
+        "management.services.agent.service.get_current_user_info",
         lambda authorization: ("user-x", "tenant-x", "en"),
         raising=False,
     )
@@ -7637,7 +7703,7 @@ async def test_check_agent_name_conflict_batch_impl_display_conflict(monkeypatch
         {"agent_id": 3, "name": "alpha", "display_name": "Shown"},
     ]
     monkeypatch.setattr(
-        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.service.query_all_agent_info_by_tenant_id",
         lambda tenant_id: existing_agents,
         raising=False,
     )
@@ -7660,7 +7726,7 @@ async def test_check_agent_name_conflict_batch_impl_display_conflict(monkeypatch
 @pytest.mark.asyncio
 async def test_check_agent_name_conflict_batch_impl_skips_same_agent(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
+        "management.services.agent.service.get_current_user_info",
         lambda authorization: ("user-x", "tenant-x", "en"),
         raising=False,
     )
@@ -7668,7 +7734,7 @@ async def test_check_agent_name_conflict_batch_impl_skips_same_agent(monkeypatch
         {"agent_id": 7, "name": "self", "display_name": "Self Display"},
     ]
     monkeypatch.setattr(
-        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.service.query_all_agent_info_by_tenant_id",
         lambda tenant_id: existing_agents,
         raising=False,
     )
@@ -7693,17 +7759,17 @@ async def test_check_agent_name_conflict_batch_impl_skips_same_agent(monkeypatch
 @pytest.mark.asyncio
 async def test_regenerate_agent_name_batch_impl_uses_llm(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
+        "management.services.agent.service.get_current_user_info",
         lambda authorization: ("user-x", "tenant-x", "en"),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.service.query_all_agent_info_by_tenant_id",
         lambda tenant_id: [{"agent_id": 2, "name": "dup_name", "display_name": "Dup"}],
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.tenant_config_manager.get_model_config",
+        "management.services.agent.service.tenant_config_manager.get_model_config",
         lambda key, tenant_id: {"model_id": "model-1", "display_name": "LLM"},
         raising=False,
     )
@@ -7713,13 +7779,8 @@ async def test_regenerate_agent_name_batch_impl_uses_llm(monkeypatch):
 
     monkeypatch.setattr("asyncio.to_thread", fake_to_thread, raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service._regenerate_agent_name_with_llm",
-        lambda **kwargs: "regenerated_name",
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "backend.services.agent_service._regenerate_agent_display_name_with_llm",
-        lambda **kwargs: "Regenerated Display",
+        "management.services.agent.service.regenerate_agent_value",
+        lambda **kwargs: "regenerated_name" if kwargs["field_key"] == "name" else "Regenerated Display",
         raising=False,
     )
 
@@ -7746,17 +7807,17 @@ async def test_regenerate_agent_name_batch_impl_uses_llm(monkeypatch):
 @pytest.mark.asyncio
 async def test_regenerate_agent_name_batch_impl_no_model(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
+        "management.services.agent.service.get_current_user_info",
         lambda authorization: ("user-x", "tenant-x", "en"),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.service.query_all_agent_info_by_tenant_id",
         lambda tenant_id: [],
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.tenant_config_manager.get_model_config",
+        "management.services.agent.service.tenant_config_manager.get_model_config",
         lambda key, tenant_id: None,
         raising=False,
     )
@@ -7776,18 +7837,18 @@ async def test_regenerate_agent_name_batch_impl_no_model(monkeypatch):
 @pytest.mark.asyncio
 async def test_regenerate_agent_name_batch_impl_llm_failure_fallback(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.agent_service.get_current_user_info",
+        "management.services.agent.service.get_current_user_info",
         lambda authorization: ("user-x", "tenant-x", "en"),
         raising=False,
     )
     # existing agent ensures duplicate detection
     monkeypatch.setattr(
-        "backend.services.agent_service.query_all_agent_info_by_tenant_id",
+        "management.services.agent.service.query_all_agent_info_by_tenant_id",
         lambda tenant_id: [{"agent_id": 2, "name": "dup", "display_name": "Dup"}],
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.tenant_config_manager.get_model_config",
+        "management.services.agent.management.tenant_config_manager.get_model_config",
         lambda key, tenant_id: {"model_id": "model-1", "display_name": "LLM"},
         raising=False,
     )
@@ -7797,23 +7858,13 @@ async def test_regenerate_agent_name_batch_impl_llm_failure_fallback(monkeypatch
 
     monkeypatch.setattr("asyncio.to_thread", run_in_thread, raising=False)
     monkeypatch.setattr(
-        "backend.services.agent_service._regenerate_agent_name_with_llm",
+        "management.services.agent.service.regenerate_agent_value",
         lambda **kwargs: (_ for _ in ()).throw(Exception("llm-fail")),
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service._regenerate_agent_display_name_with_llm",
-        lambda **kwargs: (_ for _ in ()).throw(Exception("llm-fail")),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "backend.services.agent_service._generate_unique_agent_name_with_suffix",
-        lambda base_value, **kwargs: f"{base_value}_fallback",
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "backend.services.agent_service._generate_unique_display_name_with_suffix",
-        lambda base_value, **kwargs: f"{base_value}_fallback",
+        "management.services.agent.service.generate_unique_agent_value",
+        lambda field_key, base_value, *args, **kwargs: f"{base_value}_fallback",
         raising=False,
     )
 
@@ -7844,9 +7895,9 @@ class TestResolveModelWithFallback:
     """Test suite for the _resolve_model_ids_with_fallback helper function."""
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_success_found_in_tenant(
         self,
         mock_get_model_config,
@@ -7857,7 +7908,7 @@ class TestResolveModelWithFallback:
         # Arrange - explicit model_id is valid
         mock_get_model_by_id.return_value = {"display_name": "GPT-4"}
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act
         result = _resolve_model_ids_with_fallback(
@@ -7873,9 +7924,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_fallback_to_quick_config(
         self,
         mock_get_model_config,
@@ -7891,7 +7942,7 @@ class TestResolveModelWithFallback:
             "display_name": "Default LLM Model"
         }
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act
         result = _resolve_model_ids_with_fallback(
@@ -7907,9 +7958,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_no_fallback_available(
         self,
         mock_get_model_config,
@@ -7922,7 +7973,7 @@ class TestResolveModelWithFallback:
         mock_get_model_id.return_value = None
         mock_get_model_config.return_value = None  # No quick config model
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act
         result = _resolve_model_ids_with_fallback(
@@ -7938,9 +7989,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_none_model_name(
         self,
         mock_get_model_config,
@@ -7949,7 +8000,7 @@ class TestResolveModelWithFallback:
     ):
         """Test when model_display_names is None."""
         # Arrange
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act - both model_ids and model_display_names are None
         result = _resolve_model_ids_with_fallback(
@@ -7965,9 +8016,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_empty_model_name(
         self,
         mock_get_model_config,
@@ -7976,7 +8027,7 @@ class TestResolveModelWithFallback:
     ):
         """Test when model_display_names is an empty list."""
         # Arrange
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act
         result = _resolve_model_ids_with_fallback(
@@ -7992,9 +8043,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_business_logic_model_success(
         self,
         mock_get_model_config,
@@ -8005,7 +8056,7 @@ class TestResolveModelWithFallback:
         # Arrange - business logic model with explicit id present
         mock_get_model_by_id.return_value = {"display_name": "Qwen/QwQ-32B"}
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act
         result = _resolve_model_ids_with_fallback(
@@ -8021,9 +8072,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_quick_config_no_model_id(
         self,
         mock_get_model_config,
@@ -8039,7 +8090,7 @@ class TestResolveModelWithFallback:
             # No model_id field
         }
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act
         result = _resolve_model_ids_with_fallback(
@@ -8055,9 +8106,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_with_various_labels(
         self,
         mock_get_model_config,
@@ -8068,7 +8119,7 @@ class TestResolveModelWithFallback:
         # Arrange
         mock_get_model_by_id.return_value = {"display_name": "TestModel"}
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act & Assert - Test with "Model" label
         result1 = _resolve_model_ids_with_fallback(
@@ -8093,9 +8144,9 @@ class TestResolveModelWithFallback:
         assert result2 == [222]
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_exception_handling(
         self,
         mock_get_model_config,
@@ -8106,7 +8157,7 @@ class TestResolveModelWithFallback:
         # Arrange
         mock_get_model_by_id.side_effect = Exception("Database connection error")
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act & Assert
         with pytest.raises(Exception, match="Database connection error"):
@@ -8120,9 +8171,9 @@ class TestResolveModelWithFallback:
         mock_get_model_config.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.tenant_config_manager.get_model_config')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.tenant_config_manager.get_model_config')
     async def test_resolve_model_quick_config_exception(
         self,
         mock_get_model_config,
@@ -8135,7 +8186,7 @@ class TestResolveModelWithFallback:
         mock_get_model_id.return_value = None
         mock_get_model_config.side_effect = Exception("Config service error")
 
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         # Act & Assert
         with pytest.raises(Exception, match="Config service error"):
@@ -8147,61 +8198,12 @@ class TestResolveModelWithFallback:
             )
 
 
-def test_check_single_model_availability_no_model_id():
-    reasons = _check_single_model_availability(
-        model_id=None,
-        tenant_id="tenant",
-        model_cache={},
-        reason_key="model_unavailable",
-    )
-    assert reasons == []
 
 
-@patch("backend.services.agent_service.get_model_by_model_id")
-def test_check_single_model_availability_fetches_and_handles_missing_model(mock_get_model):
-    model_cache = {}
-    mock_get_model.return_value = None
-
-    reasons = _check_single_model_availability(
-        model_id=123,
-        tenant_id="tenant",
-        model_cache=model_cache,
-        reason_key="model_unavailable",
-    )
-
-    assert reasons == ["model_unavailable"]
-    assert 123 in model_cache
-    mock_get_model.assert_called_once_with(123, "tenant")
 
 
-def test_check_single_model_availability_uses_cached_unavailable_model():
-    model_cache = {
-        456: {"connect_status": agent_service.ModelConnectStatusEnum.UNAVAILABLE.value}
-    }
-
-    reasons = _check_single_model_availability(
-        model_id=456,
-        tenant_id="tenant",
-        model_cache=model_cache,
-        reason_key="model_unavailable",
-    )
-
-    assert reasons == ["model_unavailable"]
 
 
-def test_check_single_model_availability_returns_empty_for_available_model():
-    model_cache = {
-        789: {"connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value}
-    }
-
-    reasons = _check_single_model_availability(
-        model_id=789,
-        tenant_id="tenant",
-        model_cache=model_cache,
-        reason_key="model_unavailable",
-    )
-
-    assert reasons == []
 
 
 # ============================================================================
@@ -8209,26 +8211,26 @@ def test_check_single_model_availability_returns_empty_for_available_model():
 # ============================================================================
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_all_available(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """Test check_agent_availability when all tools and models are available."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}, {"tool_id": 2}]
     mock_check_tool.return_value = [True, True]
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
 
     is_available, reasons = check_agent_availability(
         agent_id=123,
@@ -8242,26 +8244,26 @@ def test_check_agent_availability_all_available(
     mock_check_tool.assert_called_once_with([1, 2])
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_tool_unavailable(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """Test check_agent_availability when some tools are unavailable."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}, {"tool_id": 2}]
     mock_check_tool.return_value = [True, False]  # One tool unavailable
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
 
     is_available, reasons = check_agent_availability(
         agent_id=123,
@@ -8272,26 +8274,26 @@ def test_check_agent_availability_tool_unavailable(
     assert reasons == ["tool_unavailable"]
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_model_unavailable(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """Test check_agent_availability when model is unavailable."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [True]
-    mock_collect_model_reasons.return_value = ["model_unavailable"]
+    mock_resolve_model.return_value = {"connect_status": "unavailable"}
 
     is_available, reasons = check_agent_availability(
         agent_id=123,
@@ -8302,22 +8304,22 @@ def test_check_agent_availability_model_unavailable(
     assert reasons == ["model_unavailable"]
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_mcp_model_deleted(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """Test check_agent_availability when tool has selected_model_id pointing to a deleted model."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [
         {
@@ -8330,7 +8332,7 @@ def test_check_agent_availability_mcp_model_deleted(
         },
     ]
     mock_check_tool.return_value = [True, True]
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
 
     def fake_ignore_delete(model_id, tenant_id):
         if model_id == 99:
@@ -8357,27 +8359,27 @@ def test_check_agent_availability_mcp_model_deleted(
     assert looked_up == expected_lookups
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_mcp_model_selected_default_none(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """`selected_model_id` set without a default value should be skipped without lookups."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_ids": [1]}
     mock_search_tools.return_value = [
         {"tool_id": 1, "params": [{"name": "selected_model_id"}]},  # default is None
     ]
     mock_check_tool.return_value = [True]
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
 
     is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
 
@@ -8386,27 +8388,27 @@ def test_check_agent_availability_mcp_model_selected_default_none(
     mock_get_model_by_model_id_ignore_delete.assert_not_called()
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_mcp_model_record_missing(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """If the DB lookup returns None we should not raise and not add a reason."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_ids": [1]}
     mock_search_tools.return_value = [
         {"tool_id": 1, "params": [{"name": "selected_model_id", "default": 999}]},
     ]
     mock_check_tool.return_value = [True]
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
     mock_get_model_by_model_id_ignore_delete.return_value = None
 
     is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
@@ -8415,22 +8417,22 @@ def test_check_agent_availability_mcp_model_record_missing(
     assert reasons == []
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_mcp_model_params_non_dict_entries(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """Non-dict entries inside `params` (and missing `params`) must not crash the loop."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_ids": [1]}
     mock_search_tools.return_value = [
         {"tool_id": 1},                                              # no params
         {"tool_id": 2, "params": None},                               # explicit None
@@ -8439,7 +8441,7 @@ def test_check_agent_availability_mcp_model_params_non_dict_entries(
         {"tool_id": 5, "params": [{"name": "unrelated", "default": 7}]},  # wrong param name
     ]
     mock_check_tool.return_value = [True] * 5
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
     mock_get_model_by_model_id_ignore_delete.return_value = None
 
     is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
@@ -8450,22 +8452,22 @@ def test_check_agent_availability_mcp_model_params_non_dict_entries(
     mock_get_model_by_model_id_ignore_delete.assert_not_called()
 
 
-@patch('backend.services.agent_service.get_model_by_model_id_ignore_delete')
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.get_model_by_model_id_ignore_delete')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_mcp_model_loop_breaks_after_first_match(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons,
+    mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
     """Once `selected_model_id` is located, subsequent params in the same tool are skipped."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_search_agent_info.return_value = {"agent_id": 1, "model_id": 1}
+    mock_search_agent_info.return_value = {"agent_id": 1, "model_ids": [1]}
     mock_search_tools.return_value = [
         {
             "tool_id": 1,
@@ -8477,7 +8479,7 @@ def test_check_agent_availability_mcp_model_loop_breaks_after_first_match(
         },
     ]
     mock_check_tool.return_value = [True]
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
     mock_get_model_by_model_id_ignore_delete.return_value = None
 
     is_available, reasons = check_agent_availability(agent_id=1, tenant_id="t")
@@ -8489,24 +8491,24 @@ def test_check_agent_availability_mcp_model_loop_breaks_after_first_match(
     assert mock_get_model_by_model_id_ignore_delete.call_count == 1
 
 
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_both_unavailable(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons
+    mock_resolve_model
 ):
     """Test check_agent_availability when both tools and model are unavailable."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [False]
-    mock_collect_model_reasons.return_value = ["model_unavailable"]
+    mock_resolve_model.return_value = {"connect_status": "unavailable"}
 
     is_available, reasons = check_agent_availability(
         agent_id=123,
@@ -8518,21 +8520,21 @@ def test_check_agent_availability_both_unavailable(
     assert "model_unavailable" in reasons
 
 
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_no_tools(
     mock_search_agent_info,
     mock_search_tools,
-    mock_collect_model_reasons
+    mock_resolve_model
 ):
     """Test check_agent_availability when agent has no tools."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    mock_agent_info = {"agent_id": 123, "model_id": 456}
+    mock_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = []  # No tools
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
 
     is_available, reasons = check_agent_availability(
         agent_id=123,
@@ -8543,10 +8545,10 @@ def test_check_agent_availability_no_tools(
     assert reasons == []
 
 
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.read.search_agent_info_by_agent_id')
 def test_check_agent_availability_agent_not_found(mock_search_agent_info):
     """Test check_agent_availability when agent is not found."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
     mock_search_agent_info.return_value = None
 
@@ -8559,21 +8561,21 @@ def test_check_agent_availability_agent_not_found(mock_search_agent_info):
     assert reasons == ["agent_not_found"]
 
 
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
 def test_check_agent_availability_with_pre_fetched_agent_info(
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons
+    mock_resolve_model
 ):
     """Test check_agent_availability with pre-fetched agent_info (avoids duplicate DB query)."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    pre_fetched_agent_info = {"agent_id": 123, "model_id": 456}
+    pre_fetched_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [True]
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
 
     is_available, reasons = check_agent_availability(
         agent_id=123,
@@ -8587,22 +8589,22 @@ def test_check_agent_availability_with_pre_fetched_agent_info(
     mock_search_tools.assert_called_once_with(agent_id=123, tenant_id="test_tenant")
 
 
-@patch('backend.services.agent_service._collect_model_availability_reasons')
-@patch('backend.services.agent_service.check_tool_is_available')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('management.services.agent.read.resolve_model_record')
+@patch('management.services.agent.read.check_tool_is_available')
+@patch('management.services.agent.read.search_tools_for_sub_agent')
 def test_check_agent_availability_with_model_cache(
     mock_search_tools,
     mock_check_tool,
-    mock_collect_model_reasons
+    mock_resolve_model
 ):
     """Test check_agent_availability with pre-populated model cache."""
-    from backend.services.agent_service import check_agent_availability
+    from management.services.agent.read import check_agent_availability
 
-    pre_fetched_agent_info = {"agent_id": 123, "model_id": 456}
+    pre_fetched_agent_info = {"agent_id": 123, "model_ids": [456]}
     model_cache = {456: {"connect_status": "available"}}
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [True]
-    mock_collect_model_reasons.return_value = []
+    mock_resolve_model.return_value = {"connect_status": "available"}
 
     is_available, reasons = check_agent_availability(
         agent_id=123,
@@ -8613,18 +8615,18 @@ def test_check_agent_availability_with_model_cache(
 
     assert is_available is True
     assert reasons == []
-    # Verify model_cache was passed to _collect_model_availability_reasons
-    mock_collect_model_reasons.assert_called_once()
-    call_args = mock_collect_model_reasons.call_args
-    assert call_args.kwargs.get("model_cache") == model_cache or call_args[1].get("model_cache") == model_cache
+    # Verify model_cache was passed to resolve_model_record
+    mock_resolve_model.assert_called_once()
+    call_args = mock_resolve_model.call_args
+    assert call_args.args == (456, "test_tenant", model_cache)
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 async def test_get_agent_info_impl_with_unavailable_agent(
     mock_search_agent_info,
     mock_search_tools,
@@ -8652,10 +8654,82 @@ async def test_get_agent_info_impl_with_unavailable_agent(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management._resolve_model_ids_with_fallback')
+@patch('management.services.agent.management.query_all_agent_info_by_tenant_id')
+async def test_import_agent_by_agent_id_resolves_name_and_display_name_conflicts_for_repository_copy(
+    mock_query_agents,
+    mock_resolve_model,
+    mock_query_all_tools,
+    mock_create_agent,
+    mock_create_tool,
+):
+    mock_query_agents.side_effect = [
+        [{
+            "agent_id": 1,
+            "name": "duplicate_name",
+            "display_name": "Duplicate Display",
+        }],
+        [{
+            "agent_id": 2,
+            "name": "existing_agent",
+            "display_name": "Existing Agent",
+        }],
+    ]
+    mock_query_all_tools.return_value = []
+    mock_resolve_model.side_effect = [[1], [2], [1], [2]]
+    mock_create_agent.return_value = {"agent_id": 456}
+
+    agent_info = ExportAndImportAgentInfo(
+        agent_id=123,
+        name="duplicate_name",
+        display_name="Duplicate Display",
+        description="Test",
+        business_description="Test business",
+        max_steps=5,
+        provide_run_summary=True,
+        duty_prompt="",
+        constraint_prompt="",
+        few_shots_prompt="",
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+        model_id=1,
+        model_name="Model1",
+        business_logic_model_id=2,
+        business_logic_model_name="Model2",
+    )
+
+    await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        resolve_name_conflicts=True,
+    )
+
+    created_agent = mock_create_agent.call_args.kwargs["agent_info"]
+    assert created_agent["name"] == "duplicate_name_1"
+    assert created_agent["display_name"] == "Duplicate Display_1"
+
+    await import_agent_by_agent_id(
+        import_agent_info=agent_info,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        resolve_name_conflicts=True,
+    )
+
+    created_agent = mock_create_agent.call_args.kwargs["agent_info"]
+    assert created_agent["name"] == "duplicate_name"
+    assert created_agent["display_name"] == "Duplicate Display"
+
+
+@pytest.mark.asyncio
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management._resolve_model_ids_with_fallback')
 async def test_import_agent_by_agent_id_allows_duplicate_name_without_regen(
     mock_resolve_model,
     mock_query_all_tools,
@@ -8704,10 +8778,10 @@ async def test_import_agent_by_agent_id_allows_duplicate_name_without_regen(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management._resolve_model_ids_with_fallback')
 async def test_import_agent_by_agent_id_duplicate_name_no_regen_fallback(
     mock_resolve_model,
     mock_query_all_tools,
@@ -8754,10 +8828,10 @@ async def test_import_agent_by_agent_id_duplicate_name_no_regen_fallback(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management._resolve_model_ids_with_fallback')
 async def test_import_agent_by_agent_id_duplicate_name_no_model_still_allows(
     mock_resolve_model,
     mock_query_all_tools,
@@ -8804,10 +8878,10 @@ async def test_import_agent_by_agent_id_duplicate_name_no_model_still_allows(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management._resolve_model_ids_with_fallback')
 async def test_import_agent_by_agent_id_duplicate_display_name_allowed(
     mock_resolve_model,
     mock_query_all_tools,
@@ -8852,10 +8926,10 @@ async def test_import_agent_by_agent_id_duplicate_display_name_allowed(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management._resolve_model_ids_with_fallback')
 async def test_import_agent_by_agent_id_duplicate_display_name_no_llm_fallback(
     mock_resolve_model,
     mock_query_all_tools,
@@ -8902,10 +8976,10 @@ async def test_import_agent_by_agent_id_duplicate_display_name_no_llm_fallback(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service._resolve_model_ids_with_fallback')
+@patch('management.services.agent.management.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.management._resolve_model_ids_with_fallback')
 async def test_import_agent_by_agent_id_duplicate_display_name_no_model_still_allowed(
     mock_resolve_model,
     mock_query_all_tools,
@@ -8964,8 +9038,8 @@ async def test_clear_agent_new_mark_impl_success():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.return_value = 1
-    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
-         patch('backend.services.agent_service.logger') as mock_logger:
+    with patch('management.services.agent.management.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('management.services.agent.management.logger') as mock_logger:
 
         # Execute
         result = await clear_agent_new_mark_impl(
@@ -8994,8 +9068,8 @@ async def test_clear_agent_new_mark_impl_no_rows_affected():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.return_value = 0
-    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
-         patch('backend.services.agent_service.logger') as mock_logger:
+    with patch('management.services.agent.management.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('management.services.agent.management.logger') as mock_logger:
 
         # Execute
         result = await clear_agent_new_mark_impl(
@@ -9024,8 +9098,8 @@ async def test_clear_agent_new_mark_impl_multiple_rows_affected():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.return_value = 3
-    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
-         patch('backend.services.agent_service.logger') as mock_logger:
+    with patch('management.services.agent.management.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('management.services.agent.management.logger') as mock_logger:
 
         # Execute
         result = await clear_agent_new_mark_impl(
@@ -9054,8 +9128,8 @@ async def test_clear_agent_new_mark_impl_database_error():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.side_effect = Exception("Database connection failed")
-    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
-         patch('backend.services.agent_service.logger') as mock_logger:
+    with patch('management.services.agent.management.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('management.services.agent.management.logger') as mock_logger:
 
         # Execute and Assert
         with pytest.raises(Exception, match="Database connection failed"):
@@ -9081,8 +9155,8 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
     # Setup
     mock_module = MagicMock()
     mock_module.clear_agent_new_mark.return_value = 1
-    with patch('backend.services.agent_service.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
-         patch('backend.services.agent_service.logger') as mock_logger:
+    with patch('management.services.agent.management.clear_agent_new_mark', new=mock_module.clear_agent_new_mark), \
+         patch('management.services.agent.management.logger') as mock_logger:
 
         # Execute
         result = await clear_agent_new_mark_impl(
@@ -9099,13 +9173,13 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
         )
 
 # Tests for ingroup_permission and group_ids functionality
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.get_current_user_info')
-@patch('backend.services.agent_service.convert_list_to_string')
-@patch('backend.services.agent_service._get_user_group_ids')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_id')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.service.create_agent')
+@patch('management.services.agent.service.get_current_user_info')
+@patch('management.services.agent.service.convert_list_to_string')
+@patch('management.services.agent.service._get_user_group_ids')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_create_agent_with_ingroup_permission(
     mock_get_user_group_ids,
@@ -9155,12 +9229,12 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission(
     assert call_args["group_ids"] == "1,2"
 
 
-@patch('backend.services.agent_service.create_or_update_tool_by_tool_info')
-@patch('backend.services.agent_service.query_tool_instances_by_id')
-@patch('backend.services.agent_service.query_all_tools')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.get_current_user_info')
-@patch('backend.services.agent_service._get_user_group_ids')
+@patch('management.services.agent.service.create_or_update_tool_by_tool_info')
+@patch('management.services.agent.service.query_tool_instances_by_id')
+@patch('management.services.agent.management.query_all_tools')
+@patch('management.services.agent.service.create_agent')
+@patch('management.services.agent.service.get_current_user_info')
+@patch('management.services.agent.service._get_user_group_ids')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_create_agent_with_ingroup_permission_none(
     mock_get_user_group_ids,
@@ -9207,12 +9281,12 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission_none(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_creator_with_private_permission_no_group_overlap(
     mock_query_agents,
     mock_query_groups,
@@ -9266,12 +9340,12 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_no_group
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_creator_with_private_permission_with_group_overlap(
     mock_query_agents,
     mock_query_groups,
@@ -9324,12 +9398,12 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_with_gro
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_non_creator_with_private_permission_hidden(
     mock_query_agents,
     mock_query_groups,
@@ -9381,12 +9455,12 @@ async def test_list_all_agent_info_impl_non_creator_with_private_permission_hidd
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_permission_assignment_creator_gets_edit(
     mock_query_agents,
     mock_query_groups,
@@ -9438,12 +9512,12 @@ async def test_list_all_agent_info_impl_permission_assignment_creator_gets_edit(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_permission_assignment_non_creator_uses_ingroup_permission(
     mock_query_agents,
     mock_query_groups,
@@ -9522,12 +9596,12 @@ async def test_list_all_agent_info_impl_permission_assignment_non_creator_uses_i
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_admin_gets_edit_permission(
     mock_query_agents,
     mock_query_groups,
@@ -9579,12 +9653,12 @@ async def test_list_all_agent_info_impl_admin_gets_edit_permission(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_asset_owner_agent_read_only_for_admin(
     mock_query_agents,
     mock_query_groups,
@@ -9655,14 +9729,14 @@ def _mock_get_agent_info_impl_dependencies(
     mock_skill_service.return_value = mock_skill_service_instance
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.get_user_tenant_by_user_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_asset_owner_agent_read_only_for_admin(
     mock_get_user_tenant,
@@ -9704,14 +9778,14 @@ async def test_get_agent_info_impl_asset_owner_agent_read_only_for_admin(
     assert result["permission"] == PERMISSION_READ
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.get_user_tenant_by_user_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_asset_owner_agent_read_only_for_dev(
     mock_get_user_tenant,
@@ -9753,14 +9827,14 @@ async def test_get_agent_info_impl_asset_owner_agent_read_only_for_dev(
     assert result["permission"] == PERMISSION_READ
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service.query_external_sub_agents")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
+@patch("management.services.agent.service.SkillService")
+@patch("management.services.agent.service.query_external_sub_agents")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.get_user_tenant_by_user_id")
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_asset_owner_role_gets_edit(
     mock_get_user_tenant,
@@ -9803,12 +9877,12 @@ async def test_get_agent_info_impl_asset_owner_role_gets_edit(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_non_creator_no_group_overlap_hidden(
     mock_query_agents,
     mock_query_groups,
@@ -9858,12 +9932,12 @@ async def test_list_all_agent_info_impl_non_creator_no_group_overlap_hidden(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_creator_no_group_overlap_hidden(
     mock_query_agents,
     mock_query_groups,
@@ -9922,11 +9996,11 @@ async def test_list_all_agent_info_impl_creator_no_group_overlap_hidden(
 
 
 # Tests for get_creating_sub_agent_info_impl exception handling
-@patch("backend.services.agent_service.get_enable_tool_id_by_agent_id")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
-@patch("backend.services.agent_service.get_creating_sub_agent_id_service")
-@patch("backend.services.agent_service.get_current_user_info")
+@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.get_creating_sub_agent_id_service")
+@patch("management.services.agent.service.get_current_user_info")
 @pytest.mark.asyncio
 async def test_get_creating_sub_agent_info_impl_get_id_exception(
     mock_get_user_info,
@@ -9943,11 +10017,11 @@ async def test_get_creating_sub_agent_info_impl_get_id_exception(
         await get_creating_sub_agent_info_impl(authorization="Bearer token")
 
 
-@patch("backend.services.agent_service.get_enable_tool_id_by_agent_id")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
-@patch("backend.services.agent_service.get_creating_sub_agent_id_service")
-@patch("backend.services.agent_service.get_current_user_info")
+@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.get_creating_sub_agent_id_service")
+@patch("management.services.agent.service.get_current_user_info")
 @pytest.mark.asyncio
 async def test_get_creating_sub_agent_info_impl_search_info_exception(
     mock_get_user_info,
@@ -9965,11 +10039,11 @@ async def test_get_creating_sub_agent_info_impl_search_info_exception(
         await get_creating_sub_agent_info_impl(authorization="Bearer token")
 
 
-@patch("backend.services.agent_service.get_enable_tool_id_by_agent_id")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
-@patch("backend.services.agent_service.get_creating_sub_agent_id_service")
-@patch("backend.services.agent_service.get_current_user_info")
+@patch("management.services.agent.service.get_enable_tool_id_by_agent_id")
+@patch("management.services.agent.service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.get_creating_sub_agent_id_service")
+@patch("management.services.agent.service.get_current_user_info")
 @pytest.mark.asyncio
 async def test_get_creating_sub_agent_info_impl_get_tool_ids_exception(
     mock_get_user_info,
@@ -9997,16 +10071,16 @@ async def test_get_creating_sub_agent_info_impl_get_tool_ids_exception(
 
 
 # Tests for get_agent_by_name_impl
-@patch("backend.services.agent_service.query_version_list")
-@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+@patch("management.services.agent.management.query_version_list")
+@patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_empty_name(mock_search, mock_query_versions):
     """Test that empty agent name raises Exception."""
     with pytest.raises(Exception, match="agent_name required"):
         get_agent_by_name_impl("", "tenant_1")
 
 
-@patch("backend.services.agent_service.query_version_list")
-@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+@patch("management.services.agent.management.query_version_list")
+@patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
     """Test successful get_agent_by_name_impl."""
     mock_search.return_value = 123
@@ -10018,8 +10092,8 @@ def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
     assert result["latest_version_no"] == 5
 
 
-@patch("backend.services.agent_service.query_version_list")
-@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+@patch("management.services.agent.management.query_version_list")
+@patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
     """Test that agent not found raises Exception."""
     mock_search.side_effect = Exception("Agent not found")
@@ -10028,8 +10102,8 @@ def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
         get_agent_by_name_impl("nonexistent_agent", "tenant_1")
 
 
-@patch("backend.services.agent_service.query_version_list")
-@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+@patch("management.services.agent.management.query_version_list")
+@patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_empty_name_service(mock_search, mock_query_versions):
     """Test that empty agent name in impl raises Exception."""
     with pytest.raises(Exception, match="agent_name required"):
@@ -10037,8 +10111,8 @@ def test_get_agent_by_name_impl_empty_name_service(mock_search, mock_query_versi
 
 
 # Tests for get_agent_by_name_impl (different path)
-@patch("backend.services.agent_service.query_version_list")
-@patch("backend.services.agent_service.search_agent_id_by_agent_name")
+@patch("management.services.agent.management.query_version_list")
+@patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_impl_agent_not_found(mock_search, mock_query_versions):
     """Test agent not found error in get_agent_by_name_impl."""
     mock_search.side_effect = Exception("Not found")
@@ -10048,7 +10122,7 @@ def test_get_agent_by_impl_agent_not_found(mock_search, mock_query_versions):
 
 
 # Tests for delete_related_agent_impl
-@patch("backend.services.agent_service.delete_related_agent")
+@patch("management.services.agent.management.delete_related_agent")
 def test_delete_related_agent_impl_success(mock_delete):
     """Test successful delete_related_agent_impl."""
     mock_delete.return_value = True
@@ -10059,7 +10133,7 @@ def test_delete_related_agent_impl_success(mock_delete):
     mock_delete.assert_called_once_with(1, 2, "tenant_1")
 
 
-@patch("backend.services.agent_service.delete_related_agent")
+@patch("management.services.agent.management.delete_related_agent")
 def test_delete_related_agent_impl_exception(mock_delete):
     """Test that exception in delete_related_agent_impl is raised."""
     mock_delete.side_effect = Exception("Database error")
@@ -10069,9 +10143,9 @@ def test_delete_related_agent_impl_exception(mock_delete):
 
 
 # Tests for get_agent_call_relationship_impl max depth
-@patch("backend.services.agent_service.search_tools_for_sub_agent")
-@patch("backend.services.agent_service.search_agent_info_by_agent_id")
-@patch("backend.services.agent_service.query_sub_agents_id_list")
+@patch("management.services.agent.service.search_tools_for_sub_agent")
+@patch("management.services.agent.service.search_agent_info_by_agent_id")
+@patch("management.services.agent.service.query_sub_agents_id_list")
 def test_get_agent_call_relationship_impl_deep_recursion(mock_query_sub, mock_search_info, mock_search_tools):
     """Test that get_agent_call_relationship handles deep recursion gracefully."""
     mock_query_sub.return_value = [2, 3, 4, 5, 6]  # Multiple sub agents
@@ -10097,7 +10171,7 @@ def test_get_agent_call_relationship_impl_deep_recursion(mock_query_sub, mock_se
 @pytest.fixture(autouse=True)
 def _stub_requested_output_tokens_validator():
     with patch(
-        "backend.services.agent_service._validate_requested_output_tokens_for_agent",
+        "management.services.agent.service._validate_requested_output_tokens_for_agent",
         return_value=None,
     ):
         yield
@@ -10111,16 +10185,26 @@ def _stub_get_valid_model_ids():
     Tests that need to verify get_valid_model_ids behavior can mock it explicitly.
     """
     with patch(
-        "backend.services.agent_service.get_valid_model_ids",
+        "management.services.agent.read.get_valid_model_ids",
         side_effect=lambda model_ids, tenant_id: model_ids,
     ):
         yield
 
 
+@pytest.fixture(autouse=True)
+def _bridge_legacy_model_lookup_patch():
+    """Keep legacy service-level model mocks visible to the extracted reader."""
+    with patch(
+        "management.services.model.resolver.get_model_by_model_id",
+        side_effect=lambda model_id, _tenant_id=None: agent_service.get_model_by_model_id(model_id),
+    ):
+        yield
+
+
 # Tests for update_agent_info_impl skill handling exception
-@patch("backend.services.agent_service.skill_db.create_or_update_skill_by_skill_info")
-@patch("backend.services.agent_service.skill_db.query_skill_instances_by_agent_id")
-@patch("backend.services.agent_service.get_current_user_info")
+@patch("management.services.agent.service.skill_db.create_or_update_skill_by_skill_info")
+@patch("management.services.agent.service.skill_db.query_skill_instances_by_agent_id")
+@patch("management.services.agent.service.get_current_user_info")
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_skill_update_exception(
     mock_get_user,
@@ -10172,11 +10256,11 @@ async def test_update_agent_info_impl_skill_update_exception(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.AgentRunMetadata")
-@patch("backend.services.agent_service._resolve_user_tenant_language")
-@patch("backend.services.agent_service.build_memory_context")
-@patch('backend.services.agent_service.save_messages')
-@patch("backend.services.agent_service.generate_stream")
+@patch("management.services.agent.run_context.AgentRunMetadata")
+@patch("management.services.agent.run._resolve_user_tenant_language")
+@patch("management.services.agent.run_context.build_memory_context")
+@patch('management.services.agent.run.save_messages')
+@patch("management.services.agent.run.generate_stream")
 async def test_run_agent_stream_binds_agent_monitoring_context(
         mock_generate_stream, mock_save_messages, mock_build_mem_ctx,
         mock_resolve, mock_agent_metadata_cls, mock_agent_request, mock_http_request):
@@ -10209,7 +10293,7 @@ async def test_run_agent_stream_binds_agent_monitoring_context(
 
 def test_generate_stream_decorated():
     """generate_stream exists as callable after module import."""
-    from backend.services.agent_service import generate_stream
+    from management.services.agent.service import generate_stream
     assert callable(generate_stream)
 
 
@@ -10229,13 +10313,13 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
 
     memory_context = MagicMock(user_config=MagicMock(memory_switch=False))
     with (
-        patch("backend.services.agent_service.build_memory_context", return_value=memory_context),
-        patch("backend.services.agent_service.generate_stream", return_value=fake_stream()),
+        patch("management.services.agent.run_context.build_memory_context", return_value=memory_context),
+        patch("management.services.agent.run.generate_stream", return_value=fake_stream()),
         patch(
-            "backend.services.agent_service.get_latest_assistant_message",
+            "management.services.agent.run.get_latest_assistant_message",
             return_value={"message_id": 123},
         ),
-        patch("backend.services.agent_service.save_messages") as mock_save_messages,
+        patch("management.services.agent.run.save_messages") as mock_save_messages,
     ):
         result = await agent_service.run_agent_background(
             request,
@@ -10256,15 +10340,74 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
 # Tests for export_agent_with_skills_impl and import_agent_with_skills_impl
 # =============================================================================
 
+
+def test_build_skill_import_conflicts_avoids_bundle_and_existing_names():
+    """Conflict suggestions should avoid tenant names and names in the upload bundle."""
+    from management.services.agent import management as ag_svc
+
+    unavailable_snapshots = []
+
+    def generate_name(base_name, unavailable_names):
+        unavailable_snapshots.append((base_name, set(unavailable_names)))
+        return "SkillA 副本 2" if base_name == "SkillA" else "SkillB 副本"
+
+    with patch.object(
+        ag_svc,
+        "generate_available_copy_skill_name",
+        side_effect=generate_name,
+    ):
+        conflicts = ag_svc.build_skill_import_conflicts(
+            ["SkillA", "SkillA 副本", "SkillB", "SkillA"],
+            {"SkillA", "SkillB"},
+        )
+
+    assert conflicts == [
+        {"skill_name": "SkillA", "suggested_new_name": "SkillA 副本 2"},
+        {"skill_name": "SkillB", "suggested_new_name": "SkillB 副本"},
+    ]
+    assert unavailable_snapshots[0] == (
+        "SkillA",
+        {"SkillA", "SkillA 副本", "SkillB"},
+    )
+    assert "SkillA 副本 2" in unavailable_snapshots[1][1]
+
+
+@patch('management.services.agent.management.get_current_user_info')
+def test_check_skill_conflicts_impl_uses_current_tenant(mock_get_user_info):
+    """Skill precheck should query only the authenticated tenant."""
+    from management.services.agent import management as ag_svc
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+    with patch.object(
+        ag_svc.skill_db,
+        "list_skills",
+        return_value=[{"name": "SkillA", "skill_id": 10}],
+    ) as mock_list_skills, patch.object(
+        ag_svc,
+        "generate_available_copy_skill_name",
+        return_value="SkillA 副本",
+    ):
+        conflicts = ag_svc.check_skill_conflicts_impl(
+            ["SkillA", "SkillB"],
+            "Bearer token",
+        )
+
+    assert conflicts == [{
+        "skill_name": "SkillA",
+        "suggested_new_name": "SkillA 副本",
+    }]
+    mock_list_skills.assert_called_once_with("tenant_abc")
+
+
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.collect_skill_zip_entries')
-@patch('backend.services.agent_service.export_agent_dict_impl')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.collect_skill_zip_entries')
+@patch('management.services.agent.management.export_agent_dict_impl')
+@patch('management.services.agent.management.get_current_user_info')
 async def test_export_agent_with_skills_impl_no_skills(
     mock_get_user_info, mock_export_dict_impl, mock_collect_skills
 ):
     """Test export_agent_with_skills_impl returns dict when agent has no skill instances."""
-    from backend.services.agent_service import export_agent_with_skills_impl
+    from management.services.agent.service import export_agent_with_skills_impl
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
     mock_export_dict_impl.return_value = {"agent_id": 1, "agent_info": {}}
@@ -10279,14 +10422,14 @@ async def test_export_agent_with_skills_impl_no_skills(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.collect_skill_zip_entries')
-@patch('backend.services.agent_service.export_agent_dict_impl')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.collect_skill_zip_entries')
+@patch('management.services.agent.management.export_agent_dict_impl')
+@patch('management.services.agent.management.get_current_user_info')
 async def test_export_agent_with_skills_impl_skills_but_no_names(
     mock_get_user_info, mock_export_dict_impl, mock_collect_skills
 ):
     """Test export_agent_with_skills_impl returns dict when skill export yields nothing."""
-    from backend.services.agent_service import export_agent_with_skills_impl
+    from management.services.agent.service import export_agent_with_skills_impl
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
     mock_export_dict_impl.return_value = {"agent_id": 1, "agent_info": {}}
@@ -10299,15 +10442,15 @@ async def test_export_agent_with_skills_impl_skills_but_no_names(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
-@patch('backend.services.agent_service.collect_skill_zip_entries')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.search_agent_info_by_agent_id')
+@patch('management.services.agent.management.collect_skill_zip_entries')
+@patch('management.services.agent.management.get_current_user_info')
 async def test_export_agent_with_skills_impl_with_zip(
     mock_get_user_info, mock_collect_skills, mock_search_info
 ):
     """Test export_agent_with_skills_impl returns ZIP when agent has skills."""
-    from backend.services.agent_service import export_agent_with_skills_impl
-    from backend.services import agent_service as ag_svc
+    from management.services.agent.service import export_agent_with_skills_impl
+    from management.services.agent import management as ag_svc
     from consts.model import SkillZipEntry
     import io
     import zipfile
@@ -10330,33 +10473,80 @@ async def test_export_agent_with_skills_impl_with_zip(
         assert "skills/TestSkill.zip" in zf.namelist()
 
 
-# Note: test_import_agent_with_skills_impl_duplicate_skills was removed
-# The functionality is covered by other tests and the duplicate check
-# logic is tested in other test modules.
+@pytest.mark.asyncio
+@patch('management.services.agent.management.get_current_user_info')
+async def test_import_agent_with_skills_impl_duplicate_returns_suggestions_before_writes(
+    mock_get_user_info,
+):
+    """Duplicate skills should return deterministic suggestions before creating data."""
+    from management.services.agent.service import import_agent_with_skills_impl
+    from management.services.agent import management as ag_svc
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+    agent_info = types.SimpleNamespace(agent_id=1, agent_info={})
+    skills = [
+        types.SimpleNamespace(skill_name="SkillA", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="SkillA 副本", skill_zip_base64="eA=="),
+    ]
+
+    with patch.object(
+        ag_svc.skill_db,
+        'list_skills',
+        return_value=[{"name": "SkillA", "skill_id": 10}],
+    ), patch.object(
+        ag_svc,
+        'generate_available_copy_skill_name',
+        return_value="SkillA \u526f\u672c 2",
+    ), patch.object(ag_svc, 'SkillService') as mock_skill_service, patch.object(
+        ag_svc,
+        'import_agent_impl',
+        new_callable=AsyncMock,
+    ) as mock_import:
+        with pytest.raises(ag_svc.SkillDuplicateError) as exc_info:
+            await import_agent_with_skills_impl(
+                agent_info=agent_info,
+                skills=skills,
+                authorization="Bearer token",
+            )
+
+    assert exc_info.value.duplicate_names == ["SkillA"]
+    assert exc_info.value.skill_conflicts == [{
+        "skill_name": "SkillA",
+        "suggested_new_name": "SkillA \u526f\u672c 2",
+    }]
+    mock_skill_service.assert_not_called()
+    mock_import.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.get_current_user_info')
 async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     """Test import_agent_with_skills_impl successfully imports agent with skills."""
-    from backend.services.agent_service import import_agent_with_skills_impl
-    from backend.services import agent_service as ag_svc
+    from management.services.agent.service import import_agent_with_skills_impl
+    from management.services.agent import management as ag_svc
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
 
     existing_skills = [{"name": "ExistingSkill"}]
     new_skills = [MagicMock(skill_name="NewSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")]
 
-    mock_agent_info = MagicMock()
-    mock_agent_info.agent_id = 1
+    mock_agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+        },
+    )
 
     mock_skill_service = MagicMock()
     mock_skill_service.create_skill_from_zip_bytes.return_value = {"skill_id": 200}
 
     with patch.object(ag_svc.skill_db, 'list_skills', return_value=existing_skills):
         with patch.object(ag_svc, 'import_agent_impl', return_value={1: 100}) as mock_import:
-            with patch.object(ag_svc.skill_db, 'create_or_update_skill_by_skill_info'):
-                with patch('services.skill_service.SkillService', return_value=mock_skill_service):
+            with patch.object(
+                ag_svc.skill_db,
+                'create_or_update_skill_by_skill_info',
+            ) as mock_create_instance:
+                with patch.object(ag_svc, 'SkillService', return_value=mock_skill_service):
                     result = await import_agent_with_skills_impl(
                         agent_info=mock_agent_info,
                         skills=new_skills,
@@ -10366,14 +10556,17 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     assert result == {1: 100}
     mock_import.assert_called_once()
     mock_skill_service.create_skill_from_zip_bytes.assert_called_once()
+    created_skill_info = mock_create_instance.call_args.kwargs["skill_info"]
+    assert created_skill_info.agent_id == 100
+    assert created_skill_info.skill_id == 200
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.get_current_user_info')
 async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     """Test import_agent_with_skills_impl handles case where main agent is not in mapping."""
-    from backend.services.agent_service import import_agent_with_skills_impl
-    from backend.services import agent_service as ag_svc
+    from management.services.agent.service import import_agent_with_skills_impl
+    from management.services.agent import management as ag_svc
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
 
@@ -10381,24 +10574,113 @@ async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     # Use valid base64 encoded string "Hello World"
     new_skills = [MagicMock(skill_name="NewSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")]
 
-    mock_agent_info = MagicMock()
-    mock_agent_info.agent_id = 1
+    mock_agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+        },
+    )
 
     mock_skill_service = MagicMock()
     mock_skill_service.create_skill_from_zip_bytes.return_value = {"skill_id": 200}
 
     with patch.object(ag_svc.skill_db, 'list_skills', return_value=existing_skills):
         with patch.object(ag_svc, 'import_agent_impl', return_value={}) as mock_import:
-            with patch('services.skill_service.SkillService', return_value=mock_skill_service):
-                result = await import_agent_with_skills_impl(
-                    agent_info=mock_agent_info,
-                    skills=new_skills,
-                    authorization="Bearer token"
-                )
+            with patch.object(
+                ag_svc.skill_db,
+                'create_or_update_skill_by_skill_info',
+            ) as mock_create_instance:
+                with patch.object(ag_svc, 'SkillService', return_value=mock_skill_service):
+                    result = await import_agent_with_skills_impl(
+                        agent_info=mock_agent_info,
+                        skills=new_skills,
+                        authorization="Bearer token"
+                    )
 
     assert result == {}
     mock_import.assert_called_once()
-    # create_or_update_skill_by_skill_info should NOT be called since main_agent_id is None
+    mock_create_instance.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch('management.services.agent.management.get_current_user_info')
+async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_agent(
+    mock_get_user_info,
+):
+    """Use-existing and renamed skills should link to their original owning agents."""
+    from consts.model import SkillResolution
+    from management.services.agent.service import import_agent_with_skills_impl
+    from management.services.agent import management as ag_svc
+
+    mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
+    agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["ExistingSkill"]),
+            "2": types.SimpleNamespace(agent_id=2, skill_names=["RenamedSkill", "NewSkill", "MissingSkill"]),
+        },
+    )
+    skills = [
+        types.SimpleNamespace(skill_name="ExistingSkill", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="RenamedSkill", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="NewSkill", skill_zip_base64="eA=="),
+    ]
+    rename_target = "RenamedSkill \u526f\u672c"
+    resolutions = [
+        SkillResolution(skill_name="ExistingSkill", action="use_existing"),
+        SkillResolution(skill_name="RenamedSkill", action="rename", new_name=rename_target),
+    ]
+    mock_skill_service = MagicMock()
+    mock_skill_service.create_skill_from_zip_bytes.side_effect = [
+        {"skill_id": 20},
+        {"skill_id": 30},
+    ]
+
+    with patch.object(
+        ag_svc.skill_db,
+        'list_skills',
+        return_value=[
+            {"name": "ExistingSkill", "skill_id": 10},
+            {"name": "RenamedSkill", "skill_id": 11},
+        ],
+    ), patch.object(
+        ag_svc,
+        'generate_available_copy_skill_name',
+        side_effect=lambda base_name, _: f"{base_name} \u526f\u672c",
+    ), patch.object(
+        ag_svc,
+        'SkillService',
+        return_value=mock_skill_service,
+    ), patch.object(
+        ag_svc,
+        'import_agent_impl',
+        new_callable=AsyncMock,
+        return_value={1: 101, 2: 102},
+    ), patch.object(
+        ag_svc.skill_db,
+        'create_or_update_skill_by_skill_info',
+    ) as mock_create_instance:
+        result = await import_agent_with_skills_impl(
+            agent_info=agent_info,
+            skills=skills,
+            authorization="Bearer token",
+            skill_resolutions=resolutions,
+        )
+
+    assert result == {1: 101, 2: 102}
+    assert [
+        call.kwargs["skill_name"]
+        for call in mock_skill_service.create_skill_from_zip_bytes.call_args_list
+    ] == [rename_target, "NewSkill"]
+    assert all(
+        call.kwargs["skip_duplicate_check"] is False
+        for call in mock_skill_service.create_skill_from_zip_bytes.call_args_list
+    )
+    created_links = {
+        (call.kwargs["skill_info"].agent_id, call.kwargs["skill_info"].skill_id)
+        for call in mock_create_instance.call_args_list
+    }
+    assert created_links == {(101, 10), (102, 20), (102, 30)}
 
 
 # ============================================================================
@@ -10408,7 +10690,7 @@ async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
 # Test for _render_prompt_template with empty string
 def test_render_prompt_template_empty_string():
     """Test that _render_prompt_template returns empty string for empty input."""
-    from backend.services.agent_service import _render_prompt_template
+    from management.services.agent.naming import _render_prompt_template
 
     result = _render_prompt_template("")
     assert result == ""
@@ -10424,13 +10706,13 @@ def test_render_prompt_template_empty_string():
 
 # Test for update_agent_info_impl related_agent_ids query error
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.get_current_user_info')
 async def test_update_agent_info_impl_related_agent_query_error(
     mock_get_user, mock_query_sub
 ):
     """Test update_agent_info_impl handles related agent query error."""
-    from backend.services.agent_service import update_agent_info_impl
+    from management.services.agent.service import update_agent_info_impl
     from backend.consts.model import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -10471,15 +10753,15 @@ async def test_update_agent_info_impl_related_agent_query_error(
 
 # Test for update_agent_info_impl related_external_agent_ids
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.update_related_agents')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.update_related_agents')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.get_current_user_info')
 async def test_update_agent_info_impl_related_external_agents(
     mock_get_user, mock_query_sub, mock_update_related
 ):
     """Test update_agent_info_impl handles external agent relations."""
-    from backend.services.agent_service import update_agent_info_impl
-    from backend.services import agent_service as ag_svc
+    from management.services.agent.service import update_agent_info_impl
+    from management.services.agent import service as ag_svc
     from backend.consts.model import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -10523,15 +10805,15 @@ async def test_update_agent_info_impl_related_external_agents(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.update_related_agents')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.update_related_agents')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.get_current_user_info')
 async def test_update_agent_info_impl_external_agent_remove_relation(
     mock_get_user, mock_query_sub, mock_update_related
 ):
     """Test that external agent relation can be removed."""
-    from backend.services.agent_service import update_agent_info_impl
-    from backend.services import agent_service as ag_svc
+    from management.services.agent.service import update_agent_info_impl
+    from management.services.agent import service as ag_svc
     from backend.consts.model import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -10576,15 +10858,15 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.update_related_agents')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.update_related_agents')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.get_current_user_info')
 async def test_update_agent_info_impl_external_agent_relation_exists(
     mock_get_user, mock_query_sub, mock_update_related
 ):
     """Test that existing external agent relation is skipped (no exception)."""
-    from backend.services.agent_service import update_agent_info_impl
-    from backend.services import agent_service as ag_svc
+    from management.services.agent.service import update_agent_info_impl
+    from management.services.agent import service as ag_svc
     from backend.consts.model import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -10635,10 +10917,10 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
 
 # Test for import_agent_impl handles already-imported agent (continue path - line 1296)
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.get_current_user_info')
 async def test_import_agent_impl_already_imported(mock_get_user):
     """Test import_agent_impl handles already-imported agent (continue path)."""
-    from backend.services.agent_service import import_agent_impl
+    from management.services.agent.service import import_agent_impl
     from backend.consts.model import ExportAndImportDataFormat, ExportAndImportAgentInfo
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -10677,7 +10959,7 @@ async def test_import_agent_impl_already_imported(mock_get_user):
         import_count += 1
         return 100
 
-    with patch('backend.services.agent_service.import_agent_by_agent_id', side_effect=mock_import) as mock_import_fn:
+    with patch('management.services.agent.management.import_agent_by_agent_id', side_effect=mock_import) as mock_import_fn:
         result = await import_agent_impl(export_data, authorization="Bearer token")
 
     # Should only import once since the agent is added to set after first import
@@ -10686,14 +10968,14 @@ async def test_import_agent_impl_already_imported(mock_get_user):
 
 # Test for update_agent_info_impl skill unselected handling (lines 952-954)
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.skill_db.create_or_update_skill_by_skill_info')
-@patch('backend.services.agent_service.skill_db.query_skill_instances_by_agent_id')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.skill_db.create_or_update_skill_by_skill_info')
+@patch('management.services.agent.service.skill_db.query_skill_instances_by_agent_id')
+@patch('management.services.agent.service.get_current_user_info')
 async def test_update_agent_info_impl_skill_unselected(
     mock_get_user, mock_query_skills, mock_create_skill
 ):
     """Test that unselected skills are disabled (lines 952-954)."""
-    from backend.services.agent_service import update_agent_info_impl
+    from management.services.agent.service import update_agent_info_impl
     from backend.consts.model import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -10740,10 +11022,10 @@ async def test_update_agent_info_impl_skill_unselected(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.skill_db.get_valid_skill_ids')
-@patch('backend.services.agent_service.skill_db.create_or_update_skill_by_skill_info')
-@patch('backend.services.agent_service.skill_db.query_skill_instances_by_agent_id')
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.skill_db.get_valid_skill_ids')
+@patch('management.services.agent.service.skill_db.create_or_update_skill_by_skill_info')
+@patch('management.services.agent.service.skill_db.query_skill_instances_by_agent_id')
+@patch('management.services.agent.service.get_current_user_info')
 async def test_update_agent_info_impl_persists_structured_skill_config(
     mock_get_user,
     mock_query_skills,
@@ -10752,7 +11034,7 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
 ):
     """The main agent save persists per-agent skill values in the same transaction flow."""
     from backend.consts.model import AgentInfoRequest, AgentSkillInstanceRequest
-    from backend.services.agent_service import update_agent_info_impl
+    from management.services.agent.service import update_agent_info_impl
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
     mock_get_valid_skill_ids.return_value = {2}
@@ -10818,7 +11100,7 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
 @pytest.mark.asyncio
 async def test_generate_stream_unexpected_exception():
     """Test generate_stream handles unexpected exceptions."""
-    from backend.services.agent_service import generate_stream
+    from management.services.agent.service import generate_stream
 
     agent_request = MagicMock()
     agent_request.is_debug = False
@@ -10832,9 +11114,9 @@ async def test_generate_stream_unexpected_exception():
     fake_channel.publish = AsyncMock()
 
     # Mock build_memory_context to raise unexpected exception
-    with patch('backend.services.agent_service.build_memory_context', side_effect=Exception("Unexpected")), \
+    with patch('management.services.agent.run.build_memory_context', side_effect=Exception("Unexpected")), \
             patch(
-                'backend.services.agent_service.streaming_channel_manager.get_or_create_channel',
+                'management.services.agent.run.streaming_channel_manager.get_or_create_channel',
                 AsyncMock(return_value=fake_channel),
             ):
         chunks = []
@@ -10850,10 +11132,10 @@ async def test_generate_stream_unexpected_exception():
 
 # Test for import_agent_impl DFS continue path
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.management.get_current_user_info')
 async def test_import_agent_impl_continue_path(mock_get_user):
     """Test import_agent_impl handles continue in DFS loop."""
-    from backend.services.agent_service import import_agent_impl
+    from management.services.agent.service import import_agent_impl
     from backend.consts.model import ExportAndImportDataFormat, ExportAndImportAgentInfo
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -10909,8 +11191,8 @@ async def test_import_agent_impl_continue_path(mock_get_user):
         "2": mock_sub_agent_info
     }
 
-    with patch('backend.services.agent_service.import_agent_by_agent_id', return_value=100) as mock_import:
-        with patch('backend.services.agent_service.insert_related_agent'):
+    with patch('management.services.agent.management.import_agent_by_agent_id', return_value=100) as mock_import:
+        with patch('management.services.agent.management.insert_related_agent'):
             result = await import_agent_impl(export_data, authorization="Bearer token")
 
     assert mock_import.call_count == 2
@@ -10918,11 +11200,11 @@ async def test_import_agent_impl_continue_path(mock_get_user):
 
 # Test for import_agent_by_agent_id tool param validation error
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('management.services.agent.service.create_agent')
+@patch('management.services.agent.management.query_all_tools')
 async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_create):
     """Test import_agent_by_agent_id raises error for invalid tool param."""
-    from backend.services.agent_service import import_agent_by_agent_id
+    from management.services.agent.service import import_agent_by_agent_id
     from backend.consts.model import ExportAndImportAgentInfo
 
     mock_tool = MagicMock()
@@ -10971,7 +11253,7 @@ async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_
 @pytest.mark.asyncio
 async def test_import_agent_by_agent_id_invalid_max_steps():
     """Test import_agent_by_agent_id raises error for invalid max_steps."""
-    from backend.services.agent_service import import_agent_by_agent_id
+    from management.services.agent.service import import_agent_by_agent_id
     from backend.consts.model import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
@@ -11008,7 +11290,7 @@ async def test_import_agent_by_agent_id_invalid_max_steps():
 @pytest.mark.asyncio
 async def test_import_agent_by_agent_id_invalid_name():
     """Test import_agent_by_agent_id raises error for invalid agent name."""
-    from backend.services.agent_service import import_agent_by_agent_id
+    from management.services.agent.service import import_agent_by_agent_id
     from backend.consts.model import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
@@ -11043,14 +11325,14 @@ async def test_import_agent_by_agent_id_invalid_name():
 
 # Test for import_agent_by_agent_id publish_version_impl exception
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.publish_version_impl')
-@patch('backend.services.agent_service.create_agent')
-@patch('backend.services.agent_service.query_all_tools')
+@patch('management.services.agent.management.publish_version_impl')
+@patch('management.services.agent.management.create_agent')
+@patch('management.services.agent.management.query_all_tools')
 async def test_import_agent_by_agent_id_publish_version_error(
     mock_query_tools, mock_create, mock_publish
 ):
     """Test import_agent_by_agent_id handles publish_version_impl exception."""
-    from backend.services.agent_service import import_agent_by_agent_id
+    from management.services.agent.service import import_agent_by_agent_id
     from backend.consts.model import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
@@ -11080,6 +11362,14 @@ async def test_import_agent_by_agent_id_publish_version_error(
     # field-level attributes through dir(), so the access AttributeErrors
     # unless we set it explicitly.
     mock_agent_info.requested_output_tokens = None
+    # Runtime metadata support added `allow_chat_metadata` to
+    # ExportAndImportAgentInfo; import_agent_by_agent_id reads it directly
+    # at agent_service.py:2489. Same Pydantic v2 spec caveat applies.
+    mock_agent_info.allow_chat_metadata = None
+    # Runtime metadata support added `allow_chat_metadata` to
+    # ExportAndImportAgentInfo; import_agent_by_agent_id reads it directly
+    # at agent_service.py:2489. Same Pydantic v2 spec caveat applies.
+    mock_agent_info.allow_chat_metadata = None
 
     # Configure the three patched mocks so the flow reaches the publish branch:
     # - query_all_tools() must return an iterable (empty list -> no tool loop)
@@ -11101,25 +11391,12 @@ async def test_import_agent_by_agent_id_publish_version_error(
 
 
 # Test for _collect_model_availability_reasons
-def test_collect_model_availability_reasons():
-    """Test _collect_model_availability_reasons builds correct reason list."""
-    from backend.services.agent_service import _collect_model_availability_reasons
-    from backend.consts.agent_unavailable_reasons import AgentUnavailableReason
-
-    agent = {"model_ids": [999]}
-    model_cache = {}
-    tenant_id = "tenant_1"
-
-    with patch('backend.services.agent_service._check_single_model_availability', return_value=[AgentUnavailableReason.MODEL_UNAVAILABLE]):
-        result = _collect_model_availability_reasons(agent, tenant_id, model_cache)
-
-    assert AgentUnavailableReason.MODEL_UNAVAILABLE in result
 
 
 # Test for save_messages error cases
 def test_save_messages_user_with_messages_error():
     """Test save_messages raises error when messages provided for user."""
-    from backend.services.agent_service import save_messages
+    from management.services.agent.service import save_messages
     from backend.consts.const import MESSAGE_ROLE
 
     agent_request = MagicMock()
@@ -11130,22 +11407,22 @@ def test_save_messages_user_with_messages_error():
 
 def test_save_messages_assistant_without_messages_error():
     """Test save_messages raises error when messages missing for assistant."""
-    from backend.services.agent_service import save_messages
+    from management.services.agent.service import save_messages
     from backend.consts.const import MESSAGE_ROLE
 
     agent_request = MagicMock()
 
-    with pytest.raises(ValueError, match="incremental"):
+    with pytest.raises(ValueError, match="final batch"):
         save_messages(agent_request, MESSAGE_ROLE["ASSISTANT"], "user_1", "tenant_1")
 
 
 # Test for update_agent_info_impl related_external_agents exception
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.get_current_user_info')
 async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     """Test update_agent_info_impl handles external agent list error."""
-    from backend.services.agent_service import update_agent_info_impl
-    from backend.services import agent_service as ag_svc
+    from management.services.agent.service import update_agent_info_impl
+    from management.services.agent import service as ag_svc
     from backend.consts.model import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -11184,7 +11461,7 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
             await update_agent_info_impl(mock_request, authorization="Bearer token")
 
 
-@patch('backend.services.agent_service.get_current_user_info')
+@patch('management.services.agent.service.get_current_user_info')
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_example_questions_exceed_limit(mock_get_current_user_info):
     """Test update_agent_info_impl raises AppException when example_questions exceeds 6 items."""
@@ -11212,16 +11489,16 @@ async def test_update_agent_info_impl_example_questions_exceed_limit(mock_get_cu
 # =============================================================================
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service.resolve_sub_agent_version_no')
-@patch('backend.services.agent_service.query_sub_agent_relations')
-@patch('backend.services.agent_service.export_agent_by_agent_id')
+@patch('management.services.agent.management.resolve_sub_agent_version_no')
+@patch('management.services.agent.management.query_sub_agent_relations')
+@patch('management.services.agent.management.export_agent_by_agent_id')
 async def test_export_agent_dict_impl_uses_pinned_sub_agent_versions(
     mock_export_agent_by_id,
     mock_query_relations,
     mock_resolve_version,
 ):
     """BFS export should enqueue sub-agents with their pinned version numbers."""
-    from backend.services.agent_service import export_agent_dict_impl
+    from management.services.agent.service import export_agent_dict_impl
     from consts.model import ExportAndImportAgentInfo
 
     root_agent = ExportAndImportAgentInfo(
@@ -11261,7 +11538,7 @@ async def test_export_agent_dict_impl_uses_pinned_sub_agent_versions(
     ]
     mock_resolve_version.return_value = 3
 
-    with patch('backend.services.agent_service.get_current_user_info', return_value=("u", "t", "en")):
+    with patch('management.services.agent.management.get_current_user_info', return_value=("u", "t", "en")):
         result = await export_agent_dict_impl(agent_id=1, authorization="Bearer token", version_no=2)
 
     assert result["agent_id"] == 1
@@ -11276,10 +11553,10 @@ async def test_export_agent_dict_impl_uses_pinned_sub_agent_versions(
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service._export_agent_dict_core')
+@patch('management.services.agent.management._export_agent_dict_core')
 async def test_export_agent_dict_for_repository_impl(mock_export_core):
     """Repository export helper should delegate to core export without auth header."""
-    from backend.services.agent_service import export_agent_dict_for_repository_impl
+    from management.services.agent.service import export_agent_dict_for_repository_impl
 
     mock_export_core.return_value = {
         "agent_id": 10,
@@ -11326,7 +11603,7 @@ def test_resolve_model_ids_with_fallback_both_empty():
     assert result is None
 
 
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.get_model_by_model_id')
 def test_resolve_model_ids_with_fallback_explicit_ids_all_valid(mock_get_model):
     """When explicit model_ids are provided and all are valid, return them."""
     mock_get_model.return_value = {"display_name": "gpt-4"}
@@ -11340,7 +11617,7 @@ def test_resolve_model_ids_with_fallback_explicit_ids_all_valid(mock_get_model):
     assert mock_get_model.call_count == 2
 
 
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.get_model_by_model_id')
 def test_resolve_model_ids_with_fallback_explicit_ids_some_missing(mock_get_model):
     """When some model_ids are missing, return only valid ones."""
     mock_get_model.side_effect = [
@@ -11357,8 +11634,8 @@ def test_resolve_model_ids_with_fallback_explicit_ids_some_missing(mock_get_mode
     assert result == [1, 3]
 
 
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.tenant_config_manager')
 def test_resolve_model_ids_with_fallback_display_names_only(mock_tenant_config, mock_get_by_name):
     """When only model_display_names are provided, resolve them to ids."""
     mock_get_by_name.side_effect = [101, 102]
@@ -11374,8 +11651,8 @@ def test_resolve_model_ids_with_fallback_display_names_only(mock_tenant_config, 
     mock_get_by_name.assert_any_call("Model B", "tenant1")
 
 
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.tenant_config_manager')
 def test_resolve_model_ids_with_fallback_display_names_with_missing(mock_tenant_config, mock_get_by_name):
     """When some display names cannot be resolved, log and continue."""
     mock_get_by_name.side_effect = [101, None, 103]
@@ -11389,8 +11666,8 @@ def test_resolve_model_ids_with_fallback_display_names_with_missing(mock_tenant_
     assert result == [101, 103]
 
 
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.tenant_config_manager')
 def test_resolve_model_ids_with_fallback_quick_config_fallback(mock_tenant_config, mock_get_by_name):
     """When no model can be resolved, fall back to quick config LLM."""
     mock_get_by_name.return_value = None
@@ -11407,8 +11684,8 @@ def test_resolve_model_ids_with_fallback_quick_config_fallback(mock_tenant_confi
     assert result == [999]
 
 
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.tenant_config_manager')
 def test_resolve_model_ids_with_fallback_empty_display_names(mock_tenant_config, mock_get_by_name):
     """When display names contain empty strings, skip them."""
     mock_get_by_name.return_value = 55
@@ -11422,8 +11699,8 @@ def test_resolve_model_ids_with_fallback_empty_display_names(mock_tenant_config,
     assert result == [55]
 
 
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.tenant_config_manager')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.tenant_config_manager')
 def test_resolve_model_ids_with_fallback_deduplication(mock_tenant_config, mock_get_by_name):
     """Resolved model ids should be deduplicated."""
     mock_get_by_name.side_effect = [10, 10, 20]
@@ -11437,7 +11714,7 @@ def test_resolve_model_ids_with_fallback_deduplication(mock_tenant_config, mock_
     assert result == [10, 20]
 
 
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.get_model_by_model_id')
 def test_resolve_model_ids_with_fallback_explicit_ids_no_supplement(mock_get_model):
     """When explicit model_ids are provided, do NOT supplement with display names."""
     mock_get_model.return_value = {"display_name": "gpt-4"}
@@ -11451,9 +11728,9 @@ def test_resolve_model_ids_with_fallback_explicit_ids_no_supplement(mock_get_mod
     mock_get_model.assert_called_once_with(1)
 
 
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.get_model_id_by_display_name')
-@patch('backend.services.agent_service.tenant_config_manager')
+@patch('management.services.agent.management.get_model_by_model_id')
+@patch('management.services.agent.management.get_model_id_by_display_name')
+@patch('management.services.agent.management.tenant_config_manager')
 def test_resolve_model_ids_with_fallback_business_logic_model(
     mock_tenant_config, mock_get_by_name, mock_get_by_id
 ):
@@ -11488,14 +11765,14 @@ def test_resolve_model_ids_with_fallback_business_logic_model(
 
 def test_extract_json_objects_from_text_empty():
     """_extract_json_objects_from_text should return empty list for empty text."""
-    from backend.services.agent_service import _extract_json_objects_from_text
+    from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
     assert _extract_json_objects_from_text("") == []
     assert _extract_json_objects_from_text(None) == []
 
 
 def test_extract_json_objects_from_text_with_objects():
     """_extract_json_objects_from_text should extract JSON objects from mixed text."""
-    from backend.services.agent_service import _extract_json_objects_from_text
+    from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
     text = 'some text {"key": "value"} more text {"num": 123}'
     results = _extract_json_objects_from_text(text)
     assert len(results) == 2
@@ -11505,7 +11782,7 @@ def test_extract_json_objects_from_text_with_objects():
 
 def test_extract_json_objects_from_text_with_invalid_json():
     """_extract_json_objects_from_text should skip invalid JSON."""
-    from backend.services.agent_service import _extract_json_objects_from_text
+    from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
     text = 'valid {"key": "value"} invalid {broken json'
     results = _extract_json_objects_from_text(text)
     assert len(results) == 1
@@ -11514,7 +11791,7 @@ def test_extract_json_objects_from_text_with_invalid_json():
 
 def test_extract_json_objects_from_text_non_dict():
     """_extract_json_objects_from_text should skip non-dict JSON (arrays, primitives)."""
-    from backend.services.agent_service import _extract_json_objects_from_text
+    from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
     text = '{"dict": true} [1, 2, 3] "string"'
     results = _extract_json_objects_from_text(text)
     assert len(results) == 1
@@ -11523,7 +11800,7 @@ def test_extract_json_objects_from_text_non_dict():
 
 def test_extract_skill_file_upload_payloads():
     """_extract_skill_file_upload_payloads should extract payloads with absolute_path."""
-    from backend.services.agent_service import _extract_skill_file_upload_payloads
+    from utils.agent_stream_utils import extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads
     content = 'some text {"absolute_path": "/tmp/file.txt", "file_name": "test.txt"} more text'
     results = _extract_skill_file_upload_payloads(content)
     assert len(results) == 1
@@ -11532,7 +11809,7 @@ def test_extract_skill_file_upload_payloads():
 
 def test_extract_skill_file_upload_payloads_no_path():
     """_extract_skill_file_upload_payloads should skip payloads without absolute_path."""
-    from backend.services.agent_service import _extract_skill_file_upload_payloads
+    from utils.agent_stream_utils import extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads
     content = '{"key": "value"}'
     results = _extract_skill_file_upload_payloads(content)
     assert len(results) == 0
@@ -11540,7 +11817,7 @@ def test_extract_skill_file_upload_payloads_no_path():
 
 def test_transform_skill_files_to_standard_format():
     """_transform_skill_files_to_standard_format should convert skill file format to frontend format."""
-    from backend.services.agent_service import _transform_skill_files_to_standard_format
+    from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
     upload_results = [
         {
             "file_name": "test.txt",
@@ -11563,7 +11840,7 @@ def test_transform_skill_files_to_standard_format():
 
 def test_transform_skill_files_to_standard_format_missing_fields():
     """_transform_skill_files_to_standard_format should handle missing fields gracefully."""
-    from backend.services.agent_service import _transform_skill_files_to_standard_format
+    from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
     upload_results = [
         {"file_name": "test.txt"}
     ]
@@ -11576,7 +11853,8 @@ def test_transform_skill_files_to_standard_format_missing_fields():
 
 def test_safe_agent_stream_error_chunk():
     """_safe_agent_stream_error_chunk should return sanitized error message."""
-    from backend.services.agent_service import _safe_agent_stream_error_chunk, SAFE_AGENT_STREAM_ERROR_MESSAGE
+    from utils.agent_stream_utils import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
+    from utils.agent_stream_utils import SAFE_AGENT_STREAM_ERROR_MESSAGE
     result = _safe_agent_stream_error_chunk()
     assert SAFE_AGENT_STREAM_ERROR_MESSAGE in result
     assert "data:" in result
@@ -11586,8 +11864,8 @@ def test_safe_agent_stream_error_chunk():
 @pytest.mark.asyncio
 async def test_cleanup_channel_later():
     """_cleanup_channel_later should call remove_channel after delay."""
-    from backend.services.agent_service import _cleanup_channel_later
-    from backend.services.agent_service import streaming_channel_manager
+    from management.services.agent.service import _cleanup_channel_later
+    from management.services.agent.run import streaming_channel_manager
 
     with patch.object(streaming_channel_manager, 'remove_channel', new_callable=AsyncMock) as mock_remove:
         await _cleanup_channel_later(conversation_id=123, user_id="user1", delay=0.01)
@@ -11596,45 +11874,30 @@ async def test_cleanup_channel_later():
 
 def test_get_user_group_ids_success():
     """_get_user_group_ids should return comma-separated group IDs."""
-    from backend.services.agent_service import _get_user_group_ids
-    with patch('backend.services.agent_service.query_group_ids_by_user', return_value=[1, 2, 3]):
+    from management.services.agent.service import _get_user_group_ids
+    with patch('management.services.agent.management.query_group_ids_by_user', return_value=[1, 2, 3]):
         result = _get_user_group_ids("user1", "tenant1")
         assert result == "1,2,3"
 
 
 def test_get_user_group_ids_empty():
     """_get_user_group_ids should return empty string when no groups."""
-    from backend.services.agent_service import _get_user_group_ids
-    with patch('backend.services.agent_service.query_group_ids_by_user', return_value=[]):
+    from management.services.agent.service import _get_user_group_ids
+    with patch('management.services.agent.management.query_group_ids_by_user', return_value=[]):
         result = _get_user_group_ids("user1", "tenant1")
         assert result == ""
 
 
 def test_get_user_group_ids_exception():
     """_get_user_group_ids should return empty string on exception."""
-    from backend.services.agent_service import _get_user_group_ids
-    with patch('backend.services.agent_service.query_group_ids_by_user', side_effect=Exception("DB error")):
+    from management.services.agent.service import _get_user_group_ids
+    with patch('management.services.agent.management.query_group_ids_by_user', side_effect=Exception("DB error")):
         result = _get_user_group_ids("user1", "tenant1")
         assert result == ""
 
 
-def test_format_existing_values_empty():
-    """_format_existing_values should return 'None' or '无' for empty sets."""
-    from backend.services.agent_service import _format_existing_values
-    from consts.const import LANGUAGE
-
-    assert _format_existing_values(set(), "en") == "None"
-    assert _format_existing_values(set(), "zh") == "无"
 
 
-def test_format_existing_values_with_values():
-    """_format_existing_values should return sorted comma-separated values."""
-    from backend.services.agent_service import _format_existing_values
-
-    values = {"banana", "apple", "cherry"}
-    result = _format_existing_values(values, "en")
-    # Note: the implementation adds a space after commas
-    assert result == "apple, banana, cherry"
 
 
 # ============================================================================
@@ -11643,16 +11906,16 @@ def test_format_existing_values_with_values():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_success(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
 ):
     """_process_skill_file_uploads should upload files successfully."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     # Setup mocks
     mock_exists.return_value = True
@@ -11670,16 +11933,16 @@ async def test_process_skill_file_uploads_success(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_uses_structured_payloads(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
 ):
     """Structured artifacts should bypass legacy text extraction."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_exists.return_value = True
     mock_allowed.return_value = True
@@ -11699,12 +11962,12 @@ async def test_process_skill_file_uploads_uses_structured_payloads(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
 async def test_process_skill_file_uploads_rejected_path(mock_exists, mock_allowed, mock_upload):
     """_process_skill_file_uploads should reject unsafe paths."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_exists.return_value = True
     mock_allowed.return_value = False  # Reject path
@@ -11718,12 +11981,12 @@ async def test_process_skill_file_uploads_rejected_path(mock_exists, mock_allowe
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
 async def test_process_skill_file_uploads_file_not_exists(mock_exists, mock_allowed, mock_upload):
     """_process_skill_file_uploads should skip files that don't exist."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_exists.return_value = False  # File doesn't exist
     mock_allowed.return_value = True
@@ -11737,16 +12000,16 @@ async def test_process_skill_file_uploads_file_not_exists(mock_exists, mock_allo
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_upload_failure(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
 ):
     """_process_skill_file_uploads should handle upload failures gracefully."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_exists.return_value = True
     mock_allowed.return_value = True
@@ -11761,16 +12024,16 @@ async def test_process_skill_file_uploads_upload_failure(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_exception(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
 ):
     """_process_skill_file_uploads should handle exceptions gracefully."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_exists.return_value = True
     mock_allowed.return_value = True
@@ -11785,16 +12048,16 @@ async def test_process_skill_file_uploads_exception(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_uses_content_type(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
 ):
     """_process_skill_file_uploads should use content_type when mime_type is missing."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_exists.return_value = True
     mock_allowed.return_value = True
@@ -11824,7 +12087,7 @@ async def test_process_skill_file_uploads_uses_content_type(
 
 def test_stop_agent_tasks():
     """stop_agent_tasks should call preprocess_manager.stop_preprocess_tasks."""
-    from backend.services.agent_service import stop_agent_tasks
+    from management.services.agent.service import stop_agent_tasks
     from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
@@ -11842,9 +12105,9 @@ def test_stop_agent_tasks():
 @pytest.mark.asyncio
 async def test_delete_agent_impl_exception():
     """delete_agent_impl should raise ValueError on database errors."""
-    from backend.services.agent_service import delete_agent_impl
+    from management.services.agent.service import delete_agent_impl
 
-    with patch("backend.services.agent_service.delete_agent_by_id", side_effect=Exception("DB error")):
+    with patch("management.services.agent.management.delete_agent_by_id", side_effect=Exception("DB error")):
         with pytest.raises(ValueError, match="Failed to delete agent"):
             await delete_agent_impl(123, "tenant1", "user1")
 
@@ -11856,10 +12119,10 @@ async def test_delete_agent_impl_exception():
 
 def test_insert_related_agent_impl_returns_response():
     """insert_related_agent_impl returns a JSONResponse."""
-    from backend.services.agent_service import insert_related_agent_impl
+    from management.services.agent.service import insert_related_agent_impl
 
-    with patch("backend.services.agent_service.query_sub_agents_id_list", return_value=[]):
-        with patch("backend.services.agent_service.insert_related_agent", return_value=True):
+    with patch("management.services.agent.service.query_sub_agents_id_list", return_value=[]):
+        with patch("management.services.agent.management.insert_related_agent", return_value=True):
             result = insert_related_agent_impl(parent_agent_id=123, child_agent_id=456, tenant_id="tenant1")
             assert result.status_code == 200
 
@@ -11870,16 +12133,16 @@ def test_insert_related_agent_impl_returns_response():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.upload_fileobj")
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
-@patch("backend.services.agent_service.os.path.exists")
-@patch("backend.services.agent_service.os.path.getsize")
+@patch("utils.agent_stream_utils.upload_fileobj")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.os.path.exists")
+@patch("utils.agent_stream_utils.os.path.getsize")
 @patch("builtins.open", new_callable=MagicMock)
 async def test_process_skill_file_uploads_empty_filename_uses_basename(
     mock_open, mock_getsize, mock_exists, mock_allowed, mock_upload
 ):
     """_process_skill_file_uploads should use basename when file_name is empty."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_exists.return_value = True
     mock_allowed.return_value = True
@@ -11894,10 +12157,10 @@ async def test_process_skill_file_uploads_empty_filename_uses_basename(
     assert result[0]["file_name"] == "test.txt"
 
 
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.get_model_by_model_id')
 def test_resolve_model_ids_with_fallback_duplicate_ids_in_list(mock_get_model):
     """_resolve_model_ids_with_fallback should skip duplicate ids in the list."""
-    from backend.services.agent_service import _resolve_model_ids_with_fallback
+    from management.services.agent.service import _resolve_model_ids_with_fallback
 
     mock_get_model.return_value = {"display_name": "gpt-4"}
     result = _resolve_model_ids_with_fallback(
@@ -11912,10 +12175,10 @@ def test_resolve_model_ids_with_fallback_duplicate_ids_in_list(mock_get_model):
     assert 2 in result
 
 
-@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('management.services.agent.management.get_model_by_model_id')
 def test_resolve_model_ids_with_fallback_model_not_found_in_catalog(mock_get_model):
     """_resolve_model_ids_with_fallback should log and skip missing model ids."""
-    from backend.services.agent_service import _resolve_model_ids_with_fallback
+    from management.services.agent.service import _resolve_model_ids_with_fallback
 
     # First id found, second id not found in tenant catalog
     mock_get_model.side_effect = [
@@ -11936,7 +12199,7 @@ def test_resolve_model_ids_with_fallback_model_not_found_in_catalog(mock_get_mod
 # Tests for stop_agent_tasks with various scenarios
 def test_stop_agent_tasks_both_stopped():
     """stop_agent_tasks should return success when both agent and preprocess stop."""
-    from backend.services.agent_service import stop_agent_tasks
+    from management.services.agent.service import stop_agent_tasks
     from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
@@ -11950,7 +12213,7 @@ def test_stop_agent_tasks_both_stopped():
 
 def test_stop_agent_tasks_agent_only():
     """stop_agent_tasks should return success when only agent stops."""
-    from backend.services.agent_service import stop_agent_tasks
+    from management.services.agent.service import stop_agent_tasks
     from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
@@ -11964,7 +12227,7 @@ def test_stop_agent_tasks_agent_only():
 
 def test_stop_agent_tasks_preprocess_only():
     """stop_agent_tasks should return success when only preprocess stops."""
-    from backend.services.agent_service import stop_agent_tasks
+    from management.services.agent.service import stop_agent_tasks
     from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
@@ -11978,7 +12241,7 @@ def test_stop_agent_tasks_preprocess_only():
 
 def test_stop_agent_tasks_none_stopped():
     """stop_agent_tasks should return already_stopped when nothing stops."""
-    from backend.services.agent_service import stop_agent_tasks
+    from management.services.agent.service import stop_agent_tasks
     from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
@@ -11992,7 +12255,7 @@ def test_stop_agent_tasks_none_stopped():
 # Tests for _check_agent_value_duplicate
 def test_check_agent_value_duplicate_cache_used():
     """_check_agent_value_duplicate should use provided cache."""
-    from backend.services.agent_service import _check_agent_value_duplicate
+    from management.services.agent.naming import check_agent_value_duplicate as _check_agent_value_duplicate
 
     agents_cache = [
         {"agent_id": 1, "name": "TestAgent"},
@@ -12018,7 +12281,7 @@ def test_check_agent_value_duplicate_cache_used():
 
 def test_check_agent_value_duplicate_exclude_self():
     """_check_agent_value_duplicate should exclude self agent when checking duplicates."""
-    from backend.services.agent_service import _check_agent_value_duplicate
+    from management.services.agent.naming import check_agent_value_duplicate as _check_agent_value_duplicate
 
     agents_cache = [
         {"agent_id": 1, "name": "TestAgent"},
@@ -12055,7 +12318,7 @@ def test_check_agent_value_duplicate_exclude_self():
 
 def test_check_agent_value_duplicate_empty_value():
     """_check_agent_value_duplicate should return False for empty value."""
-    from backend.services.agent_service import _check_agent_value_duplicate
+    from management.services.agent.naming import check_agent_value_duplicate as _check_agent_value_duplicate
 
     assert _check_agent_value_duplicate(
         field_key="name",
@@ -12071,10 +12334,10 @@ def test_check_agent_value_duplicate_empty_value():
 
 
 # Tests for delete_related_agent_impl
-@patch("backend.services.agent_service.delete_related_agent")
+@patch("management.services.agent.management.delete_related_agent")
 def test_delete_related_agent_impl_success(mock_delete):
     """delete_related_agent_impl should call delete_related_agent."""
-    from backend.services.agent_service import delete_related_agent_impl
+    from management.services.agent.service import delete_related_agent_impl
 
     mock_delete.return_value = True
     result = delete_related_agent_impl(parent_agent_id=1, child_agent_id=2, tenant_id="tenant1")
@@ -12082,10 +12345,10 @@ def test_delete_related_agent_impl_success(mock_delete):
     assert result is True
 
 
-@patch("backend.services.agent_service.delete_related_agent")
+@patch("management.services.agent.management.delete_related_agent")
 def test_delete_related_agent_impl_failure(mock_delete):
     """delete_related_agent_impl should raise Exception on failure."""
-    from backend.services.agent_service import delete_related_agent_impl
+    from management.services.agent.service import delete_related_agent_impl
 
     mock_delete.side_effect = Exception("DB error")
     with pytest.raises(Exception, match="Failed to delete related agent"):
@@ -12093,41 +12356,8 @@ def test_delete_related_agent_impl_failure(mock_delete):
 
 
 # Tests for _generate_unique_value_with_suffix
-def test_generate_unique_value_with_suffix_no_duplicate():
-    """_generate_unique_value_with_suffix should return value_1 if no duplicate for that."""
-    from backend.services.agent_service import _generate_unique_value_with_suffix
-
-    def check_duplicate(value, tenant_id, exclude_agent_id=None, agents_cache=None):
-        return False  # No duplicate for any value
-
-    result = _generate_unique_value_with_suffix(
-        base_value="TestAgent",
-        tenant_id="tenant1",
-        duplicate_check_fn=check_duplicate,
-        agents_cache=[],
-        exclude_agent_id=None,
-        max_suffix_attempts=100
-    )
-    # Function checks the suffixed value, not original, so returns TestAgent_1
-    assert result == "TestAgent_1"
 
 
-def test_generate_unique_value_with_suffix_exhaust_attempts():
-    """_generate_unique_value_with_suffix should raise when all attempts are duplicates."""
-    from backend.services.agent_service import _generate_unique_value_with_suffix
-
-    def check_duplicate(value, tenant_id, exclude_agent_id=None, agents_cache=None):
-        return True  # All values are duplicates
-
-    with pytest.raises(ValueError, match="Failed to generate unique value"):
-        _generate_unique_value_with_suffix(
-            base_value="TestAgent",
-            tenant_id="tenant1",
-            duplicate_check_fn=check_duplicate,
-            agents_cache=[],
-            exclude_agent_id=None,
-            max_suffix_attempts=3
-        )
 
 
 # ============================================================================
@@ -12135,9 +12365,9 @@ def test_generate_unique_value_with_suffix_exhaust_attempts():
 # ============================================================================
 
 
-def test_transform_skill_files_to_standard_format_with_preview_url():
-    """_transform_skill_files_to_standard_format should use preview_url when url is missing."""
-    from backend.services.agent_service import _transform_skill_files_to_standard_format
+def test_transform_skill_files_to_standard_format_ignores_preview_url():
+    """An unapproved preview URL must not enter persisted attachment metadata."""
+    from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
     upload_results = [
         {
@@ -12148,12 +12378,13 @@ def test_transform_skill_files_to_standard_format_with_preview_url():
     ]
     frontend_files = _transform_skill_files_to_standard_format(upload_results)
     assert len(frontend_files) == 1
-    assert frontend_files[0]["presigned_url"] == "https://example.com/preview"
+    assert frontend_files[0]["url"] == ""
+    assert "presigned_url" not in frontend_files[0]
 
 
 def test_transform_skill_files_to_standard_format_empty_list():
     """_transform_skill_files_to_standard_format should return empty list for empty input."""
-    from backend.services.agent_service import _transform_skill_files_to_standard_format
+    from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
     result = _transform_skill_files_to_standard_format([])
     assert result == []
@@ -12162,7 +12393,7 @@ def test_transform_skill_files_to_standard_format_empty_list():
 # Tests for _extract_json_objects_from_text edge cases
 def test_extract_json_objects_from_text_empty_after_parse():
     """_extract_json_objects_from_text should skip empty string input."""
-    from backend.services.agent_service import _extract_json_objects_from_text
+    from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
     result = _extract_json_objects_from_text("")
     assert result == []
@@ -12178,7 +12409,7 @@ def test_extract_json_objects_from_text_empty_after_parse():
 # Test for _safe_agent_stream_error_chunk
 def test_safe_agent_stream_error_chunk_format():
     """_safe_agent_stream_error_chunk should return properly formatted SSE error."""
-    from backend.services.agent_service import _safe_agent_stream_error_chunk, SAFE_AGENT_STREAM_ERROR_MESSAGE
+    from utils.agent_stream_utils import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk, SAFE_AGENT_STREAM_ERROR_MESSAGE
 
     result = _safe_agent_stream_error_chunk()
 
@@ -12190,25 +12421,6 @@ def test_safe_agent_stream_error_chunk_format():
 
 
 # Test for _normalize_language_key edge cases
-def test_normalize_language_key_variants():
-    """_normalize_language_key should handle various language variants."""
-    from backend.services.agent_service import _normalize_language_key
-    from consts.const import LANGUAGE
-
-    # Test various Chinese variants
-    assert _normalize_language_key("zh") == LANGUAGE["ZH"]
-    assert _normalize_language_key("ZH") == LANGUAGE["ZH"]
-    assert _normalize_language_key("zh-cn") == LANGUAGE["ZH"]
-    assert _normalize_language_key("ZH-CN") == LANGUAGE["ZH"]
-
-    # Test English variants
-    assert _normalize_language_key("en") == LANGUAGE["EN"]
-    assert _normalize_language_key("EN") == LANGUAGE["EN"]
-    assert _normalize_language_key("en-us") == LANGUAGE["EN"]
-
-    # Test fallback
-    assert _normalize_language_key("") == LANGUAGE["EN"]
-    assert _normalize_language_key(None) == LANGUAGE["EN"]
 
 
 # ============================================================================
@@ -12217,11 +12429,11 @@ def test_normalize_language_key_variants():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service._stream_agent_chunks")
+@patch("management.services.agent.run._stream_agent_chunks")
 async def test_stream_agent_chunks_error_during_stream(mock_stream):
     """_stream_agent_chunks should handle errors during streaming gracefully."""
-    from backend.services.agent_service import _stream_agent_chunks
-    from backend.services.agent_service import AgentRequest
+    from management.services.agent.run import _stream_agent_chunks
+    from consts.model import AgentRequest
 
     # Create a generator that raises an error
     async def error_generator():
@@ -12268,7 +12480,7 @@ async def test_stream_agent_chunks_error_during_stream(mock_stream):
 
 def test_extract_skill_file_upload_payloads_multiple_objects():
     """_extract_skill_file_upload_payloads should extract multiple objects."""
-    from backend.services.agent_service import _extract_skill_file_upload_payloads
+    from utils.agent_stream_utils import extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads
 
     # Multiple JSON objects in text
     content = '{"absolute_path": "/tmp/file1.txt"}\n{"absolute_path": "/tmp/file2.txt"}'
@@ -12284,7 +12496,7 @@ def test_extract_skill_file_upload_payloads_multiple_objects():
 
 def test_safe_agent_stream_error_chunk_contains_type():
     """_safe_agent_stream_error_chunk should return error chunk with type."""
-    from backend.services.agent_service import _safe_agent_stream_error_chunk
+    from utils.agent_stream_utils import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
 
     result = _safe_agent_stream_error_chunk()
 
@@ -12297,11 +12509,11 @@ def test_safe_agent_stream_error_chunk_contains_type():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service._stream_agent_chunks")
+@patch("management.services.agent.run._stream_agent_chunks")
 async def test_stream_agent_chunks_captures_final_answer(mock_stream):
     """_stream_agent_chunks should capture final answer for memory."""
-    from backend.services.agent_service import _stream_agent_chunks
-    from backend.services.agent_service import AgentRequest
+    from management.services.agent.run import _stream_agent_chunks
+    from consts.model import AgentRequest
 
     # Create a generator with final answer
     async def chunk_generator():
@@ -12345,7 +12557,7 @@ async def test_stream_agent_chunks_captures_final_answer(mock_stream):
 # Tests for _check_agent_value_duplicate with different field keys
 def test_check_agent_value_duplicate_with_display_name():
     """_check_agent_value_duplicate should work with display_name field."""
-    from backend.services.agent_service import _check_agent_value_duplicate
+    from management.services.agent.naming import check_agent_value_duplicate as _check_agent_value_duplicate
 
     agents_cache = [
         {"agent_id": 1, "name": "Agent", "display_name": "Test Display"},
@@ -12371,7 +12583,7 @@ def test_check_agent_value_duplicate_with_display_name():
 
 def test_check_agent_value_duplicate_exclude_both():
     """_check_agent_value_duplicate should exclude both when both agent_ids are excluded."""
-    from backend.services.agent_service import _check_agent_value_duplicate
+    from management.services.agent.naming import check_agent_value_duplicate as _check_agent_value_duplicate
 
     agents_cache = [
         {"agent_id": 1, "name": "TestAgent"},
@@ -12393,7 +12605,7 @@ def test_check_agent_value_duplicate_exclude_both():
 
 def test_check_agent_value_duplicate_mismatched_case():
     """_check_agent_value_duplicate should be case-sensitive."""
-    from backend.services.agent_service import _check_agent_value_duplicate
+    from management.services.agent.naming import check_agent_value_duplicate as _check_agent_value_duplicate
 
     agents_cache = [
         {"agent_id": 1, "name": "TestAgent"},
@@ -12409,30 +12621,18 @@ def test_check_agent_value_duplicate_mismatched_case():
 
 
 # Tests for _format_existing_values with Chinese language
-def test_format_existing_values_chinese():
-    """_format_existing_values should use Chinese separator for Chinese language."""
-    from backend.services.agent_service import _format_existing_values
-    from consts.const import LANGUAGE
-
-    values = {"banana", "apple", "cherry"}
-    result = _format_existing_values(values, LANGUAGE["ZH"])
-
-    # Chinese separator
-    assert "apple" in result
-    assert "banana" in result
-    assert "cherry" in result
 
 
 # Tests for stop_agent_tasks with logging
 def test_stop_agent_tasks_logs_messages():
     """stop_agent_tasks should log appropriate messages."""
-    from backend.services.agent_service import stop_agent_tasks
+    from management.services.agent.service import stop_agent_tasks
     from agents.preprocess_manager import preprocess_manager
     from agents.agent_run_manager import agent_run_manager
 
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True):
         with patch.object(agent_run_manager, "stop_agent_run", return_value=True):
-            with patch("backend.services.agent_service.logging") as mock_logging:
+            with patch("management.services.agent.run.logging") as mock_logging:
                 result = stop_agent_tasks(conversation_id=123, user_id="user1")
                 # Should have called info logging
                 assert mock_logging.info.called
@@ -12441,7 +12641,7 @@ def test_stop_agent_tasks_logs_messages():
 # Tests for _safe_agent_stream_error_chunk with multiple calls
 def test_safe_agent_stream_error_chunk_consistent():
     """_safe_agent_stream_error_chunk should return consistent output."""
-    from backend.services.agent_service import _safe_agent_stream_error_chunk
+    from utils.agent_stream_utils import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
 
     result1 = _safe_agent_stream_error_chunk()
     result2 = _safe_agent_stream_error_chunk()
@@ -12454,7 +12654,7 @@ def test_safe_agent_stream_error_chunk_consistent():
 # Tests for extract_json_objects with nested JSON
 def test_extract_json_objects_nested():
     """_extract_json_objects_from_text should handle nested JSON objects."""
-    from backend.services.agent_service import _extract_json_objects_from_text
+    from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
     content = '{"outer": {"inner": "value"}}'
     result = _extract_json_objects_from_text(content)
@@ -12467,7 +12667,7 @@ def test_extract_json_objects_nested():
 # Tests for transform_skill_files with missing url fields
 def test_transform_skill_files_missing_url_fields():
     """_transform_skill_files_to_standard_format should handle missing URL fields."""
-    from backend.services.agent_service import _transform_skill_files_to_standard_format
+    from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
     upload_results = [
         {
@@ -12490,10 +12690,10 @@ def test_transform_skill_files_missing_url_fields():
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.is_allowed_skill_upload_path")
+@patch("utils.agent_stream_utils.is_allowed_skill_upload_path")
 async def test_process_skill_file_uploads_empty_absolute_path(mock_allowed):
     """_process_skill_file_uploads should skip when absolute_path is empty."""
-    from backend.services.agent_service import _process_skill_file_uploads
+    from utils.agent_stream_utils import process_skill_file_uploads as _process_skill_file_uploads
 
     mock_allowed.return_value = True
 
@@ -12514,7 +12714,7 @@ async def test_process_skill_file_uploads_empty_absolute_path(mock_allowed):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_accepts_none_history(monkeypatch):
     """An omitted optional history must behave like an empty history."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -12527,17 +12727,17 @@ async def test_stream_agent_chunks_accepts_none_history(monkeypatch):
     async def fake_agent_run(*_, **__):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
-    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
-    monkeypatch.setattr(agent_service, "save_message", lambda *_, **__: 4242)
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", lambda *_, **__: 4242)
     monkeypatch.setattr(
-        agent_service.agent_run_manager,
+        agent_run_service.agent_run_manager,
         "unregister_agent_run",
         lambda *_, **__: None,
     )
 
     collected = [
         chunk
-        async for chunk in agent_service._stream_agent_chunks(
+        async for chunk in agent_run_service._stream_agent_chunks(
             agent_request, "u", "t", MagicMock(), MagicMock()
         )
     ]
@@ -12548,7 +12748,7 @@ async def test_stream_agent_chunks_accepts_none_history(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     """_stream_agent_chunks should handle save_message exceptions gracefully."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -12563,7 +12763,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
         yield json.dumps({"type": "model_output_code", "content": "code"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     # Mock save_message to raise exception
@@ -12571,7 +12771,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
         raise Exception("DB error on save_message")
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message_fail,
         raising=False,
     )
@@ -12579,18 +12779,18 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
     # Track unregister calls
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks - should still yield despite save_message failure
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -12603,7 +12803,7 @@ async def test_stream_agent_chunks_save_message_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_malformed_json(monkeypatch):
     """_stream_agent_chunks should handle malformed JSON chunks gracefully."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -12619,32 +12819,32 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
         yield json.dumps({"type": "model_output_code", "content": "valid"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks - should yield malformed chunk as-is
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -12655,8 +12855,8 @@ async def test_stream_agent_chunks_malformed_json(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
-    """_stream_agent_chunks should handle picture_web chunks."""
-    from backend.services import agent_service
+    """Picture sources are deduplicated and passed to the final batch."""
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -12670,61 +12870,67 @@ async def test_stream_agent_chunks_picture_web_chunk(monkeypatch):
     async def fake_agent_run(*_, **__):
         yield json.dumps({
             "type": "picture_web",
-            "content": json.dumps({"images_url": ["http://example.com/img1.jpg", "http://example.com/img2.jpg"]})
+            "content": json.dumps({"images_url": [
+                "http://example.com/img1.jpg",
+                "http://example.com/img2.jpg",
+                "http://example.com/img1.jpg",
+            ]})
         })
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
-    save_source_image_calls = []
-
-    def fake_save_source_image(data, user_id=None):
-        save_source_image_calls.append(data)
-        return None
-
+    persisted_batches = []
     monkeypatch.setattr(
-        "backend.services.agent_service.save_source_image",
-        fake_save_source_image,
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    async for out in agent_run_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock(), channel=channel
     ):
         collected.append(out)
 
     # Should have picture_web chunk
     assert len(collected) >= 1
     assert "picture_web" in collected[0]
+    assert persisted_batches[0]["image_urls"] == [
+        "http://example.com/img1.jpg",
+        "http://example.com/img2.jpg",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
-    """_stream_agent_chunks should handle search_content chunks."""
-    from backend.services import agent_service
+    """Search results reference the buffered placeholder unit index."""
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -12745,56 +12951,118 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
         })
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
-    save_source_search_calls = []
-
-    def fake_save_source_search(data, user_id=None):
-        save_source_search_calls.append(data)
-        return None
-
+    persisted_batches = []
     monkeypatch.setattr(
-        "backend.services.agent_service.save_source_search",
-        fake_save_source_search,
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
 
     # Should have search_content chunk
     assert len(collected) >= 1
+    batch = persisted_batches[0]
+    assert batch["message_units"][0]["unit_type"] == "search_content_placeholder"
+    assert batch["message_units"][0]["unit_index"] == 0
+    assert len(batch["search_records"]) == 2
+    assert {record["unit_index"] for record in batch["search_records"]} == {0}
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_buffers_valid_automation_proposals(monkeypatch, caplog):
+    """Only valid automation proposal payloads are linked by the final batch."""
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="schedule a report",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "automation_proposal",
+            "content": json.dumps({"proposal_id": 77}),
+        })
+        yield json.dumps({
+            "type": "automation_proposal",
+            "content": "invalid proposal payload",
+        })
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+
+    with caplog.at_level("WARNING", logger=agent_service.logger.name):
+        chunks = [
+            chunk
+            async for chunk in agent_run_service._stream_agent_chunks(
+                agent_request,
+                "user1",
+                "tenant1",
+                agent_run_info,
+                MagicMock(),
+                channel=channel,
+            )
+        ]
+
+    assert len(chunks) == 2
+    assert len(persisted_batches) == 1
+    batch = persisted_batches[0]
+    assert [unit["unit_index"] for unit in batch["message_units"]] == [0, 1]
+    assert batch["automation_proposals"] == [{"unit_index": 0, "proposal_id": 77}]
+    assert "Invalid persisted automation proposal event payload" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(monkeypatch, caplog):
-    """_stream_agent_chunks should continue when search placeholders cannot persist."""
-    from backend.services import agent_service
+    """A failed final batch rolls back search placeholder persistence."""
+    from management.services.agent import service as agent_service
 
     agent_request = AgentRequest(
         agent_id=1,
@@ -12811,30 +13079,33 @@ async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(m
             "content": json.dumps([{"title": "Result", "url": "https://example.com"}]),
         })
 
-    class FailingFuture:
-        def result(self):
-            raise RuntimeError("placeholder write failed")
-
-    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
-    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
-    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_run_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        MagicMock(side_effect=RuntimeError("placeholder batch write failed")),
+        raising=False,
+    )
+    monkeypatch.setattr(agent_run_service, "update_message_status", MagicMock(), raising=False)
 
     with caplog.at_level("ERROR", logger=agent_service.logger.name):
         collected = [
-            chunk async for chunk in agent_service._stream_agent_chunks(
+            chunk async for chunk in agent_run_service._stream_agent_chunks(
                 agent_request, "user", "tenant", MagicMock(), MagicMock()
             )
         ]
 
-    assert len(collected) == 1
+    assert len(collected) == 2
     assert "search_content" in collected[0]
-    assert "Failed to persist search_content placeholder" in caplog.text
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[-1]
+    assert "Failed to persist assistant stream batch" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(monkeypatch, caplog):
-    """_stream_agent_chunks should continue when a streaming unit cannot persist."""
-    from backend.services import agent_service
+    """A failed final batch emits a safe error and marks the message failed."""
+    from management.services.agent import service as agent_service
 
     agent_request = AgentRequest(
         agent_id=1,
@@ -12848,30 +13119,35 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(monke
     async def fake_agent_run(*_, **__):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
-    class FailingFuture:
-        def result(self):
-            raise RuntimeError("unit write failed")
-
-    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
-    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
-    monkeypatch.setattr(agent_service, "submit", lambda *args, **kwargs: FailingFuture(), raising=False)
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_run_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        MagicMock(side_effect=RuntimeError("unit batch write failed")),
+        raising=False,
+    )
+    fallback_status = MagicMock()
+    monkeypatch.setattr(agent_run_service, "update_message_status", fallback_status, raising=False)
 
     with caplog.at_level("ERROR", logger=agent_service.logger.name):
         collected = [
-            chunk async for chunk in agent_service._stream_agent_chunks(
+            chunk async for chunk in agent_run_service._stream_agent_chunks(
                 agent_request, "user", "tenant", MagicMock(), MagicMock()
             )
         ]
 
-    assert len(collected) == 1
+    assert len(collected) == 2
     assert "final_answer" in collected[0]
-    assert "Failed to persist streaming message unit" in caplog.text
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[-1]
+    assert "Failed to persist assistant stream batch" in caplog.text
+    fallback_status.assert_called_once_with(4242, "failed", "user")
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
     """_stream_agent_chunks should handle update_unit_content exceptions in finally block."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -12887,14 +13163,14 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
@@ -12907,7 +13183,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
         raise Exception("DB error on update_unit_content")
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_content",
+        "management.services.agent.run.update_unit_content",
         fake_update_unit_content,
         raising=False,
     )
@@ -12916,7 +13192,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
+        "management.services.agent.run.update_unit_status",
         fake_update_unit_status,
         raising=False,
     )
@@ -12925,25 +13201,25 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         fake_update_message_status,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks - should still complete despite update_unit_content failure
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -12956,7 +13232,7 @@ async def test_stream_agent_chunks_update_unit_content_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
     """_stream_agent_chunks should handle update_unit_status exceptions in finally block."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -12972,14 +13248,14 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
@@ -12988,7 +13264,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_content",
+        "management.services.agent.run.update_unit_content",
         fake_update_unit_content,
         raising=False,
     )
@@ -12998,7 +13274,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
         raise Exception("DB error on update_unit_status")
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
+        "management.services.agent.run.update_unit_status",
         fake_update_unit_status_fail,
         raising=False,
     )
@@ -13007,25 +13283,25 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         fake_update_message_status,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks - should still complete
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -13038,7 +13314,7 @@ async def test_stream_agent_chunks_update_unit_status_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
     """_stream_agent_chunks should handle update_message_status exceptions in finally block."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13053,14 +13329,14 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
@@ -13069,7 +13345,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_content",
+        "management.services.agent.run.update_unit_content",
         fake_update_unit_content,
         raising=False,
     )
@@ -13078,7 +13354,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
+        "management.services.agent.run.update_unit_status",
         fake_update_unit_status,
         raising=False,
     )
@@ -13088,25 +13364,25 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
         raise Exception("DB error on update_message_status")
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         fake_update_message_status_fail,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks - should still complete
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -13119,7 +13395,7 @@ async def test_stream_agent_chunks_update_message_status_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
     """_stream_agent_chunks should extract skill file payloads from execution_logs chunks."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     # Create a temporary skill file
     skill_file = tmp_path / "test_script.py"
@@ -13144,25 +13420,25 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
         })
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
@@ -13172,7 +13448,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
         return {"success": True, "object_name": "test_obj", "url": "http://example.com/file"}
 
     monkeypatch.setattr(
-        "backend.services.agent_service.upload_fileobj",
+        "utils.agent_stream_utils.upload_fileobj",
         fake_upload,
         raising=False,
     )
@@ -13182,15 +13458,25 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
         return True
 
     monkeypatch.setattr(
-        "backend.services.agent_service.is_allowed_skill_upload_path",
+        "utils.agent_stream_utils.is_allowed_skill_upload_path",
         fake_is_allowed,
         raising=False,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run._enrich_file_uploads_with_presigned_urls",
+        lambda uploads: uploads,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.persist_assistant_run_batch",
+        lambda **_kwargs: None,
     )
 
     # Collect chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
-        agent_request, "u", "t", MagicMock(), MagicMock()
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    async for out in agent_run_service._stream_agent_chunks(
+        agent_request, "u", "t", MagicMock(), MagicMock(), channel=channel
     ):
         collected.append(out)
 
@@ -13202,7 +13488,7 @@ async def test_stream_agent_chunks_skill_file_extraction(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypatch):
     """_stream_agent_chunks should collect unique structured skill artifacts."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = AgentRequest(
         agent_id=1,
@@ -13244,34 +13530,173 @@ async def test_stream_agent_chunks_captures_structured_skill_artifacts(monkeypat
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     uploaded_payloads = []
+    upload_result = {
+        "status": "success",
+        "object_name": "skill-files/user/first.py",
+        "file_name": "first.py",
+    }
 
     async def fake_process_skill_file_uploads(payloads, user_id, tenant_id):
         uploaded_payloads.extend(payloads)
-        return []
+        return [upload_result]
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
     monkeypatch.setattr(
-        "backend.services.agent_service._process_skill_file_uploads",
+        "management.services.agent.run._process_skill_file_uploads",
         fake_process_skill_file_uploads,
     )
 
+    channel = MagicMock()
+    channel.publish = AsyncMock()
     collected = []
-    async for chunk in agent_service._stream_agent_chunks(
-        agent_request, "user", "tenant", MagicMock(), MagicMock()
+    async for chunk in agent_run_service._stream_agent_chunks(
+        agent_request,
+        "user",
+        "tenant",
+        MagicMock(),
+        MagicMock(),
+        channel=channel,
     ):
         collected.append(chunk)
 
     assert uploaded_payloads == [first_artifact, second_artifact]
-    assert len(collected) == 1
+    assert len(collected) == 2
     assert "final_answer" in collected[0]
+    event = json.loads(collected[1].removeprefix("data: ").strip())
+    assert event["type"] == "files"
+    assert json.loads(event["content"]) == {"file_uploads": [upload_result]}
+    assert collected[1] in [call.args[0] for call in channel.publish.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_emits_uploaded_workspace_artifacts(monkeypatch):
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    artifact = {
+        "object_name": "workspace/user/run/outputs/report.pdf",
+        "name": "report.pdf",
+        "size": 123,
+        "presigned_url": "https://example.test/report.pdf",
+    }
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": MockProcessType.FILE_ARTIFACT.value,
+            "content": {"artifacts": [artifact]},
+        })
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    monkeypatch.setattr(
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
+    )
+
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+    collected = [
+        chunk
+        async for chunk in agent_run_service._stream_agent_chunks(
+            agent_request,
+            "user",
+            "tenant",
+            MagicMock(),
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert len(collected) == 2
+    assert "final_answer" in collected[0]
+    event = json.loads(collected[1].removeprefix("data: ").strip())
+    assert event["type"] == "files"
+    content = json.loads(event["content"])
+    assert content == {"file_uploads": [artifact]}
+    assert collected[1] in [call.args[0] for call in channel.publish.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_parses_string_workspace_artifacts_and_handles_persist_failure(
+    monkeypatch,
+):
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="test",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    artifact = {
+        "object_name": "workspace/user/run/outputs/report.pdf",
+        "name": "report.pdf",
+    }
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": MockProcessType.FILE_ARTIFACT.value,
+            "content": "not-json",
+        })
+        yield json.dumps({
+            "type": MockProcessType.FILE_ARTIFACT.value,
+            "content": json.dumps({"artifacts": ["invalid", artifact]}),
+        })
+        yield json.dumps({"type": "final_answer", "content": "done"})
+
+    persist = MagicMock(side_effect=RuntimeError("database unavailable"))
+    monkeypatch.setattr(
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.save_message",
+        MagicMock(return_value=4242),
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.persist_assistant_run_batch",
+        persist,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.update_message_status",
+        MagicMock(),
+    )
+
+    collected = [
+        chunk
+        async for chunk in agent_run_service._stream_agent_chunks(
+            agent_request, "user", "tenant", MagicMock(), MagicMock()
+        )
+    ]
+
+    files_chunk = next(chunk for chunk in collected if '"type": "files"' in chunk)
+    event = json.loads(files_chunk.removeprefix("data: ").strip())
+    assert json.loads(event["content"]) == {"file_uploads": [artifact]}
+    persist.assert_called_once()
+    assert persist.call_args.kwargs["skill_files"] == [
+        {
+            "object_name": artifact["object_name"],
+            "name": artifact["name"],
+            "type": "file",
+            "size": 0,
+            "url": "",
+            "description": "",
+        }
+    ]
 
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
     """_stream_agent_chunks should handle invalid picture_web content gracefully."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13289,32 +13714,32 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
         })
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks - should handle invalid JSON gracefully
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -13327,7 +13752,7 @@ async def test_stream_agent_chunks_picture_web_invalid_json(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
     """_stream_agent_chunks should handle invalid search_content content gracefully."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13345,32 +13770,32 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
         })
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Collect chunks - should handle invalid JSON gracefully
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
@@ -13383,7 +13808,7 @@ async def test_stream_agent_chunks_search_content_invalid_json(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_resume_mode(monkeypatch):
     """_stream_agent_chunks should emit resume status events in resume mode."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13398,32 +13823,32 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
 
     # Call with resume_from_unit_index > 0
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock(), resume_from_unit_index=5
     ):
         collected.append(out)
@@ -13441,7 +13866,7 @@ async def test_stream_agent_chunks_resume_mode(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_memory_disabled(monkeypatch):
     """_stream_agent_chunks should skip memory when memory_switch is disabled."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13455,25 +13880,25 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
@@ -13488,7 +13913,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
 
     # Collect chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), memory_ctx
     ):
         collected.append(out)
@@ -13501,7 +13926,7 @@ async def test_stream_agent_chunks_memory_disabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
     """_stream_agent_chunks should skip agent memory when agent_share_option is 'never'."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13515,25 +13940,25 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
@@ -13549,7 +13974,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
 
     # Collect chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), memory_ctx
     ):
         collected.append(out)
@@ -13562,7 +13987,7 @@ async def test_stream_agent_chunks_memory_agent_share_never(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
     """_stream_agent_chunks should skip agent memory when agent_id is in disable_agent_ids."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13576,25 +14001,25 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
@@ -13610,7 +14035,7 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
 
     # Collect chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), memory_ctx
     ):
         collected.append(out)
@@ -13622,7 +14047,7 @@ async def test_stream_agent_chunks_memory_agent_disabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
     """_stream_agent_chunks should skip user_agent memory when agent_id is in disable_user_agent_ids."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13636,25 +14061,25 @@ async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     def fake_save_message(*args, **kwargs):
         return 4242
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         fake_save_message,
         raising=False,
     )
 
     unregister_called = {}
 
-    def fake_unregister(conv_id, user_id, status="completed"):
+    def fake_unregister(conv_id, user_id, status="completed", **_kwargs):
         unregister_called["conv_id"] = conv_id
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         fake_unregister,
         raising=False,
     )
@@ -13670,7 +14095,7 @@ async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
 
     # Collect chunks
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), memory_ctx
     ):
         collected.append(out)
@@ -13684,12 +14109,12 @@ async def test_stream_agent_chunks_memory_user_agent_disabled(monkeypatch):
 # ============================================================================
 
 
-@patch("backend.services.agent_service.resolve_sub_agent_version_no")
-@patch("backend.services.agent_service.query_sub_agent_relations")
-@patch("backend.services.agent_service.skill_db")
+@patch("management.services.agent.management.resolve_sub_agent_version_no")
+@patch("management.services.agent.management.query_sub_agent_relations")
+@patch("management.services.agent.management.skill_db")
 def test_collect_skill_names_from_tree_with_sub_agents(mock_skill_db, mock_relations, mock_resolve):
     """_collect_skill_names_from_tree should recursively collect skills from sub-agents."""
-    from backend.services.agent_service import _collect_skill_names_from_tree
+    from management.services.agent.service import _collect_skill_names_from_tree
 
     # Agent 1 has skill "Skill1" and sub-agent 2
     mock_skill_db.query_skill_instances_by_agent_id.side_effect = [
@@ -13715,11 +14140,11 @@ def test_collect_skill_names_from_tree_with_sub_agents(mock_skill_db, mock_relat
     assert len(result) == 2
 
 
-@patch("backend.services.agent_service.query_sub_agent_relations")
-@patch("backend.services.agent_service.skill_db")
+@patch("management.services.agent.management.query_sub_agent_relations")
+@patch("management.services.agent.management.skill_db")
 def test_collect_skill_names_from_tree_no_skills(mock_skill_db, mock_relations):
     """_collect_skill_names_from_tree should return empty list when no skills found."""
-    from backend.services.agent_service import _collect_skill_names_from_tree
+    from management.services.agent.service import _collect_skill_names_from_tree
 
     mock_skill_db.query_skill_instances_by_agent_id.return_value = []
     mock_relations.return_value = []
@@ -13729,10 +14154,10 @@ def test_collect_skill_names_from_tree_no_skills(mock_skill_db, mock_relations):
     assert result == []
 
 
-@patch("backend.services.agent_service.skill_db")
+@patch("management.services.agent.management.skill_db")
 def test_collect_skill_names_from_tree_skill_not_found(mock_skill_db):
     """_collect_skill_names_from_tree should handle missing skills gracefully."""
-    from backend.services.agent_service import _collect_skill_names_from_tree
+    from management.services.agent.service import _collect_skill_names_from_tree
 
     mock_skill_db.query_skill_instances_by_agent_id.return_value = [{"skill_id": 1}]
     mock_skill_db.get_skill_by_id.return_value = None  # Skill not found
@@ -13751,12 +14176,12 @@ def test_collect_skill_names_from_tree_skill_not_found(mock_skill_db):
 @pytest.mark.asyncio
 async def test_export_agent_by_agent_id_skill_error(monkeypatch):
     """export_agent_by_agent_id should handle skill collection error gracefully."""
-    from backend.services import agent_service
+    from management.services.agent import management as agent_service
 
     async def mock_create_tool_config_list(*args, **kwargs):
         return []
 
-    with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+    with patch("management.services.agent.management.search_agent_info_by_agent_id") as mock_search:
         mock_search.return_value = {
             "agent_id": 1,
             "name": "Test",
@@ -13770,14 +14195,14 @@ async def test_export_agent_by_agent_id_skill_error(monkeypatch):
             "model_ids": [],
         }
 
-        with patch("backend.services.agent_service.query_sub_agents_id_list") as mock_sub:
+        with patch("management.services.agent.management.query_sub_agents_id_list") as mock_sub:
             mock_sub.return_value = []
 
-            with patch("backend.services.agent_service.create_tool_config_list", new=mock_create_tool_config_list):
+            with patch("management.services.agent.management.create_tool_config_list", new=mock_create_tool_config_list):
                 with patch.object(agent_service, "skill_db") as mock_skill_db:
                     mock_skill_db.query_skill_instances_by_agent_id.side_effect = Exception("DB error")
 
-                    with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+                    with patch("management.services.agent.management.get_model_by_model_id") as mock_model:
                         mock_model.return_value = None
 
                         # Should not raise, just log warning
@@ -13795,12 +14220,12 @@ async def test_export_agent_by_agent_id_skill_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_export_agent_by_agent_id_knowledge_base_tool(monkeypatch):
     """export_agent_by_agent_id should reset metadata for KnowledgeBase tools."""
-    from backend.services import agent_service
+    from management.services.agent import management as agent_service
 
     async def mock_create_tool_config_list(*args, **kwargs):
         return []
 
-    with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+    with patch("management.services.agent.management.search_agent_info_by_agent_id") as mock_search:
         mock_search.return_value = {
             "agent_id": 1,
             "name": "Test",
@@ -13814,15 +14239,15 @@ async def test_export_agent_by_agent_id_knowledge_base_tool(monkeypatch):
             "model_ids": [],
         }
 
-        with patch("backend.services.agent_service.query_sub_agents_id_list") as mock_sub:
+        with patch("management.services.agent.management.query_sub_agents_id_list") as mock_sub:
             mock_sub.return_value = []
 
-            with patch("backend.services.agent_service.create_tool_config_list", new=mock_create_tool_config_list):
+            with patch("management.services.agent.management.create_tool_config_list", new=mock_create_tool_config_list):
                 with patch.object(agent_service, "skill_db") as mock_skill_db:
                     mock_skill_db.query_skill_instances_by_agent_id.return_value = []
                     mock_skill_db.get_skill_by_id.return_value = None
 
-                    with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+                    with patch("management.services.agent.management.get_model_by_model_id") as mock_model:
                         mock_model.return_value = None
 
                         # Should not raise
@@ -13851,7 +14276,7 @@ async def test_export_agent_by_agent_id_knowledge_base_tool(monkeypatch):
 @pytest.mark.asyncio
 async def test_generate_stream_stream_chunks_error(monkeypatch):
     """generate_stream should handle error from _stream_agent_chunks gracefully."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13868,7 +14293,7 @@ async def test_generate_stream_stream_chunks_error(monkeypatch):
         return m
 
     monkeypatch.setattr(
-        "backend.services.agent_service.build_memory_context",
+        "management.services.agent.run.build_memory_context",
         mock_build_memory,
         raising=False,
     )
@@ -13879,7 +14304,7 @@ async def test_generate_stream_stream_chunks_error(monkeypatch):
         return (m, m)
 
     monkeypatch.setattr(
-        "backend.services.agent_service.prepare_agent_run",
+        "management.services.agent.run.prepare_agent_run",
         mock_prepare,
         raising=False,
     )
@@ -13890,7 +14315,7 @@ async def test_generate_stream_stream_chunks_error(monkeypatch):
         yield "never"  # Make it an async generator
 
     monkeypatch.setattr(
-        "backend.services.agent_service._stream_agent_chunks",
+        "management.services.agent.run._stream_agent_chunks",
         mock_stream_chunks,
         raising=False,
     )
@@ -13909,14 +14334,14 @@ async def test_generate_stream_stream_chunks_error(monkeypatch):
         return mock_channel
 
     monkeypatch.setattr(
-        "backend.services.agent_service.streaming_channel_manager.get_or_create_channel",
+        "management.services.agent.run.streaming_channel_manager.get_or_create_channel",
         mock_get_or_create,
         raising=False,
     )
 
     # Collect chunks
     chunks = []
-    async for chunk in agent_service.generate_stream(
+    async for chunk in agent_run_service.generate_stream(
         agent_request, "user1", "tenant1", "en", enable_memory=True
     ):
         chunks.append(chunk)
@@ -13938,7 +14363,7 @@ async def test_generate_stream_stream_chunks_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypatch):
     """run_agent_stream resume mode should yield status and chunks from channel."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -13949,10 +14374,10 @@ async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypat
     agent_request.is_debug = False
     agent_request.resume = True
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+    with patch("management.services.agent.run._resolve_user_tenant_language") as mock_resolve:
         mock_resolve.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+        with patch("management.services.agent.run._detect_resume_position") as mock_detect:
             mock_detect.return_value = {
                 'should_resume': True,
                 'message_id': 1,
@@ -13961,10 +14386,10 @@ async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypat
                 'reason': 'backend_streaming'
             }
 
-            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+            with patch("management.services.agent.run.agent_run_manager") as mock_mgr:
                 mock_mgr.get_agent_run_info.return_value = MagicMock()
 
-                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                with patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
                     # Create a mock channel with history_size
                     mock_channel = MagicMock()
                     mock_channel.is_completed = False
@@ -13980,7 +14405,8 @@ async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypat
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should return streaming response
@@ -13993,7 +14419,7 @@ async def test_run_agent_stream_resume_stream_yields_status_and_chunks(monkeypat
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_channel_completed(monkeypatch):
     """run_agent_stream resume mode should handle completed channel."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14004,10 +14430,10 @@ async def test_run_agent_stream_resume_channel_completed(monkeypatch):
     agent_request.is_debug = False
     agent_request.resume = True
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+    with patch("management.services.agent.run._resolve_user_tenant_language") as mock_resolve:
         mock_resolve.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+        with patch("management.services.agent.run._detect_resume_position") as mock_detect:
             mock_detect.return_value = {
                 'should_resume': True,
                 'message_id': 1,
@@ -14016,10 +14442,10 @@ async def test_run_agent_stream_resume_channel_completed(monkeypatch):
                 'reason': 'backend_streaming'
             }
 
-            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+            with patch("management.services.agent.run.agent_run_manager") as mock_mgr:
                 mock_mgr.get_agent_run_info.return_value = MagicMock()
 
-                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                with patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
                     # Create a mock channel that is completed
                     mock_channel = MagicMock()
                     mock_channel.is_completed = True
@@ -14036,7 +14462,8 @@ async def test_run_agent_stream_resume_channel_completed(monkeypatch):
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should still return streaming response
@@ -14048,11 +14475,11 @@ async def test_run_agent_stream_resume_channel_completed(monkeypatch):
 # ============================================================================
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service._collect_skill_names_from_tree")
+@patch("management.services.agent.management.SkillService")
+@patch("management.services.agent.management._collect_skill_names_from_tree")
 def test_collect_skill_zip_entries_with_skills(mock_collect, mock_service):
     """collect_skill_zip_entries should export skills when found."""
-    from backend.services.agent_service import collect_skill_zip_entries
+    from management.services.agent.service import collect_skill_zip_entries
 
     mock_collect.return_value = ["Skill1", "Skill2"]
 
@@ -14073,16 +14500,18 @@ def test_collect_skill_zip_entries_with_skills(mock_collect, mock_service):
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_self_reference(monkeypatch):
     """update_agent_info_impl should raise error when agent references itself."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
     agent_request.related_agent_ids = [1]  # Self-reference
+    agent_request.enabled_skill_ids = None
+    agent_request.skill_instances = None
 
-    with patch("backend.services.agent_service.get_current_user_info") as mock_user:
+    with patch("management.services.agent.service.get_current_user_info") as mock_user:
         mock_user.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+        with patch("management.services.agent.service.search_agent_info_by_agent_id") as mock_search:
             mock_search.return_value = {
                 "agent_id": 1,
                 "name": "test",
@@ -14100,11 +14529,11 @@ async def test_update_agent_info_impl_self_reference(monkeypatch):
 # ============================================================================
 
 
-@patch("backend.services.agent_service.SkillService")
-@patch("backend.services.agent_service._collect_skill_names_from_tree")
+@patch("management.services.agent.management.SkillService")
+@patch("management.services.agent.management._collect_skill_names_from_tree")
 def test_collect_skill_zip_entries_no_skills(mock_collect, mock_service):
     """collect_skill_zip_entries should return empty list when no skills found."""
-    from backend.services.agent_service import collect_skill_zip_entries
+    from management.services.agent.service import collect_skill_zip_entries
 
     mock_collect.return_value = []
 
@@ -14122,7 +14551,7 @@ def test_collect_skill_zip_entries_no_skills(mock_collect, mock_service):
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
     """run_agent_stream should subscribe to channel in resume mode."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14133,10 +14562,10 @@ async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
     agent_request.is_debug = False
     agent_request.resume = True
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+    with patch("management.services.agent.run._resolve_user_tenant_language") as mock_resolve:
         mock_resolve.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+        with patch("management.services.agent.run._detect_resume_position") as mock_detect:
             mock_detect.return_value = {
                 'should_resume': True,
                 'message_id': 1,
@@ -14145,10 +14574,10 @@ async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
                 'reason': 'backend_streaming'
             }
 
-            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+            with patch("management.services.agent.run.agent_run_manager") as mock_mgr:
                 mock_mgr.get_agent_run_info.return_value = MagicMock()
 
-                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                with patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
                     mock_channel = MagicMock()
                     mock_channel.is_completed = False
                     mock_channel.history_size = 0
@@ -14159,7 +14588,8 @@ async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should stream successfully
@@ -14169,7 +14599,7 @@ async def test_run_agent_stream_resume_channel_subscribe(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_already_finished(monkeypatch):
     """run_agent_stream should return early when backend already finished."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14180,10 +14610,10 @@ async def test_run_agent_stream_resume_already_finished(monkeypatch):
     agent_request.is_debug = False
     agent_request.resume = True
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+    with patch("management.services.agent.run._resolve_user_tenant_language") as mock_resolve:
         mock_resolve.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+        with patch("management.services.agent.run._detect_resume_position") as mock_detect:
             mock_detect.return_value = {
                 'should_resume': False,
                 'message_id': 1,
@@ -14194,7 +14624,8 @@ async def test_run_agent_stream_resume_already_finished(monkeypatch):
             result = await agent_service.run_agent_stream(
                 agent_request,
                 MagicMock(),
-                "Bearer token"
+                "Bearer token",
+                resume=True,
             )
 
             assert result.status_code == 200
@@ -14203,7 +14634,7 @@ async def test_run_agent_stream_resume_already_finished(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_agent_finished_during_disconnect(monkeypatch):
     """run_agent_stream should handle agent finished during disconnect."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14214,10 +14645,10 @@ async def test_run_agent_stream_resume_agent_finished_during_disconnect(monkeypa
     agent_request.is_debug = False
     agent_request.resume = True
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+    with patch("management.services.agent.run._resolve_user_tenant_language") as mock_resolve:
         mock_resolve.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+        with patch("management.services.agent.run._detect_resume_position") as mock_detect:
             mock_detect.return_value = {
                 'should_resume': True,
                 'message_id': 1,
@@ -14226,14 +14657,15 @@ async def test_run_agent_stream_resume_agent_finished_during_disconnect(monkeypa
                 'reason': 'backend_streaming'
             }
 
-            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+            with patch("management.services.agent.run.agent_run_manager") as mock_mgr:
                 mock_mgr.get_agent_run_info.return_value = None  # Agent finished
 
-                with patch("backend.services.agent_service.update_message_status") as mock_update:
+                with patch("management.services.agent.run.update_message_status") as mock_update:
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     assert result.status_code == 200
@@ -14244,7 +14676,7 @@ async def test_run_agent_stream_resume_agent_finished_during_disconnect(monkeypa
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_no_channel(monkeypatch):
     """run_agent_stream should handle no channel exists."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14255,10 +14687,10 @@ async def test_run_agent_stream_resume_no_channel(monkeypatch):
     agent_request.is_debug = False
     agent_request.resume = True
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+    with patch("management.services.agent.run._resolve_user_tenant_language") as mock_resolve:
         mock_resolve.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+        with patch("management.services.agent.run._detect_resume_position") as mock_detect:
             mock_detect.return_value = {
                 'should_resume': True,
                 'message_id': 1,
@@ -14267,16 +14699,17 @@ async def test_run_agent_stream_resume_no_channel(monkeypatch):
                 'reason': 'backend_streaming'
             }
 
-            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+            with patch("management.services.agent.run.agent_run_manager") as mock_mgr:
                 mock_mgr.get_agent_run_info.return_value = MagicMock()
 
-                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                with patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
                     mock_channel_mgr.get_channel.return_value = None  # No channel
 
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     assert result.status_code == 200
@@ -14285,7 +14718,7 @@ async def test_run_agent_stream_resume_no_channel(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_with_chunks(monkeypatch):
     """run_agent_stream resume mode should stream chunks from channel."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14296,10 +14729,10 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
     agent_request.is_debug = False
     agent_request.resume = True
 
-    with patch("backend.services.agent_service._resolve_user_tenant_language") as mock_resolve:
+    with patch("management.services.agent.run._resolve_user_tenant_language") as mock_resolve:
         mock_resolve.return_value = ("user1", "tenant1", "en")
 
-        with patch("backend.services.agent_service._detect_resume_position") as mock_detect:
+        with patch("management.services.agent.run._detect_resume_position") as mock_detect:
             mock_detect.return_value = {
                 'should_resume': True,
                 'message_id': 1,
@@ -14308,10 +14741,10 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
                 'reason': 'backend_streaming'
             }
 
-            with patch("backend.services.agent_service.agent_run_manager") as mock_mgr:
+            with patch("management.services.agent.run.agent_run_manager") as mock_mgr:
                 mock_mgr.get_agent_run_info.return_value = MagicMock()
 
-                with patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+                with patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
                     # Create a mock channel with chunks
                     mock_channel = MagicMock()
                     mock_channel.is_completed = False
@@ -14328,7 +14761,8 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
                     result = await agent_service.run_agent_stream(
                         agent_request,
                         MagicMock(),
-                        "Bearer token"
+                        "Bearer token",
+                        resume=True,
                     )
 
                     # Should return streaming response
@@ -14338,7 +14772,7 @@ async def test_run_agent_stream_resume_with_chunks(monkeypatch):
 @pytest.mark.asyncio
 async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
     """Redis cancel polling should set the local stop event."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     fake_runtime_state = MagicMock()
     fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=[False, True])
@@ -14347,8 +14781,8 @@ async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
-    monkeypatch.setattr(agent_service.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_run_service.asyncio, "sleep", fake_sleep)
     stop_event = asyncio.Event()
 
     await agent_service._poll_runtime_cancel_signal(123, "user1", stop_event)
@@ -14361,14 +14795,14 @@ async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
 @pytest.mark.asyncio
 async def test_poll_runtime_cancel_signal_skips_when_already_stopped(monkeypatch):
     """Redis cancel polling should not touch Redis when the stop event is already set."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     fake_runtime_state = MagicMock()
     fake_runtime_state.is_cancelled_async = AsyncMock()
     stop_event = asyncio.Event()
     stop_event.set()
 
-    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
 
     await agent_service._poll_runtime_cancel_signal(123, "user1", stop_event)
 
@@ -14378,14 +14812,14 @@ async def test_poll_runtime_cancel_signal_skips_when_already_stopped(monkeypatch
 @pytest.mark.asyncio
 async def test_cancel_task_on_runtime_signal_cancels_task(monkeypatch):
     """Redis cancel polling should cancel an active asyncio task."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     fake_runtime_state = MagicMock()
     fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
     task = MagicMock()
     task.done.return_value = False
 
-    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
 
     await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
 
@@ -14396,7 +14830,7 @@ async def test_cancel_task_on_runtime_signal_cancels_task(monkeypatch):
 @pytest.mark.asyncio
 async def test_cancel_task_on_runtime_signal_waits_then_cancels(monkeypatch):
     """Redis cancel polling should sleep between checks before cancelling."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     fake_runtime_state = MagicMock()
     fake_runtime_state.is_cancelled_async = AsyncMock(side_effect=[False, True])
@@ -14407,8 +14841,8 @@ async def test_cancel_task_on_runtime_signal_waits_then_cancels(monkeypatch):
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
-    monkeypatch.setattr(agent_service.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_run_service.asyncio, "sleep", fake_sleep)
 
     await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
 
@@ -14419,14 +14853,14 @@ async def test_cancel_task_on_runtime_signal_waits_then_cancels(monkeypatch):
 @pytest.mark.asyncio
 async def test_cancel_task_on_runtime_signal_skips_done_task(monkeypatch):
     """Redis cancel polling should exit immediately for completed tasks."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     fake_runtime_state = MagicMock()
     fake_runtime_state.is_cancelled_async = AsyncMock()
     task = MagicMock()
     task.done.return_value = True
 
-    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
 
     await agent_service._cancel_task_on_runtime_signal(123, "user1", task)
 
@@ -14436,8 +14870,8 @@ async def test_cancel_task_on_runtime_signal_skips_done_task(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch):
-    """_stream_agent_chunks should persist stopped terminal status when cancellation wins."""
-    from backend.services import agent_service
+    """_stream_agent_chunks should batch partial output with stopped status."""
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14469,30 +14903,30 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
     def fake_submit(fn, *args, **kwargs):
         return FakeFuture(777)
 
-    statuses = []
+    persisted_batches = []
     unregister_calls = []
 
-    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run, raising=False)
-    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
-    monkeypatch.setattr(agent_service, "submit", fake_submit, raising=False)
-    monkeypatch.setattr(agent_service, "update_unit_content", lambda *args, **kwargs: None, raising=False)
-    monkeypatch.setattr(agent_service, "update_unit_status", lambda *args, **kwargs: None, raising=False)
-    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock(), raising=False)
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run, raising=False)
+    monkeypatch.setattr(agent_run_service, "save_message", lambda *args, **kwargs: 4242, raising=False)
+    monkeypatch.setattr(agent_run_service, "submit", fake_submit, raising=False)
+    monkeypatch.setattr(agent_run_service, "update_unit_content", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(agent_run_service, "update_unit_status", lambda *args, **kwargs: None, raising=False)
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock(), raising=False)
     monkeypatch.setattr(
-        agent_service,
-        "update_message_status",
-        lambda message_id, status, user_id: statuses.append((message_id, status, user_id)),
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
         raising=False,
     )
     monkeypatch.setattr(
-        agent_service.agent_run_manager,
+        agent_run_service.agent_run_manager,
         "unregister_agent_run",
-        lambda conv_id, user_id, status="completed": unregister_calls.append((conv_id, user_id, status)),
+        lambda conv_id, user_id, status="completed", **_kwargs: unregister_calls.append((conv_id, user_id, status)),
         raising=False,
     )
 
     collected = []
-    async for chunk in agent_service._stream_agent_chunks(
+    async for chunk in agent_run_service._stream_agent_chunks(
         agent_request,
         "user1",
         "tenant1",
@@ -14502,14 +14936,308 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
         collected.append(chunk)
 
     assert collected
-    assert statuses[-1] == (4242, "stopped", "user1")
+    assert persisted_batches[-1]["message_id"] == 4242
+    assert persisted_batches[-1]["terminal_status"] == "stopped"
+    assert persisted_batches[-1]["message_content"] == "done"
     assert unregister_calls[-1] == (999, "user1", "stopped")
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(monkeypatch):
+    """Debug runs stream normally without creating or finalizing chat rows."""
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="debug",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "final_answer", "content": "debug result"})
+
+    save_message_mock = MagicMock()
+    persist_batch_mock = MagicMock()
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", save_message_mock)
+    monkeypatch.setattr(agent_run_service, "persist_assistant_run_batch", persist_batch_mock)
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_run_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert "debug result" in chunks[0]
+    save_message_mock.assert_not_called()
+    persist_batch_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_skill_files_join_final_batch(monkeypatch):
+    """Successful skill uploads are attached by the final database transaction."""
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="create a report",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+    artifact = {"absolute_path": "/tmp/report.csv", "file_name": "report.csv"}
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": MockProcessType.SKILL_ARTIFACT.value,
+            "content": {"artifacts": [artifact]},
+        })
+        yield json.dumps({"type": "final_answer", "content": "created"})
+
+    upload_result = {
+        "object_name": "skill/user1/report.csv",
+        "file_name": "report.csv",
+        "file_size": 12,
+        "url": "https://example.com/report.csv",
+        "presigned_url": "https://example.com/report.csv?token=test",
+    }
+    process_uploads = AsyncMock(return_value=[upload_result])
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(agent_run_service, "_process_skill_file_uploads", process_uploads)
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_run_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    process_uploads.assert_awaited_once_with(
+        payloads=[artifact],
+        user_id="user1",
+        tenant_id="tenant1",
+    )
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["skill_files"] == [{
+        "object_name": "skill/user1/report.csv",
+        "name": "report.csv",
+        "type": "file",
+        "size": 12,
+        "url": "https://example.com/report.csv",
+        "presigned_url": "https://example.com/report.csv?token=test",
+        "description": "",
+    }]
+    assert any('"type": "files"' in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_client_close_persists_partial_output(monkeypatch):
+    """Closing the response iterator finalizes buffered output as failed."""
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="long request",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_thinking", "content": "partial"})
+        await asyncio.Event().wait()
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+
+    stream = agent_run_service._stream_agent_chunks(
+        agent_request,
+        "user1",
+        "tenant1",
+        agent_run_info,
+        MagicMock(),
+        channel=channel,
+    )
+    first_chunk = await anext(stream)
+    await stream.aclose()
+
+    assert "partial" in first_chunk
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["terminal_status"] == "failed"
+    assert persisted_batches[0]["message_units"][0]["unit_content"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_task_cancellation_persists_partial_output(monkeypatch):
+    """Task cancellation cannot skip the final partial-output transaction."""
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="long request",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+    first_chunk_seen = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_thinking", "content": "partial"})
+        await asyncio.Event().wait()
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+
+    async def consume_stream():
+        async for _ in agent_run_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        ):
+            first_chunk_seen.set()
+
+    consumer_task = asyncio.create_task(consume_stream())
+    await first_chunk_seen.wait()
+    await asyncio.sleep(0)
+    consumer_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer_task
+
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["terminal_status"] == "failed"
+    assert persisted_batches[0]["message_units"][0]["unit_content"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_chunks_run_failure_persists_partial_output(monkeypatch):
+    """A controlled execution failure stores buffered units with failed status."""
+    from management.services.agent import service as agent_service
+
+    agent_request = AgentRequest(
+        agent_id=1,
+        conversation_id=999,
+        query="failing request",
+        history=[],
+        minio_files=[],
+        is_debug=False,
+    )
+    agent_run_info = MagicMock()
+    agent_run_info.stop_event = asyncio.Event()
+
+    async def fake_agent_run(*_, **__):
+        yield json.dumps({"type": "model_output_thinking", "content": "partial"})
+        raise RuntimeError("model failed")
+
+    persisted_batches = []
+    channel = MagicMock()
+    channel.publish = AsyncMock()
+
+    monkeypatch.setattr(agent_run_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(
+        agent_run_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+    )
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "unregister_agent_run", MagicMock())
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+
+    chunks = [
+        chunk
+        async for chunk in agent_run_service._stream_agent_chunks(
+            agent_request,
+            "user1",
+            "tenant1",
+            agent_run_info,
+            MagicMock(),
+            channel=channel,
+        )
+    ]
+
+    assert len(chunks) == 2
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[-1]
+    assert len(persisted_batches) == 1
+    assert persisted_batches[0]["terminal_status"] == "failed"
+    assert persisted_batches[0]["message_units"][0]["unit_content"] == "partial"
 
 
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkeypatch):
     """Resume should replay Redis stream events when the run lives on another replica."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14536,12 +15264,12 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
     fake_runtime_state.get_stream_status_async = AsyncMock(return_value={"status": "completed"})
 
     with patch(
-        "backend.services.agent_service._resolve_user_tenant_language",
+        "management.services.agent.run._resolve_user_tenant_language",
         return_value=("user1", "tenant1", "en"),
     ), \
-            patch("backend.services.agent_service._detect_resume_position") as mock_detect, \
-            patch("backend.services.agent_service.agent_run_manager") as mock_mgr, \
-            patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+            patch("management.services.agent.run._detect_resume_position") as mock_detect, \
+            patch("management.services.agent.run.agent_run_manager") as mock_mgr, \
+            patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
         mock_detect.return_value = {
             "should_resume": True,
             "message_id": 1,
@@ -14551,7 +15279,7 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
         }
         mock_mgr.get_agent_run_info.return_value = None
         mock_channel_mgr.get_channel.return_value = None
-        monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+        monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
 
         result = await agent_service.run_agent_stream(
             agent_request,
@@ -14582,7 +15310,7 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_status(monkeypatch):
     """Redis resume should stop from run state when no stream completion hash exists."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14606,12 +15334,12 @@ async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_st
     fake_runtime_state.get_stream_status_async = AsyncMock(return_value={})
 
     with patch(
-        "backend.services.agent_service._resolve_user_tenant_language",
+        "management.services.agent.run._resolve_user_tenant_language",
         return_value=("user1", "tenant1", "en"),
     ), \
-            patch("backend.services.agent_service._detect_resume_position") as mock_detect, \
-            patch("backend.services.agent_service.agent_run_manager") as mock_mgr, \
-            patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+            patch("management.services.agent.run._detect_resume_position") as mock_detect, \
+            patch("management.services.agent.run.agent_run_manager") as mock_mgr, \
+            patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
         mock_detect.return_value = {
             "should_resume": True,
             "message_id": 1,
@@ -14621,7 +15349,7 @@ async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_st
         }
         mock_mgr.get_agent_run_info.return_value = None
         mock_channel_mgr.get_channel.return_value = None
-        monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+        monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
 
         result = await agent_service.run_agent_stream(
             agent_request,
@@ -14643,7 +15371,7 @@ async def test_run_agent_stream_resume_remote_running_uses_run_state_terminal_st
 @pytest.mark.asyncio
 async def test_run_agent_stream_resume_channel_body_yields_completed_status(monkeypatch):
     """Local channel resume should yield replay metadata, chunks, and completed status."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14666,12 +15394,12 @@ async def test_run_agent_stream_resume_channel_body_yields_completed_status(monk
     mock_channel.subscribe_with_history = mock_subscribe
 
     with patch(
-        "backend.services.agent_service._resolve_user_tenant_language",
+        "management.services.agent.run._resolve_user_tenant_language",
         return_value=("user1", "tenant1", "en"),
     ), \
-            patch("backend.services.agent_service._detect_resume_position") as mock_detect, \
-            patch("backend.services.agent_service.agent_run_manager") as mock_mgr, \
-            patch("backend.services.agent_service.streaming_channel_manager") as mock_channel_mgr:
+            patch("management.services.agent.run._detect_resume_position") as mock_detect, \
+            patch("management.services.agent.run.agent_run_manager") as mock_mgr, \
+            patch("management.services.agent.run.streaming_channel_manager") as mock_channel_mgr:
         mock_detect.return_value = {
             "should_resume": True,
             "message_id": 1,
@@ -14681,7 +15409,7 @@ async def test_run_agent_stream_resume_channel_body_yields_completed_status(monk
         }
         mock_mgr.get_agent_run_info.return_value = MagicMock()
         mock_channel_mgr.get_channel.return_value = mock_channel
-        monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+        monkeypatch.setattr(agent_run_service, "runtime_state_service", fake_runtime_state)
 
         result = await agent_service.run_agent_stream(
             agent_request,
@@ -14705,7 +15433,7 @@ async def test_run_agent_stream_resume_channel_body_yields_completed_status(monk
 @pytest.mark.asyncio
 async def test_generate_stream_with_memory_handles_missing_current_task(monkeypatch):
     """Memory streaming should work even if asyncio.current_task returns None."""
-    from backend.services import agent_service
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -14726,27 +15454,27 @@ async def test_generate_stream_with_memory_handles_missing_current_task(monkeypa
         yield "data: done\n\n"
 
     fake_preprocess_manager = MagicMock()
-    monkeypatch.setattr(agent_service.asyncio, "current_task", lambda: None)
-    monkeypatch.setattr(agent_service, "preprocess_manager", fake_preprocess_manager)
+    monkeypatch.setattr(agent_run_service.asyncio, "current_task", lambda: None)
+    monkeypatch.setattr(agent_run_service, "preprocess_manager", fake_preprocess_manager)
     monkeypatch.setattr(
-        agent_service.streaming_channel_manager,
+        agent_run_service.streaming_channel_manager,
         "get_or_create_channel",
         AsyncMock(return_value=fake_channel),
         raising=False,
     )
-    monkeypatch.setattr(agent_service, "build_memory_context", lambda *args, **kwargs: memory_preview)
+    monkeypatch.setattr(agent_run_service, "build_memory_context", lambda *args, **kwargs: memory_preview)
     mock_prepare_agent_run = AsyncMock(
         return_value=(agent_run_info, memory_ctx)
     )
     monkeypatch.setattr(
-        agent_service,
+        agent_run_service,
         "prepare_agent_run",
         mock_prepare_agent_run,
     )
-    monkeypatch.setattr(agent_service, "_stream_agent_chunks", fake_stream_agent_chunks)
+    monkeypatch.setattr(agent_run_service, "_stream_agent_chunks", fake_stream_agent_chunks)
 
     chunks = []
-    async for chunk in agent_service.generate_stream(
+    async for chunk in agent_run_service.generate_stream(
         agent_request,
         "user1",
         "tenant1",
@@ -14789,8 +15517,8 @@ class TestValidateRequestedOutputTokensForAgent:
 
     def test_no_requested_tokens(self):
         """Should return early when requested_output_tokens is None."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14802,8 +15530,8 @@ class TestValidateRequestedOutputTokensForAgent:
 
     def test_model_ids_from_agent(self):
         """Should get model_ids from existing agent when not in request."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14811,9 +15539,9 @@ class TestValidateRequestedOutputTokensForAgent:
             requested_output_tokens=1000
         )
 
-        with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+        with patch("management.services.agent.service.search_agent_info_by_agent_id") as mock_search:
             mock_search.return_value = {"model_ids": [5]}
-            with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+            with patch("management.services.agent.service.get_model_by_model_id") as mock_model:
                 mock_model.return_value = {"max_output_tokens": 2000, "display_name": "test_model"}
 
                 # Should not raise since 1000 < 2000
@@ -14825,9 +15553,9 @@ class TestValidateRequestedOutputTokensForAgent:
 
     def test_exceeds_limit(self):
         """Should raise when tokens exceed any model's max_output_tokens."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
-        from backend.services.agent_service import AppException
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
+        from management.services.agent.service import AppException
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14835,7 +15563,7 @@ class TestValidateRequestedOutputTokensForAgent:
             requested_output_tokens=5000  # Exceeds limit
         )
 
-        with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+        with patch("management.services.agent.service.get_model_by_model_id") as mock_model:
             mock_model.return_value = {"max_output_tokens": 2000, "display_name": "test_model"}
 
             # Should raise AppException
@@ -14844,8 +15572,8 @@ class TestValidateRequestedOutputTokensForAgent:
 
     def test_agent_search_error(self):
         """Should handle agent search error gracefully (log warning, return)."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14853,15 +15581,15 @@ class TestValidateRequestedOutputTokensForAgent:
             requested_output_tokens=1000
         )
 
-        with patch("backend.services.agent_service.search_agent_info_by_agent_id", side_effect=Exception("DB error")):
+        with patch("management.services.agent.service.search_agent_info_by_agent_id", side_effect=Exception("DB error")):
             # Should not raise, just log warning and return (model_ids stays empty)
             _validate_requested_output_tokens_for_agent(request, "tenant1")
 
     def test_multi_model_one_exceeds(self):
         """Should fail when any one of multiple models has a lower max_output_tokens."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
-        from backend.services.agent_service import AppException
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
+        from management.services.agent.service import AppException
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14875,7 +15603,7 @@ class TestValidateRequestedOutputTokensForAgent:
             3: {"max_output_tokens": 4096, "display_name": "model_c"},
         }
 
-        with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+        with patch("management.services.agent.service.get_model_by_model_id") as mock_model:
             mock_model.side_effect = lambda mid, tenant_id: model_db.get(mid)
 
             with pytest.raises(AppException) as exc_info:
@@ -14886,8 +15614,8 @@ class TestValidateRequestedOutputTokensForAgent:
 
     def test_model_info_none(self):
         """Should skip a model when get_model_by_model_id returns None (model not found)."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14895,14 +15623,14 @@ class TestValidateRequestedOutputTokensForAgent:
             requested_output_tokens=1000
         )
 
-        with patch("backend.services.agent_service.get_model_by_model_id", return_value=None):
+        with patch("management.services.agent.service.get_model_by_model_id", return_value=None):
             # Should not raise -- model_info is None, max_output_tokens is None, so skip
             _validate_requested_output_tokens_for_agent(request, "tenant1")
 
     def test_max_output_tokens_none(self):
         """Should skip when model_info has no max_output_tokens field."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14910,7 +15638,7 @@ class TestValidateRequestedOutputTokensForAgent:
             requested_output_tokens=1000
         )
 
-        with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+        with patch("management.services.agent.service.get_model_by_model_id") as mock_model:
             mock_model.return_value = {"display_name": "test_model"}  # No max_output_tokens key
 
             # Should not raise -- max_output_tokens is None, so the check is skipped
@@ -14918,8 +15646,8 @@ class TestValidateRequestedOutputTokensForAgent:
 
     def test_boundary_equal(self):
         """Should pass when requested_output_tokens equals max_output_tokens exactly."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14927,7 +15655,7 @@ class TestValidateRequestedOutputTokensForAgent:
             requested_output_tokens=2000  # Exactly equals max
         )
 
-        with patch("backend.services.agent_service.get_model_by_model_id") as mock_model:
+        with patch("management.services.agent.service.get_model_by_model_id") as mock_model:
             mock_model.return_value = {"max_output_tokens": 2000, "display_name": "test_model"}
 
             # Should not raise -- 2000 is not > 2000
@@ -14935,8 +15663,8 @@ class TestValidateRequestedOutputTokensForAgent:
 
     def test_empty_model_ids_from_agent(self):
         """Should return when existing agent has empty model_ids list."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=1,
@@ -14944,15 +15672,15 @@ class TestValidateRequestedOutputTokensForAgent:
             requested_output_tokens=1000
         )
 
-        with patch("backend.services.agent_service.search_agent_info_by_agent_id") as mock_search:
+        with patch("management.services.agent.service.search_agent_info_by_agent_id") as mock_search:
             mock_search.return_value = {"model_ids": []}  # Empty list
             # Should not raise -- model_ids is empty, so return early
             _validate_requested_output_tokens_for_agent(request, "tenant1")
 
     def test_no_agent_id(self):
         """Should return early when model_ids is empty and agent_id is None."""
-        from backend.services.agent_service import _validate_requested_output_tokens_for_agent
-        from backend.services.agent_service import AgentInfoRequest
+        from management.services.agent.service import _validate_requested_output_tokens_for_agent
+        from management.services.agent.service import AgentInfoRequest
 
         request = AgentInfoRequest(
             agent_id=None,  # No agent_id -- can't look up existing
@@ -14969,11 +15697,11 @@ class TestValidateRequestedOutputTokensForAgent:
 # ============================================================================
 
 
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_no_message(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should return no_resume when no message found."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = None
 
@@ -14983,12 +15711,12 @@ def test_detect_resume_position_no_message(mock_get_msg, mock_channel_mgr):
     assert result["reason"] == "no_assistant_message"
 
 
-@patch("backend.services.agent_service.get_last_unit_for_message")
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.get_last_unit_for_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_streaming(mock_get_msg, mock_channel_mgr, mock_last_unit):
     """_detect_resume_position should detect streaming message."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "streaming"}
     mock_channel_mgr.get_channel.return_value = MagicMock()
@@ -15002,12 +15730,12 @@ def test_detect_resume_position_streaming(mock_get_msg, mock_channel_mgr, mock_l
     assert result["resume_from_unit_index"] == 6
 
 
-@patch("backend.services.agent_service.get_last_unit_for_message")
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.get_last_unit_for_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_channel_active(mock_get_msg, mock_channel_mgr, mock_last_unit):
     """_detect_resume_position should detect active channel with completed message."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "completed"}
     mock_channel_mgr.get_channel.return_value = MagicMock()
@@ -15021,11 +15749,11 @@ def test_detect_resume_position_channel_active(mock_get_msg, mock_channel_mgr, m
     assert result["resume_from_unit_index"] == 4
 
 
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_no_channel(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should return no_resume when message is completed and no channel."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "completed"}
     mock_channel_mgr.get_channel.return_value = None
@@ -15036,12 +15764,12 @@ def test_detect_resume_position_no_channel(mock_get_msg, mock_channel_mgr):
     assert result["reason"] == "backend_completed"
 
 
-@patch("backend.services.agent_service.get_last_unit_for_message")
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.get_last_unit_for_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, mock_last_unit):
     """_detect_resume_position should handle missing last unit."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "streaming"}
     mock_channel_mgr.get_channel.return_value = MagicMock()
@@ -15059,11 +15787,11 @@ def test_detect_resume_position_no_last_unit(mock_get_msg, mock_channel_mgr, moc
 # ============================================================================
 
 
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_message_failed(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should handle failed message status."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "failed"}
     mock_channel_mgr.get_channel.return_value = None  # No active channel
@@ -15075,11 +15803,11 @@ def test_detect_resume_position_message_failed(mock_get_msg, mock_channel_mgr):
     assert result["message_status"] == "failed"
 
 
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_message_stopped(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should handle stopped message status."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "stopped"}
     mock_channel_mgr.get_channel.return_value = None  # No active channel
@@ -15091,11 +15819,11 @@ def test_detect_resume_position_message_stopped(mock_get_msg, mock_channel_mgr):
     assert result["message_status"] == "stopped"
 
 
-@patch("backend.services.agent_service.streaming_channel_manager")
-@patch("backend.services.agent_service.get_latest_assistant_message")
+@patch("management.services.agent.run.streaming_channel_manager")
+@patch("management.services.agent.run.get_latest_assistant_message")
 def test_detect_resume_position_channel_inactive_completed(mock_get_msg, mock_channel_mgr):
     """_detect_resume_position should not resume when channel exists but is completed."""
-    from backend.services.agent_service import _detect_resume_position
+    from management.services.agent.service import _detect_resume_position
 
     mock_get_msg.return_value = {"message_id": 1, "status": "completed"}
     mock_channel = MagicMock()
@@ -15114,16 +15842,16 @@ def test_detect_resume_position_channel_inactive_completed(mock_get_msg, mock_ch
 
 
 @pytest.mark.asyncio
-@patch('backend.services.agent_service._detect_resume_position')
-@patch('backend.services.agent_service.agent_run_manager')
-@patch('backend.services.agent_service._resolve_user_tenant_language')
+@patch('management.services.agent.run._detect_resume_position')
+@patch('management.services.agent.run.agent_run_manager')
+@patch('management.services.agent.run._resolve_user_tenant_language')
 async def test_run_agent_stream_resume_update_message_status_exception(
     mock_resolve,
     mock_agent_run_manager,
     mock_detect_resume,
 ):
     """run_agent_stream should handle update_message_status exception gracefully in resume mode."""
-    from backend.services import agent_service
+    from management.services.agent import service as agent_service
 
     # Setup mocks
     mock_resolve.return_value = ("user1", "tenant1", "en")
@@ -15137,7 +15865,7 @@ async def test_run_agent_stream_resume_update_message_status_exception(
     }
     mock_agent_run_manager.get_agent_run_info.return_value = None
 
-    with patch('backend.services.agent_service.update_message_status') as mock_update:
+    with patch('management.services.agent.run.update_message_status') as mock_update:
         mock_update.side_effect = Exception("DB error on update_message_status")
 
         agent_request = MagicMock()
@@ -15168,13 +15896,13 @@ async def test_run_agent_stream_resume_update_message_status_exception(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.service.convert_string_to_list")
+@patch("management.services.agent.service.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_filters_deleted_models(
     mock_query_agents,
     mock_query_groups,
@@ -15235,13 +15963,13 @@ async def test_list_all_agent_info_impl_filters_deleted_models(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.service.convert_string_to_list")
+@patch("management.services.agent.service.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_all_models_deleted(
     mock_query_agents,
     mock_query_groups,
@@ -15291,13 +16019,13 @@ async def test_list_all_agent_info_impl_all_models_deleted(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.service.check_agent_availability")
+@patch("management.services.agent.service.convert_string_to_list")
+@patch("management.services.agent.service.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.service.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_empty_model_ids(
     mock_query_agents,
     mock_query_groups,
@@ -15343,13 +16071,13 @@ async def test_list_all_agent_info_impl_empty_model_ids(
 # ============================================================================
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_filters_deleted_models(
     mock_search_agent_info,
@@ -15393,7 +16121,7 @@ async def test_get_agent_info_impl_filters_deleted_models(
     mock_check_availability.return_value = (True, [])
 
     # Mock get_valid_model_ids to filter out model_id=2 (deleted)
-    with patch("backend.services.agent_service.get_valid_model_ids") as mock_get_valid_model_ids:
+    with patch("management.services.agent.read.get_valid_model_ids") as mock_get_valid_model_ids:
         mock_get_valid_model_ids.return_value = [1, 3]
 
         result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -15407,13 +16135,13 @@ async def test_get_agent_info_impl_filters_deleted_models(
     assert result["model_name"] == "Model 1"  # First model's display_name
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_all_models_deleted(
     mock_search_agent_info,
@@ -15442,7 +16170,7 @@ async def test_get_agent_info_impl_all_models_deleted(
     mock_get_model_by_model_id.return_value = None
     mock_check_availability.return_value = (True, [])
 
-    with patch("backend.services.agent_service.get_valid_model_ids") as mock_get_valid_model_ids:
+    with patch("management.services.agent.read.get_valid_model_ids") as mock_get_valid_model_ids:
         mock_get_valid_model_ids.return_value = []  # All models deleted
 
         result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -15467,13 +16195,13 @@ class TestBuildSandboxPolicy:
 
     def test_build_sandbox_policy_function_exists(self):
         """Test that build_sandbox_policy function exists and is callable."""
-        from backend.services.agent_service import build_sandbox_policy
+        from management.services.agent.service import build_sandbox_policy
 
         assert callable(build_sandbox_policy)
 
     def test_build_sandbox_policy_accepts_required_args(self):
         """Test that build_sandbox_policy accepts tenant_id and agent_type arguments."""
-        from backend.services.agent_service import build_sandbox_policy
+        from management.services.agent.service import build_sandbox_policy
         import inspect
 
         sig = inspect.signature(build_sandbox_policy)
@@ -15482,13 +16210,25 @@ class TestBuildSandboxPolicy:
         assert "tenant_id" in params
         assert "agent_type" in params
 
+    def test_build_sandbox_policy_includes_configurable_host_tool_timeout(self):
+        import consts.const as const_module
+        from management.services.agent.service import build_sandbox_policy
+
+        with (
+            patch.object(const_module, "NEXENT_SANDBOX_DEFAULT_LEVEL", "docker"),
+            patch.object(const_module, "NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S", 900),
+        ):
+            policy = build_sandbox_policy("tenant-1", "")
+
+        assert policy["host_tool_timeout_seconds"] == 900
+
 
 class TestGetSandboxMinioClient:
     """Tests for get_sandbox_minio_client function."""
 
     def test_get_sandbox_minio_client_function_exists(self):
         """Test that get_sandbox_minio_client function exists and is callable."""
-        from backend.services.agent_service import get_sandbox_minio_client
+        from management.services.agent.service import get_sandbox_minio_client
 
         assert callable(get_sandbox_minio_client)
 
@@ -15503,21 +16243,21 @@ class TestExtractJsonObjectsFromText:
 
     def test_extract_json_objects_empty_string(self):
         """Test _extract_json_objects_from_text returns empty list for empty string."""
-        from backend.services.agent_service import _extract_json_objects_from_text
+        from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
         result = _extract_json_objects_from_text("")
         assert result == []
 
     def test_extract_json_objects_none_string(self):
         """Test _extract_json_objects_from_text returns empty list for None."""
-        from backend.services.agent_service import _extract_json_objects_from_text
+        from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
         result = _extract_json_objects_from_text(None)
         assert result == []
 
     def test_extract_json_objects_single_object(self):
         """Test _extract_json_objects_from_text extracts single JSON object."""
-        from backend.services.agent_service import _extract_json_objects_from_text
+        from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
         text = '{"key": "value"}'
         result = _extract_json_objects_from_text(text)
@@ -15526,7 +16266,7 @@ class TestExtractJsonObjectsFromText:
 
     def test_extract_json_objects_multiple_objects(self):
         """Test _extract_json_objects_from_text extracts multiple JSON objects."""
-        from backend.services.agent_service import _extract_json_objects_from_text
+        from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
         text = '{"a": 1} some text {"b": 2} more text {"c": 3}'
         result = _extract_json_objects_from_text(text)
@@ -15537,7 +16277,7 @@ class TestExtractJsonObjectsFromText:
 
     def test_extract_json_objects_nested_object(self):
         """Test _extract_json_objects_from_text extracts nested JSON objects."""
-        from backend.services.agent_service import _extract_json_objects_from_text
+        from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
         text = '{"outer": {"inner": "value"}}'
         result = _extract_json_objects_from_text(text)
@@ -15546,7 +16286,7 @@ class TestExtractJsonObjectsFromText:
 
     def test_extract_json_objects_array_not_included(self):
         """Test _extract_json_objects_from_text excludes arrays."""
-        from backend.services.agent_service import _extract_json_objects_from_text
+        from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
         text = '{"key": [1, 2, 3]}'
         result = _extract_json_objects_from_text(text)
@@ -15555,7 +16295,7 @@ class TestExtractJsonObjectsFromText:
 
     def test_extract_json_objects_with_invalid_json(self):
         """Test _extract_json_objects_from_text skips invalid JSON."""
-        from backend.services.agent_service import _extract_json_objects_from_text
+        from utils.agent_stream_utils import extract_json_objects_from_text as _extract_json_objects_from_text
 
         text = '{"valid": true} {invalid} {"also": "valid"}'
         result = _extract_json_objects_from_text(text)
@@ -15569,14 +16309,14 @@ class TestExtractSkillFileUploadPayloads:
 
     def test_extract_skill_file_payloads_empty(self):
         """Test _extract_skill_file_upload_payloads returns empty list for empty input."""
-        from backend.services.agent_service import _extract_skill_file_upload_payloads
+        from utils.agent_stream_utils import extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads
 
         result = _extract_skill_file_upload_payloads("")
         assert result == []
 
     def test_extract_skill_file_payloads_with_absolute_path(self):
         """Test _extract_skill_file_upload_payloads extracts payloads with absolute_path."""
-        from backend.services.agent_service import _extract_skill_file_upload_payloads
+        from utils.agent_stream_utils import extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads
 
         text = '{"absolute_path": "/tmp/test.txt", "file_name": "test.txt"}'
         result = _extract_skill_file_upload_payloads(text)
@@ -15585,7 +16325,7 @@ class TestExtractSkillFileUploadPayloads:
 
     def test_extract_skill_file_payloads_without_absolute_path(self):
         """Test _extract_skill_file_upload_payloads excludes payloads without absolute_path."""
-        from backend.services.agent_service import _extract_skill_file_upload_payloads
+        from utils.agent_stream_utils import extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads
 
         text = '{"file_name": "test.txt"}'
         result = _extract_skill_file_upload_payloads(text)
@@ -15593,7 +16333,7 @@ class TestExtractSkillFileUploadPayloads:
 
     def test_extract_skill_file_payloads_multiple(self):
         """Test _extract_skill_file_upload_payloads extracts multiple valid payloads."""
-        from backend.services.agent_service import _extract_skill_file_upload_payloads
+        from utils.agent_stream_utils import extract_skill_file_upload_payloads as _extract_skill_file_upload_payloads
 
         text = '{"absolute_path": "/tmp/a.txt"} extra {"absolute_path": "/tmp/b.txt"}'
         result = _extract_skill_file_upload_payloads(text)
@@ -15607,14 +16347,14 @@ class TestTransformSkillFilesToStandardFormat:
 
     def test_transform_skill_files_empty(self):
         """Test _transform_skill_files_to_standard_format returns empty list for empty input."""
-        from backend.services.agent_service import _transform_skill_files_to_standard_format
+        from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
         result = _transform_skill_files_to_standard_format([])
         assert result == []
 
     def test_transform_skill_files_full_fields(self):
         """Test _transform_skill_files_to_standard_format transforms complete upload results."""
-        from backend.services.agent_service import _transform_skill_files_to_standard_format
+        from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
         upload_results = [
             {
@@ -15636,9 +16376,9 @@ class TestTransformSkillFilesToStandardFormat:
         assert result[0]["presigned_url"] == "https://example.com/presigned"
         assert result[0]["description"] == ""
 
-    def test_transform_skill_files_uses_preview_url(self):
-        """Test _transform_skill_files_to_standard_format uses preview_url as fallback for presigned_url."""
-        from backend.services.agent_service import _transform_skill_files_to_standard_format
+    def test_transform_skill_files_ignores_preview_url(self):
+        """Temporary preview URLs are not part of the permanent file contract."""
+        from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
         upload_results = [
             {
@@ -15649,11 +16389,12 @@ class TestTransformSkillFilesToStandardFormat:
             }
         ]
         result = _transform_skill_files_to_standard_format(upload_results)
-        assert result[0]["presigned_url"] == "https://example.com/preview"
+        assert result[0]["url"] == "https://example.com/test.txt"
+        assert "presigned_url" not in result[0]
 
     def test_transform_skill_files_uses_size_fallback(self):
         """Test _transform_skill_files_to_standard_format uses 'size' as fallback for 'file_size'."""
-        from backend.services.agent_service import _transform_skill_files_to_standard_format
+        from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
         upload_results = [
             {
@@ -15666,7 +16407,7 @@ class TestTransformSkillFilesToStandardFormat:
 
     def test_transform_skill_files_multiple(self):
         """Test _transform_skill_files_to_standard_format transforms multiple files."""
-        from backend.services.agent_service import _transform_skill_files_to_standard_format
+        from utils.agent_stream_utils import transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format
 
         upload_results = [
             {"file_name": "a.txt", "size": 100},
@@ -15683,7 +16424,7 @@ class TestSafeAgentStreamErrorChunk:
 
     def test_safe_agent_stream_error_chunk_format(self):
         """Test _safe_agent_stream_error_chunk returns properly formatted SSE chunk."""
-        from backend.services.agent_service import _safe_agent_stream_error_chunk
+        from utils.agent_stream_utils import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
 
         result = _safe_agent_stream_error_chunk()
         assert result.startswith("data: ")
@@ -15693,7 +16434,7 @@ class TestSafeAgentStreamErrorChunk:
 
     def test_safe_agent_stream_error_chunk_contains_safe_message(self):
         """Test _safe_agent_stream_error_chunk contains safe error message."""
-        from backend.services.agent_service import _safe_agent_stream_error_chunk
+        from utils.agent_stream_utils import safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk
 
         result = _safe_agent_stream_error_chunk()
         assert "Agent execution failed" in result
@@ -15702,10 +16443,10 @@ class TestSafeAgentStreamErrorChunk:
 class TestGetUserGroupIds:
     """Tests for _get_user_group_ids function."""
 
-    @patch('backend.services.agent_service.query_group_ids_by_user')
+    @patch('management.services.agent.management.query_group_ids_by_user')
     def test_get_user_group_ids_success(self, mock_query_groups):
         """Test _get_user_group_ids returns comma-separated group IDs."""
-        from backend.services.agent_service import _get_user_group_ids
+        from management.services.agent.service import _get_user_group_ids
 
         mock_query_groups.return_value = ["1", "2", "3"]
 
@@ -15714,10 +16455,10 @@ class TestGetUserGroupIds:
         assert result == "1,2,3"
         mock_query_groups.assert_called_once_with("user123")
 
-    @patch('backend.services.agent_service.query_group_ids_by_user')
+    @patch('management.services.agent.management.query_group_ids_by_user')
     def test_get_user_group_ids_empty(self, mock_query_groups):
         """Test _get_user_group_ids returns empty string when no groups."""
-        from backend.services.agent_service import _get_user_group_ids
+        from management.services.agent.service import _get_user_group_ids
 
         mock_query_groups.return_value = []
 
@@ -15725,11 +16466,11 @@ class TestGetUserGroupIds:
 
         assert result == ""
 
-    @patch('backend.services.agent_service.query_group_ids_by_user')
-    @patch('backend.services.agent_service.logger')
+    @patch('management.services.agent.management.query_group_ids_by_user')
+    @patch('management.services.agent.management.logger')
     def test_get_user_group_ids_exception(self, mock_logger, mock_query_groups):
         """Test _get_user_group_ids returns empty string on exception."""
-        from backend.services.agent_service import _get_user_group_ids
+        from management.services.agent.service import _get_user_group_ids
 
         mock_query_groups.side_effect = Exception("Database error")
 
@@ -15742,14 +16483,14 @@ class TestGetUserGroupIds:
 class TestResolveModelIdsWithFallback:
     """Tests for _resolve_model_ids_with_fallback function."""
 
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.MODEL_CONFIG_MAPPING')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.MODEL_CONFIG_MAPPING')
     def test_resolve_model_ids_explicit_ids(
         self, mock_config, mock_get_by_name, mock_get_by_id
     ):
         """Test _resolve_model_ids_with_fallback uses explicit model_ids when available."""
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         mock_get_by_id.return_value = {"display_name": "Test Model"}
 
@@ -15762,14 +16503,14 @@ class TestResolveModelIdsWithFallback:
 
         assert result == [1, 2]
 
-    @patch('backend.services.agent_service.get_model_by_model_id')
-    @patch('backend.services.agent_service.get_model_id_by_display_name')
-    @patch('backend.services.agent_service.MODEL_CONFIG_MAPPING')
+    @patch('management.services.agent.management.get_model_by_model_id')
+    @patch('management.services.agent.management.get_model_id_by_display_name')
+    @patch('management.services.agent.management.MODEL_CONFIG_MAPPING')
     def test_resolve_model_ids_fallback_to_names(
         self, mock_config, mock_get_by_name, mock_get_by_id
     ):
         """Test _resolve_model_ids_with_fallback falls back to display names."""
-        from backend.services.agent_service import _resolve_model_ids_with_fallback
+        from management.services.agent.service import _resolve_model_ids_with_fallback
 
         mock_get_by_id.return_value = None
         mock_get_by_name.return_value = 5
@@ -15787,11 +16528,11 @@ class TestResolveModelIdsWithFallback:
 class TestCollectSkillNamesFromTree:
     """Tests for _collect_skill_names_from_tree function."""
 
-    @patch('backend.services.agent_service.skill_db')
-    @patch('backend.services.agent_service.query_sub_agent_relations')
+    @patch('management.services.agent.management.skill_db')
+    @patch('management.services.agent.management.query_sub_agent_relations')
     def test_collect_skill_names_empty(self, mock_relations, mock_skill_db):
         """Test _collect_skill_names_from_tree returns empty list when no skills."""
-        from backend.services.agent_service import _collect_skill_names_from_tree
+        from management.services.agent.service import _collect_skill_names_from_tree
 
         mock_skill_db.query_skill_instances_by_agent_id.return_value = []
         mock_relations.return_value = []
@@ -15800,11 +16541,11 @@ class TestCollectSkillNamesFromTree:
 
         assert result == []
 
-    @patch('backend.services.agent_service.skill_db')
-    @patch('backend.services.agent_service.query_sub_agent_relations')
+    @patch('management.services.agent.management.skill_db')
+    @patch('management.services.agent.management.query_sub_agent_relations')
     def test_collect_skill_names_single_skill(self, mock_relations, mock_skill_db):
         """Test _collect_skill_names_from_tree collects skill names."""
-        from backend.services.agent_service import _collect_skill_names_from_tree
+        from management.services.agent.service import _collect_skill_names_from_tree
 
         mock_skill_db.query_skill_instances_by_agent_id.return_value = [
             {"skill_id": 1}
@@ -15816,11 +16557,11 @@ class TestCollectSkillNamesFromTree:
 
         assert result == ["TestSkill"]
 
-    @patch('backend.services.agent_service.skill_db')
-    @patch('backend.services.agent_service.query_sub_agent_relations')
+    @patch('management.services.agent.management.skill_db')
+    @patch('management.services.agent.management.query_sub_agent_relations')
     def test_collect_skill_names_deduplicates(self, mock_relations, mock_skill_db):
         """Test _collect_skill_names_from_tree deduplicates skill names."""
-        from backend.services.agent_service import _collect_skill_names_from_tree
+        from management.services.agent.service import _collect_skill_names_from_tree
 
         mock_skill_db.query_skill_instances_by_agent_id.return_value = [
             {"skill_id": 1},
@@ -15833,11 +16574,11 @@ class TestCollectSkillNamesFromTree:
 
         assert result == ["TestSkill"]
 
-    @patch('backend.services.agent_service.skill_db')
-    @patch('backend.services.agent_service.query_sub_agent_relations')
+    @patch('management.services.agent.management.skill_db')
+    @patch('management.services.agent.management.query_sub_agent_relations')
     def test_collect_skill_names_handles_missing_skill(self, mock_relations, mock_skill_db):
         """Test _collect_skill_names_from_tree handles missing skill gracefully."""
-        from backend.services.agent_service import _collect_skill_names_from_tree
+        from management.services.agent.service import _collect_skill_names_from_tree
 
         mock_skill_db.query_skill_instances_by_agent_id.return_value = [
             {"skill_id": 1}
@@ -15853,10 +16594,10 @@ class TestCollectSkillNamesFromTree:
 class TestCollectSkillZipEntries:
     """Tests for collect_skill_zip_entries function."""
 
-    @patch('backend.services.agent_service._collect_skill_names_from_tree')
+    @patch('management.services.agent.management._collect_skill_names_from_tree')
     def test_collect_skill_zip_entries_empty(self, mock_collect):
         """Test collect_skill_zip_entries returns empty list when no skills."""
-        from backend.services.agent_service import collect_skill_zip_entries
+        from management.services.agent.service import collect_skill_zip_entries
 
         mock_collect.return_value = []
 
@@ -15864,11 +16605,11 @@ class TestCollectSkillZipEntries:
 
         assert result == []
 
-    @patch('backend.services.agent_service.SkillService')
-    @patch('backend.services.agent_service._collect_skill_names_from_tree')
+    @patch('management.services.agent.management.SkillService')
+    @patch('management.services.agent.management._collect_skill_names_from_tree')
     def test_collect_skill_zip_entries_success(self, mock_collect, mock_skill_service):
         """Test collect_skill_zip_entries returns skill zip entries."""
-        from backend.services.agent_service import collect_skill_zip_entries
+        from management.services.agent.service import collect_skill_zip_entries
 
         mock_collect.return_value = ["TestSkill"]
         mock_service_instance = MagicMock()
@@ -15887,11 +16628,11 @@ class TestCollectSkillZipEntries:
 class TestClearAgentNewMarkImpl:
     """Tests for clear_agent_new_mark_impl function."""
 
-    @patch('backend.services.agent_service.clear_agent_new_mark')
-    @patch('backend.services.agent_service.logger')
+    @patch('management.services.agent.management.clear_agent_new_mark')
+    @patch('management.services.agent.management.logger')
     async def test_clear_agent_new_mark_impl_success(self, mock_logger, mock_clear):
         """Test clear_agent_new_mark_impl calls clear_agent_new_mark and logs result."""
-        from backend.services.agent_service import clear_agent_new_mark_impl
+        from management.services.agent.service import clear_agent_new_mark_impl
 
         mock_clear.return_value = 1
 
@@ -15907,13 +16648,13 @@ class TestLoadDefaultAgentsJsonFile:
     """Tests for load_default_agents_json_file function."""
 
     @patch('builtins.open', new_callable=MagicMock)
-    @patch('backend.services.agent_service.os.listdir')
-    @patch('backend.services.agent_service.os.path.join')
+    @patch('management.services.agent.management.os.listdir')
+    @patch('management.services.agent.management.os.path.join')
     def test_load_default_agents_json_file_empty_dir(
         self, mock_join, mock_listdir, mock_open
     ):
         """Test load_default_agents_json_file returns empty list for empty directory."""
-        from backend.services.agent_service import load_default_agents_json_file
+        from management.services.agent.service import load_default_agents_json_file
 
         mock_listdir.return_value = ["readme.txt", "config.yaml"]
 
@@ -15922,13 +16663,13 @@ class TestLoadDefaultAgentsJsonFile:
         assert result == []
 
     @patch('builtins.open', new_callable=MagicMock)
-    @patch('backend.services.agent_service.os.listdir')
-    @patch('backend.services.agent_service.os.path.join')
+    @patch('management.services.agent.management.os.listdir')
+    @patch('management.services.agent.management.os.path.join')
     def test_load_default_agents_json_file_with_json(
         self, mock_join, mock_listdir, mock_open
     ):
         """Test load_default_agents_json_file loads JSON files."""
-        from backend.services.agent_service import load_default_agents_json_file
+        from management.services.agent.service import load_default_agents_json_file
         import json
 
         mock_listdir.return_value = ["agent1.json", "readme.txt"]
@@ -15960,11 +16701,11 @@ class TestLoadDefaultAgentsJsonFile:
 class TestInsertRelatedAgentImpl:
     """Tests for insert_related_agent_impl function."""
 
-    @patch('backend.services.agent_service.insert_related_agent')
-    @patch('backend.services.agent_service.query_sub_agents_id_list')
+    @patch('management.services.agent.management.insert_related_agent')
+    @patch('management.services.agent.management.query_sub_agents_id_list')
     def test_insert_related_agent_impl_success(self, mock_query, mock_insert):
         """Test insert_related_agent_impl returns success response."""
-        from backend.services.agent_service import insert_related_agent_impl
+        from management.services.agent.service import insert_related_agent_impl
         from fastapi.responses import JSONResponse
 
         mock_query.return_value = [2, 3]
@@ -15975,11 +16716,11 @@ class TestInsertRelatedAgentImpl:
         assert isinstance(result, JSONResponse)
         assert result.status_code == 200
 
-    @patch('backend.services.agent_service.insert_related_agent')
-    @patch('backend.services.agent_service.query_sub_agents_id_list')
+    @patch('management.services.agent.management.insert_related_agent')
+    @patch('management.services.agent.management.query_sub_agents_id_list')
     def test_insert_related_agent_impl_failure(self, mock_query, mock_insert):
         """Test insert_related_agent_impl returns error response."""
-        from backend.services.agent_service import insert_related_agent_impl
+        from management.services.agent.service import insert_related_agent_impl
         from fastapi.responses import JSONResponse
 
         mock_query.return_value = [2, 3]
@@ -15993,12 +16734,8 @@ class TestInsertRelatedAgentImpl:
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
-    """TOOL + EXECUTION_LOGS chunks should each produce their own row in the
-    current implementation. Earlier iterations merged them into a single
-    ``tool_call`` row, but that path was removed; ``_stream_agent_chunks``
-    now persists each chunk as its own ``conversation_message_unit_t`` row.
-    """
-    from backend.services import agent_service
+    """TOOL and EXECUTION_LOGS chunks are buffered as separate batch units."""
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -16015,16 +16752,16 @@ async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "Done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         lambda *a, **kw: 4242,
         raising=False,
     )
 
-    saved_units = []
+    persisted_batches = []
 
     class FakeFuture:
         def __init__(self, unit_id):
@@ -16044,47 +16781,54 @@ async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
         return MagicMock()
 
     monkeypatch.setattr(
-        "backend.services.agent_service.submit", fake_submit, raising=False
+        "management.services.agent.run.submit", fake_submit, raising=False
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
     )
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
+        "management.services.agent.run.update_unit_status",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_content",
+        "management.services.agent.run.update_unit_content",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_content",
+        "management.services.agent.run.update_message_content",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.generate_conversation_title_service",
+        "management.services.agent.run.generate_conversation_title_service",
         AsyncMock(),
         raising=False,
     )
 
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
 
-    # Current implementation stores TOOL and EXECUTION_LOGS as separate rows.
+    assert len(persisted_batches) == 1
+    saved_units = persisted_batches[0]["message_units"]
     standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
     standalone_logs = [u for u in saved_units if u["unit_type"] == "execution_logs"]
     assert len(standalone_tools) == 1, f"Expected 1 tool row, got {len(standalone_tools)}: {saved_units}"
@@ -16099,8 +16843,8 @@ async def test_stream_agent_chunks_tool_call_merge(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
-    """Orphaned TOOL chunk (no EXECUTION_LOGS) should be flushed as standalone 'tool' row at end of stream."""
-    from backend.services import agent_service
+    """An orphaned TOOL chunk is included in the final batch."""
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -16115,11 +16859,11 @@ async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
         yield json.dumps({"type": "tool", "content": "search('query')"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         lambda *a, **kw: 4242,
         raising=False,
     )
@@ -16143,46 +16887,54 @@ async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
         return MagicMock()
 
     monkeypatch.setattr(
-        "backend.services.agent_service.submit", fake_submit, raising=False
+        "management.services.agent.run.submit", fake_submit, raising=False
+    )
+    persisted_batches = []
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
     )
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
+        "management.services.agent.run.update_unit_status",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_content",
+        "management.services.agent.run.update_unit_content",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_content",
+        "management.services.agent.run.update_message_content",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.generate_conversation_title_service",
+        "management.services.agent.run.generate_conversation_title_service",
         AsyncMock(),
         raising=False,
     )
 
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
 
+    saved_units = persisted_batches[0]["message_units"]
     standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
     assert len(standalone_tools) == 1, f"Expected 1 standalone tool, got: {saved_units}"
     persisted_tool_content = standalone_tools[0]["unit_content"]
@@ -16195,8 +16947,8 @@ async def test_stream_agent_chunks_orphaned_tool_flush(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
-    """Multiple TOOL + EXECUTION_LOGS pairs should each produce one tool_call row."""
-    from backend.services import agent_service
+    """Multiple TOOL and EXECUTION_LOGS events retain batch boundaries."""
+    from management.services.agent import run as agent_service
 
     agent_request = MagicMock()
     agent_request.agent_id = 1
@@ -16215,11 +16967,11 @@ async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
         yield json.dumps({"type": "final_answer", "content": "Done"})
 
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run", fake_agent_run, raising=False
+        "management.services.agent.run.agent_run", fake_agent_run, raising=False
     )
 
     monkeypatch.setattr(
-        "backend.services.agent_service.save_message",
+        "management.services.agent.run.save_message",
         lambda *a, **kw: 4242,
         raising=False,
     )
@@ -16243,47 +16995,54 @@ async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
         return MagicMock()
 
     monkeypatch.setattr(
-        "backend.services.agent_service.submit", fake_submit, raising=False
+        "management.services.agent.run.submit", fake_submit, raising=False
+    )
+    persisted_batches = []
+    monkeypatch.setattr(
+        agent_service,
+        "persist_assistant_run_batch",
+        lambda **kwargs: persisted_batches.append(kwargs),
+        raising=False,
     )
 
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_status",
+        "management.services.agent.run.update_unit_status",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_unit_content",
+        "management.services.agent.run.update_unit_content",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_content",
+        "management.services.agent.run.update_message_content",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.update_message_status",
+        "management.services.agent.run.update_message_status",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.agent_run_manager.unregister_agent_run",
+        "management.services.agent.run.agent_run_manager.unregister_agent_run",
         lambda *a, **kw: None,
         raising=False,
     )
     monkeypatch.setattr(
-        "backend.services.agent_service.generate_conversation_title_service",
+        "management.services.agent.run.generate_conversation_title_service",
         AsyncMock(),
         raising=False,
     )
 
     collected = []
-    async for out in agent_service._stream_agent_chunks(
+    async for out in agent_run_service._stream_agent_chunks(
         agent_request, "u", "t", MagicMock(), MagicMock()
     ):
         collected.append(out)
 
-    # Current implementation persists TOOL and EXECUTION_LOGS as separate rows.
+    saved_units = persisted_batches[0]["message_units"]
     standalone_tools = [u for u in saved_units if u["unit_type"] == "tool"]
     standalone_logs = [u for u in saved_units if u["unit_type"] == "execution_logs"]
     assert len(standalone_tools) == 2, f"Expected 2 tool rows, got {len(standalone_tools)}: {saved_units}"
@@ -16306,13 +17065,13 @@ async def test_stream_agent_chunks_multiple_tool_calls(monkeypatch):
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_filters_deleted_models(
     mock_query_agents,
     mock_query_groups,
@@ -16373,13 +17132,13 @@ async def test_list_all_agent_info_impl_filters_deleted_models(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_all_models_deleted(
     mock_query_agents,
     mock_query_groups,
@@ -16429,13 +17188,13 @@ async def test_list_all_agent_info_impl_all_models_deleted(
 
 
 @pytest.mark.asyncio
-@patch("backend.services.agent_service.get_valid_model_ids")
-@patch("backend.services.agent_service.get_model_by_model_id")
-@patch("backend.services.agent_service.check_agent_availability")
-@patch("backend.services.agent_service.convert_string_to_list")
-@patch("backend.services.agent_service.get_user_tenant_by_user_id")
-@patch("backend.services.agent_service.query_group_ids_by_user")
-@patch("backend.services.agent_service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.read.get_valid_model_ids")
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
 async def test_list_all_agent_info_impl_empty_model_ids(
     mock_query_agents,
     mock_query_groups,
@@ -16481,13 +17240,13 @@ async def test_list_all_agent_info_impl_empty_model_ids(
 # ============================================================================
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.management.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_filters_deleted_models(
     mock_search_agent_info,
@@ -16531,7 +17290,7 @@ async def test_get_agent_info_impl_filters_deleted_models(
     mock_check_availability.return_value = (True, [])
 
     # Mock get_valid_model_ids to filter out model_id=2 (deleted)
-    with patch("backend.services.agent_service.get_valid_model_ids") as mock_get_valid_model_ids:
+    with patch("management.services.agent.read.get_valid_model_ids") as mock_get_valid_model_ids:
         mock_get_valid_model_ids.return_value = [1, 3]
 
         result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -16545,13 +17304,13 @@ async def test_get_agent_info_impl_filters_deleted_models(
     assert result["model_name"] == "Model 1"  # First model's display_name
 
 
-@patch('backend.services.agent_service.SkillService')
-@patch('backend.services.agent_service.query_external_sub_agents')
-@patch('backend.services.agent_service.check_agent_availability')
-@patch('backend.services.agent_service.get_model_by_model_id')
-@patch('backend.services.agent_service.query_sub_agents_id_list')
-@patch('backend.services.agent_service.search_tools_for_sub_agent')
-@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.management.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_all_models_deleted(
     mock_search_agent_info,
@@ -16580,7 +17339,7 @@ async def test_get_agent_info_impl_all_models_deleted(
     mock_get_model_by_model_id.return_value = None
     mock_check_availability.return_value = (True, [])
 
-    with patch("backend.services.agent_service.get_valid_model_ids") as mock_get_valid_model_ids:
+    with patch("management.services.agent.read.get_valid_model_ids") as mock_get_valid_model_ids:
         mock_get_valid_model_ids.return_value = []  # All models deleted
 
         result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
@@ -16590,8 +17349,311 @@ async def test_get_agent_info_impl_all_models_deleted(
     assert result["model_name"] is None
 
 
-@patch("backend.services.agent_service.get_user_language", return_value="en-US")
-@patch("backend.services.agent_service.get_current_user_info", return_value=("user-1", "tenant-1", "zh-CN"))
+@patch('management.services.agent.service.batch_search_agent_display_names')
+@patch('management.services.agent.service.batch_search_version_names')
+@patch('management.services.agent.service.batch_query_current_version_nos')
+@patch('management.services.agent.service.query_sub_agent_relations')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.management.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_with_pinned_version(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl enriches sub_agent_relations with pinned version_no."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": 2}
+    ]
+    mock_batch_query_current_version_nos.return_value = {}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 2, "version_name": "v2.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["agent_id"] == 456
+    assert rel["agent_name"] == "Sub Agent"
+    assert rel["version_no"] == 2
+    assert rel["version_name"] == "v2.0"
+
+
+@patch('management.services.agent.service.batch_search_agent_display_names')
+@patch('management.services.agent.service.batch_search_version_names')
+@patch('management.services.agent.service.batch_query_current_version_nos')
+@patch('management.services.agent.service.query_sub_agent_relations')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_null_version_fallback(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl resolves null version_no via batch_query_current_version_nos."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": None}
+    ]
+    mock_batch_query_current_version_nos.return_value = {456: 3}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 3, "version_name": "v3.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["agent_id"] == 456
+    assert rel["version_no"] == 3
+    assert rel["version_name"] == "v3.0"
+
+
+@patch('management.services.agent.service.batch_search_agent_display_names')
+@patch('management.services.agent.service.batch_search_version_names')
+@patch('management.services.agent.service.batch_query_current_version_nos')
+@patch('management.services.agent.service.query_sub_agent_relations')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_zero_version_fallback(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl resolves version_no=0 via batch_query_current_version_nos."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": 0}
+    ]
+    mock_batch_query_current_version_nos.return_value = {456: 1}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 1, "version_name": "v1.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["version_no"] == 1
+    assert rel["version_name"] == "v1.0"
+
+
+@patch('management.services.agent.service.batch_search_agent_display_names')
+@patch('management.services.agent.service.batch_search_version_names')
+@patch('management.services.agent.service.batch_query_current_version_nos')
+@patch('management.services.agent.service.query_sub_agent_relations')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_no_resolved_version(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl handles when no published version exists for sub-agent."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": None}
+    ]
+    mock_batch_query_current_version_nos.return_value = {}
+    mock_batch_search_version_names.return_value = []
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 1
+    rel = result["sub_agent_relations"][0]
+    assert rel["agent_id"] == 456
+    assert rel["version_no"] is None
+    assert rel["version_name"] is None
+    assert rel["agent_name"] == "Sub Agent"
+
+
+@patch('management.services.agent.service.batch_search_agent_display_names')
+@patch('management.services.agent.service.batch_search_version_names')
+@patch('management.services.agent.service.batch_query_current_version_nos')
+@patch('management.services.agent.service.query_sub_agent_relations')
+@patch('management.services.agent.service.SkillService')
+@patch('management.services.agent.service.query_external_sub_agents')
+@patch('management.services.agent.service.check_agent_availability')
+@patch('management.services.model.resolver.get_model_by_model_id')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.search_tools_for_sub_agent')
+@patch('management.services.agent.service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_sub_agent_relations_with_none_agent_id(
+    mock_search_agent_info, mock_search_tools, mock_query_sub_agents_id,
+    mock_get_model_by_model_id, mock_check_availability,
+    mock_query_external_sub_agents, mock_skill_service,
+    mock_query_sub_agent_relations, mock_batch_query_current_version_nos,
+    mock_batch_search_version_names, mock_batch_search_agent_display_names
+):
+    """Test get_agent_info_impl handles relations with selected_agent_id=None gracefully."""
+    mock_agent_info = {"agent_id": 123, "model_id": None, "business_description": "Test"}
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = [456, None]
+    mock_get_model_by_model_id.return_value = None
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+
+    mock_skill_service_instance = MagicMock()
+    mock_skill_service_instance.list_skill_instances.return_value = []
+    mock_skill_service.return_value = mock_skill_service_instance
+
+    # Include a relation with selected_agent_id=None alongside a normal one
+    mock_query_sub_agent_relations.return_value = [
+        {"selected_agent_id": 456, "selected_agent_version_no": 2},
+        {"selected_agent_id": None, "selected_agent_version_no": 5},
+    ]
+    mock_batch_query_current_version_nos.return_value = {}
+    mock_batch_search_version_names.return_value = [
+        {"agent_id": 456, "version_no": 2, "version_name": "v2.0"}
+    ]
+    mock_batch_search_agent_display_names.return_value = {456: "Sub Agent"}
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert len(result["sub_agent_relations"]) == 2
+    # First relation (normal) should be enriched correctly
+    rel_normal = result["sub_agent_relations"][0]
+    assert rel_normal["agent_id"] == 456
+    assert rel_normal["agent_name"] == "Sub Agent"
+    assert rel_normal["version_no"] == 2
+    assert rel_normal["version_name"] == "v2.0"
+    # Second relation (None agent_id) should have None values without crashing
+    rel_none = result["sub_agent_relations"][1]
+    assert rel_none["agent_id"] is None
+    assert rel_none["agent_name"] is None
+    assert rel_none["version_no"] == 5
+    assert rel_none["version_name"] is None
+
+
+@patch('management.services.agent.service.update_related_agents')
+@patch('management.services.agent.service.query_sub_agents_id_list')
+@patch('management.services.agent.service.update_agent')
+@patch('management.services.agent.service.get_current_user_info')
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_with_related_agents_objects(
+    mock_get_current_user_info,
+    mock_update_agent,
+    mock_query_sub_agents_id_list,
+    mock_update_related_agents
+):
+    """Test update_agent_info_impl passes related_agents dicts when RelatedAgentInfo objects are provided."""
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_query_sub_agents_id_list.return_value = []
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.enabled_tool_ids = None
+    request.related_agent_ids = [456, 789]
+
+    mock_ra1 = MagicMock()
+    mock_ra1.agent_id = 456
+    mock_ra1.version_no = 2
+    mock_ra2 = MagicMock()
+    mock_ra2.agent_id = 789
+    mock_ra2.version_no = None
+    request.related_agents = [mock_ra1, mock_ra2]
+
+    apply_default_prompt_template_request_fields(request)
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 123
+    mock_update_related_agents.assert_called_once_with(
+        parent_agent_id=123,
+        tenant_id="test_tenant",
+        user_id="test_user",
+        related_agents=[
+            {"agent_id": 456, "version_no": 2},
+            {"agent_id": 789, "version_no": None},
+        ],
+    )
+
+
+@patch("management.services.agent.run.get_user_language", return_value="en-US")
+@patch("management.services.agent.service.get_current_user_info", return_value=("user-1", "tenant-1", "zh-CN"))
 def test_resolve_user_tenant_language_honors_explicit_identity(
     mock_current_user_info,
     mock_get_user_language,
@@ -16608,7 +17670,869 @@ def test_resolve_user_tenant_language_honors_explicit_identity(
     mock_get_user_language.assert_called_once()
 
 
-@patch("backend.services.agent_service.query_group_ids_by_user", side_effect=RuntimeError("db unavailable"))
+@patch("management.services.agent.management.query_group_ids_by_user", side_effect=RuntimeError("db unavailable"))
 def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_group_ids):
     assert agent_service._get_user_group_ids("user-1", "tenant-1") == ""
     mock_query_group_ids.assert_called_once_with("user-1")
+
+
+def test_inject_user_timezone_time_with_valid_timezone():
+    """Should prepend [Current time: ...] when X-User-Timezone header is present."""
+    from datetime import timezone
+    from unittest.mock import MagicMock, patch
+
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Asia/Shanghai"}
+    with patch("utils.time_context_utils.ZoneInfo", return_value=timezone.utc):
+        result = prepend_current_time("What time is it?", request.headers.get("x-user-timezone"))
+    assert result.startswith("[Current time:")
+    assert "What time is it?" in result
+
+
+def test_inject_user_timezone_time_without_header():
+    """Should return query unchanged when X-User-Timezone header is absent."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {}
+    result = prepend_current_time("What time is it?", request.headers.get("x-user-timezone"))
+    assert result == "What time is it?"
+
+
+def test_inject_user_timezone_time_with_existing_prefix():
+    """Should not double-inject when query already has [Current time:] prefix."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Asia/Shanghai"}
+    prefixed = "[Current time: 2026-01-01 20:00:00]\n\nWhat time is it?"
+    result = prepend_current_time(prefixed, request.headers.get("x-user-timezone"))
+    assert result == prefixed
+
+
+def test_inject_user_timezone_time_with_invalid_timezone():
+    """Should return query unchanged when timezone is invalid."""
+    from unittest.mock import MagicMock
+    request = MagicMock()
+    request.headers = {"x-user-timezone": "Invalid/Timezone"}
+    result = prepend_current_time("What time is it?", request.headers.get("x-user-timezone"))
+    assert result == "What time is it?"
+
+
+# ---------------------------------------------------------------------------
+# run_agent_stream knowledge_scope resolution (scoped conversation selection)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_resolves_dict_knowledge_scope(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """A dict knowledge_scope resolves the per-run pool and wires runtime context."""
+    from backend.consts.model import ConversationKnowledgeScopeRequest
+
+    import sys as _sys
+    import types as _types
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(kss_module, "build_runtime_knowledge_policy", return_value="scope policy", create=True)
+    mocker.patch.object(kss_module, "build_runtime_knowledge_resources", return_value="scope resources", create=True)
+
+
+    mock_create_conversation = mocker.patch.object(
+        agent_run_service, "create_new_conversation", return_value={"conversation_id": 999}
+    )
+    mocker.patch.object(
+        agent_run_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_run_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_run_service, "save_messages")
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    mocker.patch.object(agent_run_service, "generate_stream", return_value=stream_chunks())
+
+    resolved = Mock()
+    resolved.tool_params = {"index_names": ["pool-a"]}
+    resolved.desired_scope = {
+        "local": {"mode": "override", "knowledge_ids": ["1"]},
+        "aidp": {"mode": "disabled"},
+    }
+    resolved.warnings = ["warn-1"]
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = [1]
+    resolved.local_display_names = ["KB A"]
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    mock_agent_request.conversation_id = None
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = {
+        "local": {"mode": "override", "knowledge_ids": ["1"]}
+    }
+
+    await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    mock_resolve.assert_called_once()
+    call_kwargs = dict(mock_resolve.call_args.kwargs)
+    scope = call_kwargs.pop("scope")
+    assert scope.local.mode == "override"
+    assert scope.local.knowledge_ids == ["1"]
+    assert call_kwargs == {
+        "agent_id": mock_agent_request.agent_id,
+        "tenant_id": "t",
+        "user_id": "u",
+        "version_no": mock_agent_request.version_no,
+        "is_debug": False,
+        "request_tool_params": None,
+    }
+    assert mock_agent_request.tool_params == {"index_names": ["pool-a"]}
+    assert mock_agent_request.__dict__["_runtime_knowledge_context"] == {
+        "policy": "scope policy",
+        "resources": "scope resources",
+    }
+    event = mock_agent_request.__dict__["_resolved_knowledge_scope_event"]
+    assert event["warnings"] == ["warn-1"]
+    assert event["effective"]["local"]["knowledge_ids"] == [1]
+    assert event["effective"]["aidp"]["disabled"] is True
+    mock_create_conversation.assert_called_once()
+    assert mock_create_conversation.call_args.kwargs["knowledge_scope"] == (
+        resolved.desired_scope
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """A request scope on an existing conversation is re-persisted after resolution."""
+    from backend.consts.model import ConversationKnowledgeScopeRequest
+
+    import sys as _sys
+    import types as _types
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_policy",
+        return_value="scope policy", create=True,
+    )
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_resources",
+        return_value="scope resources", create=True,
+    )
+    mocker.patch.object(
+        agent_run_service, "get_conversation_service",
+        return_value={"knowledge_scope": None},
+    )
+    mocker.patch.object(agent_run_service, "update_conversation_chat_mode_service")
+    mock_update_scope = mocker.patch.object(
+        agent_run_service, "update_conversation_knowledge_scope_service"
+    )
+    mocker.patch.object(
+        agent_run_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_run_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_run_service, "save_messages")
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    mocker.patch.object(agent_run_service, "generate_stream", return_value=stream_chunks())
+
+    resolved = Mock()
+    resolved.tool_params = {}
+    resolved.desired_scope = {"local": {"mode": "inherit"}}
+    resolved.warnings = []
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = []
+    resolved.local_display_names = []
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    mock_agent_request.conversation_id = 55
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = {"local": {"mode": "inherit"}}
+
+    await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    mock_resolve.assert_called_once()
+    call_kwargs = dict(mock_resolve.call_args.kwargs)
+    scope = call_kwargs.pop("scope")
+    assert scope.local.mode == "inherit"
+    assert call_kwargs == {
+        "agent_id": mock_agent_request.agent_id,
+        "tenant_id": "t",
+        "user_id": "u",
+        "version_no": mock_agent_request.version_no,
+        "is_debug": False,
+        "request_tool_params": None,
+    }
+    mock_update_scope.assert_called_once_with(
+        conversation_id=55,
+        knowledge_scope=resolved.desired_scope,
+        user_id="u",
+        tenant_id="t",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_uses_stored_scope_when_request_has_none(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """When the request carries no scope, the stored conversation scope wins."""
+    from backend.consts.model import ConversationKnowledgeScopeRequest
+
+    import sys as _sys
+    import types as _types
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_policy",
+        return_value="scope policy", create=True,
+    )
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_resources",
+        return_value="scope resources", create=True,
+    )
+    mock_get_conversation = mocker.patch.object(
+        agent_run_service, "get_conversation_service",
+        return_value={"knowledge_scope": {"local": {"mode": "inherit"}}},
+    )
+    mock_update_scope = mocker.patch.object(
+        agent_run_service, "update_conversation_knowledge_scope_service"
+    )
+    mocker.patch.object(agent_run_service, "update_conversation_chat_mode_service")
+    mocker.patch.object(
+        agent_run_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_run_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_run_service, "save_messages")
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    mocker.patch.object(agent_run_service, "generate_stream", return_value=stream_chunks())
+
+    resolved = Mock()
+    resolved.tool_params = {}
+    resolved.desired_scope = {"local": {"mode": "inherit"}}
+    resolved.warnings = []
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = []
+    resolved.local_display_names = []
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    mock_agent_request.conversation_id = 55
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = None
+
+    await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    mock_get_conversation.assert_called_once_with(
+        conversation_id=55, user_id="u", tenant_id="t"
+    )
+    mock_resolve.assert_called_once()
+    scope = dict(mock_resolve.call_args.kwargs)["scope"]
+    assert scope.local.mode == "inherit"
+    # A stored scope is used but not re-persisted: the request carried none.
+    mock_update_scope.assert_not_called()
+
+
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
+    mocker, mock_agent_request, mock_http_request,
+):
+    """The stream emits a knowledge_scope_resolved SSE event carrying the effective scope."""
+    import sys as _sys
+    import types as _types
+
+    kss_module = _types.ModuleType("services.knowledge_scope_service")
+    _services_pkg = _types.ModuleType("services")
+    _services_pkg.__path__ = []
+    _sys.modules["services"] = _services_pkg
+    _sys.modules["services.knowledge_scope_service"] = kss_module
+    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_policy",
+        return_value="scope policy", create=True,
+    )
+    mocker.patch.object(
+        kss_module, "build_runtime_knowledge_resources",
+        return_value="scope resources", create=True,
+    )
+    mocker.patch.object(
+        agent_run_service, "get_conversation_service",
+        return_value={"knowledge_scope": None},
+    )
+    mocker.patch.object(agent_run_service, "update_conversation_chat_mode_service")
+    mocker.patch.object(agent_run_service, "update_conversation_knowledge_scope_service")
+    mocker.patch.object(
+        agent_run_service, "_resolve_user_tenant_language", return_value=("u", "t", "en")
+    )
+    mocker.patch.object(
+        agent_run_service, "build_memory_context",
+        return_value=MagicMock(user_config=MagicMock(memory_switch=True)),
+    )
+    mocker.patch.object(agent_run_service, "save_messages")
+
+    resolved = Mock()
+    resolved.tool_params = {}
+    resolved.desired_scope = {"local": {"mode": "inherit"}}
+    resolved.warnings = []
+    resolved.local_disabled = False
+    resolved.local_knowledge_ids = [1]
+    resolved.local_display_names = ["KB A"]
+    resolved.aidp_disabled = True
+    resolved.aidp_kds_ids = []
+    resolved.aidp_display_names = []
+    mock_resolve.return_value = resolved
+
+    async def stream_chunks():
+        yield "data: chunk\n\n"
+
+    mocker.patch.object(agent_run_service, "generate_stream", return_value=stream_chunks())
+
+    mock_agent_request.conversation_id = 55
+    mock_agent_request.is_debug = False
+    mock_agent_request.knowledge_scope = {"local": {"mode": "inherit"}}
+
+    response = await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    body = "".join(chunks)
+    assert "knowledge_scope_resolved" in body
+    assert '"local"' in body
+    assert '"KB A"' in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        (b"", "Agent icon file is empty"),
+        (b"x" * (agent_service.AGENT_ICON_MAX_BYTES + 1), "Agent icon must not exceed 2 MB"),
+        (b"not an image", "Agent icon must be a PNG, JPEG, GIF, or WebP image"),
+    ],
+    ids=("empty", "too-large", "invalid-format"),
+)
+async def test_upload_agent_icon_impl_rejects_invalid_content(content, message):
+    with pytest.raises(ValueError, match=message):
+        await agent_service.upload_agent_icon_impl(123, content, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_rejects_without_edit_permission(mocker):
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/png")
+    mocker.patch.object(agent_service, "get_agent_info_impl", return_value={"permission": "VIEW"})
+    upload = mocker.patch.object(agent_service.minio_client, "upload_fileobj")
+
+    with pytest.raises(agent_service.ForbiddenError, match="permission to edit"):
+        await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+
+    upload.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_upload_failure(mocker):
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/png")
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
+    )
+    mocker.patch.object(agent_service.minio_client, "upload_fileobj", return_value=(False, "storage error"))
+
+    with pytest.raises(ValueError, match="Failed to upload agent icon: storage error"):
+        await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_upload_agent_icon_impl_success(mocker):
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/png")
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"permission": "EDIT", "tenant_id": "owner-tenant"},
+    )
+    upload = mocker.patch.object(agent_service.minio_client, "upload_fileobj", return_value=(True, None))
+    update = mocker.patch.object(agent_service, "update_agent_icon")
+
+    result = await agent_service.upload_agent_icon_impl(123, b"png", "tenant", "user")
+
+    assert result == {"icon_url": "/api/agent/123/icon", "content_type": "image/png"}
+    upload.assert_called_once()
+    assert upload.call_args.args[1] == "agent-icons/owner-tenant/123/icon"
+    update.assert_called_once_with(
+        agent_id=123,
+        tenant_id="owner-tenant",
+        icon_url="/api/agent/123/icon",
+        user_id="user",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "agent", [
+        {},
+        {"icon_url": ""},
+    ],
+)
+async def test_get_agent_icon_impl_requires_icon_url(mocker, agent):
+    mocker.patch.object(agent_service, "get_agent_info_impl", return_value=agent)
+
+    with pytest.raises(FileNotFoundError, match="Agent icon not found"):
+        await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_get_agent_icon_impl_raises_when_object_missing(mocker):
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "owner-tenant"},
+    )
+    get_stream = mocker.patch.object(agent_service, "get_file_stream", return_value=None)
+
+    with pytest.raises(FileNotFoundError, match="Agent icon not found"):
+        await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+    get_stream.assert_called_once_with("agent-icons/owner-tenant/123/icon")
+
+
+@pytest.mark.asyncio
+async def test_get_agent_icon_impl_rejects_invalid_stored_content(mocker):
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "tenant"},
+    )
+    mocker.patch.object(agent_service, "get_file_stream", return_value=io.BytesIO(b"invalid"))
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value=None)
+
+    with pytest.raises(FileNotFoundError, match="Agent icon is invalid"):
+        await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+
+@pytest.mark.asyncio
+async def test_get_agent_icon_impl_success(mocker):
+    content = b"png content"
+    mocker.patch.object(
+        agent_service,
+        "get_agent_info_impl",
+        return_value={"icon_url": "/api/agent/123/icon", "tenant_id": "owner-tenant"},
+    )
+    mocker.patch.object(agent_service, "get_file_stream", return_value=io.BytesIO(content))
+    mocker.patch.object(agent_service, "_detect_agent_icon_content_type", return_value="image/webp")
+
+    result = await agent_service.get_agent_icon_impl(123, "tenant", "user")
+
+    assert result == (content, "image/webp")
+
+
+# =============================================================================
+# Runtime metadata flow inside run_agent_stream
+# =============================================================================
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.run._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_rejects_invalid_runtime_metadata(
+    mock_resolve, mock_http_request,
+):
+    """Non-JSON runtime metadata must be rejected with CHAT_METADATA_INVALID."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        # A dict that passes model construction but fails validate_runtime_metadata
+        # (NaN is not JSON-serializable).
+        metadata={"bad": float("nan")},
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    with patch.object(agent_run_service, "get_conversation_service", mock_get_conversation):
+        with pytest.raises(agent_run_service.AppException) as exc_info:
+            await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert exc_info.value.error_code == agent_run_service.ErrorCode.CHAT_METADATA_INVALID
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.run._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_rejects_oversized_runtime_metadata(
+    mock_resolve, mock_http_request,
+):
+    """METADATA_TOO_LARGE validation failures map to CHAT_METADATA_TOO_LARGE."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"payload": "x" * (64 * 1024 + 1)},
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    with patch.object(agent_run_service, "get_conversation_service", mock_get_conversation):
+        with pytest.raises(agent_run_service.AppException) as exc_info:
+            await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert exc_info.value.error_code == agent_run_service.ErrorCode.CHAT_METADATA_TOO_LARGE
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.run._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_rejects_metadata_when_agent_disallows(
+    mock_resolve, mock_http_request,
+):
+    """Metadata input for an agent with allow_chat_metadata=False is rejected."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"session": "s1"},
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    with patch.object(agent_run_service, "get_conversation_service", mock_get_conversation), \
+            patch.object(
+                agent_run_service, "search_agent_info_by_agent_id",
+                return_value={"allow_chat_metadata": False},
+            ):
+        with pytest.raises(agent_run_service.AppException) as exc_info:
+            await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert exc_info.value.error_code == agent_run_service.ErrorCode.CHAT_METADATA_NOT_ALLOWED
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.run._resolve_user_tenant_language", return_value=("u", "t", "en"))
+@patch("management.services.agent.run.create_new_conversation")
+@patch("management.services.agent.run.generate_stream")
+@patch("management.services.agent.run.save_messages")
+@patch("management.services.agent.run_context.build_memory_context")
+async def test_run_agent_stream_new_conversation_persists_runtime_metadata(
+    mock_build_mem_ctx,
+    mock_save_messages,
+    mock_generate_stream,
+    mock_create_conversation,
+    mock_resolve,
+    mock_http_request,
+):
+    """New conversations carry runtime_metadata into create_new_conversation."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=None, query="q", history=[], minio_files=[],
+        metadata={"session": "s1"},
+    )
+    mock_create_conversation.return_value = {
+        "conversation_id": 222,
+        "runtime_metadata": {"session": "s1"},
+        "runtime_metadata_version": 3,
+    }
+    mock_build_mem_ctx.return_value = MagicMock(user_config=MagicMock(memory_switch=True))
+
+    async def stream_chunks():
+        yield "data: ok\n\n"
+
+    mock_generate_stream.return_value = stream_chunks()
+
+    with patch.object(
+        agent_run_service, "search_agent_info_by_agent_id",
+        return_value={"allow_chat_metadata": True},
+    ):
+        response = await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    kwargs = mock_create_conversation.call_args.kwargs
+    assert kwargs["runtime_metadata"] == {"session": "s1"}
+    assert request.conversation_id == 222
+    assert request.__dict__["_runtime_metadata_snapshot"] == {"session": "s1"}
+    assert request.__dict__["_runtime_metadata_version"] == 3
+    assert response.headers["conversation_id"] == "222"
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.run._resolve_user_tenant_language", return_value=("u", "t", "en"))
+@patch("management.services.agent.run.update_conversation_chat_mode_service")
+@patch("management.services.agent.run.update_conversation_agent_id_service")
+@patch("management.services.agent.run.generate_stream")
+@patch("management.services.agent.run.save_messages")
+@patch("management.services.agent.run_context.build_memory_context")
+async def test_run_agent_stream_existing_conversation_resolves_metadata(
+    mock_build_mem_ctx,
+    mock_save_messages,
+    mock_generate_stream,
+    mock_update_agent_id,
+    mock_update_chat_mode,
+    mock_resolve,
+    mock_http_request,
+):
+    """Existing-conversation metadata updates go through resolve_conversation_runtime_metadata."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"session": "s2"},
+        expected_metadata_version=5,
+    )
+    mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+    mock_resolve_metadata = MagicMock(
+        return_value={"runtime_metadata": {"session": "s2"}, "runtime_metadata_version": 6}
+    )
+    mock_build_mem_ctx.return_value = MagicMock(user_config=MagicMock(memory_switch=True))
+
+    async def stream_chunks():
+        yield "data: ok\n\n"
+
+    mock_generate_stream.return_value = stream_chunks()
+
+    with patch.object(agent_run_service, "get_conversation_service", mock_get_conversation), \
+            patch.object(
+                agent_run_service, "search_agent_info_by_agent_id",
+                return_value={"allow_chat_metadata": True},
+            ), \
+            patch.object(
+                agent_run_service, "resolve_conversation_runtime_metadata", mock_resolve_metadata,
+            ):
+        response = await run_agent_stream(request, mock_http_request, "Bearer token")
+
+    assert isinstance(response, StreamingResponse)
+    assert request.__dict__["_runtime_metadata_snapshot"] == {"session": "s2"}
+    assert request.__dict__["_runtime_metadata_version"] == 6
+    mock_resolve_metadata.assert_called_once_with(
+        conversation_id=123,
+        user_id="u",
+        request_metadata={"session": "s2"},
+        update_requested=True,
+        expected_version=5,
+    )
+    mock_update_chat_mode.assert_called_once()
+    mock_update_agent_id.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.run._resolve_user_tenant_language", return_value=("u", "t", "en"))
+async def test_run_agent_stream_metadata_version_conflict(
+    mock_resolve, mock_http_request,
+):
+    """A concurrent metadata update surfaces as CHAT_METADATA_VERSION_CONFLICT."""
+    request = AgentRequest(
+        agent_id=1, conversation_id=123, query="q", history=[], minio_files=[],
+        metadata={"session": "s2"},
+    )
+
+    class _FakeVersionConflict(ValueError):
+        def __init__(self, current_version):
+            super().__init__("conflict")
+            self.current_version = current_version
+
+    original = agent_run_service.RuntimeMetadataVersionConflict
+    agent_run_service.RuntimeMetadataVersionConflict = _FakeVersionConflict
+    try:
+        mock_get_conversation = MagicMock(return_value={"knowledge_scope": None})
+        mock_resolve_metadata = MagicMock(side_effect=_FakeVersionConflict(current_version=7))
+        with patch.object(agent_run_service, "get_conversation_service", mock_get_conversation), \
+                patch.object(
+                    agent_run_service, "search_agent_info_by_agent_id",
+                    return_value={"allow_chat_metadata": True},
+                ), \
+                patch.object(
+                    agent_run_service, "resolve_conversation_runtime_metadata", mock_resolve_metadata,
+                ):
+            with pytest.raises(agent_run_service.AppException) as exc_info:
+                await run_agent_stream(request, mock_http_request, "Bearer token")
+    finally:
+        agent_run_service.RuntimeMetadataVersionConflict = original
+
+    assert exc_info.value.error_code == agent_run_service.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
+    assert exc_info.value.details == {"current_version": 7}
+
+
+@pytest.fixture
+def rebase_import_context(mocker):
+    """Isolate persistence while retaining real import orchestration and naming rules."""
+    from management.services.agent import management, naming
+
+    catalog = []
+    mocker.patch.object(management, "get_current_user_info", return_value=("user", "tenant", "en"))
+    query = mocker.patch.object(
+        management, "query_all_agent_info_by_tenant_id", side_effect=lambda tenant: list(catalog)
+    )
+    mocker.patch.object(management, "query_all_tools", return_value=[])
+    mocker.patch.object(management, "_resolve_model_ids_with_fallback", return_value=[])
+    mocker.patch.object(management, "_get_user_group_ids", return_value="")
+    mocker.patch.object(management, "publish_version_impl", new_callable=AsyncMock)
+    relations = mocker.patch.object(management, "insert_related_agent")
+    llm = mocker.patch.object(naming, "call_llm_for_system_prompt")
+
+    def create_agent(agent_info, **kwargs):
+        record = {**agent_info, "agent_id": len(catalog) + 1}
+        catalog.append(record)
+        return record
+
+    create = mocker.patch.object(management, "create_agent", side_effect=create_agent)
+    payload = ExportAndImportAgentInfo(
+        agent_id=1, name="copy", display_name="Copy", description="test", business_description="test",
+        max_steps=5, provide_run_summary=False, enabled=True, tools=[], managed_agents=[],
+        model_ids=[], model_names=[],
+    )
+    return types.SimpleNamespace(
+        service=management, catalog=catalog, payload=payload, query=query, create=create,
+        relations=relations, llm=llm,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing,expected", [
+    ([], ("copy", "Copy")),
+    ([{"name": "copy", "display_name": "Other"}], ("copy_1", "Copy")),
+    ([{"name": "other", "display_name": "Copy"}], ("copy", "Copy_1")),
+    ([{"name": "copy", "display_name": "Copy"}], ("copy_1", "Copy_1")),
+    ([{"name": "copy", "display_name": "Copy"}, {"name": "copy_1", "display_name": "Copy_2"}],
+     ("copy_2", "Copy_1")),
+])
+async def test_ac019_repository_copy_resolves_each_name_independently(rebase_import_context, existing, expected):
+    ctx = rebase_import_context
+    ctx.catalog.extend(existing)
+    await ctx.service.import_agent_by_agent_id(ctx.payload, "tenant", "user", resolve_name_conflicts=True)
+    assert (ctx.catalog[-1]["name"], ctx.catalog[-1]["display_name"]) == expected
+    ctx.query.assert_called_once_with("tenant")
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac019_ordinary_import_keeps_names_by_default(rebase_import_context):
+    ctx = rebase_import_context
+    ctx.catalog.append({"name": "copy", "display_name": "Copy"})
+    await ctx.service.import_agent_by_agent_id(ctx.payload, "tenant", "user")
+    assert (ctx.catalog[-1]["name"], ctx.catalog[-1]["display_name"]) == ("copy", "Copy")
+    ctx.query.assert_not_called()
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac019_repeated_dfs_copies_see_names_created_by_previous_agents(rebase_import_context):
+    ctx = rebase_import_context
+    ctx.catalog.append({"name": "copy", "display_name": "Copy"})
+    ctx.payload.managed_agents = [2]
+    child = ctx.payload.model_copy(update={"agent_id": 2, "managed_agents": []})
+    snapshot = types.SimpleNamespace(agent_id=1, agent_info={"1": ctx.payload, "2": child})
+    for _ in range(2):
+        mapping = await ctx.service.import_agent_impl(snapshot, "Bearer token", resolve_name_conflicts=True)
+        assert mapping[1] > mapping[2]
+    assert [record["name"] for record in ctx.catalog] == ["copy", "copy_1", "copy_2", "copy_3", "copy_4"]
+    assert [record["display_name"] for record in ctx.catalog] == ["Copy", "Copy_1", "Copy_2", "Copy_3", "Copy_4"]
+    assert ctx.relations.call_count == 2
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ac019_suffix_exhaustion_prevents_agent_creation(rebase_import_context):
+    ctx = rebase_import_context
+    ctx.catalog.extend({"name": value} for value in ["copy", *(f"copy_{index}" for index in range(1, 101))])
+    with pytest.raises(ValueError, match="max attempts"):
+        await ctx.service.import_agent_by_agent_id(ctx.payload, "tenant", "user", resolve_name_conflicts=True)
+    ctx.create.assert_not_called()
+    ctx.llm.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolve_conflicts", [False, True])
+async def test_ac019_skill_bundle_preserves_naming_flag_and_skill_binding(rebase_import_context, mocker, resolve_conflicts):
+    ctx = rebase_import_context
+    ctx.catalog.append({"name": "copy", "display_name": "Copy"})
+    ctx.payload.skill_names = ["SkillA"]
+    mocker.patch.object(ctx.service.skill_db, "list_skills", return_value=[])
+    skill_service = mocker.patch.object(ctx.service, "SkillService").return_value
+    skill_service.create_skill_from_zip_bytes.return_value = {"skill_id": 7}
+    bind = mocker.patch.object(ctx.service.skill_db, "create_or_update_skill_by_skill_info")
+    snapshot = types.SimpleNamespace(agent_id=1, agent_info={"1": ctx.payload})
+    result = await ctx.service.import_agent_with_skills_impl(
+        snapshot, [types.SimpleNamespace(skill_name="SkillA", skill_zip_base64="eA==")], "Bearer token",
+        resolve_name_conflicts=resolve_conflicts,
+    )
+    assert result == {1: 2}
+    assert ctx.catalog[-1]["name"] == ("copy_1" if resolve_conflicts else "copy")
+    assert ctx.catalog[-1]["display_name"] == ("Copy_1" if resolve_conflicts else "Copy")
+    assert bind.call_args.kwargs["skill_info"].skill_id == 7
+    assert bind.call_args.kwargs["skill_info"].agent_id == 2
+    ctx.llm.assert_not_called()
+
+
+def test_check_single_model_availability_loads_missing_cache_entry(mocker):
+    from management.services.model import resolver
+
+    model_cache = {}
+    get_model = mocker.patch.object(resolver, "get_model_by_model_id", return_value=None)
+
+    model = resolver.resolve_model_record(31, "tenant-id", model_cache)
+
+    assert not resolver.is_model_available(model)
+    assert model_cache == {31: None}
+    get_model.assert_called_once_with(31, "tenant-id")
+
+
+def test_check_single_model_availability_reuses_cached_model(mocker):
+    from management.services.model import resolver
+
+    status_enum = types.SimpleNamespace(
+        AVAILABLE=types.SimpleNamespace(value="available"),
+        get_value=lambda value: value,
+    )
+    mocker.patch.object(resolver, "ModelConnectStatusEnum", status_enum)
+    get_model = mocker.patch.object(resolver, "get_model_by_model_id")
+    model_cache = {31: {"connect_status": "available"}}
+
+    model = resolver.resolve_model_record(31, "tenant-id", model_cache)
+
+    assert resolver.is_model_available(model)
+    get_model.assert_not_called()
+
+
+def test_collect_model_availability_marks_models_not_configured(mocker):
+    from management.services.agent import read
+
+    mocker.patch.object(read, "search_tools_for_sub_agent", return_value=[])
+    available, reasons = read.check_agent_availability(
+        agent_id=1,
+        agent_info={"model_ids": []},
+        tenant_id="tenant-id",
+        model_cache={},
+    )
+
+    assert available is False
+    assert reasons == [read.AgentUnavailableReason.MODEL_NOT_CONFIGURED]
+
+
+def test_is_agent_running_reflects_manager_lookup(mocker):
+    get_run_info = mocker.patch.object(
+        agent_run_service.agent_run_manager,
+        "get_agent_run_info",
+        return_value={"status": "running"},
+    )
+
+    assert agent_run_service.is_agent_running(44, "user-id") is True
+    get_run_info.assert_called_once_with(44, "user-id")
+
+
+def test_is_agent_running_returns_false_when_run_is_missing(mocker):
+    mocker.patch.object(agent_run_service.agent_run_manager, "get_agent_run_info", return_value=None)
+
+    assert agent_run_service.is_agent_running(44, "user-id") is False

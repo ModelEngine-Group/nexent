@@ -13,6 +13,7 @@ import { refreshToolListWithToast } from "./useRefreshToolListWithToast";
 import { McpServiceStatus } from "@/const/mcpTools";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import type { McpServiceItem } from "@/types/mcpTools";
+import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
 
 /**
  * Toggles the enabled/disabled flag on an MCP service and refreshes caches that
@@ -64,11 +65,15 @@ export function useMcpServiceToggle() {
         message,
         t,
         toastKey: `mcp-tools-refresh-${service.mcpId}`,
+        mcpId: service.mcpId,
       })
         .then(() => {
           queryClient.invalidateQueries({ queryKey: ["tools"] });
           queryClient.invalidateQueries({ queryKey: ["agents"] });
           queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
+          queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
+          queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity });
+          queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.communityList });
         })
         .finally(() => {
           setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: false }));

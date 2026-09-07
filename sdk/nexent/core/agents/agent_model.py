@@ -263,6 +263,10 @@ class AgentConfig(BaseModel):
     )
     model_name: str = Field(description="Model alias from ModelConfig")
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
+    allow_chat_metadata: bool = Field(
+        description="Whether Native Chat and Debug users may submit runtime metadata",
+        default=False,
+    )
     instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
     managed_agents: List["AgentConfig"] = Field(
         description="Internal managed sub-agents created locally",
@@ -310,7 +314,7 @@ class AgentConfig(BaseModel):
             "scope (session/system), "
             "docker_image, memory_limit_mb, cpu_quota, "
             "network_disabled, timeout_seconds, shell_policy, "
-            "output_dir, auto_sync_outputs.  "
+            "host_tool_timeout_seconds, output_dir, auto_sync_outputs.  "
             'Example: {"level": "docker", "scope": "session", '
             '"docker_image": "nexent/nexent-sandbox:latest"}'
         ),
@@ -352,7 +356,7 @@ class AgentRunInfo(BaseModel):
     agent_config: AgentConfig = Field(description="Detailed Agent configuration")
     mcp_host: Optional[List[Union[str, Dict[str, Any]]]] = Field(
         description="MCP server address(es). Can be a string (URL) or dict with 'url', 'transport', "
-        "and optionally 'authorization' or 'headers' keys. "
+        "and optionally 'authorization', 'headers', or 'httpx_client_factory' keys. "
         "Transport can be 'sse' or 'streamable-http'. If string, transport is auto-detected based on URL ending: "
         "URLs ending with '/sse' use 'sse' transport, URLs ending with '/mcp' use 'streamable-http' transport. "
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
@@ -362,6 +366,14 @@ class AgentRunInfo(BaseModel):
     stop_event: Event = Field(description="Stop event control")
     conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
     user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
+    runtime_metadata: Dict[str, Any] = Field(
+        description="Immutable application-resolved runtime metadata snapshot",
+        default_factory=dict,
+    )
+    runtime_metadata_version: Optional[int] = Field(
+        description="Conversation runtime metadata version used by this run",
+        default=None,
+    )
     context_input: Optional[Any] = Field(
         description="Immutable run-scoped context snapshot supplied by the application boundary.",
         default=None,
@@ -397,6 +409,22 @@ class AgentRunInfo(BaseModel):
             "MinIO client for syncing sandbox output files to object storage.  "
             "Required when sandbox_config.auto_sync_outputs is True."
         ),
+        default=None,
+    )
+    workspace_path: Optional[str] = Field(
+        description="Run-scoped local workspace used for uploaded inputs and generated outputs.",
+        default=None,
+    )
+    workspace_run_id: Optional[str] = Field(
+        description="Opaque run identifier used to isolate workspace files and object keys.",
+        default=None,
+    )
+    tenant_id: Optional[str] = Field(
+        description="Tenant id used for run-scoped file isolation.",
+        default=None,
+    )
+    minio_files: Optional[List[Dict[str, Any]]] = Field(
+        description="Authorized files uploaded with the current run request.",
         default=None,
     )
 
@@ -442,6 +470,10 @@ class ExternalA2AAgentConfig(BaseModel):
     timeout: float = Field(description="Request timeout in seconds", default=300.0)
     raw_card: Optional[Dict[str, Any]] = Field(
         description="Raw Agent Card containing skills and capabilities",
+        default=None
+    )
+    custom_headers: Optional[Dict[str, str]] = Field(
+        description="Pre-built auth headers from securitySchemes + credentials",
         default=None
     )
 
@@ -496,7 +528,8 @@ class ExternalA2AAgentConfig(BaseModel):
             protocol_version=self.protocol_version,
             protocol_type=self.protocol_type,
             timeout=self.timeout,
-            raw_card=self.raw_card
+            raw_card=self.raw_card,
+            custom_headers=self.custom_headers
         )
 
 

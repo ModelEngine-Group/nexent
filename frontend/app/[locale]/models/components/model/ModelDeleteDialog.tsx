@@ -127,6 +127,7 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.VLM:
       case MODEL_TYPES.VLM2:
       case MODEL_TYPES.VLM3:
+      case MODEL_TYPES.VLM4:
         return {
           bg: "bg-yellow-50",
           text: "text-yellow-600",
@@ -171,6 +172,7 @@ export const ModelDeleteDialog = ({
       case MODEL_TYPES.VLM:
       case MODEL_TYPES.VLM2:
       case MODEL_TYPES.VLM3:
+      case MODEL_TYPES.VLM4:
         return "👁️";
       default:
         return "⚙️";
@@ -199,6 +201,8 @@ export const ModelDeleteDialog = ({
         return t("model.type.imageGeneration");
       case MODEL_TYPES.VLM3:
         return t("model.type.videoUnderstanding");
+      case MODEL_TYPES.VLM4:
+        return t("model.type.audioUnderstanding");
       default:
         return t("model.type.unknown");
     }
@@ -482,20 +486,29 @@ export const ModelDeleteDialog = ({
   // Prefetch provider model list (supports Silicon, ModelEngine, DashScope, TokenPony)
   const prefetchProviderModels = async (
     provider: ModelSource,
-    modelType: ModelType | null
+    modelType: ModelType | null,
+    // Optional override for the API key to use for this fetch. Needed
+    // right after a provider config save: `models` state may not have
+    // re-rendered into this closure yet (React state updates are async),
+    // so falling back to getApiKeyByType() here could still read the
+    // pre-save key even though the backend already has the new one.
+    apiKeyOverride?: string
   ): Promise<void> => {
     if (!modelType) return;
     try {
       let result: any[] = [];
       if (provider === MODEL_SOURCES.SILICON) {
-        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.SILICON);
+        const apiKey =
+          apiKeyOverride ?? getApiKeyByType(modelType, MODEL_SOURCES.SILICON);
         result = await modelService.addProviderModel({
           provider: MODEL_SOURCES.SILICON,
           type: modelType,
           apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
         });
       } else if (provider === MODEL_SOURCES.MODELENGINE) {
-        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.MODELENGINE);
+        const apiKey =
+          apiKeyOverride ??
+          getApiKeyByType(modelType, MODEL_SOURCES.MODELENGINE);
         const baseUrl = getProviderBaseUrlByType(modelType);
         result = await modelService.addProviderModel({
           provider: MODEL_SOURCES.MODELENGINE,
@@ -504,14 +517,18 @@ export const ModelDeleteDialog = ({
           baseUrl: baseUrl || undefined,
         });
       } else if (provider === MODEL_SOURCES.DASHSCOPE) {
-        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.DASHSCOPE);
+        const apiKey =
+          apiKeyOverride ??
+          getApiKeyByType(modelType, MODEL_SOURCES.DASHSCOPE);
         result = await modelService.addProviderModel({
           provider: MODEL_SOURCES.DASHSCOPE,
           type: modelType,
           apiKey: apiKey && apiKey.trim() !== "" ? apiKey : "sk-no-api-key",
         });
       } else if (provider === MODEL_SOURCES.TOKENPONY) {
-        const apiKey = getApiKeyByType(modelType, MODEL_SOURCES.TOKENPONY);
+        const apiKey =
+          apiKeyOverride ??
+          getApiKeyByType(modelType, MODEL_SOURCES.TOKENPONY);
         result = await modelService.addProviderModel({
           provider: MODEL_SOURCES.TOKENPONY,
           type: modelType,
@@ -899,6 +916,15 @@ export const ModelDeleteDialog = ({
       }
     }
     await onSuccess();
+    if (selectedSource && deletingModelType) {
+      // Pass the just-saved apiKey directly instead of re-deriving it from
+      // `models` state, which may still be stale in this closure.
+      await prefetchProviderModels(
+        selectedSource,
+        deletingModelType,
+        apiKey
+      );
+    }
     setIsProviderConfigOpen(false);
   };
 
@@ -1315,6 +1341,7 @@ export const ModelDeleteDialog = ({
                 MODEL_TYPES.VLM,
                 MODEL_TYPES.VLM2,
                 MODEL_TYPES.VLM3,
+                MODEL_TYPES.VLM4,
                 MODEL_TYPES.STT,
                 MODEL_TYPES.TTS,
               ] as ModelType[]
@@ -1822,7 +1849,16 @@ export const ModelDeleteDialog = ({
           }
         }}
       />
+      {/* key forces full unmount/remount whenever the dialog is (re)opened
+          for a given type/source, so the internal apiKey/maxTokens/etc
+          state always initializes from the latest initialApiKey prop. Without
+          this, the component stays mounted across opens and relies on the
+          [initialApiKey, ...] effect dependency diff to resync -- if that
+          diff doesn't trigger at the right time relative to the parent's
+          models refresh, the API key input can keep showing a stale value
+          after the user saves and reopens the dialog. */}
       <ProviderConfigEditDialog
+        key={`${selectedSource || "__none__"}-${deletingModelType || "__none__"}-${isProviderConfigOpen}`}
         isOpen={isProviderConfigOpen}
         onClose={() => setIsProviderConfigOpen(false)}
         initialApiKey={getApiKeyByType(

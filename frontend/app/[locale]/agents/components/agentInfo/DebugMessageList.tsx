@@ -5,6 +5,7 @@ import { TaskWindow } from "@/app/chat/streaming/taskWindow";
 import { transformMessagesToTaskMessages } from "@/app/chat/streaming/messageTransformer";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType } from "@/types/chat";
+import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "antd";
 import { Sparkles } from "lucide-react";
 
@@ -25,6 +26,7 @@ export default function DebugMessageList({
   emptyPlaceholder,
   onOptimizeReply,
 }: DebugMessageListProps) {
+  const { t } = useTranslation("common");
   const processMessageSteps = (message: ChatMessageType): TaskMessageType[] => {
     if (!message.steps || message.steps.length === 0) return [];
 
@@ -137,7 +139,7 @@ export default function DebugMessageList({
 
                 {canOptimize && (
                   <div className="mt-1 flex justify-start">
-                    <Tooltip title="优化" placement="top">
+                    <Tooltip title={t("agent.debug.optimizeTooltip")} placement="top">
                       <Button
                         type="text"
                         size="small"

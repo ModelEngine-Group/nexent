@@ -104,7 +104,8 @@ class MockUserTokenUsageLog:
     _instances = []
     
     def __init__(self, token_usage_id=1, token_id=1, call_function_name="run_chat",
-                 related_id=123, created_by="user123", meta_data=None, create_time=None):
+                 related_id=123, created_by="user123", meta_data=None, create_time=None,
+                 delete_flag="N", updated_by=None, update_time=None):
         self.token_usage_id = token_usage_id
         self.token_id = token_id
         self.call_function_name = call_function_name
@@ -112,6 +113,9 @@ class MockUserTokenUsageLog:
         self.created_by = created_by
         self.meta_data = meta_data
         self.create_time = create_time
+        self.delete_flag = delete_flag
+        self.updated_by = updated_by or created_by
+        self.update_time = update_time
         MockUserTokenUsageLog._instances.append(self)
     
     @classmethod
@@ -130,17 +134,29 @@ class MockColumn:
     def desc(self):
         return "desc"
 
+    def asc(self):
+        return "asc"
+
+    def in_(self, values):
+        return ("in", tuple(values))
+
+    def label(self, name):
+        return f"label_{name}"
+
 MockUserTokenInfo.create_time = MockColumn()
 
 MockUserTokenUsageLog.token_usage_id = 1
-MockUserTokenUsageLog.token_id = 1
+MockUserTokenUsageLog.token_id = MockColumn()
 MockUserTokenUsageLog.call_function_name = "test"
 MockUserTokenUsageLog.related_id = 1
 MockUserTokenUsageLog.create_time = MockColumn()
+MockUserTokenUsageLog.delete_flag = "N"
+MockUserTokenUsageLog.updated_by = "test"
 
 db_models_mock = MagicMock()
 db_models_mock.UserTokenInfo = MockUserTokenInfo
 db_models_mock.UserTokenUsageLog = MockUserTokenUsageLog
+db_models_mock.UserTenant = MagicMock()
 sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.db_models'] = db_models_mock
 
@@ -152,8 +168,12 @@ sys.modules['backend.consts.exceptions'] = exceptions_mock
 # Mock sqlalchemy
 sqlalchemy_mock = MagicMock()
 sqlalchemy_mock.exc.SQLAlchemyError = type("SQLAlchemyError", (Exception,), {})
+sqlalchemy_mock.func = MagicMock()
+sqlalchemy_mock.orm = MagicMock()
+sqlalchemy_mock.orm.aliased = MagicMock()
 sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
+sys.modules['sqlalchemy.orm'] = sqlalchemy_mock.orm
 
 
 # Import the module under test
@@ -198,6 +218,7 @@ class MockSession:
         MockUserTokenUsageLog.reset()
         self._tokens = []
         self._usage_logs = []
+        self._user_tenants = []
 
     def __enter__(self):
         return self
@@ -328,16 +349,113 @@ class TestDeleteToken:
     def test_delete_token_success(self, mock_db_session):
         """Test successful token deletion."""
         token = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123", delete_flag="N")
+        usage_log = MockUserTokenUsageLog(token_usage_id=1, token_id=1, created_by="user123")
         mock_db_session._tokens.append(token)
+        mock_db_session._usage_logs.append(usage_log)
 
         result = token_db.delete_token(1, "user123")
         assert result is True
         assert token.delete_flag == "Y"
+        assert usage_log.delete_flag == "Y"
+        assert usage_log.updated_by == "user123"
 
     def test_delete_token_not_found(self, mock_db_session):
         """Test deletion of non-existent token."""
         result = token_db.delete_token(999, "user123")
         assert result is False
+
+
+class TestSoftDeleteTokensByUser:
+    """Tests for deleting all API keys and usage logs owned by a user."""
+
+    def test_soft_delete_tokens_also_soft_deletes_usage_logs(self, mock_db_session):
+        token = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
+        usage_log = MockUserTokenUsageLog(token_usage_id=1, token_id=1, created_by="user123")
+        mock_db_session._tokens.append(token)
+        mock_db_session._usage_logs.append(usage_log)
+
+        deleted_count = token_db.soft_delete_tokens_by_user("user123", "admin123")
+
+        assert deleted_count == 1
+        assert token.delete_flag == "Y"
+        assert token.updated_by == "admin123"
+        assert usage_log.delete_flag == "Y"
+        assert usage_log.updated_by == "admin123"
+
+
+class TestListActiveTokensByTenant:
+    """Tests for list_active_tokens_by_tenant function.
+
+    Note: These tests use integration-style mocking since the function uses
+    complex SQLAlchemy features (aliased joins, subqueries, aggregates).
+    The tests verify the function structure rather than full DB integration.
+    """
+
+    def test_list_active_tokens_by_tenant_function_exists(self):
+        """Verify the list_active_tokens_by_tenant function exists."""
+        assert hasattr(token_db, 'list_active_tokens_by_tenant')
+
+    def test_list_active_tokens_by_tenant_signature(self):
+        """Test that the function has the expected signature."""
+        import inspect
+        sig = inspect.signature(token_db.list_active_tokens_by_tenant)
+        params = list(sig.parameters.keys())
+        assert 'tenant_id' in params
+        assert 'page' in params
+        assert 'page_size' in params
+        assert 'sort_order' in params
+
+    def test_list_active_tokens_by_tenant_default_parameters(self):
+        """Test that default parameters work correctly."""
+        import inspect
+        sig = inspect.signature(token_db.list_active_tokens_by_tenant)
+        params = sig.parameters
+        assert params['page'].default == 1
+        assert params['page_size'].default == 20
+        assert params['sort_order'].default == "desc"
+
+
+class TestCreateTokenWithCreatedBy:
+    """Tests for create_token with created_by parameter."""
+
+    def test_create_token_with_explicit_created_by(self, mock_db_session):
+        """Test that created_by parameter is used when provided."""
+        result = token_db.create_token(
+            "nexent-custom123", "user_owner", created_by="admin_user"
+        )
+
+        assert result["token_id"] is not None
+        assert result["access_key"] == "nexent-custom123"
+        assert result["user_id"] == "user_owner"
+
+    def test_create_token_defaults_created_by_to_user_id(self, mock_db_session):
+        """Test that created_by defaults to user_id when not provided."""
+        result = token_db.create_token("nexent-default123", "user123")
+
+        assert result["token_id"] is not None
+        assert result["access_key"] == "nexent-default123"
+
+
+class TestSoftDeleteTokensByUser:
+    """Tests for soft_delete_tokens_by_user function."""
+
+    def test_soft_delete_tokens_returns_count(self, mock_db_session):
+        """Test that soft_delete_tokens_by_user returns the number of deleted tokens."""
+        token1 = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
+        token2 = MockUserTokenInfo(token_id=2, access_key="nexent-key2", user_id="user123")
+        mock_db_session._tokens.extend([token1, token2])
+
+        deleted_count = token_db.soft_delete_tokens_by_user("user123", "admin456")
+
+        assert deleted_count == 2
+        assert token1.delete_flag == "Y"
+        assert token2.delete_flag == "Y"
+
+    def test_soft_delete_tokens_empty_user(self, mock_db_session):
+        """Test soft delete for user with no tokens."""
+        deleted_count = token_db.soft_delete_tokens_by_user("user_with_no_tokens", "admin456")
+
+        assert deleted_count == 0
 
 
 class TestLogTokenUsage:

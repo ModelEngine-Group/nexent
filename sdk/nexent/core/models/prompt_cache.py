@@ -24,6 +24,11 @@ APPROVED_PROVIDER_PROMPT_CACHE_PROFILES: Dict[str, Dict[str, Any]] = {
         "serialization_version": "openai_chat_completions.v1",
         "capability_version": PROMPT_CACHE_CAPABILITY_VERSION,
     },
+    "deepseek": {
+        "mode": "provider_automatic", "enabled": True, "metrics_available": True,
+        "serialization_version": "deepseek_chat_completions.v1",
+        "capability_version": PROMPT_CACHE_CAPABILITY_VERSION,
+    },
 }
 
 
@@ -123,10 +128,10 @@ def extract_prompt_cache_usage(
             metrics_source="capability_unknown",
         )
 
-    cached, source = _extract_cached_input_tokens(usage)
+    profile = _normalize_capability_profile(capability_profile or {})
+    cached, source = _extract_cached_input_tokens(usage, provider=str(profile.get("provider") or ""))
     uncached = max(0, (input_tokens or 0) - cached)
     total = cached + uncached
-    profile = _normalize_capability_profile(capability_profile or {})
     discount = profile.get("cached_input_discount", 0.0)
     try:
         discount = max(0.0, min(float(discount), 1.0))
@@ -174,14 +179,20 @@ def _directive_advice(profile: Optional[Mapping[str, Any]]) -> CacheDirectiveAdv
     return CacheDirectiveAdvice(mode=mode, reason="unrecognized_mode")
 
 
-def _extract_cached_input_tokens(usage: Any) -> Tuple[int, str]:
-    candidates = (
+def _extract_cached_input_tokens(usage: Any, provider: str = "") -> Tuple[int, str]:
+    deepseek_candidate = (None, "prompt_cache_hit_tokens", "deepseek_prompt_cache_tokens")
+    common_candidates = (
         ("prompt_tokens_details", "cached_tokens", "openai_prompt_tokens_details"),
         ("input_tokens_details", "cached_tokens", "openai_input_tokens_details"),
         ("input_token_details", "cache_read", "anthropic_input_token_details"),
         ("input_token_details", "cache_read_input_tokens", "anthropic_input_token_details"),
         (None, "cached_tokens", "top_level_fallback"),
         (None, "cache_read_input_tokens", "top_level_fallback"),
+    )
+    candidates = (
+        (deepseek_candidate, *common_candidates)
+        if provider.lower() == "deepseek"
+        else (*common_candidates, deepseek_candidate)
     )
     for parent_name, child_name, source in candidates:
         value = _get_value(_get_value(usage, parent_name), child_name) if parent_name else _get_value(usage, child_name)
@@ -227,5 +238,6 @@ def _normalize_for_json(value: Any) -> Any:
 def _serialization_version(provider: str) -> str:
     return {
         "openai": "openai_chat_completions.v1",
+        "deepseek": "deepseek_chat_completions.v1",
         "anthropic": "anthropic_messages.v1",
     }.get((provider or "").lower(), "unknown")

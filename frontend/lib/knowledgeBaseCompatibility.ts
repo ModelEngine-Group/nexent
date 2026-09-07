@@ -11,6 +11,10 @@ export const isMultimodalConstraintMismatch = (
   );
 };
 
+/**
+ * Check whether a knowledge base is compatible with the configured embedding models.
+ * String args must be model display names (matching kb.embeddingModel / display_name).
+ */
 export const isEmbeddingModelCompatible = (
   kb: KnowledgeBase,
   currentEmbeddingModel: string | null,

@@ -38,6 +38,11 @@ class SubAgentToolWrapper:
     for execution; the wrapper only annotates the stream.
     """
 
+    # Managed-agent orchestration must stay in the trusted Runtime process.
+    # Remote code executors expose this wrapper through the authenticated host
+    # tool bridge, while the inner agent uses its own sandbox executor.
+    _nexent_execute_on_host = True
+
     # Attributes that live on the wrapper itself rather than being forwarded
     # to the inner agent. Anything else is dispatched via ``__getattr__`` /
     # ``__setattr__`` so the wrapper stays transparent.
