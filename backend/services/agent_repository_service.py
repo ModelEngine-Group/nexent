@@ -1046,6 +1046,11 @@ def check_repository_import_precheck_impl(
         tenant_id,
     )
     if not record:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            OFFICIAL_AGENT_TENANT_ID,
+        )
+    if not record:
         raise ValueError("Repository listing not found")
 
     if record.get("status") != STATUS_SHARED:
@@ -1097,6 +1102,11 @@ async def import_agent_from_repository_impl(
         agent_repository_id,
         tenant_id,
     )
+    if not record:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            OFFICIAL_AGENT_TENANT_ID,
+        )
     if not record:
         raise ValueError("Repository listing not found")
 
