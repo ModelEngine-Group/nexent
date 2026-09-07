@@ -50,7 +50,7 @@ from services.oauth_service import (
     create_or_update_oauth_account,
     find_supabase_user_id_by_email,
 )
-from services.skill_service import init_skill_list_for_tenant
+from management.services.skill.service import init_skill_list_for_tenant
 from services.tool_configuration_service import init_tool_list_for_tenant
 from utils.auth_utils import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
 

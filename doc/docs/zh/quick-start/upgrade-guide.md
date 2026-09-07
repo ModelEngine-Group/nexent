@@ -2,7 +2,7 @@
 
 ## 🚀 升级流程概览
 
-升级 Nexent 时建议依次完成以下几个步骤：
+升级 Nexent 时，建议依次完成以下步骤：
 
 1. 拉取最新代码
 2. 执行升级脚本
@@ -12,22 +12,23 @@
 
 ## 🔄 步骤一：更新代码
 
-更新之前，先记录下当前部署的版本和数据目录
+更新前，先记录当前版本和数据目录，并备份 PostgreSQL、MinIO 及其他重要数据。
 
 - 当前部署版本信息的位置：根目录 `VERSION`
-- 数据目录信息的位置：`deploy/env/.env`中的 ROOT_DIR
+- 数据目录信息的位置：`deploy/env/.env` 中的 `ROOT_DIR`
 
 **git 方式下载的代码**
 
-通过 git 指令更新代码
+确认当前位于用于部署的分支，然后以快进方式拉取代码：
 
 ```bash
-git pull
+git branch --show-current
+git pull --ff-only
 ```
 
 **zip 包等方式下载的代码**
 
-需要去 github 上重新下载一份最新代码，并解压缩。另外，需要从之前执行部署脚本目录下 docker 目录中拷贝 deploy.options 到新代码目录下的 docker 目录中（如果不存在该文件则忽略）。
+从 GitHub 下载目标版本并解压。然后将旧部署目录中的 `deploy/docker/deploy.options` 复制到新代码的相同位置；如果该文件不存在，可跳过此步骤。也可以在部署时使用 `--reuse-from` 直接复用旧目录的环境配置和部署选项。
 
 ## 🔄 步骤二：执行升级
 
@@ -37,18 +38,20 @@ git pull
 bash deploy.sh docker
 ```
 
-缺少 deploy.options 的情况下，会提示需要重新选择部署配置，例如组件组合、端口策略、镜像来源等。按照您之前的部署方式重新选择即可。
+如果缺少 `deploy.options`，脚本会要求重新选择组件、端口策略和镜像来源。请选择与原环境一致的配置。
 
 > 💡 提示
 > - 升级时会保留 `deploy/env/.env` 中的已有值、注释、顺序和旧版独有变量，并追加当前 `deploy/env/.env.example` 新增的变量。如果 `.env` 不存在，会优先复用旧版 `docker/.env`，再回退到当前模板。加载镜像或启动服务前必须存在可读的 `.env.example`。
-> - 若需配置语音模型（STT/TTS），请在 `deploy/env/.env` 中补充相关变量，我们将尽快提供前端配置入口。
+> - v2.5.0 会补充沙箱相关变量，并拉取 `nexent-sandbox` 镜像。若使用私有仓库或离线环境，请确认沙箱镜像也已同步。
 
 ## 🌐 步骤三：验证部署
 
 部署完成后：
 
 1. 在浏览器打开 `http://localhost:3000`
-2. 参考 [用户指南](https://doc.nexent.tech/zh/user-guide/home-page) 完成智能体配置与验证
+2. 检查 Config、Runtime、MCP、Northbound、Web 和 Data Process 等已选服务是否正常运行
+3. 确认 `nexent-agent-workspace` 卷存在，且 Runtime 可以创建沙箱执行环境
+4. 参考 [用户指南](../user-guide/home-page) 完成智能体配置与问答验证
 
 ## 可选操作
 
@@ -75,8 +78,9 @@ docker system prune -af
 ```
 
 > ⚠️ 注意事项
-> - 删除镜像前请先备份重要数据。
+> - 删除镜像不会备份业务数据；升级前仍需单独备份数据库和对象存储。
 > - 若需保留数据库数据，请勿删除数据库 volume（通常位于 `/nexent/docker/volumes` 或自定义挂载路径）。
+> - `docker system prune -af` 会清理当前 Docker 主机上所有未使用的镜像和构建缓存，不仅限于 Nexent。共享主机上不建议执行。
 
 ---
 
@@ -85,6 +89,8 @@ docker system prune -af
 SQL 增量不再手动执行。Docker 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动按文件名顺序检查并执行 `deploy/sql/migrations/` 下的 `*.sql` 文件；其他后端容器只等待迁移记录达到目标状态。SQL 会从 `deploy/sql` 挂载到 `/opt/nexent/sql`，因此只修改 SQL 时重新执行部署即可，不需要重新构建镜像。
 
 迁移脚本使用 SQL 文件名作为 `nexent.schema_migrations` 中的迁移 ID。已记录且 checksum 相同会跳过；已记录但 checksum 变化时会重新执行同名 SQL，并更新 checksum、执行时间、应用版本和源文件路径。
+
+已经发布的迁移文件不可修改、重命名或删除。需要调整数据库结构时，应在 `deploy/sql/migrations/` 下新增版本化迁移文件。v2.5.0 使用合并迁移文件统一应用本版本的数据库变更。
 
 > 💡 提示
 > - 升级前请备份数据库，生产环境尤为重要。

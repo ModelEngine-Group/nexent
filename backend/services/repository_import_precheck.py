@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from consts.model import (
-    ModelConnectStatusEnum,
     RepositoryImportPrecheckResponse,
     RepositoryImportRequirementItem,
     ToolSourceEnum,
 )
+from management.services.model.resolver import is_model_available
 from database import skill_db
 from database.knowledge_db import (
     get_knowledge_name_map_by_index_names,
@@ -58,13 +58,7 @@ def _check_model_available(display_name: Optional[str], tenant_id: str) -> Tuple
         return False, _REASON_MODEL_UNAVAILABLE
 
     model_info = get_model_by_model_id(model_id, tenant_id)
-    if not model_info:
-        return False, _REASON_MODEL_UNAVAILABLE
-
-    connect_status = ModelConnectStatusEnum.get_value(
-        model_info.get("connect_status")
-    )
-    if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
+    if not is_model_available(model_info):
         return False, _REASON_MODEL_UNAVAILABLE
 
     return True, None

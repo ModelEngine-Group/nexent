@@ -37,7 +37,7 @@ class AgentAutomationLeaseStore:
     async def recover(self) -> None:
         recovery_time = _utcnow()
         await asyncio.to_thread(agent_automation_db.recover_orphaned_runs)
-        await asyncio.to_thread(agent_automation_db.release_expired_locks)
+        await asyncio.to_thread(agent_automation_db.release_all_task_locks)
         self._recovery_time = recovery_time
 
     async def claim_due(

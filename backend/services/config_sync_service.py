@@ -2,21 +2,13 @@ import logging
 from typing import Optional, Any
 
 from consts.const import (
-    APP_DESCRIPTION,
-    APP_NAME,
     AVATAR_URI,
     CUSTOM_ICON_URL,
     DATAMATE_URL,
-    DEFAULT_APP_DESCRIPTION_EN,
-    DEFAULT_APP_DESCRIPTION_ZH,
-    DEFAULT_APP_NAME_EN,
-    DEFAULT_APP_NAME_ZH,
     DEFAULT_GROUP_ID,
     ICON_TYPE,
     ICON_KEY,
-    LANGUAGE,
     MODEL_CONFIG_MAPPING,
-    LANGUAGE,
     MODEL_ENGINE_ENABLED,
     TENANT_NAME
 )
@@ -29,6 +21,13 @@ from utils.config_utils import (
 )
 
 logger = logging.getLogger("config_sync_service")
+
+LEGACY_APP_CONFIG_KEYS = frozenset({
+    "APP_NAME",
+    "APP_DESCRIPTION",
+    "NAME",
+    "DESCRIPTION",
+})
 
 
 def get_model_id_for_config(model_type: str, display_name: str, tenant_id: str) -> Optional[int]:
@@ -89,6 +88,8 @@ async def save_config_impl(config, tenant_id, user_id):
     # Process app configuration - use key names directly without prefix
     for key, value in config_dict.get("app", {}).items():
         env_key = get_env_key(key)
+        if env_key in LEGACY_APP_CONFIG_KEYS:
+            continue
         env_config[env_key] = safe_value(value)
 
         # Check if the key exists and has the same value in tenant_config_dict
@@ -157,14 +158,7 @@ async def load_config_impl(language: str, tenant_id: str):
 
 
 def build_app_config(language: str, tenant_id: str) -> dict:
-    default_app_name = DEFAULT_APP_NAME_ZH if language == LANGUAGE["ZH"] else DEFAULT_APP_NAME_EN
-    default_app_description = DEFAULT_APP_DESCRIPTION_ZH if language == LANGUAGE[
-        "ZH"] else DEFAULT_APP_DESCRIPTION_EN
-
     return {
-        "name": tenant_config_manager.get_app_config(APP_NAME, tenant_id=tenant_id) or default_app_name,
-        "description": tenant_config_manager.get_app_config(APP_DESCRIPTION,
-                                                            tenant_id=tenant_id) or default_app_description,
         "tenantName": tenant_config_manager.get_app_config(TENANT_NAME, tenant_id=tenant_id) or "",
         "defaultGroupId": tenant_config_manager.get_app_config(DEFAULT_GROUP_ID, tenant_id=tenant_id) or "",
         "icon": {

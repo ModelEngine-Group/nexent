@@ -22,6 +22,8 @@ from database.client import minio_client
 Multimodal = LoadSaveObjectManager(storage_client=minio_client)
 ```
 
+You can also pass the optional parameter `validate_url_access`: a callback that receives a list of URLs and is used to validate URL access permissions; it should raise a `PermissionError` when validation fails.
+
 You can also implement your own storage client based on the `StorageClient` base class in `sdk.nexent.storage.storage_client_base`.  
 The storage client must implement:
 
@@ -325,3 +327,5 @@ result_url = blur_image_tool(
 )
 # result_url is something like "s3://nexent/attachments/xxx.png"
 ```
+
+> VLM image/video/audio understanding is uniformly accessed through the Gateway adapters (core/gateway/), supporting OpenAI VLM, ModelEngine (audio via the vlm4 slot), DashScope VLM audio adaptation, etc.; the multimodal analysis tools (AnalyzeImageTool/AnalyzeAudioTool/AnalyzeVideoTool) allow users to choose the model.

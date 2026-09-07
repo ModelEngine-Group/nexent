@@ -127,7 +127,7 @@ consts_const_mod.SUPABASE_KEY = "supabase-key"
 consts_const_mod.SERVICE_ROLE_KEY = "service-role-key"
 consts_const_mod.DEBUG_JWT_EXPIRE_SECONDS = 3600
 consts_const_mod.LANGUAGE = "zh"
-# Fields required by utils.memory_utils and services.vectordatabase_service
+# Fields required by utils.memory_utils and management.services.knowledge_base.service
 consts_const_mod.MODEL_CONFIG_MAPPING = {
     "llm": "LLM_ID", "embedding": "EMBEDDING_ID"}
 consts_const_mod.ES_HOST = "http://localhost:9200"
@@ -370,8 +370,8 @@ db_tenant_cfg_mod.update_config_by_tenant_config_id = _update_config_by_tenant_c
 db_tenant_cfg_mod.update_config_by_tenant_config_id_and_data = _update_config_by_tenant_config_id_and_data
 sys.modules["database.tenant_config_db"] = db_tenant_cfg_mod
 
-# Stub services.vectordatabase_service to avoid heavy imports
-services_vdb_mod = types.ModuleType("services.vectordatabase_service")
+# Stub management.services.knowledge_base.service to avoid heavy imports
+services_vdb_mod = types.ModuleType("management.services.knowledge_base.service")
 
 
 class _ElasticSearchService:
@@ -384,7 +384,7 @@ def _get_vector_db_core():
 
 services_vdb_mod.ElasticSearchService = _ElasticSearchService
 services_vdb_mod.get_vector_db_core = _get_vector_db_core
-sys.modules["services.vectordatabase_service"] = services_vdb_mod
+sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
 
 # Stub nexent.memory.memory_service.clear_model_memories
 nexent_memory_mod = types.ModuleType("nexent.memory.memory_service")

@@ -1,12 +1,12 @@
 import json
 
 import pytest
+from utils.time_context_utils import strip_current_time_prefix
 
 from services.agent_automation import tool_adapter as adapter_module
 from services.agent_automation.tool_adapter import (
     AgentLoopAutomationToolAdapter,
     AutomationToolRuntimeContext,
-    _strip_runtime_time_prefix,
     link_persisted_proposal_card,
 )
 
@@ -52,7 +52,7 @@ def test_build_tool_config_registers_scheduled_task_as_builtin(monkeypatch):
     ],
 )
 def test_strip_runtime_time_prefix_keeps_only_the_original_request(message, expected):
-    assert _strip_runtime_time_prefix(message) == expected
+    assert strip_current_time_prefix(message) == expected
 
 
 def test_build_callback_runs_coroutine_without_an_event_loop(monkeypatch):

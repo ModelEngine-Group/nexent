@@ -8,8 +8,10 @@
 - **Q: Docker 容器如何访问宿主机上部署的模型（如 Ollama）？**
   - A: 由于容器内的 `localhost` 指向容器自身，需要通过以下方式连接宿主机服务：
   
-    **方案一：使用Docker特殊DNS名称 host.docker.internal**  
-    适用场景：Mac/Windows和较新版本的Docker Desktop(Linux版本也支持)  
+    **方案一：使用 Docker 特殊 DNS 名称 `host.docker.internal`**
+
+    适用场景：macOS、Windows，以及已配置该名称的 Linux Docker 环境。
+
       ```bash
       http://host.docker.internal:11434/v1
       ```
@@ -17,8 +19,9 @@
     ```bash
     http://[宿主机IP]:11434/v1
     ```
-    **方案三：修改Docker Compose配置**  
-    在docker-compose.yaml中添加：
+    **方案三：配置 Docker Compose**
+
+    在对应服务中添加：
     ```yaml
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -32,6 +35,22 @@
 - **Q: 如何查看容器日志？**
   - A: 使用 `docker logs <容器名称>` 命令查看特定容器的日志。
 
+- **Q: 智能体运行时报错，提示无法创建沙箱，如何排查？**
+  - A: 依次检查以下项目：
+    1. Docker 服务是否正常运行。
+    2. Runtime 是否能够只读访问 `/var/run/docker.sock`。
+    3. `deploy/env/.env` 中 `NEXENT_SANDBOX_DOCKER_IMAGE` 指定的镜像是否已拉取。
+    4. `NEXENT_SANDBOX_WORKSPACE_VOLUME` 指定的工作区卷是否存在。
+    5. 沙箱资源限制是否超过当前主机可用资源。
+
+    Docker 部署可使用以下命令检查默认资源：
+
+    ```bash
+    docker images nexent/nexent-sandbox
+    docker volume inspect nexent-agent-workspace
+    docker logs nexent-runtime --tail 100
+    ```
+
 ## 🔍 故障排除
 
 ### 🔢 模型连接问题
@@ -42,16 +61,22 @@
     2. **有效的 API 密钥**: 验证您的 API 密钥具有适当权限
     3. **模型名称**: 确认模型标识符正确
     4. **网络访问**: 确保您的部署可以访问提供商的服务器
-    关于如何配置模型，请参阅用户指南中的 [模型管理](../user-guide/agent-development/model-configuration.md)。
+    关于如何配置模型，请参阅用户指南中的 [模型配置](../user-guide/agent-development/model-configuration)。
 
-- **Q: 接入 DeepSeek 官方 API 时多轮对话会报错，如何解决？**
-  - A: DeepSeek 官方当前仅支持文本对话接口，而 Nexent 的推理流程面向多模态设计。在多轮对话中，官方 API 无法正确接收多模态格式数据，因此会触发错误。建议改用硅基流动等已对 DeepSeek 系列模型完成多模态适配的供应商，既保持 DeepSeek 模型的体验，又能兼容 Nexent 的多模态调用链。具体来说，我们使用的消息体形如：
+- **Q: 模型服务提示消息格式不兼容，如何解决？**
+  - A: 不同提供商对 OpenAI 消息格式的兼容程度不同。有些纯文本接口只接受字符串 `content`，不接受由多个内容块组成的数组。请先确认模型类型和 API 地址配置正确，再查阅提供商的协议说明。例如，多模态消息可能使用：
+
   ```python
   { "role":"user", "content":[ { "type":"text", "text":"prompt" } ] }
   ```
-  而DeepSeek只接收：
+
+  纯文本接口可能只接受：
+
   ```python
   { "role":"user", "content":"prompt" }
+  ```
+
+  如果提供商不支持当前消息格式，请改用兼容 OpenAI 多模态消息的接口，或将该模型配置为对应的纯文本模型类型。
 
 ## 🐛 已知问题
 
@@ -59,15 +84,13 @@
 
 ### 🔧 OpenSSH 容器软件安装限制
 
-**问题描述**: 在 OpenSSH 容器中为终端工具使用安装其他软件包目前由于容器限制而比较困难。
+**问题描述**：OpenSSH 终端容器和智能体沙箱都是受控执行环境，不建议在运行时安装系统软件包。沙箱镜像已经包含常用的数据处理和文档生成依赖，但不保证包含所有第三方软件。
 
-**状态**: 开发中
+**状态**：属于运行环境的安全限制。
 
-**影响**: 需要在终端环境中使用自定义工具或软件包的用户可能面临限制。
+**影响**：依赖额外系统包或需要管理员权限的脚本可能无法直接运行。
 
-**计划解决方案**: 我们正在努力提供改进的容器和文档，使自定义变得更容易。这将包括更好的包管理和更灵活的容器配置。
-
-**预期时间线**: 改进的容器支持计划在即将发布的版本中提供。
+**解决方式**：将依赖预先加入自定义终端或沙箱镜像，并在部署配置中使用该镜像。不要在生产运行期间临时修改容器。
 
 ## 📝 问题报告
 
