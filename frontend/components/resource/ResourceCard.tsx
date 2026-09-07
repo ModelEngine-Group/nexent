@@ -13,6 +13,9 @@ export interface ResourceCardProps {
   /** Resource tags displayed below the description. */
   tags?: ReactNode;
   meta?: ReactNode;
+  /** Status icons displayed beside the title, left of actions. */
+  headerActions?: ReactNode;
+  /** Actions displayed at the top-right (e.g., "..." menu). */
   actions?: ReactNode;
   footer?: ReactNode;
   onClick?: () => void;
@@ -28,6 +31,7 @@ export default function ResourceCard({
   badge,
   tags,
   meta,
+  headerActions,
   actions,
   footer,
   onClick,
@@ -80,8 +84,15 @@ export default function ResourceCard({
               <div className="mt-1 flex flex-wrap gap-2">{badge}</div>
             ) : null}
           </div>
-          {actions ? (
-            <div data-resource-card-action className={actionClassName}>
+          {headerActions || actions ? (
+            <div
+              data-resource-card-action
+              className={cn(
+                "flex shrink-0 items-center gap-1",
+                actionClassName
+              )}
+            >
+              {headerActions}
               {actions}
             </div>
           ) : null}
