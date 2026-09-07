@@ -15,6 +15,8 @@ DEPLOYMENT_ROOT_ENV="$TMP_DIR/root.env"
 : > "$DEPLOYMENT_ROOT_ENV"
 export DEPLOYMENT_LANG=en
 
+SHARED_STORAGE_TEMPLATE="$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-common/templates/shared-storage.yaml")"
+
 assert_eq() {
   local expected="$1"
   local actual="$2"
@@ -70,6 +72,9 @@ assert_success() {
     exit 1
   fi
 }
+
+assert_contains "$SHARED_STORAGE_TEMPLATE" $'  capacity:\n    storage: {{ $skillsSize }}\n  accessModes:' "skills PV accessModes should be a sibling of capacity"
+assert_not_contains "$SHARED_STORAGE_TEMPLATE" $'    storage: {{ $skillsSize }}\n    accessModes:' "skills PV accessModes should not be nested under capacity"
 
 write_full_config() {
   local file="$1"

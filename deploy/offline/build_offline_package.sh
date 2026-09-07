@@ -701,7 +701,15 @@ copy_deployment_bundle() {
   rm -f "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-runtime-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-secrets-values.yaml" "$OUTPUT_DIR/deploy/k8s/helm/nexent-infrastructure/generated-persistence-values.yaml"
   case "$TARGET" in
     docker) rm -rf "$OUTPUT_DIR/deploy/k8s" ;;
-    k8s) rm -rf "$OUTPUT_DIR/deploy/docker" ;;
+    k8s)
+      rm -rf "$OUTPUT_DIR/deploy/docker"
+      if [ ! -d "$DEPLOY_ROOT/docker/assets/official-skills-zip" ]; then
+        echo "❌ Required K8s official skill assets not found: $DEPLOY_ROOT/docker/assets/official-skills-zip"
+        return 1
+      fi
+      mkdir -p "$OUTPUT_DIR/deploy/docker/assets"
+      cp -R "$DEPLOY_ROOT/docker/assets/official-skills-zip" "$OUTPUT_DIR/deploy/docker/assets/"
+      ;;
   esac
 
   create_offline_deploy_entrypoint
