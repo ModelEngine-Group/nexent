@@ -106,11 +106,11 @@ bash deploy.sh k8s
 
 ### Offline Deployment
 
-When the target cluster cannot access public image registries, download a prebuilt offline deployment package from GitHub Actions:
+When the target cluster cannot access public image registries, download a prebuilt offline deployment package from Nexent Releases:
 
-1. Sign in to GitHub and open [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml).
-2. Select a successful run for the required version and download `nexent-<version>-<platform>.zip` matching the cluster node architecture from **Artifacts**.
-3. Copy the archive to a management host that can access the target cluster and extract it. Workflow artifacts are retained for 30 days; if one has expired, ask a maintainer to rerun the workflow.
+1. Open [Nexent Releases](https://github.com/ModelEngine-Group/nexent/releases).
+2. Find the required version in the release list and download `nexent-<version>-<platform>.zip` matching the cluster node architecture from that release's **Assets**.
+3. Copy the archive to a management host that can access the target cluster and extract it.
 
 Extract the offline deployment package:
 
