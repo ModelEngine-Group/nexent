@@ -95,3 +95,4 @@ agent_repository_frontend
 .playwright-mcp/
 # Added by code-review-graph
 .code-review-graph/
+.agents/
