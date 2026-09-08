@@ -79,7 +79,7 @@ export function AgentRepositoryCard({
                 {t("agentRepository.card.official")}
               </span>
             ) : null}
-            {author ? (
+            {author && !listing.is_official ? (
               <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
                 {author}
               </p>
