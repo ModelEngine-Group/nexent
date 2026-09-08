@@ -792,7 +792,7 @@ async def test_embedding_dimension_check_embedding_success():
         )
         assert dimension == 3
         mock_build.assert_called_once_with(
-            {"base_url": "http://test.com/embeddings", "api_key": "test-key",
+            {"base_url": "http://test.com", "api_key": "test-key",
              "ssl_verify": True, "model_type": "embedding"},
             "embedding", "embedding", None, model_name="test-embedding",
         )
@@ -812,7 +812,7 @@ async def test_embedding_dimension_check_multi_embedding_success():
         )
         assert dimension == 4
         mock_build.assert_called_once_with(
-            {"model_factory": None, "base_url": "http://test.com/embeddings",
+            {"model_factory": None, "base_url": "http://test.com",
              "api_key": "test-key", "ssl_verify": True, "model_type": "multi_embedding"},
             "multi_embedding", "multiEmbedding", None, model_name="test-multi-embedding",
         )
