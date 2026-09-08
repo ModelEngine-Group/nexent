@@ -727,6 +727,55 @@ def _remap_kb_refs(
                 ]
 
 
+def _update_existing_agent_kb_refs(
+    bundle: OfficialAgentBundle,
+    agent_id: int,
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Repair KB tool references on an Agent from an earlier partial install."""
+    from consts.model import ToolInstanceInfoRequest
+    from database.tool_db import (
+        create_or_update_tool_by_tool_info,
+        query_all_tools,
+        query_tool_instances_by_agent_id,
+    )
+
+    bundle_tools = {
+        (tool.class_name, tool.source): tool
+        for agent in bundle.agent_info.values()
+        for tool in agent.tools or []
+        if tool.class_name in _KB_TOOL_CLASS_NAMES
+    }
+    if not bundle_tools:
+        return
+
+    tenant_tools = {
+        tool.get("tool_id"): tool for tool in query_all_tools(tenant_id=tenant_id)
+    }
+    for instance in query_tool_instances_by_agent_id(agent_id, tenant_id):
+        tenant_tool = tenant_tools.get(instance.get("tool_id")) or {}
+        key = (tenant_tool.get("class_name"), tenant_tool.get("source"))
+        bundle_tool = bundle_tools.get(key)
+        tool_id = instance.get("tool_id")
+        if bundle_tool is None or tool_id is None:
+            continue
+        create_or_update_tool_by_tool_info(
+            ToolInstanceInfoRequest(
+                tool_id=tool_id,
+                agent_id=agent_id,
+                enabled=instance.get("enabled", True),
+                params=bundle_tool.params,
+            ),
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        logger.info(
+            "Repaired knowledge-base tool reference for existing agent_id=%s",
+            agent_id,
+        )
+
+
 async def _install_bundle(
     bundle: OfficialAgentBundle,
     tenant_id: str,
@@ -809,6 +858,13 @@ async def _install_bundle(
             ),
         )
         _remap_kb_refs(bundle, kb_mapping)
+        if existing_agent_id is not None:
+            _update_existing_agent_kb_refs(
+                bundle,
+                existing_agent_id,
+                tenant_id,
+                user_id,
+            )
 
     if bundle.skills and existing_agent_id is None:
         agent_id_mapping = await _run_step(
