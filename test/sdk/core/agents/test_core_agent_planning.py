@@ -277,10 +277,23 @@ monitor_mod.get_monitoring_manager = MagicMock(return_value=MagicMock())
 # ---- Load core_agent under controlled sys.modules -----------------
 CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "core_agent.py"
 CORE_AGENT_NAME = "sdk.nexent.core.agents.core_agent"
+
+# ``sdk.nexent.core.agents`` is an isolated shim with an empty ``__path__``
+# above, so Python cannot discover sibling modules during relative imports.
+# Register the real MCP error helper before loading ``core_agent.py``.
+MCP_ERRORS_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "mcp_errors.py"
+MCP_ERRORS_NAME = "sdk.nexent.core.agents.mcp_errors"
+mcp_errors_spec = importlib.util.spec_from_file_location(MCP_ERRORS_NAME, MCP_ERRORS_PATH)
+mcp_errors_module = importlib.util.module_from_spec(mcp_errors_spec)
+sys.modules[MCP_ERRORS_NAME] = mcp_errors_module
+agents_mod = sys.modules["sdk.nexent.core.agents"]
+agents_mod.mcp_errors = mcp_errors_module
+assert mcp_errors_spec and mcp_errors_spec.loader
+mcp_errors_spec.loader.exec_module(mcp_errors_module)
+
 spec = importlib.util.spec_from_file_location(CORE_AGENT_NAME, CORE_AGENT_PATH)
 core_agent_module = importlib.util.module_from_spec(spec)
 sys.modules[CORE_AGENT_NAME] = core_agent_module
-agents_mod = sys.modules["sdk.nexent.core.agents"]
 agents_mod.core_agent = core_agent_module
 assert spec and spec.loader
 spec.loader.exec_module(core_agent_module)
