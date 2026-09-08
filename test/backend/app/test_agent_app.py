@@ -203,6 +203,55 @@ async def test_agent_run_api(mocker, mock_auth_header):
     assert "data: chunk2" in content
 
 
+def test_nl2agent_resource_installation_accepts_only_candidate_ref(
+    mocker,
+    mock_auth_header,
+):
+    """UT-BE-NL2A-INSTALL-002 / HTTP boundary."""
+
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    install = mocker.patch(
+        "apps.agent_app.install_nl2agent_resource_impl",
+        new_callable=AsyncMock,
+        return_value={
+            "status": "installed",
+            "candidate_ref": "tenant_skill_repository:12",
+            "resource_type": "skill",
+            "resource_id": 91,
+        },
+    )
+
+    response = config_client.post(
+        "/agent/nl2agent/resource-installations",
+        json={"agent_id": 42, "candidate_ref": "tenant_skill_repository:12"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["resource_id"] == 91
+    install.assert_called_once_with(
+        agent_id=42,
+        candidate_ref="tenant_skill_repository:12",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    rejected = config_client.post(
+        "/agent/nl2agent/resource-installations",
+        json={
+            "agent_id": 42,
+            "candidate_ref": "tenant_skill_repository:12",
+            "target_name": "client-controlled-name",
+        },
+        headers=mock_auth_header,
+    )
+
+    assert rejected.status_code == 422
+
+
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header

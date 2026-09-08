@@ -9,7 +9,7 @@ import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, unquote, urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import (
@@ -324,6 +324,291 @@ class Nl2AgentResourceError(Exception):
         super().__init__(code)
         self.code = code
         self.retryable = retryable
+
+
+async def install_nl2agent_resource_impl(
+    *,
+    agent_id: int,
+    candidate_ref: str,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Install one trusted repository resource for an editable NL2Agent draft."""
+
+    require_agent_draft_edit(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    prefix, separator, raw_identifier = candidate_ref.partition(":")
+    if not separator or not raw_identifier:
+        raise Nl2AgentResourceError("invalid_candidate_ref")
+    if prefix == "tenant_skill_repository":
+        if not raw_identifier.isdecimal() or int(raw_identifier) <= 0:
+            raise Nl2AgentResourceError("invalid_candidate_ref")
+        from database.skill_repository_db import (
+            get_skill_repository_by_id_and_publisher,
+        )
+        from management.services.skill.service import SkillService
+        from services.skill_repository_service import (
+            install_skill_from_repository_impl,
+        )
+
+        repository_id = int(raw_identifier)
+        repository = get_skill_repository_by_id_and_publisher(
+            repository_id,
+            tenant_id,
+        )
+        if not repository or repository.get("status") != "shared":
+            raise Nl2AgentResourceError("resource_not_visible")
+        source_marker = f"repository:{repository_id}"
+        for skill in SkillService(tenant_id=tenant_id).list_visible_skills(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        ):
+            if skill.get("source") != source_marker:
+                continue
+            skill_id = skill.get("skill_id")
+            if isinstance(skill_id, int) and skill_id > 0:
+                return {
+                    "status": "already_installed",
+                    "candidate_ref": candidate_ref,
+                    "resource_type": "skill",
+                    "resource_id": skill_id,
+                }
+        installed = install_skill_from_repository_impl(
+            skill_repository_id=repository_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            source=source_marker,
+        )
+        skill_id = (
+            installed.get("skill_id") if isinstance(installed, dict) else None
+        )
+        if not isinstance(skill_id, int) or skill_id <= 0:
+            raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+        return {
+            "status": "installed",
+            "candidate_ref": candidate_ref,
+            "resource_type": "skill",
+            "resource_id": skill_id,
+        }
+    if prefix == "tenant_mcp_repository":
+        if not raw_identifier.isdecimal() or int(raw_identifier) <= 0:
+            raise Nl2AgentResourceError("invalid_candidate_ref")
+
+        from consts.exceptions import McpPortConflictError
+        from consts.model import MCPConfigRequest
+        from database.remote_mcp_db import get_mcp_records_by_tenant
+        from services.mcp_management_service import list_community_mcp_services
+        from services.remote_mcp_service import (
+            add_container_mcp_service,
+            add_mcp_service,
+            suggest_container_port,
+        )
+
+        market_id = int(raw_identifier)
+
+        def installed_mcp_id() -> int | None:
+            for record in get_mcp_records_by_tenant(tenant_id):
+                if record.get("market_id") != market_id:
+                    continue
+                mcp_id = record.get("mcp_id")
+                if isinstance(mcp_id, int) and mcp_id > 0:
+                    return mcp_id
+            return None
+
+        existing_mcp_id = installed_mcp_id()
+        if existing_mcp_id is not None:
+            return {
+                "status": "already_installed",
+                "candidate_ref": candidate_ref,
+                "resource_type": "mcp_server",
+                "resource_id": existing_mcp_id,
+            }
+
+        visible_mcp: dict[str, Any] | None = None
+        cursor: str | None = None
+        scanned = 0
+        while scanned < MAX_INTERNAL_SOURCE_ITEMS:
+            visible_result = await list_community_mcp_services(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                cursor=cursor,
+                limit=UNINSTALLED_SOURCE_PAGE_SIZE,
+            )
+            items = visible_result.get("items", [])
+            if not isinstance(items, list) or not items:
+                break
+            scanned += len(items)
+            visible_mcp = next(
+                (
+                    item for item in items
+                    if isinstance(item, dict) and item.get("marketId") == market_id
+                ),
+                None,
+            )
+            if visible_mcp is not None:
+                break
+            next_cursor = visible_result.get("nextCursor")
+            if not isinstance(next_cursor, str) or not next_cursor:
+                break
+            cursor = next_cursor
+        if visible_mcp is None:
+            raise Nl2AgentResourceError("resource_not_visible")
+
+        name = str(visible_mcp.get("name") or "").strip()
+        if not name:
+            raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+        description = str(visible_mcp.get("description") or "").strip() or None
+        tags = (
+            visible_mcp.get("tags")
+            if isinstance(visible_mcp.get("tags"), list)
+            else []
+        )
+        registry_json = (
+            visible_mcp.get("registryJson")
+            if isinstance(visible_mcp.get("registryJson"), dict)
+            else {}
+        )
+        authorization_token = visible_mcp.get("authorizationToken")
+        custom_headers = visible_mcp.get("customHeaders")
+        transport_type = str(visible_mcp.get("transportType") or "").lower()
+        if transport_type == "container":
+            config_json = visible_mcp.get("configJson")
+            if not isinstance(config_json, dict):
+                raise Nl2AgentResourceError("resource_not_visible")
+            try:
+                mcp_config = MCPConfigRequest.model_validate(config_json)
+            except ValueError as exc:
+                logger.warning(
+                    "Visible MCP repository entry has invalid container config "
+                    "(market_id=%s)",
+                    market_id,
+                )
+                raise Nl2AgentResourceError("resource_not_visible") from exc
+            for attempt in range(2):
+                try:
+                    await add_container_mcp_service(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        name=name,
+                        description=description,
+                        source="community",
+                        tags=tags,
+                        authorization_token=(
+                            authorization_token
+                            if isinstance(authorization_token, str)
+                            else None
+                        ),
+                        registry_json=registry_json,
+                        market_id=market_id,
+                        port=suggest_container_port(),
+                        mcp_config=mcp_config,
+                    )
+                    break
+                except McpPortConflictError:
+                    if attempt:
+                        raise Nl2AgentResourceError(
+                            "resource_install_failed", retryable=True
+                        )
+        else:
+            server_url = str(visible_mcp.get("serverUrl") or "").strip()
+            if not server_url.startswith(("https://", "http://")):
+                raise Nl2AgentResourceError("resource_not_visible")
+            await add_mcp_service(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                name=name,
+                description=description,
+                source="community",
+                server_url=server_url,
+                tags=tags,
+                authorization_token=(
+                    authorization_token
+                    if isinstance(authorization_token, str)
+                    else None
+                ),
+                custom_headers=(
+                    custom_headers if isinstance(custom_headers, dict) else None
+                ),
+                container_config=None,
+                registry_json=registry_json,
+                config_json=(
+                    visible_mcp.get("configJson")
+                    if isinstance(visible_mcp.get("configJson"), dict)
+                    else None
+                ),
+                market_id=market_id,
+                enabled=True,
+            )
+
+        created_mcp_id = installed_mcp_id()
+        if created_mcp_id is None:
+            raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+        return {
+            "status": "installed",
+            "candidate_ref": candidate_ref,
+            "resource_type": "mcp_server",
+            "resource_id": created_mcp_id,
+        }
+
+    if prefix != "nexent_official_skill":
+        raise Nl2AgentResourceError("resource_not_visible")
+
+    from management.services.skill.service import (
+        SkillService,
+        get_official_skills_with_status,
+        install_skills_from_zip_for_tenant,
+    )
+
+    skill_name = unquote(raw_identifier)
+    official_skills = get_official_skills_with_status(tenant_id=tenant_id)
+    if not any(
+        str(item.get("name") or "") == skill_name
+        for item in official_skills
+        if isinstance(item, dict)
+    ):
+        raise Nl2AgentResourceError("resource_not_visible")
+
+    visible_skills = SkillService(tenant_id=tenant_id).list_visible_skills(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    for skill in visible_skills:
+        if str(skill.get("name") or "") == skill_name:
+            skill_id = skill.get("skill_id")
+            if isinstance(skill_id, int) and skill_id > 0:
+                return {
+                    "status": "already_installed",
+                    "candidate_ref": candidate_ref,
+                    "resource_type": "skill",
+                    "resource_id": skill_id,
+                }
+
+    installed_names = install_skills_from_zip_for_tenant(
+        [skill_name],
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    if skill_name not in installed_names:
+        raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+
+    visible_skills = SkillService(tenant_id=tenant_id).list_visible_skills(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    for skill in visible_skills:
+        if str(skill.get("name") or "") == skill_name:
+            skill_id = skill.get("skill_id")
+            if isinstance(skill_id, int) and skill_id > 0:
+                return {
+                    "status": "installed",
+                    "candidate_ref": candidate_ref,
+                    "resource_type": "skill",
+                    "resource_id": skill_id,
+                }
+    raise Nl2AgentResourceError("resource_install_failed", retryable=True)
 
 
 def _resource_text_variants(value: Any) -> tuple[str, str]:

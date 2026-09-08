@@ -6,6 +6,7 @@ from threading import Event
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import services.nl2agent_service as nl2agent_service
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
@@ -98,6 +99,318 @@ def test_resource_search_keeps_relevant_generic_query_tool_as_a_candidate():
 
     assert result.uncovered_requirement_ids == []
     assert result.candidates[0].candidate_ref == "tool:127"
+
+
+@pytest.mark.asyncio
+async def test_official_skill_installation_returns_the_real_skill_id(mocker):
+    """UT-BE-NL2A-INSTALL-001."""
+
+    installer = getattr(
+        nl2agent_service,
+        "install_nl2agent_resource_impl",
+        None,
+    )
+    assert callable(installer)
+
+    mocker.patch(
+        "management.services.skill.service.get_official_skills_with_status",
+        return_value=[{"name": "daily-report", "status": "installable"}],
+    )
+    install = mocker.patch(
+        "management.services.skill.service.install_skills_from_zip_for_tenant",
+        return_value=["daily-report"],
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        side_effect=[[], [{"skill_id": 91, "name": "daily-report"}]],
+    )
+    require_edit = mocker.patch(
+        "services.nl2agent_service.require_agent_draft_edit"
+    )
+
+    result = await installer(
+        agent_id=42,
+        candidate_ref="nexent_official_skill:daily-report",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "installed",
+        "candidate_ref": "nexent_official_skill:daily-report",
+        "resource_type": "skill",
+        "resource_id": 91,
+    }
+    require_edit.assert_called_once_with(
+        agent_id=42, tenant_id="tenant-a", user_id="user-a"
+    )
+    install.assert_called_once_with(
+        ["daily-report"], tenant_id="tenant-a", user_id="user-a"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_skill_installation_does_not_accept_a_client_target_name(mocker):
+    """UT-BE-NL2A-INSTALL-002."""
+
+    install = mocker.patch(
+        "services.skill_repository_service.install_skill_from_repository_impl",
+        return_value={"skill_id": 92},
+    )
+    mocker.patch(
+        "database.skill_repository_db.get_skill_repository_by_id_and_publisher",
+        return_value={"skill_repository_id": 12, "status": "shared"},
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[],
+    )
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_skill_repository:12",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "installed",
+        "candidate_ref": "tenant_skill_repository:12",
+        "resource_type": "skill",
+        "resource_id": 92,
+    }
+    install.assert_called_once_with(
+        skill_repository_id=12,
+        tenant_id="tenant-a",
+        user_id="user-a",
+        source="repository:12",
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_skill_installation_is_idempotent_by_repository_id(
+    mocker,
+):
+    """UT-BE-NL2A-INSTALL-005."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "database.skill_repository_db.get_skill_repository_by_id_and_publisher",
+        return_value={"skill_repository_id": 12, "status": "shared"},
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[{"skill_id": 92, "source": "repository:12"}],
+    )
+    install = mocker.patch(
+        "services.skill_repository_service.install_skill_from_repository_impl",
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_skill_repository:12",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "already_installed",
+        "candidate_ref": "tenant_skill_repository:12",
+        "resource_type": "skill",
+        "resource_id": 92,
+    }
+    install.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_repository_installation_uses_only_visible_server_snapshot(
+    mocker,
+):
+    """UT-BE-NL2A-INSTALL-003."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(return_value={"items": [{
+            "marketId": 87,
+            "name": "weather",
+            "description": "Weather lookup",
+            "transportType": "url",
+            "serverUrl": "https://weather.example/mcp",
+            "tags": ["weather"],
+            "registryJson": {},
+        }]}),
+    )
+    add_mcp = mocker.patch(
+        "services.remote_mcp_service.add_mcp_service",
+        new=AsyncMock(),
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        side_effect=[[], [{"mcp_id": 321, "market_id": 87}]],
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:87",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "installed",
+        "candidate_ref": "tenant_mcp_repository:87",
+        "resource_type": "mcp_server",
+        "resource_id": 321,
+    }
+    assert add_mcp.await_args.kwargs["server_url"] == "https://weather.example/mcp"
+    assert "authorization_token" in add_mcp.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_mcp_repository_installation_is_idempotent(mocker):
+    """UT-BE-NL2A-INSTALL-005."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    list_visible = mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(),
+    )
+    add_mcp = mocker.patch(
+        "services.remote_mcp_service.add_mcp_service",
+        new=AsyncMock(),
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        return_value=[{"mcp_id": 321, "market_id": 87}],
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:87",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["status"] == "already_installed"
+    assert result["resource_id"] == 321
+    list_visible.assert_not_awaited()
+    add_mcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_container_mcp_installation_retries_a_backend_selected_port(mocker):
+    """UT-BE-NL2A-INSTALL-004."""
+
+    from consts.exceptions import McpPortConflictError
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(return_value={"items": [{
+            "marketId": 88,
+            "name": "filesystem",
+            "transportType": "container",
+            "configJson": {
+                "mcpServers": {"filesystem": {"command": "npx"}},
+            },
+            "tags": [],
+            "registryJson": {},
+        }]}),
+    )
+    add_container = mocker.patch(
+        "services.remote_mcp_service.add_container_mcp_service",
+        new=AsyncMock(side_effect=[McpPortConflictError("busy"), None]),
+    )
+    mocker.patch(
+        "services.remote_mcp_service.suggest_container_port",
+        side_effect=[5021, 5022],
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        side_effect=[[], [{"mcp_id": 322, "market_id": 88}]],
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:88",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["resource_id"] == 322
+    assert add_container.await_count == 2
+    assert add_container.await_args_list[0].kwargs["port"] == 5021
+    assert add_container.await_args_list[1].kwargs["port"] == 5022
+
+
+@pytest.mark.asyncio
+async def test_invisible_or_incomplete_mcp_repository_is_rejected_without_install(
+    mocker,
+):
+    """UT-BE-NL2A-INSTALL-006 / UT-BE-NL2A-INSTALL-007."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(return_value={"items": [{
+            "marketId": 88,
+            "name": "private-service",
+            "transportType": "url",
+            "serverUrl": "not-a-url",
+            "registryJson": {"internalToken": "must-not-leak"},
+        }]}),
+    )
+    add_mcp = mocker.patch(
+        "services.remote_mcp_service.add_mcp_service",
+        new=AsyncMock(),
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        return_value=[],
+    )
+
+    with pytest.raises(Nl2AgentResourceError) as exc_info:
+        await nl2agent_service.install_nl2agent_resource_impl(
+            agent_id=42,
+            candidate_ref="tenant_mcp_repository:88",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "resource_not_visible"
+    assert "internalToken" not in str(exc_info.value)
+    add_mcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("draft_error", ["agent_not_draft", "agent_read_only"])
+async def test_non_editable_agent_cannot_start_resource_installation(
+    mocker,
+    draft_error,
+):
+    """UT-BE-NL2A-INSTALL-006."""
+
+    from services.agent_draft_permission_service import AgentDraftEditError
+
+    mocker.patch(
+        "services.nl2agent_service.require_agent_draft_edit",
+        side_effect=AgentDraftEditError(draft_error),
+    )
+    install = mocker.patch(
+        "management.services.skill.service.install_skills_from_zip_for_tenant",
+    )
+
+    with pytest.raises(AgentDraftEditError, match=draft_error):
+        await nl2agent_service.install_nl2agent_resource_impl(
+            agent_id=42,
+            candidate_ref="nexent_official_skill:daily-report",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    install.assert_not_called()
 
 
 def test_recommendation_is_derived_from_backend_score_not_model_refs():
