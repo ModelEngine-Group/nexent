@@ -71,6 +71,20 @@ sys.modules["nexent.storage.storage_client_factory"].create_storage_client_from_
     mock_create_storage_client_from_config
 )
 
+feature_capability_mock = mock.MagicMock()
+feature_capability_mock.extract_provider_feature_candidate = mock.MagicMock(return_value=None)
+feature_capability_mock.resolve_feature_capabilities = mock.MagicMock(
+    side_effect=lambda provider, model, **kwargs: {
+        "schema_version": 1,
+        "reasoning": {"supported": None, "mode": "unknown", "request_style": "unknown", "efforts": []},
+        "prompt_cache": {"supported": None, "mode": "unknown", "metrics_available": None},
+        "source": "unknown",
+        "match_kind": "none",
+        "catalog_revision": kwargs.get("catalog_revision"),
+    }
+)
+sys.modules["nexent.core.models.feature_capability"] = feature_capability_mock
+
 # ============================================================================
 # CRITICAL: Mock database.client module BEFORE any import that might trigger it
 # The problem is that when database.client is imported, it immediately runs
@@ -132,11 +146,16 @@ for module_path in [
     "consts.model",
     "consts.const",
     "consts.exceptions",
+    "consts.model_feature_capabilities",
     "utils",
     "utils.model_name_utils",
     "services.model_health_service",
 ]:
     sys.modules.setdefault(module_path, mock.MagicMock())
+
+sys.modules["consts.model_feature_capabilities"].CATALOG_REVISION = "test"
+sys.modules["consts.model_feature_capabilities"].EXACT_CATALOG = {}
+sys.modules["consts.model_feature_capabilities"].FAMILY_RULES = ()
 
 
 # Provide real implementations for the utils.model_name_utils helpers used by
@@ -506,18 +525,8 @@ async def test_prepare_model_dict_excludes_w11_accept_signal_fields():
 
 
 @pytest.mark.asyncio
-async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates():
-    """Provider capacity candidates remain UI hints until an operator saves them.
-
-    Per the W1/W2 plan, _extract_capacity_hints tags provider-discovered
-    capacity values with capacity_source="provider_candidate" so the
-    catalog UI can show them as suggestions. They must not auto-persist
-    on batch_create; only operator acceptance (capacity_source="operator")
-    can write to the row. The original assertion only checked the dumped
-    result, which is trivially controlled by the mock; the strengthened
-    assertion below pins ModelRequest's constructor kwargs so the
-    contract is enforced regardless of what model_dump returns.
-    """
+async def test_ac_p5_003_prepare_model_dict_persists_provider_capacity_candidates():
+    """Provider facts reach governance instead of being replaced by catalog."""
     with mock.patch(
         "backend.services.model_provider_service.split_repo_name",
         return_value=("openai", "gpt-4"),
@@ -550,33 +559,18 @@ async def test_prepare_model_dict_does_not_persist_provider_capacity_candidates(
             "capacity_source": "provider_candidate",
         }
 
-        result = await prepare_model_dict(
+        await prepare_model_dict(
             "openai",
             model,
             "https://api.openai.com/v1",
             "test-key",
         )
 
-        # Result-level: the dumped dict (controlled by the mock) doesn't
-        # carry capacity hints downstream.
-        assert "context_window_tokens" not in result
-        assert "max_output_tokens" not in result
-        assert "tokenizer_family" not in result
-        assert "capacity_source" not in result
-
-        # Contract-level: prepare_model_dict must NOT thread provider
-        # candidates into ModelRequest. Without this assertion the bug
-        # we just fixed -- threading every W2 field through unconditionally
-        # -- would slip past the result-level check because the mock
-        # absorbs any kwargs silently.
         _, kwargs = mock_model_request.call_args
-        assert "context_window_tokens" not in kwargs
-        assert "max_output_tokens" not in kwargs
-        assert "max_input_tokens" not in kwargs
-        assert "default_output_reserve_tokens" not in kwargs
-        assert "tokenizer_family" not in kwargs
-        assert "capacity_source" not in kwargs
-        assert "capability_profile_version" not in kwargs
+        assert kwargs["context_window_tokens"] == 128000
+        assert kwargs["max_output_tokens"] == 16384
+        assert kwargs["tokenizer_family"] == "o200k_base"
+        assert kwargs["capacity_source"] == "provider_candidate"
 
 
 @pytest.mark.asyncio
@@ -1653,7 +1647,8 @@ async def test_get_provider_models_silicon_internal_exception_handling():
 
         # Test normal case
         result = await get_provider_models(model_data)
-        assert result == [{"id": "test-model"}]
+        assert result[0]["id"] == "test-model"
+        assert result[0]["feature_capability_metadata"]["source"] == "unknown"
 
         # Test case where provider handles exception internally
         model_data_exception = model_data.copy()
@@ -1718,7 +1713,8 @@ async def test_get_provider_models_silicon_with_different_model_types():
 
             result = await get_provider_models(model_data)
 
-            assert result == [{"id": "test-model"}]
+            assert result[0]["id"] == "test-model"
+            assert result[0]["feature_capability_metadata"]["source"] == "unknown"
             mock_provider_instance.get_models.assert_called_once_with(
                 model_data)
 

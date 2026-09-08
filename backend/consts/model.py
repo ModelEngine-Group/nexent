@@ -565,6 +565,8 @@ class ModelRequest(BaseModel):
     tokenizer_family: Optional[str] = None
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
+    feature_capability_metadata: Optional[Dict[str, Any]] = None
+    capacity_mode: Optional[Literal["auto", "manual"]] = None
     # W11 accept-signal fields (audit/metrics only — never persisted). Sent by
     # the frontend when the operator clicks "Use suggestion" and saves; the
     # app layer pops them before the dict reaches the service/DB layer and
@@ -597,7 +599,11 @@ class ModelCapacitySuggestionResponse(BaseModel):
     suggested_provider: Optional[str] = None
     canonical_model_name: Optional[str] = None
     capability_profile_version: Optional[str] = None
-    capacity_source_on_accept: Optional[Literal["operator"]] = None
+    capacity_source_on_accept: Optional[Literal["operator", "profile"]] = None
+    canonical_identity: Optional[Dict[str, Any]] = None
+    capacity_match: Optional[Dict[str, Any]] = None
+    tokenizer_match: Optional[Dict[str, Any]] = None
+    governance_metadata_proposal: Optional[Dict[str, Any]] = None
 
 
 class CapacityCoverageBareModel(BaseModel):
@@ -613,6 +619,36 @@ class CapacityCoverageResponse(BaseModel):
     total_llm_vlm: int
     bare_count: int
     bare_models: List[CapacityCoverageBareModel] = Field(default_factory=list)
+
+
+class CapacityAdoptionPreviewRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=256)
+    expected_matcher_version: Optional[str] = None
+
+
+class CapacityAdoptRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=256)
+    expected_profile_version: str = Field(..., min_length=1, max_length=256)
+    expected_matcher_version: Optional[str] = None
+    fields: Optional[List[str]] = None
+    reset_manual_fields: List[str] = Field(default_factory=list)
+
+
+class TokenCountProbeRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=256)
+    force: bool = False
+
+
+class ManageCapacityAdoptionPreviewRequest(CapacityAdoptionPreviewRequest):
+    tenant_id: str = Field(..., min_length=1)
+
+
+class ManageCapacityAdoptRequest(CapacityAdoptRequest):
+    tenant_id: str = Field(..., min_length=1)
+
+
+class ManageTokenCountProbeRequest(TokenCountProbeRequest):
+    tenant_id: str = Field(..., min_length=1)
 
 
 class ProviderModelRequest(BaseModel):
@@ -1736,6 +1772,7 @@ class ManageTenantModelCreateRequest(BaseModel):
     tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
     capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
     capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
+    capacity_mode: Optional[Literal["auto", "manual"]] = Field(None, description="Capacity inheritance mode")
     # W11 accept-signal fields. Same audit-only contract as ModelRequest:
     # the app layer pops them off model_data before the dict reaches the
     # service/DB layer and forwards them to
@@ -1775,6 +1812,7 @@ class ManageTenantModelUpdateRequest(BaseModel):
     tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
     capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
     capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
+    capacity_mode: Optional[Literal["auto", "manual"]] = Field(None, description="Capacity inheritance mode")
     # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
     # contract. The app layer pops them before calling the service so
     # update_model_record never sees them.
