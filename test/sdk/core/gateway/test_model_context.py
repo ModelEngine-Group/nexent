@@ -4,12 +4,6 @@ from nexent.core.gateway.model_context import LLMContext, VLMContext
 
 
 def test_context_carries_full_connection_config():
-    """Guards the fields the removed gateway cache key used to drop.
-
-    ``base_url``, ``api_key``, ``ssl_verify`` and ``timeout_seconds`` are part
-    of a model's identity: two records sharing a repo/name but differing here
-    are different endpoints, so they must never resolve to one shared adapter.
-    """
     context = VLMContext(
         model_name="qwen-vl-max",
         base_url="https://api.example.com",

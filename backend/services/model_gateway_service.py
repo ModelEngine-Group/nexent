@@ -174,7 +174,7 @@ def get_adapter_from_config(
     tenant_id: Optional[str] = None,
     **construct_extras: Any,
 ):
-    """Resolve and return a newly built adapter for ``cfg``."""
+    """Resolve and return the adapter for ``cfg``."""
     context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
     return get_gateway().get_adapter(context)
 
@@ -186,13 +186,11 @@ def build_adapter_fresh(
     tenant_id: Optional[str] = None,
     **construct_extras: Any,
 ):
-    """Build a fresh adapter for ``cfg``, resolving the adapter class directly.
+    """Build a fresh adapter for ``cfg``.
 
-    Equivalent to :func:`get_adapter_from_config` now that the gateway keeps no
-    instance cache. Kept as a separate name for the per-call construction sites
-    (health checks, knowledge-base resolvers, voice streaming sessions) where
+    Used by per-call construction sites (e.g. voice streaming sessions) where
     vendor config carries per-request params (api_key, ws_url, voice, …) that
-    must never be shared between callers.
+    must not collide across tenants.
     """
     context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
     cls = get_registry().resolve(context.factory, modality)

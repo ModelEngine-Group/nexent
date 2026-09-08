@@ -72,12 +72,6 @@ def test_get_adapter_builds_separate_instances_for_different_models():
 
 
 def test_get_adapter_does_not_share_endpoint_or_credentials():
-    """Regression guard for the removed identity-keyed adapter cache.
-
-    The old key was ``(tenant_id, modality, slot, model_name, factory)``, so
-    rotating an api_key or repointing base_url on a model record kept serving
-    the adapter built from the previous config.
-    """
     gateway = MultimodalGateway(_make_registry())
 
     stale = gateway.get_adapter(_make_context())

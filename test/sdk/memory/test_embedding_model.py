@@ -98,7 +98,7 @@ class TestEmbeddingModelInfo:
 # --------------------------------------------------------------------------- #
 
 class TestEmbeddingClientFactory:
-    """Tests for the uncached embedding client factory."""
+    """Tests for the embedding client factory."""
 
     def test_builds_adapter_from_context(self, mocker):
         """The adapter is constructed from an EmbeddingContext built out of the arguments."""
@@ -173,10 +173,7 @@ class TestEmbeddingClientFactory:
         """Same repo/name/dimension with a different endpoint, key or TLS setting
         must never reuse another caller's client.
 
-        Regression guard for the removed process-wide cache, whose key was
-        ``"{model_repo}:{model_name}:{dimension}"`` and therefore handed tenant
-        A's endpoint and API key to tenant B. Real adapters are used because
-        constructing one performs no I/O.
+        Real adapters are used because constructing one performs no I/O.
         """
         tenant_a = get_embedding_client(
             model_name="bge-m3",

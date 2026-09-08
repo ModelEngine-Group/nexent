@@ -10,18 +10,7 @@ from .registry import AdapterRegistry, get_registry
 
 
 class MultimodalGateway:
-    """Resolve :class:`MultimodalAdapter` instances from a construction context.
-
-    Adapters are built fresh on every call. An earlier revision cached them by
-    ``(tenant_id, modality, slot, model_name, factory)``, a key that omitted
-    ``base_url``, ``api_key``, ``ssl_verify``, ``timeout_seconds`` and every
-    sampling parameter. Two model records sharing a repo/name but pointing at
-    different endpoints therefore resolved to the same instance, and editing a
-    model in the management UI had no effect until the process restarted -
-    adapters also memoize their wrapped model, so stale config was baked in
-    twice. Building an adapter is cheap (the wrapped model creates its HTTP
-    client lazily), so correctness wins over reuse here.
-    """
+    """Resolve :class:`MultimodalAdapter` instances by context."""
 
     def __init__(self, registry: AdapterRegistry = None) -> None:
         """Initializes the gateway with a registry.
@@ -33,13 +22,13 @@ class MultimodalGateway:
         self._registry = registry or get_registry()
 
     def get_adapter(self, context: ModelContext) -> MultimodalAdapter:
-        """Returns a newly built adapter for ``context``.
+        """Returns the adapter for ``context``.
 
         Args:
             context: The construction context identifying the desired model.
 
         Returns:
-            A fresh adapter instance bound to ``context``.
+            The newly built adapter instance.
         """
         cls = self._registry.resolve(context.factory, context.modality)
         return cls(context)

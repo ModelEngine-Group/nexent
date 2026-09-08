@@ -11,14 +11,7 @@ This module provides:
       mem_{model_name}_{dimension}            # when model_repo is absent
 
 - ``get_embedding_client()``: builds an ``OpenAICompatibleEmbeddingAdapter``
-  from the caller-supplied configuration. Instances are deliberately not
-  cached: ``base_url``, ``api_key`` and ``ssl_verify`` are tenant-scoped
-  database values that operators can change at runtime, and two tenants may
-  legitimately use the same model name and dimension with different endpoints
-  and credentials. Any key narrower than the full configuration would keep
-  serving a stale endpoint or stale credentials. Construction is cheap, and
-  callers that embed many texts within one operation can build once and reuse
-  the returned instance for the duration of that operation.
+  from the caller-supplied configuration.
 
 The SDK never talks to Elasticsearch directly. All vector writes go through
 the backend layer (``memory_index_service``). This module is therefore purely
@@ -92,13 +85,7 @@ def get_embedding_client(
     model_repo: Optional[str] = None,
     ssl_verify: bool = True,
 ) -> OpenAICompatibleEmbeddingAdapter:
-    """Build an ``OpenAICompatibleEmbeddingAdapter`` for the given configuration.
-
-    A fresh adapter is returned on every call. Caching by model identity alone
-    is unsafe here: the endpoint, the credentials and the TLS setting all come
-    from tenant-scoped database rows that can change while the process runs, so
-    a cached instance would keep posting to a stale ``base_url`` with a stale
-    ``api_key``.
+    """Return an ``OpenAICompatibleEmbeddingAdapter`` instance.
 
     When ``model_repo`` is provided (e.g. ``"BAAI"``), the fully-qualified
     name ``"BAAI/bge-m3"`` is passed to the API. Some providers (e.g.
