@@ -20,11 +20,33 @@ def _configure_celery_environment(monkeypatch):
     monkeypatch.setattr(constants, "REDIS_BACKEND_URL", backend_url)
 
 
+def _disable_celery_result_backend(monkeypatch, module):
+    """Keep direct task.run() coverage tests independent of a live Redis backend."""
+    task_names = (
+        "parser_bootstrap",
+        "process_part",
+        "aggregate_parts",
+        "aggregate_store_chunks",
+        "process",
+        "process_sync",
+        "forward_part",
+        "aggregate_forward_parts",
+        "forward",
+        "cleanup_source",
+        "process_and_forward",
+    )
+    for task_name in task_names:
+        task = getattr(module, task_name, None)
+        if task is not None and hasattr(task, "update_state"):
+            monkeypatch.setattr(task, "update_state", lambda **_kwargs: None)
+
+
 @pytest.fixture()
 def tasks(monkeypatch):
     _configure_celery_environment(monkeypatch)
     import data_process.tasks as module
 
+    _disable_celery_result_backend(monkeypatch, module)
     return module
 
 
@@ -32,7 +54,9 @@ def tasks(monkeypatch):
 def parser_runtime(monkeypatch):
     _configure_celery_environment(monkeypatch)
     from data_process import parser_runtime as module
+    import data_process.parse_tasks as parse_tasks
 
+    _disable_celery_result_backend(monkeypatch, parse_tasks)
     return module
 
 
