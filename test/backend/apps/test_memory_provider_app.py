@@ -155,9 +155,11 @@ def _mock_plugin_loader():
     return loader
 
 
-def test_service_factories_load_plugins_once():
+def test_ac_005_config_factory_loads_builtin_and_external_plugins_once():
     loader = _mock_plugin_loader()
-    with patch.object(memory_provider_app, "PluginLoader", return_value=loader), patch.object(
+    with patch.object(
+        memory_provider_app, "PluginLoader", return_value=loader
+    ) as loader_type, patch.object(
         memory_provider_app, "MemoryProviderConfigService"
     ) as config_service_type, patch.object(
         memory_provider_app, "MemoryExternalProviderService"
@@ -169,6 +171,9 @@ def test_service_factories_load_plugins_once():
 
     assert first is loader
     assert second is loader
+    loader_type.assert_called_once_with(
+        "/tmp/test-plugins", include_builtin_plugins=True
+    )
     loader.load_all.assert_called_once_with()
     config_service_type.assert_called()
     provider_service_type.assert_called()

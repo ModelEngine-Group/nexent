@@ -1,5 +1,7 @@
+import shutil
 import sys
 import types
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -40,7 +42,7 @@ sys.modules["nexent.memory"] = memory_pkg
 sys.modules["nexent.memory.providers"] = providers_pkg
 sys.modules["nexent.memory.providers.base"] = providers_base
 
-from backend.services.memory_provider_plugin_loader import PluginLoader  # noqa: E402
+from backend.services.memory_provider_plugin_loader import PluginLoader
 
 
 @pytest.fixture
@@ -55,6 +57,10 @@ def _create_plugin(directory, name, manifest_content, entry_content=None):
     if entry_content:
         (plugin_dir / "provider.py").write_text(entry_content)
     return plugin_dir
+
+
+def _manifest_for(name):
+    return VALID_MANIFEST.replace("name: test-provider", f"name: {name}")
 
 
 VALID_MANIFEST = """
@@ -190,6 +196,199 @@ def test_build_provider_plugin_not_found(plugins_dir):
 
     with pytest.raises(ValueError, match="not found"):
         loader.build_provider("nonexistent", {})
+
+
+def test_ac_001_builtin_plugin_is_discovered_when_external_directory_is_empty(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+
+    assert [plugin.name for plugin in loader.list_plugins()] == ["mem0"]
+
+
+def test_ac_002_builtin_and_external_plugins_are_merged(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+    _create_plugin(
+        external_dir,
+        "partner-memory",
+        _manifest_for("partner-memory"),
+        VALID_ENTRY,
+    )
+
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+
+    assert {plugin.name for plugin in loader.list_plugins()} == {
+        "mem0",
+        "partner-memory",
+    }
+
+
+def test_ac_003_external_plugin_overrides_builtin_and_removal_restores_builtin(
+    tmp_path, caplog
+):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    builtin_entry = VALID_ENTRY.replace(
+        "class TestProvider:", 'class TestProvider:\n    source = "builtin"'
+    )
+    external_entry = VALID_ENTRY.replace(
+        "class TestProvider:", 'class TestProvider:\n    source = "external"'
+    )
+    _create_plugin(
+        builtin_dir, "shared-provider", _manifest_for("shared-provider"), builtin_entry
+    )
+    external_plugin_dir = _create_plugin(
+        external_dir,
+        "shared-provider",
+        _manifest_for("shared-provider"),
+        external_entry,
+    )
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+
+    loader.load_all()
+    assert loader.get_plugin("shared-provider").provider_class.source == "external"
+    assert "overrides plugin from builtin" in caplog.text
+
+    shutil.rmtree(external_plugin_dir)
+    assert loader.get_plugin("shared-provider").provider_class.source == "builtin"
+
+
+def test_ac_008_new_external_plugin_is_discovered_without_reloading_process(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+    loader_identity = id(loader)
+
+    _create_plugin(
+        external_dir,
+        "hot-added",
+        _manifest_for("hot-added"),
+        VALID_ENTRY,
+    )
+
+    assert loader.get_plugin("hot-added") is not None
+    assert id(loader) == loader_identity
+
+
+def test_ac_004_invalid_external_plugin_does_not_hide_builtin_plugin(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+    _create_plugin(
+        external_dir,
+        "incomplete-provider",
+        _manifest_for("incomplete-provider"),
+        entry_content=None,
+    )
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+
+    loader.load_all()
+
+    assert [plugin.name for plugin in loader.list_plugins()] == ["mem0"]
+
+
+def test_ac_008_external_plugin_update_is_discovered_without_restart(tmp_path):
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    entry_v1 = VALID_ENTRY.replace(
+        "class TestProvider:", 'class TestProvider:\n    version = "v1"'
+    )
+    plugin_dir = _create_plugin(
+        external_dir,
+        "hot-updated",
+        _manifest_for("hot-updated"),
+        entry_v1,
+    )
+    loader = PluginLoader(str(external_dir))
+    loader.load_all()
+    assert loader.get_plugin("hot-updated").provider_class.version == "v1"
+
+    entry_v2 = entry_v1.replace('version = "v1"', 'version = "version-two"')
+    (plugin_dir / "provider.py").write_text(entry_v2)
+
+    assert loader.get_plugin("hot-updated").provider_class.version == "version-two"
+
+
+def test_ac_010_unchanged_directories_do_not_reimport_plugins(tmp_path, monkeypatch):
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    _create_plugin(
+        external_dir,
+        "stable-provider",
+        _manifest_for("stable-provider"),
+        VALID_ENTRY,
+    )
+    loader = PluginLoader(str(external_dir))
+    import_count = 0
+    original_import = loader._import_module
+
+    def counting_import(plugin_name, entry_file):
+        nonlocal import_count
+        import_count += 1
+        return original_import(plugin_name, entry_file)
+
+    monkeypatch.setattr(loader, "_import_module", counting_import)
+    loader.load_all()
+
+    loader.list_plugins()
+    loader.get_plugin("stable-provider")
+    loader.build_provider("stable-provider", {})
+    assert import_count == 1
+
+
+def test_ac_011_concurrent_refresh_exposes_complete_registry(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+    _create_plugin(
+        external_dir,
+        "hot-added",
+        _manifest_for("hot-added"),
+        VALID_ENTRY,
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(
+            executor.map(
+                lambda _: {plugin.name for plugin in loader.list_plugins()},
+                range(32),
+            )
+        )
+
+    assert all(result == {"mem0", "hot-added"} for result in results)
 
 
 def test_protocol_validation_searchable_only(plugins_dir):
