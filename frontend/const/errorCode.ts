@@ -95,6 +95,7 @@ export const ErrorCode = {
   KNOWLEDGE_STORAGE_COMMIT_FAILED: "060107",
   KNOWLEDGE_TASK_SUBMIT_FAILED: "060108",
   KNOWLEDGE_DELETE_BLOCKED: "060109",
+  KNOWLEDGE_RESOURCE_EXCEEDED: "060110",
 
   // ==================== 07 MCPTools / MCP 工具 ====================
   // 01 - Tool

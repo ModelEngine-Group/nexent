@@ -84,6 +84,7 @@ export const DEFAULT_ERROR_MESSAGES: Record<string, string> = {
     "File upload failed because the storage service is unavailable.",
   [ErrorCode.KNOWLEDGE_TASK_SUBMIT_FAILED]:
     "The file was uploaded, but the ingestion service is unavailable.",
+  [ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED]: "Knowledge resource limit exceeded.",
 
   // ==================== 07 MCPTools / MCP 工具 ====================
   // 01 - Tool

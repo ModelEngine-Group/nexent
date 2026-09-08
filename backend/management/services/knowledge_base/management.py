@@ -471,6 +471,8 @@ class KnowledgeBaseManagementService:
                               "embedding_model_id": actual_model_id}
             create_knowledge_record(knowledge_data)
             return {"status": "success", "message": f"Index {index_name} created successfully"}
+        except AppException:
+            raise
         except Exception as e:
             raise Exception(f"Error creating index: {str(e)}")
 
@@ -575,6 +577,9 @@ class KnowledgeBaseManagementService:
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
+        except AppException:
+            # Preserve structured resource-limit errors for the application layer.
+            raise
         except (DuplicateError, ValueError):
             raise
         except Exception as e:

@@ -557,7 +557,10 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       const queryString = queryParams.toString();
@@ -584,7 +587,10 @@ export const API_ENDPOINTS = {
         queryParams.append("agent_id", String(params.agent_id));
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.search_tag_predicates?.length) {
         queryParams.append(
@@ -627,7 +633,10 @@ export const API_ENDPOINTS = {
         queryParams.append("search", params.search.trim());
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       if (params?.sort_by_update_time) {
@@ -654,7 +663,10 @@ export const API_ENDPOINTS = {
         queryParams.append("new_skill_padding", "true");
       }
       if (params?.tag_predicates?.length) {
-        queryParams.append("tag_predicates", JSON.stringify(params.tag_predicates));
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
       }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
@@ -885,7 +897,8 @@ export const fetchWithErrorHandling = async (
           if (errorData?.error === "TenantStorageFull") {
             throw new ApiError(
               413,
-              errorData.message || "Tenant storage limit reached"
+              errorData.message || "Tenant storage limit reached",
+              errorData
             );
           }
         } catch (error) {
@@ -895,7 +908,8 @@ export const fetchWithErrorHandling = async (
         }
         throw new ApiError(
           ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
+          "File size exceeds limit.",
+          errorDetails
         );
       }
 

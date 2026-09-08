@@ -3780,7 +3780,7 @@
   "errorCode.060103": "Failed to sync knowledge base.",
   "errorCode.060104": "Search index not found.",
   "errorCode.060105": "Knowledge search failed.",
-  "errorCode.060106": "Knowledge-base resource limit exceeded.",
+  "errorCode.060110": "Knowledge-base resource limit exceeded.",
   "errorCode.070101": "Tool not found.",
   "errorCode.070102": "Tool execution failed.",
   "errorCode.070103": "Tool configuration is invalid.",
