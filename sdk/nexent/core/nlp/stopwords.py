@@ -13,6 +13,7 @@ def download_stopwords(url: str, save_path: str) -> bool:
     try:
         logger.info(f"Downloading stopwords: {url}")
         response = requests.get(url, timeout=10)
+        response.raise_for_status()
         response.encoding = 'utf-8'
         with open(save_path, 'w', encoding='utf-8') as f:
             f.write(response.text)
