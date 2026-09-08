@@ -5,7 +5,21 @@ from unittest.mock import MagicMock
 import pytest
 
 
+def _configure_celery_environment(monkeypatch):
+    """Provide import-time Celery URLs without requiring a local .env file."""
+    broker_url = "redis://localhost:6379/0"
+    backend_url = "redis://localhost:6379/1"
+    monkeypatch.setenv("REDIS_URL", broker_url)
+    monkeypatch.setenv("REDIS_BACKEND_URL", backend_url)
+
+    from consts import const as constants
+
+    monkeypatch.setattr(constants, "REDIS_URL", broker_url)
+    monkeypatch.setattr(constants, "REDIS_BACKEND_URL", backend_url)
+
+
 def test_parser_worker_arguments_use_prefork_autoscale(monkeypatch):
+    _configure_celery_environment(monkeypatch)
     from data_process import worker
 
     captured = {}
@@ -31,6 +45,7 @@ def test_parser_worker_arguments_use_prefork_autoscale(monkeypatch):
 
 
 def test_non_parser_worker_arguments_use_threads(monkeypatch):
+    _configure_celery_environment(monkeypatch)
     from data_process import worker
 
     captured = {}

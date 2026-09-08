@@ -5,14 +5,29 @@ import types
 import pytest
 
 
-def test_parser_task_uses_late_ack_and_rejects_lost_children():
+def _configure_celery_environment(monkeypatch):
+    """Provide import-time Celery URLs without requiring a local .env file."""
+    broker_url = "redis://localhost:6379/0"
+    backend_url = "redis://localhost:6379/1"
+    monkeypatch.setenv("REDIS_URL", broker_url)
+    monkeypatch.setenv("REDIS_BACKEND_URL", backend_url)
+
+    from consts import const as constants
+
+    monkeypatch.setattr(constants, "REDIS_URL", broker_url)
+    monkeypatch.setattr(constants, "REDIS_BACKEND_URL", backend_url)
+
+
+def test_parser_task_uses_late_ack_and_rejects_lost_children(monkeypatch):
+    _configure_celery_environment(monkeypatch)
     from data_process.parse_tasks import ParserTask
 
     assert ParserTask.acks_late is True
     assert ParserTask.reject_on_worker_lost is True
 
 
-def test_parser_task_payload_contains_object_reference_only():
+def test_parser_task_payload_contains_object_reference_only(monkeypatch):
+    _configure_celery_environment(monkeypatch)
     from data_process import parse_tasks
 
     assert parse_tasks.process_part.name == "data_process.tasks.process_part"
@@ -20,6 +35,7 @@ def test_parser_task_payload_contains_object_reference_only():
 
 
 def test_aggregate_parts_reads_redis_references(monkeypatch):
+    _configure_celery_environment(monkeypatch)
     from data_process import parse_tasks
 
     monkeypatch.setattr(
