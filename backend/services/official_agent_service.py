@@ -286,7 +286,9 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
 
 
 def _find_installed_agent_id(
-    bundle: OfficialAgentBundle, tenant_id: str
+    bundle: OfficialAgentBundle,
+    tenant_id: str,
+    user_id: Optional[str] = None,
 ) -> Optional[int]:
     """Return whether the bundle's root agent already exists in the tenant.
 
@@ -299,6 +301,17 @@ def _find_installed_agent_id(
     name = getattr(root_agent, "name", None)
     if not name:
         return False
+
+    if user_id is not None:
+        from database.agent_db import query_all_agent_info_by_tenant_id
+
+        for agent in query_all_agent_info_by_tenant_id(tenant_id):
+            if (
+                agent.get("name") == name
+                and str(agent.get("created_by")) == str(user_id)
+            ):
+                return agent.get("agent_id")
+        return None
 
     from database.agent_db import search_agent_id_by_agent_name
 
@@ -975,13 +988,44 @@ async def install_official_agents(
         root_renamed = bool(renames) and bool(root_name) and root_name in renames
         existing_agent_id = None
         if not root_renamed:
-            existing_agent_id = _find_installed_agent_id(bundle, tenant_id)
+            existing_agent_id = _find_installed_agent_id(
+                bundle, tenant_id, user_id=user_id
+            )
             if existing_agent_id is not None:
                 logger.info(
                     "Official agent '%s' already exists as agent_id=%s; "
                     "ensuring dependencies before returning it",
                     name,
                     existing_agent_id,
+                )
+            elif root_name and _is_agent_installed(bundle, tenant_id):
+                # Agents are user-owned even though their dependencies are
+                # tenant-scoped. Avoid reusing another user's Agent, whose
+                # group permissions could make a successful copy invisible.
+                from database.agent_db import query_all_agent_info_by_tenant_id
+
+                used_names = {
+                    agent.get("name")
+                    for agent in query_all_agent_info_by_tenant_id(tenant_id)
+                }
+                base_name = f"{root_name}_copy_{str(user_id)[:8]}"
+                unique_name = base_name
+                suffix = 2
+                while unique_name in used_names:
+                    unique_name = f"{base_name}_{suffix}"
+                    suffix += 1
+                renames = dict(renames or {})
+                renames[root_name] = unique_name
+                root_renamed = True
+                if root_agent is not None:
+                    root_agent.display_name = (
+                        root_agent.display_name or root_name
+                    ) + "（副本）"
+                logger.info(
+                    "Official agent '%s' exists for another user; creating "
+                    "visible user copy name=%s",
+                    name,
+                    unique_name,
                 )
 
         missing_models = await _missing_model_types(bundle, tenant_id)
