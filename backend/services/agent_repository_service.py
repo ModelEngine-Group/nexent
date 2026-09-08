@@ -1147,6 +1147,7 @@ async def import_agent_from_repository_impl(
             authorization=authorization,
             model_ids=model_ids,
             embedding_model_ids=embedding_model_ids,
+            skill_resolutions=skill_resolutions,
         )
         item = results[0] if results else None
         if item is None:

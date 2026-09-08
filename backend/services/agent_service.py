@@ -4310,6 +4310,7 @@ async def _create_skills_for_install(
     tenant_id: str,
     user_id: str,
     reuse_existing_skills: bool = False,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
 ) -> Dict[str, int]:
     """Create or reuse tenant skills for the official-agent installer.
 
@@ -4330,14 +4331,25 @@ async def _create_skills_for_install(
         raise SkillDuplicateError(duplicates)
 
     service = SkillService(tenant_id=tenant_id)
+    resolutions = {
+        item.skill_name: item
+        for item in (skill_resolutions or [])
+    }
     result: Dict[str, int] = {}
     for skill_name, encoded_zip in skill_name_to_zip.items():
-        if reuse_existing_skills and skill_name in existing:
+        resolution = resolutions.get(skill_name)
+        if (
+            (reuse_existing_skills or (resolution and resolution.action == "use_existing"))
+            and skill_name in existing
+        ):
             result[skill_name] = existing[skill_name]
             continue
+        target_name = skill_name
+        if resolution and resolution.action == "rename" and resolution.new_name:
+            target_name = resolution.new_name
         created = service.create_skill_from_zip_bytes(
             zip_bytes=base64.b64decode(encoded_zip),
-            skill_name=skill_name,
+            skill_name=target_name,
             source="导入",
             user_id=user_id,
             tenant_id=tenant_id,

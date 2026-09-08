@@ -29,6 +29,7 @@ from consts.model import (
     OfficialAgentInstallStep,
     OfficialAgentListItem,
     OfficialAgentMcpPreview,
+    SkillResolution,
     SkillZipEntry,
 )
 
@@ -725,6 +726,7 @@ async def _install_bundle(
     user_id: str,
     authorization: str,
     embedding_model_id: Optional[int] = None,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
     steps: Optional[List[OfficialAgentInstallStep]] = None,
 ) -> Optional[int]:
     """Install one official agent bundle, returning the new main agent id.
@@ -775,7 +777,8 @@ async def _install_bundle(
                 bundle.skills,
                 tenant_id,
                 user_id,
-                reuse_existing_skills=True,
+                reuse_existing_skills=False,
+                skill_resolutions=skill_resolutions,
             ),
         )
 
@@ -855,6 +858,7 @@ async def install_official_agents(
     renames: Optional[Dict[str, str]] = None,
     model_ids: Optional[Dict[str, int]] = None,
     embedding_model_ids: Optional[Dict[str, int]] = None,
+    skill_resolutions: Optional[List[SkillResolution]] = None,
 ) -> List[OfficialAgentInstallItem]:
     """Install the requested official agents for a tenant.
 
@@ -921,6 +925,7 @@ async def install_official_agents(
                 user_id,
                 authorization,
                 embedding_model_id=embedding_model_id,
+                skill_resolutions=skill_resolutions,
                 steps=steps,
             )
             results.append(
