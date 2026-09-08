@@ -1140,6 +1140,14 @@ async def import_agent_from_repository_impl(
         # The official bundle directory name is the root Agent name, which is
         # already stored in the repository record's ``name`` field.
         bundle_name = str(record.get("name") or "")
+        logger.info(
+            "Repository import resolved official listing id=%s name=%r "
+            "publisher_tenant_id=%r target_tenant_id=%r",
+            agent_repository_id,
+            bundle_name,
+            record.get("publisher_tenant_id"),
+            tenant_id,
+        )
         results = await install_official_agents(
             [bundle_name],
             tenant_id=tenant_id,

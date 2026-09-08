@@ -285,7 +285,9 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
     return None
 
 
-def _is_agent_installed(bundle: OfficialAgentBundle, tenant_id: str) -> bool:
+def _find_installed_agent_id(
+    bundle: OfficialAgentBundle, tenant_id: str
+) -> Optional[int]:
     """Return whether the bundle's root agent already exists in the tenant.
 
     ``search_agent_id_by_agent_name`` raises ValueError when the agent is
@@ -301,10 +303,14 @@ def _is_agent_installed(bundle: OfficialAgentBundle, tenant_id: str) -> bool:
     from database.agent_db import search_agent_id_by_agent_name
 
     try:
-        search_agent_id_by_agent_name(name, tenant_id)
-        return True
+        return search_agent_id_by_agent_name(name, tenant_id)
     except ValueError:
-        return False
+        return None
+
+
+def _is_agent_installed(bundle: OfficialAgentBundle, tenant_id: str) -> bool:
+    """Return whether the bundle's root agent already exists in the tenant."""
+    return _find_installed_agent_id(bundle, tenant_id) is not None
 
 
 async def _first_available_embedding_model_id(tenant_id: str) -> Optional[int]:
@@ -500,6 +506,7 @@ async def _install_mcp_servers(
                 tenant_id,
             )
             continue
+
         if existing_url:
             raise ValueError(
                 f"MCP server name '{mcp.mcp_server_name}' already exists for "
@@ -728,6 +735,7 @@ async def _install_bundle(
     embedding_model_id: Optional[int] = None,
     skill_resolutions: Optional[List[SkillResolution]] = None,
     steps: Optional[List[OfficialAgentInstallStep]] = None,
+    existing_agent_id: Optional[int] = None,
 ) -> Optional[int]:
     """Install one official agent bundle, returning the new main agent id.
 
@@ -802,7 +810,7 @@ async def _install_bundle(
         )
         _remap_kb_refs(bundle, kb_mapping)
 
-    if bundle.skills:
+    if bundle.skills and existing_agent_id is None:
         agent_id_mapping = await _run_step(
             "agent",
             _import_agent_with_skill_links(
@@ -813,6 +821,15 @@ async def _install_bundle(
                 user_id=user_id,
             ),
         )
+    elif existing_agent_id is not None:
+        steps.append(
+            OfficialAgentInstallStep(
+                name="agent",
+                status="ok",
+                message="agent already exists; dependencies ensured",
+            )
+        )
+        return existing_agent_id
     else:
         agent_id_mapping = await _run_step(
             "agent",
@@ -886,14 +903,30 @@ async def install_official_agents(
             )
             continue
 
+        logger.info(
+            "Preparing official agent '%s' for tenant %s: agents=%d skills=%d "
+            "knowledge_bases=%d documents=%d",
+            name,
+            tenant_id,
+            len(bundle.agent_info),
+            len(bundle.skills or []),
+            len(bundle.knowledge_bases or []),
+            sum(len(kb.documents or []) for kb in bundle.knowledge_bases or []),
+        )
+
         root_agent = bundle.agent_info.get(str(bundle.agent_id))
         root_name = getattr(root_agent, "name", None) if root_agent else None
         root_renamed = bool(renames) and bool(root_name) and root_name in renames
-        if not root_renamed and _is_agent_installed(bundle, tenant_id):
-            results.append(
-                OfficialAgentInstallItem(name=name, status="already_installed")
-            )
-            continue
+        existing_agent_id = None
+        if not root_renamed:
+            existing_agent_id = _find_installed_agent_id(bundle, tenant_id)
+            if existing_agent_id is not None:
+                logger.info(
+                    "Official agent '%s' already exists as agent_id=%s; "
+                    "ensuring dependencies before returning it",
+                    name,
+                    existing_agent_id,
+                )
 
         missing_models = await _missing_model_types(bundle, tenant_id)
         if missing_models:
@@ -927,10 +960,14 @@ async def install_official_agents(
                 embedding_model_id=embedding_model_id,
                 skill_resolutions=skill_resolutions,
                 steps=steps,
+                existing_agent_id=existing_agent_id,
             )
             results.append(
                 OfficialAgentInstallItem(
-                    name=name, status="installed", steps=steps, agent_id=agent_id
+                    name=name,
+                    status=("already_installed" if existing_agent_id else "installed"),
+                    steps=steps,
+                    agent_id=agent_id,
                 )
             )
         except Exception as e:
