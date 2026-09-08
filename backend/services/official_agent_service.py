@@ -179,6 +179,12 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
         return None
 
     dir_path = os.path.join(OFFICIAL_AGENTS_PATH, name)
+    logger.info(
+        "Loading official agent bundle name=%r base_path=%r direct_path=%r",
+        name,
+        OFFICIAL_AGENTS_PATH,
+        dir_path,
+    )
     if not os.path.isdir(dir_path):
         # Deployment resources may be grouped by profile, for example
         # ``official-agents/general/<bundle>/agent.json``. The repository
@@ -201,7 +207,12 @@ def _load_bundle(name: str) -> Optional[OfficialAgentBundle]:
                 data = json.load(f)
             bundle = OfficialAgentBundle.model_validate(data)
         except (OSError, json.JSONDecodeError, ValueError) as e:
-            logger.warning("Skip invalid official agent bundle '%s': %s", name, e)
+            logger.warning(
+                "Skip invalid official agent bundle '%s' at '%s': %s",
+                name,
+                os.path.join(dir_path, "agent.json"),
+                e,
+            )
             return None
         bundle.name = name
         _attach_skills_from_dir(bundle, dir_path)
