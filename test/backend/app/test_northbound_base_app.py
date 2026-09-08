@@ -358,6 +358,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
         self.assertTrue(cors_middleware.kwargs.get("allow_credentials"))
         self.assertEqual(cors_middleware.kwargs.get("allow_methods"), ["GET", "POST", "PUT", "DELETE"])
         self.assertEqual(cors_middleware.kwargs.get("allow_headers"), ["*"])
+        self.assertEqual(cors_middleware.kwargs.get("expose_headers"), ["conversation_id"])
 
     def test_router_inclusion(self):
         """The main northbound router should be included."""
