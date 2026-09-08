@@ -1,6 +1,5 @@
 """Shared MCP execution error types and classifiers."""
 
-import asyncio
 from typing import Set
 
 
@@ -20,8 +19,6 @@ def is_mcp_timeout_error(error: BaseException) -> bool:
     while current is not None and id(current) not in visited:
         visited.add(id(current))
         if getattr(current, "_nexent_mcp_timeout", False):
-            return True
-        if isinstance(current, (TimeoutError, asyncio.TimeoutError)):
             return True
         message = str(current).lower()
         if MCP_TOOL_TIMEOUT_TEXT.lower() in message:
