@@ -1201,3 +1201,165 @@ def test_forward_result_errors_cleanup_and_chain_fallbacks(tasks, monkeypatch):
     assert tasks.submit_process_forward_chain(source="s", source_type="local", chunking_strategy="basic") == ""
     monkeypatch.setattr(tasks, "submit_process_forward_chain", lambda **kwargs: "")
     assert tasks.process_and_forward.run("s", "local", "basic") == ""
+
+
+def test_parser_runtime_initialization_guards_and_source_error_paths(parser_runtime, monkeypatch):
+    runtime = parser_runtime.ParserRuntime(2, [])
+    runtime._core = types.SimpleNamespace()
+    monkeypatch.setattr(runtime, "ensure_initialized", lambda: None)
+    assert runtime.core is runtime._core
+
+    reentrant = parser_runtime.ParserRuntime(1, [])
+    reentrant._initializing = True
+    with pytest.raises(RuntimeError, match="already in progress"):
+        reentrant.ensure_initialized()
+
+    failed = parser_runtime.ParserRuntime(1, [])
+    monkeypatch.setattr(parser_runtime, "_configure_third_party_model_paths", lambda _paths: (_ for _ in ()).throw(ValueError("bad model path")))
+    with pytest.raises(ValueError, match="bad model path"):
+        failed.ensure_initialized()
+    assert failed._core is None and failed._initializing is False
+
+    model_db = types.ModuleType("database.model_management_db")
+    model_db.get_model_by_model_id = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db unavailable"))
+    monkeypatch.setitem(sys.modules, "database.model_management_db", model_db)
+    runtime._initialized = True
+    runtime._core = types.SimpleNamespace(file_process=lambda **_kwargs: [{"content": "chunk"}])
+    assert runtime.process_source(
+        file_data=b"data", filename="file.txt", chunking_strategy="basic", model_id=1, tenant_id="tenant"
+    ) == [{"content": "chunk"}]
+
+    stream = io.BytesIO(b"minio-data")
+    attachment = types.ModuleType("database.attachment_db")
+    attachment.get_file_stream = lambda _source: stream
+    monkeypatch.setitem(sys.modules, "database.attachment_db", attachment)
+    assert parser_runtime.ParserRuntime.read_source("s3://object", "minio") == b"minio-data"
+    assert stream.closed
+    attachment.get_file_stream = lambda _source: None
+    with pytest.raises(FileNotFoundError):
+        parser_runtime.ParserRuntime.read_source("s3://missing", "minio")
+
+    sentinel_runtime = types.SimpleNamespace(ensure_initialized=lambda: None)
+    monkeypatch.setattr(parser_runtime, "get_parser_runtime", lambda: sentinel_runtime)
+    assert parser_runtime.ensure_parser_runtime() is sentinel_runtime
+
+
+def test_parser_task_low_level_redis_and_error_cleanup_paths(parser_runtime, monkeypatch):
+    import data_process.parse_tasks as parse_tasks
+
+    redis_module = types.ModuleType("redis")
+    redis_module.Redis = types.SimpleNamespace(from_url=lambda *args, **kwargs: (args, kwargs))
+    monkeypatch.setitem(sys.modules, "redis", redis_module)
+    client = parse_tasks._redis_client()
+    assert client[0] == (parse_tasks.REDIS_BACKEND_URL,)
+    assert client[1]["decode_responses"] is True
+
+    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle.get_file_record = lambda **_kwargs: None
+    lifecycle.transition_file_record = lambda *_args, **_kwargs: None
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+    parse_tasks._mark_lifecycle(
+        "task", status="FAILED", stage="PROCESS", source="source", index_name="idx", tenant_id=None, file_id=None
+    )
+    lifecycle.get_file_record = lambda **_kwargs: {"file_id": "fid", "status": "PROCESSING"}
+    lifecycle.transition_file_record = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("db down"))
+    parse_tasks._mark_lifecycle(
+        "task", status="FAILED", stage="PROCESS", source="source", index_name="idx", tenant_id=None, file_id=None
+    )
+
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("cleanup")))
+    tasks_module = sys.modules["data_process.tasks"]
+    monkeypatch.setattr(tasks_module, "save_error_to_redis", lambda *args: (_ for _ in ()).throw(RuntimeError("redis")))
+    parse_tasks.aggregate_store_chunks.push_request(id="aggregate-errors")
+    try:
+        with pytest.raises(RuntimeError, match="no Redis key"):
+            parse_tasks.aggregate_store_chunks.run([{"part_index": 0}], "final", source="source", index_name="idx")
+    finally:
+        parse_tasks.aggregate_store_chunks.pop_request()
+
+    runtime = types.SimpleNamespace(
+        read_source=lambda *_args: b"data",
+        process_source=lambda **_kwargs: [{"content": "x"}],
+        split_source=lambda **_kwargs: [b"one", b"two"],
+    )
+    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("cleanup")))
+    parse_tasks.process.push_request(id="process-error")
+    try:
+        with pytest.raises(Exception, match="read failed"):
+            monkeypatch.setattr(runtime, "read_source", lambda *_args: (_ for _ in ()).throw(RuntimeError("read failed")))
+            parse_tasks.process.run("source", "local", index_name="idx")
+    finally:
+        parse_tasks.process.pop_request()
+
+    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(runtime, "read_source", lambda *_args: b"data")
+    monkeypatch.setattr(runtime, "split_source", lambda **_kwargs: [b"one", b"two"])
+    monkeypatch.setattr(parse_tasks, "DP_FILE_SPLIT_SIZE_MB", 0)
+    monkeypatch.setattr(parse_tasks, "DP_PART_PROCESSOR_COUNT", 2)
+    monkeypatch.setattr(parse_tasks, "_upload_part", lambda *args: {"uri": "s3://part", "part_index": 0})
+    monkeypatch.setattr(parse_tasks.process, "replace", lambda _signature: (_ for _ in ()).throw(parse_tasks.Ignore()))
+    parse_tasks.process.push_request(id="process-ignore")
+    try:
+        with pytest.raises(parse_tasks.Ignore):
+            parse_tasks.process.run("source", "local", index_name="idx")
+    finally:
+        parse_tasks.process.pop_request()
+
+
+def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monkeypatch):
+    _configure_celery_environment(monkeypatch)
+    from data_process import worker
+    import data_process.parse_tasks as parse_tasks
+
+    monkeypatch.setattr(worker, "QUEUES", "parse_q")
+    monkeypatch.setattr(parse_tasks.parser_bootstrap, "apply_async", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("dispatch")))
+    worker.worker_ready_handler()
+
+    validate_redis_connection = worker.validate_redis_connection
+    monkeypatch.setattr(worker, "validate_redis_connection", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
+    assert worker.validate_service_connections() is False
+    redis_module = types.ModuleType("redis")
+    redis_module.from_url = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("connect"))
+    monkeypatch.setitem(sys.modules, "redis", redis_module)
+    with pytest.raises(RuntimeError, match="connect"):
+        validate_redis_connection()
+
+    monkeypatch.setitem(sys.modules, "utils.monitoring", None)
+    monkeypatch.setattr(worker, "QUEUES", "forward_q")
+    monkeypatch.setattr(worker, "app", types.SimpleNamespace(worker_main=lambda _args: None))
+    monkeypatch.setattr(worker, "_validate_parser_config", lambda: None)
+    worker.start_worker()
+
+    from nexent.data_process.core import DataProcessCore
+
+    core = DataProcessCore()
+    fake_classes = {
+        "unstructured_processor": ("UnstructuredProcessor",),
+        "openpyxl_processor": ("OpenPyxlProcessor",),
+        "extract_image": ("UniversalImageExtractor",),
+        "file_splitter": ("FileSplitter",),
+    }
+    for module_name, class_names in fake_classes.items():
+        module = types.ModuleType(f"nexent.data_process.{module_name}")
+        for class_name in class_names:
+            setattr(module, class_name, type(class_name, (), {}))
+        monkeypatch.setitem(sys.modules, f"nexent.data_process.{module_name}", module)
+    for name in ("Unstructured", "OpenPyxl", "UniversalImageExtractor", "FileSplitter"):
+        assert core._load_processor(name).__class__.__name__ in {"UnstructuredProcessor", "OpenPyxlProcessor", "UniversalImageExtractor", "FileSplitter"}
+    with pytest.raises(ValueError, match="Unsupported processor"):
+        core._load_processor("unknown")
+    core._processor_factories.pop("Unstructured")
+    with pytest.raises(ValueError, match="Unsupported processor"):
+        core._get_processor("Unstructured")
+    core._processor_factories["Unstructured"] = lambda: types.SimpleNamespace(process_file=lambda *args, **kwargs: [{"content": "ok"}])
+    assert core._get_processor("Unstructured") is core.processors["Unstructured"]
+    core.model_registry.model_paths = {"unstructured_default": "model.json", "table_transformer": "table"}
+    ensured = []
+    monkeypatch.setattr(core, "ensure_model", lambda alias: ensured.append(alias))
+    core.processors["UniversalImageExtractor"] = types.SimpleNamespace(process_file=lambda *args, **kwargs: [])
+    core.processors["Unstructured"] = types.SimpleNamespace(process_file=lambda *args, **kwargs: [{"content": "ok"}])
+    assert core.file_process(b"data", "file.pdf", model_type="multi_embedding")[0]
+    assert ensured == ["unstructured_default", "unstructured_default", "table_transformer"]
+    assert core.preload_models([]) == {}
+    assert core.ensure_model("missing") is None
