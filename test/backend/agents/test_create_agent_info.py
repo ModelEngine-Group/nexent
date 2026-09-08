@@ -76,11 +76,22 @@ consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
 sys.modules["consts.exceptions"] = consts_exceptions_module
 
+consts_tool_labels_module = types.ModuleType("consts.tool_labels")
+consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
+    "store_memory",
+    "search_memory",
+    "download_from_s3",
+    "upload_to_s3",
+    "parallel_executor",
+})
+sys.modules["consts.tool_labels"] = consts_tool_labels_module
+
 # Also add model and exceptions to consts module attributes
 consts_module = sys.modules.get("consts")
 if consts_module:
     setattr(consts_module, "model", consts_model_module)
     setattr(consts_module, "exceptions", consts_exceptions_module)
+    setattr(consts_module, "tool_labels", consts_tool_labels_module)
     setattr(
         consts_module,
         "capability_profiles",
@@ -537,20 +548,10 @@ from backend.agents.create_agent_info import (
 )
 
 
-def test_ac_p3_25_external_search_switch_skips_provider_factory(monkeypatch):
-    factory = MagicMock()
-    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
-    monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", False)
-
-    assert _get_external_provider_service_for_search() is None
-    factory.assert_not_called()
-
-
-def test_ac_p3_25_external_search_switch_uses_provider_factory(monkeypatch):
+def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
     service = object()
     factory = MagicMock(return_value=service)
     monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
-    monkeypatch.setattr(create_agent_info_module, "EXTERNAL_MEMORY_SEARCH_ENABLED", True)
 
     assert _get_external_provider_service_for_search() is service
     factory.assert_called_once_with()
@@ -1109,6 +1110,30 @@ class TestCreateToolConfigList:
                 source="local",
                 usage=None
             )
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_ignores_legacy_system_managed_bindings(self):
+        """Legacy S3 bindings are replaced by the run-scoped built-in tools."""
+        with patch(
+            "backend.agents.create_agent_info.discover_langchain_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[
+                {"tool_id": 1, "class_name": "DownloadFromS3Tool", "name": "download_from_s3"},
+                {"tool_id": 2, "class_name": "UploadToS3Tool", "name": "upload_to_s3"},
+            ],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={"name": "legacy-agent"},
+        ), patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+        assert result == []
+        mock_tool_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool(self):

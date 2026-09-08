@@ -18,9 +18,11 @@ WITH legacy_source AS (
     SELECT 'agent_repository.tags', repository.agent_repository_id::TEXT,
            repository.publisher_tenant_id, 'agent', repository.agent_id::TEXT,
            to_jsonb(repository.tags), 'text_array',
-           (SELECT count(*) FROM nexent.ag_tenant_agent_t AS agent
-            WHERE agent.agent_id = repository.agent_id
-              AND agent.tenant_id = repository.publisher_tenant_id)
+           CASE WHEN EXISTS (
+               SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+               WHERE agent.agent_id = repository.agent_id
+                 AND agent.tenant_id = repository.publisher_tenant_id
+           ) THEN 1 ELSE 0 END
     FROM nexent.ag_agent_repository_t AS repository
     WHERE COALESCE(cardinality(repository.tags), 0) > 0
     UNION ALL
@@ -219,10 +221,11 @@ WITH category_alias_groups (category_key, accepted_aliases) AS (
       ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
     WHERE COALESCE(repository.delete_flag, 'N') <> 'Y'
       AND NULLIF(btrim(expanded.raw_value), '') IS NOT NULL
-      AND (SELECT count(*)
-           FROM nexent.ag_tenant_agent_t AS agent
-           WHERE agent.agent_id = repository.agent_id
-             AND agent.tenant_id = repository.publisher_tenant_id) = 1
+      AND EXISTS (
+          SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+          WHERE agent.agent_id = repository.agent_id
+            AND agent.tenant_id = repository.publisher_tenant_id
+      )
 ), projected AS (
     SELECT tenant_id, resource_id,
            count(DISTINCT normalized_value) AS keyword_count,
@@ -447,10 +450,11 @@ WITH category_alias_groups (category_key, accepted_aliases) AS (
     JOIN category_aliases AS aliases
       ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
     WHERE COALESCE(repository.delete_flag, 'N') <> 'Y'
-      AND (SELECT count(*)
-           FROM nexent.ag_tenant_agent_t AS agent
-           WHERE agent.agent_id = repository.agent_id
-             AND agent.tenant_id = repository.publisher_tenant_id) = 1
+      AND EXISTS (
+          SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+          WHERE agent.agent_id = repository.agent_id
+            AND agent.tenant_id = repository.publisher_tenant_id
+      )
 ), projected_counts AS (
     SELECT projected.tenant_id,
            projected.resource_id,

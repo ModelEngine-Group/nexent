@@ -18,6 +18,7 @@ class DownloadFromS3Tool(Tool):
     """Tool for downloading files from S3/MinIO storage to local workspace."""
 
     name = "download_from_s3"
+    is_user_selectable = False
     description = (
         "Download a file from S3/MinIO storage to the local workspace. "
         "Accepts s3://bucket/key, /bucket/key, or plain object key paths. "
