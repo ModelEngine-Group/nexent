@@ -45,6 +45,8 @@ const TYPE_ICON: Record<RepositoryImportRequirementType, typeof Database> = {
   tool: Wrench,
 };
 
+const OFFICIAL_TENANT_ID = "__nexent_official__";
+
 interface AgentRepositoryCopyDialogProps {
   listing: AgentRepositoryListingItem | null;
   open: boolean;
@@ -89,6 +91,9 @@ export function AgentRepositoryCopyDialog({
     listing?.display_name?.trim() ||
     listing?.name?.trim() ||
     t("agentRepository.card.untitled");
+  const isOfficialListing =
+    listing?.is_official === true ||
+    listing?.publisher_tenant_id === OFFICIAL_TENANT_ID;
 
   const {
     data: precheck,
@@ -122,7 +127,7 @@ export function AgentRepositoryCopyDialog({
   );
   const hasSkillConflicts = skillConflictItems.length > 0;
   const hasOfficialKnowledge = Boolean(
-    listing?.is_official &&
+    isOfficialListing &&
     precheck?.items.some((item) => item.type === "knowledge_base")
   );
   const availableEmbeddingModels = useMemo(
@@ -136,7 +141,7 @@ export function AgentRepositoryCopyDialog({
   );
 
   useEffect(() => {
-    if (!open || !listing?.is_official) return;
+    if (!open || !isOfficialListing) return;
     setSelectedModelId((current) => current ?? availableLlmModels[0]?.id);
     if (hasOfficialKnowledge) {
       setSelectedEmbeddingModelId(
@@ -145,7 +150,7 @@ export function AgentRepositoryCopyDialog({
     }
   }, [
     open,
-    listing?.is_official,
+    isOfficialListing,
     hasOfficialKnowledge,
     availableLlmModels,
     availableEmbeddingModels,
@@ -180,7 +185,7 @@ export function AgentRepositoryCopyDialog({
       : undefined;
 
     if (
-      listing?.is_official &&
+      isOfficialListing &&
       (!selectedModelId || (hasOfficialKnowledge && !selectedEmbeddingModelId))
     ) {
       message.error("请先选择语言模型和向量模型");
@@ -191,7 +196,7 @@ export function AgentRepositoryCopyDialog({
       await importMutation.mutateAsync({
         agentRepositoryId,
         skillResolutions,
-        modelOptions: listing?.is_official
+        modelOptions: isOfficialListing
           ? {
               modelIds: selectedModelId
                 ? { [listing.name]: selectedModelId }
@@ -410,7 +415,7 @@ export function AgentRepositoryCopyDialog({
             </section>
           ) : null}
 
-          {listing?.is_official ? (
+          {isOfficialListing ? (
             <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
               <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
                 选择本次安装使用的模型

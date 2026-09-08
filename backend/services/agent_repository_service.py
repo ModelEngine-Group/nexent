@@ -104,6 +104,7 @@ def _to_summary_item(
         "icon": record.get("icon"),
         "downloads": downloads,
         "content": record.get("content"),
+        "publisher_tenant_id": record.get("publisher_tenant_id"),
         "is_official": record.get("publisher_tenant_id") == OFFICIAL_AGENT_TENANT_ID,
     }
 

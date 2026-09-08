@@ -22,6 +22,7 @@ export interface AgentRepositoryListingItem {
   version_label?: string | null;
   downloads?: number;
   submitted_by?: string | null;
+  publisher_tenant_id?: string | null;
   content?: string | null;
   /** Platform-provided template; readable/copyable but not tenant-editable. */
   is_official?: boolean;
