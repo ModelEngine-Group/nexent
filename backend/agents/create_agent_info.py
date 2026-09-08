@@ -1783,7 +1783,8 @@ async def create_tool_config_list(
 
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
-            index_names = tool_config.params.get("index_names", [])
+            index_names = tool_config.params.get("index_names") or []
+            tool_config.params["index_names"] = index_names
 
             # Enforce knowledge-base-level read permission for the chatting user.
             # Agent-level permission controls "who can use this agent", but each knowledge

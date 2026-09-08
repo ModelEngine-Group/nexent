@@ -1103,8 +1103,10 @@ async def generate_stream(
             logger.error(
                 "Agent run error without memory: %r", None, exc_info=True
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            error_chunk = _safe_agent_stream_error_chunk()
+            if channel is not None:
+                await channel.publish(error_chunk)
+            yield error_chunk
             return
 
         try:
@@ -1126,8 +1128,10 @@ async def generate_stream(
                 run_exc,
                 exc_info=True,
             )
-            await channel.publish(_safe_agent_stream_error_chunk())
-            yield _safe_agent_stream_error_chunk()
+            error_chunk = _safe_agent_stream_error_chunk()
+            if channel is not None:
+                await channel.publish(error_chunk)
+            yield error_chunk
             return
     except Exception as stream_exc:
         logger.error(
@@ -1135,8 +1139,10 @@ async def generate_stream(
             stream_exc,
             exc_info=True,
         )
-        await channel.publish(_safe_agent_stream_error_chunk())
-        yield _safe_agent_stream_error_chunk()
+        error_chunk = _safe_agent_stream_error_chunk()
+        if channel is not None:
+            await channel.publish(error_chunk)
+        yield error_chunk
         return
     finally:
         if cancel_poll_task and not cancel_poll_task.done():

@@ -187,7 +187,7 @@ class SystemAgentProvider:
             )
         except WorkbenchAgentError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - optional capability import is best effort
             raise WorkbenchAgentError(
                 "system_agent_not_ready",
                 retryable=True,
@@ -242,36 +242,59 @@ class SystemAgentProvider:
         actor: str,
     ) -> list[dict[str, Any]]:
         required_names = self.release_manifest.official_skill_names
-        installed_names = install_skills_from_zip_for_tenant(
-            skill_names=list(required_names),
-            tenant_id=tenant_id,
-            user_id=actor,
-        )
-        missing_installs = set(required_names).difference(installed_names)
-        if missing_installs:
-            raise WorkbenchAgentError(
-                "official_skill_install_failed",
-                retryable=True,
-                message=(
-                    "Required official Skills were not installed: "
-                    + ", ".join(sorted(missing_installs))
-                ),
+        try:
+            installed_names = list(
+                install_skills_from_zip_for_tenant(
+                    skill_names=list(required_names),
+                    tenant_id=tenant_id,
+                    user_id=actor,
+                )
+            )
+        except Exception as exc:
+            installed_names = []
+            logger.warning(
+                "Official Skill import failed for workbench Agent in tenant %s; "
+                "continuing with already available official Skills: %s",
+                tenant_id,
+                exc,
             )
 
         resolved: list[dict[str, Any]] = []
         for skill_name in required_names:
-            skill = skill_db.get_skill_by_name(skill_name, tenant_id)
-            if not skill:
-                raise WorkbenchAgentError(
-                    "official_skill_install_failed",
-                    retryable=True,
-                    message=f"Required official Skill is missing: {skill_name}",
+            prefix = f"{skill_name}_"
+            aliases = sorted(
+                (
+                    name
+                    for name in installed_names
+                    if name.startswith(prefix) and name[len(prefix):].isdigit()
+                ),
+                key=lambda name: int(name[len(prefix):]),
+            )
+            candidates = [skill_name, *aliases]
+            skill = None
+            for candidate in candidates:
+                candidate_skill = skill_db.get_skill_by_name(candidate, tenant_id)
+                if not candidate_skill:
+                    continue
+                if str(candidate_skill.get("source") or "").casefold() == "official":
+                    skill = candidate_skill
+                    break
+                logger.warning(
+                    "Preserving non-official Skill '%s' in tenant %s while "
+                    "resolving official workbench capability '%s'",
+                    candidate,
+                    tenant_id,
+                    skill_name,
                 )
-            if str(skill.get("source") or "").casefold() != "official":
-                raise WorkbenchAgentError(
-                    "official_skill_name_conflict",
-                    message=f"Non-official Skill uses reserved name: {skill_name}",
+            if skill is None:
+                logger.warning(
+                    "Official Skill '%s' is unavailable for workbench Agent in "
+                    "tenant %s; bootstrap will continue without it (imported=%s)",
+                    skill_name,
+                    tenant_id,
+                    skill_name in installed_names,
                 )
+                continue
             resolved.append(skill)
         return resolved
 
@@ -285,7 +308,11 @@ class SystemAgentProvider:
     ) -> None:
         """Replace the protected draft capability set for a release upgrade."""
         selected_name = self.release_manifest.persistent_tool_names[0]
-        selected_tool = self._find_available_tool(selected_name, tenant_id)
+        selected_tool = self._find_available_tool(
+            selected_name,
+            tenant_id,
+            required=False,
+        )
 
         delete_tools_by_agent_id(
             agent_id,
@@ -294,18 +321,31 @@ class SystemAgentProvider:
             version_no=0,
             allow_system=True,
         )
-        create_or_update_tool_by_tool_info(
-            ToolInstanceInfoRequest(
-                tool_id=int(selected_tool["tool_id"]),
-                agent_id=agent_id,
-                params={},
-                enabled=True,
-            ),
-            tenant_id=tenant_id,
-            user_id=actor,
-            version_no=0,
-            allow_system=True,
-        )
+        if selected_tool is not None:
+            params = (
+                {"index_names": []}
+                if selected_name == "knowledge_base_search"
+                else {}
+            )
+            create_or_update_tool_by_tool_info(
+                ToolInstanceInfoRequest(
+                    tool_id=int(selected_tool["tool_id"]),
+                    agent_id=agent_id,
+                    params=params,
+                    enabled=True,
+                ),
+                tenant_id=tenant_id,
+                user_id=actor,
+                version_no=0,
+                allow_system=True,
+            )
+        else:
+            logger.warning(
+                "Tool '%s' is unavailable for workbench Agent in tenant %s; "
+                "bootstrap will continue without it",
+                selected_name,
+                tenant_id,
+            )
 
         delete_skills_by_agent_id(
             agent_id,
@@ -341,13 +381,11 @@ class SystemAgentProvider:
         ):
             return False
 
-        try:
-            expected_tool = self._find_available_tool(
-                self.release_manifest.persistent_tool_names[0],
-                tenant_id,
-            )
-        except WorkbenchAgentError:
-            return False
+        expected_tool = self._find_available_tool(
+            self.release_manifest.persistent_tool_names[0],
+            tenant_id,
+            required=False,
+        )
         enabled_tool_ids = {
             int(item["tool_id"])
             for item in query_tool_instances_by_agent_id(
@@ -355,27 +393,39 @@ class SystemAgentProvider:
             )
             if item.get("enabled") is True and item.get("tool_id") is not None
         }
-        if enabled_tool_ids != {int(expected_tool["tool_id"])}:
+        allowed_tool_ids = (
+            {int(expected_tool["tool_id"])} if expected_tool is not None else set()
+        )
+        if not enabled_tool_ids.issubset(allowed_tool_ids):
             return False
 
-        expected_skill_ids: set[int] = set()
-        for skill_name in self.release_manifest.official_skill_names:
-            skill = skill_db.get_skill_by_name(skill_name, tenant_id)
-            if (
-                not skill
-                or str(skill.get("source") or "").casefold() != "official"
-                or skill.get("skill_id") is None
-            ):
-                return False
-            expected_skill_ids.add(int(skill["skill_id"]))
-        enabled_skill_ids = {
+        enabled_skill_ids = [
             int(item["skill_id"])
             for item in skill_db.query_skill_instances_by_agent_id(
                 int(existing["agent_id"]), tenant_id, version_no=0
             )
             if item.get("enabled") is True and item.get("skill_id") is not None
-        }
-        return enabled_skill_ids == expected_skill_ids
+        ]
+        resolved_bases: set[str] = set()
+        for skill_id in enabled_skill_ids:
+            skill = skill_db.get_skill_by_id(skill_id, tenant_id)
+            if not skill or str(skill.get("source") or "").casefold() != "official":
+                return False
+            skill_name = str(skill.get("name") or skill.get("skill_name") or "")
+            base_name = self._official_skill_base_name(skill_name)
+            if base_name is None or base_name in resolved_bases:
+                return False
+            resolved_bases.add(base_name)
+        return True
+
+    def _official_skill_base_name(self, skill_name: str) -> str | None:
+        for base_name in self.release_manifest.official_skill_names:
+            if skill_name == base_name:
+                return base_name
+            prefix = f"{base_name}_"
+            if skill_name.startswith(prefix) and skill_name[len(prefix):].isdigit():
+                return base_name
+        return None
 
     @staticmethod
     def _stable_tool_names(tool: dict[str, Any]) -> set[str]:
@@ -389,18 +439,22 @@ class SystemAgentProvider:
         self,
         tool_name: str,
         tenant_id: str,
-    ) -> dict[str, Any]:
+        *,
+        required: bool = True,
+    ) -> dict[str, Any] | None:
         for tool in query_all_tools(tenant_id):
             if (
                 tool_name in self._stable_tool_names(tool)
                 and tool.get("is_available") is not False
             ):
                 return tool
-        raise WorkbenchAgentError(
-            "system_agent_not_ready",
-            retryable=True,
-            message=f"Required Tool is unavailable: {tool_name}",
-        )
+        if required:
+            raise WorkbenchAgentError(
+                "system_agent_not_ready",
+                retryable=True,
+                message=f"Required Tool is unavailable: {tool_name}",
+            )
+        return None
 
     def _resolve_published_ref(
         self,

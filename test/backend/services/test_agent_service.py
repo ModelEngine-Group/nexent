@@ -5731,6 +5731,47 @@ async def test_generate_stream_unexpected_exception_emits_error(monkeypatch, cap
     assert "Traceback" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_generate_stream_without_channel_emits_preparation_error(monkeypatch):
+    """Debug/no-memory runs return a safe SSE error even without a channel."""
+    agent_request = AgentRequest(
+        agent_id=9,
+        conversation_id=9010,
+        query="q",
+        history=[],
+        minio_files=[],
+        is_debug=True,
+    )
+    monkeypatch.setattr(
+        "management.services.agent.run.prepare_agent_run",
+        AsyncMock(side_effect=TypeError("invalid persisted tool params")),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "AgentRunAlreadyActiveError",
+        type("AgentRunAlreadyActiveError", (Exception,), {}),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "MemoryPreparationException",
+        type("MemoryPreparationException", (Exception,), {}),
+    )
+
+    chunks = []
+    async for chunk in agent_run_service.generate_stream(
+        agent_request,
+        user_id="u",
+        tenant_id="t",
+        enable_memory=False,
+        channel=None,
+    ):
+        chunks.append(chunk)
+
+    assert len(chunks) == 1
+    assert '"type": "error"' in chunks[0]
+    assert SAFE_AGENT_STREAM_ERROR_MESSAGE in chunks[0]
+
+
 async def test_generate_stream_registers_and_streams(monkeypatch):
     """generate_stream(enable_memory=False) should prepare run info, register it and stream data without memory tokens."""
     # Prepare AgentRequest & Request

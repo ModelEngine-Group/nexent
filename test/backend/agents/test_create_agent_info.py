@@ -6879,6 +6879,65 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             assert len(result) == 1
 
     @pytest.mark.asyncio
+    async def test_create_tool_config_list_normalizes_null_index_names(self):
+        """A persisted null index_names value behaves like an empty KB selection."""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_tools_for_sub_agent"
+            ) as mock_tools,
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                return_value={"name": "workbench_main"},
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_vector_db_core",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_embedding_model_by_index_name"
+            ) as mock_get_embedding,
+            patch(
+                "backend.agents.create_agent_info.ToolConfig"
+            ) as mock_tool_config,
+        ):
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": None},
+                    {"name": "rerank", "default": False},
+                ],
+            }]
+
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+
+            instance = MockToolConfigInstance()
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(instance, key, value)
+                return instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            assert result == [instance]
+            assert instance.params["index_names"] == []
+            assert instance.metadata["allowed_index_names"] == []
+            mock_get_embedding.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_create_tool_config_list_preserves_order_after_filtering(self):
         """
         After filtering, the order of accessible knowledge bases is preserved.

@@ -172,26 +172,29 @@ def test_wma_015_release_installs_exact_official_skills(mocker):
     )
 
 
-def test_wma_016_release_rejects_same_name_custom_skill(mocker):
+def test_wma_016_release_preserves_custom_skill_and_binds_official_alias(mocker):
     """UT-BE-WMA-016 and UT-BE-WMA-017."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     mocker.patch(
         "management.services.agent.system_agent_provider.install_skills_from_zip_for_tenant",
-        return_value=list(WORKBENCH_OFFICIAL_SKILL_NAMES),
+        return_value=["docx_1", *WORKBENCH_OFFICIAL_SKILL_NAMES[1:]],
     )
     mocker.patch(
         "management.services.agent.system_agent_provider.skill_db.get_skill_by_name",
         side_effect=lambda name, tenant_id: {
-            "skill_id": 1,
+            "skill_id": 101 if name == "docx_1" else 1,
             "skill_name": name,
             "source": "custom" if name == "docx" else "official",
         },
     )
 
-    with pytest.raises(WorkbenchAgentError) as exc_info:
-        provider._prepare_official_skills("tenant-a", "system")
+    skills = provider._prepare_official_skills("tenant-a", "system")
 
-    assert exc_info.value.code == "official_skill_name_conflict"
+    assert [skill["skill_name"] for skill in skills] == [
+        "docx_1",
+        *WORKBENCH_OFFICIAL_SKILL_NAMES[1:],
+    ]
+    assert all(skill["source"] == "official" for skill in skills)
 
 
 def test_wma_006_016_replace_binds_exact_tool_and_six_skills(mocker):
@@ -254,7 +257,7 @@ def test_wma_006_016_replace_binds_exact_tool_and_six_skills(mocker):
     ] == [1, 2, 3, 4, 5, 6]
 
 
-def test_wma_017_missing_official_package_blocks_release(mocker):
+def test_wma_017_missing_official_package_does_not_block_release(mocker):
     """UT-BE-WMA-017."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     mocker.patch(
@@ -263,16 +266,78 @@ def test_wma_017_missing_official_package_blocks_release(mocker):
             name for name in WORKBENCH_OFFICIAL_SKILL_NAMES if name != "pdf"
         ],
     )
-    resolve = mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.get_skill_by_name"
+    mocker.patch(
+        "management.services.agent.system_agent_provider.skill_db.get_skill_by_name",
+        side_effect=lambda name, tenant_id: None if name == "pdf" else {
+            "skill_id": WORKBENCH_OFFICIAL_SKILL_NAMES.index(name) + 1,
+            "skill_name": name,
+            "source": "official",
+        },
     )
 
-    with pytest.raises(WorkbenchAgentError) as exc_info:
-        provider._prepare_official_skills("tenant-a", "system")
+    skills = provider._prepare_official_skills("tenant-a", "system")
 
-    assert exc_info.value.code == "official_skill_install_failed"
-    assert exc_info.value.retryable is True
-    resolve.assert_not_called()
+    assert [skill["skill_name"] for skill in skills] == [
+        name for name in WORKBENCH_OFFICIAL_SKILL_NAMES if name != "pdf"
+    ]
+
+
+def test_wma_017_missing_knowledge_tool_does_not_block_other_capabilities(mocker):
+    """UT-BE-WMA-017: an unavailable optional Tool must not block bootstrap."""
+    provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
+    mocker.patch(
+        "management.services.agent.system_agent_provider.query_all_tools",
+        return_value=[],
+    )
+    delete_tools = mocker.patch(
+        "management.services.agent.system_agent_provider.delete_tools_by_agent_id"
+    )
+    bind_tool = mocker.patch(
+        "management.services.agent.system_agent_provider.create_or_update_tool_by_tool_info"
+    )
+    mocker.patch(
+        "management.services.agent.system_agent_provider.delete_skills_by_agent_id"
+    )
+    bind_skill = mocker.patch(
+        "management.services.agent.system_agent_provider.skill_db.create_or_update_skill_by_skill_info"
+    )
+
+    provider._replace_release_capabilities(
+        agent_id=17,
+        tenant_id="tenant-a",
+        actor="system",
+        official_skills=[
+            {"skill_id": 2, "skill_name": "pdf", "source": "official"}
+        ],
+    )
+
+    delete_tools.assert_called_once()
+    bind_tool.assert_not_called()
+    bind_skill.assert_called_once()
+
+
+def test_wma_017_degraded_release_state_accepts_missing_optional_capabilities(mocker):
+    """UT-BE-WMA-017: a published degraded capability subset is not drift."""
+    provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
+    existing = _agent(provider)
+    mocker.patch(
+        "management.services.agent.system_agent_provider.query_all_tools",
+        return_value=[],
+    )
+    mocker.patch(
+        "management.services.agent.system_agent_provider.query_tool_instances_by_agent_id",
+        return_value=[],
+    )
+    mocker.patch(
+        "management.services.agent.system_agent_provider.skill_db.query_skill_instances_by_agent_id",
+        return_value=[{"skill_id": 2, "enabled": True}],
+    )
+    mocker.patch(
+        "management.services.agent.system_agent_provider.skill_db.get_skill_by_id",
+        return_value={"skill_id": 2, "name": "pdf", "source": "official"},
+    )
+
+    assert provider._release_state_matches(existing, "tenant-a") is True
 
 
 def test_sal_004_initializes_release_and_returns_published_ref(mocker):
