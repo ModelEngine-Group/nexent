@@ -21,6 +21,7 @@ export const ResourceGapResolutionCard: FC<{
   const reactId = useId();
   const cardKey = `resource_gap_resolution:${payload.agent_id}:${reactId}`;
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
   const resumedRequestId = useRef<number | null>(null);
   const {
     registerCard,
@@ -37,7 +38,8 @@ export const ResourceGapResolutionCard: FC<{
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
 
   const submit = (
-    actionName: "skill_created" | "revise_requirements" | "abandon"
+    actionName: "skill_created" | "revise_requirements" | "abandon",
+    requirementId = selectedRequirementId
   ) => {
     if (isLocked) return;
     setIsSubmitted(true);
@@ -47,7 +49,7 @@ export const ResourceGapResolutionCard: FC<{
       subtype: payload.subtype,
       agent_id: payload.agent_id,
       action: actionName,
-      result: { requirements: payload.requirements },
+      result: { requirement_id: requirementId },
     };
     aui.thread().append({
       role: "user",
@@ -69,7 +71,7 @@ export const ResourceGapResolutionCard: FC<{
       return;
     }
     resumedRequestId.current = skillCreationRequest.requestId;
-    submit("skill_created");
+    submit("skill_created", skillCreationRequest.requirementId);
   }, [cardKey, payload.agent_id, skillCreationRequest]);
 
   return (
@@ -89,39 +91,18 @@ export const ResourceGapResolutionCard: FC<{
         </div>
       </div>
       <div className="space-y-3 p-4">
-        <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+        <ul className="space-y-2 text-sm text-muted-foreground">
           {payload.requirements.map((requirement) => (
-            <li key={requirement.requirement_id}>{requirement.query}</li>
+            <li key={requirement.requirement_id} className="flex items-center justify-between gap-3">
+              <span>{requirement.query}</span>
+              <div className="flex gap-1">
+                <Button type="button" size="sm" disabled={isLocked} onClick={() => requestSkillCreation(payload.agent_id, cardKey, requirement.requirement_id)}><PlusCircle className="mr-1 size-4" />{t("nl2agent.resourceGap.createSkill", "Create Skill")}</Button>
+                <Button type="button" size="sm" variant="outline" disabled={isLocked} onClick={() => submit("revise_requirements", requirement.requirement_id)}><PencilLine className="size-4" /></Button>
+                <Button type="button" size="sm" variant="ghost" disabled={isLocked} onClick={() => submit("abandon", requirement.requirement_id)}><XCircle className="size-4" /></Button>
+              </div>
+            </li>
           ))}
         </ul>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            disabled={isLocked}
-            onClick={() => requestSkillCreation(payload.agent_id, cardKey)}
-          >
-            <PlusCircle className="mr-1 size-4" />
-            {t("nl2agent.resourceGap.createSkill", "Create Skill")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={isLocked}
-            onClick={() => submit("revise_requirements")}
-          >
-            <PencilLine className="mr-1 size-4" />
-            {t("nl2agent.resourceGap.revise", "Revise requirements")}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={isLocked}
-            onClick={() => submit("abandon")}
-          >
-            <XCircle className="mr-1 size-4" />
-            {t("nl2agent.resourceGap.abandon", "Abandon")}
-          </Button>
-        </div>
       </div>
     </section>
   );

@@ -48,6 +48,7 @@ interface ActiveNl2AgentCard {
 interface SkillCreationRequest {
   agentId: number;
   cardKey: string;
+  requirementId: string;
   requestId: number;
   completed: boolean;
 }
@@ -71,7 +72,7 @@ type Nl2AgentFlowAction =
   | { type: "reset"; agentId: number | null }
   | { type: "register_card"; card: ActiveNl2AgentCard }
   | { type: "submit_card"; cardKey: string }
-  | { type: "request_skill_creation"; agentId: number; cardKey: string }
+  | { type: "request_skill_creation"; agentId: number; cardKey: string; requirementId: string }
   | { type: "complete_skill_creation"; agentId: number; requestId: number }
   | { type: "resources_bound"; agentId: number }
   | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
@@ -146,6 +147,7 @@ function reducer(
         skillCreationRequest: {
           agentId: action.agentId,
           cardKey: action.cardKey,
+          requirementId: action.requirementId,
           requestId: (state.skillCreationRequest?.requestId ?? 0) + 1,
           completed: false,
         },
@@ -251,7 +253,7 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   resetFlow: (agentId?: number | null) => void;
   registerCard: (key: string, subtype: string) => void;
   submitCard: (key: string) => void;
-  requestSkillCreation: (agentId: number, cardKey: string) => void;
+  requestSkillCreation: (agentId: number, cardKey: string, requirementId: string) => void;
   completeSkillCreation: (agentId: number, requestId: number) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
@@ -287,8 +289,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
     []
   );
   const requestSkillCreation = useCallback(
-    (agentId: number, cardKey: string) =>
-      dispatch({ type: "request_skill_creation", agentId, cardKey }),
+    (agentId: number, cardKey: string, requirementId: string) =>
+      dispatch({ type: "request_skill_creation", agentId, cardKey, requirementId }),
     []
   );
   const completeSkillCreation = useCallback(
