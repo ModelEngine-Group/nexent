@@ -252,6 +252,45 @@ def test_nl2agent_resource_installation_accepts_only_candidate_ref(
     assert rejected.status_code == 422
 
 
+def test_nl2agent_resource_config_reads_only_requested_candidate(
+    mocker,
+    mock_auth_header,
+):
+    """UT-BE-NL2A-CONFIG-001 / HTTP boundary."""
+
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    detail = mocker.patch(
+        "apps.agent_app.get_resource_config_detail_impl",
+        new_callable=AsyncMock,
+        return_value={
+            "candidate_ref": "tool:7",
+            "resource_type": "tool",
+            "schema": [],
+            "values": {},
+            "enabled": False,
+            "bound": False,
+        },
+    )
+
+    response = config_client.get(
+        "/agent/nl2agent/resource-config",
+        params={"agent_id": 42, "candidate_ref": "tool:7"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["candidate_ref"] == "tool:7"
+    detail.assert_awaited_once_with(
+        agent_id=42,
+        candidate_ref="tool:7",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header

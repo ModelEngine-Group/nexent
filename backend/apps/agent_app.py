@@ -28,6 +28,7 @@ from consts.model import (
     NL2AgentRunRequest,
     NL2AgentResourceInstallationRequest,
     NL2AgentResourceInstallationResponse,
+    NL2AgentResourceConfigResponse,
 )
 from consts.exceptions import (
     ForbiddenError,
@@ -66,6 +67,7 @@ from services.nl2agent_service import (
     Nl2AgentDraftSaveError,
     Nl2AgentResourceError,
     create_nl2agent_stream,
+    get_resource_config_detail_impl,
     install_nl2agent_resource_impl,
 )
 from services.agent_version_service import (
@@ -303,6 +305,48 @@ async def install_nl2agent_resource_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail={"code": "resource_install_failed", "retryable": True},
+        ) from exc
+
+
+@agent_config_router.get(
+    "/nl2agent/resource-config",
+    response_model=NL2AgentResourceConfigResponse,
+)
+async def get_nl2agent_resource_config_api(
+    agent_id: int,
+    candidate_ref: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Get safe configuration metadata for one visible draft resource."""
+
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        return await get_resource_config_detail_impl(
+            agent_id=agent_id,
+            candidate_ref=candidate_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except AgentDraftEditError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail={"code": exc.code},
+        ) from exc
+    except Nl2AgentResourceError as exc:
+        status_code = (
+            HTTPStatus.BAD_REQUEST
+            if exc.code == "invalid_candidate_ref"
+            else HTTPStatus.NOT_FOUND
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code},
+        ) from exc
+    except Exception as exc:
+        logger.exception("NL2Agent resource config lookup failed")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail={"code": "resource_config_failed", "retryable": True},
         ) from exc
 
 

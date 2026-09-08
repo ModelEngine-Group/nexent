@@ -28,6 +28,7 @@ from services.nl2agent_service import (
     _resource_similarity,
     build_nl2agent_run_info,
     create_nl2agent_stream,
+    get_resource_config_detail_impl,
     recommend_installed_resources_impl,
     recommend_resources_impl,
     recommend_uninstalled_resources_impl,
@@ -99,6 +100,146 @@ def test_resource_search_keeps_relevant_generic_query_tool_as_a_candidate():
 
     assert result.uncovered_requirement_ids == []
     assert result.candidates[0].candidate_ref == "tool:127"
+
+
+@pytest.mark.asyncio
+async def test_tool_resource_config_returns_schema_instance_values_and_binding(
+    mocker,
+):
+    """UT-BE-NL2A-CONFIG-001."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(return_value=[{
+            "tool_id": 7,
+            "name": "weather",
+            "source": "local",
+            "is_available": True,
+            "params": [{
+                "name": "top_k",
+                "type": "integer",
+                "optional": False,
+                "default": 5,
+                "description": "Maximum results",
+                "minimum": 1,
+            }],
+        }]),
+    )
+    mocker.patch(
+        "database.tool_db.query_tool_instances_by_id",
+        return_value={"params": {"top_k": 9}, "enabled": True},
+    )
+
+    result = await get_resource_config_detail_impl(
+        agent_id=42,
+        candidate_ref="tool:7",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["schema"] == [{
+        "name": "top_k",
+        "type": "number",
+        "required": True,
+        "description": "Maximum results",
+        "default": 5,
+        "secret": False,
+        "constraints": {"minimum": 1},
+    }]
+    assert result["values"] == {"top_k": 9}
+    assert result["enabled"] is True
+    assert result["bound"] is True
+
+
+@pytest.mark.asyncio
+async def test_tool_resource_config_without_instance_returns_empty_values(mocker):
+    """UT-BE-NL2A-CONFIG-002."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(return_value=[{
+            "tool_id": 7,
+            "name": "weather",
+            "source": "local",
+            "is_available": True,
+            "params": [],
+        }]),
+    )
+    mocker.patch("database.tool_db.query_tool_instances_by_id", return_value=None)
+
+    result = await get_resource_config_detail_impl(
+        agent_id=42,
+        candidate_ref="tool:7",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["values"] == {}
+    assert result["enabled"] is False
+    assert result["bound"] is False
+
+
+@pytest.mark.asyncio
+async def test_skill_resource_config_keeps_defaults_separate_from_overrides(mocker):
+    """UT-BE-NL2A-CONFIG-003."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[{
+            "skill_id": 11,
+            "name": "daily_report",
+            "config_schemas": [{
+                "name": "region",
+                "type": "string",
+                "required": True,
+                "description": "Target region",
+                "default": "cn",
+            }],
+            "config_values": {"region": "cn"},
+        }],
+    )
+    mocker.patch(
+        "database.skill_db.query_skill_instance_by_id",
+        return_value={"config_values": {"region": "us"}, "enabled": True},
+    )
+
+    result = await get_resource_config_detail_impl(
+        agent_id=42,
+        candidate_ref="skill:11",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["schema"][0]["default"] == "cn"
+    assert result["values"] == {"region": "us"}
+
+
+@pytest.mark.asyncio
+async def test_resource_config_rejects_invisible_resource_without_reading_values(
+    mocker,
+):
+    """UT-BE-NL2A-CONFIG-004."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(return_value=[]),
+    )
+    read_instance = mocker.patch("database.tool_db.query_tool_instances_by_id")
+
+    with pytest.raises(Nl2AgentResourceError) as exc_info:
+        await get_resource_config_detail_impl(
+            agent_id=42,
+            candidate_ref="tool:7",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "resource_not_visible"
+    read_instance.assert_not_called()
 
 
 @pytest.mark.asyncio

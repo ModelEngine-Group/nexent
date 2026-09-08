@@ -611,6 +611,154 @@ async def install_nl2agent_resource_impl(
     raise Nl2AgentResourceError("resource_install_failed", retryable=True)
 
 
+def _build_resource_config_schema(
+    fields: Any,
+    defaults: Any,
+) -> list[dict[str, Any]]:
+    """Normalize resource schemas without merging persisted instance values."""
+
+    if not isinstance(fields, list):
+        return []
+    default_values = defaults if isinstance(defaults, dict) else {}
+    schema: list[dict[str, Any]] = []
+    excluded_keys = {
+        "name",
+        "type",
+        "required",
+        "optional",
+        "description",
+        "description_zh",
+        "default",
+        "value",
+        "secret",
+        "constraints",
+    }
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        constraints = (
+            dict(field.get("constraints"))
+            if isinstance(field.get("constraints"), dict)
+            else {}
+        )
+        constraints.update(
+            {
+                key: value
+                for key, value in field.items()
+                if key not in excluded_keys and value is not None
+            }
+        )
+        schema.append(
+            {
+                "name": name,
+                "type": _normalize_frontend_param_type(field.get("type")),
+                "required": bool(
+                    field.get("required", not bool(field.get("optional")))
+                ),
+                "description": str(field.get("description") or ""),
+                "default": field.get("default", default_values.get(name)),
+                "secret": bool(field.get("secret")),
+                "constraints": constraints,
+            }
+        )
+    return schema
+
+
+async def get_resource_config_detail_impl(
+    *,
+    agent_id: int,
+    candidate_ref: str,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Return a visible resource's schema and draft-instance values on demand."""
+
+    require_agent_draft_edit(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    prefix, separator, raw_identifier = candidate_ref.partition(":")
+    if (
+        not separator
+        or prefix not in {"tool", "skill"}
+        or not raw_identifier.isdecimal()
+        or int(raw_identifier) <= 0
+    ):
+        raise Nl2AgentResourceError("invalid_candidate_ref")
+    resource_id = int(raw_identifier)
+
+    if prefix == "tool":
+        from database.tool_db import query_tool_instances_by_id
+        from services.tool_configuration_service import list_all_tools
+
+        tools = await list_all_tools(tenant_id=tenant_id)
+        tool = next(
+            (
+                item
+                for item in tools
+                if isinstance(item, dict)
+                and item.get("tool_id") == resource_id
+                and item.get("source")
+                in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
+                and item.get("is_available") is True
+            ),
+            None,
+        )
+        if tool is None:
+            raise Nl2AgentResourceError("resource_not_visible")
+        instance = query_tool_instances_by_id(
+            agent_id,
+            resource_id,
+            tenant_id,
+        )
+        values = instance.get("params") if isinstance(instance, dict) else {}
+        return {
+            "candidate_ref": candidate_ref,
+            "resource_type": "tool",
+            "schema": _build_resource_config_schema(
+                tool.get("params"),
+                {},
+            ),
+            "values": values if isinstance(values, dict) else {},
+            "enabled": bool(instance and instance.get("enabled")),
+            "bound": instance is not None,
+        }
+
+    from database.skill_db import query_skill_instance_by_id
+    from management.services.skill.service import SkillService
+
+    skill = next(
+        (
+            item
+            for item in SkillService(tenant_id=tenant_id).list_visible_skills(
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if item.get("skill_id") == resource_id
+        ),
+        None,
+    )
+    if skill is None:
+        raise Nl2AgentResourceError("resource_not_visible")
+    instance = query_skill_instance_by_id(agent_id, resource_id, tenant_id)
+    values = instance.get("config_values") if isinstance(instance, dict) else {}
+    return {
+        "candidate_ref": candidate_ref,
+        "resource_type": "skill",
+        "schema": _build_resource_config_schema(
+            skill.get("config_schemas"),
+            skill.get("config_values"),
+        ),
+        "values": values if isinstance(values, dict) else {},
+        "enabled": bool(instance and instance.get("enabled")),
+        "bound": instance is not None,
+    }
+
+
 def _resource_text_variants(value: Any) -> tuple[str, str]:
     normalized = _normalize_search_text(value)
     normalized = re.sub(r"[_\-/\.:]+", " ", normalized)
