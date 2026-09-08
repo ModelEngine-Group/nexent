@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import tempfile
+import uuid
 import zipfile
 from typing import Dict, List, Optional
 
@@ -1059,9 +1060,16 @@ async def install_official_agents(
                 renames[root_name] = unique_name
                 root_renamed = True
                 if root_agent is not None:
+                    from database.user_tenant_db import get_user_tenant_by_user_id
+
+                    user_record = get_user_tenant_by_user_id(user_id) or {}
+                    user_email = str(user_record.get("user_email") or "").strip()
+                    display_suffix = user_email or "当前用户"
                     root_agent.display_name = (
                         root_agent.display_name or root_name
-                    ) + "（副本）"
+                    ) + f"（{display_suffix}）"
+                unique_name = f"{root_name}__copy_{uuid.uuid4().hex[:8]}"
+                renames[root_name] = unique_name
                 logger.info(
                     "Official agent '%s' exists for another user; creating "
                     "visible user copy name=%s",

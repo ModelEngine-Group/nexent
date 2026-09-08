@@ -4356,6 +4356,13 @@ async def _create_skills_for_install(
         target_name = skill_name
         if resolution and resolution.action == "rename" and resolution.new_name:
             target_name = resolution.new_name
+            if target_name == f"{skill_name} 副本":
+                from database.user_tenant_db import get_user_tenant_by_user_id
+
+                user_record = get_user_tenant_by_user_id(user_id) or {}
+                user_email = str(user_record.get("user_email") or "").strip()
+                if user_email:
+                    target_name = f"{skill_name}（{user_email}）"
         created = service.create_skill_from_zip_bytes(
             zip_bytes=base64.b64decode(encoded_zip),
             skill_name=target_name,
