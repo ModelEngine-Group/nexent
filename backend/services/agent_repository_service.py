@@ -1104,6 +1104,8 @@ async def import_agent_from_repository_impl(
     tenant_id: str,
     authorization: str,
     skill_resolutions: Optional[List[SkillResolution]] = None,
+    model_ids: Optional[Dict[str, int]] = None,
+    embedding_model_ids: Optional[Dict[str, int]] = None,
     user_id: Optional[str] = None,
 ) -> Dict[int, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
@@ -1134,6 +1136,8 @@ async def import_agent_from_repository_impl(
             tenant_id=tenant_id,
             user_id=user_id or "repository-import",
             authorization=authorization,
+            model_ids=model_ids,
+            embedding_model_ids=embedding_model_ids,
         )
         item = results[0] if results else None
         if item is None:

@@ -81,7 +81,9 @@ export async function fetchMyEditableAgents(
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch my editable agents: ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch my editable agents: ${response.statusText}`
+      );
     }
 
     return response.json();
@@ -188,9 +190,15 @@ export interface SkillResolutionInput {
   new_name?: string;
 }
 
+export interface RepositoryImportModelOptions {
+  modelIds?: Record<string, number>;
+  embeddingModelIds?: Record<string, number>;
+}
+
 export async function importAgentFromRepository(
   agentRepositoryId: number,
-  skillResolutions?: SkillResolutionInput[]
+  skillResolutions?: SkillResolutionInput[],
+  modelOptions?: RepositoryImportModelOptions
 ): Promise<void> {
   try {
     const response = await fetch(
@@ -198,7 +206,20 @@ export async function importAgentFromRepository(
       {
         method: "POST",
         headers: getAuthHeaders(),
-        body: skillResolutions ? JSON.stringify(skillResolutions) : undefined,
+        body:
+          skillResolutions || modelOptions
+            ? JSON.stringify({
+                ...(skillResolutions
+                  ? { skill_resolutions: skillResolutions }
+                  : {}),
+                ...(modelOptions?.modelIds
+                  ? { model_ids: modelOptions.modelIds }
+                  : {}),
+                ...(modelOptions?.embeddingModelIds
+                  ? { embedding_model_ids: modelOptions.embeddingModelIds }
+                  : {}),
+              })
+            : undefined,
       }
     );
 

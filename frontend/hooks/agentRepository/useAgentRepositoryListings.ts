@@ -143,6 +143,7 @@ export function useImportAgentFromRepository() {
     mutationFn: ({
       agentRepositoryId,
       skillResolutions,
+      modelOptions,
     }: {
       agentRepositoryId: number;
       skillResolutions?: {
@@ -150,10 +151,15 @@ export function useImportAgentFromRepository() {
         action: "rename" | "use_existing";
         new_name?: string;
       }[];
+      modelOptions?: {
+        modelIds?: Record<string, number>;
+        embeddingModelIds?: Record<string, number>;
+      };
     }) =>
       agentRepositoryService.importAgentFromRepository(
         agentRepositoryId,
-        skillResolutions
+        skillResolutions,
+        modelOptions
       ),
     onSuccess: async () => {
       await Promise.all([
@@ -167,7 +173,8 @@ export function useImportAgentFromRepository() {
 export function useOfficialAgents(enabled = true, tenantId?: string) {
   return useQuery({
     queryKey: ["officialAgents", tenantId ?? null],
-    queryFn: () => agentRepositoryService.fetchOfficialAgentsWithStatus(tenantId),
+    queryFn: () =>
+      agentRepositoryService.fetchOfficialAgentsWithStatus(tenantId),
     staleTime: 30_000,
     enabled,
   });
