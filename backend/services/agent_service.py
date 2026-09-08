@@ -4327,14 +4327,23 @@ async def _create_skills_for_install(
         if item.get("name")
     }
     duplicates = list(set(skill_name_to_zip) & set(existing))
-    if duplicates and not reuse_existing_skills:
-        raise SkillDuplicateError(duplicates)
-
     service = SkillService(tenant_id=tenant_id)
     resolutions = {
         item.skill_name: item
         for item in (skill_resolutions or [])
     }
+    unresolved_duplicates = [
+        skill_name
+        for skill_name in duplicates
+        if not reuse_existing_skills
+        and not (
+            resolutions.get(skill_name)
+            and resolutions[skill_name].action in {"use_existing", "rename"}
+        )
+    ]
+    if unresolved_duplicates:
+        raise SkillDuplicateError(unresolved_duplicates)
+
     result: Dict[str, int] = {}
     for skill_name, encoded_zip in skill_name_to_zip.items():
         resolution = resolutions.get(skill_name)
