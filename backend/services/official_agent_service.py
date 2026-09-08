@@ -562,7 +562,9 @@ async def _create_knowledge_bases(
     Returns a mapping ``logical_index_name -> actual tenant index_name``. A KB
     whose logical index name already exists in the tenant is reused unchanged.
     """
-    from database.knowledge_db import get_knowledge_record
+    from database.group_db import query_groups_by_tenant
+    from database.knowledge_db import get_knowledge_record, update_knowledge_record
+    from utils.str_utils import convert_string_to_list
     from services.vectordatabase_service import (
         ElasticSearchService,
         get_embedding_model_by_id,
@@ -584,6 +586,37 @@ async def _create_knowledge_bases(
         )
         if existing:
             existing_index = existing.get("index_name") or logical
+            tenant_groups = query_groups_by_tenant(
+                tenant_id, page=None, page_size=None
+            ).get("groups", [])
+            tenant_group_ids = sorted(
+                int(group["group_id"])
+                for group in tenant_groups
+                if group.get("group_id") is not None
+            )
+            existing_group_ids = set(
+                convert_string_to_list(existing.get("group_ids"))
+            )
+            if (
+                set(tenant_group_ids) != existing_group_ids
+                or str(existing.get("ingroup_permission") or "").upper()
+                != "READ_ONLY"
+            ):
+                update_knowledge_record(
+                    {
+                        "index_name": existing_index,
+                        "group_ids": ",".join(str(group) for group in tenant_group_ids),
+                        "ingroup_permission": "READ_ONLY",
+                        "updated_by": user_id,
+                    }
+                )
+                logger.info(
+                    "Expanded official knowledge base '%s' visibility for tenant "
+                    "%s to groups %s",
+                    kb_name,
+                    tenant_id,
+                    tenant_group_ids,
+                )
             logger.info(
                 "Knowledge base '%s' already exists for tenant %s, reusing "
                 "(index %s)",
@@ -601,6 +634,14 @@ async def _create_knowledge_bases(
             user_id=user_id,
             tenant_id=tenant_id,
             embedding_model_id=embedding_model_id,
+            ingroup_permission="READ_ONLY",
+            group_ids=[
+                int(group["group_id"])
+                for group in query_groups_by_tenant(
+                    tenant_id, page=None, page_size=None
+                ).get("groups", [])
+                if group.get("group_id") is not None
+            ],
         )
         actual_index = created["id"]
 

@@ -185,6 +185,11 @@ def _extract_knowledge_bases(
     tenant_id: str,
 ) -> List[Tuple[str, str, Optional[str]]]:
     """Return (key, display_name, description) tuples for knowledge bases."""
+    bundle_kb_metadata = {
+        str(getattr(kb, "logical_index_name", "")): kb
+        for kb in (getattr(snapshot, "knowledge_bases", None) or [])
+        if getattr(kb, "logical_index_name", None)
+    }
     index_names: Set[str] = set()
     for agent in snapshot.agent_info.values():
         agent_data = _agent_dict(agent)
@@ -206,11 +211,21 @@ def _extract_knowledge_bases(
     )
     items: List[Tuple[str, str, Optional[str]]] = []
     for index_name in sorted(index_names):
-        display_name = name_map.get(index_name) or index_name
+        bundle_kb = bundle_kb_metadata.get(index_name)
+        display_name = (
+            getattr(bundle_kb, "display_name", None)
+            if bundle_kb is not None
+            else None
+        ) or name_map.get(index_name) or index_name
+        description = (
+            getattr(bundle_kb, "description", None)
+            if bundle_kb is not None
+            else None
+        )
         items.append((
             f"knowledge_base:{index_name}",
             display_name,
-            None,
+            description,
         ))
     return items
 
@@ -288,6 +303,14 @@ def build_repository_import_precheck(
             "index_name": index_name,
             "tenant_id": tenant_id,
         })
+        if not record and getattr(snapshot, "knowledge_bases", None):
+            record = get_knowledge_record({
+                "knowledge_name": kb_name,
+                "tenant_id": tenant_id,
+            })
+            if record:
+                available = True
+                reason = None
         kb_description = record.get("knowledge_describe") if record else description
         items.append(RepositoryImportRequirementItem(
             type="knowledge_base",
