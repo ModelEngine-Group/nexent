@@ -157,8 +157,10 @@ def call_llm_for_system_prompt(
                 if delta is None:
                     logger.debug("Skipping LLM stream chunk without delta")
                     continue
- 
-                reasoning_content = getattr(delta, "reasoning_content", None)
+
+                reasoning_content = getattr(delta, "reasoning", None)
+                if reasoning_content is None:
+                    reasoning_content = getattr(delta, "reasoning_content", None)
                 new_token = getattr(delta, "content", None)
 
                 # Note: reasoning_content is separate metadata and doesn't affect content filtering
