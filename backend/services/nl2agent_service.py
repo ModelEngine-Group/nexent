@@ -1765,7 +1765,9 @@ async def _load_verified_nl2agent_state(
                     definition.get("optional") if isinstance(definition, dict) else False
                 ),
                 "description": str(
-                    definition.get("description") if isinstance(definition, dict) else ""
+                    (definition.get("description") or "")
+                    if isinstance(definition, dict)
+                    else ""
                 ),
             }
             for name, definition in resource["inputs"].items()
