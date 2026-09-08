@@ -737,7 +737,6 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_verify_model_config_success(client, auth_header, sample_model_data, mocker):
     """Test successful model config verification."""
-    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
@@ -751,7 +750,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     )
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
+        "/model/temporary_healthcheck", json=sample_model_data)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -767,7 +766,6 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
 @pytest.mark.asyncio
 async def test_verify_model_config_failure_with_error(client, auth_header, sample_model_data, mocker):
     """Test model config verification failure with detailed error message."""
-    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={
@@ -779,7 +777,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
+        "/model/temporary_healthcheck", json=sample_model_data)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -797,14 +795,13 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 @pytest.mark.asyncio
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
-    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         side_effect=Exception("err")
     )
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
+        "/model/temporary_healthcheck", json=sample_model_data)
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
