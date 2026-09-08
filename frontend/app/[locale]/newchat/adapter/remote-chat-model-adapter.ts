@@ -12,6 +12,7 @@ import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
+import { isSafeNl2AgentResourceCard } from "@/lib/nl2agent-resource-resolution";
 
 // Backend SSE chunk format
 interface ImageMetadata {
@@ -834,12 +835,20 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
       }
     }
     if (content.subtype === "installed_resource_binding") {
-      if ((content as any).schema_version === 2 && Array.isArray(content.resources)) {
+      if (
+        (content as any).schema_version === 2 &&
+        Array.isArray(content.resources)
+      ) {
+        if (!isSafeNl2AgentResourceCard(content)) {
+          log.warn("[ChatModelAdapter] Ignored unsafe v2 binding-card payload");
+          return null;
+        }
         content.resources = content.resources.map((resource: any) => ({
           candidate: resource,
           recommendation: resource.recommendation,
           is_bound: resource.is_bound,
-          form_kind: resource.resource_type === "tool" ? "TOOL_CONFIG" : "SKILL_CONFIG",
+          form_kind:
+            resource.resource_type === "tool" ? "TOOL_CONFIG" : "SKILL_CONFIG",
           config: [],
         }));
       }
@@ -868,14 +877,28 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
       }
     }
     if (content.subtype === "suggested_resource_installation") {
-      if ((content as any).schema_version === 2 && Array.isArray(content.resources)) {
+      if (
+        (content as any).schema_version === 2 &&
+        Array.isArray(content.resources)
+      ) {
+        if (!isSafeNl2AgentResourceCard(content)) {
+          log.warn(
+            "[ChatModelAdapter] Ignored unsafe v2 installation-card payload"
+          );
+          return null;
+        }
         content.resources = content.resources.map((resource: any) => ({
           candidate: resource,
           recommendation: resource.recommendation,
           form_kind: "SKILL_CONFIG",
           config: [],
           installation_options: [
-            { option_id: "repository", label: "Install", form_kind: "SKILL_CONFIG", config: [] },
+            {
+              option_id: "repository",
+              label: "Install",
+              form_kind: "SKILL_CONFIG",
+              config: [],
+            },
           ],
           default_option_id: "repository",
         }));
@@ -2465,7 +2488,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   result.score_details?.chunk_type === "image" ||
                   Boolean(imageMetadata);
                 const retrievalHighlightTerms = getRetrievalHighlightTerms(
-                  result.score_details,
+                  result.score_details
                 );
                 const title =
                   result.title ||
@@ -2719,7 +2742,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     result.score_details?.chunk_type === "image" ||
                     Boolean(imageMetadata);
                   const retrievalHighlightTerms = getRetrievalHighlightTerms(
-                    result.score_details,
+                    result.score_details
                   );
                   const title =
                     result.title ||
