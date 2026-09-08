@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import pytest
 from jinja2 import UndefinedError
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
-from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from pydantic import ValidationError
 from smolagents import CodeAgent
 from smolagents.memory import TaskStep
@@ -25,7 +24,7 @@ from tool_collection.mcp.local_mcp_service import local_mcp_service
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     NL2A_WRAPPER_NAME,
-    RECOMMEND_RESOURCES_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_NAME,
     RecommendResourcesInput,
     RequirementClarificationPayload,
     ResourceCandidate,
@@ -39,8 +38,6 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceRequirement,
     ResourceSearchOutput,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
-    SEARCH_INSTALLED_RESOURCES_NAME,
-    SEARCH_UNINSTALLED_RESOURCES_NAME,
     SearchInstalledResourcesInput,
     build_nl2a_wrapper,
     get_resource_gap_requirements,
@@ -276,8 +273,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
 ):
     prompt = build_nl2agent_system_prompt(
         language,
-        tool_name="runtime_search",
-        recommend_tool_name="runtime_recommend",
+        resolve_tool_name="runtime_resolve",
         wrapper_name="runtime_wrapper",
         save_tool_name="runtime_save",
         max_results=3,
@@ -286,15 +282,14 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert heading in prompt
     assert immutable_rule in prompt
     assert description_rule in prompt
-    assert "runtime_search" in prompt
-    assert "runtime_recommend" in prompt
+    assert "runtime_resolve" in prompt
     assert "runtime_wrapper" in prompt
     assert "runtime_save" in prompt
     assert "json.loads" in prompt
     assert "bound_resources" in prompt
     assert "business_description" not in prompt
     assert 'subtype="requirement_clarification"' in prompt
-    assert 'subtype="installed_resource_binding"' in prompt
+    assert '"BIND": "installed_resource_binding"' in prompt
     assert 'subtype="final_confirmation"' not in prompt
     assert "agent_generation_completed" in prompt
     assert "agent_id=None" not in prompt
@@ -342,11 +337,11 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert '"question_id": "expected_output"' in prompt
 
     description_save = prompt.index('"description":')
-    resource_search = prompt.index("raw_results = parallel_executor")
+    resource_search = prompt.index("raw_resource_result = runtime_resolve")
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 8
+    assert len(code_blocks) == 6
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -382,12 +377,12 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
 def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert 'subtype="resource_gap_resolution"' in prompt
+    assert '"RESOLVE_GAP": "resource_gap_resolution"' in prompt
     assert "resource_gap_resolution" in prompt
     assert "skill_created" in prompt
     if language == "en":
-        assert "Backend relevance ranking determines recommendation labels" in prompt
-        assert "no_matching_resources" in prompt
+        assert "States, scores, relationships, resources, and `next_action`" in prompt
+        assert "bypass resolution" in prompt
 
 
 @pytest.mark.parametrize(
@@ -406,7 +401,8 @@ def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
             "### Scheduled-task Boundary",
             "this workflow does not create the scheduled task",
             "Never search for a scheduled-task resource",
-            'resource_result={"status": "success", "resources": []}',
+            'resource_result={"status":"success","phase":"INITIAL",'
+            '"next_action":"BIND","requirements":[],"resources":[]}',
             "Every Prompt field describes one invocation",
             "open [Scheduled tasks](/agent-tasks)",
         ),
@@ -415,7 +411,8 @@ def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
             "### 定时任务边界",
             "本流程不创建定时任务",
             "不得搜索定时任务资源",
-            'resource_result={"status": "success", "resources": []}',
+            'resource_result={"status":"success","phase":"INITIAL",'
+            '"next_action":"BIND","requirements":[],"resources":[]}',
             "所有 Prompt 字段只描述 Agent 单次被调用时的行为",
             "前往[定时任务](/agent-tasks)",
         ),
@@ -467,7 +464,7 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "Omit every unspecified field so its persisted value remains unchanged",
             "listing only the potentially affected fields",
             "searches only for the newly requested capability",
-            "reconfigure a specifically requested bound resource",
+            "Reconfiguring a specifically requested bound resource",
             "Never start at `duty_prompt` or enter the full Prompt generation chain",
             'Start with "Updated:"',
             "Conversational removal is unsupported",
@@ -531,13 +528,29 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
 def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert f"({SEARCH_INSTALLED_RESOURCES_NAME}," in prompt
-    assert f"({SEARCH_UNINSTALLED_RESOURCES_NAME}," in prompt
-    assert f"raw_resource_result = {RECOMMEND_RESOURCES_NAME}(" in prompt
+    assert f"raw_resource_result = {RESOLVE_RESOURCE_REQUIREMENTS_NAME}(" in prompt
     assert f"saved = {SAVE_AGENT_DRAFT_FIELDS_NAME}(" in prompt
     assert f"wrapped = {NL2A_WRAPPER_NAME}(" in prompt
     assert "external_registry" not in prompt
     assert "MCP_OFFICIAL_REGISTRY" not in prompt
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_prompt_uses_backend_owned_serial_resource_actions(language):
+    """UT-BE-NL2A-PROMPT-001 / UT-BE-NL2A-PROMPT-002."""
+
+    prompt = build_nl2agent_system_prompt(language)
+    assert "INSTALL -> suggested_resource_installation" in prompt
+    assert "RESOLVE_GAP -> resource_gap_resolution" in prompt
+    assert "BIND -> installed_resource_binding" in prompt
+    assert "POST_INSTALL" in prompt
+    assert "POST_GAP" in prompt
+    assert "parallel_executor" not in prompt
+    assert "recommend_resources" not in prompt
+    assert "installed_tool_name" not in prompt
+    assert "uninstalled_tool_name" not in prompt
+    assert 'subtype="resource_gap_resolution"' not in prompt
+    assert "combine two uncovered sets" in prompt or "拼接两份 uncovered 集合" in prompt
 
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
@@ -739,25 +752,19 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     registered_tools = await local_mcp_service.get_tools()
 
     assert [tool.name for tool in config.tools] == [
-        SEARCH_INSTALLED_RESOURCES_NAME,
-        SEARCH_UNINSTALLED_RESOURCES_NAME,
-        RECOMMEND_RESOURCES_NAME,
+        RESOLVE_RESOURCE_REQUIREMENTS_NAME,
         SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME,
-        ParallelExecutorTool.name,
     ]
     assert [tool.description for tool in config.tools] == [
-        registered_tools[SEARCH_INSTALLED_RESOURCES_NAME].description,
-        registered_tools[SEARCH_UNINSTALLED_RESOURCES_NAME].description,
-        registered_tools[RECOMMEND_RESOURCES_NAME].description,
+        registered_tools[RESOLVE_RESOURCE_REQUIREMENTS_NAME].description,
         registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
         registered_tools[NL2A_WRAPPER_NAME].description,
-        ParallelExecutorTool.description,
     ]
     assert json.loads(config.tools[0].inputs)["agent_id"] == "int"
     assert json.loads(config.tools[1].inputs)["agent_id"] == "int"
     assert json.loads(config.tools[2].inputs)["agent_id"] == "int"
-    save_inputs = json.loads(config.tools[3].inputs)
+    save_inputs = json.loads(config.tools[1].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
         "description",
@@ -767,12 +774,11 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         "greeting_message",
         "example_questions",
     }
-    assert set(json.loads(config.tools[4].inputs)) == {
+    assert set(json.loads(config.tools[2].inputs)) == {
         "subtype",
         "agent_id",
         "resource_result",
         "questions",
-        "requirements",
     }
     assert config.instructions is None
     assert len(config.context_items) == 1

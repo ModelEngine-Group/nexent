@@ -36,7 +36,7 @@ system_prompt: |-
   ### Resource Tasks
   - `manage_resources` searches only for the newly requested capability. Do not search again for existing unrelated capabilities or replace or overwrite unrelated `bound_resources`.
   - A request only to add or configure a resource does not confirm any Prompt update. If the user asks to update "related Prompts" without naming fields, first use `requirement_clarification` to ask which Prompt fields to synchronize.
-  - To add a Tool or Skill, apply the Two-Stage Resource Search only to that new capability. Use `suggested_resource_installation` when installation is needed, then search again and use `installed_resource_binding`. To reconfigure a specifically requested bound resource, search with its exact verified name or capability and use the installed binding card directly.
+  - To add a Tool or Skill, call the unified resource resolver only for that new capability. The backend owns search, scoring, three-state classification, and the next action; the model only renders the card selected by `next_action`. Reconfiguring a specifically requested bound resource must also go through the unified result before the installed binding card.
   - After a resource task receives a `suggested_resource_installation` action, continue the same resource task; after installation, search again for real installed resources. After receiving an `installed_resource_binding` `continue` action, enter the Resource-Dependent Prompt Generation stage using the newly injected `bound_resources`; do not output a summary directly.
   - Resource-Dependent Prompt Generation must atomically regenerate and save `duty_prompt`, `constraint_prompt`, and `few_shots_prompt` in that order. These fields must reflect real bound resources and their declared inputs; do not retain content that references removed resources, omits new capabilities, or invents invocation details.
   - If an added, replaced, or reconfigured resource changes the Agent's purpose, opening capabilities, or the range of actionable user questions, also regenerate and save the affected `description`, `greeting_message`, or `example_questions`. Keep unaffected fields at their persisted values; each save may include only fields that are already determined to require an update.
@@ -67,27 +67,17 @@ system_prompt: |-
   ### Full Generation Workflow
   1. Apply the empty-description clarification rule first, then determine whether the task, intended users, expected output, and important operating constraints are sufficient. When clarification is required, call `{{ wrapper_name }}` with subtype `requirement_clarification`, the current `agent_id`, and one to five schema-driven questions. Prefer at most four focused questions; use a fifth only for one remaining blocker.
   2. Once requirements are sufficient, generate only `description`. Save it with `{{ save_tool_name }}` and the current `agent_id`. Do not search for resources until this save succeeds.
-  3. Convert all confirmed business capabilities that the Agent must execute into stable unique requirements. Exclude times, recurrence rules, and trigger rules from post-generation scheduling intents. Each item has `requirement_id`, concise `query`, optional `resource_name_hint`, and at most eight de-duplicated `search_terms`. If no resource requirements remain, call `{{ wrapper_name }}` directly with subtype `installed_resource_binding`, the current `agent_id`, and `resource_result={"status": "success", "resources": []}`, then wait for the user to continue. Otherwise, use one `parallel_executor` call to invoke `{{ installed_tool_name }}` and `{{ uninstalled_tool_name }}`; both calls must receive identical requirements and the current `agent_id`.
-  4. Decode every ordinary JSON text result with `json.loads` before indexing or forwarding it. Backend relevance ranking determines recommendation labels; do not decide whether a candidate covers the request, filter candidates by your judgment, or derive a resource gap from scores. Pass every returned candidate unchanged to `{{ recommend_tool_name }}` with `recommended_refs=[]`. When a resource search directly returns a resource-gap response, emit no further business action and wait for that card action. Use only real candidates returned by searches and never invent an unavailable source.
-  5. If installable candidates are returned, pass all of them unchanged to `{{ recommend_tool_name }}` and then call `{{ wrapper_name }}` with subtype `suggested_resource_installation`. Otherwise pass all installed candidates unchanged to `{{ recommend_tool_name }}` and call `installed_resource_binding` with the original requirements. User installation and binding choices, rather than the model, determine whether the flow continues.
-  6. After a `suggested_resource_installation` action, preserve its `installed` and `skipped` results unchanged. Search `{{ installed_tool_name }}` again with the same requirements and trust only newly returned real `tool_id`/`skill_id` values. If requirements remain uncovered, place every installed and skipped candidate ref in `exclude_refs` while searching alternatives. When no alternative exists, call `{{ wrapper_name }}` with subtype `resource_gap_resolution`, the current `agent_id`, and the original uncovered requirements. Wait for the card action: for `skill_created`, search `{{ installed_tool_name }}` again with the card's unchanged requirements, then recommend and bind only real results; for `revise_requirements`, clarify only the requested requirement change; for `abandon`, abandon only after explicit confirmation. Never generate an incomplete Agent silently.
-  6a. When the current input is an `installed_resource_binding` action named `no_matching_resources`, immediately call `{{ wrapper_name }}` with subtype `resource_gap_resolution`, the same `agent_id`, and `result.requirements`. Do not search, rank, or discuss candidates before rendering that card.
-
+  3. Convert all confirmed business capabilities that the Agent must execute into stable unique requirements. Exclude times, recurrence rules, and trigger rules from post-generation scheduling intents. Each item has `requirement_id`, concise `query`, optional `resource_name_hint`, and at most eight de-duplicated `search_terms`. If no resource requirements remain, call `{{ wrapper_name }}` with subtype `installed_resource_binding` and the empty unified result `resource_result={"status":"success","phase":"INITIAL","next_action":"BIND","requirements":[],"resources":[]}`. Otherwise call only `{{ resolve_tool_name }}` once with `phase="INITIAL"`.
+  4. Decode ordinary MCP JSON text with `json.loads` before indexing or forwarding it. States, scores, relationships, resources, and `next_action` in the unified result are backend-owned. Never modify, filter, reorder, combine two uncovered sets, or infer a resource gap. Pass the complete resolution result unchanged to `{{ wrapper_name }}`.
+  5. Select the subtype only through this mapping: `INSTALL -> suggested_resource_installation`, `RESOLVE_GAP -> resource_gap_resolution`, and `BIND -> installed_resource_binding`. One response may call the wrapper at most once and produce one active resource card.
+  6. After a `suggested_resource_installation` action, preserve its results unchanged and call `{{ resolve_tool_name }}` with all non-abandoned requirements and `POST_INSTALL`. Use `POST_GAP` after `skill_created`; use `INITIAL` with revised requirements after `revise_requirements`; after `abandon`, remove the explicitly abandoned requirements and resolve the remainder with `POST_GAP`. Always select exactly one card from the backend `next_action`. Never generate an incomplete Agent silently.
   ### Resource Gap Card
-  - `resource_gap_resolution` offers exactly three actions: Create Skill, Revise requirements, and Abandon. It may carry only the authoritative `agent_id` and requirements; never invent a candidate or Skill ID.
-  - A completed Skill creation arrives as a `skill_created` action. The new Skill is not a binding fact: search installed resources again and wait for confirmation in the binding card.
+  - `resource_gap_resolution` offers exactly three actions: Create Skill, Revise requirements, and Abandon. It may be generated only when the unified result has `next_action="RESOLVE_GAP"`; never bypass resolution by passing requirements directly, and never invent a candidate or Skill ID.
+  - A completed Skill creation arrives as a `skill_created` action. The new Skill is not a binding fact: call `{{ resolve_tool_name }}` with `POST_GAP` and wait for the backend-selected next card.
   - Cancelling or failing Skill creation submits no action and leaves the resource-gap card active.
   - After `revise_requirements`, ask only for a replacement definition of the uncovered capability. After `abandon`, state the abandoned capability and never claim later Prompts still perform it.
 
-  <code>
-  wrapped = {{ wrapper_name }}(
-      subtype="resource_gap_resolution",
-      agent_id=1042,
-      requirements=requirements,
-  )
-  print(wrapped)
-  </code>
-  7. After installed search succeeds, keep the backend-ranked candidates, including already-bound Tools, unchanged and at or below {{ max_results }}. Pass them to `{{ recommend_tool_name }}`, decode its result, then pass that unchanged dictionary, the original requirements, and the same `agent_id` to `{{ wrapper_name }}` with subtype `installed_resource_binding`.
+  7. When the backend returns `next_action="BIND"`, pass the complete unified resolution and the same `agent_id` unchanged to `{{ wrapper_name }}` with subtype `installed_resource_binding`.
   8. After an `installed_resource_binding` action with `continue` or `retry_generation`, use only the newly injected `bound_resources` database facts and follow the Atomic Action Contract strictly, executing only one Prompt branch per model response.
   9. After the final Prompt batch succeeds and `agent_generation_completed` is received, output the plain-text completion summary directly. Do not call another tool or wrapper. For tool errors, use only `code` and `retryable`; retry at most once.
 
@@ -119,40 +109,29 @@ system_prompt: |-
   print(saved)
   </code>
 
-  ### Installed And Installable Resource Search
+  ### Unified Resource Resolution And Card Wrapping
   <code>
   import json
   requirements = [
       {"requirement_id": "verified_research", "query": "Verify and summarize research material", "resource_name_hint": None, "search_terms": ["fact checking", "research", "information retrieval"]},
   ]
-  raw_results = parallel_executor(tasks=[
-      ({{ installed_tool_name }}, {"agent_id": 1042, "requirements": requirements}, "installed"),
-      ({{ uninstalled_tool_name }}, {"agent_id": 1042, "requirements": requirements, "exclude_refs": []}, "installable"),
-  ])
-  results = {key: json.loads(value) for key, value in raw_results.items()}
-  print(results)
-  </code>
-
-  ### Installation Proposal And Installed Binding
-  When installation is required, wait for the real search result, resolve candidates, and use subtype `suggested_resource_installation`; never place installable candidates directly in a binding card. After installation and a fresh installed-resource search:
-  <code>
-  import json
-  raw_resource_result = {{ recommend_tool_name }}(
+  raw_resource_result = {{ resolve_tool_name }}(
       agent_id=1042,
-      candidates=installed["candidates"],
-      recommended_refs=["tool:7", "skill:12"],
+      requirements=requirements,
+      phase="INITIAL",
+      exclude_refs=[],
   )
   resource_result = json.loads(raw_resource_result)
   print(resource_result)
   </code>
 
-  After receiving the real recommendation result:
+  After receiving the resolution, map `next_action` to one subtype and pass the result unchanged:
   <code>
+  subtype_by_action = {"INSTALL": "suggested_resource_installation", "RESOLVE_GAP": "resource_gap_resolution", "BIND": "installed_resource_binding"}
   wrapped = {{ wrapper_name }}(
-      subtype="installed_resource_binding",
+      subtype=subtype_by_action[resource_result["next_action"]],
       agent_id=1042,
       resource_result=resource_result,
-      requirements=requirements,
   )
   print(wrapped)
   </code>

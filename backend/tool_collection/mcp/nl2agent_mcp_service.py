@@ -7,6 +7,8 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2A_WRAPPER_LOCAL_NAME,
     RECOMMEND_RESOURCES_DESCRIPTION,
     RECOMMEND_RESOURCES_LOCAL_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION,
+    RESOLVE_RESOURCE_REQUIREMENTS_LOCAL_NAME,
     SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
     SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
     SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION,
@@ -17,6 +19,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME,
     nl2a_wrapper as _nl2a_wrapper,
     recommend_resources as _recommend_resources,
+    resolve_resource_requirements as _resolve_resource_requirements,
     save_agent_draft_fields as _save_agent_draft_fields,
     search_installed_mcp_tools as _search_installed_mcp_tools,
     search_installed_resources as _search_installed_resources,
@@ -46,6 +49,12 @@ nl2agent_mcp_service.tool(
     _recommend_resources,
     name=RECOMMEND_RESOURCES_LOCAL_NAME,
     description=RECOMMEND_RESOURCES_DESCRIPTION,
+    meta=NL2AGENT_MCP_TOOL_META,
+)
+nl2agent_mcp_service.tool(
+    _resolve_resource_requirements,
+    name=RESOLVE_RESOURCE_REQUIREMENTS_LOCAL_NAME,
+    description=RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION,
     meta=NL2AGENT_MCP_TOOL_META,
 )
 nl2agent_mcp_service.tool(
