@@ -859,6 +859,18 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
       }
     }
     if (content.subtype === "suggested_resource_installation") {
+      if ((content as any).schema_version === 2 && Array.isArray(content.resources)) {
+        content.resources = content.resources.map((resource: any) => ({
+          candidate: resource,
+          recommendation: resource.recommendation,
+          form_kind: "SKILL_CONFIG",
+          config: [],
+          installation_options: [
+            { option_id: "repository", label: "Install", form_kind: "SKILL_CONFIG", config: [] },
+          ],
+          default_option_id: "repository",
+        }));
+      }
       if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||

@@ -616,26 +616,6 @@ export function SuggestedResourceInstallationCard({
                 </span>
               ) : (
                 <>
-                  {needsConfiguration(item.resource) ? (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="outline"
-                      className="size-9 rounded-md"
-                      title={t(
-                        "nl2agent.resourceBinding.configure",
-                        "Configure"
-                      )}
-                      aria-label={t(
-                        "nl2agent.resourceBinding.configure",
-                        "Configure"
-                      )}
-                      disabled={!interactive || item.status === "installing"}
-                      onClick={() => openConfig(item)}
-                    >
-                      <Settings2 className="size-4" />
-                    </Button>
-                  ) : null}
                   <Button
                     type="button"
                     size="sm"
