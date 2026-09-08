@@ -446,6 +446,21 @@ def test_step_stream_wrapped_mcp_timeout_bypasses_agent_retry():
         next(agent._step_stream(MagicMock()))
 
 
+def test_step_stream_generic_timeout_remains_agent_execution_error():
+    """A non-MCP executor timeout must not be reported as an MCP timeout."""
+    from nexent.core.agents.core_agent import AgentExecutionError
+
+    rule = GuardrailRule(name="pii", pattern="機密信息", severity="block")
+    agent = _make_step_agent(
+        rule, messages=[_msg("user", "hello")], model_output="<code>slow_code()</code>",
+    )
+    agent.python_executor.side_effect = TimeoutError("local code execution timed out")
+    agent.verification_controller.config.step_verification_enabled = False
+
+    with pytest.raises(AgentExecutionError):
+        next(agent._step_stream(MagicMock()))
+
+
 def test_step_stream_native_mcp_timeout_preserves_error_identity():
     """A native MCP timeout is re-raised unchanged by the executor guard."""
     rule = GuardrailRule(name="pii", pattern="机密信息", severity="block")
