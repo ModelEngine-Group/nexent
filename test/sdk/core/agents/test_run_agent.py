@@ -731,13 +731,13 @@ def test_mcp_timeout_classifier_detects_executor_wrapped_error():
 
 
 def test_mcp_timeout_classifier_handles_native_and_legacy_errors():
-    """Recognize native timeout types, marker errors, and MCP SDK messages."""
+    """Recognize marked MCP errors and MCP SDK messages, not generic timeouts."""
     native = MCPToolTimeoutError("native timeout")
     assert is_mcp_timeout_error(native)
     assert propagate_mcp_timeout(native) is native
 
-    assert is_mcp_timeout_error(TimeoutError("request timed out"))
-    assert is_mcp_timeout_error(asyncio.TimeoutError("request timed out"))
+    assert not is_mcp_timeout_error(TimeoutError("request timed out"))
+    assert not is_mcp_timeout_error(asyncio.TimeoutError("request timed out"))
     assert is_mcp_timeout_error(
         RuntimeError("Timed out while waiting for response to ClientRequest")
     )
