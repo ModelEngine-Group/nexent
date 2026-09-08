@@ -34,7 +34,7 @@ import {
   fetchOfficialSkillsWithStatus,
 } from "@/services/skillService";
 import skillRepositoryService from "@/services/skillRepositoryService";
-import { toApiError, type ApiError } from "@/services/api";
+import { API_ENDPOINTS, fetchWithErrorHandling, toApiError, type ApiError } from "@/services/api";
 import type { CommunityQuickAddDraft } from "@/types/mcpTools";
 import type {
   Nl2AgentCardAction,
@@ -299,23 +299,14 @@ export function SuggestedResourceInstallationCard({
     setDialogDraft(null);
   };
 
-  const installOfficialSkill = async (item: InstallationItem) => {
-    const name = decodeCandidateName(
-      candidateRef(item),
-      "nexent_official_skill"
-    );
-    await installOfficialSkills(
-      [name],
-      i18n.language.startsWith("zh") ? "zh" : "en"
-    );
-    const skills = await fetchOfficialSkillsWithStatus();
-    const installed = skills.find(
-      (skill) => skill.name === name && skill.status === "installed"
-    );
-    if (!installed || installed.skill_id <= 0) {
-      throw new Error("Installed Skill could not be resolved");
-    }
-    return installed.skill_id;
+  const installThroughNl2Agent = async (item: InstallationItem) => {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.agent.nl2agentResourceInstallations, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: payload.agent_id, candidate_ref: candidateRef(item) }),
+    });
+    const result = await response.json();
+    if (!Number.isInteger(result.resource_id) || result.resource_id <= 0) throw new Error("Installed resource could not be resolved");
+    return result.resource_id as number;
   };
 
   const installRepositorySkill = async (item: InstallationItem) => {
@@ -457,20 +448,7 @@ export function SuggestedResourceInstallationCard({
     }
     dispatch({ type: "install", ref: candidateRef(item) });
     try {
-      let resourceId: number;
-      switch (item.resource.candidate.source) {
-        case "NEXENT_OFFICIAL_SKILL":
-          resourceId = await installOfficialSkill(item);
-          break;
-        case "TENANT_SKILL_REPOSITORY":
-          resourceId = await installRepositorySkill(item);
-          break;
-        case "TENANT_MCP_REPOSITORY":
-          resourceId = await installRepositoryMcp(item);
-          break;
-        default:
-          throw new Error("Unsupported installation source");
-      }
+      const resourceId = await installThroughNl2Agent(item);
       dispatch({ type: "installed", ref: candidateRef(item), resourceId });
       message.success(
         t("nl2agent.resourceInstallation.success", "Resource installed")
