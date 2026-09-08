@@ -126,9 +126,15 @@ export function AgentRepositoryCopyDialog({
     [abnormalItems]
   );
   const hasSkillConflicts = skillConflictItems.length > 0;
-  const hasOfficialKnowledge = Boolean(
-    isOfficialListing &&
-    precheck?.items.some((item) => item.type === "knowledge_base")
+  const officialKnowledgeItems = useMemo(
+    () =>
+      precheck?.items.filter((item) => item.type === "knowledge_base") ?? [],
+    [precheck]
+  );
+  const hasOfficialKnowledge = isOfficialListing && officialKnowledgeItems.length > 0;
+  const hasExistingOfficialKnowledge = Boolean(
+    hasOfficialKnowledge &&
+      officialKnowledgeItems.every((item) => item.available)
   );
   const availableEmbeddingModels = useMemo(
     () =>
@@ -143,15 +149,18 @@ export function AgentRepositoryCopyDialog({
   useEffect(() => {
     if (!open || !isOfficialListing) return;
     setSelectedModelId((current) => current ?? availableLlmModels[0]?.id);
-    if (hasOfficialKnowledge) {
+    if (hasOfficialKnowledge && !hasExistingOfficialKnowledge) {
       setSelectedEmbeddingModelId(
         (current) => current ?? availableEmbeddingModels[0]?.id
       );
+    } else if (hasExistingOfficialKnowledge) {
+      setSelectedEmbeddingModelId(undefined);
     }
   }, [
     open,
     isOfficialListing,
     hasOfficialKnowledge,
+    hasExistingOfficialKnowledge,
     availableLlmModels,
     availableEmbeddingModels,
   ]);
@@ -186,7 +195,10 @@ export function AgentRepositoryCopyDialog({
 
     if (
       isOfficialListing &&
-      (!selectedModelId || (hasOfficialKnowledge && !selectedEmbeddingModelId))
+      (!selectedModelId ||
+        (hasOfficialKnowledge &&
+          !hasExistingOfficialKnowledge &&
+          !selectedEmbeddingModelId))
     ) {
       message.error("请先选择语言模型和向量模型");
       return;
@@ -201,9 +213,12 @@ export function AgentRepositoryCopyDialog({
               modelIds: selectedModelId
                 ? { [listing.name]: selectedModelId }
                 : undefined,
-              embeddingModelIds: selectedEmbeddingModelId
-                ? { [listing.name]: selectedEmbeddingModelId }
-                : undefined,
+              embeddingModelIds:
+                hasOfficialKnowledge &&
+                !hasExistingOfficialKnowledge &&
+                selectedEmbeddingModelId
+                  ? { [listing.name]: selectedEmbeddingModelId }
+                  : undefined,
             }
           : undefined,
       });
@@ -435,7 +450,7 @@ export function AgentRepositoryCopyDialog({
                   }))}
                 />
               </div>
-              {hasOfficialKnowledge ? (
+              {hasOfficialKnowledge && !hasExistingOfficialKnowledge ? (
                 <div className="space-y-2">
                   <label className="block text-xs text-slate-600 dark:text-slate-300">
                     向量模型
