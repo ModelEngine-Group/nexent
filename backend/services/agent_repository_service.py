@@ -157,16 +157,24 @@ def list_agent_repository_listings_impl(
         status=status,
         agent_id=agent_id,
     )
+    # Summary queries intentionally omit the publisher field. Restore it
+    # before mapping the response so official rows can be identified by the
+    # client and routed to the official copy flow.
+    for record in records:
+        record.setdefault("publisher_tenant_id", tenant_id)
     # Official listings are published by the reserved official tenant.  They
     # must remain visible after the standalone deployment command finishes;
     # using OFFICIAL_AGENT_PROFILES here would incorrectly couple visibility to
     # the Nexent container's startup environment.
     if agent_id is None and (status is None or status == STATUS_SHARED):
-        records.extend(list_agent_repository_summaries(
+        official_records = list_agent_repository_summaries(
             publisher_tenant_id=OFFICIAL_AGENT_TENANT_ID,
             status=STATUS_SHARED,
             agent_id=agent_id,
-        ))
+        )
+        for record in official_records:
+            record["publisher_tenant_id"] = OFFICIAL_AGENT_TENANT_ID
+        records.extend(official_records)
         # Keep the response stable if a repository record is visible through
         # both tenant queries (for example during a migration or in tests).
         unique_records = {}
