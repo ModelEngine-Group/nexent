@@ -14,6 +14,7 @@ export type Nl2AgentFlowPhase =
   | "idle"
   | "clarifying"
   | "installing"
+  | "resolving_gap"
   | "binding"
   | "generating"
   | "generation_failed"
@@ -121,6 +122,8 @@ function reducer(
             ? "clarifying"
             : action.card.subtype === "suggested_resource_installation"
               ? "installing"
+              : action.card.subtype === "resource_gap_resolution"
+                ? "resolving_gap"
               : action.card.subtype === "installed_resource_binding"
                 ? "binding"
                 : state.phase,
