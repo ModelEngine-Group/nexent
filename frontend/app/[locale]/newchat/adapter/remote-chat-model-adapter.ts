@@ -834,6 +834,15 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
       }
     }
     if (content.subtype === "installed_resource_binding") {
+      if ((content as any).schema_version === 2 && Array.isArray(content.resources)) {
+        content.resources = content.resources.map((resource: any) => ({
+          candidate: resource,
+          recommendation: resource.recommendation,
+          is_bound: resource.is_bound,
+          form_kind: resource.resource_type === "tool" ? "TOOL_CONFIG" : "SKILL_CONFIG",
+          config: [],
+        }));
+      }
       if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
