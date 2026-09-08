@@ -216,6 +216,7 @@ function ToolFallbackSearchContent({
     filename: item.filename || item.sourceFile,
     objectName: item.objectName,
     citeIndex: item.citeIndex ?? index,
+    toolSign: item.toolSign,
   }));
   if (regularSources.length === 0) return null;
 
@@ -238,7 +239,7 @@ function ToolFallbackSearchContent({
                     groupId: `tool-search-${index}`,
                     sources: panelSources,
                     images: [],
-                    selectedCiteIndex: item.citeIndex ?? index,
+                    selectedCitationKey: `${item.toolSign ?? ""}${item.citeIndex ?? index}`,
                   })
                 }
               >

@@ -14,7 +14,7 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from utils.logging_utils import configure_logging
+from utils.logging_utils import configure_logging, get_uvicorn_logging_config
 from consts.const import (
     REDIS_URL, REDIS_BACKEND_URL, REDIS_PORT, FLOWER_PORT, DISABLE_CELERY_FLOWER,
     DOCKER_ENVIRONMENT, DP_PARSE_MAX_PROCESSES, DP_PARSE_MIN_PROCESSES,
@@ -511,7 +511,14 @@ except Exception as e_exec:
         logger.info(f"📋 Effective service config: {self.config}")
         
         for service_name, start_func, config_key in services:
-            if self.config.get(config_key, True):
+            service_enabled = self.config.get(config_key, True)
+            if service_name == "Celery Workers" and service_enabled:
+                # Redis must be available for cancellation markers, while
+                # recovery must finish before Celery can consume work.
+                from services.startup_recovery_service import recover_data_process_tasks
+
+                recover_data_process_tasks()
+            if service_enabled:
                 enabled_count += 1
                 logger.info(f"Starting {service_name}...")
                 if start_func():
@@ -784,10 +791,11 @@ def main():
         
         logger.info(f"🌐 Starting API server on {args.api_host}:{args.api_port}")
         uvicorn.run(
-            app, 
+            app,
             host=args.api_host,
             port=args.api_port,
-            log_level="warning"
+            log_level="warning",
+            log_config=get_uvicorn_logging_config(categories=["data_process"]),
         )
         
     except KeyboardInterrupt:

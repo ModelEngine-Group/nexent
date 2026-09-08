@@ -29,6 +29,7 @@ def service_module(monkeypatch):
     fastapi.FastAPI = FakeFastAPI
     logging_utils = types.ModuleType("utils.logging_utils")
     logging_utils.configure_logging = MagicMock()
+    logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
     constants = types.ModuleType("consts.const")
     constants.REDIS_URL = "redis://test:6379/0"
     constants.REDIS_BACKEND_URL = "redis://test:6379/1"

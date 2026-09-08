@@ -35,17 +35,17 @@ def client(mocker):
     mocker.patch('boto3.client')
     # Patch MinioClient at both possible import paths
     mocker.patch('backend.database.client.MinioClient')
-    # Stub services.vectordatabase_service to avoid real VDB initialization
+    # Stub management.services.knowledge_base.service to avoid real VDB initialization
     import types
     import sys as _sys
-    if "services.vectordatabase_service" not in _sys.modules:
-        services_vdb_mod = types.ModuleType("services.vectordatabase_service")
+    if "management.services.knowledge_base.service" not in _sys.modules:
+        services_vdb_mod = types.ModuleType("management.services.knowledge_base.service")
 
         def _get_vector_db_core():  # minimal stub
             return object()
 
         services_vdb_mod.get_vector_db_core = _get_vector_db_core
-        _sys.modules["services.vectordatabase_service"] = services_vdb_mod
+        _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
     
     # Import after mocking (only backend path is required by app imports)
     from backend.apps.model_managment_app import router

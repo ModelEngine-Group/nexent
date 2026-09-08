@@ -111,6 +111,7 @@ class ErrorCode(Enum):
     KNOWLEDGE_INDEX_WRITE_BLOCKED = "060106"  # Index write blocked by storage protection
     KNOWLEDGE_STORAGE_COMMIT_FAILED = "060107"  # Source object ledger commit failed
     KNOWLEDGE_TASK_SUBMIT_FAILED = "060108"  # Data-process task submission failed
+    KNOWLEDGE_DELETE_BLOCKED = "060109"  # Delete blocked by in-flight file processing
 
     # ==================== 07 MCPTools / MCP 工具 ====================
     # 01 - Tool
@@ -303,6 +304,8 @@ ERROR_CODE_HTTP_STATUS = {
     ErrorCode.COMMON_RESOURCE_NOT_FOUND: 404,
     ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS: 409,
     ErrorCode.COMMON_RESOURCE_DISABLED: 403,
+    # Knowledge base lifecycle
+    ErrorCode.KNOWLEDGE_DELETE_BLOCKED: 409,
     # Chat - Runtime metadata
     ErrorCode.CHAT_METADATA_NOT_ALLOWED: 400,
     ErrorCode.CHAT_METADATA_INVALID: 422,

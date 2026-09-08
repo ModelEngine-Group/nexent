@@ -1,5 +1,6 @@
 """Unit tests for backend.apps.agent_repository_app module."""
 
+import json
 import os
 import sys
 import types
@@ -36,6 +37,13 @@ class _SkillResolution(BaseModel):
 
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
 consts_model.SkillResolution = _SkillResolution
+
+class _TagAssignmentFilter(BaseModel):
+    definition_id: int
+    value_ids: list[int]
+
+
+consts_model.TagAssignmentFilter = _TagAssignmentFilter
 sys.modules["consts.model"] = consts_model
 
 consts_exceptions_mock = types.ModuleType("consts.exceptions")
@@ -201,6 +209,113 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
         page_size=6,
         search="alpha",
     )
+
+
+def test_list_agent_repository_listings_api_passes_tag_filter(
+    mocker,
+    mock_auth_header,
+):
+    """Test list API forwards an exact repository tag filter."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get("/repository/agent?tag=operations", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    mock_list.assert_called_once_with(
+        "test_tenant_id",
+        status=None,
+        agent_id=None,
+        page=1,
+        page_size=10,
+        search=None,
+        tag="operations",
+    )
+
+
+def test_list_agent_repository_listings_api_passes_search_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards structured tag matches for text search."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent",
+        headers=mock_auth_header,
+        params={
+            "search": "智能体类别",
+            "search_tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["search_tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
+def test_list_agent_repository_listings_api_passes_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards structured tag filters."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
+def test_list_agent_repository_tag_stats_api(mocker, mock_auth_header):
+    """Test tag-stat endpoint returns the service result for the caller tenant."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_stats = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_tag_stats_impl",
+        return_value=[{"tag": "operations", "count": 2}],
+    )
+
+    response = client.get("/repository/agent/tags", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [{"tag": "operations", "count": 2}]}
+    mock_stats.assert_called_once_with("test_tenant_id")
 
 
 def test_create_agent_repository_listing_api_success(mocker, mock_auth_header):
@@ -547,6 +662,68 @@ def test_list_my_editable_agents_api_passes_ownership_filter(
         new_agent_padding=False,
         agent_id=None,
     )
+
+
+def test_list_my_editable_agents_api_passes_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API parses and forwards structured tag filters."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+        return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/agent/mine",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    tag_predicates = mock_list_mine.call_args.kwargs["tag_predicates"]
+    assert tag_predicates == [_TagAssignmentFilter(definition_id=1, value_ids=[2])]
+
+
+def test_list_my_editable_agents_api_passes_search_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards structured tag matches for text search."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list_mine = mocker.patch(
+        "apps.agent_repository_app.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+        return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/agent/mine",
+        headers=mock_auth_header,
+        params={
+            "search": "智能体类别",
+            "search_tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list_mine.call_args.kwargs["search_tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
 
 
 def test_list_my_editable_agents_api_passes_pagination_and_search(

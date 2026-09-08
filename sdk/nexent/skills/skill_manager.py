@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from .constants import SKILL_FILE_NAME
 from .skill_loader import SkillLoader
+from .upload import normalize_skill_upload
+from .paths import resolve_contained_path, resolve_skill_path
 
 logger = logging.getLogger(__name__)
 
@@ -92,67 +94,26 @@ class SkillManager:
         return tenant_dir
 
     def resolve_skill_dir(self, skill_name: str, *, tenant_id: Optional[str]) -> str:
-        """Resolve a skill directory and reject names that escape the tenant root."""
-        if not isinstance(skill_name, str) or not skill_name.strip():
-            raise ValueError("skill_name must be a non-empty string")
-        if (
-            os.path.isabs(skill_name)
-            or ntpath.isabs(skill_name)
-            or bool(ntpath.splitdrive(skill_name)[0])
-        ):
-            raise ValueError("skill_name must not be an absolute path")
-        if (
-            skill_name in {".", ".."}
-            or "/" in skill_name
-            or "\\" in skill_name
-            or "\x00" in skill_name
-            or os.path.basename(skill_name) != skill_name
-        ):
-            raise ValueError("skill_name resolves outside the tenant directory")
-        tenant_dir = self.resolve_tenant_dir(tenant_id=tenant_id)
-        tenant_dir_real = os.path.realpath(tenant_dir)
-        skill_dir = os.path.realpath(os.path.join(tenant_dir_real, skill_name))
-        if (
-            not skill_dir.startswith(os.path.realpath(self.base_skills_dir) + os.sep)
-            or not skill_dir.startswith(tenant_dir_real + os.sep)
-        ):
-            raise ValueError("skill_name resolves outside the tenant directory")
-        return skill_dir
+        """Resolve a skill directory inside its tenant and configured root."""
+        return resolve_skill_path(
+            self.resolve_tenant_dir(tenant_id=tenant_id), skill_name,
+            allowed_root=self.base_skills_dir,
+        )
 
     def _resolve_skill_file_path(self, skill_dir: str, file_path: str) -> str:
-        """Resolve a relative skill file path and keep it inside ``skill_dir``."""
+        """Resolve a nonempty relative file inside the configured skill root."""
         if not isinstance(file_path, str) or not file_path.strip():
             raise ValueError("file_path must be a non-empty relative path")
-
-        if "\x00" in file_path:
-            raise ValueError("file_path contains a null byte")
-        if (
-            os.path.isabs(file_path)
-            or ntpath.isabs(file_path)
-            or bool(ntpath.splitdrive(file_path)[0])
-        ):
-            raise ValueError("file_path must not be an absolute path")
-
-        path_segments = file_path.replace("\\", "/").split("/")
-        if any(segment == ".." for segment in path_segments):
-            raise ValueError("file_path resolves outside the skill directory")
-        normalized_segments = [segment for segment in path_segments if segment not in {"", "."}]
-        if not normalized_segments:
-            raise ValueError("file_path must point to a file inside the skill directory")
-
         if not self.base_skills_dir:
             raise ValueError("base_skills_dir is not configured")
-        base_skills_dir_real = os.path.realpath(self.base_skills_dir)
-        skill_dir_real = os.path.realpath(skill_dir)
-        target_path = os.path.realpath(os.path.join(skill_dir_real, *normalized_segments))
-        if not skill_dir_real.startswith(base_skills_dir_real + os.sep):
+        root = os.path.realpath(self.base_skills_dir)
+        skill_root = os.path.realpath(skill_dir)
+        if not skill_root.startswith(root + os.sep):
             raise ValueError("file_path resolves outside the skill directory")
-        if (
-            not target_path.startswith(base_skills_dir_real + os.sep)
-            or not target_path.startswith(skill_dir_real + os.sep)
-        ):
-            raise ValueError("file_path resolves outside the skill directory")
-        return target_path
+        target = resolve_contained_path(skill_root, file_path)
+        if target == skill_root:
+            raise ValueError("file_path must point to a file inside the skill directory")
+        return target
 
     def list_skills(self, *, tenant_id: Optional[str]) -> List[Dict[str, str]]:
         """List all available skills from local storage.
@@ -360,21 +321,7 @@ class SkillManager:
         Raises:
             ValueError: If file format is invalid or SKILL.md not found
         """
-        content_bytes: bytes
-        if isinstance(file_content, str):
-            content_bytes = file_content.encode("utf-8")
-        elif isinstance(file_content, io.BytesIO):
-            content_bytes = file_content.getvalue()
-        else:
-            content_bytes = file_content
-
-        if file_type == "auto":
-            if skill_name and skill_name.endswith(".zip"):
-                file_type = "zip"
-            elif content_bytes.startswith(b"PK"):  # ZIP magic bytes
-                file_type = "zip"
-            else:
-                file_type = "md"
+        content_bytes, file_type = normalize_skill_upload(file_content, file_type, filename=skill_name)
 
         if file_type == "zip":
             return self._upload_skill_from_zip(content_bytes, skill_name, tenant_id=tenant_id)
@@ -544,19 +491,7 @@ class SkillManager:
         if not existing:
             raise ValueError(f"Skill not found: {skill_name}")
 
-        content_bytes: bytes
-        if isinstance(file_content, str):
-            content_bytes = file_content.encode("utf-8")
-        elif isinstance(file_content, io.BytesIO):
-            content_bytes = file_content.getvalue()
-        else:
-            content_bytes = file_content
-
-        if file_type == "auto":
-            if content_bytes.startswith(b"PK"):
-                file_type = "zip"
-            else:
-                file_type = "md"
+        content_bytes, file_type = normalize_skill_upload(file_content, file_type)
 
         if file_type == "zip":
             return self._update_skill_from_zip(content_bytes, skill_name, tenant_id=tenant_id)

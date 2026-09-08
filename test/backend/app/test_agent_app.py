@@ -3,11 +3,6 @@ Unit tests for backend.apps.agent_app module.
 
 Tests all agent management API endpoints including runtime and configuration operations.
 """
-from apps.agent_app import (
-    agent_config_router,
-    agent_runtime_router,
-    nl2agent_run_api,
-)
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
@@ -131,13 +126,20 @@ sys.modules['utils.monitoring'].monitoring_manager = monitoring_manager_mock
 sys.modules['utils.monitoring'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['agents.agent_run_manager'] = MagicMock()
-sys.modules['services.agent_service'] = MagicMock()
-sys.modules['services.skill_service'] = MagicMock()
+sys.modules['management.services.agent.service'] = MagicMock()
+sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['services.conversation_management_service'] = MagicMock()
 sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.agent_version_service'] = MagicMock()
+sys.modules['services.prompt_service'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
+from apps.agent_app import (
+    agent_config_router,
+    agent_runtime_router,
+    nl2agent_run_api,
+)
+
 
 
 # Create FastAPI apps for runtime and config routers
@@ -1603,16 +1605,16 @@ async def test_export_agent_api_empty_response(mocker, mock_auth_header):
 
 def _alias_services_for_tests():
     """
-    Provide fallback aliases for dynamic `services.agent_service` imports used by the routers.
+    Provide fallback aliases for dynamic `management.services.agent.service` imports used by the routers.
     Map `backend.services.*` modules to `services.*` so mocker.patch can locate them.
     """
     import sys
     try:
         import backend.services as b_services
-        import backend.services.agent_service as b_agent_service
+        import management.services.agent.service as b_agent_service
         # Map both the package and submodule for compatibility
         sys.modules['services'] = b_services
-        sys.modules['services.agent_service'] = b_agent_service
+        sys.modules['management.services.agent.service'] = b_agent_service
     except Exception:
         # If the project already supports direct imports, ignore the failure
         pass

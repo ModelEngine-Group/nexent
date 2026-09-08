@@ -47,6 +47,7 @@ class SearchRecord(TypedDict):
     score_overall: Optional[float]
     score_accuracy: Optional[float]
     score_semantic: Optional[float]
+    retrieval_highlight_terms: Optional[List[str]]
     published_date: Optional[datetime]
     cite_index: Optional[int]
     search_type: Optional[str]
@@ -518,6 +519,53 @@ def update_conversation_message_status(message_id: int, status: str,
         )
 
 
+def fail_streaming_assistant_messages() -> List[Dict[str, Any]]:
+    """Mark assistant messages left streaming by a stopped runtime as failed.
+
+    Returns the affected runtime identities so the caller can finish the
+    corresponding short-lived Redis state with the existing runtime-state API.
+    The conditional update makes repeated startup recovery idempotent.
+    """
+    with get_db_session() as session:
+        rows = (
+            session.query(
+                ConversationMessage.message_id,
+                ConversationMessage.conversation_id,
+                ConversationMessage.created_by,
+            )
+            .filter(
+                ConversationMessage.message_role == "assistant",
+                ConversationMessage.status == "streaming",
+                ConversationMessage.delete_flag == "N",
+            )
+            .with_for_update()
+            .all()
+        )
+        if not rows:
+            return []
+
+        message_ids = [int(row.message_id) for row in rows]
+        session.query(ConversationMessage).filter(
+            ConversationMessage.message_id.in_(message_ids),
+            ConversationMessage.status == "streaming",
+            ConversationMessage.delete_flag == "N",
+        ).update(
+            {
+                "status": "failed",
+                "update_time": func.current_timestamp(),
+            },
+            synchronize_session=False,
+        )
+        return [
+            {
+                "message_id": int(row.message_id),
+                "conversation_id": int(row.conversation_id),
+                "user_id": row.created_by,
+            }
+            for row in rows
+        ]
+
+
 def update_conversation_message_content(message_id: int, content: str,
                                          user_id: Optional[str] = None) -> None:
     """
@@ -729,6 +777,43 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
 
         # Convert SQLAlchemy model instances to dictionaries
         return list(map(as_dict, records))
+
+
+def get_units_by_message(message_id: int) -> List[Dict[str, Any]]:
+    """Query all completed units for a given assistant message.
+
+    Returns a list of dicts with keys: unit_id, unit_type, unit_content,
+    unit_index, message_id.  Used by the per-turn external memory supplement.
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = (
+            select(
+                ConversationMessageUnit.unit_id,
+                ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.unit_content,
+                ConversationMessageUnit.unit_index,
+                ConversationMessageUnit.message_id,
+            )
+            .where(
+                ConversationMessageUnit.message_id == message_id,
+                ConversationMessageUnit.unit_status == "completed",
+                ConversationMessageUnit.delete_flag == "N",
+            )
+            .order_by(ConversationMessageUnit.unit_index.asc())
+        )
+        results = session.execute(stmt).all()
+        return [
+            {
+                "unit_id": r.unit_id,
+                "unit_type": r.unit_type,
+                "unit_content": r.unit_content,
+                "unit_index": r.unit_index,
+                "message_id": r.message_id,
+            }
+            for r in results
+        ]
 
 
 def get_conversation_list(
@@ -1550,6 +1635,7 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             - score_overall: Overall relevance score
             - score_accuracy: Accuracy score
             - score_semantic: Semantic relevance score
+            - retrieval_highlight_terms: Exact lexical terms returned by retrieval
             - published_date: Publication date
         user_id: Reserved parameter for created_by and updated_by fields
 
@@ -1587,6 +1673,10 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             data["score_accuracy"] = search_data['score_accuracy']
         if 'score_semantic' in search_data:
             data["score_semantic"] = search_data['score_semantic']
+        if 'retrieval_highlight_terms' in search_data:
+            data["retrieval_highlight_terms"] = search_data[
+                'retrieval_highlight_terms'
+            ]
         if 'published_date' in search_data:
             data["published_date"] = search_data['published_date']
         if user_id:

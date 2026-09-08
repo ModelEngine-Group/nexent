@@ -446,6 +446,7 @@ class MemoryUserConfig(BaseModel):
     agent_share_option: str = Field(description="Agent share option")
     disable_agent_ids: List[str] = Field(description="Disable agent ids")
     disable_user_agent_ids: List[str] = Field(description="Disable user agent ids")
+    external_provider_top_k: int = Field(default=20, description="Max results per external provider")
 
     def __str__(self) -> str:  # pragma: no cover
         return self.model_dump_json(indent=2, ensure_ascii=False)

@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch, Tag, Tour } from "antd";
+import { Button, Spin, Switch, Tag, Tour } from "antd";
 import {
   History,
   Maximize2,
@@ -316,8 +316,11 @@ function AgentSetupContent() {
         />
       </div>
 
-      <main className="flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
-        <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
+      <main className="relative flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
+        <div
+          className="flex min-w-0 min-h-0 flex-1 flex-row gap-4"
+          style={{ visibility: isRequestedAgentLoading ? "hidden" : "visible" }}
+        >
           <PanelCard
             panelRef={generationPanelRef}
             title={t("agent.page.panel.nl2agent")}
@@ -523,6 +526,15 @@ function AgentSetupContent() {
             </PanelCard>
           )}
         </div>
+        {isRequestedAgentLoading ? (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-gray-50"
+            role="status"
+          >
+            <Spin size="large" />
+            <span className="text-sm text-gray-500">{t("common.loading")}</span>
+          </div>
+        ) : null}
       </main>
       <Tour
         open={isAgentTourOpen}

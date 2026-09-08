@@ -7,9 +7,11 @@ from consts.const import (
 	MEMORY_AGENT_SHARE_KEY,
 	DISABLE_AGENT_ID_KEY,
 	DISABLE_USERAGENT_ID_KEY,
+	EXTERNAL_PROVIDER_TOP_K_KEY,
 	DEFAULT_MEMORY_SWITCH_KEY,
 	DEFAULT_DREAMING_SWITCH_KEY,
 	DEFAULT_MEMORY_AGENT_SHARE_KEY,
+	DEFAULT_EXTERNAL_PROVIDER_TOP_K,
 )
 from consts.model import MemoryAgentShareMode
 from database.memory_config_db import (
@@ -209,6 +211,22 @@ def remove_disabled_useragent_id(user_id: str, ua_id: str) -> bool:
 	return _remove_multi_value(user_id, DISABLE_USERAGENT_ID_KEY, ua_id)
 
 
+def get_external_provider_top_k(user_id: str) -> int:
+	configs = get_user_configs(user_id)
+	value = configs.get(EXTERNAL_PROVIDER_TOP_K_KEY, str(DEFAULT_EXTERNAL_PROVIDER_TOP_K))
+	try:
+		return int(value)
+	except (ValueError, TypeError):
+		return DEFAULT_EXTERNAL_PROVIDER_TOP_K
+
+
+def set_external_provider_top_k(user_id: str, top_k: int) -> bool:
+	if top_k < 1 or top_k > 100:
+		logger.error(f"Invalid top_k value: {top_k}, must be between 1 and 100")
+		return False
+	return _update_single_config(user_id, EXTERNAL_PROVIDER_TOP_K_KEY, str(top_k))
+
+
 def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip_query: bool = False) -> MemoryContext:
 	if skip_query:
 		# When memory is forcibly disabled (e.g., debug mode), return minimum context without database queries
@@ -217,6 +235,7 @@ def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip
 			agent_share_option="never",
 			disable_agent_ids=[],
 			disable_user_agent_ids=[],
+			external_provider_top_k=DEFAULT_EXTERNAL_PROVIDER_TOP_K,
 		)
 		return MemoryContext(
 			user_config=memory_user_config,
@@ -230,6 +249,7 @@ def build_memory_context(user_id: str, tenant_id: str, agent_id: str | int, skip
 		agent_share_option=get_agent_share(user_id).value,
 		disable_agent_ids=get_disabled_agent_ids(user_id),
 		disable_user_agent_ids=get_disabled_useragent_ids(user_id),
+		external_provider_top_k=get_external_provider_top_k(user_id),
 	)
 	# If user turn off the memory function, return minimum context directly
 	if not memory_user_config.memory_switch:

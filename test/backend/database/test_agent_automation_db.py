@@ -482,8 +482,15 @@ def test_lease_recovery_helpers_cover_empty_and_success_paths(monkeypatch):
     assert agent_automation_db.release_task_lock(1) is True
     assert agent_automation_db.release_task_lock(1, "scheduler-a") is True
     assert agent_automation_db.recover_orphaned_runs() == 2
+    assert agent_automation_db.release_all_task_locks() == 2
     assert agent_automation_db.release_expired_locks() == 2
-    assert any("AUTOMATION_LEASE_EXPIRED" in str(statement) for statement, _ in session.calls)
+    recovery_sql = next(
+        str(statement)
+        for statement, _ in session.calls
+        if "AUTOMATION_LEASE_EXPIRED" in str(statement)
+    )
+    assert "status = 'RUNNING'" in recovery_sql
+    assert "QUEUED" not in recovery_sql
 
 
 def test_optional_database_rows_return_empty_values(monkeypatch):

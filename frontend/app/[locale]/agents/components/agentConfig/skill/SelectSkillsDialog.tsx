@@ -23,6 +23,7 @@ interface SelectSkillsDialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onOpenManageTags: () => void;
+  readonly onOpenTagManagement?: () => void;
   readonly onEditSkill?: (skill: Skill) => void;
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
@@ -52,6 +53,7 @@ export default function SelectSkillsDialog({
   open,
   onClose,
   onOpenManageTags,
+  onOpenTagManagement,
   onEditSkill,
   currentAgentId,
   isReadOnly,
@@ -331,8 +333,20 @@ export default function SelectSkillsDialog({
             onClick={onOpenManageTags}
             className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
           >
-            {t("skillPool.manageTags")}
+            {t("skillPool.bulkAssignTags")}
           </Button>
+          {onOpenTagManagement ? (
+            <Button
+              type="text"
+              size="small"
+              icon={<Tag size={13} />}
+              disabled={!skillMetadataModifiable}
+              onClick={onOpenTagManagement}
+              className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
+            >
+              {t("skillPool.tagManagement")}
+            </Button>
+          ) : null}
         </div>
       }
       open={open}

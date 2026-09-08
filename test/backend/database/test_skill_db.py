@@ -1312,6 +1312,31 @@ class TestCreateSkill:
         session.add.assert_called()
         session.commit.assert_called()
 
+    def test_create_skill_truncates_description_to_database_limit(self, monkeypatch, mock_session):
+        """Long third-party descriptions must not make skill uploads fail."""
+        session, _ = mock_session
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+
+        created = []
+
+        class MockSkillInfoClass:
+            def __init__(self, **kwargs):
+                self.skill_id = 1
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+        monkeypatch.setattr("backend.database.skill_db.SkillInfo", MockSkillInfoClass)
+        session.add = lambda value: created.append(value)
+        session.flush = MagicMock()
+        session.commit = MagicMock()
+
+        create_skill({"name": "long-description", "description": "x" * 1001}, "tenant1")
+
+        assert len(created[0].skill_description) == 1000
+
     def test_create_skill_with_tool_ids(self, monkeypatch, mock_session):
         """Test creating a skill with associated tool IDs."""
         session, query = mock_session

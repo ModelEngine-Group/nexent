@@ -1,9 +1,23 @@
 name: Build Offline Deployment Package
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      image_source:
+        required: false
+        default: 'general'
+        type: string
+      include_source:
+        required: false
+        default: false
+        type: boolean
+      upload_to_obs:
+        required: false
+        default: true
+        type: boolean
   workflow_dispatch:
     inputs:
       version:
@@ -19,6 +33,11 @@ on:
           - mainland
       include_source:
         description: 'Include source code in the package'
+        required: false
+        default: false
+        type: boolean
+      include_full_sandbox:
+        description: 'Include the optional full sandbox image with Anthropic skill dependencies'
         required: false
         default: false
         type: boolean
@@ -78,19 +97,25 @@ jobs:
           fi
 
           SOURCE_SUFFIX=""
+          FULL_SANDBOX_SUFFIX=""
           INCLUDE_SOURCE="${{ inputs.include_source || false }}"
+          INCLUDE_FULL_SANDBOX="${{ inputs.include_full_sandbox || false }}"
           IMAGE_SOURCE="${{ inputs.image_source || 'general' }}"
           UPLOAD_TO_OBS="${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.upload_to_obs }}"
           if [ "$INCLUDE_SOURCE" = "true" ]; then
             SOURCE_SUFFIX="-with-source"
           fi
+          if [ "$INCLUDE_FULL_SANDBOX" = "true" ]; then
+            FULL_SANDBOX_SUFFIX="-with-full-sandbox"
+          fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "platform=$PLATFORM" >> "$GITHUB_OUTPUT"
           echo "include-source=$INCLUDE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "include-full-sandbox=$INCLUDE_FULL_SANDBOX" >> "$GITHUB_OUTPUT"
           echo "image-source=$IMAGE_SOURCE" >> "$GITHUB_OUTPUT"
           echo "upload_to_obs=$UPLOAD_TO_OBS" >> "$GITHUB_OUTPUT"
-          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}${FULL_SANDBOX_SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Set deployment components
         id: set-components
@@ -109,6 +134,7 @@ jobs:
             --platform "${{ steps.set-vars.outputs.platform }}" \
             --output-dir ./offline-output \
             --include-source "${{ steps.set-vars.outputs.include-source }}" \
+            --include-sandbox-full "${{ steps.set-vars.outputs.include-full-sandbox }}" \
             --image-source "${{ steps.set-vars.outputs.image-source }}" \
             --components "${{ steps.set-components.outputs.components }}" \
             --target all \
@@ -131,15 +157,15 @@ jobs:
         with:
           access_key_id: ${{ secrets.HUAWEI_OBS_ACCESSKEY }}
           secret_access_key: ${{ secrets.HUAWEI_OBS_SECRETKEY }}
-          region: 'cn-east-3'
+          region: 'ap-southeast-1'
 
       - name: Upload to Huawei Cloud OBS
         if: ${{ steps.set-vars.outputs.upload_to_obs == 'true' }}
         uses: huaweicloud/obs-helper@v1.0.0
         with:
-          bucket_name: 'nexent-images'
+          bucket_name: 'modelengine-software'
           local_file_path: './${{ steps.set-vars.outputs.package-name }}.zip'
-          obs_file_path: 'packages/${{ steps.set-vars.outputs.package-name }}.zip'
+          obs_file_path: 'nexent/${{ steps.set-vars.outputs.package-name }}.zip'
           operation_type: 'upload'
 
       - name: Upload artifact
@@ -161,6 +187,7 @@ jobs:
           echo "Package: ${{ steps.set-vars.outputs.package-name }}.zip"
           echo "Note: the GitHub artifact zip contains the offline package contents directly."
           echo "Components: ${{ steps.set-components.outputs.components }}"
+          echo "Include full sandbox: ${{ steps.set-vars.outputs.include-full-sandbox }}"
           echo "Image source: ${{ steps.set-vars.outputs.image-source }}"
           echo "Ref Type: ${{ github.ref_type }}"
           echo "Ref Name: ${{ github.ref_name }}"

@@ -1,6 +1,6 @@
 # Nexent
 
-Nexent is a zero-code platform for auto-generating production-grade AI agents, built on **Harness Engineering** principles. It provides unified tools, skills, memory, and orchestration with built-in constraints, feedback loops, and control planes — no orchestration, no complex drag-and-drop required, using pure language to develop any agent you want.
+Nexent is a zero-code agent platform built on **Harness Engineering** principles. Describe your goal in natural language, and the system generates an agent configuration and helps configure tools, Skills, knowledge bases, memory, and collaborative agents. You can then debug, publish, and continuously iterate on the generated agent without manually orchestrating complex workflows.
 
 > One prompt. Endless reach.
 
@@ -17,7 +17,7 @@ Nexent is a zero-code platform for auto-generating production-grade AI agents, b
 
 > *If you want to go fast, go alone; if you want to go far, go together.*
 
-We have released **Nexent v2.0** — a major upgrade over v1.0. This release brings A2A protocol support, progressive Skill disclosure, layered memory architecture, full-featured user management with RBAC, agent version management, and the Agent Market. Core capabilities like knowledge base integration, multimodal interaction, and the MCP tool ecosystem have been significantly enhanced. The platform is maturing rapidly and we welcome your feedback.
+This documentation corresponds to **Nexent v2.5.0**. This release enhances natural-language agent generation (NL2Agent), tool and Skill recommendations, isolated sandbox execution, generated file handling, layered memory, personal knowledge-base capacity, and northbound APIs. The platform also supports A2A agent collaboration, MCP tools, knowledge-base retrieval, multimodal interaction, version management, and multi-tenant access control.
 
 - **🗺️ Check our [Feature Map](https://github.com/orgs/ModelEngine-Group/projects/6)** to explore current and upcoming features.
 - **🔍 Try the current build** and leave ideas or bugs in the [Issues](https://github.com/ModelEngine-Group/nexent/issues) tab.
@@ -32,46 +32,47 @@ Most of all, we need visibility. Star ⭐ and watch the [GitHub repository](http
 
 ## ✨ Key Features
 
-Nexent v2.0 delivers a comprehensive feature set for building powerful AI agents:
+Nexent v2.5.0 provides the following core capabilities:
 
-- **⚙️ Multi-Model Integration** — OpenAI-compatible any provider, with full Embedding/VLM/STT/TTS support
-- **🤖 Zero-Code Agent Generation** — Describe in plain language, deploy in one click
+- **⚙️ Multi-Model Integration** — Centrally manage LLM, Embedding, Rerank, image, video, audio, STT, and TTS models
+- **🤖 Zero-Code Agent Generation** — Clarify requirements through multi-turn natural-language conversations, recommend resources, and generate a debuggable agent configuration
 - **🤝 A2A Agent Collaboration** — Agent-to-Agent protocol for seamless multi-agent workflows
-- **🧠 Layered Memory Architecture** — Two-tier memory system with cross-conversation context accumulation
-- **📝 Progressive Skill Disclosure** — Context-aware tool suggestions that reveal as you go
-- **🗄️ Personal-Grade Knowledge Base** — 20+ format document import with intelligent retrieval
-- **🔧 MCP Tool Ecosystem** — Plug-and-play extensibility with custom tool development
+- **🧠 Layered Memory Architecture** — Tenant, User, and Agent memory, with Dreaming for consolidating long-term memory
+- **📝 Progressive Skill Disclosure** — Load Skill instructions and resources on demand and execute scripts in an isolated sandbox
+- **🗄️ Personal Knowledge Bases** — Support multiple document formats, intelligent retrieval, access permissions, and capacity quotas
+- **🔧 MCP Tool Ecosystem** — A plug-and-play extensible tool system with support for custom development
 - **🌐 Internet Knowledge Integration** — Multi-source hybrid search blending real-time web with private data
-- **🔍 Knowledge-Level Traceability** — Precise citations and verifiable sources on every answer
-- **🎭 Multimodal Interaction** — Voice, text, images, and files for fully natural conversations
-- **🔢 Agent Version Management** — Version iteration and rollback for safe, controlled deployments
-- **🏪 Agent Market** — Official and community agents ready to install and use
-- **👥 Multi-Tenant RBAC** — Tenant isolation, role-based permissions, and fine-grained resource access
+- **🔍 Knowledge-Level Traceability** — Precise citations and source verification so that every fact can be traced
+- **🎭 Multimodal and File Processing** — Accept text, image, audio, video, and document inputs, and display generated files for preview or download
+- **🔢 Agent Version Management** — Iterate through versions and review history with safe, controlled rollbacks
+- **🏪 Resource Marketplace** — Share and reuse agents, MCP services, and Skills, with listing approval support
+- **👥 Delegated Administration** — Multi-tenant isolation, RBAC, user groups, resource authorization, API keys, and knowledge-base capacity management
 
 For detailed feature information and examples, see our **[Features Guide](./features)**.
 
 ## 🏗️ Software Architecture
 
-Nexent adopts a modern distributed microservices architecture designed to provide high-performance, scalable AI agent platform. The entire system is based on containerized deployment, supporting cloud-native and enterprise-grade application scenarios.
+Nexent separates configuration management, agent runtime, MCP, northbound APIs, data processing, and the web frontend into independent services that can be deployed with Docker Compose or Kubernetes. PostgreSQL, Elasticsearch, Redis, and MinIO respectively provide business-data storage, retrieval indexes, caching and task queues, and object storage.
 
 ### 🌐 Layered Architecture Design
 
 - **Frontend Layer** — Modern user interface built with Next.js + React + TypeScript
-- **API Gateway Layer** — FastAPI high-performance web framework for request routing and load balancing
-- **Business Logic Layer** — Agent management, conversation management, knowledge base management, and model management
-- **Data Layer** — Distributed storage architecture with PostgreSQL, Elasticsearch, Redis, and MinIO
+- **API Service Layer** — FastAPI-based configuration, runtime, MCP, northbound, and data-processing APIs
+- **Business Logic Layer** — Agent, conversation, knowledge-base, model, memory, permission, and marketplace management
+- **Data Layer** — PostgreSQL, Elasticsearch, Redis, and MinIO store different types of data
 
 ### 🚀 Core Service Architecture
 
-- **Agent Services** — Agent generation and execution based on SmolAgents framework
-- **Data Processing Services** — Real-time and batch processing supporting 20+ file formats
-- **MCP Ecosystem** — Standardized tool interfaces and plugin architecture
+- **Agent Services** — Generate and run agents with SmolAgents and stream results through the Runtime service
+- **Sandbox and File Workspace** — Run model-generated code and Skill scripts in isolation and synchronize generated files to object storage
+- **Data Processing Services** — Parse, chunk, and vectorize documents to build indexes for knowledge-base retrieval
+- **MCP Ecosystem** — Provide unified access to remote, containerized, and custom API tools
 
 ### ⚡ Distributed Features
 
-- **Asynchronous Processing** — High-performance async processing architecture based on asyncio
-- **Microservices Design** — Service decoupling with independent scaling and deployment
-- **Containerized Deployment** — Docker Compose service orchestration supporting cloud-native deployment
+- **Asynchronous and Streaming Processing** — Use asynchronous tasks and SSE to continuously return agent execution results
+- **Service Decomposition** — Deploy and scale configuration, runtime, and data-processing services independently
+- **Containerized Deployment** — Provide both Docker Compose and Helm deployment options
 
 For detailed architectural design and technical implementation, see our **[Software Architecture](./software-architecture)**.
 

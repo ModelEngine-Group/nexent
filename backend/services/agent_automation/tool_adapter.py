@@ -8,6 +8,8 @@ time settings only; Agent/runtime fields are applied after extraction.
 from __future__ import annotations
 
 import asyncio
+
+from utils.time_context_utils import strip_current_time_prefix
 import concurrent.futures
 import json
 import logging
@@ -34,14 +36,6 @@ logger = logging.getLogger("agent_automation.tool_adapter")
 DEFAULT_AUTOMATION_TIMEZONE = "Asia/Shanghai"
 
 
-def _strip_runtime_time_prefix(message: str) -> str:
-    """Remove the runtime-only current-time header from the user request."""
-    normalized = str(message or "")
-    if normalized.startswith("[Current time:"):
-        close_index = normalized.find("]", len("[Current time:"))
-        if close_index >= 0:
-            return normalized[close_index + 1:].lstrip("\n").strip()
-    return normalized
 
 
 def _run_coroutine(coro):
@@ -140,7 +134,7 @@ class AgentLoopAutomationToolAdapter:
         # The model argument is intentionally not forwarded to extraction. The
         # persisted current user message is the authoritative business input.
         del request_text
-        user_message = _strip_runtime_time_prefix(context.user_message)
+        user_message = strip_current_time_prefix(str(context.user_message or ""))
         language = detect_instruction_language(user_message)
         if context.source_message_id is None:
             message = (

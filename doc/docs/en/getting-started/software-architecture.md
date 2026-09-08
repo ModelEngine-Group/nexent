@@ -1,6 +1,6 @@
 # Software Architecture
 
-Nexent adopts a modern distributed microservices architecture designed to provide a high-performance, scalable AI agent platform. The entire system is containerized with Docker and supports cloud-native and enterprise-grade deployment scenarios.
+Nexent separates the web frontend, configuration management, agent runtime, MCP, northbound APIs, and data processing into independent services. These services collaborate through well-defined APIs and use PostgreSQL, Elasticsearch, Redis, and MinIO to store different types of data. The project provides both Docker Compose and Kubernetes deployment options.
 
 ![Software Architecture Diagram](../../assets/architecture_zh.png)
 
@@ -10,19 +10,19 @@ Nexent's software architecture follows layered design principles, structured int
 
 ### 🌐 Frontend Layer
 - **Technology Stack**: Next.js + React + TypeScript
-- **Functions**: User interface, agent interaction, multimodal input processing
-- **Features**: Responsive design, real-time WebSocket communication, internationalization (i18n)
+- **Functions**: Agent generation and configuration, chat interaction, resource management, and multimodal file uploads
+- **Features**: Responsive design, SSE streaming results, WebSocket voice communication, and internationalization (i18n)
 
 ### 🔌 API Gateway Layer
-Distributed API services built on FastAPI:
+The backend consists of multiple FastAPI-based API services:
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **nexent-config** | 5010 | Main API service - agent CRUD, configuration management |
-| **nexent-runtime** | 5014 | Runtime service - agent execution, streaming responses |
-| **nexent-mcp** | 5011/5015 | MCP service - tool protocol management, FastMCP server |
-| **nexent-northbound** | 5013 | External API service - A2A protocol, partner integrations |
-| **nexent-data-process** | 5012 | Data processing service - document parsing, vectorization |
+| **nexent-config** | 5010 | Configuration API: agents, conversations, models, knowledge bases, memory, permissions, and resources |
+| **nexent-runtime** | 5014 | Runtime API: agent execution, sandbox coordination, and streaming responses |
+| **nexent-mcp** | 5011/5015 | MCP API and FastMCP service: MCP configuration, tool discovery, and container management |
+| **nexent-northbound** | 5013 | Northbound API: external calls, conversation management, and A2A interfaces |
+| **nexent-data-process** | 5012 | Data processing API: document parsing, chunking, vectorization, and indexing |
 
 ### 🧠 Business Logic Layer
 The backend implements a clean layered architecture:
@@ -32,6 +32,7 @@ The backend implements a clean layered architecture:
 - **Key Modules**:
   - `agent_app.py` - Agent CRUD, version management, streaming execution
   - `conversation_management_app.py` - Multi-turn dialogue, history tracking
+  - `api_key_app.py` / `quota_app.py` - API key and capacity management
   - `model_managment_app.py` - Model configuration, health checks
   - `skill_app.py` - Skill creation and management
   - `knowledge_summary_app.py` - Knowledge base operations
@@ -41,12 +42,14 @@ The backend implements a clean layered architecture:
 #### Service Layer (`backend/services/`)
 - **Purpose**: Core business logic orchestration, coordinate repositories/SDKs
 - **Key Modules**:
-  - `agent_service.py` - Agent lifecycle, execution orchestration, memory management
+  - `agent_service.py` - Agent lifecycle, configuration, and runtime request orchestration
+  - `runtime_proxy_service.py` - Forward chat and debugging requests to the Runtime service
   - `agent_version_service.py` - Version publishing, rollback, comparison
-  - `model_management_service.py` - Multi-model support, load balancing
+  - `model_management_service.py` / `model_gateway_service.py` - Model management and unified adaptation
   - `memory_config_service.py` - Memory configuration, context building
   - `conversation_management_service.py` - Session management, history persistence
   - `skill_service.py` - Skill generation, template processing
+  - `nl2agent_service.py` - Natural-language agent generation conversations and draft management
   - `data_process_service.py` - Document processing pipeline
   - `mcp_container_service.py` - MCP container lifecycle management
   - `remote_mcp_service.py` - Remote MCP server integration
@@ -56,8 +59,8 @@ The backend implements a clean layered architecture:
 #### Agent Core (`backend/agents/`)
 - **Purpose**: Agent execution framework built on SmolAgents
 - **Key Components**:
-  - `agent_run_manager.py` - Agent run lifecycle, streaming coordination
-  - `create_agent_info.py` - Agent configuration builder, tool integration
+  - `agent_run_manager.py` - Agent run lifecycle, workspace management, and streaming coordination
+  - `create_agent_info.py` - Agent configuration, tool, and sandbox environment builder
   - `preprocess_manager.py` - Document preprocessing orchestration
   - `skill_creation_agent.py` - LLM-powered skill generation
 
@@ -94,8 +97,10 @@ Distributed data storage architecture with multiple specialized databases:
 - **MinIO** (port 9010/9011): Distributed object storage
   - File uploads and attachments (`attachment_db.py`)
   - Document storage for knowledge base
-  - Preview generation and temporary files
+  - Preview files and sandbox-generated artifacts
 - **Features**: S3-compatible API, large file handling
+
+The agent runtime also uses a separate workspace for the inputs and outputs of each run. Docker deployments share the workspace through the `nexent-agent-workspace` volume, while Kubernetes deployments use the `nexent-workspace` PVC. Artifacts that must be retained are synchronized to MinIO after a run, and the backend cleans up temporary working directories.
 
 ## 🔧 Core Service Architecture
 
@@ -103,15 +108,20 @@ Distributed data storage architecture with multiple specialized databases:
 ```
 Agent Framework (SmolAgents-based):
 ├── Agent Creation & Configuration
-│   ├── Name/display name generation (LLM-powered)
-│   ├── Tool integration and selection
+│   ├── NL2Agent requirement clarification and configuration generation
+│   ├── Tool and Skill recommendation, installation, and binding
 │   ├── Sub-agent relationship management
 │   └── Version control and publishing
 ├── Agent Execution Engine
 │   ├── Streaming response (SSE)
 │   ├── Tool calling and orchestration
-│   ├── Multi-model support (LLM + Business logic)
+│   ├── Multi-model and multimodal input
 │   └── Memory context building
+├── Isolated Execution & File Processing
+│   ├── Docker or other code sandbox levels
+│   ├── Session or system lifecycle scope
+│   ├── Isolated Skill script execution
+│   └── Runtime workspace and MinIO artifact synchronization
 ├── Version Management
 │   ├── Publishing and rollback
 │   ├── Version comparison
@@ -191,7 +201,7 @@ Service Decomposition Strategy:
 ├── nexent-config (5010)
 │   └── Agent CRUD, configuration, user management
 ├── nexent-runtime (5014)
-│   └── Agent execution, streaming responses
+│   └── Agent execution, sandbox coordination, file artifacts, and streaming responses
 ├── nexent-mcp (5011/5015)
 │   └── MCP tool protocol, container management
 ├── nexent-northbound (5013)
@@ -200,6 +210,8 @@ Service Decomposition Strategy:
 │   └── Document processing, vectorization, Celery workers
 ├── nexent-web (3000)
 │   └── Frontend Next.js application
+├── nexent-sandbox (created according to the runtime strategy)
+│   └── Isolated execution of model-generated code and Skill scripts
 └── Optional Services
     ├── nexent-redis (6379) - Caching and message broker
     ├── nexent-elasticsearch (9210) - Vector search
@@ -211,26 +223,27 @@ Service Decomposition Strategy:
 ```
 Docker Compose Orchestration:
 ├── Application Services Containerization
+├── Sandbox images and independent workspace volumes
 ├── Database Service Isolation
 ├── Network Layer Security (bridge network)
 ├── Volume Mounting for Data Persistence
 ├── Health Checks and Auto-restart
-└── Kubernetes Support (IS_DEPLOYED_BY_KUBERNETES)
+└── Corresponding Kubernetes Helm deployment option
 ```
 
 ## 🔐 Security and Scalability
 
 ### 🛡️ Security Architecture
-- **Authentication**: Multi-tenant support, user permission management
-- **Authorization**: Role-based access control (RBAC), group-based permissions
-- **Data Security**: Tenant data isolation, secure transmission (HTTPS)
-- **Network Security**: Service间安全通信, Docker network isolation
+- **Authentication**: Local accounts, OAuth, CAS, and northbound API keys
+- **Authorization**: Role-based access control (RBAC) and user-group permissions
+- **Data Security**: Tenant data isolation with sensitive configuration managed by backend services
+- **Runtime Isolation**: Deployments use Docker sandboxes by default and restrict network access, shell access, CPU, memory, and per-step execution time
 
 ### 📈 Scalability Design
-- **Horizontal Scaling**: Independent microservice scaling, load balancing
-- **Vertical Scaling**: Resource pool management, intelligent scheduling
-- **Storage Scaling**: Distributed storage (MinIO), data sharding (Elasticsearch)
-- **Cache Scaling**: Redis clustering for session and data caching
+- **Service Scaling**: Configuration, runtime, northbound, and data-processing services can be deployed independently
+- **Resource Control**: Compute resources can be configured separately for sandboxes and data-processing services
+- **Storage Scaling**: MinIO stores objects, while Elasticsearch stores retrieval indexes
+- **Caching and Tasks**: Redis provides caching, locks, and the Celery message broker
 
 ### 🔧 Modular Architecture
 - **Loose Coupling**: Low inter-service dependencies, standardized interfaces
@@ -238,21 +251,22 @@ Docker Compose Orchestration:
 - **Configuration Management**: Environment-based configuration, dynamic updates
 - **Single Source of Truth**: Environment variables centralized in `backend/consts/const.py`
 
-## 🔄 Data Flow Architecture
+## 🔄 System Data Flow
 
 ### 📥 User Request Flow
 ```
-User Input → Frontend Validation → API Gateway (nexent-config)
-    → Route Distribution → Business Service (Service Layer)
+User Input → Web Frontend → nexent-config or nexent-northbound
+    → App Layer Validation → Service Layer Orchestration
     → Data Access (Database Layer) → PostgreSQL/Elasticsearch/Redis/MinIO
 ```
 
 ### 🤖 Agent Execution Flow
 ```
-User Message → nexent-runtime → Agent Service
-    → Memory Context Build → Tool Resolution
-    → Model Inference (Streaming) → SSE Response
-    → Conversation Save → History Storage
+User Message → nexent-config / nexent-northbound
+    → Runtime Proxy → nexent-runtime
+    → Memory and Metadata Context Build → Tool and Sandbox Execution
+    → Model Inference → SSE Streaming Response
+    → File Artifact Synchronization → Final Conversation Persistence
 ```
 
 ### 📚 Knowledge Base Processing Flow
@@ -271,9 +285,9 @@ Real-time Input → Streaming Endpoint → Async Processing
 ## 🎯 Architecture Advantages
 
 ### 🏢 Enterprise-grade Features
-- **High Availability**: Multi-service redundancy, health checks, auto-restart
+- **Deployability**: Service decomposition, health checks, and automatic restart
 - **High Performance**: Async processing, Redis caching, vector search optimization
-- **High Concurrency**: Distributed architecture, load balancing
+- **Concurrent Processing**: Asynchronous APIs, task queues, and an independent Runtime service
 - **Monitoring Friendly**: OpenTelemetry observability, Grafana Tempo tracing, structured logging
 
 ### 🔧 Developer Friendly
@@ -291,4 +305,4 @@ Real-time Input → Streaming Endpoint → Async Processing
 
 ---
 
-This architectural design ensures that Nexent can provide a stable, scalable AI agent service platform while maintaining high performance. Whether for individual users or enterprise-level deployments, it delivers excellent user experience and technical assurance.
+This architecture separates configuration management, agent execution, and data processing, allowing deployment scenarios to select components as needed while providing clear boundaries for tool extensibility, runtime isolation, and external-system integration.

@@ -87,6 +87,23 @@ def update_model_record(
         return result.rowcount > 0
 
 
+def fail_detecting_models_on_startup() -> int:
+    """Finish connectivity checks interrupted by a config-service restart."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(ModelRecord)
+            .where(
+                ModelRecord.connect_status == "detecting",
+                ModelRecord.delete_flag == "N",
+            )
+            .values(
+                connect_status="unavailable",
+                update_time=func.current_timestamp(),
+            )
+        )
+        return int(result.rowcount or 0)
+
+
 def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:
     """
     Delete a model record (soft delete) and update the update timestamp

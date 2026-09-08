@@ -76,11 +76,22 @@ consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
 sys.modules["consts.exceptions"] = consts_exceptions_module
 
+consts_tool_labels_module = types.ModuleType("consts.tool_labels")
+consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
+    "store_memory",
+    "search_memory",
+    "download_from_s3",
+    "upload_to_s3",
+    "parallel_executor",
+})
+sys.modules["consts.tool_labels"] = consts_tool_labels_module
+
 # Also add model and exceptions to consts module attributes
 consts_module = sys.modules.get("consts")
 if consts_module:
     setattr(consts_module, "model", consts_model_module)
     setattr(consts_module, "exceptions", consts_exceptions_module)
+    setattr(consts_module, "tool_labels", consts_tool_labels_module)
     setattr(
         consts_module,
         "capability_profiles",
@@ -231,10 +242,11 @@ sys.modules['database.a2a_agent_db'] = a2a_agent_db_stub
 database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['database.knowledge_db'] = MagicMock()
 sys.modules['database.knowledge_db'].get_knowledge_name_map_by_index_names = MagicMock()
-sys.modules['services.vectordatabase_service'] = MagicMock()
+sys.modules['management.services.knowledge_base.service'] = MagicMock()
+sys.modules['management.services.model.resolver'] = MagicMock()
 # Configure ElasticSearchService.filter_accessible_indices as a pass-through so that
 # existing tests (which don't explicitly mock this permission filter) still work correctly.
-sys.modules['services.vectordatabase_service'].ElasticSearchService.filter_accessible_indices.side_effect = \
+sys.modules['management.services.knowledge_base.service'].ElasticSearchService.filter_accessible_indices.side_effect = \
     lambda index_names, **kwargs: list(index_names)
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
@@ -261,6 +273,10 @@ sys.modules['services.model_gateway_service'] = _create_stub_module(
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
 )
 sys.modules['services.memory_config_service'] = MagicMock()
+sys.modules['services.memory_external_provider_service'] = _create_stub_module(
+    "services.memory_external_provider_service",
+    get_memory_external_provider_service=MagicMock(return_value=None),
+)
 # Extend services hierarchy with additional stubs
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
@@ -271,8 +287,8 @@ sys.modules['services.tool_configuration_service'] = _create_stub_module(
     "services.tool_configuration_service",
     initialize_tools_on_startup=AsyncMock(),
 )
-sys.modules['services.agent_service'] = _create_stub_module(
-    "services.agent_service",
+sys.modules['management.services.agent.service'] = _create_stub_module(
+    "management.services.agent.service",
     build_sandbox_policy=MagicMock(return_value=None),
     get_sandbox_minio_client=MagicMock(return_value=None),
 )
@@ -281,6 +297,9 @@ sys.modules['nexent.memory.memory_service'] = MagicMock()
 # Build top-level nexent module to avoid importing the real package
 nexent_module = _create_stub_module("nexent", MessageObserver=mock_message_observer)
 sys.modules['nexent'] = nexent_module
+sys.modules['nexent.memory'] = _create_stub_module("nexent.memory")
+sys.modules['nexent.memory.models'] = _create_stub_module("nexent.memory.models")
+sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
@@ -525,7 +544,17 @@ from backend.agents.create_agent_info import (
     _resolve_runtime_tool_records,
     _resolve_input_budget,
     _resolve_safe_input_budget,
+    _get_external_provider_service_for_search,
 )
+
+
+def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
+    service = object()
+    factory = MagicMock(return_value=service)
+    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
+
+    assert _get_external_provider_service_for_search() is service
+    factory.assert_called_once_with()
 
 
 @pytest.fixture(autouse=True)
@@ -595,8 +624,8 @@ class TestGetSkillsForTemplate:
         mock_skill1 = {"name": "skill1", "description": "desc1"}
         mock_skill2 = {"name": "skill2", "description": "desc2"}
 
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2]
             mock_skill_service.return_value = mock_instance
@@ -623,8 +652,8 @@ class TestGetSkillsForTemplate:
         mock_skill2 = {"description": "desc2"}  # Missing name
         mock_skill3 = {}  # Missing both
 
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2, mock_skill3]
             mock_skill_service.return_value = mock_instance
@@ -643,8 +672,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_empty_list(self):
         """Test case when no skills are enabled"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = []
             mock_skill_service.return_value = mock_instance
@@ -659,8 +688,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_exception_handling(self):
         """Test case for exception handling when SkillService fails"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_skill_service.side_effect = Exception("Service unavailable")
 
             with patch('backend.agents.create_agent_info.logger') as mock_logger:
@@ -676,8 +705,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_with_version_no(self):
         """Test case with specific version number"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [
                 {"name": "v2_skill", "description": "version 2 skill"}
@@ -1081,6 +1110,30 @@ class TestCreateToolConfigList:
                 source="local",
                 usage=None
             )
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_ignores_legacy_system_managed_bindings(self):
+        """Legacy S3 bindings are replaced by the run-scoped built-in tools."""
+        with patch(
+            "backend.agents.create_agent_info.discover_langchain_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[
+                {"tool_id": 1, "class_name": "DownloadFromS3Tool", "name": "download_from_s3"},
+                {"tool_id": 2, "class_name": "UploadToS3Tool", "name": "upload_to_s3"},
+            ],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={"name": "legacy-agent"},
+        ), patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+        assert result == []
+        mock_tool_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool(self):
@@ -2714,7 +2767,7 @@ class TestCreateAgentConfig:
         """
         services_pkg = types.ModuleType("services")
         services_pkg.__path__ = []
-        skill_service_mod = types.ModuleType("services.skill_service")
+        skill_service_mod = types.ModuleType("management.services.skill.service")
         skill_service_mod.SkillService = MagicMock(
             return_value=MagicMock(get_enabled_skills_for_agent=MagicMock(return_value=[]))
         )
@@ -2749,7 +2802,7 @@ class TestCreateAgentConfig:
             ) as mock_logger,
             patch.dict(sys.modules, {
                 'services': services_pkg,
-                'services.skill_service': skill_service_mod,
+                'management.services.skill.service': skill_service_mod,
                 'services.memory_record_service': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),

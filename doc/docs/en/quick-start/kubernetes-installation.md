@@ -10,7 +10,7 @@
 | **Architecture** | x86_64 / ARM64 | x86_64 |
 | **Software** | Kubernetes 1.24+, Helm 3+, kubectl configured | Kubernetes 1.28+ |
 
-> **💡 Note**: The recommended configuration of **8 cores and 64 GiB RAM** provides optimal performance for production workloads.
+> **💡 Note**: The recommended configuration is suitable for a complete deployment. Actual resource requirements also depend on the replica count, knowledge-base size, and number of concurrent agents. Set requests and limits in production according to load-test results.
 
 ## 🚀 Quick Start
 
@@ -43,6 +43,16 @@ Run the deployment script:
 bash deploy.sh k8s
 ```
 
+The default flow uses two independent Helm releases. It installs `nexent-infrastructure` (Elasticsearch, PostgreSQL, Redis, and MinIO), waits for all four services, initializes the Elasticsearch API key, and only then installs the application-side `nexent` release for the first time. Application Pods therefore do not roll a second time to receive the key. Use `--release-scope all|infrastructure|nexent` for the complete flow or either release independently:
+
+```bash
+bash deploy.sh k8s --release-scope all
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
+```
+
+The `nexent` scope requires an existing, healthy infrastructure release. Infrastructure-only uninstall is rejected while the Nexent release exists. If a legacy single `nexent` release still owns infrastructure resources, deployment stops because automatic migration is not supported; this version supports fresh dual-release installations only.
+
 After running the command, the script opens Bash TUI menus for configuration. Use arrow keys or `j/k` to move, Space to toggle multi-select items, Enter to confirm, `b`/Backspace to go back, and `q` to quit.
 
 **Deployment Components:**
@@ -52,6 +62,8 @@ After running the command, the script opens Bash TUI menus for configuration. Us
 - **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
+
+The `application` component also prepares the agent sandbox image configuration. The Runtime service uses a shared workspace to process uploaded and generated files, and synchronizes artifacts that must be retained to MinIO.
 
 **Port Policy:**
 - **development (default)**: uses NodePort for Web and selected debug/internal services
@@ -103,7 +115,7 @@ When the target cluster cannot access public image registries, download a prebui
 Extract the offline deployment package:
 
 ```bash
-unzip nexent-v2.2.1-amd64.zip -d nexent
+unzip nexent-<version>-amd64.zip -d nexent
 cd nexent
 ```
 
@@ -160,10 +172,10 @@ Nexent uses a microservices architecture deployed via Helm charts:
 **Application Services:**
 | Service | Description | Default Port |
 |---------|-------------|--------------|
-| nexent-config | Configuration service | 5010 |
-| nexent-runtime | Runtime service | 5010 |
-| nexent-mcp | MCP container service | 5010 |
-| nexent-northbound | Northbound API service | 5010 |
+| nexent-config | Configuration and management API | 5010 |
+| nexent-runtime | Agent runtime API | 5014 |
+| nexent-mcp | MCP management and tool service | 5011 |
+| nexent-northbound | Northbound API service | 5013 |
 | nexent-web | Web frontend | 3000 |
 | nexent-data-process | Data processing service | 5012 |
 
@@ -172,7 +184,7 @@ Nexent uses a microservices architecture deployed via Helm charts:
 |---------|-------------|
 | nexent-elasticsearch | Search and indexing engine |
 | nexent-postgresql | Relational database |
-| nexent-redis | Caching layer |
+| nexent-redis | Cache, distributed locks, and task message broker |
 | nexent-minio | S3-compatible object storage |
 
 **Supabase Services (when `supabase` is selected):**
@@ -187,6 +199,8 @@ Nexent uses a microservices architecture deployed via Helm charts:
 |---------|-------------|
 | nexent-openssh-server | SSH terminal for AI agents |
 | nexent-monitoring | Optional observability stack |
+
+Sandboxes are not persistent business Pods. The Runtime service creates isolated execution environments according to the deployment configuration to run model-generated code and Skill scripts.
 
 ## 🔌 Port Mapping
 
@@ -212,6 +226,8 @@ Nexent uses PersistentVolumes for data persistence:
 | Shared workspace | nexent-workspace-pv | `/var/lib/nexent` |
 | Shared skills | nexent-skills-pv | `/var/lib/nexent-data/skills` |
 
+By default, `nexent-workspace` requests 10 GiB of `ReadWriteMany` storage and transfers the inputs and outputs of each run between application services. When using a custom StorageClass, make sure it supports the configured access mode. In multi-replica deployments, all related Pods must be able to access the same workspace.
+
 Helm uninstall does not delete local hostPath data by default. Use `bash deploy/k8s/uninstall.sh --delete-local-data true` or `bash uninstall.sh k8s --delete-local-data true` to delete known Nexent local volume contents under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`; use `--keep-local-data` to preserve them explicitly.
 
 ### Uninstall Kubernetes Deployment
@@ -219,8 +235,14 @@ Helm uninstall does not delete local hostPath data by default. Use `bash deploy/
 Use the root uninstall entrypoint from the repository root:
 
 ```bash
-# Remove Helm release; prompts before deleting namespace or local data in interactive shells
+# Remove nexent first, then nexent-infrastructure
 bash uninstall.sh k8s
+
+# Remove only the application release
+bash uninstall.sh k8s --release-scope nexent --keep-namespace
+
+# Remove only infrastructure (the application release must already be absent)
+bash uninstall.sh k8s --release-scope infrastructure --keep-namespace
 
 # Clean only Helm release state, useful for stuck releases
 bash uninstall.sh k8s clean
@@ -242,6 +264,10 @@ bash uninstall.sh k8s delete-all
 ```bash
 # Deploy with interactive prompts
 bash deploy.sh k8s
+
+# Upgrade only infrastructure or only the application release
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
 
 # Non-interactive deployment with the default component set
 bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general

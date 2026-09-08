@@ -125,7 +125,7 @@ consts_pkg.const = consts_const
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_const
 
-vdb_service = types.ModuleType("services.vectordatabase_service")
+vdb_service = types.ModuleType("management.services.knowledge_base.service")
 
 
 def _fake_get_vector_db_core(db_type=None, tenant_id=None):
@@ -137,7 +137,7 @@ vdb_service.get_vector_db_core = _fake_get_vector_db_core
 services_pkg = types.ModuleType("services")
 services_pkg.vectordatabase_service = vdb_service
 sys.modules["services"] = services_pkg
-sys.modules["services.vectordatabase_service"] = vdb_service
+sys.modules["management.services.knowledge_base.service"] = vdb_service
 
 
 from backend.services import memory_index_service  # noqa: E402

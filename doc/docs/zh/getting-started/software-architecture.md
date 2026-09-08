@@ -1,6 +1,6 @@
 # 软件架构
 
-Nexent 采用现代化的分布式微服务架构，旨在提供高性能、可扩展的 AI 智能体平台。整个系统基于容器化部署，支持云原生和企业级应用场景。
+Nexent 将 Web、配置管理、智能体运行、MCP、北向接口和数据处理拆分为独立服务。各服务通过明确的 API 协作，并使用 PostgreSQL、Elasticsearch、Redis 和 MinIO 保存不同类型的数据。项目同时提供 Docker Compose 和 Kubernetes 部署方案。
 
 ![软件架构图](../../assets/architecture_zh.png)
 
@@ -10,19 +10,19 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 
 ### 🌐 前端层（Frontend Layer）
 - **技术栈**：Next.js + React + TypeScript
-- **功能**：用户界面、智能体交互、多模态输入处理
-- **特性**：响应式设计、WebSocket 实时通信、国际化（i18n）支持
+- **功能**：智能体生成与配置、问答交互、资源管理和多模态文件上传
+- **特性**：响应式设计、SSE 流式结果、WebSocket 语音通信和国际化（i18n）
 
 ### 🔌 API 网关层（API Gateway Layer）
-基于 FastAPI 构建的分布式 API 服务：
+后端由多个基于 FastAPI 的 API 服务组成：
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| **nexent-config** | 5010 | 主 API 服务 - 智能体 CRUD、配置管理 |
-| **nexent-runtime** | 5014 | 运行时服务 - 智能体执行、流式响应 |
-| **nexent-mcp** | 5011/5015 | MCP 服务 - 工具协议管理、FastMCP 服务器 |
-| **nexent-northbound** | 5013 | 外部 API 服务 - A2A 协议、合作伙伴集成 |
-| **nexent-data-process** | 5012 | 数据处理服务 - 文档解析、向量化 |
+| **nexent-config** | 5010 | 配置 API：智能体、会话、模型、知识库、记忆、权限和资源管理 |
+| **nexent-runtime** | 5014 | 运行时 API：智能体执行、沙箱协调和流式响应 |
+| **nexent-mcp** | 5011/5015 | MCP API 与 FastMCP 服务：MCP 配置、工具发现和容器管理 |
+| **nexent-northbound** | 5013 | 北向 API：外部调用、会话管理和 A2A 接口 |
+| **nexent-data-process** | 5012 | 数据处理 API：文档解析、分块、向量化和索引 |
 
 ### 🧠 业务逻辑层（Business Logic Layer）
 后端采用清晰的分层架构：
@@ -32,6 +32,7 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 - **核心模块**：
   - `agent_app.py` - 智能体 CRUD、版本管理、流式执行
   - `conversation_management_app.py` - 多轮对话、历史追踪
+  - `api_key_app.py` / `quota_app.py` - API Key 与容量管理
   - `model_managment_app.py` - 模型配置、健康检查
   - `skill_app.py` - 技能创建与管理
   - `knowledge_summary_app.py` - 知识库操作
@@ -41,12 +42,14 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 #### Service 层（`backend/services/`）
 - **职责**：核心业务逻辑编排，协调仓库/SDK
 - **核心模块**：
-  - `agent_service.py` - 智能体生命周期、执行编排、记忆管理
+  - `agent_service.py` - 智能体生命周期、配置与运行请求编排
+  - `runtime_proxy_service.py` - 将问答和调试请求转发到 Runtime
   - `agent_version_service.py` - 版本发布、回滚、对比
-  - `model_management_service.py` - 多模型支持、负载均衡
+  - `model_management_service.py` / `model_gateway_service.py` - 模型管理与统一适配
   - `memory_config_service.py` - 记忆配置、上下文构建
   - `conversation_management_service.py` - 会话管理、历史持久化
   - `skill_service.py` - 技能生成、模板处理
+  - `nl2agent_service.py` - 自然语言生成智能体的会话与草稿管理
   - `data_process_service.py` - 文档处理管道
   - `mcp_container_service.py` - MCP 容器生命周期管理
   - `remote_mcp_service.py` - 远程 MCP 服务器集成
@@ -56,8 +59,8 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 #### 智能体核心层（`backend/agents/`）
 - **职责**：基于 SmolAgents 的智能体执行框架
 - **核心组件**：
-  - `agent_run_manager.py` - 智能体运行生命周期、流式协调
-  - `create_agent_info.py` - 智能体配置构建、工具集成
+  - `agent_run_manager.py` - 智能体运行生命周期、工作区与流式协调
+  - `create_agent_info.py` - 智能体配置、工具和沙箱环境构建
   - `preprocess_manager.py` - 文档预处理编排
   - `skill_creation_agent.py` - LLM 驱动的技能生成
 
@@ -94,8 +97,10 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 - **MinIO**（端口 9010/9011）：分布式对象存储
   - 文件上传和附件（`attachment_db.py`）
   - 知识库文档存储
-  - 预览生成和临时文件
+  - 预览文件和沙箱生成产物
 - **特性**：S3 兼容 API、大文件处理
+
+智能体运行时还使用独立工作区保存本次运行的输入与输出。Docker 部署通过 `nexent-agent-workspace` 卷共享工作区；Kubernetes 部署使用 `nexent-workspace` PVC。运行结束后，需保留的产物会同步到 MinIO，临时工作目录由后端清理。
 
 ## 🔧 核心服务架构
 
@@ -103,15 +108,20 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 ```
 智能体框架（基于 SmolAgents）：
 ├── 智能体创建与配置
-│   ├── 名称/显示名生成（LLM 驱动）
-│   ├── 工具集成与选择
+│   ├── NL2Agent 需求澄清与配置生成
+│   ├── 工具与 Skill 推荐、安装和绑定
 │   ├── 子智能体关系管理
 │   └── 版本控制与发布
 ├── 智能体执行引擎
 │   ├── 流式响应（SSE）
 │   ├── 工具调用与编排
-│   ├── 多模型支持（LLM + 业务逻辑）
+│   ├── 多模型与多模态输入
 │   └── 记忆上下文构建
+├── 隔离执行与文件处理
+│   ├── Docker 或其他级别的代码沙箱
+│   ├── session / system 生命周期范围
+│   ├── Skill 脚本隔离执行
+│   └── 运行工作区与 MinIO 产物同步
 ├── 版本管理
 │   ├── 发布与回滚
 │   ├── 版本对比
@@ -191,7 +201,7 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 ├── nexent-config (5010)
 │   └── 智能体 CRUD、配置、用户管理
 ├── nexent-runtime (5014)
-│   └── 智能体执行、流式响应
+│   └── 智能体执行、沙箱协调、文件产物和流式响应
 ├── nexent-mcp (5011/5015)
 │   └── MCP 工具协议、容器管理
 ├── nexent-northbound (5013)
@@ -200,6 +210,8 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 │   └── 文档处理、向量化、Celery 工作者
 ├── nexent-web (3000)
 │   └── 前端 Next.js 应用
+├── nexent-sandbox（按运行策略创建）
+│   └── 隔离执行模型生成的代码和 Skill 脚本
 └── 可选服务
     ├── nexent-redis (6379) - 缓存和消息代理
     ├── nexent-elasticsearch (9210) - 向量搜索
@@ -211,26 +223,27 @@ Nexent 的软件架构遵循分层设计原则，从上到下分为以下几个�
 ```
 Docker Compose 编排：
 ├── 应用服务容器化
+├── 沙箱镜像与独立工作区卷
 ├── 数据库服务隔离
 ├── 网络层安全配置（bridge 网络）
 ├── 卷挂载数据持久化
 ├── 健康检查与自动重启
-└── Kubernetes 支持（IS_DEPLOYED_BY_KUBERNETES）
+└── 对应的 Kubernetes Helm 部署方案
 ```
 
 ## 🔐 安全与扩展性
 
 ### 🛡️ 安全架构
-- **身份验证**：多租户支持、用户权限管理
-- **授权**：基于角色的访问控制（RBAC）、群组权限
-- **数据安全**：租户数据隔离、安全传输（HTTPS）
-- **网络安全**：服务间安全通信、Docker 网络隔离
+- **身份验证**：支持本地账号、OAuth、CAS 和北向 API Key
+- **授权**：基于角色的访问控制（RBAC）和用户组权限
+- **数据安全**：租户数据隔离，敏感配置由服务端管理
+- **运行隔离**：部署环境默认使用 Docker 沙箱，并限制网络、Shell、CPU、内存和单步执行时间
 
 ### 📈 可扩展性设计
-- **水平扩展**：微服务独立扩展、负载均衡
-- **垂直扩展**：资源池管理、智能调度
-- **存储扩展**：分布式存储（MinIO）、数据分片（Elasticsearch）
-- **缓存扩展**：Redis 集群用于会话和数据缓存
+- **服务扩展**：配置、运行、北向接口和数据处理服务可独立部署
+- **资源控制**：沙箱和数据处理服务可分别设置计算资源
+- **存储扩展**：MinIO 保存对象，Elasticsearch 保存检索索引
+- **缓存与任务**：Redis 用于缓存、锁和 Celery 消息代理
 
 ### 🔧 模块化架构
 - **松耦合设计**：服务间低依赖、接口标准化
@@ -238,21 +251,22 @@ Docker Compose 编排：
 - **配置管理**：环境隔离、动态配置更新
 - **单一数据源**：环境变量集中管理于 `backend/consts/const.py`
 
-## 🔄 数据流架构
+## 🔄 系统数据流
 
 ### 📥 用户请求流
 ```
-用户输入 → 前端验证 → API 网关（nexent-config）
-    → 路由分发 → 业务服务（Service 层）
+用户输入 → Web 前端 → nexent-config 或 nexent-northbound
+    → App 层校验 → Service 层编排
     → 数据访问（Database 层）→ PostgreSQL/Elasticsearch/Redis/MinIO
 ```
 
 ### 🤖 智能体执行流
 ```
-用户消息 → nexent-runtime → Agent Service
-    → 记忆上下文构建 → 工具解析
-    → 模型推理（流式）→ SSE 响应
-    → 对话保存 → 历史存储
+用户消息 → nexent-config / nexent-northbound
+    → Runtime Proxy → nexent-runtime
+    → 记忆与 Metadata 上下文构建 → 工具和沙箱执行
+    → 模型推理 → SSE 流式响应
+    → 文件产物同步 → 对话最终持久化
 ```
 
 ### 📚 知识库处理流
@@ -271,9 +285,9 @@ Docker Compose 编排：
 ## 🎯 架构优势
 
 ### 🏢 企业级特性
-- **高可用性**：多服务冗余、健康检查、自动重启
+- **可部署性**：服务拆分、健康检查和自动重启
 - **高性能**：异步处理、Redis 缓存、向量搜索优化
-- **高并发**：分布式架构、负载均衡
+- **并发处理**：异步接口、任务队列和独立 Runtime
 - **监控友好**：OpenTelemetry 可观测性、Grafana Tempo 追踪、结构化日志
 
 ### 🔧 开发友好
@@ -291,4 +305,4 @@ Docker Compose 编排：
 
 ---
 
-这种架构设计确保了 Nexent 能够在保持高性能的同时，为用户提供稳定、可扩展的 AI 智能体服务平台。无论是个人用户还是企业级部署，都能够获得优秀的使用体验和技术保障。
+这套架构将配置管理、智能体执行和数据处理分开，使不同部署场景能够按需选择组件，并为工具扩展、运行隔离和外部系统集成提供清晰边界。
