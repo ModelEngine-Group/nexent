@@ -252,8 +252,11 @@ def start_worker():
 
     logger.info("Start Celery worker '%s' queues=%s", worker_name, queues)
     logger.info("Worker concurrency=%s parser_worker=%s", WORKER_CONCURRENCY, parser_worker)
-    logger.debug("Broker URL: %s", app.conf.broker_url)
-    logger.debug("Backend URL: %s", app.conf.result_backend)
+    # Keep startup diagnostics optional so lightweight test doubles and custom
+    # Celery app wrappers do not need to expose the full ``conf`` object.
+    app_conf = getattr(app, "conf", None)
+    logger.debug("Broker URL: %s", getattr(app_conf, "broker_url", None))
+    logger.debug("Backend URL: %s", getattr(app_conf, "result_backend", None))
     logger.debug("Task time limit: %ss", CELERY_TASK_TIME_LIMIT)
     logger.debug("Worker prefetch multiplier: %s", CELERY_WORKER_PREFETCH_MULTIPLIER)
 
