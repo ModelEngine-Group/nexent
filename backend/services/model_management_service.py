@@ -1,5 +1,6 @@
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 from consts.const import (
@@ -19,14 +20,32 @@ from consts.provider import (
 )
 
 from database.model_management_db import (
+    apply_model_mutations,
     create_model_record,
     delete_model_record,
     get_model_by_name_factory,
+    get_model_by_model_id,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record
 )
+from consts.exceptions import ModelCapacityConfigError
+from services.model_capacity_validation_service import (
+    audit_capacity_records,
+    validate_capacity_contract,
+)
+from services.model_capacity_governance_service import (
+    GOVERNED_FIELDS,
+    apply_catalog_adoption,
+    catalog_adoption_preview,
+    derive_legacy_metadata,
+    merge_capacity_governance,
+    normalize_legacy_capacity_ingress,
+)
+from services.model_token_count_probe_service import run_token_count_probe
+from nexent.core.models.model_identity import MATCHER_VERSION
+from nexent.core.models.feature_capability import normalize_feature_profile
 from services.model_provider_service import (
     prepare_model_dict,
     merge_existing_model_attributes,
@@ -34,6 +53,12 @@ from services.model_provider_service import (
 )
 from services.model_health_service import embedding_dimension_check, _infer_model_factory
 from services.model_capacity_suggestion_service import CapacitySuggestionMatchKind, suggest_capacity
+from services.model_profile_match_service import (
+    resolve_model_profiles,
+    serialize_profile_match,
+)
+from services.model_capacity_health_service import classify_capacity_health
+from consts.capability_profiles import CATALOG, CATALOG_REVISION
 from utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
@@ -44,6 +69,17 @@ logger = logging.getLogger("model_management_service")
 
 INDEPENDENT_MULTIMODAL_MODEL_TYPES = {"vlm", "vlm2", "vlm3", "vlm4"}
 CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
+
+
+def get_capacity_audit(tenant_id: str) -> Dict[str, Any]:
+    """Return a sanitized, read-only capacity audit for one tenant."""
+    records = get_model_records(None, tenant_id)
+    scoped = [
+        record
+        for record in records
+        if record.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES
+    ]
+    return audit_capacity_records(scoped)
 
 
 # OpenTelemetry counter for silent catalog-matcher failures during the
@@ -172,27 +208,100 @@ def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type
     return True
 
 
-def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
-    """Keep the deprecated `max_tokens` column in lockstep with `max_output_tokens`.
+def _apply_capacity_governance(
+    model_data: Dict[str, Any],
+    *,
+    explicit_fields: set[str],
+    existing: Optional[Dict[str, Any]] = None,
+    accepted_profile_version: Optional[str] = None,
+    provider_fields: Optional[set[str]] = None,
+) -> Dict[str, Any]:
+    """Apply P1 one-way legacy normalization and field-level provenance."""
+    normalized, explicit, used_legacy = normalize_legacy_capacity_ingress(
+        model_data,
+        explicit_fields=explicit_fields,
+    )
+    governed_explicit = set(GOVERNED_FIELDS).intersection(explicit)
+    # Unrelated edits must be provenance-neutral. Legacy rows are materialized
+    # only on their first authorized capacity write, not when a name,
+    # description, credential, or connectivity setting changes.
+    if not governed_explicit and not accepted_profile_version:
+        return normalized
+    accepted_fields = (
+        governed_explicit
+        if accepted_profile_version
+        else set()
+    )
+    result = merge_capacity_governance(
+        normalized,
+        explicit_fields=explicit,
+        existing=existing,
+        accepted_profile_version=accepted_profile_version,
+        accepted_profile_fields=accepted_fields,
+        provider_fields=provider_fields or (),
+        legacy_ingress_used=used_legacy,
+    )
+    if result.audit_delta:
+        logger.info(
+            "capacity_governance_merge fields=%s sources=%s",
+            ",".join(item["field"] for item in result.audit_delta),
+            ",".join(item["new_source"] for item in result.audit_delta),
+        )
+    output = dict(normalized)
+    for field in governed_explicit:
+        output[field] = result.values.get(field)
+    output["capacity_field_metadata"] = result.metadata
+    output["capacity_source"] = result.row_capacity_source
+    output["capability_profile_version"] = result.capability_profile_version
+    return output
 
-    W1 step 7 deprecates `max_tokens` as the LLM/VLM output-cap alias of
-    `max_output_tokens`. Legacy clients that still write `max_tokens`
-    independently let the two columns diverge in the DB; that divergence
-    later surfaces at the W2 dispatch boundary as
-    `CallerMaxTokensOverrideForbidden` because the SDK auto-fills
-    `max_tokens` from the model record while the W2 snapshot computes its
-    output cap from `max_output_tokens`.
 
-    Defense in depth at the service layer: when a caller sends a non-None
-    `max_output_tokens`, force `max_tokens` to mirror it. Embedding rows are
-    exempt because they repurpose `max_tokens` as the vector dimension.
-    """
-    max_output = model_data.get("max_output_tokens")
-    if max_output is None:
-        return
-    if model_data.get("model_type") in ("embedding", "multi_embedding"):
-        return
-    model_data["max_tokens"] = max_output
+def _apply_model_profile_resolution(
+    model_data: Dict[str, Any],
+    *,
+    explicit_fields: set[str],
+    full_model_name: str,
+    accepted_profile_version: Optional[str],
+) -> tuple[Dict[str, Any], set[str], Optional[str]]:
+    """Persist independent match evidence and apply verified auto facts."""
+    output = dict(model_data)
+    capacity_mode = output.pop("capacity_mode", None)
+    explicit = set(explicit_fields)
+    explicit.discard("capacity_mode")
+    resolution = resolve_model_profiles(
+        model_name=full_model_name,
+        provider=output.get("model_factory"),
+        base_url=output.get("base_url"),
+        model_type=output.get("model_type"),
+    )
+    output["canonical_model_id"] = resolution.canonical_model_id
+    output["model_identity_metadata"] = dict(resolution.identity_metadata)
+    output["tokenizer_match_metadata"] = serialize_profile_match(
+        resolution.tokenizer_match
+    )
+
+    selected_version = resolution.capacity_match.selected_profile
+    if accepted_profile_version:
+        if accepted_profile_version != selected_version:
+            raise ModelCapacityConfigError(
+                "capacity_profile_stale",
+                "accepted capability profile no longer matches this model",
+                field="accepted_capability_profile_version",
+            )
+        if not resolution.capacity_match.auto_applicable:
+            raise ModelCapacityConfigError(
+                "capacity_profile_unverified",
+                "accepted capability profile is not evidence-complete for automatic use",
+                field="accepted_capability_profile_version",
+            )
+
+    if capacity_mode == "auto" and resolution.capacity_match.auto_applicable:
+        for field, value in resolution.capacity_suggestions.items():
+            if field in GOVERNED_FIELDS and value is not None and output.get(field) is None:
+                output[field] = value
+                explicit.add(field)
+        accepted_profile_version = selected_version
+    return output, explicit, accepted_profile_version
 
 
 def _is_bare_capacity_model(model: Dict[str, Any]) -> bool:
@@ -270,12 +379,52 @@ def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
     }
 
 
-async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
+def get_capacity_health(tenant_id: str) -> Dict[str, Any]:
+    """Return deterministic P3 health for every tenant LLM/VLM."""
+    profiles = {item.capability_profile_version: item for item in CATALOG.values()}
+    items: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    for record in get_model_records(None, tenant_id):
+        if record.get("model_type") not in CAPACITY_COVERAGE_MODEL_TYPES:
+            continue
+        resolution = _resolution_for_record(record)
+        match = serialize_profile_match(resolution.capacity_match)
+        profile = profiles.get(record.get("capability_profile_version")) or profiles.get(
+            resolution.capacity_match.selected_profile
+        )
+        health = classify_capacity_health(
+            record, match=match, profile_verified_at=getattr(profile, "verified_at", None)
+        )
+        item = {
+            "model_id": record.get("model_id"), "display_name": record.get("display_name"),
+            "model_name": add_repo_to_name(record.get("model_repo", ""), record.get("model_name", "")),
+            "model_factory": record.get("model_factory"), "model_type": record.get("model_type"),
+            "matcher_version": MATCHER_VERSION, **health,
+        }
+        items.append(item)
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+    return {
+        "catalog_revision": CATALOG_REVISION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total": len(items), "counts": counts, "items": items,
+    }
+
+
+async def create_model_for_tenant(
+    user_id: str,
+    tenant_id: str,
+    model_data: Dict[str, Any],
+    *,
+    explicit_fields: Optional[set[str]] = None,
+    accepted_profile_version: Optional[str] = None,
+):
     """Create a single model record for the given tenant.
 
     Raises ValueError on display name conflict or invalid input.
     """
     try:
+        explicit = set(explicit_fields or model_data.keys())
+        full_model_name = model_data.get("model_name", "")
         # Replace localhost with host.docker.internal for local llm
         model_base_url = model_data.get("base_url", "")
         if LOCALHOST_NAME in model_base_url or LOCALHOST_IP in model_base_url:
@@ -314,7 +463,18 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                 model_name=model_data.get("model_name", "")
             )
 
-        _coerce_legacy_max_tokens_alias(model_data)
+        model_data, explicit, accepted_profile_version = _apply_model_profile_resolution(
+            model_data,
+            explicit_fields=explicit,
+            full_model_name=full_model_name,
+            accepted_profile_version=accepted_profile_version,
+        )
+        model_data = _apply_capacity_governance(
+            model_data,
+            explicit_fields=explicit,
+            accepted_profile_version=accepted_profile_version,
+        )
+        validate_capacity_contract(model_data)
 
         # Use NOT_DETECTED status as default
         model_data["connect_status"] = model_data.get(
@@ -378,6 +538,8 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             create_model_record(model_data, user_id, tenant_id)
             logging.debug(
                 f"Model {model_data['display_name']} created successfully")
+    except ModelCapacityConfigError:
+        raise
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise Exception(f"Failed to create model: {str(e)}")
@@ -439,72 +601,90 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             for model in existing_model_list
         }
 
-        # Delete existing models not present.
-        # The membership key MUST match how existing_model_map (a few lines
-        # above) and the create-or-update branch (a few lines below) build
-        # their lookup key, otherwise the two halves disagree about what
-        # "the same model" means. Both of those use add_repo_to_name, which
-        # omits the slash when model_repo is empty. The naive
-        # `model_repo + "/" + model_name` here always prepends "/" for the
-        # empty-repo case (DashScope catalogs return bare names like
-        # "glm-4.7" and rows land with model_repo=""), so "/glm-4.7" never
-        # matched the catalog's "glm-4.7" entry -- every existing row was
-        # treated as "not in the incoming list" and silently soft-deleted on
-        # every batch_create. Use the same helper to keep both halves
-        # speaking the same language.
-        for model in existing_model_list:
-            model_full_name = add_repo_to_name(
-                model_repo=model["model_repo"],
-                model_name=model["model_name"],
-            )
-            if model_full_name not in model_list_ids:
-                delete_model_record(model["model_id"], user_id, tenant_id)
-
-        # Create or update new models
+        # Validate the full incoming synchronization set before the first
+        # delete or write, so an invalid row cannot leave a partially-mutated
+        # provider catalog.
         for model in model_list:
+            candidate = dict(model)
+            candidate["model_type"] = model_type
+            candidate_repo, candidate_name_only = split_repo_name(
+                candidate.get("id", "")
+            )
+            existing = existing_model_map.get(
+                add_repo_to_name(candidate_repo, candidate_name_only)
+            )
+            validate_capacity_contract(candidate, existing=existing)
+
+        deletes = [
+            model["model_id"]
+            for model in existing_model_list
+            if add_repo_to_name(model["model_repo"], model["model_name"])
+            not in model_list_ids
+        ]
+        creates: list[Dict[str, Any]] = []
+        updates: list[tuple[int, Dict[str, Any]]] = []
+
+        # Prepare and validate every mutation before opening the transaction.
+        for incoming in model_list:
+            model = dict(incoming)
             model["model_type"] = model_type
-            _, model_name = split_repo_name(
-                model["id"]) if model.get("id") else ("", "")
-            model_repo, model_name_only = split_repo_name(
-                model.get("id", "")) if model.get("id") else ("", "")
+            model_repo, model_name_only = split_repo_name(model.get("id", ""))
             model_display_name = add_repo_to_name(model_repo, model_name_only)
-            if model_name:
-                existing_model = existing_model_map.get(model_display_name)
-                if existing_model:
-                    update_data = {}
-                    # Check if max_tokens has changed
-                    existing_max_tokens = existing_model.get("max_tokens")
+            existing_model = existing_model_map.get(model_display_name)
+            accepted_version = model.pop("_accepted_profile_version", None)
+
+            if existing_model:
+                update_data: Dict[str, Any] = {}
+                feature_capability_metadata = normalize_feature_profile(
+                    model.get("feature_capability_metadata")
+                )
+                if (
+                    feature_capability_metadata is not None
+                    and existing_model.get("feature_capability_metadata")
+                    != feature_capability_metadata
+                ):
+                    update_data["feature_capability_metadata"] = (
+                        feature_capability_metadata
+                    )
+                if model_type not in CAPACITY_COVERAGE_MODEL_TYPES:
                     new_max_tokens = model.get("max_tokens")
-                    if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
+                    if new_max_tokens is not None and existing_model.get("max_tokens") != new_max_tokens:
                         update_data["max_tokens"] = new_max_tokens
-                    # Same gap as prepare_model_dict had for the create branch:
-                    # the batch refresh path only touched legacy max_tokens, so
-                    # editing a row's capacity via batch-add (e.g. tweaking the
-                    # top-level batch defaults and re-confirming) silently
-                    # dropped the W1/W2 capacity updates. We mirror the
-                    # operator-vs-candidate rule from prepare_model_dict here:
-                    # only persist W1/W2 capacity when the payload is marked
-                    # capacity_source="operator", so provider-discovered hints
-                    # don't auto-overwrite an existing row on a refresh.
-                    if model.get("capacity_source") == "operator":
-                        for field in (
-                            "context_window_tokens",
-                            "max_input_tokens",
-                            "max_output_tokens",
-                            "default_output_reserve_tokens",
-                            "tokenizer_family",
-                            "capability_profile_version",
-                        ):
-                            new_value = model.get(field)
-                            if new_value is None:
-                                continue
-                            if existing_model.get(field) != new_value:
-                                update_data[field] = new_value
-                        if existing_model.get("capacity_source") != "operator":
-                            update_data["capacity_source"] = "operator"
-                    if update_data:
-                        update_model_record(existing_model["model_id"], update_data, user_id)
-                    continue
+                if (
+                    model.get("capacity_source") == "operator"
+                    or model.get("capacity_source") == "provider_candidate"
+                    or accepted_version
+                    or (model_type in CAPACITY_COVERAGE_MODEL_TYPES and "max_tokens" in model)
+                ):
+                    governed = {
+                        key: value
+                        for key, value in model.items()
+                        if key in GOVERNED_FIELDS
+                        or key in {"model_type", "max_tokens", "capacity_source"}
+                    }
+                    explicit = set(governed)
+                    governed = _apply_capacity_governance(
+                        governed,
+                        explicit_fields=explicit,
+                        existing=existing_model,
+                        accepted_profile_version=accepted_version,
+                        provider_fields=(
+                            set(GOVERNED_FIELDS).intersection(explicit)
+                            if model.get("capacity_source") == "provider_candidate"
+                            else None
+                        ),
+                    )
+                    update_data.update(
+                        {
+                            key: value
+                            for key, value in governed.items()
+                            if key != "model_type"
+                        }
+                    )
+                if update_data:
+                    validate_capacity_contract(update_data, existing=existing_model)
+                    updates.append((existing_model["model_id"], update_data))
+                continue
 
             model_dict = await prepare_model_dict(
                 provider=provider,
@@ -512,8 +692,35 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                 model_url=model_url,
                 model_api_key=model_api_key,
             )
-            create_model_record(model_dict, user_id, tenant_id)
-            logging.debug(f"Model {model['id']} created successfully")
+            explicit = set(model)
+            model_dict, explicit, accepted_version = _apply_model_profile_resolution(
+                model_dict,
+                explicit_fields=explicit,
+                full_model_name=model.get("id", ""),
+                accepted_profile_version=accepted_version,
+            )
+            model_dict = _apply_capacity_governance(
+                model_dict,
+                explicit_fields=explicit,
+                accepted_profile_version=accepted_version,
+                provider_fields=(
+                    set(GOVERNED_FIELDS).intersection(explicit)
+                    if model.get("capacity_source") == "provider_candidate"
+                    else None
+                ),
+            )
+            validate_capacity_contract(model_dict)
+            creates.append(model_dict)
+
+        apply_model_mutations(
+            creates=creates,
+            updates=updates,
+            deletes=deletes,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+    except ModelCapacityConfigError:
+        raise
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise Exception(f"Failed to batch create models: {str(e)}")
@@ -538,11 +745,165 @@ async def list_provider_models_for_tenant(tenant_id: str, provider: str, model_t
         raise Exception(f"Failed to list provider models: {str(e)}")
 
 
+def _single_capacity_model(display_name: str, tenant_id: str) -> Dict[str, Any]:
+    records = get_models_by_display_name(display_name, tenant_id)
+    candidates = [
+        record for record in records if record.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES
+    ]
+    if len(candidates) != 1:
+        raise LookupError(f"Capacity model not found: {display_name}")
+    return candidates[0]
+
+
+def _resolution_for_record(record: Dict[str, Any]):
+    return resolve_model_profiles(
+        model_name=add_repo_to_name(
+            record.get("model_repo", ""), record.get("model_name", "")
+        ),
+        provider=record.get("model_factory"),
+        base_url=record.get("base_url"),
+        model_type=record.get("model_type"),
+    )
+
+
+async def preview_capacity_adoption_for_tenant(
+    tenant_id: str,
+    display_name: str,
+    *,
+    expected_matcher_version: Optional[str] = None,
+) -> Dict[str, Any]:
+    record = _single_capacity_model(display_name, tenant_id)
+    resolution = _resolution_for_record(record)
+    if expected_matcher_version and expected_matcher_version != MATCHER_VERSION:
+        raise ModelCapacityConfigError(
+            "capacity_matcher_stale", "model matcher changed since request"
+        )
+    if not resolution.capacity_match.auto_applicable or not resolution.capacity_match.selected_profile:
+        raise ModelCapacityConfigError(
+            "capacity_profile_unverified",
+            "no unique evidence-complete capacity profile is available",
+        )
+    preview = catalog_adoption_preview(
+        record,
+        resolution.capacity_suggestions,
+        proposed_profile_version=resolution.capacity_match.selected_profile,
+    )
+    preview.update(
+        {
+            "display_name": display_name,
+            "canonical_model_id": resolution.canonical_model_id,
+            "matcher_version": MATCHER_VERSION,
+            "capacity_match": serialize_profile_match(resolution.capacity_match),
+        }
+    )
+    return preview
+
+
+async def adopt_capacity_for_tenant(
+    user_id: str,
+    tenant_id: str,
+    display_name: str,
+    *,
+    expected_profile_version: str,
+    expected_matcher_version: Optional[str] = None,
+    fields: Optional[List[str]] = None,
+    reset_manual_fields: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    record = _single_capacity_model(display_name, tenant_id)
+    resolution = _resolution_for_record(record)
+    if not resolution.capacity_match.auto_applicable or not resolution.capacity_match.selected_profile:
+        raise ModelCapacityConfigError(
+            "capacity_profile_unverified",
+            "no unique evidence-complete capacity profile is available",
+        )
+    result = apply_catalog_adoption(
+        record,
+        resolution.capacity_suggestions,
+        proposed_profile_version=resolution.capacity_match.selected_profile,
+        expected_profile_version=expected_profile_version,
+        current_matcher_version=MATCHER_VERSION,
+        expected_matcher_version=expected_matcher_version,
+        fields=fields,
+        reset_manual_fields=reset_manual_fields or (),
+    )
+    validate_capacity_contract(result.values)
+    changed_fields = {item["field"] for item in result.audit_delta}
+    update_data = {field: result.values.get(field) for field in changed_fields}
+    update_data.update(
+        {
+            "capacity_field_metadata": result.metadata,
+            "capacity_source": result.row_capacity_source,
+            "capability_profile_version": result.capability_profile_version,
+            "canonical_model_id": resolution.canonical_model_id,
+            "model_identity_metadata": dict(resolution.identity_metadata),
+        }
+    )
+    update_model_record(record["model_id"], update_data, user_id)
+    logger.info(
+        "capacity_catalog_adoption model_id=%s profile_version=%s matcher_version=%s fields=%s",
+        record["model_id"],
+        result.capability_profile_version or "mixed",
+        MATCHER_VERSION,
+        ",".join(sorted(changed_fields)) or "none",
+    )
+    return {
+        "display_name": display_name,
+        "profile_version": result.capability_profile_version,
+        "matcher_version": MATCHER_VERSION,
+        "updated_fields": sorted(changed_fields),
+        "audit": list(result.audit_delta),
+    }
+
+
+async def probe_token_count_for_tenant(
+    user_id: str,
+    tenant_id: str,
+    display_name: str,
+    *,
+    force: bool = False,
+) -> Dict[str, Any]:
+    record = _single_capacity_model(display_name, tenant_id)
+    resolution = _resolution_for_record(record)
+    factory = (record.get("model_factory") or "").lower()
+    if factory == "anthropic":
+        protocol = "anthropic"
+    elif factory in {"gemini", "google"}:
+        protocol = "gemini"
+    elif factory in {
+        "openai", "openai-api-compatible", "dashscope", "silicon",
+        "siliconflow", "modelengine", "deepseek",
+    }:
+        protocol = "openai"
+    else:
+        protocol = "unknown"
+    metadata = await run_token_count_probe(
+        inference_protocol=protocol,
+        base_url=record.get("base_url") or "",
+        model_name=add_repo_to_name(
+            record.get("model_repo", ""), record.get("model_name", "")
+        ),
+        canonical_model_id=resolution.canonical_model_id,
+        api_key=record.get("api_key") or "",
+        credential_scope=f"{tenant_id}:{record['model_id']}:{user_id}",
+        fingerprint_salt=tenant_id,
+        existing=record.get("token_count_probe_metadata"),
+        force=force,
+    )
+    if metadata != record.get("token_count_probe_metadata"):
+        update_model_record(
+            record["model_id"], {"token_count_probe_metadata": metadata}, user_id
+        )
+    return metadata
+
+
 async def update_single_model_for_tenant(
     user_id: str,
     tenant_id: str,
     current_display_name: str,
-    model_data: Dict[str, Any]
+    model_data: Dict[str, Any],
+    *,
+    explicit_fields: Optional[set[str]] = None,
+    accepted_profile_version: Optional[str] = None,
 ):
     """Update model(s) by current display_name. If embedding/multi_embedding, update both types.
 
@@ -586,15 +947,45 @@ async def update_single_model_for_tenant(
             else:
                 model_data["ssl_verify"] = True
 
-        # Carry model_type from the existing record so the legacy-alias
-        # coercion can distinguish LLM/VLM updates from embedding updates
-        # even when the caller payload omits model_type. We don't store the
-        # injected model_type back on model_data because the update path
-        # explicitly strips it later.
         existing_model_type = existing_models[0].get("model_type") if existing_models else None
-        if model_data.get("max_output_tokens") is not None and \
-                existing_model_type not in ("embedding", "multi_embedding"):
-            model_data["max_tokens"] = model_data["max_output_tokens"]
+        explicit = set(explicit_fields or model_data.keys())
+        if explicit.intersection({"model_name", "model_repo", "base_url", "model_factory", "capacity_mode"}) or accepted_profile_version:
+            resolution_input = dict(existing_models[0])
+            resolution_input.update(model_data)
+            full_model_name = add_repo_to_name(
+                resolution_input.get("model_repo", ""),
+                resolution_input.get("model_name", ""),
+            )
+            model_data, explicit, accepted_profile_version = _apply_model_profile_resolution(
+                resolution_input,
+                explicit_fields=explicit,
+                full_model_name=full_model_name,
+                accepted_profile_version=accepted_profile_version,
+            )
+            # Retain only fields that are part of this partial update plus the
+            # newly evaluated match metadata and auto-applied capacity facts.
+            allowed = explicit.union(
+                {
+                    "canonical_model_id",
+                    "model_identity_metadata",
+                    "tokenizer_match_metadata",
+                    "model_type",
+                }
+            )
+            model_data = {key: value for key, value in model_data.items() if key in allowed}
+        governance_input = dict(model_data)
+        model_type_was_supplied = "model_type" in governance_input
+        governance_input.setdefault("model_type", existing_model_type)
+        model_data = _apply_capacity_governance(
+            governance_input,
+            explicit_fields=explicit,
+            existing=existing_models[0],
+            accepted_profile_version=accepted_profile_version,
+        )
+        if not model_type_was_supplied:
+            model_data.pop("model_type", None)
+
+        validate_capacity_contract(model_data, existing=existing_models[0])
 
         if has_multi_embedding:
             # Update both embedding and multi_embedding records
@@ -623,8 +1014,8 @@ async def update_single_model_for_tenant(
 async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_list: List[Dict[str, Any]]):
     """Batch update models for a tenant by model_id or model_name."""
     try:
+        prepared_updates: list[tuple[int, Dict[str, Any]]] = []
         for model in model_list:
-            _coerce_legacy_max_tokens_alias(model)
             # Build update data excluding id fields
             update_data = {k: v for k, v in model.items() if k not in ["model_id", "model_name"]}
 
@@ -632,7 +1023,13 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
 
             # Check if model_id is a numeric string (primary key)
             if model_id_or_name and model_id_or_name.isdigit():
-                update_model_record(int(model_id_or_name), update_data, user_id, tenant_id)
+                current_model = get_model_by_model_id(
+                    int(model_id_or_name), tenant_id=tenant_id
+                )
+                if current_model is None:
+                    logging.warning("Model not found: model_id=%s", model_id_or_name)
+                    continue
+                target_model_id = int(model_id_or_name)
             else:
                 # Parse "model_repo/model_name" format from frontend's model_id field
                 if "/" in model_id_or_name:
@@ -649,9 +1046,50 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
                     logging.warning(f"Model not found: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
                     continue
 
-                update_model_record(model_record["model_id"], update_data, user_id, tenant_id)
+                current_model = model_record
+                target_model_id = model_record["model_id"]
+
+            explicit = set(update_data)
+            if explicit.intersection({"base_url", "model_factory", "capacity_mode"}):
+                resolution_input = dict(current_model)
+                resolution_input.update(update_data)
+                resolved, explicit, _ = _apply_model_profile_resolution(
+                    resolution_input,
+                    explicit_fields=explicit,
+                    full_model_name=add_repo_to_name(
+                        resolution_input.get("model_repo", ""),
+                        resolution_input.get("model_name", ""),
+                    ),
+                    accepted_profile_version=None,
+                )
+                allowed = explicit.union(
+                    {"canonical_model_id", "model_identity_metadata", "tokenizer_match_metadata"}
+                )
+                update_data = {
+                    key: value for key, value in resolved.items() if key in allowed
+                }
+            governance_input = dict(update_data)
+            governance_input["model_type"] = current_model.get("model_type")
+            governed = _apply_capacity_governance(
+                governance_input,
+                explicit_fields=explicit,
+                existing=current_model,
+            )
+            governed.pop("model_type", None)
+            validate_capacity_contract(governed, existing=current_model)
+            prepared_updates.append((target_model_id, governed))
+
+        apply_model_mutations(
+            creates=[],
+            updates=prepared_updates,
+            deletes=[],
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
 
         logging.info("[DEBUG] Batch update models successfully")
+    except ModelCapacityConfigError:
+        raise
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
         raise Exception(f"Failed to batch update models: {str(e)}")
@@ -712,6 +1150,9 @@ async def list_models_for_tenant(tenant_id: str):
         }
 
         for record in records:
+            record["capacity_field_metadata"] = derive_legacy_metadata(record)
+            if record.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES:
+                record["max_tokens"] = record.get("max_output_tokens")
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
                 model_name=record["model_name"],
@@ -792,6 +1233,9 @@ async def list_models_for_admin(
         # Normalize model records
         normalized_models: List[Dict[str, Any]] = []
         for record in records:
+            record["capacity_field_metadata"] = derive_legacy_metadata(record)
+            if record.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES:
+                record["max_tokens"] = record.get("max_output_tokens")
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
                 model_name=record["model_name"],

@@ -16,22 +16,29 @@ import logging
 
 from consts.model import (
     BatchCreateModelsRequest,
+    CapacityAdoptRequest,
+    CapacityAdoptionPreviewRequest,
     CapacitySuggestionFields,
     ModelRequest,
     ModelCapacitySuggestionRequest,
     ModelCapacitySuggestionResponse,
     ProviderModelRequest,
+    TokenCountProbeRequest,
     ManageTenantModelListRequest,
     ManageTenantModelListResponse,
     ManageTenantModelCreateRequest,
     ManageTenantModelUpdateRequest,
     ManageTenantModelDeleteRequest,
     ManageTenantModelHealthcheckRequest,
+    ManageCapacityAdoptRequest,
+    ManageCapacityAdoptionPreviewRequest,
+    ManageTokenCountProbeRequest,
     ManageBatchCreateModelsRequest,
     ManageProviderModelListRequest,
     ManageProviderModelCreateRequest,
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
+from consts.exceptions import ModelCapacityConfigError, UnauthorizedError
 
 from fastapi import APIRouter, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
@@ -43,6 +50,11 @@ from services.model_health_service import (
     verify_model_config_connectivity,
 )
 from services.model_capacity_suggestion_service import suggest_capacity
+from services.model_capacity_catalog_service import catalog_status
+from services.model_profile_match_service import (
+    resolve_model_profiles,
+    serialize_profile_match,
+)
 from services.model_management_service import (
     create_model_for_tenant,
     create_provider_models_for_tenant,
@@ -55,18 +67,50 @@ from services.model_management_service import (
     list_llm_models_for_tenant,
     list_models_for_admin,
     get_capacity_coverage,
+    get_capacity_health,
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
+    adopt_capacity_for_tenant,
+    preview_capacity_adoption_for_tenant,
+    probe_token_count_for_tenant,
 )
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import TokenExpiredError
+from database.user_tenant_db import get_user_tenant_by_user_id
 
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
 
 
-def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionResponse:
+def _require_super_admin(authorization: Optional[str]) -> tuple[str, str]:
+    user_id, tenant_id = _get_authenticated_user(authorization)
+    info = get_user_tenant_by_user_id(user_id)
+    if not info or (info.get("user_role") or "").upper() not in {"SU", "SUPER_ADMIN"}:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Super administrator role required")
+    return user_id, tenant_id
+
+
+def _require_model_manager(authorization: Optional[str]) -> tuple[str, str]:
+    user_id, tenant_id = _get_authenticated_user(authorization)
+    info = get_user_tenant_by_user_id(user_id)
+    role = (info.get("user_role") if info else "") or ""
+    if role.upper() not in {"ADMIN", "DEV", "SPEED", "SU", "SUPER_ADMIN"}:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Model management role required",
+        )
+    return user_id, tenant_id
+
+
+def _get_authenticated_user(authorization: Optional[str]) -> tuple[str, str]:
+    try:
+        return get_current_user_id(authorization)
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized") from exc
+
+
+def _capacity_suggestion_response_to_model(result, resolution=None) -> ModelCapacitySuggestionResponse:
     suggestions = None
     if result.suggestions is not None:
         suggestions = CapacitySuggestionFields(
@@ -74,9 +118,27 @@ def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionRes
             max_input_tokens=result.suggestions.max_input_tokens,
             max_output_tokens=result.suggestions.max_output_tokens,
             default_output_reserve_tokens=result.suggestions.default_output_reserve_tokens,
-            tokenizer_family=result.suggestions.tokenizer_family,
+            tokenizer_family=(
+                resolution.capacity_suggestions.get("tokenizer_family")
+                if resolution is not None
+                else result.suggestions.tokenizer_family
+            ),
         )
 
+    metadata_proposal = None
+    if resolution is not None and resolution.capacity_match.auto_applicable:
+        metadata_proposal = {
+            "schema_version": 1,
+            "fields": {
+                field: {
+                    "source": "catalog",
+                    "confidence": resolution.capacity_match.confidence,
+                    "profile_version": resolution.capacity_match.selected_profile,
+                }
+                for field, value in resolution.capacity_suggestions.items()
+                if value is not None
+            },
+        }
     return ModelCapacitySuggestionResponse(
         suggestions=suggestions,
         match_kind=result.match_kind.value,
@@ -86,6 +148,16 @@ def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionRes
         canonical_model_name=result.canonical_model_name,
         capability_profile_version=result.capability_profile_version,
         capacity_source_on_accept=result.capacity_source_on_accept,
+        canonical_identity=(
+            dict(resolution.identity_metadata) if resolution is not None else None
+        ),
+        capacity_match=(
+            serialize_profile_match(resolution.capacity_match) if resolution is not None else None
+        ),
+        tokenizer_match=(
+            serialize_profile_match(resolution.tokenizer_match) if resolution is not None else None
+        ),
+        governance_metadata_proposal=metadata_proposal,
     )
 
 
@@ -98,7 +170,14 @@ def _suggest_capacity_for_request(request: ModelCapacitySuggestionRequest) -> Mo
         api_key=request.api_key,
         enabled=CAPACITY_SUGGESTION_ENABLED,
     )
-    return _capacity_suggestion_response_to_model(result)
+    resolution = resolve_model_profiles(
+        model_name=request.model_name,
+        provider=request.provider_hint or result.suggested_provider,
+        base_url=request.base_url,
+        model_type=request.model_type,
+        capacity_result=result,
+    )
+    return _capacity_suggestion_response_to_model(result, resolution)
 
 
 def _capacity_suggestion_for_model_request(request: ModelRequest):
@@ -138,11 +217,20 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        explicit_fields = set(request.model_fields_set)
         model_data = request.model_dump()
         accept_signal = pop_capacity_accept_signal(model_data)
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        await create_model_for_tenant(user_id, tenant_id, model_data)
+        await create_model_for_tenant(
+            user_id,
+            tenant_id,
+            model_data,
+            explicit_fields=explicit_fields,
+            accepted_profile_version=(
+                accept_signal.get("capability_profile_version") if accept_signal else None
+            ),
+        )
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
@@ -150,6 +238,9 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Model created successfully"
         })
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
@@ -220,6 +311,191 @@ async def get_model_capacity_coverage(authorization: Optional[str] = Header(None
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.get("/capacity-health")
+async def get_model_capacity_health(authorization: Optional[str] = Header(None)):
+    """Return tenant-isolated P3 capacity health and remediation metadata."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        result = get_capacity_health(tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully retrieved model capacity health",
+            "data": jsonable_encoder(result),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Capacity health query failed")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Capacity health query failed",
+        ) from e
+
+
+@router.get("/capacity-catalog-status")
+async def get_capacity_catalog_status(authorization: Optional[str] = Header(None)):
+    get_current_user_id(authorization)
+    return JSONResponse(status_code=HTTPStatus.OK, content={
+        "message": "Successfully retrieved capacity catalog status",
+        "data": jsonable_encoder(catalog_status()),
+    })
+
+
+@router.post("/capacity-adoption-preview")
+async def preview_capacity_adoption(
+    request: CapacityAdoptionPreviewRequest,
+    authorization: Optional[str] = Header(None),
+):
+    try:
+        _, tenant_id = _require_model_manager(authorization)
+        result = await preview_capacity_adoption_for_tenant(
+            tenant_id,
+            request.display_name,
+            expected_matcher_version=request.expected_matcher_version,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully previewed capacity adoption",
+            "data": jsonable_encoder(result),
+        })
+    except LookupError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ModelCapacityConfigError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Capacity adoption preview failed")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Capacity adoption preview failed") from e
+
+
+@router.post("/capacity-adopt")
+async def adopt_capacity(
+    request: CapacityAdoptRequest,
+    authorization: Optional[str] = Header(None),
+):
+    try:
+        user_id, tenant_id = _require_model_manager(authorization)
+        result = await adopt_capacity_for_tenant(
+            user_id,
+            tenant_id,
+            request.display_name,
+            expected_profile_version=request.expected_profile_version,
+            expected_matcher_version=request.expected_matcher_version,
+            fields=request.fields,
+            reset_manual_fields=request.reset_manual_fields,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully adopted capacity profile",
+            "data": jsonable_encoder(result),
+        })
+    except LookupError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ModelCapacityConfigError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Capacity adoption failed")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Capacity adoption failed") from e
+
+
+@router.post("/token-count-probe")
+async def probe_token_count(
+    request: TokenCountProbeRequest,
+    authorization: Optional[str] = Header(None),
+):
+    try:
+        user_id, tenant_id = _require_model_manager(authorization)
+        result = await probe_token_count_for_tenant(
+            user_id, tenant_id, request.display_name, force=request.force
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Token-count capability probe completed",
+            "data": jsonable_encoder(result),
+        })
+    except LookupError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        reason = str(e) if str(e) in {"ssrf_rejected", "connection_failed"} else "probe_rejected"
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=reason)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Token count probe failed")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Token count probe failed") from e
+
+
+@router.post("/manage/capacity-adoption-preview")
+async def manage_preview_capacity_adoption(
+    request: ManageCapacityAdoptionPreviewRequest,
+    authorization: Optional[str] = Header(None),
+):
+    _require_super_admin(authorization)
+    try:
+        result = await preview_capacity_adoption_for_tenant(
+            request.tenant_id,
+            request.display_name,
+            expected_matcher_version=request.expected_matcher_version,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully previewed capacity adoption",
+            "data": jsonable_encoder(result),
+        })
+    except LookupError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ModelCapacityConfigError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+
+
+@router.post("/manage/capacity-adopt")
+async def manage_adopt_capacity(
+    request: ManageCapacityAdoptRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user_id, _ = _require_super_admin(authorization)
+    try:
+        result = await adopt_capacity_for_tenant(
+            user_id,
+            request.tenant_id,
+            request.display_name,
+            expected_profile_version=request.expected_profile_version,
+            expected_matcher_version=request.expected_matcher_version,
+            fields=request.fields,
+            reset_manual_fields=request.reset_manual_fields,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Successfully adopted capacity profile",
+            "data": jsonable_encoder(result),
+        })
+    except LookupError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ModelCapacityConfigError as e:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
+
+
+@router.post("/manage/token-count-probe")
+async def manage_probe_token_count(
+    request: ManageTokenCountProbeRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user_id, _ = _require_super_admin(authorization)
+    try:
+        result = await probe_token_count_for_tenant(
+            user_id,
+            request.tenant_id,
+            request.display_name,
+            force=request.force,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={
+            "message": "Token-count capability probe completed",
+            "data": jsonable_encoder(result),
+        })
+    except LookupError as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        reason = str(e) if str(e) in {"ssrf_rejected", "connection_failed"} else "probe_rejected"
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=reason)
+
+
 @router.post("/provider/create")
 async def create_provider_model(request: ProviderModelRequest, authorization: Optional[str] = Header(None)):
     """Create or refresh provider models for the current tenant in memory only.
@@ -268,11 +544,14 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
         # Strip W11 accept-signal fields off every model entry before the
         # batch reaches the service/DB layer. Same audit-only contract as
         # the single-create path: pop now, emit the SLO counter on success.
-        accept_signals = [
-            signal
-            for model in batch_model_config.get("models", [])
-            if (signal := pop_capacity_accept_signal(model)) is not None
-        ]
+        accept_signals = []
+        for model in batch_model_config.get("models", []):
+            signal = pop_capacity_accept_signal(model)
+            if signal is not None:
+                accept_signals.append(signal)
+                model["_accepted_profile_version"] = signal.get(
+                    "capability_profile_version"
+                )
         await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
         provider = batch_model_config.get("provider")
         for signal in accept_signals:
@@ -283,6 +562,9 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -338,8 +620,18 @@ async def update_single_model(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        explicit_fields = set(request)
         accept_signal = pop_capacity_accept_signal(request)
-        await update_single_model_for_tenant(user_id, tenant_id, display_name, request)
+        await update_single_model_for_tenant(
+            user_id,
+            tenant_id,
+            display_name,
+            request,
+            explicit_fields=explicit_fields,
+            accepted_profile_version=(
+                accept_signal.get("capability_profile_version") if accept_signal else None
+            ),
+        )
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.get("model_factory")
@@ -351,6 +643,9 @@ async def update_single_model(
         logging.error(f"Failed to update model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                             detail=str(e))
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to update model: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT,
@@ -381,6 +676,9 @@ async def batch_update_models(request: List[dict], authorization: Optional[str] 
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch update models: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -603,6 +901,7 @@ async def manage_create_model(
         logger.debug(
             f"Start to create model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}")
 
+        explicit_fields = set(request.model_fields_set) - {"tenant_id"}
         model_data = request.model_dump(exclude={'tenant_id'})
         # Strip W11 accept-signal fields before the dict reaches the
         # service (which calls create_model_record -> SQLAlchemy insert).
@@ -611,7 +910,15 @@ async def manage_create_model(
         # operator-accepted suggestions saved by SU/asset-owner via
         # /manage/* would silently miss the accept_total SLO numerator.
         accept_signal = pop_capacity_accept_signal(model_data)
-        await create_model_for_tenant(user_id, request.tenant_id, model_data)
+        await create_model_for_tenant(
+            user_id,
+            request.tenant_id,
+            model_data,
+            explicit_fields=explicit_fields,
+            accepted_profile_version=(
+                accept_signal.get("capability_profile_version") if accept_signal else None
+            ),
+        )
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
@@ -620,6 +927,9 @@ async def manage_create_model(
             "message": "Model created successfully",
             "data": {"tenant_id": request.tenant_id}
         })
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to create model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
@@ -654,12 +964,20 @@ async def manage_update_model(
             f"Start to update model for tenant, user_id: {user_id}, target_tenant_id: {request.tenant_id}, "
             f"current_display_name: {request.current_display_name}")
 
+        explicit_fields = set(request.model_fields_set) - {"tenant_id", "current_display_name"}
         model_data = request.model_dump(exclude={'tenant_id', 'current_display_name'}, exclude_unset=True)
         # Same audit-only contract as /manage/create above: pop before
         # the dict reaches update_model_record, emit after persist.
         accept_signal = pop_capacity_accept_signal(model_data)
         await update_single_model_for_tenant(
-            user_id, request.tenant_id, request.current_display_name, model_data
+            user_id,
+            request.tenant_id,
+            request.current_display_name,
+            model_data,
+            explicit_fields=explicit_fields,
+            accepted_profile_version=(
+                accept_signal.get("capability_profile_version") if accept_signal else None
+            ),
         )
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
@@ -672,6 +990,9 @@ async def manage_update_model(
     except LookupError as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(e))
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logging.error(f"Failed to update model for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(e))
@@ -775,6 +1096,9 @@ async def manage_batch_create_models(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ModelCapacityConfigError as e:
+        logging.warning("Invalid model capacity configuration: %s", e.reason_code)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
         logging.error(f"Failed to batch create models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
