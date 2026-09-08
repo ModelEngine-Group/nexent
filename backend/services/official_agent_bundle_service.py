@@ -177,7 +177,14 @@ def load_official_bundles(base_dir: str | Path, profiles: Iterable[str]) -> list
         if not profile_dir.is_dir():
             logger.warning("Official agent profile directory not found: %s", profile_dir)
             continue
-        bundle_paths = list(profile_dir.rglob("*.zip"))
+        # Skill payloads are ZIP files too, but they are dependencies inside
+        # a directory Bundle rather than standalone Agent Bundles. Do not
+        # attempt to parse them as archives that must contain agent.json.
+        bundle_paths = [
+            path
+            for path in profile_dir.rglob("*.zip")
+            if path.parent.name != "skills"
+        ]
         bundle_dirs = [
             path.parent
             for path in profile_dir.rglob("agent.json")
