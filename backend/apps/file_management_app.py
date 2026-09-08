@@ -260,6 +260,38 @@ async def process_files(
         except Exception as lifecycle_exc:
             logger.warning("Failed to persist process-submit error: %s", lifecycle_exc)
 
+    def persist_submit_task(file_details: dict, task_id: Optional[str]):
+        """Persist the parent chain ID so deletion can revoke a queued chain."""
+        if not task_id:
+            return
+        try:
+            from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
+
+            record = get_file_record(
+                file_id=file_details.get("file_id"),
+                tenant_id=tenant_id,
+                index_name=index_name,
+                object_name=file_details.get("path_or_url"),
+                include_hidden=True,
+            )
+            if record and file_details.get("file_id") and record.get("file_id") != file_details.get("file_id"):
+                logger.warning(
+                    "Ignoring mismatched lifecycle row while persisting task ID %s: expected=%s actual=%s",
+                    task_id,
+                    file_details.get("file_id"),
+                    record.get("file_id"),
+                )
+                return
+            if record:
+                transition_file_record(
+                    record["file_id"],
+                    parent_task_id=task_id,
+                    expected_statuses=("UPLOADING", "UPLOADED", "PROCESSING", "FORWARDING"),
+                    updated_by=user_id,
+                )
+        except Exception as lifecycle_exc:
+            logger.warning("Failed to persist process task ID %s: %s", task_id, lifecycle_exc)
+
     if process_result is None or (isinstance(process_result, dict) and process_result.get("status") == "error"):
         error_message = "Data process service failed"
         if isinstance(process_result, dict) and "message" in process_result:
@@ -272,10 +304,6 @@ async def process_files(
     # New batch responses identify every submitted file. Persist only the failed items,
     # allowing successful files to continue through their Celery chains.
     if isinstance(process_result, dict) and isinstance(process_result.get("results"), list):
-        failed_results = [
-            result for result in process_result["results"]
-            if isinstance(result, dict) and result.get("status") == "FAILED"
-        ]
         files_by_id = {
             file_details.get("file_id"): file_details
             for file_details in files
@@ -286,6 +314,19 @@ async def process_files(
             for file_details in files
             if file_details.get("path_or_url")
         }
+        for submitted_result in process_result["results"]:
+            if not isinstance(submitted_result, dict) or submitted_result.get("status") != "SUBMITTED":
+                continue
+            file_details = files_by_id.get(submitted_result.get("file_id"))
+            if file_details is None:
+                file_details = files_by_source.get(submitted_result.get("source"))
+            if file_details is not None:
+                persist_submit_task(file_details, submitted_result.get("task_id"))
+
+        failed_results = [
+            result for result in process_result["results"]
+            if isinstance(result, dict) and result.get("status") == "FAILED"
+        ]
         for failed_result in failed_results:
             file_details = files_by_id.get(failed_result.get("file_id"))
             if file_details is None:
@@ -316,6 +357,11 @@ async def process_files(
                     "failed_files": failed_results,
                 },
             )
+
+    elif isinstance(process_result, dict) and process_result.get("task_id"):
+        # Single-file / legacy data-process responses expose one parent chain ID.
+        if len(files) == 1:
+            persist_submit_task(files[0], process_result["task_id"])
 
     # A legacy batch service may only return task_ids. An explicit empty list means
     # no file was submitted; mark every file failed instead of leaving UPLOADED rows.

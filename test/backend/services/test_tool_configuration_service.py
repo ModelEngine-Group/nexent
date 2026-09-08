@@ -1168,6 +1168,10 @@ class TestListAllToolsWithLabels:
              "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
             {"tool_id": 4, "name": "postgres_database", "description": "d4", "source": "local",
              "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 5, "name": "download_from_s3", "description": "d5", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 6, "name": "upload_to_s3", "description": "d6", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
         ]
         mock_descriptions.return_value = {}
 
@@ -1177,6 +1181,8 @@ class TestListAllToolsWithLabels:
         result_names = [t["name"] for t in result]
         assert "store_memory" not in result_names
         assert "search_memory" not in result_names
+        assert "download_from_s3" not in result_names
+        assert "upload_to_s3" not in result_names
         assert "tavily_search" in result_names
         assert "postgres_database" in result_names
         assert len(result) == 2

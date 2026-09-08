@@ -18,6 +18,7 @@ class UploadToS3Tool(Tool):
     """Tool for uploading files from local workspace to S3/MinIO storage."""
 
     name = "upload_to_s3"
+    is_user_selectable = False
     description = (
         "Upload a file from the local workspace to S3/MinIO storage. "
         "The file path must be within the workspace directory. A relative path such as "
