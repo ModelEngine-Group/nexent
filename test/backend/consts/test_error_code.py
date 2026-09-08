@@ -139,7 +139,7 @@ class TestErrorCodeValues:
 
     def test_knowledge_resource_exceeded_value(self):
         """Knowledge resource limits use the Knowledge module's next code."""
-        assert ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED.value == "060106"
+        assert ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED.value == "060110"
 
     def test_memory_not_found_value(self):
         """Test MEMORY_NOT_FOUND has correct string value."""

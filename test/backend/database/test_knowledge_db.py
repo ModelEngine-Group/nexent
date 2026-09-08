@@ -303,7 +303,7 @@ def test_knowledge_tenant_limit_rejects_the_next_active_record(monkeypatch):
     with pytest.raises(Exception) as exc_info:
         _enforce_knowledge_limits(session, "tenant-1", "user-1")
 
-    assert exc_info.value.error_code.value == "060106"
+    assert exc_info.value.error_code.value == "060110"
     assert exc_info.value.details["scope"] == "tenant"
     assert exc_info.value.details["limit"] == 1
     assert session.query_calls == 1
@@ -375,7 +375,7 @@ def test_knowledge_user_limit_applies_to_creator_role(monkeypatch, role, expecte
     with pytest.raises(Exception) as exc_info:
         _enforce_knowledge_limits(session, "tenant-1", "user-1")
 
-    assert exc_info.value.error_code.value == "060106"
+    assert exc_info.value.error_code.value == "060110"
     assert exc_info.value.details["scope"] == "user"
     assert exc_info.value.details["limit"] == expected_limit
     assert exc_info.value.details["role"] == role

@@ -21,8 +21,10 @@ import {
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import { ErrorCode } from "@/const/errorCode";
+import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
@@ -66,6 +68,10 @@ const getKnowledgeBaseCreateErrorMessage = (
   name: string,
   t: TFunction
 ) => {
+  const resourceLimitMessage = getKnowledgeResourceLimitMessage(error, t);
+  if (resourceLimitMessage) {
+    return resourceLimitMessage;
+  }
   if (isApiErrorCode(error, 409)) {
     return t("knowledgeBase.message.nameExists", { name });
   }
@@ -82,6 +88,10 @@ const getKnowledgeBaseCreateErrorMessage = (
 };
 
 const getKnowledgeBaseUploadErrorMessage = (error: unknown, t: TFunction) => {
+  const resourceLimitMessage = getKnowledgeResourceLimitMessage(error, t);
+  if (resourceLimitMessage) {
+    return resourceLimitMessage;
+  }
   if (isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)) {
     return t("quota.personalKbUploadBlocked");
   }
@@ -580,7 +590,11 @@ function DataConfig({ isActive }: DataConfigProps) {
       const files = Array.from(e.dataTransfer.files);
       const validFiles = files.filter(isKnowledgeBaseFileSizeValid);
       if (validFiles.length !== files.length) {
-        message.error(t("knowledgeBase.upload.fileTooLarge"));
+        message.error(
+          t("knowledgeBase.upload.fileTooLarge", {
+            limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+          })
+        );
       }
       if (validFiles.length > 0) {
         setUploadFiles(validFiles);

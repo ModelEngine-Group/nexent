@@ -139,6 +139,9 @@ async def create_new_index(
             embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
         )
+    except AppException:
+        # Preserve the standard error code/details for knowledge resource limits.
+        raise
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while creating index")
         raise HTTPException(
