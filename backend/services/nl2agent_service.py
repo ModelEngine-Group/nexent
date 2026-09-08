@@ -1755,14 +1755,28 @@ async def _load_verified_nl2agent_state(
         resource = by_ref.get(f"tool:{tool_id}")
         if resource is None:
             continue
-        params = instance.get("params")
+        runtime_inputs = [
+            {
+                "name": name,
+                "type": _normalize_frontend_param_type(
+                    definition.get("type") if isinstance(definition, dict) else None
+                ),
+                "required": not bool(
+                    definition.get("optional") if isinstance(definition, dict) else False
+                ),
+                "description": str(
+                    definition.get("description") if isinstance(definition, dict) else ""
+                ),
+            }
+            for name, definition in resource["inputs"].items()
+            if isinstance(name, str) and name
+        ]
         facts.append({
             "resource_type": "tool",
             "resource_id": tool_id,
             "name": resource["name"],
             "description": resource["description"],
-            "input_fields": sorted(resource["inputs"]),
-            "configured_fields": sorted(params) if isinstance(params, dict) else [],
+            "runtime_inputs": sorted(runtime_inputs, key=lambda item: item["name"]),
         })
     for instance in query_enabled_skill_instances(
         agent_id=agent_id,
@@ -1773,20 +1787,12 @@ async def _load_verified_nl2agent_state(
         resource = by_ref.get(f"skill:{skill_id}")
         if resource is None:
             continue
-        config_values = instance.get("config_values")
         facts.append({
             "resource_type": "skill",
             "resource_id": skill_id,
             "name": resource["name"],
             "description": resource["description"],
-            "config_fields": sorted(
-                item["name"]
-                for item in resource["config"]
-                if isinstance(item, dict) and isinstance(item.get("name"), str)
-            ),
-            "configured_fields": (
-                sorted(config_values) if isinstance(config_values, dict) else []
-            ),
+            "runtime_inputs": [],
         })
     facts.sort(key=lambda item: (item["resource_type"], item["resource_id"]))
     return draft, facts
