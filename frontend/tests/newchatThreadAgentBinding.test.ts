@@ -13,7 +13,16 @@ test("binds an agent selected for a new thread to that thread's metadata", async
 
   assert.match(
     page,
-    /getItemById\(runtime\.threads\.getState\(\)\.mainThreadId\)\s*\.updateCustom\(\{[\s\S]*agentId:\s*agent\.id\s*\}\)/
+    /thread\.updateCustom\(\{\s*agentId:\s*agent\.id\s*\}\)/
+  );
+});
+
+test("initializes a new thread before storing its selected agent", async () => {
+  const page = await readFile(pagePath, "utf8");
+
+  assert.match(
+    page,
+    /const thread = runtime\.threads\.getItemById\([\s\S]*await thread\.initialize\(\);[\s\S]*await thread\.updateCustom\(/
   );
 });
 
