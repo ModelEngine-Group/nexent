@@ -334,6 +334,7 @@ class TestKnowledgeBaseSearchTool:
         """Test successful hybrid search"""
         # Mock search results
         mock_results = create_mock_search_result(3)
+        mock_results[0]["highlight_terms"] = ["Test Document"]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
@@ -349,6 +350,10 @@ class TestKnowledgeBaseSearchTool:
             assert "score" in doc
             assert "index" in doc
             assert doc["title"] == f"Test Document {i}"
+
+        assert result["results"][0]["score_details"][
+            "retrieval_highlight_terms"
+        ] == ["Test Document"]
 
         # Verify vdb_core was called correctly
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -376,6 +381,47 @@ class TestKnowledgeBaseSearchTool:
             query_text="test query",
             top_k=5
         )
+
+    def test_search_hybrid_merges_scores_and_highlight_terms(self, knowledge_base_search_tool):
+        """Hybrid results merge branch scores and highlight terms into score_details."""
+        mock_results = create_mock_search_result(1)
+        mock_results[0]["scores"] = {"accurate": 0.6, "semantic": 0.8}
+        mock_results[0]["highlight_terms"] = ["hybrid term"]
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
+
+        score_details = result["results"][0]["score_details"]
+        assert score_details["accurate"] == 0.6
+        assert score_details["semantic"] == 0.8
+        assert score_details["retrieval_highlight_terms"] == ["hybrid term"]
+
+    def test_search_results_without_metadata_stay_untouched(self, knowledge_base_search_tool):
+        """Documents without score metadata must not gain a score_details key."""
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
+
+        assert "score_details" not in result["results"][0]
+        # The original document dict must not be mutated by formatting.
+        assert "score" not in mock_results[0]["document"]
+
+    def test_search_accurate_merges_highlight_terms(self, knowledge_base_search_tool):
+        """Accurate results expose lexical highlight terms for later rendering."""
+        mock_results = create_mock_search_result(2)
+        mock_results[0]["highlight_terms"] = ["exact term"]
+        mock_results[0]["document"]["score_details"] = {"accuracy": 0.7}
+        knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
+
+        first = result["results"][0]
+        assert first["score_details"]["accuracy"] == 0.7
+        assert first["score_details"]["retrieval_highlight_terms"] == ["exact term"]
+        assert "score_details" not in result["results"][1]
+        # The original document dict must not be mutated by formatting.
+        assert "retrieval_highlight_terms" not in mock_results[0]["document"]["score_details"]
 
     def test_search_semantic_success(self, knowledge_base_search_tool):
         """Test successful semantic search"""

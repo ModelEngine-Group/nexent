@@ -51,6 +51,16 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
+# Document deletion coordination.  The Redis deletion fence itself never
+# expires; these values only bound one drain attempt and background retry
+# cadence while workers finish an in-flight request.
+DOCUMENT_DELETE_DRAIN_TIMEOUT_S = float(
+    os.getenv("DOCUMENT_DELETE_DRAIN_TIMEOUT_S", "30")
+)
+DOCUMENT_DELETE_RETRY_INTERVAL_S = float(
+    os.getenv("DOCUMENT_DELETE_RETRY_INTERVAL_S", "2")
+)
+
 # Agent automation runtime configuration
 AGENT_AUTOMATION_ENABLED = os.getenv(
     "AGENT_AUTOMATION_ENABLED", "true"
@@ -426,12 +436,8 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
     os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
 )
 
-# External memory transparent proxy master switches
-EXTERNAL_MEMORY_SEARCH_ENABLED = os.getenv(
-    "EXTERNAL_MEMORY_SEARCH_ENABLED", "false"
-).lower() in ("true", "1", "yes")
-# External provider toggles (configured per provider elsewhere; these constants
-# describe protocol-level defaults)
+# External provider protocol defaults. Provider records control whether each
+# configured integration participates in search and ingest.
 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
     "agent",
     "model_output",

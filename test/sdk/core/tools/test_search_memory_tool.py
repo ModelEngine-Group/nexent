@@ -244,6 +244,26 @@ class TestSearchMemoryToolPipelinePath:
 
         assert service.build_context.call_args.kwargs["external_results"] is external_results
 
+    def test_ac_p3_18_external_results_do_not_require_internal_embedding(self):
+        """AC-P3-18: external hits remain usable without internal embeddings."""
+        service = _async_context_service(_make_context({}))
+        external = _StubRecord(
+            "Deployment color is cobalt-42",
+            score=0.91,
+            source="mem0",
+        )
+        tool = _make_tool(
+            memory_context_service=service,
+            embedding_configured=False,
+            external_results=[external],
+        )
+
+        out = tool.forward(query="deployment color", top_k=5)
+
+        service.build_context.assert_called_once()
+        assert "#### External Memory" in out
+        assert "Deployment color is cobalt-42" in out
+
     def test_ac_p3_22_restores_external_results_dropped_by_global_top_k(self):
         """Mixed-source output keeps prefetched external hits after fusion truncation."""
         service = _async_context_service(_make_context({

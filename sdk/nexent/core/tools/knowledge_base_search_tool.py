@@ -465,6 +465,28 @@ class KnowledgeBaseSearchTool(Tool):
                 "", ProcessType.PICTURE_WEB, search_images_list_json
             )
 
+    @staticmethod
+    def _format_search_results(results: list, include_scores: bool) -> list:
+        """Format raw vector search results for tool output.
+
+        Copies each document before mutation, attaches score/index, and merges
+        score details plus retrieval highlight terms into ``score_details``.
+        """
+        formatted_results = []
+        for result in results:
+            doc = dict(result["document"])
+            doc["score"] = result["score"]
+            doc["index"] = result["index"]
+            score_details = dict(doc.get("score_details") or {})
+            if include_scores and result.get("scores"):
+                score_details.update(result["scores"])
+            if result.get("highlight_terms"):
+                score_details["retrieval_highlight_terms"] = result["highlight_terms"]
+            if score_details:
+                doc["score_details"] = score_details
+            formatted_results.append(doc)
+        return formatted_results
+
     def search_hybrid(self, query, index_names, top_k):
         try:
             results = self.vdb_core.hybrid_search(
@@ -474,12 +496,9 @@ class KnowledgeBaseSearchTool(Tool):
                 top_k=top_k,
             )
 
-            formatted_results = []
-            for result in results:
-                doc = result["document"]
-                doc["score"] = result["score"]
-                doc["index"] = result["index"]
-                formatted_results.append(doc)
+            formatted_results = self._format_search_results(
+                results, include_scores=True
+            )
 
             return {
                 "results": formatted_results,
@@ -496,12 +515,9 @@ class KnowledgeBaseSearchTool(Tool):
                 top_k=top_k,
             )
 
-            formatted_results = []
-            for result in results:
-                doc = result["document"]
-                doc["score"] = result["score"]
-                doc["index"] = result["index"]
-                formatted_results.append(doc)
+            formatted_results = self._format_search_results(
+                results, include_scores=False
+            )
 
             return {
                 "results": formatted_results,
@@ -519,12 +535,9 @@ class KnowledgeBaseSearchTool(Tool):
                 top_k=top_k,
             )
 
-            formatted_results = []
-            for result in results:
-                doc = result["document"]
-                doc["score"] = result["score"]
-                doc["index"] = result["index"]
-                formatted_results.append(doc)
+            formatted_results = self._format_search_results(
+                results, include_scores=False
+            )
 
             return {
                 "results": formatted_results,

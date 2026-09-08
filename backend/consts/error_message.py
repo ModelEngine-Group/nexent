@@ -75,6 +75,7 @@ class ErrorMessage:
         ErrorCode.KNOWLEDGE_INDEX_WRITE_BLOCKED: "Knowledge base ingestion failed because storage space is insufficient.",
         ErrorCode.KNOWLEDGE_STORAGE_COMMIT_FAILED: "File upload failed because the storage service is unavailable.",
         ErrorCode.KNOWLEDGE_TASK_SUBMIT_FAILED: "The file was uploaded, but the ingestion service is unavailable.",
+        ErrorCode.KNOWLEDGE_DELETE_BLOCKED: "Knowledge base deletion is blocked while files are being processed.",
 
         # ==================== 07 MCPTools / MCP 工具 ====================
         ErrorCode.MCP_TOOL_NOT_FOUND: "Tool not found.",

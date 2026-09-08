@@ -265,7 +265,7 @@ class SearchMemoryTool(Tool):
             top_k,
             self.memory_context_service is not None,
         )
-        if not self.embedding_configured:
+        if not self.embedding_configured and not self.external_results:
             logger.info(
                 "event=memory_tool_degraded tool=search_memory tenant_id=%s "
                 "reason=embedding_not_configured",
