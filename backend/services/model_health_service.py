@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from nexent.core import MessageObserver
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
@@ -31,6 +31,20 @@ def _normalize_embedding_url(base_url: str) -> str:
     if not base_url or "/embeddings" in base_url:
         return base_url
     return f"{base_url.rstrip('/')}/embeddings"
+
+
+def _embedding_url_candidates(base_url: str) -> List[str]:
+    """Ordered URLs to probe for an embedding model: endpoint form first, then as given.
+
+    Providers differ in whether embeddings are served at the bare base URL or at the
+    explicit /embeddings endpoint, so both forms are candidates. Whichever answers
+    first is the URL worth persisting, because the runtime adapter POSTs to the
+    stored value verbatim.
+    """
+    if not base_url:
+        return []
+    normalized = _normalize_embedding_url(base_url)
+    return [normalized] if normalized == base_url else [normalized, base_url]
 
 
 def _infer_model_factory(model_type: str, base_url: str, current_factory: Optional[str] = None) -> Optional[str]:
@@ -71,9 +85,6 @@ async def _embedding_dimension_check(
     model_factory: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
 ):
-    if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
-
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
 
     if model_type == "embedding":
@@ -154,25 +165,26 @@ async def _perform_connectivity_check(
         model_base_url = model_base_url.replace(
             LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
 
-    # Normalize embedding URLs by appending /embeddings if not present
-    if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
-
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
     connectivity: bool
 
-    if model_type == "embedding":
-        emb = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
-            "embedding", "embedding", None, model_name=model_name,
-        ).dimension_check(timeout=effective_timeout)
-        connectivity = len(emb) > 0 and len(emb[0]) > 0
-    elif model_type == "multi_embedding":
-        emb = await build_adapter_fresh(
-            {"model_factory": model_factory, "base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
-            "multi_embedding", "multiEmbedding", None, model_name=model_name,
-        ).dimension_check(timeout=effective_timeout)
-        connectivity = len(emb) > 0 and len(emb[0]) > 0
+    if model_type in EMBEDDING_TYPES:
+        # Probe the /embeddings endpoint first and the URL exactly as stored second,
+        # so this verdict is reached against a URL the runtime adapter can also use.
+        for candidate_url in _embedding_url_candidates(model_base_url):
+            if model_type == "embedding":
+                emb = await build_adapter_fresh(
+                    {"base_url": candidate_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
+                    "embedding", "embedding", None, model_name=model_name,
+                ).dimension_check(timeout=effective_timeout)
+            else:
+                emb = await build_adapter_fresh(
+                    {"model_factory": model_factory, "base_url": candidate_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
+                    "multi_embedding", "multiEmbedding", None, model_name=model_name,
+                ).dimension_check(timeout=effective_timeout)
+            if len(emb) > 0 and len(emb[0]) > 0:
+                return True
+        return False
     elif model_type == "llm":
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
