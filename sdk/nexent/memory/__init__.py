@@ -3,7 +3,6 @@
 from .embedding_model import (
     EmbeddingModelInfo,
     get_embedding_client,
-    reset_embedding_client_cache,
 )
 from .models import (
     ExternalMemoryItem,
@@ -96,7 +95,6 @@ __all__ = [
     # Embedding
     "EmbeddingModelInfo",
     "get_embedding_client",
-    "reset_embedding_client_cache",
     # Providers
     "BaseMemoryProvider",
     "SearchableMemoryProvider",

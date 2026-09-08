@@ -1,4 +1,4 @@
-"""Embedding model metadata and client cache for the memory system.
+"""Embedding model metadata and client factory for the memory system.
 
 This module provides:
 
@@ -10,11 +10,15 @@ This module provides:
       mem_{model_repo}_{model_name}_{dimension}
       mem_{model_name}_{dimension}            # when model_repo is absent
 
-- ``get_embedding_client()``: a process-wide cache that reuses
-  ``OpenAICompatibleEmbeddingAdapter`` instances keyed by ``(model_name, dimension)``.
-  Creating an HTTP client per memory write would add unnecessary latency;
-  caching a single instance per model avoids that while keeping the SDK
-  layer stateless.
+- ``get_embedding_client()``: builds an ``OpenAICompatibleEmbeddingAdapter``
+  from the caller-supplied configuration. Instances are deliberately not
+  cached: ``base_url``, ``api_key`` and ``ssl_verify`` are tenant-scoped
+  database values that operators can change at runtime, and two tenants may
+  legitimately use the same model name and dimension with different endpoints
+  and credentials. Any key narrower than the full configuration would keep
+  serving a stale endpoint or stale credentials. Construction is cheap, and
+  callers that embed many texts within one operation can build once and reuse
+  the returned instance for the duration of that operation.
 
 The SDK never talks to Elasticsearch directly. All vector writes go through
 the backend layer (``memory_index_service``). This module is therefore purely
@@ -23,15 +27,12 @@ a data-transformation and lifecycle-management helper.
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
-from ..core.gateway.modality import OpenAICompatibleEmbeddingAdapter
 from ..core.gateway import EmbeddingContext
-
-logger = logging.getLogger("memory_embedding_model")
+from ..core.gateway.modality import OpenAICompatibleEmbeddingAdapter
 
 
 def _sanitize_index_component(value: str) -> str:
@@ -79,10 +80,8 @@ class EmbeddingModelInfo:
 
 
 # --------------------------------------------------------------------------- #
-# Process-wide HTTP client cache                                               #
+# Embedding client factory                                                     #
 # --------------------------------------------------------------------------- #
-# Key = "model_name:dimension", Value = OpenAICompatibleEmbeddingAdapter instance.
-_embedding_client_cache: dict[str, OpenAICompatibleEmbeddingAdapter] = {}
 
 
 def get_embedding_client(
@@ -93,11 +92,13 @@ def get_embedding_client(
     model_repo: Optional[str] = None,
     ssl_verify: bool = True,
 ) -> OpenAICompatibleEmbeddingAdapter:
-    """Return a cached ``OpenAICompatibleEmbeddingAdapter`` instance.
+    """Build an ``OpenAICompatibleEmbeddingAdapter`` for the given configuration.
 
-    Instances are cached by ``(model_repo, model_name, dimension)`` so that
-    repeated memory writes within the same process reuse the underlying HTTP
-    client and connection pool.
+    A fresh adapter is returned on every call. Caching by model identity alone
+    is unsafe here: the endpoint, the credentials and the TLS setting all come
+    from tenant-scoped database rows that can change while the process runs, so
+    a cached instance would keep posting to a stale ``base_url`` with a stale
+    ``api_key``.
 
     When ``model_repo`` is provided (e.g. ``"BAAI"``), the fully-qualified
     name ``"BAAI/bge-m3"`` is passed to the API. Some providers (e.g.
@@ -113,35 +114,18 @@ def get_embedding_client(
         ssl_verify: Whether to verify SSL certificates.
 
     Returns:
-        A cached (or newly created) ``OpenAICompatibleEmbeddingAdapter`` instance.
+        A newly created ``OpenAICompatibleEmbeddingAdapter`` instance.
     """
-    cache_key = f"{model_repo or ''}:{model_name}:{dimension}"
-    if cache_key not in _embedding_client_cache:
-        # Form the fully-qualified model name the API expects.
-        full_model_name = f"{model_repo}/{model_name}" if model_repo else model_name
-        _embedding_client_cache[cache_key] = OpenAICompatibleEmbeddingAdapter(
-            EmbeddingContext(
-                model_name=full_model_name,
-                base_url=base_url,
-                api_key=api_key,
-                modality="embedding",
-                factory="openai",
-                embedding_dim=dimension,
-                ssl_verify=ssl_verify,
-            )
+    # Form the fully-qualified model name the API expects.
+    full_model_name = f"{model_repo}/{model_name}" if model_repo else model_name
+    return OpenAICompatibleEmbeddingAdapter(
+        EmbeddingContext(
+            model_name=full_model_name,
+            base_url=base_url,
+            api_key=api_key,
+            modality="embedding",
+            factory="openai",
+            embedding_dim=dimension,
+            ssl_verify=ssl_verify,
         )
-        logger.debug(
-            "Created and cached embedding client for model=%s dim=%d",
-            full_model_name,
-            dimension,
-        )
-    return _embedding_client_cache[cache_key]
-
-
-def reset_embedding_client_cache() -> None:
-    """Clear all cached embedding client instances.
-
-    Call this in test teardown to ensure test isolation.
-    """
-    _embedding_client_cache.clear()
-    logger.debug("Cleared embedding client cache")
+    )

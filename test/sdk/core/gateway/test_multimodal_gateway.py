@@ -1,4 +1,4 @@
-"""Unit tests for MultimodalGateway caching and delegation."""
+"""Unit tests for MultimodalGateway adapter construction and delegation."""
 
 import pytest
 from nexent.core.gateway.model_context import VLMContext
@@ -49,7 +49,7 @@ def _make_context(model_name="dummy-model"):
     )
 
 
-def test_get_adapter_builds_and_caches_by_context():
+def test_get_adapter_builds_a_new_instance_on_every_call():
     gateway = MultimodalGateway(_make_registry())
     context = _make_context()
 
@@ -57,17 +57,47 @@ def test_get_adapter_builds_and_caches_by_context():
     second = gateway.get_adapter(context)
 
     assert isinstance(first, _FakeAdapter)
-    assert first is second
+    assert first is not second
     assert first._context is context
+    assert second._context is context
 
 
-def test_get_adapter_builds_separate_instance_for_different_key():
+def test_get_adapter_builds_separate_instances_for_different_models():
     gateway = MultimodalGateway(_make_registry())
 
     first = gateway.get_adapter(_make_context("model-a"))
     second = gateway.get_adapter(_make_context("model-b"))
 
     assert first is not second
+
+
+def test_get_adapter_does_not_share_endpoint_or_credentials():
+    """Regression guard for the removed identity-keyed adapter cache.
+
+    The old key was ``(tenant_id, modality, slot, model_name, factory)``, so
+    rotating an api_key or repointing base_url on a model record kept serving
+    the adapter built from the previous config.
+    """
+    gateway = MultimodalGateway(_make_registry())
+
+    stale = gateway.get_adapter(_make_context())
+    rotated_context = _make_context()
+    rotated_context.base_url = "https://rotated.example.com"
+    rotated_context.api_key = "sk-rotated"
+    rotated = gateway.get_adapter(rotated_context)
+
+    assert stale is not rotated
+    assert rotated._context.base_url == "https://rotated.example.com"
+    assert rotated._context.api_key == "sk-rotated"
+    assert stale._context.api_key == "sk-key"
+
+
+def test_gateway_keeps_no_adapter_cache():
+    gateway = MultimodalGateway(_make_registry())
+    gateway.get_adapter(_make_context())
+
+    assert not hasattr(gateway, "_adapter_cache")
+    assert not hasattr(gateway, "invalidate")
 
 
 def test_gateway_defaults_to_process_registry():
@@ -102,24 +132,6 @@ async def test_stream_delegates_to_adapter(gateway, context):
 async def test_health_check_delegates_to_adapter(gateway, context):
     assert await gateway.health_check(context) is True
 
-
-def test_invalidate_single_context(gateway, context):
-    cached = gateway.get_adapter(context)
-    assert gateway.get_adapter(context) is cached
-
-    gateway.invalidate(context)
-    assert gateway.get_adapter(context) is not cached
-
-
-def test_invalidate_all_contexts(gateway, context):
-    other_context = _make_context("model-other")
-    first_cached = gateway.get_adapter(context)
-    other_cached = gateway.get_adapter(other_context)
-
-    gateway.invalidate()
-
-    assert gateway.get_adapter(context) is not first_cached
-    assert gateway.get_adapter(other_context) is not other_cached
 
 
 def test_get_gateway_is_lazy_singleton():
