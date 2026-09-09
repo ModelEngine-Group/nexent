@@ -36,6 +36,10 @@ export type AgentEvaluationRun = {
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
   progress_total?: number;
   progress_done?: number;
+  avg_duration_seconds?: number | null;
+  total_tokens?: number | null;
+  tokens_from_monitoring?: boolean;
+  duration_from_monitoring?: boolean;
   score_overall?: number | null;
   case_count?: number | null;
   pass_count?: number | null;
@@ -50,6 +54,10 @@ export type EvaluationHistoryItem = {
   evaluation_set_name?: string;
   judge_model_name?: string;
   status: AgentEvaluationRun["status"];
+  avg_duration_seconds?: number | null;
+  total_tokens?: number | null;
+  tokens_from_monitoring?: boolean;
+  duration_from_monitoring?: boolean;
   score_overall?: number | null;
   case_count?: number | null;
   pass_count?: number | null;

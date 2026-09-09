@@ -110,7 +110,7 @@ export default function EvaluationReportCard({
       <div className="px-4 py-4">
         <Flex vertical gap={5}>
           {/* Metrics row */}
-          <Flex gap={3} justify="stretch" wrap>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <MetricCard
               label={t("agentEvaluation.report.metric.passRate")}
               value={`${passRate}%`}
@@ -124,7 +124,23 @@ export default function EvaluationReportCard({
               label={t("agentEvaluation.report.metric.caseCount")}
               value={total}
             />
-          </Flex>
+            <MetricCard
+              label={t("agentEvaluation.report.metric.avgDuration")}
+              value={
+                run.avg_duration_seconds != null
+                  ? `≈${run.avg_duration_seconds.toFixed(1)} s`
+                  : "-"
+              }
+            />
+            <MetricCard
+              label={t("agentEvaluation.report.metric.tokens")}
+              value={
+                run.total_tokens != null
+                  ? `≈${run.total_tokens.toLocaleString()}`
+                  : "-"
+              }
+            />
+          </div>
 
           {/* Distribution bar */}
           <ResultDistributionBar passCount={passCount} failCount={failCount} />

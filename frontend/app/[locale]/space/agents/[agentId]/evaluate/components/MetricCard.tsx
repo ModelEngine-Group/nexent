@@ -10,7 +10,11 @@ interface MetricCardProps {
   highlight?: boolean;
 }
 
-export default function MetricCard({ label, value, highlight }: MetricCardProps) {
+export default function MetricCard({
+  label,
+  value,
+  highlight,
+}: MetricCardProps) {
   return (
     <Flex
       vertical
@@ -22,12 +26,16 @@ export default function MetricCard({ label, value, highlight }: MetricCardProps)
           : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
       }`}
     >
-      <Text className={`text-xs ${highlight ? "text-blue-600 dark:text-blue-400" : "text-slate-500 dark:text-slate-400"}`}>
+      <Text
+        className={`text-xs ${highlight ? "text-blue-600 dark:text-blue-400" : "text-slate-500 dark:text-slate-400"}`}
+      >
         {label}
       </Text>
       <Text
         className={`text-2xl font-semibold mt-1 ${
-          highlight ? "text-blue-600 dark:text-blue-400" : "text-slate-900 dark:text-white"
+          highlight
+            ? "text-blue-600 dark:text-blue-400"
+            : "text-slate-900 dark:text-white"
         }`}
       >
         {value}

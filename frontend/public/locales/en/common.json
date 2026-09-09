@@ -3359,6 +3359,8 @@
   "agentEvaluation.history.pieces": "pcs",
   "agentEvaluation.report.title": "Evaluation Report",
   "agentEvaluation.report.metric.passRate": "Pass Rate",
+  "agentEvaluation.report.metric.avgDuration": "Avg Duration",
+  "agentEvaluation.report.metric.tokens": "Tokens",
   "agentEvaluation.report.metric.avgScore": "Avg Score",
   "agentEvaluation.report.metric.caseCount": "Total Cases",
   "agentEvaluation.report.metric.avgLatency": "Avg Latency",

@@ -376,8 +376,8 @@ class TestListAgentEvaluationsByAgent:
 
         session, _ = session_factory
         rows = [
-            (MagicMock(name="r1"), "Set1", "GPT-4", 10, 7),
-            (MagicMock(name="r2"), "Set2", "Claude", 5, 0),
+            (MagicMock(name="r1"), "Set1", "GPT-4", 10, 7, 1500, 120, 30),
+            (MagicMock(name="r2"), "Set2", "Claude", 5, 0, None, None, 60),
         ]
         _make_query_chain(session, rows)
 
@@ -391,14 +391,35 @@ class TestListAgentEvaluationsByAgent:
         assert results[0]["case_count"] == 10
         assert results[0]["pass_count"] == 7
         assert results[0]["fail_count"] == 3
+        assert results[0]["total_tokens"] == 120
+        assert results[0]["avg_duration_seconds"] == 1.5
+        assert results[0]["tokens_from_monitoring"] is True
+        assert results[1]["total_tokens"] == 60
+        assert results[1]["tokens_from_monitoring"] is False
         assert results[1]["case_count"] == 5
         assert results[1]["fail_count"] == 5
+
+    @pytest.mark.parametrize("done, expected", [(2, 3.0), (0, None)])
+    def test_duration_fallback(self, session_factory, monkeypatch, done, expected):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        _make_query_chain(session, [(MagicMock(), "Set", "Model", 2, 0, None, None, 8)])
+        monkeypatch.setattr(agent_evaluation_db, "as_dict", lambda _: {
+            "agent_evaluation_id": 1,
+            "progress_done": done,
+            "create_time": "2026-09-09T10:00:00Z",
+            "update_time": "2026-09-09T10:00:06Z",
+        })
+        result = agent_evaluation_db.list_agent_evaluations_by_agent(42, "t1")[0]
+        assert result["avg_duration_seconds"] == expected
+        assert result["duration_from_monitoring"] is False
 
     def test_handles_none_counts(self, session_factory, monkeypatch):
         from backend.database import agent_evaluation_db
 
         session, _ = session_factory
-        rows = [(MagicMock(name="r1"), "Set1", "GPT-4", None, None)]
+        rows = [(MagicMock(name="r1"), "Set1", "GPT-4", None, None, None, None, None)]
         _make_query_chain(session, rows)
         monkeypatch.setattr(agent_evaluation_db, "as_dict",
                             lambda _r: {"agent_evaluation_id": 1})

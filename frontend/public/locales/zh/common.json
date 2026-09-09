@@ -3245,6 +3245,8 @@
   "agentEvaluation.history.pieces": "条",
   "agentEvaluation.report.title": "评估报告",
   "agentEvaluation.report.metric.passRate": "通过率",
+  "agentEvaluation.report.metric.avgDuration": "平均耗时",
+  "agentEvaluation.report.metric.tokens": "Token 数",
   "agentEvaluation.report.metric.avgScore": "平均得分",
   "agentEvaluation.report.metric.caseCount": "用例总数",
   "agentEvaluation.report.metric.avgLatency": "平均耗时",

@@ -1,9 +1,13 @@
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import case as sql_case, func
 from database.client import as_dict, get_db_session
-from database.db_models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, EvaluationSetCase, ModelRecord
+from database.db_models import (
+    AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet,
+    EvaluationSetCase, ModelMonitoringRecord, ModelRecord,
+)
 
 logger = logging.getLogger("agent_evaluation_db")
 
@@ -157,6 +161,18 @@ def list_agent_evaluations_by_agent(
             )
         ).label("pass_count")
 
+        # Monitoring has no evaluation ID; restrict matching to this run's offline calls.
+        def monitoring_metric(expression):
+            return session.query(expression).filter(
+                ModelMonitoringRecord.tenant_id == AgentEvaluation.tenant_id,
+                ModelMonitoringRecord.agent_id == AgentEvaluation.agent_id,
+                ModelMonitoringRecord.user_id == AgentEvaluation.created_by,
+                ModelMonitoringRecord.conversation_id == 0,
+                ModelMonitoringRecord.delete_flag == "N",
+                ModelMonitoringRecord.create_time >= AgentEvaluation.create_time,
+                ModelMonitoringRecord.create_time <= AgentEvaluation.update_time,
+            ).correlate(AgentEvaluation).scalar_subquery()
+
         q = (
             session.query(
                 AgentEvaluation,
@@ -164,6 +180,15 @@ def list_agent_evaluations_by_agent(
                 ModelRecord.display_name.label("judge_model_name"),
                 func.count(AgentEvaluationCase.agent_evaluation_case_id).label("case_count"),
                 pass_count_expr,
+                monitoring_metric(func.avg(ModelMonitoringRecord.request_duration_ms)),
+                monitoring_metric(func.sum(ModelMonitoringRecord.total_tokens)),
+                func.sum(sql_case(
+                    (AgentEvaluationCase.status.in_(["COMPLETED", "FAILED"]), func.ceil((
+                        func.length(func.coalesce(AgentEvaluationCase.inputs["query"].astext, ""))
+                        + func.length(func.coalesce(AgentEvaluationCase.predict["answer"].astext, ""))
+                    ) / 2.0)),
+                    else_=0,
+                )).label("estimated_tokens"),
             )
             .outerjoin(
                 EvaluationSet,
@@ -195,13 +220,30 @@ def list_agent_evaluations_by_agent(
         )
         rows = q.all()
         results = []
-        for eval_row, evaluation_set_name, judge_model_name, case_count, pass_count in rows:
+        for (
+            eval_row, evaluation_set_name, judge_model_name, case_count,
+            pass_count, duration_ms, tokens, estimated_tokens,
+        ) in rows:
             rec = as_dict(eval_row)
             rec["evaluation_set_name"] = evaluation_set_name
             rec["judge_model_name"] = judge_model_name
             rec["case_count"] = case_count or 0
             rec["pass_count"] = pass_count or 0
             rec["fail_count"] = (case_count or 0) - (pass_count or 0)
+            rec["total_tokens"] = int(tokens if tokens is not None else estimated_tokens or 0)
+            rec["tokens_from_monitoring"] = tokens is not None
+            rec["duration_from_monitoring"] = duration_ms is not None
+            rec["avg_duration_seconds"] = None
+            done = rec.get("progress_done") or 0
+            started = rec.get("create_time")
+            finished = rec.get("update_time")
+            # Run timestamps include queueing and judging; this is an estimate per case.
+            if duration_ms is not None:
+                rec["avg_duration_seconds"] = round(float(duration_ms) / 1000, 2)
+            elif done > 0 and started and finished:
+                started = datetime.fromisoformat(started)
+                finished = datetime.fromisoformat(finished)
+                rec["avg_duration_seconds"] = round(max(0, (finished - started).total_seconds()) / done, 2)
             results.append(rec)
         return results
 
