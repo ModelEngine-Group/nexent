@@ -402,6 +402,7 @@ class ResourceGapRequirement(BaseModel):
 
     requirement_id: str = Field(min_length=1, max_length=100)
     query: str = Field(min_length=1, max_length=500)
+    search_terms: list[str] = Field(default_factory=list, max_length=8)
     weak_references: list[WeakResourceReference] = Field(
         default_factory=list, max_length=2
     )
@@ -882,6 +883,7 @@ def _build_v2_resource_payload(
             gap_requirements.append(ResourceGapRequirement(
                 requirement_id=item.requirement.requirement_id,
                 query=item.requirement.query,
+                search_terms=item.requirement.search_terms,
                 weak_references=weak_references,
             ))
         return ResourceGapResolutionPayloadV2(

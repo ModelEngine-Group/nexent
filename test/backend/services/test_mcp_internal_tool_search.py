@@ -1293,6 +1293,37 @@ def test_unified_wrapper_rejects_subtype_that_disagrees_with_next_action():
         )
 
 
+def test_unified_gap_wrapper_preserves_requirement_search_terms():
+    """UT-BE-NL2A-WRAPPER-003."""
+
+    wrapped = build_nl2a_wrapper(
+        subtype="resource_gap_resolution",
+        agent_id=42,
+        resource_result=ResourceResolutionOutput(
+            phase="POST_GAP",
+            next_action="RESOLVE_GAP",
+            requirements=[RequirementResolution(
+                requirement={
+                    "requirement_id": "train_ticket_query",
+                    "query": "Query 12306 train ticket availability",
+                    "search_terms": ["12306", "train ticket"],
+                },
+                state="uncovered",
+            )],
+            resources=[],
+        ),
+    )
+
+    payload = _unwrap_nl2a(wrapped)
+
+    assert payload["requirements"] == [{
+        "requirement_id": "train_ticket_query",
+        "query": "Query 12306 train ticket availability",
+        "search_terms": ["12306", "train ticket"],
+        "weak_references": [],
+    }]
+
+
 @pytest.mark.anyio
 async def test_unified_wrapper_reresolves_model_supplied_resource_details(mocker):
     """UT-BE-NL2A-WRAPPER-002."""
