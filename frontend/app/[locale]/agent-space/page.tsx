@@ -567,6 +567,14 @@ export default function AgentRepositoryPage() {
             setCopyOpen(true);
           }
         }}
+        onSuccess={async () => {
+          // A repository copy creates the Agent and may start asynchronous
+          // knowledge-file ingestion. Refresh the mine tab immediately so the
+          // newly copied Agent is visible without a manual page reload.
+          setTab(AgentRepositoryTab.MINE);
+          setMinePage(1);
+          await refetchMine();
+        }}
       />
     </ConfigProvider>
   );
