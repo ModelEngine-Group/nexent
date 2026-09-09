@@ -356,7 +356,9 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   // Initialize selectedModelId when agent info becomes available
   useEffect(() => {
     setSelectedModelId((current) =>
-      debugModelIds.includes(current) ? current : (defaultModelId ?? null)
+      current !== null && debugModelIds.includes(current)
+        ? current
+        : (defaultModelId ?? null)
     );
   }, [debugModelIds, defaultModelId]);
 
