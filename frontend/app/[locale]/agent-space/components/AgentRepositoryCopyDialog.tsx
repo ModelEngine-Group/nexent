@@ -145,6 +145,12 @@ export function AgentRepositoryCopyDialog({
       ),
     [tenantModels]
   );
+  const officialEmbeddingModelMissing = Boolean(
+    isOfficialListing &&
+      hasOfficialKnowledge &&
+      !hasExistingOfficialKnowledge &&
+      availableEmbeddingModels.length === 0
+  );
 
   useEffect(() => {
     if (!open || !isOfficialListing) return;
@@ -200,7 +206,11 @@ export function AgentRepositoryCopyDialog({
           !hasExistingOfficialKnowledge &&
           !selectedEmbeddingModelId))
     ) {
-      message.error("请先选择语言模型和向量模型");
+      message.error(
+        officialEmbeddingModelMissing
+          ? "当前租户未配置可用向量模型，请先配置后再复制官方智能体"
+          : "请先选择语言模型和向量模型"
+      );
       return;
     }
 
@@ -278,7 +288,9 @@ export function AgentRepositoryCopyDialog({
             type="primary"
             icon={<Copy className="size-4" />}
             loading={importMutation.isPending}
-            disabled={!precheck || isLoading || isError}
+            disabled={
+              !precheck || isLoading || isError || officialEmbeddingModelMissing
+            }
             onClick={handleCopy}
           >
             {t("agentRepository.card.copy")}
@@ -466,6 +478,11 @@ export function AgentRepositoryCopyDialog({
                     }))}
                   />
                 </div>
+              ) : null}
+              {officialEmbeddingModelMissing ? (
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  当前租户未配置可用向量模型，请先配置后再复制官方智能体。
+                </p>
               ) : null}
             </section>
           ) : null}
