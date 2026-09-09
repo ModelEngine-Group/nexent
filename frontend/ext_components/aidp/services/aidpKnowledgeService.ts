@@ -138,6 +138,16 @@ export interface AidpCreateKbPayload {
 export interface AidpSetPermissionPayload {
   ingroup_permission: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
+  /** Only include metadata fields when their values have changed. */
+  name?: string;
+  description?: string;
+}
+
+export interface AidpSaveSettingsResult {
+  success: boolean;
+  permissions_saved: boolean;
+  metadata_status: "unchanged" | "updated" | "failed";
+  metadata?: AidpKbDetail;
 }
 
 export interface AidpUpdateKbPayload {
@@ -393,16 +403,15 @@ class AidpKnowledgeService {
   }
 
   /**
-   * Update the in-group permission for a KB (does not call AIDP).
-   * Required when a Nexent user with EDIT permission changes who can see the KB.
+   * Save local permissions first, then synchronize supplied metadata changes.
    */
   async setPermission(
     id: string,
     payload: AidpSetPermissionPayload
-  ): Promise<void> {
+  ): Promise<AidpSaveSettingsResult> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbPermission(id), {});
 
-    await fetchWithErrorHandling(url, {
+    const response = await fetchWithErrorHandling(url, {
       method: "PATCH",
       headers: {
         ...getAuthHeaders(),
@@ -410,6 +419,7 @@ class AidpKnowledgeService {
       },
       body: JSON.stringify(payload),
     });
+    return response.json();
   }
 
   /**

@@ -76,19 +76,12 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       const values = await form.validateFields();
       setLoading(true);
 
-      // Update AIDP-side metadata (name + description).
-      const updated = await aidpKnowledgeService.updateKb(
-        knowledgeBase.kds_id,
-        {
-          name: values.name.trim(),
-          description: values.description?.trim() || "",
-        }
-      );
+      const name = values.name.trim();
+      const description = values.description?.trim() || "";
+      const nameChanged = name !== knowledgeBase.kds_name.trim();
+      const descriptionChanged =
+        description !== (knowledgeBase.description || "").trim();
 
-      // Update Nexent-side permissions only when something actually
-      // changed. Skipping the PATCH call when values match the original
-      // row avoids an unnecessary DB write and sidesteps backend
-      // validation for rows where the user hasn't touched permissions.
       const newPermission = isUser ? "PRIVATE" : values.ingroup_permission;
       const newGroupIds: number[] = isUser
         ? []
@@ -111,24 +104,46 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
             (id, idx) => id !== [...originalGroupIds].sort((a, b) => a - b)[idx]
           );
 
-      if (permissionChanged) {
-        await aidpKnowledgeService.setPermission(knowledgeBase.kds_id, {
-          ingroup_permission: newPermission,
-          group_ids: normalizedNewGroupIds,
-        });
+      if (!nameChanged && !descriptionChanged && !permissionChanged) {
+        form.resetFields();
+        onSuccess(knowledgeBase);
+        return;
       }
 
-      message.success(t("aidpKnowledge.updateKbSuccess"));
+      // Omitted metadata fields must never trigger an upstream AIDP request.
+      const result = await aidpKnowledgeService.setPermission(
+        knowledgeBase.kds_id,
+        {
+          ingroup_permission: newPermission,
+          group_ids: normalizedNewGroupIds,
+          ...(nameChanged ? { name } : {}),
+          ...(descriptionChanged ? { description } : {}),
+        }
+      );
+      const metadataFailed = result.metadata_status === "failed";
+      if (metadataFailed) {
+        message.warning(t("aidpKnowledge.updateKbMetadataFailed"));
+      } else {
+        message.success(t("aidpKnowledge.updateKbSuccess"));
+      }
+      const updated = result.metadata;
       form.resetFields();
       onSuccess({
         ...knowledgeBase,
-        ...updated,
-        kds_id: knowledgeBase.kds_id,
-        kds_name: updated.kds_name || values.name.trim(),
-        description: updated.description ?? values.description?.trim() ?? "",
+        kds_name:
+          !metadataFailed && nameChanged
+            ? updated?.kds_name || name
+            : knowledgeBase.kds_name,
+        description:
+          !metadataFailed && descriptionChanged
+            ? (updated?.description ?? description)
+            : knowledgeBase.description,
         ingroup_permission: newPermission,
         group_ids: normalizedNewGroupIds,
-        resource_status: "ACTIVE",
+        resource_status:
+          result.metadata_status === "updated"
+            ? "ACTIVE"
+            : knowledgeBase.resource_status,
       });
     } catch (error) {
       if (error && typeof error === "object" && "errorFields" in error) {
