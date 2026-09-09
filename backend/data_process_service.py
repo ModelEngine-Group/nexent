@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from data_process.ray_config import RayConfig
-from utils.logging_utils import configure_logging
+from utils.logging_utils import get_uvicorn_logging_config
 from consts.const import (
     REDIS_URL, REDIS_PORT, FLOWER_PORT, RAY_DASHBOARD_PORT, RAY_DASHBOARD_HOST,
     RAY_ACTOR_NUM_CPUS, RAY_NUM_CPUS, DISABLE_RAY_DASHBOARD, DISABLE_CELERY_FLOWER,
@@ -26,10 +26,11 @@ from consts.const import (
 # Load environment variables
 load_dotenv()
 
-# Configure logging with color formatter
-configure_logging(logging.INFO)
+# Configure logging: console + file, both console and uvicorn share the same config
+import logging.config
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["data_process"]))
 logging.getLogger("ray").setLevel(logging.WARNING)
-logger = logging.getLogger("data_process_service")
+logger = logging.getLogger("data_process")
 
 # Global variables to track processes
 service_processes = {
@@ -577,7 +578,14 @@ except Exception as e_exec:
         logger.info(f"📋 Effective service config: {self.config}")
         
         for service_name, start_func, config_key in services:
-            if self.config.get(config_key, True):
+            service_enabled = self.config.get(config_key, True)
+            if service_name == "Ray Cluster":
+                # Redis must be available for cancellation markers, while
+                # recovery must finish before Ray or Celery can consume work.
+                from services.startup_recovery_service import recover_data_process_tasks
+
+                recover_data_process_tasks()
+            if service_enabled:
                 enabled_count += 1
                 logger.info(f"Starting {service_name}...")
                 if start_func():
@@ -882,10 +890,11 @@ def main():
         
         logger.info(f"🌐 Starting API server on {args.api_host}:{args.api_port}")
         uvicorn.run(
-            app, 
+            app,
             host=args.api_host,
             port=args.api_port,
-            log_level="warning"
+            log_level="warning",
+            log_config=get_uvicorn_logging_config(categories=["data_process"]),
         )
         
     except KeyboardInterrupt:

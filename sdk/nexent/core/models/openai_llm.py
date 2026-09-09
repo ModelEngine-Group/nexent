@@ -391,9 +391,10 @@ class OpenAIModel(OpenAIServerModel):
                         if chunk_finish_reason is not None:
                             finish_reason = str(chunk_finish_reason)
 
-                        new_token = chunk.choices[0].delta.content
-                        reasoning_content = getattr(
-                            chunk.choices[0].delta, 'reasoning_content', None)
+                        new_token = getattr(chunk.choices[0].delta, "content", None)
+                        reasoning_content = getattr(chunk.choices[0].delta, "reasoning", None)
+                        if reasoning_content is None:
+                            reasoning_content = getattr(chunk.choices[0].delta, "reasoning_content", None)
 
                         # Handle reasoning_content if it exists and is not null
                         if reasoning_content is not None:

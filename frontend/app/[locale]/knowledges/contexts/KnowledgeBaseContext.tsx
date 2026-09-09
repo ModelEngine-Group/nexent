@@ -548,7 +548,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
           payload: t("knowledgeBase.error.deleteRetry"),
         });
-        return false;
+        // Keep the original API error so the caller can show its EDS code/details.
+        throw error;
       }
     },
     [state.knowledgeBases, state.selectedIds, state.activeKnowledgeBase]

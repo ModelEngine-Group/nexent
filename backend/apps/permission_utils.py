@@ -2,7 +2,7 @@ from http import HTTPStatus
 
 from fastapi import HTTPException
 
-from services.vectordatabase_service import ElasticSearchService
+from management.services.knowledge_base.service import ElasticSearchService
 
 
 def require_knowledge_base_edit_permission(index_name: str, user_id: str, tenant_id: str) -> None:

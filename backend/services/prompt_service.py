@@ -21,16 +21,13 @@ from database.agent_db import search_agent_info_by_agent_id, query_all_agent_inf
 from database.model_management_db import get_model_by_model_id
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.tool_db import query_tools_by_ids, query_tool_instances_by_id
-from services.agent_service import (
-    get_enable_tool_id_by_agent_id,
-    _check_agent_name_duplicate,
-    _check_agent_display_name_duplicate,
-    _regenerate_agent_name_with_llm,
-    _regenerate_agent_display_name_with_llm,
-    _generate_unique_agent_name_with_suffix,
-    _generate_unique_display_name_with_suffix,
-    update_agent,
+from management.services.agent.service import get_enable_tool_id_by_agent_id
+from management.services.agent.naming import (
+    check_agent_value_duplicate,
+    generate_unique_agent_value,
+    regenerate_agent_value,
 )
+from database.agent_db import update_agent
 from services.prompt_template_service import resolve_prompt_generate_template
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
@@ -39,7 +36,7 @@ from utils.prompt_template_utils import (
     get_guardrail_regex_prompt_template,
 )
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional as Opt
 
 from adapters.exception import JiuwenSDKError, NexentCapabilityError
@@ -264,97 +261,32 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         else:
             # If name field is complete, check for duplicates and regenerate if needed before yielding
             if result_data.get("is_complete", False):
-                if result_type == "agent_var_name":
-                    agent_name = final_results["agent_var_name"]
-                    # Check and regenerate name if duplicate
-                    if _check_agent_name_duplicate(
-                        agent_name,
-                        tenant_id=tenant_id,
-                        exclude_agent_id=agent_id,
-                        agents_cache=all_agents
-                    ):
-                        logger.info(
-                            f"Agent name '{agent_name}' already exists, regenerating with LLM")
-                        try:
-                            agent_name = _regenerate_agent_name_with_llm(
-                                original_name=agent_name,
-                                existing_names=existing_names,
-                                task_description=task_description,
-                                model_id=model_id,
-                                tenant_id=tenant_id,
-                                language=language,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id,
-                                prompt_template_id=prompt_template_id,
-                                user_id=user_id,
-                            )
-                            logger.info(
-                                f"Regenerated agent name: '{agent_name}'")
-                            final_results["agent_var_name"] = agent_name
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
-                            # Fallback: add suffix
-                            agent_name = _generate_unique_agent_name_with_suffix(
-                                agent_name,
-                                tenant_id=tenant_id,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id
-                            )
-                            final_results["agent_var_name"] = agent_name
-
-                    # Yield the (possibly regenerated) name
-                    yield {
-                        "type": "agent_var_name",
-                        "content": final_results["agent_var_name"],
-                        "is_complete": True
-                    }
-
-                elif result_type == "agent_display_name":
-                    agent_display_name = final_results["agent_display_name"]
-                    # Check and regenerate display_name if duplicate
-                    if _check_agent_display_name_duplicate(
-                        agent_display_name,
-                        tenant_id=tenant_id,
-                        exclude_agent_id=agent_id,
-                        agents_cache=all_agents
-                    ):
-                        logger.info(
-                            f"Agent display_name '{agent_display_name}' already exists, regenerating with LLM")
-                        try:
-                            agent_display_name = _regenerate_agent_display_name_with_llm(
-                                original_display_name=agent_display_name,
-                                existing_display_names=existing_display_names,
-                                task_description=task_description,
-                                model_id=model_id,
-                                tenant_id=tenant_id,
-                                language=language,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id,
-                                prompt_template_id=prompt_template_id,
-                                user_id=user_id,
-                            )
-                            logger.info(
-                                f"Regenerated agent display_name: '{agent_display_name}'")
-                            final_results["agent_display_name"] = agent_display_name
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
-                            # Fallback: add suffix
-                            agent_display_name = _generate_unique_display_name_with_suffix(
-                                agent_display_name,
-                                tenant_id=tenant_id,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id
-                            )
-                            final_results["agent_display_name"] = agent_display_name
-
-                    # Yield the (possibly regenerated) display_name
-                    yield {
-                        "type": "agent_display_name",
-                        "content": final_results["agent_display_name"],
-                        "is_complete": True
-                    }
+                field_key = "name" if result_type == "agent_var_name" else "display_name"
+                value = final_results[result_type]
+                if check_agent_value_duplicate(
+                    field_key, value, tenant_id, exclude_agent_id=agent_id, agents_cache=all_agents
+                ):
+                    try:
+                        value = regenerate_agent_value(
+                            field_key=field_key,
+                            original_value=value,
+                            existing_values=existing_names if field_key == "name" else existing_display_names,
+                            task_description=task_description,
+                            model_id=model_id,
+                            tenant_id=tenant_id,
+                            language=language,
+                            agents_cache=all_agents,
+                            exclude_agent_id=agent_id,
+                            prompt_template_id=prompt_template_id,
+                            user_id=user_id,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to regenerate agent %s with LLM: %s, using fallback", field_key, exc)
+                        value = generate_unique_agent_value(
+                            field_key, value, tenant_id, all_agents, agent_id
+                        )
+                    final_results[result_type] = value
+                yield {"type": result_type, "content": value, "is_complete": True}
 
     # 2. Update agent with the final result (skip in create mode)
     if agent_id == 0:

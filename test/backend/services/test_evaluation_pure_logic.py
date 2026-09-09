@@ -279,6 +279,7 @@ def _install_sys_modules_stubs() -> None:
         create_evaluation_set=MagicMock(),
         get_evaluation_set_cases_all=MagicMock(),
         insert_evaluation_set_cases=MagicMock(),
+        materialize_virtual_evaluation_set_for_run=MagicMock(),
         update_evaluation_set_case_count=MagicMock(),
     )
     _db_pkg.evaluation_set_db = _esdb_mod
@@ -290,7 +291,7 @@ def _install_sys_modules_stubs() -> None:
 
     # ---- services / utils --------------------------------------------------
     _services_pkg = _register_package("services")
-    _as_mod = _mk_mod("services.agent_service", prepare_agent_run=MagicMock())
+    _as_mod = _mk_mod("management.services.agent.service", prepare_agent_run=MagicMock())
     _services_pkg.agent_service = _as_mod
     _ess_mod = _mk_mod(
         "services.evaluation_set_service",

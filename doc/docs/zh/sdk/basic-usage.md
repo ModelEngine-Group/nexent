@@ -45,8 +45,9 @@ search_tool = ExaSearchTool(
     max_results=5
 )
 
-# 创建知识库工具
+# 创建知识库工具（index_names 为必填参数）
 kb_tool = KnowledgeBaseSearchTool(
+    index_names=["my_knowledge_base"],
     top_k=5, 
     observer=observer
 )

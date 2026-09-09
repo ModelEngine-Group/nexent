@@ -46,6 +46,7 @@ _spec.loader.exec_module(em)
 @pytest.fixture(autouse=True)
 def _reset_running():
     em._running = False
+    em.list_dispatchable_pending_runs.return_value = []
     yield
     em._running = False
 
@@ -87,6 +88,9 @@ def _fake_session_rows(rows):
 
 def test_run_loop_reaps_and_cleans_up(mocker):
     _fake_session_rows([("t1",), ("t2",)])
+    pending_runs = [{"agent_evaluation_id": 7}]
+    em.list_dispatchable_pending_runs.return_value = pending_runs
+    dispatch = mocker.patch.object(em, "_dispatch_pending_runs")
     reap = mocker.patch("evaluation_maintenance.reap_stale_runs", return_value=2)
     cleanup = mocker.patch("evaluation_maintenance.cleanup_aged_evaluations", return_value=5)
     mocker.patch("evaluation_maintenance.time.sleep",
@@ -96,10 +100,86 @@ def test_run_loop_reaps_and_cleans_up(mocker):
     em._running = True
     em._run_loop()
 
+    dispatch.assert_called_once_with(pending_runs)
     assert reap.call_args_list == [call("t1"), call("t2")]
     assert cleanup.call_args_list == [call("t1"), call("t2")]
     info.assert_any_call("Reaped %d stale RUNNING evaluations for tenant %s", 2, "t1")
     info.assert_any_call("Cleaned up %d aged evaluations for tenant %s", 5, "t1")
+
+
+def test_dispatch_pending_runs_reuses_runtime_dispatcher(mocker, monkeypatch):
+    dispatcher = MagicMock()
+    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy.dispatch_agent_evaluation_run = dispatcher
+    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+
+    em._dispatch_pending_runs(
+        [
+            {
+                "agent_evaluation_id": 7,
+                "tenant_id": "tenant-1",
+                "created_by": "user-1",
+            }
+        ]
+    )
+
+    dispatcher.assert_called_once_with(
+        agent_evaluation_id=7,
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+
+def test_dispatch_pending_runs_returns_immediately_when_empty(monkeypatch):
+    monkeypatch.delitem(sys.modules, "services.runtime_proxy_service", raising=False)
+
+    em._dispatch_pending_runs([])
+
+    assert "services.runtime_proxy_service" not in sys.modules
+
+
+def test_dispatch_pending_runs_skips_incomplete_identity(mocker, monkeypatch):
+    dispatcher = MagicMock()
+    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy.dispatch_agent_evaluation_run = dispatcher
+    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+    warning = mocker.patch.object(em.logger, "warning")
+
+    em._dispatch_pending_runs(
+        [
+            {
+                "agent_evaluation_id": 7,
+                "tenant_id": "tenant-1",
+                "created_by": None,
+            }
+        ]
+    )
+
+    dispatcher.assert_not_called()
+    warning.assert_called_once_with(
+        "Cannot redispatch pending evaluation %s without tenant and creator",
+        7,
+    )
+
+
+def test_dispatch_pending_runs_keeps_failed_dispatch_pending(mocker, monkeypatch):
+    dispatcher = MagicMock(side_effect=RuntimeError("runtime unavailable"))
+    runtime_proxy = types.ModuleType("services.runtime_proxy_service")
+    runtime_proxy.dispatch_agent_evaluation_run = dispatcher
+    monkeypatch.setitem(sys.modules, "services.runtime_proxy_service", runtime_proxy)
+    warning = mocker.patch.object(em.logger, "warning")
+
+    em._dispatch_pending_runs(
+        [
+            {
+                "agent_evaluation_id": 7,
+                "tenant_id": "tenant-1",
+                "created_by": "user-1",
+            }
+        ]
+    )
+
+    warning.assert_called_once()
 
 
 def test_run_loop_skips_cleanup_until_interval(mocker, monkeypatch):

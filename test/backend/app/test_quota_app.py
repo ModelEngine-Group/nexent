@@ -617,9 +617,9 @@ class TestQuotaRoleHelpers:
 
     def test_manageable_indices_only_include_edit_permissions(self):
         with patch(
-            "services.vectordatabase_service.get_vector_db_core"
+            "management.services.knowledge_base.service.get_vector_db_core"
         ), patch(
-            "services.vectordatabase_service.ElasticSearchService.list_indices",
+            "management.services.knowledge_base.service.ElasticSearchService.list_indices",
             return_value={
                 "index_permissions": {
                     "editable": "EDIT",
@@ -634,9 +634,9 @@ class TestQuotaRoleHelpers:
             }
 
         with patch(
-            "services.vectordatabase_service.get_vector_db_core"
+            "management.services.knowledge_base.service.get_vector_db_core"
         ), patch(
-            "services.vectordatabase_service.ElasticSearchService.list_indices",
+            "management.services.knowledge_base.service.ElasticSearchService.list_indices",
             return_value=[],
         ):
             assert quota_app._get_manageable_index_names("tenant", "user") == set()

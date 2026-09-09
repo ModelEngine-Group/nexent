@@ -98,10 +98,10 @@ class TestListModelsEndpoint:
 
         import types
 
-        if "services.vectordatabase_service" not in sys.modules:
-            mod = types.ModuleType("services.vectordatabase_service")
+        if "management.services.knowledge_base.service" not in sys.modules:
+            mod = types.ModuleType("management.services.knowledge_base.service")
             mod.get_vector_db_core = lambda: object()
-            sys.modules["services.vectordatabase_service"] = mod
+            sys.modules["management.services.knowledge_base.service"] = mod
 
         from apps.monitoring_app import router
 

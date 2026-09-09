@@ -250,8 +250,14 @@ class TestPermissionEnforcement:
         )
         try:
             soft_delete = MagicMock(return_value=True)
+            cleanup_documents = MagicMock(return_value=0)
             with patch.object(aidp_mgmt_app, "delete_aidp_kb_impl", return_value=True), \
-                 patch.object(aidp_mgmt_app.perms, "soft_delete_permission", soft_delete):
+                 patch.object(aidp_mgmt_app.perms, "soft_delete_permission", soft_delete), \
+                 patch.object(
+                     aidp_mgmt_app,
+                     "_cleanup_document_assignments_for_deleted_knowledge_base",
+                     cleanup_documents,
+                 ):
                 response = client.delete(
                     "/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()
                 )
@@ -260,6 +266,7 @@ class TestPermissionEnforcement:
         assert response.status_code == HTTPStatus.OK
         assert response.json() == {"success": True}
         soft_delete.assert_called_once()
+        cleanup_documents.assert_called_once_with("tenant-test", "kb-1", "user-test")
 
     def test_set_permission_private_clears_groups(self):
         client = _client()

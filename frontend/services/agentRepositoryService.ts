@@ -43,6 +43,20 @@ export async function fetchAgentRepositoryListings(
   }
 }
 
+export async function fetchAgentRepositoryTagStats(): Promise<
+  Array<{ tag: string; count: number }>
+> {
+  const response = await fetchWithErrorHandling(
+    API_ENDPOINTS.agentRepository.tagStats,
+    { method: "GET", headers: getAuthHeaders() }
+  );
+  if (!response.ok) throw new Error("Failed to fetch agent repository tag stats");
+  const data = (await response.json()) as {
+    items?: Array<{ tag: string; count: number }>;
+  };
+  return data.items ?? [];
+}
+
 export async function fetchAgentRepositoryListingDetail(
   agentRepositoryId: number
 ): Promise<AgentRepositoryListingDetail> {
@@ -311,6 +325,7 @@ export async function installOfficialAgents(
 
 const agentRepositoryService = {
   fetchAgentRepositoryListings,
+  fetchAgentRepositoryTagStats,
   fetchAgentRepositoryListingDetail,
   fetchMyEditableAgents,
   createAgentRepositoryListing,

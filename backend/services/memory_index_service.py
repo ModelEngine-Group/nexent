@@ -28,7 +28,7 @@ from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import MemoryLayer
 from nexent.vector_database.base import VectorDatabaseCore
 
-from services.vectordatabase_service import get_vector_db_core
+from management.services.knowledge_base.service import get_vector_db_core
 from consts.const import VectorDatabaseType
 
 

@@ -816,13 +816,12 @@ async def list_published_agents_impl(
         from database.agent_db import (
             query_all_agent_info_by_tenant_id,
         )
-        from services.agent_service import (
-            CAN_EDIT_ALL_USER_ROLES,
-            get_user_tenant_by_user_id,
-            query_group_ids_by_user,
-            get_model_by_model_id,
-            check_agent_availability,
-            _apply_duplicate_name_availability_rules,
+        from consts.const import CAN_EDIT_ALL_USER_ROLES
+        from database.user_tenant_db import get_user_tenant_by_user_id
+        from database.group_db import query_group_ids_by_user
+        from database.model_management_db import get_model_by_model_id
+        from management.services.agent.read import (
+            check_agent_availability, apply_duplicate_name_availability_rules,
         )
         from services.asset_owner_visibility import resolve_agent_list_permission
         from database.agent_version_db import query_agent_snapshot, query_version_list
@@ -940,7 +939,7 @@ async def list_published_agents_impl(
 
         # Handle duplicate name/display_name: keep the earliest created agent available,
         # mark later ones as unavailable due to duplication.
-        _apply_duplicate_name_availability_rules(enriched_agents)
+        apply_duplicate_name_availability_rules(enriched_agents)
 
         # Build the final simple agent list
         simple_agent_list: list[dict] = []

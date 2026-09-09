@@ -140,12 +140,12 @@ export default function AgentPrompt() {
                 });
               }}
               maxTagCount={3}
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? "")
-                  .toLowerCase()
-                  .includes(input.toLowerCase())
-              }
+              showSearch={{
+                filterOption: (input, option) =>
+                  (option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase()),
+              }}
               disabled={!canManage && !isSpeedMode}
             />
           </Form.Item>
@@ -155,7 +155,7 @@ export default function AgentPrompt() {
       <Tabs
         value={activePromptTab}
         onValueChange={handlePromptTabChange}
-        className="w-full"
+        className="relative z-0 w-full"
       >
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="duty">{t("agent.field.dutyPrompt")}</TabsTrigger>

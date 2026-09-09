@@ -52,6 +52,16 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
+# Document deletion coordination.  The Redis deletion fence itself never
+# expires; these values only bound one drain attempt and background retry
+# cadence while workers finish an in-flight request.
+DOCUMENT_DELETE_DRAIN_TIMEOUT_S = float(
+    os.getenv("DOCUMENT_DELETE_DRAIN_TIMEOUT_S", "30")
+)
+DOCUMENT_DELETE_RETRY_INTERVAL_S = float(
+    os.getenv("DOCUMENT_DELETE_RETRY_INTERVAL_S", "2")
+)
+
 # Agent automation runtime configuration
 AGENT_AUTOMATION_ENABLED = os.getenv(
     "AGENT_AUTOMATION_ENABLED", "true"
@@ -62,6 +72,14 @@ AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
 AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
     os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
 )
+
+# Unified tag document retrieval projection rollout flag. When enabled, document
+# assignments are projected to retrieval providers and tracked in the
+# document_tag_projection ledger; canonical assignments are never rolled back
+# when a provider rejects or delays a projection.
+TAG_DOCUMENT_PROJECTION_ENABLED = os.getenv(
+    "TAG_DOCUMENT_PROJECTION_ENABLED", "true"
+).lower() in ("true", "1", "yes", "on")
 AGENT_AUTOMATION_LEASE_SECONDS = int(
     os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
 )
@@ -245,11 +263,6 @@ ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in (
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
-DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
-DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
-DEFAULT_APP_NAME_ZH = "Nexent 智能体"
-DEFAULT_APP_NAME_EN = "Nexent Agent"
-
 # Minio Configuration
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
@@ -307,6 +320,16 @@ RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 # Disable plasma preallocation to reduce idle memory usage
 # When set to false, Ray will allocate object store memory on-demand instead of preallocating
 RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
+
+
+# Logging Configuration
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# When IS_DEBUG=true, force DEBUG level for all loggers (overrides LOG_LEVEL).
+IS_DEBUG = os.getenv("IS_DEBUG", "false").lower() == "true"
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "1"))  # days
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
 
 
 # Service Control Flags
@@ -368,9 +391,11 @@ DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
 DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
 DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
+EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
 DEFAULT_MEMORY_SWITCH_KEY = "Y"
 DEFAULT_DREAMING_SWITCH_KEY = "Y"
 DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
+DEFAULT_EXTERNAL_PROVIDER_TOP_K = 20
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
@@ -423,9 +448,10 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
     os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
 )
 
-# External provider toggles (configured per provider elsewhere; these constants
-# describe protocol-level defaults)
+# External provider protocol defaults. Provider records control whether each
+# configured integration participates in search and ingest.
 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "agent",
     "model_output",
     "model_output_thinking",
     "model_output_deep_thinking",
@@ -540,8 +566,6 @@ MODEL_CONFIG_MAPPING = {
     "tts": "TTS_ID"
 }
 
-APP_NAME = "APP_NAME"
-APP_DESCRIPTION = "APP_DESCRIPTION"
 ICON_TYPE = "ICON_TYPE"
 ICON_KEY = "ICON_KEY"
 AVATAR_URI = "AVATAR_URI"
@@ -739,7 +763,7 @@ NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
 )
 """Docker named volume shared by the runtime and the system-scoped sandbox."""
 
-NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
+NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "2048"))
 
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
 
@@ -792,3 +816,6 @@ enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"
+
+# External Memory Provider Configuration
+MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

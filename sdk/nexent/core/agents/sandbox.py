@@ -20,12 +20,14 @@ import base64
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import logging
 import mimetypes
 import re
 import secrets
 import shlex
+import socket
 import tarfile
 import threading
 import time
@@ -36,6 +38,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 
@@ -59,17 +62,22 @@ class SandboxSkillScriptRunner:
         executor: Any,
         timeout_seconds: int = 300,
         workspace_path: Optional[str] = None,
+        network_enabled: bool = False,
     ) -> None:
         self._executor = executor
         self._container = getattr(executor, "container", None)
         self._timeout_seconds = max(1, int(timeout_seconds))
         self._workspace_path = (workspace_path or "").rstrip("/")
+        self._network_enabled = bool(network_enabled)
+        self._pnpm_store_path = ""
+        self._pnpm_store_seeded = False
         self._root = (
             f"{self._workspace_path}/skills"
             if self._workspace_path
             else ""
         )
         self._staged_skills: dict[str, str] = {}
+        self._staged_script_fingerprints: dict[tuple[str, str], tuple[int, int]] = {}
         self._stage_lock = threading.Lock()
 
     @property
@@ -104,6 +112,75 @@ class SandboxSkillScriptRunner:
         self._root = skills_root
         return skills_root
 
+    def _resolve_workspace_script(
+        self,
+        script_path: str,
+        working_directory: Optional[str],
+    ) -> tuple[str, str]:
+        """Resolve one run-workspace script without following an escaping link."""
+        workspace_path = (working_directory or self._workspace_path).rstrip("/")
+        if not workspace_path:
+            raise RuntimeError("Workspace scripts require a run-scoped workspace")
+        if self._workspace_path and workspace_path != self._workspace_path:
+            raise RuntimeError("Workspace script path does not match the sandbox runner workspace")
+
+        normalized = (script_path or "").strip().strip("\"'").replace("\\", "/")
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        path_parts = normalized.split("/")
+        if not normalized or normalized.startswith("/") or ".." in path_parts:
+            raise ValueError("Workspace script path must be a safe relative path")
+        suffix = Path(normalized).suffix.lower()
+        if suffix not in {".py", ".js", ".mjs"}:
+            raise ValueError("Workspace scripts must use a .py, .js, or .mjs extension")
+
+        candidate = f"{workspace_path}/{normalized}"
+        resolved_result = self._container.exec_run(
+            ["realpath", "-e", "--", candidate],
+            user="sandbox",
+        )
+        if getattr(resolved_result, "exit_code", None) != 0:
+            raise FileNotFoundError(f"Workspace script not found: {normalized}")
+        resolved = self._output_text(getattr(resolved_result, "output", b"")).strip()
+        if resolved == workspace_path or not resolved.startswith(f"{workspace_path}/"):
+            raise PermissionError("Workspace script resolves outside the current run workspace")
+        file_result = self._container.exec_run(
+            ["test", "-f", resolved],
+            user="sandbox",
+        )
+        if getattr(file_result, "exit_code", None) != 0:
+            raise ValueError("Workspace script must resolve to a regular file")
+        return resolved, normalized
+
+    def _validate_workspace_python(self, script_path: str) -> None:
+        """Apply the existing Python shell-call guard to a workspace script."""
+        result = self._container.exec_run(
+            ["cat", "--", script_path],
+            user="sandbox",
+        )
+        if getattr(result, "exit_code", None) != 0:
+            raise RuntimeError("Failed to read workspace Python script for validation")
+        source = self._output_text(getattr(result, "output", b""))
+        if len(source.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("Workspace Python scripts cannot exceed 1 MiB")
+        violations = _scan_shell_calls(
+            source,
+            allow_package_installs=self._network_enabled,
+        )
+        if violations:
+            raise PermissionError(
+                "Workspace Python script contains blocked shell calls: "
+                + ", ".join(violations)
+            )
+
+    def _ensure_output_directory(self, output_dir: str) -> None:
+        """Create the run output directory and keep it writable by the sandbox user."""
+        self._run_container_command(["mkdir", "-p", "--", output_dir], user="0")
+        self._run_container_command(
+            ["chown", "sandbox:sandbox", "--", output_dir],
+            user="0",
+        )
+
     def _stage_skill(
         self,
         manager: Any,
@@ -120,6 +197,38 @@ class SandboxSkillScriptRunner:
         )
         local_skill_root = str(Path(local_skill_dir).resolve())
         relative_script = Path(local_script).resolve().relative_to(Path(local_skill_root))
+        script_key = (local_skill_root, relative_script.as_posix())
+        script_stat = Path(local_script).stat()
+        script_fingerprint = (script_stat.st_mtime_ns, script_stat.st_size)
+
+        with self._stage_lock:
+            staged_dir = self._staged_skills.get(local_skill_root)
+            staged_fingerprint = self._staged_script_fingerprints.get(script_key)
+            if staged_dir and staged_fingerprint != script_fingerprint:
+                self._run_container_command(["rm", "-rf", "--", staged_dir], user="0")
+                self._staged_skills.pop(local_skill_root, None)
+                self._staged_script_fingerprints = {
+                    key: value
+                    for key, value in self._staged_script_fingerprints.items()
+                    if key[0] != local_skill_root
+                }
+
+        sandbox_skill_dir = self._stage_skill_directory(
+            local_skill_dir,
+            skill_name,
+            skills_root,
+        )
+        self._staged_script_fingerprints[script_key] = script_fingerprint
+        return f"{sandbox_skill_dir}/{relative_script.as_posix()}", normalized_script
+
+    def _stage_skill_directory(
+        self,
+        local_skill_dir: str,
+        skill_name: str,
+        skills_root: str,
+    ) -> str:
+        """Copy one resolved tenant skill directory into the run workspace."""
+        local_skill_root = str(Path(local_skill_dir).resolve())
 
         with self._stage_lock:
             sandbox_skill_dir = self._staged_skills.get(local_skill_root)
@@ -145,7 +254,7 @@ class SandboxSkillScriptRunner:
                 )
                 self._staged_skills[local_skill_root] = sandbox_skill_dir
 
-        return f"{sandbox_skill_dir}/{relative_script.as_posix()}", normalized_script
+        return sandbox_skill_dir
 
     def __call__(
         self,
@@ -156,43 +265,126 @@ class SandboxSkillScriptRunner:
         params: Optional[str],
         tenant_id: Optional[str],
         working_directory: Optional[str],
+        source: str = "skill",
     ) -> str:
         if not self.available:
             raise RuntimeError(
                 "Skill scripts require a Docker sandbox, but the configured sandbox executor is unavailable"
             )
 
-        skills_root = self._resolve_skills_root(working_directory)
-        sandbox_script, normalized_script = self._stage_skill(
-            manager,
-            skill_name,
-            script_path,
-            tenant_id,
-            skills_root,
-        )
-        interpreter = "python" if normalized_script.endswith(".py") else "bash"
+        normalized_source = (source or "skill").strip().lower()
+        skill_python_path = ""
+        if normalized_source == "skill":
+            skills_root = self._resolve_skills_root(working_directory)
+            sandbox_script, normalized_script = self._stage_skill(
+                manager,
+                skill_name,
+                script_path,
+                tenant_id,
+                skills_root,
+            )
+            skill_python_path = sandbox_script[: -(len(normalized_script) + 1)]
+            if normalized_script.endswith(".sh"):
+                # Some third-party skill archives store shell scripts with
+                # CRLF line endings. Preserve the uploaded source and only
+                # normalize the run-scoped, read-only staging copy.
+                self._run_container_command(
+                    ["sed", "-i", "s/\\r$//", sandbox_script],
+                    user="0",
+                )
+            interpreter_args = [
+                "python" if normalized_script.endswith(".py") else "bash",
+                sandbox_script,
+            ]
+        elif normalized_source == "workspace":
+            sandbox_script, normalized_script = self._resolve_workspace_script(
+                script_path,
+                working_directory,
+            )
+            if normalized_script.endswith(".py"):
+                self._validate_workspace_python(sandbox_script)
+                skills_root = self._resolve_skills_root(working_directory)
+                local_skill_dir = manager.resolve_skill_dir(
+                    skill_name,
+                    tenant_id=tenant_id,
+                )
+                if not Path(local_skill_dir).is_dir():
+                    raise FileNotFoundError(f"Skill not found: {skill_name}")
+                skill_python_path = self._stage_skill_directory(
+                    local_skill_dir,
+                    skill_name,
+                    skills_root,
+                )
+                interpreter_args = ["python", sandbox_script]
+            else:
+                workspace_path = (working_directory or self._workspace_path).rstrip("/")
+                interpreter_args = [
+                    "node",
+                    "--experimental-permission",
+                    "--allow-addons",
+                    f"--allow-fs-read={workspace_path}",
+                    "--allow-fs-read=/opt/nexent/node_modules",
+                    "--allow-fs-read=/usr/local/lib/node_modules",
+                    f"--allow-fs-write={workspace_path}",
+                    sandbox_script,
+                ]
+        else:
+            raise ValueError("source must be either 'skill' or 'workspace'")
+
         command = [
             "timeout",
             "--signal=KILL",
             str(self._timeout_seconds),
-            interpreter,
-            sandbox_script,
+            *interpreter_args,
             *shlex.split(params or ""),
         ]
-        workdir = working_directory or "/home/sandbox/workdir/output"
-        output_dir = (
-            f"{working_directory.rstrip('/')}/outputs"
-            if working_directory
-            else workdir
-        )
+        if working_directory:
+            workspace_dir = working_directory.rstrip("/")
+            output_dir = f"{workspace_dir}/outputs"
+        elif self._workspace_path:
+            workspace_dir = self._workspace_path
+            output_dir = f"{workspace_dir}/outputs"
+        else:
+            workspace_dir = "/home/sandbox/workdir"
+            output_dir = "/home/sandbox/workdir/output"
+        self._ensure_output_directory(output_dir)
+        execution_environment = {
+            "NEXENT_WORKSPACE": workspace_dir,
+            "NEXENT_OUTPUT_DIR": output_dir,
+            "NODE_PATH": "/opt/nexent/node_modules:/usr/local/lib/node_modules",
+            "PNPM_CONFIG_OFFLINE": "false" if self._network_enabled else "true",
+            "npm_config_offline": "false" if self._network_enabled else "true",
+            "COREPACK_ENABLE_NETWORK": "1" if self._network_enabled else "0",
+            "PNPM_CONFIG_STORE_DIR": (
+                self._resolve_network_pnpm_store(workspace_dir)
+                if self._network_enabled
+                else SANDBOX_PNPM_STORE_PATH
+            ),
+            # pnpm follows npm's environment-variable convention for this
+            # option. Keep the uppercase key for compatibility, but use the
+            # npm_config spelling to make the per-run store effective.
+            "npm_config_store_dir": (
+                self._resolve_network_pnpm_store(workspace_dir)
+                if self._network_enabled
+                else SANDBOX_PNPM_STORE_PATH
+            ),
+            "PIP_USER": "1",
+            "PYTHONPATH": ":".join(
+                path
+                for path in (
+                    skill_python_path,
+                    "/home/sandbox/.local/lib/python3.11/site-packages",
+                )
+                if path
+            ),
+        }
+        if self._network_enabled and interpreter_args[0] == "bash":
+            self._ensure_network_pnpm_store(workspace_dir)
         result = self._container.exec_run(
             command,
             user="sandbox",
-            workdir=workdir,
-            environment={
-                "NEXENT_WORKSPACE": workdir,
-                "NEXENT_OUTPUT_DIR": output_dir,
-            },
+            workdir=output_dir,
+            environment=execution_environment,
             demux=True,
         )
         exit_code = getattr(result, "exit_code", None)
@@ -218,7 +410,56 @@ class SandboxSkillScriptRunner:
                 "error": failure_message,
                 "output": output if error_output else "",
             })
+        logger.info(
+            "Sandbox skill script completed source=%s skill=%s script=%s interpreter=%s exit=%s",
+            normalized_source,
+            skill_name,
+            normalized_script,
+            interpreter_args[0],
+            exit_code,
+        )
         return output
+
+    def _resolve_network_pnpm_store(self, workspace_dir: str) -> str:
+        """Return a writable, container-private pnpm store for one agent run."""
+        store_key = hashlib.sha256(workspace_dir.encode("utf-8")).hexdigest()[:24]
+        expected_path = f"/tmp/nexent-pnpm-stores/{store_key}"
+        if self._pnpm_store_path and self._pnpm_store_path != expected_path:
+            raise RuntimeError("pnpm store path does not match the sandbox runner workspace")
+        self._pnpm_store_path = expected_path
+        return expected_path
+
+    def _ensure_network_pnpm_store(self, workspace_dir: str) -> None:
+        """Seed a run-private writable pnpm store from the full image cache."""
+        store_path = self._resolve_network_pnpm_store(workspace_dir)
+        if self._pnpm_store_seeded:
+            return
+        self._run_container_command(
+            ["mkdir", "-p", "/tmp/nexent-pnpm-stores"],
+            user="0",
+        )
+        source_check = self._container.exec_run(
+            ["test", "-d", f"{SANDBOX_PNPM_STORE_SOURCE}/v3"],
+            user="0",
+        )
+        if getattr(source_check, "exit_code", None) == 0:
+            self._run_container_command(
+                [
+                    "cp",
+                    "-a",
+                    "--reflink=auto",
+                    f"{SANDBOX_PNPM_STORE_SOURCE}/.",
+                    store_path,
+                ],
+                user="0",
+            )
+        else:
+            self._run_container_command(["mkdir", "-p", store_path], user="0")
+        self._run_container_command(
+            ["chown", "-R", "sandbox:sandbox", store_path],
+            user="0",
+        )
+        self._pnpm_store_seeded = True
 
     def cleanup(self) -> None:
         """Remove this run's private skill copy from a shared container."""
@@ -246,6 +487,24 @@ class SandboxSkillScriptRunner:
                 )
         except Exception as exc:
             logger.warning("Failed to remove sandbox skill directory %s: %s", self._root, exc)
+        if self._pnpm_store_path:
+            try:
+                result = self._container.exec_run(
+                    ["rm", "-rf", "--", self._pnpm_store_path],
+                    user="0",
+                )
+                if getattr(result, "exit_code", None) != 0:
+                    logger.warning(
+                        "Failed to remove sandbox pnpm store %s (exit=%s)",
+                        self._pnpm_store_path,
+                        getattr(result, "exit_code", None),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to remove sandbox pnpm store %s: %s",
+                    self._pnpm_store_path,
+                    exc,
+                )
 
 
 def _serialize_tool_bridge_value(value: Any) -> Any:
@@ -462,10 +721,10 @@ class SandboxConfig:
     level: SandboxLevel = SandboxLevel.LOCAL
     scope: SandboxScope = SandboxScope.SESSION
     docker_image: str = "nexent/nexent-sandbox:latest"
-    memory_limit_mb: int = 512
+    memory_limit_mb: int = 2048
     cpu_quota: float = 1.0
     network_disabled: bool = True
-    timeout_seconds: int = 30
+    timeout_seconds: int = 120
     host_tool_timeout_seconds: Optional[float] = None
     shell_policy: ShellPolicy = ShellPolicy.DISABLED
     output_dir: str = "/home/sandbox/workdir/output"
@@ -487,10 +746,10 @@ class SandboxConfig:
             level=SandboxLevel(data.get("level", "local")),
             scope=SandboxScope(data.get("scope", "session")),
             docker_image=data.get("docker_image", "nexent/nexent-sandbox:latest"),
-            memory_limit_mb=int(data.get("memory_limit_mb", 512)),
+            memory_limit_mb=int(data.get("memory_limit_mb", 2048)),
             cpu_quota=float(data.get("cpu_quota", 1.0)),
             network_disabled=bool(data.get("network_disabled", True)),
-            timeout_seconds=int(data.get("timeout_seconds", 30)),
+            timeout_seconds=int(data.get("timeout_seconds", 120)),
             host_tool_timeout_seconds=host_tool_timeout_seconds,
             shell_policy=ShellPolicy(data.get("shell_policy", "disabled")),
             output_dir=data.get("output_dir", "/home/sandbox/workdir/output"),
@@ -515,34 +774,113 @@ _FORBIDDEN_SHELL_CALLS = {
 }
 
 
-def _scan_shell_calls(code: str) -> list[str]:
+def _is_allowed_pip_install_call(node: ast.Call) -> bool:
+    """Return whether a subprocess call is a shell-free pip install argv."""
+    if not node.args or not isinstance(node.args[0], (ast.List, ast.Tuple)):
+        return False
+    for keyword in node.keywords:
+        if keyword.arg in {"cwd", "env", "executable", "preexec_fn"}:
+            return False
+        if keyword.arg == "shell" and not (
+            isinstance(keyword.value, ast.Constant) and keyword.value.value is False
+        ):
+            return False
+
+    argv_nodes = list(node.args[0].elts)
+    if not argv_nodes:
+        return False
+    argv: list[str] = []
+    for index, value in enumerate(argv_nodes):
+        if (
+            index == 0
+            and isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id == "sys"
+            and value.attr == "executable"
+        ):
+            argv.append("<python>")
+        elif isinstance(value, ast.Constant) and isinstance(value.value, str):
+            argv.append(value.value)
+        else:
+            return False
+
+    normalized = [value.lower() for value in argv]
+    if normalized[0] == "<python>":
+        return len(normalized) >= 5 and normalized[1:4] == ["-m", "pip", "install"]
+    executable = normalized[0].replace("\\", "/").rsplit("/", 1)[-1]
+    if executable in {"pip", "pip3"}:
+        return len(normalized) >= 3 and normalized[1] == "install"
+    if executable.startswith("python"):
+        return len(normalized) >= 5 and normalized[1:4] == ["-m", "pip", "install"]
+    return False
+
+
+def _scan_shell_calls(
+    code: str,
+    *,
+    allow_package_installs: bool = False,
+) -> list[str]:
     """AST static scan for forbidden subprocess / os shell invocations."""
+    stripped_lines = [line.strip() for line in code.splitlines() if line.strip()]
+    magic_violations = []
+    for line in stripped_lines:
+        if line.startswith("!"):
+            magic_violations.append("IPython shell escape (!...)")
+        elif re.match(r"^%(?:system|sx|sc)\b", line, flags=re.IGNORECASE):
+            magic_violations.append("IPython shell magic")
+        elif re.match(r"^%%(?:bash|sh|script)\b", line, flags=re.IGNORECASE):
+            magic_violations.append("IPython shell cell magic")
+
     try:
         tree = ast.parse(code)
     except SyntaxError:
-        return []
+        # IPython magics such as `%pip install` are not valid Python AST. They
+        # remain available for dependency installation, while explicit shell
+        # escapes are rejected above.
+        return magic_violations
 
-    violations = []
+    violations = list(magic_violations)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            module = func.value.id
+        if isinstance(func, ast.Attribute):
             attr = func.attr
-            if module in _FORBIDDEN_SHELL_CALLS and attr in _FORBIDDEN_SHELL_CALLS[module]:
-                violations.append(f"{module}.{attr}(...)")
+            if isinstance(func.value, ast.Name):
+                module = func.value.id
+                if module in _FORBIDDEN_SHELL_CALLS and attr in _FORBIDDEN_SHELL_CALLS[module]:
+                    if (
+                        allow_package_installs
+                        and module == "subprocess"
+                        and attr in {"run", "check_call", "check_output"}
+                        and _is_allowed_pip_install_call(node)
+                    ):
+                        continue
+                    violations.append(f"{module}.{attr}(...)")
+            if (
+                isinstance(func.value, ast.Call)
+                and isinstance(func.value.func, ast.Name)
+                and func.value.func.id == "get_ipython"
+                and attr in {"system", "getoutput"}
+            ):
+                violations.append(f"get_ipython().{attr}(...)")
     return violations
 
 
-def _install_shell_guard(executor: Any, policy: ShellPolicy, logger_: logging.Logger) -> Any:
+def _install_shell_guard(
+    executor: Any,
+    policy: ShellPolicy,
+    logger_: logging.Logger,
+    *,
+    allow_package_installs: bool = False,
+) -> Any:
     """
     Install an AST-based guard that intercepts subprocess / os shell calls
     before they reach the sandbox container.
 
     This runs in the host process, scanning the code string BEFORE it is
-    sent over the wire to the container.  Combined with ``network_disabled=True``
-    and a non-root UID, defence-in-depth is achieved.
+    sent over the wire to the container. Combined with a non-root UID and the
+    configured container network policy, defence-in-depth is achieved.
     """
     if getattr(executor, "_nexent_shell_guard_installed", False):
         return executor
@@ -552,25 +890,65 @@ def _install_shell_guard(executor: Any, policy: ShellPolicy, logger_: logging.Lo
     original_call = executor.__call__
 
     def wrapped_call(code: str) -> Any:
-        violations = _scan_shell_calls(code)
+        violations = _scan_shell_calls(
+            code,
+            allow_package_installs=allow_package_installs,
+        )
         if violations:
             logger_.warning(
                 "Sandbox shell guard blocked %d call(s): %s",
                 len(violations),
                 violations,
             )
-            return (
-                "SecurityError: shell command execution is disabled in this sandbox.\n"
+            message = (
+                "SecurityError: this shell command is not permitted by the sandbox policy.\n"
                 "Detected: " + ", ".join(violations) + "\n"
-                "Suggestion: use a Nexent tool (e.g. TerminalTool with explicit "
-                "allowlist) or implement the logic in pure Python.\n"
+                "Suggestion: when network access is enabled, install Python packages with a "
+                "shell-free `subprocess` pip-install argv or `%pip install`; otherwise use an "
+                "approved Nexent tool or pure Python.\n"
                 "To enable shell access, configure sandbox_policy.shell_policy='restricted' "
                 "and supply an explicit command allowlist."
             )
+            return _make_code_output(message)
         return original_call(code)
 
     executor.__call__ = wrapped_call
     executor._nexent_shell_guard_installed = True
+    return executor
+
+
+def _make_code_output(logs: str) -> Any:
+    """Return the executor result shape expected by the agent runtime."""
+    try:
+        from smolagents.remote_executors import CodeOutput
+
+        return CodeOutput(output=None, logs=logs, is_final_answer=False)
+    except ImportError:
+        return SimpleNamespace(output=None, logs=logs, is_final_answer=False)
+
+
+_ONLINE_USER_SITE_BOOTSTRAP = (
+    "import importlib as _nexent_importlib, site as _nexent_site, sys as _nexent_sys\n"
+    "_nexent_user_site = _nexent_site.getusersitepackages()\n"
+    "(_nexent_sys.path.insert(0, _nexent_user_site) "
+    "if _nexent_user_site not in _nexent_sys.path else None)\n"
+    "_nexent_sys.path_importer_cache.pop(_nexent_user_site, None)\n"
+    "_nexent_importlib.invalidate_caches()\n"
+)
+
+
+def _install_online_user_site(executor: Any) -> Any:
+    """Keep runtime-installed user packages importable in the active kernel."""
+    if getattr(executor, "_nexent_online_user_site_installed", False):
+        return executor
+
+    original_call = executor.__call__
+
+    def wrapped_call(code: str) -> Any:
+        return original_call(_ONLINE_USER_SITE_BOOTSTRAP + code)
+
+    executor.__call__ = wrapped_call
+    executor._nexent_online_user_site_installed = True
     return executor
 
 
@@ -811,8 +1189,10 @@ _PACKAGE_LIST_NOTE = (
     "Nexent sandbox image provides the standard packages listed at:\n"
     "  doc/docs/zh/backend/sandbox-design.md#64\n"
     "Please try: (1) use a pre-installed package; "
-    "(2) implement the logic with Python stdlib; "
-    "(3) call a Nexent tool instead of a raw import."
+    "(2) when sandbox network access is enabled, install a Python dependency "
+    "with `%pip install --user <package>` and retry; "
+    "(3) implement the logic with Python stdlib; "
+    "(4) call a Nexent tool instead of a raw import."
 )
 
 
@@ -835,8 +1215,7 @@ def _wrap_with_diagnostics(executor: Any, logger_: logging.Logger) -> Any:
             pkg = missing.group(1) if missing else "unknown"
             logger_.info(
                 "Sandbox execution hit missing package '%s'. "
-                "Not auto-installing (security boundary). "
-                "Returning diagnostic message to LLM.",
+                "Returning dependency-install guidance to the LLM.",
                 pkg,
             )
             return (
@@ -982,14 +1361,150 @@ def cleanup_executor(executor: Any, logger_: logging.Logger, timeout: float = 5.
 
 
 SANDBOX_CONTAINER_NAME = "nexent-runtime-sandbox"
-SANDBOX_NETWORK_NAME = "nexent_network"
+SANDBOX_NETWORK_NAME = "nexent_sandbox_control"
 SANDBOX_JUPYTER_PORT = 8888
 SANDBOX_SESSION_CONTAINER_PREFIX = "nexent-runtime-sandbox-session"
+SANDBOX_PNPM_STORE_SOURCE = "/opt/nexent/pnpm-store"
+SANDBOX_PNPM_STORE_PATH = "/mnt/nexent/workdir/.pnpm-store"
+_DOCKER_CLONE3_SECCOMP_MIN_VERSION = (20, 10, 10)
+_ONLINE_PACKAGE_ENV = {
+    "PNPM_CONFIG_OFFLINE": "false",
+    "npm_config_offline": "false",
+    "COREPACK_ENABLE_NETWORK": "1",
+    "PIP_USER": "1",
+    "PYTHONPATH": "/home/sandbox/.local/lib/python3.11/site-packages",
+    "PATH": (
+        "/home/sandbox/.local/bin:/usr/local/bin:/usr/local/sbin:"
+        "/usr/sbin:/usr/bin:/sbin:/bin"
+    ),
+}
 
 
 def _is_containerized_runtime() -> bool:
     """Return whether the current runtime is running inside a Docker container."""
     return Path("/.dockerenv").exists()
+
+
+def _docker_bridge_gateway(client: Any) -> str:
+    """Return the Docker host IPv4 address without requiring ``host-gateway``.
+
+    Docker Engine versions before 20.10 do not understand the special
+    ``host-gateway`` value in ``ExtraHosts``. The default bridge gateway is the
+    equivalent concrete host address and is supported by older daemons.
+    """
+    network = client.networks.get("bridge")
+    network.reload()
+    ipam_configs = ((network.attrs or {}).get("IPAM") or {}).get("Config") or []
+    for config in ipam_configs:
+        gateway = config.get("Gateway")
+        if not gateway:
+            continue
+        try:
+            if ipaddress.ip_address(gateway).version == 4:
+                return gateway
+        except ValueError:
+            continue
+    raise RuntimeError("Docker bridge network does not expose an IPv4 gateway")
+
+
+def _apply_legacy_docker_seccomp_compatibility(
+    client: Any,
+    container_run_kwargs: dict[str, Any],
+    logger_: logging.Logger,
+) -> None:
+    """Disable seccomp only for Docker versions whose default profile blocks clone3."""
+    try:
+        server_version = str(client.version()["Version"])
+        version_match = re.match(r"^(\d+)\.(\d+)\.(\d+)", server_version)
+        if version_match is None:
+            raise ValueError(f"unrecognized Docker server version: {server_version}")
+        parsed_version = tuple(int(part) for part in version_match.groups())
+    except Exception as exc:
+        logger_.warning(
+            "Could not determine Docker server version; preserving the default seccomp profile: %s",
+            exc,
+        )
+        return
+
+    if parsed_version < _DOCKER_CLONE3_SECCOMP_MIN_VERSION:
+        container_run_kwargs["security_opt"] = ["seccomp=unconfined"]
+        logger_.warning(
+            "Docker server %s predates clone3 support in the default seccomp profile; "
+            "starting the sandbox with seccomp=unconfined for compatibility",
+            server_version,
+        )
+
+
+def _ensure_sandbox_control_network(client: Any) -> Any:
+    """Return an internal control network shared only with the runtime."""
+    import docker
+
+    try:
+        network = client.networks.get(SANDBOX_NETWORK_NAME)
+    except docker.errors.NotFound:
+        network = client.networks.create(
+            SANDBOX_NETWORK_NAME,
+            driver="bridge",
+            internal=True,
+        )
+    network.reload()
+    if not bool((network.attrs or {}).get("Internal")):
+        raise RuntimeError(
+            f"Sandbox control network {SANDBOX_NETWORK_NAME} must be internal"
+        )
+
+    if _is_containerized_runtime():
+        runtime_container = client.containers.get(socket.gethostname())
+        connected = (network.attrs or {}).get("Containers") or {}
+        if runtime_container.id not in connected:
+            network.connect(runtime_container)
+            network.reload()
+    return network
+
+
+def _attach_sandbox_to_control_network(
+    client: Any,
+    container: Any,
+    *,
+    alias: str,
+) -> Any:
+    """Attach an egress-enabled sandbox to the internal runtime control plane."""
+    network = _ensure_sandbox_control_network(client)
+    container.reload()
+    connected = (network.attrs or {}).get("Containers") or {}
+    if container.id not in connected:
+        network.connect(container, aliases=[alias])
+        network.reload()
+    return network
+
+
+def _seed_pnpm_offline_store(container: Any) -> None:
+    """Seed a read-only pnpm store on the workspace filesystem when available."""
+    source_check = container.exec_run(
+        ["test", "-d", f"{SANDBOX_PNPM_STORE_SOURCE}/v3"],
+        user="root",
+    )
+    if getattr(source_check, "exit_code", None) != 0:
+        return
+
+    target_check = container.exec_run(
+        ["test", "-d", f"{SANDBOX_PNPM_STORE_PATH}/v3"],
+        user="root",
+    )
+    if getattr(target_check, "exit_code", None) == 0:
+        return
+
+    commands = [
+        ["mkdir", "-p", SANDBOX_PNPM_STORE_PATH],
+        ["cp", "-a", f"{SANDBOX_PNPM_STORE_SOURCE}/.", SANDBOX_PNPM_STORE_PATH],
+        ["chmod", "-R", "a-w", SANDBOX_PNPM_STORE_PATH],
+    ]
+    for command in commands:
+        result = container.exec_run(command, user="root")
+        if getattr(result, "exit_code", None) != 0:
+            raise RuntimeError(
+                f"Failed to prepare pnpm offline store with {command[0]}"
+            )
 
 
 def _kernel_gateway_command() -> list[str]:
@@ -1049,6 +1564,8 @@ class _RecoveredDockerExecutor:
 
 class _DockerKernelLease:
     """Expose one isolated Jupyter kernel backed by a shared Docker container."""
+
+    _nexent_kernel_lease = True
 
     def __init__(
         self,
@@ -1306,6 +1823,32 @@ class _DockerKernelLease:
         )
 
     def __call__(self, code_action: str) -> Any:
+        shell_policy = getattr(self, "_nexent_shell_policy", ShellPolicy.BOXED)
+        if shell_policy != ShellPolicy.BOXED:
+            violations = _scan_shell_calls(
+                code_action,
+                allow_package_installs=getattr(
+                    self,
+                    "_nexent_allow_package_installs",
+                    False,
+                ),
+            )
+            if violations:
+                self._logger.warning(
+                    "Sandbox shell guard blocked %d call(s): %s",
+                    len(violations),
+                    violations,
+                )
+                message = (
+                    "SecurityError: this shell command is not permitted by the sandbox policy.\n"
+                    "Detected: " + ", ".join(violations) + "\n"
+                    "Suggestion: when network access is enabled, install Python packages with a "
+                    "shell-free `subprocess` pip-install argv or `%pip install`; otherwise use an "
+                    "approved Nexent tool or pure Python."
+                )
+                return _make_code_output(message)
+        if getattr(self, "_nexent_online_user_site", False):
+            code_action = _ONLINE_USER_SITE_BOOTSTRAP + code_action
         return self.run_code_raise_errors(code_action)
 
     def send_variables(self, variables: dict[str, Any]) -> None:
@@ -1965,6 +2508,7 @@ class SandboxPoolManager:
 
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
+        _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
         container_name = f"{SANDBOX_SESSION_CONTAINER_PREFIX}-{secrets.token_hex(8)}"
         run_kwargs.update({
             "name": container_name,
@@ -1987,12 +2531,15 @@ class SandboxPoolManager:
             # The runtime's 127.0.0.1 is not the Docker host. Connect directly
             # over the shared Docker network using this container's unique DNS
             # name and do not publish a host port.
-            try:
-                client.networks.get(SANDBOX_NETWORK_NAME)
-            except docker.errors.NotFound:
-                client.networks.create(SANDBOX_NETWORK_NAME, driver="bridge")
+            _ensure_sandbox_control_network(client)
             run_kwargs.pop("ports", None)
-            run_kwargs["network"] = SANDBOX_NETWORK_NAME
+            if config.network_disabled:
+                run_kwargs["network"] = SANDBOX_NETWORK_NAME
+            else:
+                # Docker's default bridge supplies outbound access. The
+                # container is attached to the internal control network after
+                # creation so the runtime can still reach Jupyter by DNS name.
+                run_kwargs.pop("network", None)
             connection_host = container_name
             connection_port = SANDBOX_JUPYTER_PORT
         else:
@@ -2005,6 +2552,13 @@ class SandboxPoolManager:
             connection_port = 0
 
         container = client.containers.run(config.docker_image, **run_kwargs)
+        if _is_containerized_runtime() and not config.network_disabled:
+            _attach_sandbox_to_control_network(
+                client,
+                container,
+                alias=container_name,
+            )
+        _seed_pnpm_offline_store(container)
         owner = None
         container_group = None
         executor = None
@@ -2106,6 +2660,7 @@ class SandboxPoolManager:
 
         client = docker.from_env()
         run_kwargs = dict(container_run_kwargs)
+        _apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger_)
         if _is_containerized_runtime():
             run_kwargs.pop("ports", None)
         else:
@@ -2114,6 +2669,13 @@ class SandboxPoolManager:
             }
         run_kwargs["detach"] = True
         container = client.containers.run(config.docker_image, **run_kwargs)
+        if _is_containerized_runtime() and not config.network_disabled:
+            _attach_sandbox_to_control_network(
+                client,
+                container,
+                alias=SANDBOX_CONTAINER_NAME,
+            )
+        _seed_pnpm_offline_store(container)
         try:
             container.reload()
             deadline = time.monotonic() + max(10, config.timeout_seconds)
@@ -2191,8 +2753,18 @@ class SandboxPoolManager:
                 if config.scope != SandboxScope.SYSTEM
                 else False
             ),
-            **({"extra_hosts": {"host.docker.internal": "host-gateway"}} if host_tools_exist else {}),
         }
+        if host_tools_exist and not _is_containerized_runtime():
+            import docker
+
+            docker_client = docker.from_env()
+            container_run_kwargs["extra_hosts"] = {
+                "host.docker.internal": _docker_bridge_gateway(docker_client)
+            }
+        if not config.network_disabled:
+            container_environment = dict(container_run_kwargs.get("environment") or {})
+            container_environment.update(_ONLINE_PACKAGE_ENV)
+            container_run_kwargs["environment"] = container_environment
         workspace_root = config.extra_kwargs.get("workspace_root")
         if workspace_root:
             resolved_workspace_root = str(Path(workspace_root).resolve())
@@ -2210,16 +2782,16 @@ class SandboxPoolManager:
                 import docker
 
                 docker_client = docker.from_env()
-                try:
-                    docker_client.networks.get(SANDBOX_NETWORK_NAME)
-                except docker.errors.NotFound:
-                    docker_client.networks.create(SANDBOX_NETWORK_NAME, driver="bridge")
+                _ensure_sandbox_control_network(docker_client)
                 container_run_kwargs.update({
                     "name": SANDBOX_CONTAINER_NAME,
-                    "network": SANDBOX_NETWORK_NAME,
                     "labels": {"com.nexent.sandbox": "runtime"},
                     "command": _kernel_gateway_command(),
                 })
+                if config.network_disabled:
+                    container_run_kwargs["network"] = SANDBOX_NETWORK_NAME
+                else:
+                    container_run_kwargs.pop("network", None)
                 logger_.debug("Using Docker network %s for system sandbox", SANDBOX_NETWORK_NAME)
             except Exception as exc:
                 logger_.warning("Could not prepare Docker network %s: %s", SANDBOX_NETWORK_NAME, exc)
@@ -2377,7 +2949,19 @@ def _wrap_executor(executor: Any, config: SandboxConfig, logger_: logging.Logger
     """Apply shell guard and diagnostic wrapper to an executor (except LOCAL)."""
     if config.level == SandboxLevel.LOCAL:
         return executor
-    executor = _install_shell_guard(executor, config.shell_policy, logger_)
+    if getattr(type(executor), "_nexent_kernel_lease", False):
+        executor._nexent_shell_policy = config.shell_policy
+        executor._nexent_allow_package_installs = not config.network_disabled
+        executor._nexent_online_user_site = not config.network_disabled
+        return executor
+    executor = _install_shell_guard(
+        executor,
+        config.shell_policy,
+        logger_,
+        allow_package_installs=not config.network_disabled,
+    )
+    if config.level == SandboxLevel.DOCKER and not config.network_disabled:
+        executor = _install_online_user_site(executor)
     executor = _wrap_with_diagnostics(executor, logger_)
     return executor
 

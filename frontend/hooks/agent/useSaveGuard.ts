@@ -30,15 +30,16 @@ type AgentNameConflictStatus =
 
 export async function checkAgentNameConflict(
   field: AgentNameField,
-  value: string,
+  value: string | undefined,
   agentId?: number
 ): Promise<AgentNameConflictStatus> {
-  if (!value.trim()) return "available";
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "available";
 
   const result = await checkAgentNameConflictBatch({
     items: [
       {
-        [field]: value.trim(),
+        [field]: trimmed,
         agent_id: agentId,
       },
     ],
@@ -85,9 +86,9 @@ export const useSaveGuard = () => {
     const { agentId, editedAgent } = useAgentStore.getState();
     if (!editedAgent || agentId === null) return false;
 
-    const name = editedAgent.name.trim();
-    const displayName = (editedAgent.display_name || "").trim();
-    const description = editedAgent.description.trim();
+    const name = (editedAgent.name ?? "").trim();
+    const displayName = (editedAgent.display_name ?? "").trim();
+    const description = (editedAgent.description ?? "").trim();
 
     if (!displayName) {
       message.error(t("agent.validation.displayNameRequired"));

@@ -15,33 +15,35 @@ This ensures that tests are reliable, fast, and don't affect real systems or dat
 
 ## Testing Framework
 
-The project uses a combination of testing frameworks:
+The project uses the following combination of testing tools:
 
-- **unittest**: Python's standard unit testing framework for test organization and assertions
-- **unittest.mock**: For mocking dependencies and isolating components
+- **pytest**: Core testing framework for test discovery and execution (pytest only; new tests are not organized with unittest)
+- **pytest-asyncio**: Async test support (`test/pytest.ini` is configured with `asyncio_mode = auto`, so async test functions are automatically detected; explicit `@pytest.mark.asyncio` markers are also supported)
+- **pytest-mock / unittest.mock**: For mocking dependencies and isolating components (patch with fully-qualified paths at the import site)
 - **TestClient** from FastAPI: For testing API endpoints without running an actual server
-- **pytest**: For advanced test discovery and execution
-- **coverage**: For code coverage analysis and reporting
+- **pytest-cov + coverage**: For code coverage analysis and reporting
 
 ## Test Structure
 
 ```
 test/
-├── backend/                 # Backend tests
-│   ├── app/                # API endpoint tests
-│   ├── services/           # Service layer tests
-│   └── utils/              # Utility function tests
-├── frontend/               # Frontend tests (future)
-├── integration/            # Integration tests (future)
-└── run_all_tests.py       # Main test runner
+├── backend/                # Backend tests (apps, services, database, agents, utils, etc.)
+├── sdk/                    # SDK tests
+├── ext_components/         # Extension component tests (e.g., aidp)
+├── common/                 # Shared test utilities and mocks
+├── stress/                 # Stress test scripts
+├── conftest.py             # Global fixtures
+├── pytest.ini              # pytest configuration
+└── run_all_test.py         # Main test runner
 ```
 
 ## Key Features
 
-- 🔍 **Auto-discover test files** - Automatically finds all `test_*.py` files
+- 🔍 **Auto-discover test files** - Automatically finds all `test_*.py` files (covering `test/backend`, `test/sdk`, `test/ext_components`)
 - 📊 **Coverage reports** - Generates console, HTML, and XML format coverage reports
-- 🔧 **Auto-install dependencies** - Automatically installs required packages if needed
-- ✅ **Detailed output** - Shows the running status and results of each test
+- 🧵 **Parallel execution** - Controls the number of concurrent worker processes via `NEXENT_PYTEST_WORKERS` (default: auto)
+- ⏱️ **Timeout protection** - Limits per-file execution time via `NEXENT_PYTEST_FILE_TIMEOUT` (default: 600 seconds)
+- ✅ **Detailed output** - Shows the running status and results of each test file
 - 🚫 **Complete isolation** - No real external services are ever contacted
 - ⚡ **Fast execution** - No network delays or external service processing time
 
@@ -50,16 +52,16 @@ test/
 ### Quick Start
 
 ```bash
-# Run all tests with coverage
-cd test
-python run_all_tests.py
+# After activating the backend virtual environment, run all tests with coverage from the project root
+source backend/.venv/bin/activate
+python test/run_all_test.py
 ```
 
 ### Backend Tests
 
 ```bash
-# Run backend tests only
-python test/backend/run_all_test.py
+# Run backend tests only (via the target path environment variable)
+NEXENT_PYTEST_TARGETS=test/backend python test/run_all_test.py
 ```
 
 ### Individual Test Files
@@ -71,11 +73,11 @@ python -m pytest test/backend/services/test_agent_service.py -v
 
 ## Output Files
 
-When tests complete, you'll find:
+When tests complete, you'll find the following under the `test/` directory:
 
-- `coverage_html/` - Detailed HTML format coverage report
-- `coverage.xml` - XML format coverage report (for CI/CD)
-- `.coverage` - Coverage data file
+- `test/coverage_html/` - Detailed HTML format coverage report
+- `test/coverage.xml` - XML format coverage report (for CI/CD)
+- `test/.coverage` - Coverage data file
 - Console output with detailed test results and coverage statistics
 
 ## Testing Strategy
@@ -98,7 +100,7 @@ External modules are mocked before imports to avoid real connections:
 
 ### 3. Test Organization
 
-- Tests are organized as classes inheriting from `unittest.TestCase`
+- Tests are organized uniformly with pytest (function or class style); async tests use `@pytest.mark.asyncio` or rely on `asyncio_mode = auto`
 - Each API endpoint or function has multiple test cases (success, failure, exception scenarios)
 - Comprehensive patches are applied to isolate the code under test
 - Tests follow a clear setup-execute-assert pattern
@@ -137,7 +139,7 @@ for p in patches:
     p.start()
 
 # Now import the modules after applying all patches
-from backend.apps.file_management_app import router
+from apps.file_management_app import router
 ```
 
 ### Benefits of This Approach
@@ -150,24 +152,32 @@ from backend.apps.file_management_app import router
 
 ## Test Example
 
-Here's a detailed example of how tests are structured:
+Here's a detailed example of how tests are structured (pytest style; mocks use the fully-qualified path of the module where the name is referenced, so patches take effect on already-imported references; underlying dependencies must be patched before import — see the "Module Patching Technique" above):
 
 ```python
-@patch("utils.auth_utils.get_current_user_id")
-@patch("database.agent_db.query_all_tools")
-async def test_list_tools_api_success(self, mock_query_all_tools, mock_get_current_user_id):
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from apps.tool_config_app import list_tools_api
+
+
+@pytest.mark.asyncio
+@patch("apps.tool_config_app.get_current_user_id")
+@patch("apps.tool_config_app.list_all_tools")
+async def test_list_tools_api_success(mock_list_all_tools, mock_get_current_user_id):
     # Setup
     mock_get_current_user_id.return_value = ("user123", "tenant456")
     expected_tools = [{"id": 1, "name": "Tool1"}, {"id": 2, "name": "Tool2"}]
-    mock_query_all_tools.return_value = expected_tools
-    
+    mock_list_all_tools.return_value = expected_tools
+
     # Execute
     result = await list_tools_api(authorization="Bearer fake_token")
-    
+
     # Assert
     mock_get_current_user_id.assert_called_once_with("Bearer fake_token")
-    mock_query_all_tools.assert_called_once_with(tenant_id="tenant456")
-    self.assertEqual(result, expected_tools)
+    mock_list_all_tools.assert_called_once_with(tenant_id="tenant456", labels=None)
+    assert result == expected_tools
 ```
 
 ## Coverage Reporting
@@ -182,50 +192,31 @@ The test suite generates comprehensive coverage reports:
 ## Sample Output
 
 ```
-Nexent Community - Unit Test Runner
 ============================================================
-Discovered Test Files:
-----------------------------------------
-  • backend/services/test_agent_service.py
-  • backend/services/test_conversation_management_service.py
-  • backend/services/test_knowledge_summary_service.py
-
-Total: 3 test files
-
+Test Summary
 ============================================================
-Running Unit Tests with Coverage
-============================================================
+PASSED - test/backend/services/test_agent_service.py
+PASSED - test/backend/services/test_conversation_management_service.py
+PASSED - test/backend/services/test_knowledge_summary_service.py
 
-test_get_enable_tool_id_by_agent_id ... ok
-test_save_message_with_string_content ... ok
-test_load_knowledge_prompts ... ok
-...
+Test Results:
+  Total Tests: 96
+  Passed: 96
+  Failed: 0
+  Pass Rate: 100.0%
 
-============================================================
-Coverage Report
-============================================================
-Name                                               Stmts   Miss  Cover   Missing
---------------------------------------------------------------------------------
-backend/services/agent_service.py                   120     15    88%   45-50, 78-82
-backend/services/conversation_management_service.py  180     25    86%   123-128, 156-162
-backend/services/knowledge_summary_service.py        45      8    82%   35-42
---------------------------------------------------------------------------------
-TOTAL                                               345     48    86%
-
-HTML coverage report generated in: test/coverage_html
-XML coverage report generated: test/coverage.xml
-
-============================================================
-✅ All tests passed!
+Total Coverage: 86.5%
+HTML coverage report generated in: test\coverage_html
+XML coverage report generated: test\coverage.xml
 ```
 
 ## Dependencies
 
-The test runner automatically installs required packages if they're not already available:
+When the test runner starts, it checks for the required dependencies (it does not install them automatically); if any are missing, it exits with a prompt showing the install command:
 
 - `pytest-cov` - For pytest coverage integration
 - `coverage` - For code coverage analysis
-- `pytest` - For advanced test discovery and execution
+- `pytest-asyncio` - For async test execution
 
 ## Best Practices
 

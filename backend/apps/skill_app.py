@@ -22,7 +22,7 @@ from services.agent_draft_permission_service import (
     require_agent_draft_edit,
 )
 from services.nl2skill_service import create_nl2skill_stream
-from services.skill_service import (
+from management.services.skill.service import (
     SkillService,
     UnsupportedSkillFilePreview,
     get_official_skills_with_status,

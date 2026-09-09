@@ -4,13 +4,19 @@ Unit tests for nexent.skills.skill_loader module.
 import sys
 import os
 import importlib.util
+import types
 from unittest.mock import MagicMock
 
 import pytest
 
+# Resolve relative SDK helper imports without initializing the full SDK.
+skills_package = types.ModuleType("nexent.skills")
+skills_package.__path__ = [os.path.join(os.path.dirname(__file__), "../../../sdk/nexent/skills")]
+sys.modules["nexent.skills"] = skills_package
+
 # Load skill_loader module directly without nexent package imports
 spec = importlib.util.spec_from_file_location(
-    "skill_loader",
+    "nexent.skills.skill_loader",
     os.path.join(os.path.dirname(__file__), "../../../sdk/nexent/skills/skill_loader.py")
 )
 module = importlib.util.module_from_spec(spec)
@@ -637,10 +643,10 @@ class TestSkillLoaderFileEncoding:
         skill_file.write_bytes(b"\x80")
         detection = MagicMock()
         detection.best.return_value = None
-        mocker.patch.object(module, "from_bytes", return_value=detection)
+        mocker.patch.object(sys.modules["nexent.skills.text_codec"], "from_bytes", return_value=detection)
 
         with pytest.raises(UnicodeDecodeError, match="Unable to detect"):
-            module._read_skill_text(skill_file)
+            SkillLoader.load(str(skill_file))
 
 
 if __name__ == "__main__":

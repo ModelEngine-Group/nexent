@@ -2,6 +2,8 @@
  * Types for tenant agent repository (marketplace listings)
  */
 
+import type { TagResourcePredicate } from "@/types/tagManagement";
+
 export type AgentRepositoryListingStatus =
   | "not_shared"
   | "pending_review"
@@ -46,6 +48,9 @@ export interface AgentRepositoryListingListParams {
   page?: number;
   page_size?: number;
   search?: string;
+  search_tag_predicates?: TagResourcePredicate[];
+  tag_predicates?: TagResourcePredicate[];
+  tag?: string;
 }
 
 export interface AgentRepositoryListingDetail {
@@ -89,6 +94,7 @@ export interface MyEditableAgentItem {
   permission?: "EDIT" | "READ_ONLY";
   /** Total downloads summed across all repository listings for this agent_id. */
   downloads?: number;
+  tags?: string[];
   repository_info: MyAgentRepositoryInfoItem[];
 }
 
@@ -121,6 +127,8 @@ export interface MyEditableAgentListParams {
   search?: string;
   new_agent_padding?: boolean;
   agent_id?: number;
+  tag_predicates?: TagResourcePredicate[];
+  search_tag_predicates?: TagResourcePredicate[];
 }
 
 export interface MyEditableAgentPagination {

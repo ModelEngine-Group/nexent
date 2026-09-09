@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { useDeployment } from "@/components/providers/deploymentProvider";
-import { useConfig } from "@/hooks/useConfig";
+import { APP_DISPLAY_NAME } from "@/const/modelConfig";
 import { ChatInterface } from "./internal/chatInterface";
 import "@/styles/chat.css";
 
@@ -12,13 +10,9 @@ import "@/styles/chat.css";
  * Handles authentication, config loading, and session management for the chat interface
  */
 export default function ChatContent() {
-  const { appConfig } = useConfig();
-
   useEffect(() => {
-    if (appConfig?.appName) {
-      document.title = `${appConfig.appName}`;
-    }
-  }, [appConfig?.appName]);
+    document.title = APP_DISPLAY_NAME;
+  }, []);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
