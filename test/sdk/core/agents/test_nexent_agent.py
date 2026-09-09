@@ -120,6 +120,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    WARNING = "warning"
     NL2A = "nl2a"
     FILE_ARTIFACT = "file_artifact"
 
