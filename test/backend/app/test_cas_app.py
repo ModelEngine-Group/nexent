@@ -4,6 +4,7 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -29,6 +30,7 @@ cas_service_mock.get_cas_config = MagicMock(
         "heartbeat_url": "https://cas.example.com/heartbeat",
         "heartbeat_interval_seconds": 300,
         "heartbeat_cookie_name": "AUTH_TOKEN",
+        "renew_enabled": True,
         "renew_before_seconds": 300,
         "renew_timeout_seconds": 10,
         "display_name": "CAS",
@@ -67,6 +69,19 @@ for _name, _module in _ORIGINAL_MODULES.items():
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
+
+
+@pytest.mark.parametrize("renew_enabled", [True, False])
+def test_ac001_ac002_public_config_returns_boolean_renewal_switch(monkeypatch, renew_enabled):
+    config = {**cas_service_mock.get_cas_config.return_value, "renew_enabled": renew_enabled}
+    monkeypatch.setattr(cas_service_mock.get_cas_config, "return_value", config)
+
+    response = client.get("/user/cas/config")
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["data"]["renew_enabled"] is renew_enabled
+    assert response.json()["data"]["enabled"] is True
+    assert response.json()["data"]["heartbeat_url"] == "https://cas.example.com/heartbeat"
 
 
 class TestCasApp(unittest.TestCase):

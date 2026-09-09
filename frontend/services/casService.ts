@@ -8,6 +8,7 @@ export interface CasConfig {
   heartbeat_url: string;
   heartbeat_interval_seconds: number;
   heartbeat_cookie_name: string;
+  renew_enabled: boolean;
   renew_before_seconds: number;
   renew_timeout_seconds: number;
   display_name: string;
@@ -23,6 +24,7 @@ const disabledConfig: CasConfig = {
   heartbeat_url: "",
   heartbeat_interval_seconds: 300,
   heartbeat_cookie_name: "",
+  renew_enabled: true,
   renew_before_seconds: 300,
   renew_timeout_seconds: 10,
   display_name: "CAS",

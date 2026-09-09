@@ -200,6 +200,7 @@ data:
   CAS_HEARTBEAT_URL: {{ .Values.config.cas.heartbeatUrl | quote }}
   CAS_HEARTBEAT_INTERVAL_SECONDS: {{ .Values.config.cas.heartbeatIntervalSeconds | quote }}
   CAS_HEARTBEAT_COOKIE_NAME: {{ .Values.config.cas.heartbeatCookieName | quote }}
+  CAS_RENEW_ENABLED: {{ .Values.config.cas.renewEnabled | quote }}
   CAS_RENEW_BEFORE_SECONDS: {{ .Values.config.cas.renewBeforeSeconds | quote }}
   CAS_RENEW_TIMEOUT_SECONDS: {{ .Values.config.cas.renewTimeoutSeconds | quote }}
   CAS_SYNTHETIC_EMAIL_DOMAIN: {{ .Values.config.cas.syntheticEmailDomain | quote }}

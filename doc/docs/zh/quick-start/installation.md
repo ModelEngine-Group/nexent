@@ -416,6 +416,7 @@ LOCAL_SESSION_MAX_AGE_SECONDS=3600
 CAS_HEARTBEAT_URL=
 CAS_HEARTBEAT_INTERVAL_SECONDS=300
 CAS_HEARTBEAT_COOKIE_NAME=
+CAS_RENEW_ENABLED=true
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -432,6 +433,8 @@ CAS 未返回 `CAS_ROLE_ATTRIBUTE` 指定的角色属性、属性为空或映射
 CAS 未返回 `CAS_TENANT_ATTRIBUTE` 指定的租户属性或属性为空时，使用 `CAS_DEFAULT_TENANT_ID`。
 
 `CAS_HEARTBEAT_URL` 用于启用独立的 CAS 用户活动心跳。页面可见时，首次用户活动立即发送 GET；之后点击、键盘、鼠标、触摸、窗口聚焦或页面可见性变化在所有浏览器标签页中每 `CAS_HEARTBEAT_INTERVAL_SECONDS` 最多发送一次。若配置的 Cookie 可被前端读取，请求会携带 `X-Auth-Token: <cookie-name>=<cookie-value>`；读取不到时仍发送心跳，但不带该 Header。由于浏览器直接访问心跳地址，认证源必须通过 CORS 允许 Nexent Origin、GET、OPTIONS 和 `X-Auth-Token`。心跳只保活认证源会话，现有无感续期仍负责刷新 Nexent 本地会话。
+
+`CAS_RENEW_ENABLED` 默认为 `true`。设置为 `false` 仅关闭浏览器 iframe 自动无感续期，不影响 CAS 登录、活动心跳或续期接口。心跳不会延长 Nexent 本地 JWT；关闭续期后，会话到期仍按现有规则处理，`CAS_LOGIN_MODE=force` 仍会自动跳转登录并重新加载页面。前后端升级后，修改 `deploy/env/.env`，重新创建后端容器以加载新环境变量，并刷新已打开的页面后生效。恢复为 `true` 并重复上述步骤即可重新开启。
 
 常用 CAS 地址：
 
@@ -479,6 +482,7 @@ LOCAL_SESSION_MAX_AGE_SECONDS=3600
 CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
 CAS_HEARTBEAT_INTERVAL_SECONDS=300
 CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
+CAS_RENEW_ENABLED=true
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
