@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import copy
 import json
 import logging
@@ -80,7 +80,7 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
-from consts.model import ToolParamsRequest
+from consts.model import ToolParamsRequest, ModelConnectStatusEnum
 from consts.exceptions import ValidationError
 
 logger = logging.getLogger("create_agent_info")
@@ -93,6 +93,26 @@ def _create_fixed_search_memory_tool():
     return SearchMemoryTool()
 
 
+def _model_is_available(model: dict | None) -> bool:
+    """Return whether the model record is in AVAILABLE connect status."""
+    return bool(model) and (
+        ModelConnectStatusEnum.get_value(model.get("connect_status"))
+        == ModelConnectStatusEnum.AVAILABLE.value
+    )
+
+
+def _select_agent_model_id(
+    agent_model_ids: List[int],
+    override_model_id: int | None,
+    tenant_id: str,
+) -> int | None:
+    """Select the request override or the first configured available model."""
+    if override_model_id is not None:
+        return override_model_id
+    for model_id in agent_model_ids:
+        if _model_is_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
+            return model_id
+    return agent_model_ids[0] if agent_model_ids else None
 def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
     """Return at most one structured active document for each long-term scope."""
     result = []
@@ -1308,9 +1328,9 @@ async def create_agent_config(
         "knowledge_base_summary": knowledge_base_summary,
         "user_id": user_id,
     }
-    # AgentInfo stores model_ids (a list); pick the first for the primary model lookup
-    agent_model_ids = agent_info.get("model_ids")
-    model_id_to_use = override_model_id if override_model_id else (agent_model_ids[0] if agent_model_ids else None)
+    # AgentInfo stores model_ids (a list); pick the first available model.
+    agent_model_ids = agent_info.get("model_ids") or []
+    model_id_to_use = _select_agent_model_id(agent_model_ids, override_model_id, tenant_id)
     model_info = None
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)

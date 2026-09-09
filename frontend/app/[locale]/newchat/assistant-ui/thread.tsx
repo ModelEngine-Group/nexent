@@ -64,6 +64,7 @@ import {
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
@@ -160,6 +161,8 @@ export interface ThreadProps {
 const useAgentModels = (
   agent: Agent | PublishedAgent
 ): readonly ModelOption[] => {
+  const { models: availableModels } = useModelList();
+
   return useMemo(() => {
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
@@ -170,27 +173,45 @@ const useAgentModels = (
       model_names &&
       model_names.length > 0
     ) {
-      return model_ids.map((id, i) => ({
+      const configuredModels = model_ids.map((id, i) => ({
         id: String(id),
         name: model_names[i] ?? `Model ${id}`,
       }));
+      const availableModelIds = new Set(
+        availableModels
+          .filter((model) => model.connect_status === "available")
+          .map((model) => String(model.id))
+      );
+      return configuredModels.filter((model) =>
+        availableModelIds.has(model.id)
+      );
     }
 
     // Fallback for single model: check model_name on typedAgent
     const modelName = (typedAgent as unknown as { model_name?: string })
       .model_name;
-    if (modelName) {
+    const modelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status === "available" &&
+        (model.displayName === modelName || model.name === modelName)
+    );
+    if (modelName && modelIsAvailable) {
       return [{ id: modelName, name: modelName }];
     }
 
     // Fallback to the single model field (used by AgentDraft / debug panel)
     const singleModel = (typedAgent as unknown as { model?: string }).model;
-    if (singleModel) {
+    const singleModelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status === "available" &&
+        (model.displayName === singleModel || model.name === singleModel)
+    );
+    if (singleModel && singleModelIsAvailable) {
       return [{ id: singleModel, name: singleModel }];
     }
 
     return [];
-  }, [agent]);
+  }, [agent, availableModels]);
 };
 
 export const Thread: FC<ThreadProps> = ({
@@ -221,6 +242,28 @@ export const Thread: FC<ThreadProps> = ({
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
+  const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
+  const selectedModelIsValid = Boolean(
+    selectedModelId && models.some((model) => model.id === selectedModelId)
+  );
+  const fallbackModelId = models[0]?.id;
+  const effectiveSelectedModelId = selectedModelIsValid
+    ? selectedModelId
+    : localSelectedModelId &&
+        models.some((model) => model.id === localSelectedModelId)
+      ? localSelectedModelId
+      : fallbackModelId;
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      if (!models.some((model) => model.id === modelId)) return;
+      if (selectedModelId !== undefined) {
+        onModelChange?.(modelId);
+      } else {
+        setLocalSelectedModelId(modelId);
+      }
+    },
+    [models, onModelChange, selectedModelId]
+  );
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
@@ -421,8 +464,8 @@ export const Thread: FC<ThreadProps> = ({
         welcomeSuggestions={welcomeSuggestions}
         onBack={onBack}
         models={models}
-        selectedModelId={selectedModelId}
-        onModelChange={onModelChange}
+        selectedModelId={effectiveSelectedModelId}
+        onModelChange={handleModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
