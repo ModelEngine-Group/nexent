@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { Alert, Button, Empty, Input, Modal, Spin, message } from "antd";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
@@ -76,7 +77,11 @@ const normalizeScopeForSource = (
       local: { mode: "disabled", knowledge_ids: [] },
     };
   }
-  return copyScope(null);
+  return {
+    schema_version: 1,
+    local: { mode: "disabled", knowledge_ids: [] },
+    aidp: { mode: "disabled", kds_ids: [] },
+  };
 };
 
 export const ConversationKnowledgeScopeModal: FC<
@@ -84,6 +89,7 @@ export const ConversationKnowledgeScopeModal: FC<
 > = ({ open, value, capabilities, onCancel, onConfirm }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const { user } = useAuthorizationContext();
   const { data: groupListData } = useGroupList(user?.tenantId ?? null);
   const groupNameById = useMemo(
@@ -96,16 +102,11 @@ export const ConversationKnowledgeScopeModal: FC<
       ),
     [groupListData]
   );
-  const hasSourceConflict = Boolean(
-    capabilities?.sources.local.enabled && capabilities.sources.aidp.enabled
-  );
-  const configuredSource: "local" | "aidp" | null = hasSourceConflict
+  const configuredSource: "local" | "aidp" | null = !isDeploymentReady
     ? null
-    : capabilities?.sources.local.enabled
-      ? "local"
-      : capabilities?.sources.aidp.enabled
-        ? "aidp"
-        : null;
+    : enableAidpKnowledge
+      ? "aidp"
+      : "local";
   const [draft, setDraft] = useState<ConversationKnowledgeScope>(() =>
     normalizeScopeForSource(value, configuredSource)
   );
@@ -127,7 +128,7 @@ export const ConversationKnowledgeScopeModal: FC<
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !configuredSource) return;
     const normalized = normalizeScopeForSource(value, configuredSource);
     setDraft(normalized);
     setInitialSelectionWasFiltered(false);
@@ -355,7 +356,9 @@ export const ConversationKnowledgeScopeModal: FC<
       );
       return;
     }
-    const maxSelect = capabilities?.sources[source].max_select ?? 0;
+    const maxSelect =
+      capabilities?.sources[source].max_select ??
+      (source === "local" ? 50 : 10);
     if (maxSelect > 0 && currentValues.length >= maxSelect) {
       message.warning(t("chat.knowledgeScope.maxSelect", { count: maxSelect }));
       return;
@@ -496,7 +499,9 @@ export const ConversationKnowledgeScopeModal: FC<
           );
         }
       }
-      const maxSelect = capabilities?.sources[source].max_select ?? 0;
+      const maxSelect =
+        capabilities?.sources[source].max_select ??
+        (source === "local" ? 50 : 10);
       const mergedIds = Array.from(
         new Set([
           ...values,
@@ -668,10 +673,8 @@ export const ConversationKnowledgeScopeModal: FC<
       )}
     >
       {value &&
-        ((value.local.mode === "override" &&
-          !capabilities?.sources.local.enabled) ||
-          (value.aidp.mode === "override" &&
-            !capabilities?.sources.aidp.enabled)) && (
+        ((value.local.mode === "override" && configuredSource === "aidp") ||
+          (value.aidp.mode === "override" && configuredSource === "local")) && (
           <Alert
             className="mb-3"
             type="warning"
@@ -703,7 +706,7 @@ export const ConversationKnowledgeScopeModal: FC<
           }
         />
       )}
-      <Spin spinning={loading}>
+      <Spin spinning={loading || !isDeploymentReady}>
         {configuredSource ? (
           <div className="space-y-3 py-2">
             <Input.Search
@@ -715,15 +718,7 @@ export const ConversationKnowledgeScopeModal: FC<
             />
             {renderSource(configuredSource)}
           </div>
-        ) : hasSourceConflict ? (
-          <Alert
-            type="error"
-            showIcon
-            message={t("chat.knowledgeScope.sourceConflict")}
-          />
-        ) : (
-          <Empty description={t("chat.knowledgeScope.noTool")} />
-        )}
+        ) : null}
       </Spin>
     </Modal>
   );

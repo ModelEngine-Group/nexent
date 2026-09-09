@@ -13,6 +13,10 @@ const fixtures = vi.hoisted(() => ({
   t: (key: string) => key,
   groups: { groups: [] },
   predicates: [],
+  deployment: { enableAidpKnowledge: false, isDeploymentReady: true },
+}));
+vi.mock("@/components/providers/deploymentProvider", () => ({
+  useDeployment: () => fixtures.deployment,
 }));
 vi.mock("react-i18next", async (original) => ({
   ...(await original<typeof import("react-i18next")>()),
@@ -36,7 +40,7 @@ vi.mock("@/services/knowledgeBaseService", () => ({
   default: {
     getKnowledgeBasesInfo: vi.fn(),
     getAidpKnowledgeBasesAll: vi.fn(),
-    mapAidpKnowledgeBasesToKnowledgeBases: () => [],
+    mapAidpKnowledgeBasesToKnowledgeBases: (items: unknown[]) => items,
   },
 }));
 
@@ -68,6 +72,13 @@ const selection: ConversationKnowledgeScope = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  fixtures.deployment.enableAidpKnowledge = false;
+  fixtures.deployment.isDeploymentReady = true;
+  vi.mocked(knowledgeBaseService.getAidpKnowledgeBasesAll).mockResolvedValue({
+    value: [{ id: "aidp-1", name: "AIDP Catalog", permission: "READ_ONLY" }],
+  } as unknown as Awaited<
+    ReturnType<typeof knowledgeBaseService.getAidpKnowledgeBasesAll>
+  >);
   vi.mocked(knowledgeBaseService.getKnowledgeBasesInfo).mockResolvedValue({
     knowledgeBases: [
       {
@@ -97,6 +108,66 @@ beforeEach(() => {
     ] as KnowledgeBase[],
   });
 });
+it.each([
+  null,
+  capabilities,
+  {
+    ...capabilities,
+    sources: {
+      ...capabilities.sources,
+      aidp: { ...capabilities.sources.aidp, enabled: true },
+    },
+  },
+])(
+  "AIDP deployment source overrides absent, local or mixed agent capabilities",
+  async (agentCapabilities) => {
+    fixtures.deployment.enableAidpKnowledge = true;
+    const confirm = vi.fn();
+    render(
+      <ConversationKnowledgeScopeModal
+        open
+        value={selection}
+        capabilities={agentCapabilities}
+        onCancel={vi.fn()}
+        onConfirm={confirm}
+      />
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: /AIDP Catalog/ })
+    );
+    expect(knowledgeBaseService.getKnowledgeBasesInfo).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("option", { name: /Alpha/ })
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
+    );
+    expect(confirm.mock.calls[0][0]).toEqual({
+      schema_version: 1,
+      local: { mode: "disabled", knowledge_ids: [] },
+      aidp: { mode: "override", kds_ids: ["aidp-1"] },
+    });
+  }
+);
+
+it("waits for deployment settings and uses local catalog without an agent", async () => {
+  fixtures.deployment.isDeploymentReady = false;
+  const props = {
+    open: true,
+    value: null,
+    capabilities: null,
+    onCancel: vi.fn(),
+    onConfirm: vi.fn(),
+  };
+  const { rerender } = render(<ConversationKnowledgeScopeModal {...props} />);
+  expect(knowledgeBaseService.getKnowledgeBasesInfo).not.toHaveBeenCalled();
+  expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
+  fixtures.deployment.isDeploymentReady = true;
+  rerender(<ConversationKnowledgeScopeModal {...props} />);
+  await screen.findByRole("option", { name: /Alpha/ });
+  expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
+});
+
 it("UT-FE-WB-025 uses one authorized catalog and disables incompatible embeddings", async () => {
   render(
     <ConversationKnowledgeScopeModal

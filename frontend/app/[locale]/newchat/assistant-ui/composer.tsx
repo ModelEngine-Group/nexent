@@ -53,6 +53,7 @@ import type {
   KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
 import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import type { SkillFileContent } from "@/types/skill";
 import { SkillFileMentionPopover } from "../ui/skill-file-mention";
 import { DirectiveChip } from "../ui/directive-text";
@@ -234,12 +235,12 @@ export const Composer: FC<ComposerProps> = ({
       ? workbenchPresentation.mode
       : null;
 
+  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const hasIncompatibleScope = Boolean(
+    isDeploymentReady &&
     knowledgeScope &&
-    ((knowledgeScope.local.mode === "override" &&
-      !knowledgeCapabilities?.sources.local.enabled) ||
-      (knowledgeScope.aidp.mode === "override" &&
-        !knowledgeCapabilities?.sources.aidp.enabled))
+    ((knowledgeScope.local.mode === "override" && enableAidpKnowledge) ||
+      (knowledgeScope.aidp.mode === "override" && !enableAidpKnowledge))
   );
 
   const knowledgeSummary = useMemo(() => {
