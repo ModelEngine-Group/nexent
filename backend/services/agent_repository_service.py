@@ -1086,6 +1086,7 @@ def check_repository_import_precheck_impl(
             display_name=display_name,
             snapshot=bundle,
             tenant_id=tenant_id,
+            require_kb_embedding_model=True,
         )
         return result.model_dump()
 

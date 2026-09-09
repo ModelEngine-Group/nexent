@@ -80,6 +80,23 @@ def _check_kb_available(index_name: str, tenant_id: str) -> Tuple[bool, Optional
     return True, None
 
 
+def _check_kb_embedding_available(
+    record: Dict[str, Any],
+    tenant_id: str,
+) -> Tuple[bool, Optional[str]]:
+    """Check that an existing official KB still has a usable tenant model."""
+    model_id = record.get("embedding_model_id")
+    model = get_model_by_model_id(model_id, tenant_id) if model_id else None
+    if not model:
+        return False, _REASON_MODEL_UNAVAILABLE
+
+    connect_status = ModelConnectStatusEnum.get_value(model.get("connect_status"))
+    if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
+        return False, _REASON_MODEL_UNAVAILABLE
+
+    return True, None
+
+
 def _check_mcp_available(server_name: str, tenant_id: str) -> Tuple[bool, Optional[str]]:
     if not server_name or not str(server_name).strip():
         return False, _REASON_MCP_NOT_FOUND
@@ -275,6 +292,7 @@ def build_repository_import_precheck(
     display_name: str,
     snapshot: Any,
     tenant_id: str,
+    require_kb_embedding_model: bool = False,
 ) -> RepositoryImportPrecheckResponse:
     """Build import precheck response for a repository listing snapshot."""
     tenant_tools = _build_tenant_tool_map(tenant_id)
@@ -311,6 +329,8 @@ def build_repository_import_precheck(
             if record:
                 available = True
                 reason = None
+        if record and require_kb_embedding_model:
+            available, reason = _check_kb_embedding_available(record, tenant_id)
         kb_description = record.get("knowledge_describe") if record else description
         items.append(RepositoryImportRequirementItem(
             type="knowledge_base",
