@@ -37,6 +37,7 @@ from ext_components.aidp.consts.aidp_exceptions import (
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
+from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
 from ext_components.aidp.services.aidp_access_service import (
     get_cached_aidp_doc_count,
     get_cached_aidp_kb_detail,
@@ -160,12 +161,10 @@ class UpdateKbRequest(BaseModel):
 
 
 class SetPermissionRequest(BaseModel):
-    """Request body for setting a KB's group-level permission.
+    """Save permissions and optionally synchronize explicitly changed metadata."""
 
-    The AIDP platform is not invoked; the change is purely a local table
-    write that controls who can see the KB in subsequent list/search calls.
-    """
-
+    name: Optional[str] = Field(None, min_length=1, description="Changed KB name; omit when unchanged")
+    description: Optional[str] = Field(None, description="Changed description; omit when unchanged")
     ingroup_permission: str = Field(..., description="EDIT / READ_ONLY / PRIVATE")
     group_ids: Optional[List[int]] = Field(
         None,
@@ -755,7 +754,7 @@ async def set_permission(
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     body: SetPermissionRequest,
 ) -> JSONResponse:
-    """Update the in-group permission for a KB (does not call AIDP)."""
+    """Save local permissions first, then synchronize supplied metadata changes."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
@@ -787,14 +786,23 @@ async def set_permission(
                 detail=str(exc),
             )
 
-    perms.update_permission(
+    metadata = body.model_dump(include={"name", "description"}, exclude_none=True)
+    if "name" in metadata:
+        metadata["name"] = metadata["name"].strip()
+        if not metadata["name"]:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Name must not be blank")
+    result = await asyncio.to_thread(
+        save_kb_settings,
         kb_id=kds_id,
         tenant_id=tenant_id,
+        user_id=user_id,
         ingroup_permission=body.ingroup_permission,
         group_ids=final_group_ids,
-        updated_by=user_id,
+        metadata=metadata,
+        server_url=AIDP_SERVER_URL,
+        api_key=AIDP_API_KEY,
     )
-    return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
 @aidp_mgmt_router.get("/models")

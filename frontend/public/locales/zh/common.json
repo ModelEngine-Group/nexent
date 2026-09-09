@@ -3919,6 +3919,8 @@
   "aidpKnowledge.updateKb": "更新知识库",
   "aidpKnowledge.updateKbSuccess": "知识库已更新",
   "aidpKnowledge.updateKbFailed": "更新知识库失败",
+  "aidpKnowledge.updateKbPermissionFailed": "名称和描述已保存，但权限更新失败，请重新编辑并重试",
+  "aidpKnowledge.updateKbMetadataFailed": "权限已保存，但名称和描述更新失败，请重新编辑并重试",
   "aidpKnowledge.kbName": "名称",
   "aidpKnowledge.kbNamePlaceholder": "知识库名称",
   "aidpKnowledge.kbNameRequired": "名称是必填项",
