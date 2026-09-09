@@ -54,6 +54,7 @@ import {
   MoreHorizontalIcon,
   RefreshCwIcon,
   ArrowLeft,
+  AlertTriangleIcon,
   SparklesIcon,
   type LucideIcon,
   PencilIcon,
@@ -876,9 +877,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
                   <button
                     key={suggestion.id}
                     type="button"
-                    onClick={() =>
-                      handleSampleQuestionClick(suggestion.prompt)
-                    }
+                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
                     className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -1271,11 +1270,13 @@ const AssistantMessage: FC<{
                 Boolean((part as { image?: string }).image)) ||
               (part.type === "text" &&
                 Boolean(
-                  (part as {
-                    isSearchImage?: boolean;
-                    imageSource?: SourcePartLike;
-                  }).isSearchImage &&
-                    (part as { imageSource?: SourcePartLike }).imageSource
+                  (
+                    part as {
+                      isSearchImage?: boolean;
+                      imageSource?: SourcePartLike;
+                    }
+                  ).isSearchImage &&
+                  (part as { imageSource?: SourcePartLike }).imageSource
                 ));
             const isExecutionCodePart =
               part.type === "data" &&
@@ -1391,6 +1392,7 @@ const AssistantMessage: FC<{
               case "text": {
                 const textPart = part as typeof part & {
                   isError?: boolean;
+                  isWarning?: boolean;
                   text?: string;
                   isSearchImage?: boolean;
                   imageSource?: SourcePartLike;
@@ -1402,6 +1404,14 @@ const AssistantMessage: FC<{
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
+                      <span className="break-all">{textPart.text}</span>
+                    </div>
+                  );
+                }
+                if (textPart.isWarning) {
+                  return (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-amber-500 dark:text-amber-400" />
                       <span className="break-all">{textPart.text}</span>
                     </div>
                   );
