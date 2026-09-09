@@ -1021,6 +1021,22 @@ async def install_official_agents(
                 bundle, tenant_id, user_id=user_id
             )
             if existing_agent_id is not None:
+                # Keep the official copy label consistent even when an
+                # idempotent retry reuses an existing Agent.
+                if root_agent is not None:
+                    from database.agent_db import update_agent_display_name
+                    from database.user_tenant_db import get_user_tenant_by_user_id
+
+                    user_record = get_user_tenant_by_user_id(user_id) or {}
+                    user_email = str(user_record.get("user_email") or "").strip()
+                    current_display_name = getattr(root_agent, "display_name", None) or root_name
+                    if user_email and not current_display_name.endswith(f"（{user_email}）"):
+                        update_agent_display_name(
+                            existing_agent_id,
+                            tenant_id,
+                            f"{current_display_name}（{user_email}）",
+                            user_id,
+                        )
                 logger.info(
                     "Official agent '%s' already exists as agent_id=%s; "
                     "ensuring dependencies before returning it",
@@ -1063,6 +1079,16 @@ async def install_official_agents(
                     name,
                     unique_name,
                 )
+
+        if root_agent is not None and not root_renamed and existing_agent_id is None:
+            from database.user_tenant_db import get_user_tenant_by_user_id
+
+            user_record = get_user_tenant_by_user_id(user_id) or {}
+            user_email = str(user_record.get("user_email") or "").strip()
+            if user_email:
+                current_display_name = getattr(root_agent, "display_name", None) or root_name
+                if not current_display_name.endswith(f"（{user_email}）"):
+                    root_agent.display_name = f"{current_display_name}（{user_email}）"
 
         missing_models = await _missing_model_types(bundle, tenant_id)
         if missing_models:

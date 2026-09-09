@@ -309,6 +309,24 @@ def update_agent_icon(agent_id: int, tenant_id: str, icon_url: str, user_id: str
             raise ValueError("ag_tenant_agent_t Agent not found")
 
 
+def update_agent_display_name(
+    agent_id: int, tenant_id: str, display_name: str, user_id: str
+) -> None:
+    """Update the display name on every active version of an agent."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(AgentInfo)
+            .where(
+                AgentInfo.agent_id == agent_id,
+                AgentInfo.tenant_id == tenant_id,
+                AgentInfo.delete_flag == "N",
+            )
+            .values(display_name=display_name, updated_by=user_id)
+        )
+        if result.rowcount == 0:
+            raise ValueError("ag_tenant_agent_t Agent not found")
+
+
 def query_agent_records_for_nl2agent(agent_id: int, tenant_id: str) -> list[dict]:
     """Return all tenant-owned records for NL2Agent draft validation.
 
