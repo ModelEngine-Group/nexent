@@ -99,7 +99,7 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
     def add_message(self, agent_name, process_type, content, **kwargs):
         if self.boundary_reached and (
             (process_type == ProcessType.FINAL_ANSWER and content == self._STOP_FINAL_ANSWER)
-            or (process_type == ProcessType.ERROR and content == self._STOP_ERROR)
+            or (process_type == ProcessType.WARNING and content == self._STOP_ERROR)
         ):
             return
 

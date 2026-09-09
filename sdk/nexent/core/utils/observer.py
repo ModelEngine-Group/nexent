@@ -14,6 +14,15 @@ _NL2A_STATE_PATTERN = re.compile(
     r"<nl2a_state>\s*(.*?)\s*</nl2a_state>",
     re.DOTALL,
 )
+# Terminal/Jupyter tracebacks contain ANSI SGR and other control sequences for
+# console colouring. They have no meaning in JSON/SSE clients and otherwise
+# surface as visible ``[31m`` garbage in the web UI.
+_ANSI_ESCAPE_PATTERN = re.compile(
+    r"(?:\x1b\[[0-?]*[ -/]*[@-~]"
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+    r"|\x1b[@-_]"
+    r"|\x9b[0-?]*[ -/]*[@-~])"
+)
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
     {
         "description",
@@ -38,6 +47,7 @@ class ProcessType(Enum):
     AGENT_FINISH = "agent_finish"  # sub-agent end of run mark, mainly used for front-end display
     FINAL_ANSWER = "final_answer"  # final summary
     ERROR = "error"  # error field
+    WARNING = "warning"  # recoverable issue; execution can continue
     OTHER = "other"  # temporary other fields
     TOKEN_COUNT = "token_count"  # record the number of tokens used in each step
     HISTORY_SUMMARY = "history_summary"  # newly-created context compression checkpoint
@@ -226,6 +236,7 @@ class MessageObserver:
             ProcessType.EXECUTION_LOGS: ExecutionLogsTransformer(),
             ProcessType.FINAL_ANSWER: FinalAnswerTransformer(),
             ProcessType.ERROR: default_transformer,
+            ProcessType.WARNING: default_transformer,
             ProcessType.OTHER: default_transformer,
             ProcessType.SEARCH_CONTENT: default_transformer,
             ProcessType.TOKEN_COUNT: TokenCountTransformer(),
@@ -533,6 +544,8 @@ class MessageObserver:
             process_type, self.transformers[ProcessType.OTHER])
         formatted_content = transformer.transform(
             content=content, lang=self.lang, agent_name=agent_name, **kwargs)
+        if isinstance(formatted_content, str):
+            formatted_content = _ANSI_ESCAPE_PATTERN.sub("", formatted_content)
         nl2a_content = None
         nl2a_state_content = None
 
