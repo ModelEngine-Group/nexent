@@ -669,6 +669,52 @@ SQL
   pass "canonical source mismatch rolls back all migration work"
 }
 
+test_unmappable_agent_and_skill_tags_are_skipped() {
+  local database="utm_unmappable_legacy_tags"
+  local preflight_output
+  create_database "$database"
+  create_legacy_schema "$database"
+  run_sql "$database" <<'SQL'
+INSERT INTO nexent.user_tenant_t (tenant_id, created_by, delete_flag)
+VALUES ('tenant-mappable', 'owner-mappable', 'N');
+
+INSERT INTO nexent.ag_tool_info_t VALUES
+    (70, 'tenant-mappable', '["MappableToolTag"]'::JSONB, 'N');
+INSERT INTO nexent.ag_agent_repository_t VALUES
+    (71, 'tenant-mappable', 999, ARRAY['Marketing', 'UnmappableAgentTag'], 'N');
+INSERT INTO nexent.ag_skill_info_t VALUES
+    (130, NULL, '["GlobalSkillTag"]'::JSON, 'N');
+SQL
+
+  preflight_output="$(run_file "$database" "$PREFLIGHT_SQL")"
+  assert_contains "$preflight_output" "skipped_agent_tags_without_canonical_source" \
+    "preflight must identify Agent tags that will be skipped"
+  assert_contains "$preflight_output" "skipped_skill_tags_without_tenant" \
+    "preflight must identify Skill tags that will be skipped"
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment AS assignment JOIN nexent.tag_definition AS definition USING (tenant_id, definition_id) JOIN nexent.tag_value AS value USING (tenant_id, definition_id, value_id) WHERE assignment.tenant_id = 'tenant-mappable' AND assignment.resource_type = 'tool' AND assignment.resource_id = '70' AND definition.definition_key = 'keywords' AND value.normalized_value = 'mappabletooltag' AND assignment.delete_flag = 'N';" \
+    "1" "mappable legacy tags must still migrate"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment WHERE resource_type = 'agent' AND resource_id = '999' AND delete_flag = 'N';" \
+    "0" "Agent tags without a canonical source must not create assignments"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment WHERE resource_type = 'skill' AND resource_id = '130' AND delete_flag = 'N';" \
+    "0" "Skill tags without a tenant must not create assignments"
+  assert_query "$database" \
+    "SELECT tags::TEXT FROM nexent.ag_agent_repository_t WHERE agent_repository_id = 71;" \
+    "{Marketing,UnmappableAgentTag}" "skipped Agent tags must remain in the legacy field"
+  assert_query "$database" \
+    "SELECT skill_tags::TEXT FROM nexent.ag_skill_info_t WHERE skill_id = 130;" \
+    "[\"GlobalSkillTag\"]" "skipped Skill tags must remain in the legacy field"
+
+  preflight_output="$(run_file "$database" "$PREFLIGHT_SQL")"
+  assert_not_contains "$preflight_output" "legacy_missing_assignment" \
+    "post-migration preflight must not report intentionally skipped tags as missing"
+  pass "unmappable Agent and Skill tags are skipped without blocking migration"
+}
+
 test_agent_version_history_is_not_a_canonical_conflict() {
   local database="utm_agent_version_history"
   local preflight_output
@@ -1108,6 +1154,7 @@ main() {
   test_null_and_empty_tenant_roll_back
   test_non_string_json_roll_back
   test_source_mismatch_roll_back
+  test_unmappable_agent_and_skill_tags_are_skipped
   test_agent_version_history_is_not_a_canonical_conflict
   test_value_capacity_preflight_roll_back
   test_assignment_capacity_preflight_roll_back
