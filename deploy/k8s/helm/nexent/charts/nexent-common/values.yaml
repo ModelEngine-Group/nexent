@@ -70,7 +70,6 @@ config:
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
   officialAgentsPath: "/mnt/nexent/official-agents"
-  marketBackend: "http://60.204.251.153:8010"
   memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
   logDir: "/mnt/nexent-data/logs"
   modelEngine:

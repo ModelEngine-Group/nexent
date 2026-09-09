@@ -480,7 +480,6 @@ render_k8s_runtime_config_values() {
     printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
     printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
     printf '    officialAgentsPath: %s\n' "$(yaml_quote "$(env_or_default OFFICIAL_AGENTS_PATH "/mnt/nexent/official-agents")")"
-    printf '    marketBackend: %s\n' "$(yaml_quote "$(env_or_default MARKET_BACKEND "http://60.204.251.153:8010")")"
     printf '    logDir: %s\n' "$(yaml_quote "$(env_or_default LOG_DIR "/mnt/nexent-data/logs")")"
     echo "    modelEngine:"
     printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
