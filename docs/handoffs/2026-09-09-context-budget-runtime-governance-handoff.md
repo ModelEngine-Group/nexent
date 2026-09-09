@@ -154,6 +154,16 @@ Multipass VM：`nexent-context-capability`，当前已停止。
 VM 部署脚本曾把挂载工作树的非执行文件改成 executable，并生成 `official-skills-zip/`；handoff 前已恢复
 全部 Git 执行位并删除该可重建目录。当前提交前工作树应保持干净。
 
+本机已删除 54 条不再使用的 context-budget archive/backup/rehearsal/rewrite 分支。以下旧分支因仍被
+worktree 占用而保护性保留，且不属于本次 Git handoff：
+
+- `fix/context_budget`：工作树含未跟踪的 `.local-infra/` 和 `official-skills-zip/`。
+- `context-budget-golden`：`/tmp` 工作树含大量未提交的历史 staging 内容。
+- `split/context-budget-golden`：仍绑定一个干净的旧 worktree。
+
+四个 `split/context-*` PR 分支也保留，用于追溯现有 #3848～#3851。切换设备只需要 checkout 当前
+`feat/context-budget-runtime-governance`；上述本机 worktree 和未提交内容不会随远端分支迁移。
+
 ## 7. 建议的下一步顺序
 
 1. checkout 当前 handoff 分支并确认 `git status` 干净。
