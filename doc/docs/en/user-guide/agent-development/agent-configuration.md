@@ -70,6 +70,42 @@ Agents can use tools and skills to complete tasks, including local capabilities 
 
 On the **Select Agent Tools** tab, click **MCP Config** to connect a remote or containerized MCP service, or convert an existing API into MCP tools. For all three connection methods, OpenAPI requirements, service management, and tool testing, see [Integrate MCP Services](../../integration/integration-in/mcp.md).
 
+### 🔐 Pass User Information to Tools (Tool-side Authorization)
+
+When an agent invokes MCP tools, collaborative agents, or external A2A agents, the platform passes the **current caller's user information** according to each tool's declaration, so the tool can authorize on its own before accessing data.
+
+🔔 **Platform boundary**: the platform itself performs no authorization for tools; it only passes through the authenticated session identity. Authorization is the tool's responsibility.
+
+**How to declare**: if a tool's input schema defines any of the conventional field names below, the platform treats it as requesting that user information and fills the field with the current user's value at call time:
+
+| Conventional field | Meaning |
+|--------------------|---------|
+| `tenant_id` | Tenant ID |
+| `tenant_name` | Tenant name |
+| `user_id` | User ID |
+| `user_name` | User name |
+| `user_account` | User account (email) |
+| `user_groups` | List of user-group names the user belongs to |
+
+**Example**: a data query tool that enforces data permissions by caller account and groups only needs to declare `user_account` and `user_groups` in its inputSchema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "description": "Query content" },
+    "user_account": { "type": "string", "description": "Caller account (injected by the platform)" },
+    "user_groups": { "type": "array", "items": { "type": "string" }, "description": "Caller user groups (injected by the platform)" }
+  }
+}
+```
+
+> 💡 **Notes**:
+>
+> - These conventional fields are **invisible to the model**: the model neither sees nor fills them, and injected values come only from the current authenticated session, so they cannot be forged
+> - Undeclared conventional fields are never injected and do not affect the tool's existing parameters
+> - When an agent calls collaborative agents (including external A2A agents), the user information is passed through in the request metadata
+
 ### ⚙️ Custom Tools
 
 You can refer to the following guides to develop your own tools and integrate them into Nexent to enrich agent capabilities:

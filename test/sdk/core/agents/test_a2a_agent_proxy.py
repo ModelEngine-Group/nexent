@@ -1752,6 +1752,46 @@ class TestExternalA2AAgentWrapper:
         metadata["tenant"]["region"] = "changed"
         assert wrapper.get_runtime_metadata() == {"tenant": {"region": "cn"}}
 
+
+    def test_call_merges_user_context_into_message_context(self):
+        """The caller user context is merged into the forwarded message context."""
+        wrapper = ExternalA2AAgentWrapper(
+            self._make_info(),
+            user_context={
+                "user_account": "bug-admin@qq.com",
+                "user_groups": ["Default Group"],
+            },
+        )
+        wrapper.set_runtime_metadata({"tenant": {"region": "cn"}})
+
+        with patch.object(ExternalA2AAgentProxy, "sync_call", return_value="ok") as sync_call:
+            assert wrapper(task="do something") == "ok"
+
+        sync_call.assert_called_once_with(
+            "do something",
+            [],
+            context={
+                "tenant": {"region": "cn"},
+                "user_context": {
+                    "user_account": "bug-admin@qq.com",
+                    "user_groups": ["Default Group"],
+                },
+            },
+        )
+
+    def test_user_context_is_isolated_copy(self):
+        """Mutating the source dict after construction must not leak into calls."""
+        source = {"user_account": "bug-admin@qq.com"}
+        wrapper = ExternalA2AAgentWrapper(self._make_info(), user_context=source)
+        source["user_account"] = "forged@evil.com"
+
+        with patch.object(ExternalA2AAgentProxy, "sync_call", return_value="ok") as sync_call:
+            wrapper(task="do something")
+
+        assert sync_call.call_args[1]["context"]["user_context"] == {
+            "user_account": "bug-admin@qq.com"
+        }
+
     def test_set_runtime_metadata_rejects_non_dict(self):
         """set_runtime_metadata must reject values that are not mappings."""
         wrapper = ExternalA2AAgentWrapper(self._make_info())

@@ -366,6 +366,12 @@ class AgentRunInfo(BaseModel):
     stop_event: Event = Field(description="Stop event control")
     conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
     user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
+    user_context: Optional[Dict[str, Any]] = Field(
+        description="Caller user context (tenant/user/groups) passed through to tools for "
+        "tool-side authorization. Hidden from the model; values come only from the "
+        "authenticated session, never from model output.",
+        default=None,
+    )
     runtime_metadata: Dict[str, Any] = Field(
         description="Immutable application-resolved runtime metadata snapshot",
         default_factory=dict,

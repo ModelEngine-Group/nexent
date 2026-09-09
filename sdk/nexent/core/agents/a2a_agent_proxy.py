@@ -726,7 +726,8 @@ class ExternalA2AAgentWrapper:
         self,
         agent_info: A2AAgentInfo,
         stop_event: Optional[Event] = None,
-        observer: Optional[Any] = None
+        observer: Optional[Any] = None,
+        user_context: Optional[Dict[str, Any]] = None
     ):
         """Initialize the external A2A agent wrapper.
 
@@ -734,6 +735,9 @@ class ExternalA2AAgentWrapper:
             agent_info: Configuration for the external A2A agent.
             stop_event: Optional stop event for cancellation.
             observer: Optional message observer for logging.
+            user_context: Optional caller user context (tenant/user/groups)
+                forwarded to the external agent via message metadata so it
+                can authorize before accessing data.
         """
         self.name = agent_info.name
         # Use skills description if available
@@ -743,6 +747,7 @@ class ExternalA2AAgentWrapper:
         self.observer = observer
         self._proxy: Optional[ExternalA2AAgentProxy] = None
         self._runtime_metadata: Dict[str, Any] = {}
+        self._user_context: Dict[str, Any] = deepcopy(user_context or {})
         # Required by smolagents for managed agents
         self.inputs = {
             "task": {"type": "string", "description": "Task description for the external agent."},
@@ -790,10 +795,13 @@ class ExternalA2AAgentWrapper:
             return "Error: No task provided"
 
         try:
+            context = self.get_runtime_metadata()
+            if self._user_context:
+                context["user_context"] = deepcopy(self._user_context)
             result = self._proxy.sync_call(
                 query,
                 history,
-                context=self.get_runtime_metadata(),
+                context=context,
             )
             return result
         except Exception as e:
