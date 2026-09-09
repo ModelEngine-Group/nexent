@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from consts.model import (
+    ModelConnectStatusEnum,
     RepositoryImportPrecheckResponse,
     RepositoryImportRequirementItem,
     ToolSourceEnum,
