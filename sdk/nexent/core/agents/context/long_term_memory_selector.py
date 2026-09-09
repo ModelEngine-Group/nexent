@@ -117,8 +117,19 @@ def select_long_term_memory(
         "rules": ["Return JSON only", "Select IDs only", "Keep each ID at most once"],
     }, ensure_ascii=False)
     try:
-        response = model([ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": prompt}])],
-                         stop_sequences=[])
+        usage_kwargs = (
+            {
+                "usage_purpose": "history_summary",
+                "usage_turn_id": getattr(model, "default_usage_turn_id", None),
+            }
+            if hasattr(model, "provider_call_usages")
+            else {}
+        )
+        response = model(
+            [ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": prompt}])],
+            stop_sequences=[],
+            **usage_kwargs,
+        )
         output = response.content
         if isinstance(output, list):
             output = "".join(block.get("text", "") for block in output if isinstance(block, dict))

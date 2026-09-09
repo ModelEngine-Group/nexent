@@ -7,7 +7,12 @@ import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { useCapacitySuggestion } from "@/hooks/useCapacitySuggestion";
 import { modelService } from "@/services/modelService";
-import { ModelOption, ModelType } from "@/types/modelConfig";
+import {
+  ModelOption,
+  ModelType,
+  TokenCountProbeMetadata,
+  FeatureCapabilityOverride,
+} from "@/types/modelConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import {
   ModelChunkSizeSlider,
@@ -28,6 +33,7 @@ import {
   ModelCapacityFormState,
   validateCapacityForm,
 } from "./ModelCapacityFields";
+import { ModelFeatureCapabilityFields } from "./ModelFeatureCapabilityFields";
 
 const { Option } = Select;
 
@@ -80,6 +86,14 @@ export const ModelEditDialog = ({
     ...emptyCapacityForm,
   });
   const [loading, setLoading] = useState(false);
+  const [reviewingAutomaticUpdate, setReviewingAutomaticUpdate] =
+    useState(false);
+  const [probingTokenCount, setProbingTokenCount] = useState(false);
+  const [probeMetadata, setProbeMetadata] =
+    useState<TokenCountProbeMetadata | null>(null);
+  const [featureOverride, setFeatureOverride] =
+    useState<FeatureCapabilityOverride | null>(null);
+  const [featureOverrideDirty, setFeatureOverrideDirty] = useState(false);
   const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
   const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
     useState(true);
@@ -100,8 +114,89 @@ export const ModelEditDialog = ({
   // should trigger an API call.
   const autoSuggestFiredRef = useRef(false);
 
+  const reviewAutomaticUpdate = async () => {
+    if (!model) return;
+    setReviewingAutomaticUpdate(true);
+    try {
+      const preview = await modelService.previewCapacityAdoption(
+        model.displayName,
+        model.modelIdentityMetadata?.matcherVersion,
+        tenantId
+      );
+      const changed = Object.entries(preview.fields).filter(
+        ([, item]) => item.changed
+      );
+      Modal.confirm({
+        title: "Review automatic capacity update",
+        content: (
+          <div className="mt-3 space-y-2 text-sm">
+            {changed.length === 0 ? (
+              <div>No catalog changes are available.</div>
+            ) : (
+              changed.map(([field, item]) => (
+                <div key={field} className="flex justify-between gap-4">
+                  <span>{field}</span>
+                  <span>
+                    {String(item.currentValue ?? "Unknown")} →{" "}
+                    {String(item.proposedValue ?? "Unknown")}
+                    {item.blockedByManual ? " · Manual value preserved" : ""}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        ),
+        okText: "Adopt automatic values",
+        okButtonProps: {
+          disabled: changed.every(([, item]) => !item.applicable),
+        },
+        onOk: async () => {
+          await modelService.adoptCapacity({
+            displayName: model.displayName,
+            expectedProfileVersion: preview.proposedProfileVersion,
+            expectedMatcherVersion: preview.matcherVersion,
+            tenantId,
+          });
+          message.success("Automatic capacity values adopted");
+          await onSuccess();
+        },
+      });
+    } catch (error) {
+      message.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to review automatic update"
+      );
+    } finally {
+      setReviewingAutomaticUpdate(false);
+    }
+  };
+
+  const probeTokenCount = async () => {
+    if (!model) return;
+    setProbingTokenCount(true);
+    try {
+      const result = await modelService.probeTokenCount(
+        model.displayName,
+        true,
+        tenantId
+      );
+      setProbeMetadata(result);
+      message.success(`Token-count endpoint: ${result.status}`);
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : "Token-count probe failed"
+      );
+    } finally {
+      setProbingTokenCount(false);
+    }
+  };
+
   useEffect(() => {
     if (model) {
+      setProbeMetadata(model.tokenCountProbeMetadata || null);
+      setFeatureOverride(model.featureCapabilityOverride || null);
+      setFeatureOverrideDirty(false);
       setForm({
         type: model.type,
         name: model.name,
@@ -157,7 +252,9 @@ export const ModelEditDialog = ({
     form.type === MODEL_TYPES.MULTI_EMBEDDING;
   const isRerankModel = form.type === MODEL_TYPES.RERANK;
   const connectivityModelType =
-    form.type === MODEL_TYPES.VLM2 || form.type === MODEL_TYPES.VLM3 || form.type === MODEL_TYPES.VLM4
+    form.type === MODEL_TYPES.VLM2 ||
+    form.type === MODEL_TYPES.VLM3 ||
+    form.type === MODEL_TYPES.VLM4
       ? (MODEL_TYPES.VLM as ModelType)
       : form.type;
   const isVoiceModel =
@@ -363,10 +460,7 @@ export const ModelEditDialog = ({
       // Determine max tokens.
       // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
       // input is hidden and must not be read here per the W1/W2 plan
-      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
-      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
-      // a few lines below, keeping the deprecated NOT NULL column aligned
-      // with the W2 source of truth.
+      // ("Never use legacy max_tokens").
       let maxTokensValue = supportsCapacityFields
         ? 0
         : parseMaxTokens(form.maxTokens) || 0;
@@ -420,11 +514,15 @@ export const ModelEditDialog = ({
                 : undefined
               : undefined,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(featureOverrideDirty
+            ? { featureCapabilityOverride: featureOverride }
+            : {}),
           ...(acceptedCapacitySuggestion
             ? {
                 acceptedSuggestionMatchKind:
                   acceptedCapacitySuggestion.matchKind,
-                ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                ...(acceptedCapacitySuggestion.capabilityProfileVersion &&
+                acceptedCapacitySuggestion.capacityMatch?.autoApplicable
                   ? {
                       acceptedCapabilityProfileVersion:
                         acceptedCapacitySuggestion.capabilityProfileVersion,
@@ -477,11 +575,15 @@ export const ModelEditDialog = ({
               }
             : {}),
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+          ...(featureOverrideDirty
+            ? { featureCapabilityOverride: featureOverride }
+            : {}),
           ...(acceptedCapacitySuggestion
             ? {
                 acceptedSuggestionMatchKind:
                   acceptedCapacitySuggestion.matchKind,
-                ...(acceptedCapacitySuggestion.capabilityProfileVersion
+                ...(acceptedCapacitySuggestion.capabilityProfileVersion &&
+                acceptedCapacitySuggestion.capacityMatch?.autoApplicable
                   ? {
                       acceptedCapabilityProfileVersion:
                         acceptedCapacitySuggestion.capabilityProfileVersion,
@@ -562,6 +664,7 @@ export const ModelEditDialog = ({
       onCancel={onClose}
       footer={null}
       destroyOnHidden
+      width={880}
     >
       <div className="space-y-4">
         {/* Model Name */}
@@ -687,8 +790,17 @@ export const ModelEditDialog = ({
               validationError={capacityValidationError}
               capacitySource={model.capacitySource}
               capabilityProfileVersion={model.capabilityProfileVersion}
-              // context_window/max_output no longer required; empty input
-              // lands DEFAULT_* via buildCapacityPayload at save time.
+              capacityFieldMetadata={model.capacityFieldMetadata}
+              canonicalModelId={model.canonicalModelId}
+              tokenizerMatchMetadata={model.tokenizerMatchMetadata}
+              tokenCountProbeMetadata={
+                probeMetadata || model.tokenCountProbeMetadata
+              }
+              onReviewAutomaticUpdate={reviewAutomaticUpdate}
+              reviewingAutomaticUpdate={reviewingAutomaticUpdate}
+              onProbeTokenCount={probeTokenCount}
+              probingTokenCount={probingTokenCount}
+              // Capacity fields are optional; blank input remains unknown.
               suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
               suggestionLoading={checkingCapacitySuggestion}
               onUseSuggestion={() =>
@@ -710,6 +822,20 @@ export const ModelEditDialog = ({
               }
             />
           </div>
+        )}
+
+        {supportsCapacityFields && (
+          <ModelFeatureCapabilityFields
+            baseline={model.featureCapabilityMetadata}
+            effective={model.effectiveFeatureCapabilities}
+            policy={model.effectiveFeaturePolicy}
+            warnings={model.featureCapabilityWarnings}
+            value={featureOverride}
+            onChange={(next) => {
+              setFeatureOverride(next);
+              setFeatureOverrideDirty(true);
+            }}
+          />
         )}
 
         {/* maxTokens (legacy; only kept for types not covered by the capacity panel) */}
@@ -992,7 +1118,7 @@ export const ProviderConfigEditDialog = ({
   const needsLegacyMaxTokens = isRerankModel || isVoiceModel;
   // Neither mode marks any field required:
   // - per-row mode (supportsCapacityFields): context_window/max_output are
-  //   optional and get DEFAULT_* substituted at save by buildCapacityPayload
+  //   optional and blank values remain unknown
   // - bulk-apply mode (supportsBulkCapacity): optional broadcast -- "fill
   //   to override; leave empty to keep each row's current value"
   const capacityRequiredFields: Array<keyof ModelCapacityFormState> = [];
@@ -1068,14 +1194,8 @@ export const ProviderConfigEditDialog = ({
                 : undefined,
             }
           : {}),
-        // Both per-model and bulk-apply modes write capacity via
-        // buildCapacityPayload. Per-model (supportsCapacityFields) opts
-        // into default substitution: empty context_window/max_output land
-        // DEFAULT_CONTEXT_WINDOW_TOKENS / DEFAULT_MAX_OUTPUT_TOKENS at the
-        // wire. Bulk-apply (supportsBulkCapacity) passes applyDefaults=false
-        // so empty fields stay omitted ("don't broadcast this value"), and
-        // an apiKey-only bulk edit doesn't accidentally null out per-row
-        // capacity by writing 32K/4K across N rows.
+        // Both modes omit blank capacity fields, preserving unknown rows and
+        // preventing API-key-only edits from rewriting capacity facts.
         ...(supportsCapacityFields
           ? buildCapacityPayload(capacityForm)
           : supportsBulkCapacity
@@ -1084,7 +1204,8 @@ export const ProviderConfigEditDialog = ({
         ...(supportsCapacityFields && acceptedCapacitySuggestion
           ? {
               acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
-              ...(acceptedCapacitySuggestion.capabilityProfileVersion
+              ...(acceptedCapacitySuggestion.capabilityProfileVersion &&
+              acceptedCapacitySuggestion.capacityMatch?.autoApplicable
                 ? {
                     acceptedCapabilityProfileVersion:
                       acceptedCapacitySuggestion.capabilityProfileVersion,
@@ -1163,7 +1284,7 @@ export const ProviderConfigEditDialog = ({
             validationError={capacityValidationError}
             capacitySource={initialCapacity?.capacitySource}
             capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
-            // context_window/max_output optional; DEFAULT_* substitute at save.
+            // Capacity fields are optional; blank values remain unknown.
             legacyMaxTokensCandidate={
               initialCapacity?.contextWindowTokens &&
               initialCapacity?.maxOutputTokens
@@ -1181,7 +1302,7 @@ export const ProviderConfigEditDialog = ({
             <Alert
               type="info"
               showIcon
-              message={t("model.dialog.capacity.bulkApply.title")}
+              title={t("model.dialog.capacity.bulkApply.title")}
               description={t("model.dialog.capacity.bulkApply.hint")}
             />
             <ModelCapacityFields

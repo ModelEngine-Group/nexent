@@ -302,9 +302,57 @@ export function extractAssistantMsgFromResponse(
           const currentStep = steps[steps.length - 1];
           if (currentStep) {
             try {
-              currentStep.metrics = JSON.parse(msg.content);
+              const metrics = JSON.parse(msg.content);
+              currentStep.metrics = {
+                ...(currentStep.metrics || {}),
+                ...metrics,
+                context_budget:
+                  currentStep.metrics?.context_budget || metrics.context_budget,
+              };
             } catch {
               currentStep.metrics = null;
+            }
+          }
+          break;
+        }
+
+        case chatConfig.messageTypes.CONTEXT_BUDGET: {
+          const currentStep = steps[steps.length - 1];
+          if (currentStep) {
+            try {
+              const contextBudget = JSON.parse(msg.content);
+              currentStep.metrics = {
+                ...(currentStep.metrics || {
+                  step_number: contextBudget.step_number,
+                  duration: 0,
+                  step_input_tokens: null,
+                  step_output_tokens: null,
+                  total_output_tokens: 0,
+                  estimated_context_tokens: contextBudget.final_tokens,
+                  token_threshold: contextBudget.soft_budget,
+                  hard_input_budget_tokens: contextBudget.hard_budget,
+                  context_processing_mode: null,
+                  output_finish_reason: null,
+                }),
+                context_budget: contextBudget,
+              };
+              if (
+                contextBudget?.compression?.attempted ||
+                Number(contextBudget?.retry_ordinal || 0) > 0 ||
+                !["not_needed", "not_attempted"].includes(
+                  contextBudget?.recovery_state
+                )
+              ) {
+                currentStep.contents.push({
+                  id: `context-budget-${dialog_msg.message_id}-${currentStep.contents.length}`,
+                  type: chatConfig.messageTypes.CONTEXT_BUDGET,
+                  content: msg.content,
+                  expanded: true,
+                  timestamp: Date.now(),
+                });
+              }
+            } catch {
+              /* forward-compatible: ignore malformed optional event */
             }
           }
           break;

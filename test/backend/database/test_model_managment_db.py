@@ -747,3 +747,52 @@ def test_get_model_by_model_id_ignore_delete_without_tenant_id(monkeypatch):
     # Filter by model_id alone; the absence of tenant_id means we still call
     # scalars() exactly once.
     assert session.scalars.call_count == 1
+
+
+def test_apply_model_mutations_uses_one_transaction(monkeypatch):
+    session = MagicMock()
+    context = MagicMock()
+    context.__enter__.return_value = session
+    context.__exit__.return_value = None
+    monkeypatch.setattr(model_mgmt_db, "get_db_session", lambda: context)
+    monkeypatch.setattr(
+        model_mgmt_db.db_client,
+        "clean_string_values",
+        lambda value: dict(value),
+    )
+
+    model_mgmt_db.apply_model_mutations(
+        creates=[{"model_name": "new"}],
+        updates=[(1, {"display_name": "updated"})],
+        deletes=[2],
+        user_id="u1",
+        tenant_id="t1",
+    )
+
+    assert context.__enter__.call_count == 1
+    assert context.__exit__.call_count == 1
+    assert session.execute.call_count == 3
+
+
+def test_apply_model_mutations_propagates_failure_to_transaction_context(monkeypatch):
+    session = MagicMock()
+    session.execute.side_effect = [MagicMock(), RuntimeError("write failed")]
+    context = MagicMock()
+    context.__enter__.return_value = session
+    context.__exit__.return_value = None
+    monkeypatch.setattr(model_mgmt_db, "get_db_session", lambda: context)
+    monkeypatch.setattr(
+        model_mgmt_db.db_client,
+        "clean_string_values",
+        lambda value: dict(value),
+    )
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        model_mgmt_db.apply_model_mutations(
+            creates=[{"model_name": "new"}],
+            updates=[(1, {"display_name": "updated"})],
+            deletes=[2],
+            user_id="u1",
+            tenant_id="t1",
+        )
+    assert context.__exit__.call_args.args[0] is RuntimeError
