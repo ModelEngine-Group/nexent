@@ -116,6 +116,10 @@ sys.modules['database.db_models'] = MagicMock()
 sys.modules['database.conversation_db'] = MagicMock()
 sys.modules['database.db_models'] = MagicMock()
 
+# Another test file may have replaced the parent database package with a
+# stub module. Restore the real package so dotted submodule imports resolve.
+sys.modules.pop('database', None)
+
 # Stub database.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
@@ -448,6 +452,11 @@ sys.modules['nexent.storage.storage_client_factory'].create_storage_client_from_
 sys.modules.pop('consts.model', None)
 if hasattr(sys.modules.get('consts'), 'model'):
     delattr(sys.modules['consts'], 'model')
+# Other test files may have replaced consts.exceptions with a lightweight stub.
+# Restore the real module so backend imports can resolve all exception names.
+sys.modules.pop('consts.exceptions', None)
+if hasattr(sys.modules.get('consts'), 'exceptions'):
+    delattr(sys.modules['consts'], 'exceptions')
 
 # Now import backend modules
 import backend.services.agent_service as agent_service
@@ -1853,7 +1862,8 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
     mock_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
     }
     mock_get_model_by_model_id.return_value = mock_model_info
 
@@ -1890,10 +1900,65 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
         "unavailable_reasons": []
     }
     assert result == expected_result
-    # Source calls get_model_by_model_id twice for the single model id:
-    # once while collecting model_names and once when deriving legacy model_name.
-    assert mock_get_model_by_model_id.call_count == 2
-    mock_get_model_by_model_id.assert_any_call(456)
+    # The model record is fetched once and reused through the model cache.
+    assert mock_get_model_by_model_id.call_count == 1
+    mock_get_model_by_model_id.assert_any_call(456, "test_tenant")
+
+
+@patch('backend.services.agent_service.SkillService')
+@patch('backend.services.agent_service.query_external_sub_agents')
+@patch('backend.services.agent_service.check_agent_availability')
+@patch('backend.services.agent_service.get_model_by_model_id')
+@patch('backend.services.agent_service.get_valid_model_ids')
+@patch('backend.services.agent_service.query_sub_agents_id_list')
+@patch('backend.services.agent_service.search_tools_for_sub_agent')
+@patch('backend.services.agent_service.search_agent_info_by_agent_id')
+@pytest.mark.asyncio
+async def test_get_agent_info_impl_filters_unavailable_models(
+    mock_search_agent_info,
+    mock_search_tools,
+    mock_query_sub_agents_id,
+    mock_get_valid_model_ids,
+    mock_get_model_by_model_id,
+    mock_check_availability,
+    mock_query_external_sub_agents,
+    mock_skill_service,
+):
+    """Agent detail should expose only bound models with AVAILABLE status."""
+    mock_agent_info = {
+        "agent_id": 123,
+        "model_ids": [35, 26],
+        "business_description": "Test agent",
+    }
+    mock_search_agent_info.return_value = mock_agent_info
+    mock_search_tools.return_value = []
+    mock_query_sub_agents_id.return_value = []
+    mock_get_valid_model_ids.return_value = [35, 26]
+    mock_get_model_by_model_id.side_effect = lambda model_id, tenant_id: {
+        35: {
+            "display_name": "deepseek-v4-flash",
+            "connect_status": agent_service.ModelConnectStatusEnum.UNAVAILABLE.value,
+        },
+        26: {
+            "display_name": "glm-5.2",
+            "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+        },
+    }[model_id]
+    mock_check_availability.return_value = (True, [])
+    mock_query_external_sub_agents.return_value = []
+    mock_skill_service.return_value.list_skill_instances.return_value = []
+    availability_model_ids: list[int] = []
+    mock_check_availability.side_effect = lambda **kwargs: (
+        availability_model_ids.extend(kwargs["agent_info"]["model_ids"]),
+        (True, []),
+    )[1]
+
+    result = await get_agent_info_impl(agent_id=123, tenant_id="test_tenant")
+
+    assert result["model_ids"] == [26]
+    assert result["model_names"] == ["glm-5.2"]
+    assert result["model_name"] == "glm-5.2"
+    assert availability_model_ids == [35, 26]
 
 
 @patch("backend.services.agent_service.check_agent_availability")
@@ -1961,7 +2026,8 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
     # Mock model info without display_name
     mock_model_info = {
         "model_id": 456,
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
         # No display_name field
     }
     mock_get_model_by_model_id.return_value = mock_model_info
@@ -1998,10 +2064,9 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
         "unavailable_reasons": []
     }
     assert result == expected_result
-    # Source calls get_model_by_model_id twice for the single model id:
-    # once while collecting model_names and once when deriving legacy model_name.
-    assert mock_get_model_by_model_id.call_count == 2
-    mock_get_model_by_model_id.assert_any_call(456)
+    # The model record is fetched once and reused through the model cache.
+    assert mock_get_model_by_model_id.call_count == 1
+    mock_get_model_by_model_id.assert_any_call(456, "test_tenant")
 
 
 @patch('backend.services.agent_service.SkillService')
@@ -2053,7 +2118,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
     # Assert
     expected_result = {
         "agent_id": 123,
-        "model_ids": [456],
+        "model_ids": [],
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
@@ -2069,10 +2134,9 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
         "unavailable_reasons": []
     }
     assert result == expected_result
-    # Source calls get_model_by_model_id twice for the single model id:
-    # once while collecting model_names and once when deriving legacy model_name.
-    assert mock_get_model_by_model_id.call_count == 2
-    mock_get_model_by_model_id.assert_any_call(456)
+    # The missing model record is fetched once during availability filtering.
+    assert mock_get_model_by_model_id.call_count == 1
+    mock_get_model_by_model_id.assert_any_call(456, "test_tenant")
 
 
 @patch('backend.services.agent_service.SkillService')
@@ -2111,18 +2175,20 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
     }
 
     # Mock model info for business logic model
     mock_business_logic_model_info = {
         "model_id": 789,
         "display_name": "Claude-3.5",
-        "provider": "anthropic"
+        "provider": "anthropic",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
     }
 
     # Mock get_model_by_model_id to return different values based on input
-    def mock_get_model(model_id):
+    def mock_get_model(model_id, tenant_id=None):
         if model_id == 456:
             return mock_main_model_info
         elif model_id == 789:
@@ -2170,8 +2236,8 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     # - once for main model_ids[0]
     # - once again to derive legacy model_name from model_ids[0]
     # - once for business_logic_model_id
-    assert mock_get_model_by_model_id.call_count == 3
-    mock_get_model_by_model_id.assert_any_call(456)
+    assert mock_get_model_by_model_id.call_count == 2
+    mock_get_model_by_model_id.assert_any_call(456, "test_tenant")
     mock_get_model_by_model_id.assert_any_call(789)
 
 
@@ -2210,11 +2276,12 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
     }
 
     # Mock get_model_by_model_id to return None for business_logic_model_id
-    def mock_get_model(model_id):
+    def mock_get_model(model_id, tenant_id=None):
         if model_id == 456:
             return mock_main_model_info
         elif model_id == 789:
@@ -2262,8 +2329,8 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     # - once for main model_ids[0]
     # - once again to derive legacy model_name from model_ids[0]
     # - once for business_logic_model_id
-    assert mock_get_model_by_model_id.call_count == 3
-    mock_get_model_by_model_id.assert_any_call(456)
+    assert mock_get_model_by_model_id.call_count == 2
+    mock_get_model_by_model_id.assert_any_call(456, "test_tenant")
     mock_get_model_by_model_id.assert_any_call(789)
 
 
@@ -2302,18 +2369,20 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
     }
 
     # Mock model info for business logic model without display_name
     mock_business_logic_model_info = {
         "model_id": 789,
-        "provider": "anthropic"
+        "provider": "anthropic",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
         # No display_name field
     }
 
     # Mock get_model_by_model_id to return different values based on input
-    def mock_get_model(model_id):
+    def mock_get_model(model_id, tenant_id=None):
         if model_id == 456:
             return mock_main_model_info
         elif model_id == 789:
@@ -2361,8 +2430,8 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     # - once for main model_ids[0]
     # - once again to derive legacy model_name from model_ids[0]
     # - once for business_logic_model_id
-    assert mock_get_model_by_model_id.call_count == 3
-    mock_get_model_by_model_id.assert_any_call(456)
+    assert mock_get_model_by_model_id.call_count == 2
+    mock_get_model_by_model_id.assert_any_call(456, "test_tenant")
     mock_get_model_by_model_id.assert_any_call(789)
 
 
@@ -2949,7 +3018,11 @@ async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
     mock_convert_list.return_value = []
     # Do not mutate model_cache here so that the "model_id not in model_cache" branch runs.
     mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
-    mock_get_model.return_value = {"model_name": "m", "display_name": "M"}
+    mock_get_model.return_value = {
+        "model_name": "m",
+        "display_name": "M",
+        "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+    }
 
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
@@ -11780,6 +11853,34 @@ def test_collect_model_availability_reasons():
     assert AgentUnavailableReason.MODEL_UNAVAILABLE in result
 
 
+def test_collect_model_availability_reasons_available_when_any_model_available():
+    """Agent stays available while at least one bound model is healthy."""
+    from backend.services.agent_service import _collect_model_availability_reasons
+    from backend.consts.agent_unavailable_reasons import AgentUnavailableReason
+
+    unavailable_reason = [AgentUnavailableReason.MODEL_UNAVAILABLE]
+    model_availability_by_id = {7: unavailable_reason, 8: []}
+
+    def _check_single(model_id, tenant_id, model_cache, reason_key):
+        return model_availability_by_id[model_id]
+
+    with patch(
+        'backend.services.agent_service._check_single_model_availability',
+        side_effect=_check_single,
+    ):
+        result = _collect_model_availability_reasons({"model_ids": [7, 8]}, "tenant_1", {})
+
+    assert AgentUnavailableReason.MODEL_UNAVAILABLE not in result
+
+    with patch(
+        'backend.services.agent_service._check_single_model_availability',
+        return_value=unavailable_reason,
+    ):
+        result = _collect_model_availability_reasons({"model_ids": [7, 8]}, "tenant_1", {})
+
+    assert AgentUnavailableReason.MODEL_UNAVAILABLE in result
+
+
 # Test for save_messages error cases
 def test_save_messages_user_with_messages_error():
     """Test save_messages raises error when messages provided for user."""
@@ -16396,9 +16497,17 @@ async def test_list_all_agent_info_impl_filters_deleted_models(
     # Mock model info for valid models (get_model_by_model_id takes 2 args: model_id and tenant_id)
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {
+                "display_name": "Model 1",
+                "model_id": 1,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {
+                "display_name": "Model 3",
+                "model_id": 3,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         return None
     mock_get_model.side_effect = get_model_side_effect
 
@@ -16565,9 +16674,17 @@ async def test_get_agent_info_impl_filters_deleted_models(
     # Mock get_model_by_model_id for valid models
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {
+                "display_name": "Model 1",
+                "model_id": 1,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {
+                "display_name": "Model 3",
+                "model_id": 3,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         return None
     mock_get_model_by_model_id.side_effect = get_model_side_effect
 
@@ -17565,9 +17682,17 @@ async def test_list_all_agent_info_impl_filters_deleted_models(
     # Mock model info for valid models (get_model_by_model_id takes 2 args: model_id and tenant_id)
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {
+                "display_name": "Model 1",
+                "model_id": 1,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {
+                "display_name": "Model 3",
+                "model_id": 3,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         return None
     mock_get_model.side_effect = get_model_side_effect
 
@@ -17734,9 +17859,17 @@ async def test_get_agent_info_impl_filters_deleted_models(
     # Mock get_model_by_model_id for valid models
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {
+                "display_name": "Model 1",
+                "model_id": 1,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {
+                "display_name": "Model 3",
+                "model_id": 3,
+                "connect_status": agent_service.ModelConnectStatusEnum.AVAILABLE.value,
+            }
         return None
     mock_get_model_by_model_id.side_effect = get_model_side_effect
 
@@ -18494,6 +18627,7 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
         (b"x" * (agent_service.AGENT_ICON_MAX_BYTES + 1), "Agent icon must not exceed 2 MB"),
         (b"not an image", "Agent icon must be a PNG, JPEG, GIF, or WebP image"),
     ],
+    ids=["empty", "too_large", "not_an_image"],
 )
 async def test_upload_agent_icon_impl_rejects_invalid_content(content, message):
     with pytest.raises(ValueError, match=message):

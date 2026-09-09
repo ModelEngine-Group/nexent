@@ -1682,7 +1682,6 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
         logger.error(f"Failed to get external sub agents: {str(e)}")
         agent_info["external_sub_agent_id_list"] = []
 
-    # Get model names from model_ids array
     # Filter out deleted models (delete_flag='Y' in model_record_t)
     model_ids = agent_info.get("model_ids") or []
     valid_model_ids = get_valid_model_ids(model_ids, tenant_id)
@@ -1691,17 +1690,24 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     deleted_model_ids = set(model_ids) - set(valid_model_ids)
     agent_info["model_ids"] = valid_model_ids
 
+    model_cache: Dict[int, Optional[dict]] = {}
+    available_model_ids = _filter_available_model_ids(
+        model_ids=valid_model_ids,
+        tenant_id=tenant_id,
+        model_cache=model_cache,
+    )
+
     model_names: List[str] = []
-    for mid in valid_model_ids:
-        model_info = get_model_by_model_id(mid)
+    for mid in available_model_ids:
+        model_info = model_cache.get(mid)
         if model_info:
             display_name = model_info.get("display_name")
             if display_name:
                 model_names.append(display_name)
     agent_info["model_names"] = model_names
-    # Always derive model_name from valid_model_ids so the API contract is consistent.
-    if valid_model_ids:
-        first_model_info = get_model_by_model_id(valid_model_ids[0])
+    # Always derive model_name from available_model_ids so the API contract is consistent.
+    if available_model_ids:
+        first_model_info = model_cache.get(available_model_ids[0])
         agent_info["model_name"] = first_model_info.get(
             "display_name", None) if first_model_info is not None else None
     else:
@@ -1729,7 +1735,8 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
     is_available, unavailable_reasons = check_agent_availability(
         agent_id=agent_id,
         tenant_id=tenant_id,
-        agent_info=agent_info
+        agent_info=agent_info,
+        model_cache=model_cache,
     )
 
     # Add MODEL_DELETED reason if any configured models have been deleted
@@ -1739,6 +1746,7 @@ async def get_agent_info_impl(agent_id: int, tenant_id: str, version_no: int = 0
 
     agent_info["is_available"] = is_available
     agent_info["unavailable_reasons"] = unavailable_reasons
+    agent_info["model_ids"] = available_model_ids
 
     # Set current_version_no from draft record (version_no=0)
     # This ensures the returned data always has the current published version info
@@ -2691,11 +2699,17 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 agent_info=agent,
                 model_cache=model_cache
             )
+            available_model_ids = _filter_available_model_ids(
+                model_ids=valid_model_ids,
+                tenant_id=tenant_id,
+                model_cache=model_cache,
+            )
 
             # Preserve the raw data so we can adjust availability for duplicates
             enriched_agents.append({
                 "raw_agent": agent,
                 "unavailable_reasons": unavailable_reasons,
+                "available_model_ids": available_model_ids,
             })
 
         # Handle duplicate name/display_name: keep the earliest created agent available,
@@ -2709,7 +2723,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 dict.fromkeys(entry["unavailable_reasons"]))
 
             # Get model names from model_ids array
-            model_ids = agent.get("model_ids") or []
+            model_ids = entry["available_model_ids"]
             model_names: List[str] = []
             for mid in model_ids:
                 if mid not in model_cache:
@@ -2796,22 +2810,48 @@ def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> Non
                      AgentUnavailableReason.DUPLICATE_DISPLAY_NAME)
 
 
+def _model_record_is_available(model_info: Optional[dict]) -> bool:
+    """Return whether a model record is in AVAILABLE connect status."""
+    if not model_info:
+        return False
+    connect_status = ModelConnectStatusEnum.get_value(model_info.get("connect_status"))
+    return connect_status == ModelConnectStatusEnum.AVAILABLE.value
+
+
+def _filter_available_model_ids(
+    model_ids: List[int],
+    tenant_id: str,
+    model_cache: Dict[int, Optional[dict]],
+) -> List[int]:
+    """Return bound model IDs whose connect status is AVAILABLE."""
+    available_model_ids: List[int] = []
+    for model_id in model_ids:
+        if model_id not in model_cache:
+            model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
+        if _model_record_is_available(model_cache.get(model_id)):
+            available_model_ids.append(model_id)
+    return available_model_ids
+
+
 def _collect_model_availability_reasons(agent: dict, tenant_id: str, model_cache: Dict[int, Optional[dict]]) -> list[str]:
     """
     Build a list of reasons related to model availability issues for a given agent.
-    Iterates over model_ids (the canonical field) and collects one unavailable reason
-    per model that is missing or not in AVAILABLE status.
+    The agent stays available while at least one bound model is in AVAILABLE status.
     """
     reasons: list[str] = []
     model_ids = agent.get("model_ids") or []
     if model_ids:
-        for mid in model_ids:
-            reasons.extend(_check_single_model_availability(
+        model_available = [
+            not _check_single_model_availability(
                 model_id=mid,
                 tenant_id=tenant_id,
                 model_cache=model_cache,
                 reason_key=AgentUnavailableReason.MODEL_UNAVAILABLE,
-            ))
+            )
+            for mid in model_ids
+        ]
+        if not any(model_available):
+            reasons.append(AgentUnavailableReason.MODEL_UNAVAILABLE)
     else:
         reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
 
