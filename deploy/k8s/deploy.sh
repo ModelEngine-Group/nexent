@@ -568,7 +568,7 @@ render_k8s_runtime_config_values() {
     printf '      heartbeatUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_HEARTBEAT_URL "")")"
     printf '      heartbeatIntervalSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_HEARTBEAT_INTERVAL_SECONDS "300")")"
     printf '      heartbeatCookieName: %s\n' "$(yaml_quote "$(env_or_default CAS_HEARTBEAT_COOKIE_NAME "")")"
-    printf '      renewEnabled: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_ENABLED "true")")"
+    printf '      renewEnabled: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_ENABLED "false")")"
     printf '      renewBeforeSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_BEFORE_SECONDS "300")")"
     printf '      renewTimeoutSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_TIMEOUT_SECONDS "10")")"
     printf '      syntheticEmailDomain: %s\n' "$(yaml_quote "$(env_or_default CAS_SYNTHETIC_EMAIL_DOMAIN "cas.local")")"
