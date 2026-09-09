@@ -2439,3 +2439,22 @@ async def test_usm_non_embedding_base_url_is_not_resolved():
 
         assert mock_dim.call_count == 0
         assert mock_update.call_args[0][1]["base_url"] == "https://api.openai.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_usm_embedding_localhost_replaced_before_url_resolution():
+    """update_single_model_for_tenant: localhost is rewritten before candidates are probed."""
+    svc = import_svc()
+
+    mock_dim = mock.AsyncMock(return_value=768)
+
+    with mock.patch.object(svc, "get_models_by_display_name",
+                           return_value=_existing_embedding_record("https://old.example/v1/embeddings")), \
+            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+
+        await svc.update_single_model_for_tenant(
+            "u1", "t1", "Test Emb", {"base_url": "http://localhost:11434/v1"})
+
+        assert mock_dim.call_args[0][0]["base_url"] == "http://host.docker.internal:11434/v1/embeddings"
+        assert mock_update.call_args[0][1]["base_url"] == "http://host.docker.internal:11434/v1/embeddings"

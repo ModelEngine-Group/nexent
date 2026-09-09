@@ -279,7 +279,11 @@ async def resolve_embedding_base_url(model_data: Dict[str, Any]) -> Tuple[Option
 
     Returns (None, None) when no candidate answered.
     """
-    for candidate_url in _embedding_url_candidates(model_data.get("base_url", "")):
+    base_url = model_data.get("base_url") or ""
+    if LOCALHOST_NAME in base_url or LOCALHOST_IP in base_url:
+        base_url = base_url.replace(
+            LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
+    for candidate_url in _embedding_url_candidates(base_url):
         dimension = await embedding_dimension_check({**model_data, "base_url": candidate_url})
         if dimension is not None:
             return candidate_url, dimension
