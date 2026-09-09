@@ -307,6 +307,23 @@ ProcessType = _module_mocks["sdk.nexent.core.utils.observer"].ProcessType
 MessageObserver = _module_mocks["sdk.nexent.core.utils.observer"].MessageObserver
 
 
+def test_remove_parallel_executor_import_removes_injected_tool_import():
+    code = (
+        "from nexent.core.tools.parallel_executor import parallel_executor\n"
+        "result = parallel_executor(tasks=[])"
+    )
+
+    assert core_agent_module._remove_parallel_executor_import(code) == (
+        "result = parallel_executor(tasks=[])"
+    )
+
+
+def test_remove_parallel_executor_import_preserves_unrelated_code():
+    code = "from other_module import parallel_executor_helper\nprint(parallel_executor_helper)"
+
+    assert core_agent_module._remove_parallel_executor_import(code) == code
+
+
 def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
     module = TestRunStreamRealExecution()._load_core_agent_in_isolation()
     agent = object.__new__(module.CoreAgent)
