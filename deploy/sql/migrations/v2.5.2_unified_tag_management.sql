@@ -446,7 +446,8 @@ INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reaso
 SELECT source_name, source_row_id, tenant_id, resource_type || '/' || COALESCE(resource_id, '?'),
        'null_or_empty_tenant', to_jsonb(source)
 FROM utm_legacy_source AS source
-WHERE tenant_id IS NULL OR btrim(tenant_id) = '';
+WHERE (tenant_id IS NULL OR btrim(tenant_id) = '')
+  AND source_name <> 'skill.skill_tags';
 
 INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, sample)
 SELECT source_name, source_row_id, tenant_id, resource_type || '/' || COALESCE(resource_id, '?'),
@@ -474,7 +475,8 @@ SELECT source_name, source_row_id, tenant_id,
             ELSE 'canonical_source_missing_or_tenant_mismatch' END,
        canonical_match_count, to_jsonb(source)
 FROM utm_legacy_source AS source
-WHERE canonical_match_count = 0;
+WHERE canonical_match_count = 0
+  AND source_name <> 'agent_repository.tags';
 
 INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
 SELECT source_name, source_row_id, tenant_id,
@@ -1227,7 +1229,13 @@ CROSS JOIN LATERAL unnest(repository.tags) AS expanded(raw_value)
 JOIN utm_agent_category_alias AS aliases
   ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
 WHERE COALESCE(cardinality(repository.tags), 0) > 0
-  AND COALESCE(repository.delete_flag, 'N') <> 'Y';
+  AND COALESCE(repository.delete_flag, 'N') <> 'Y'
+  AND EXISTS (
+      SELECT 1
+      FROM nexent.ag_tenant_agent_t AS agent
+      WHERE agent.agent_id = repository.agent_id
+        AND agent.tenant_id = repository.publisher_tenant_id
+  );
 
 DO $$
 DECLARE
