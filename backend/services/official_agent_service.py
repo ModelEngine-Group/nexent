@@ -566,10 +566,12 @@ async def _create_knowledge_bases(
     from database.group_db import query_groups_by_tenant
     from database.knowledge_db import get_knowledge_record, update_knowledge_record
     from utils.str_utils import convert_string_to_list
-    from services.vectordatabase_service import (
-        ElasticSearchService,
-        get_embedding_model_by_id,
+    from management.services.knowledge_base.service import ElasticSearchService
+    from management.services.knowledge_base.common import (
         get_vector_db_core,
+    )
+    from management.services.model.resolver import (
+        get_embedding_model_by_id,
     )
 
     vdb_core = get_vector_db_core()
