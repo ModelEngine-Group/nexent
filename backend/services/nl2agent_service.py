@@ -1097,9 +1097,7 @@ def _rank_resource_catalog(
             (
                 ResourceMatch(
                     candidate_ref=item["candidate"].candidate_ref,
-                    score=round(
-                        item["relationships"][requirement.requirement_id], 4
-                    ),
+                    score=item["relationships"][requirement.requirement_id],
                     strength=(
                         "strong"
                         if item["relationships"][requirement.requirement_id]

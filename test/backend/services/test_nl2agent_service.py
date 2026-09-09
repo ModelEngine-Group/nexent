@@ -632,6 +632,43 @@ def test_rank_resource_catalog_preserves_requirement_relationship_boundaries(moc
     }
 
 
+def test_rank_resource_catalog_preserves_weak_score_below_strong_boundary(mocker):
+    """A score below 0.65 remains a weak match without round-trip distortion."""
+
+    mocker.patch(
+        "services.nl2agent_service._score_resource_requirement",
+        return_value=0.64999,
+    )
+    catalog = [{
+        "candidate_ref": "tool:1",
+        "resource_type": "tool",
+        "source": "MCP_TOOL",
+        "name": "Weather Tool",
+        "description": "Weather Tool",
+        "names": ["Weather Tool"],
+        "labels": [],
+        "descriptions": ["Weather Tool"],
+        "interfaces": [],
+        "installed": True,
+        "quality": 1.0,
+    }]
+
+    result = _rank_resource_catalog(
+        requirements=[
+            ResourceRequirement(requirement_id="weather", query="Weather")
+        ],
+        catalog=catalog,
+    )
+
+    assert result.matches_by_requirement == {
+        "weather": [
+            ResourceMatch(
+                candidate_ref="tool:1", score=0.64999, strength="weak"
+            )
+        ]
+    }
+
+
 def test_initial_resolution_prefers_installed_strong_match(mocker):
     """UT-BE-NL2A-RESOLVE-001."""
 
