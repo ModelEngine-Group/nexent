@@ -43,6 +43,7 @@ from database.conversation_db import (
     update_message_unit_content,
     update_message_unit_status,
 )
+from database.model_management_db import get_model_by_model_id
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from services.model_gateway_service import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
@@ -306,7 +307,8 @@ def save_conversation_assistant(request: AgentRequest, messages: List[str], user
     )
 
 
-def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
+def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["ZH"],
+                       model_id: Optional[int] = None) -> str:
     """
     Call LLM to generate a title from a user question
 
@@ -314,6 +316,7 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
         question: User's question content
         tenant_id: Tenant ID
         language: Language code ('zh' for Chinese, 'en' for English)
+        model_id: Optional tenant-scoped LLM model ID
 
     Returns:
         str: Generated title
@@ -321,8 +324,15 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     prompt_template = get_generate_title_prompt_template(language=language)
     set_monitoring_context(tenant_id=tenant_id, user_id=None)
 
-    model_config = tenant_config_manager.get_model_config(
-        key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
+    if model_id is not None:
+        model_config = get_model_by_model_id(model_id, tenant_id)
+        if not model_config:
+            raise ValidationError("Selected model is unavailable")
+        if model_config.get("model_type") != "llm":
+            raise ValidationError("Selected model is not an LLM model")
+    else:
+        model_config = tenant_config_manager.get_model_config(
+            key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
     display_name = model_config.get("display_name", "") if model_config else ""
     set_monitoring_operation("title_generation", display_name=display_name or None)
 
@@ -355,8 +365,12 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     # Call the model (gateway adapter forwards to the wrapped OpenAIModel)
     response = llm(messages)
     if not response or not response.content or not response.content.strip():
-        return DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
-    return remove_think_blocks(response.content.strip())
+        title = DEFAULT_EN_TITLE if language == LANGUAGE["EN"] else DEFAULT_ZH_TITLE
+    else:
+        title = remove_think_blocks(response.content.strip())
+
+    logger.info("title_generation: %s -> %s", display_name or "unknown", title)
+    return title
 
 
 def update_conversation_title(conversation_id: int, title: str, user_id: str = None) -> bool:
@@ -1018,7 +1032,9 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
         }
 
 
-async def generate_conversation_title_service(conversation_id: int, question: str, user_id: str, tenant_id: str, language: str = LANGUAGE["ZH"]) -> str:
+async def generate_conversation_title_service(conversation_id: int, question: str, user_id: str, tenant_id: str,
+                                              language: str = LANGUAGE["ZH"],
+                                              model_id: Optional[int] = None) -> str:
     """
     Generate conversation title from user question
 
@@ -1031,19 +1047,22 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         user_id: User ID
         tenant_id: Tenant ID
         language: Language code ('zh' for Chinese, 'en' for English)
+        model_id: Optional tenant-scoped LLM model ID
 
     Returns:
         str: Generated title
     """
     try:
         # Call LLM to generate title from question in a separate thread to avoid blocking
-        title = await asyncio.to_thread(call_llm_for_title, question, tenant_id, language)
+        title = await asyncio.to_thread(call_llm_for_title, question, tenant_id, language, model_id)
 
         # Update conversation title
         update_conversation_title(conversation_id, title, user_id)
 
         return title
 
+    except ValidationError:
+        raise
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")
         raise Exception(str(e))
