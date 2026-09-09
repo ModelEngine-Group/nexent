@@ -10,6 +10,7 @@ import type {
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
+import { stripAnsiControlSequences } from "@/lib/ansi";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
@@ -189,7 +190,9 @@ export interface Nl2aResourceCandidate {
 }
 
 export type Nl2aInstallationFormKind =
-  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
+  | "SKILL_CONFIG"
+  | "MCP_REMOTE"
+  | "MCP_CONTAINER";
 
 export interface Nl2aResourceInstallationOption {
   option_id: string;
@@ -624,7 +627,12 @@ function parseSseChunk(line: string): SseChunk | null {
   if (!jsonStr) return null;
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-    if (typeof parsed.type === "string") return parsed as unknown as SseChunk;
+    if (typeof parsed.type === "string") {
+      if (typeof parsed.content === "string") {
+        parsed.content = stripAnsiControlSequences(parsed.content);
+      }
+      return parsed as unknown as SseChunk;
+    }
     if (typeof parsed.status === "string") {
       return { type: "status", content: parsed.status };
     }
@@ -654,7 +662,8 @@ function parseSseChunk(line: string): SseChunk | null {
  * | subagent_start               | subagent     | Opens a nested sub-agent card      |
  * | subagent_end                 | subagent     | Closes the most recent nested card |
  * | final_answer                 | text         | Final summary answer               |
- * | error                         | text         | Error message                      |
+ * | warning                       | text         | Recoverable step issue             |
+ * | error                         | text         | Terminal error message             |
  * | search_content               | text         | Search results content             |
  * | picture_web                  | text         | Web search image references        |
  * | card                         | text         | Card-rendered content              |
@@ -692,6 +701,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "agent_finish":
     case "max_steps_reached":
     case "verification":
+    case "warning":
     case "error":
       return "text";
     case "search_content":
@@ -1418,7 +1428,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const history = historyMessages.map((msg) => {
       const customMetadata = isNl2Agent
         ? (msg.metadata?.custom as
-            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
+            | { nl2agentCardAction?: Nl2AgentCardAction }
+            | undefined)
         : undefined;
       const text = customMetadata?.nl2agentCardAction
         ? JSON.stringify(customMetadata.nl2agentCardAction)
@@ -1514,7 +1525,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (abortHandled) return;
       abortHandled = true;
       const abortReason = abortSignal?.reason as
-        { detach?: boolean } | undefined;
+        | { detach?: boolean }
+        | undefined;
       if (abortReason?.detach) {
         log.log(
           `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
@@ -1542,7 +1554,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     let agentResponse:
-      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
+      | ReadableStreamDefaultReader<Uint8Array>
+      | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
@@ -2186,6 +2199,24 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             completeVerificationPanel();
           }
 
+          if (chunk.type === "final_answer") {
+            // Backward compatibility for streams produced before the warning
+            // event existed. A later final answer proves those earlier step
+            // errors were recovered, so update their presentation in place.
+            for (const part of contentParts) {
+              if (part?.type === "text" && part.isError) {
+                delete part.isError;
+                part.isWarning = true;
+              }
+            }
+          }
+
+          if (chunk.type === "warning") {
+            // Preserve ordering without treating a recoverable issue as the
+            // end of the verification/run lifecycle.
+            flushOpenReasoning();
+          }
+
           // Sub-agent boundary handling. ``subagent_start`` registers a new
           // invocation in the per-id map (so parallel siblings stay
           // independent) and emits a stamp ``data`` part so the
@@ -2344,6 +2375,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             const textPart: any = {
               type: "text",
               text: chunk.content,
+              ...(chunk.type === "warning" && { isWarning: true }),
               ...(chunk.type === "error" && { isError: true }),
             };
             if (textMeta) {
@@ -2519,6 +2551,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               // in front of it.
               flushOpenReasoning();
               completeVerificationPanel();
+              for (const part of contentParts) {
+                if (part?.type === "text" && part.isError) {
+                  delete part.isError;
+                  part.isWarning = true;
+                }
+              }
+            } else if (chunk.type === "warning") {
+              flushOpenReasoning();
             }
             const partType = mapChunkType(chunk.type);
             if (partType === "reasoning") {
@@ -2575,6 +2615,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const textPart: any = {
                 type: "text",
                 text: chunk.content,
+                ...(chunk.type === "warning" && { isWarning: true }),
                 ...(chunk.type === "error" && { isError: true }),
               };
               const textMeta = resolveSubAgent(chunk.invocation_id);

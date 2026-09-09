@@ -120,6 +120,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    WARNING = "warning"
     NL2A = "nl2a"
     FILE_ARTIFACT = "file_artifact"
 
@@ -1955,9 +1956,9 @@ def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
 
-    # Verify error message was added
+    # Recoverable action-step errors must not imply that the run terminated.
     mock_core_agent.observer.add_message.assert_any_call(
-        "", ProcessType.ERROR, "Test error occurred")
+        "", ProcessType.WARNING, "Test error occurred")
 
 
 def test_agent_run_with_observer_skips_non_action_step(nexent_agent_instance, mock_core_agent):
@@ -2007,7 +2008,7 @@ def test_agent_run_with_observer_with_stop_event_set(nexent_agent_instance, mock
 
     # Verify stop event message was added
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.ERROR, "Agent execution interrupted by external stop signal"
+        "test_agent", ProcessType.WARNING, "Agent execution interrupted by external stop signal"
     )
 
 
@@ -4998,7 +4999,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         upload_tool.forward.assert_called_once_with(str(failed_file), "outputs/failed.txt")
         assert any(
-            call_args.args[1] == ProcessType.ERROR
+            call_args.args[1] == ProcessType.WARNING
             for call_args in nexent_agent_instance.observer.add_message.call_args_list
         )
 

@@ -78,7 +78,7 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, "<user_break>")
     observer.add_message(
         "nl2agent",
-        ProcessType.ERROR,
+        ProcessType.WARNING,
         "Agent execution interrupted by external stop signal",
     )
     observer.add_message("nl2agent", ProcessType.ERROR, "real runtime failure")

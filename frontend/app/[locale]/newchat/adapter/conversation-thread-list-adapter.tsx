@@ -24,6 +24,7 @@ import {
 } from "@/services/conversationService";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
+import { stripAnsiControlSequences } from "@/lib/ansi";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 
 import { storageService } from "@/services/storageService";
@@ -70,7 +71,8 @@ type HistoricalChatMode = "planning" | "execution";
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
 let historicalChatModeListener:
-  ((mode: HistoricalChatMode) => void) | undefined;
+  | ((mode: HistoricalChatMode) => void)
+  | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -147,7 +149,8 @@ const toToolSearchItem = (value: unknown) => {
   const item = value as Record<string, unknown>;
   const url = typeof item.url === "string" ? item.url : "";
   const filename = typeof item.filename === "string" ? item.filename : "";
-  const sourceFile = typeof item.source_file === "string" ? item.source_file : "";
+  const sourceFile =
+    typeof item.source_file === "string" ? item.source_file : "";
   const imageMetadata = parseImageMetadata(item.text);
   const resolvedUrl = imageMetadata?.image_url || url;
   const title =
@@ -162,17 +165,24 @@ const toToolSearchItem = (value: unknown) => {
       : typeof item.citeIndex === "number"
         ? item.citeIndex
         : undefined;
-  const toolSign = typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+  const toolSign =
+    typeof item.tool_sign === "string" ? item.tool_sign : undefined;
 
   return resolvedUrl || sourceFile
     ? {
         url: resolvedUrl,
         title,
-        text: imageMetadata ? undefined : typeof item.text === "string" ? item.text : undefined,
-        sourceType: typeof item.source_type === "string" ? item.source_type : undefined,
+        text: imageMetadata
+          ? undefined
+          : typeof item.text === "string"
+            ? item.text
+            : undefined,
+        sourceType:
+          typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
-        objectName: typeof item.object_name === "string" ? item.object_name : undefined,
+        objectName:
+          typeof item.object_name === "string" ? item.object_name : undefined,
         citeIndex,
         toolSign,
         isImage: Boolean(imageMetadata),
@@ -219,7 +229,7 @@ const buildBranchableHistory = (
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length;) {
+  for (let groupStart = 0; groupStart < messages.length; ) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -353,10 +363,19 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
       const messageParts = Array.isArray(msg.message)
-        ? msg.message
+        ? msg.message.map((part) => ({
+            ...part,
+            content:
+              typeof part.content === "string"
+                ? stripAnsiControlSequences(part.content)
+                : part.content,
+          }))
         : typeof msg.message === "string"
           ? [{ type: "text", content: msg.message }]
           : [];
+      const runHasFinalAnswer = messageParts.some(
+        (part) => part.type === "final_answer"
+      );
       const persistedAnswerImageKeys = extractAidpImageKeys(
         messageParts.flatMap((part) =>
           (part.type === "final_answer" || part.type === "text") &&
@@ -628,7 +647,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                     isImage: true,
                     imageKey: imagePart.imageKey,
                   },
-                  part.tool_call_id,
+                  part.tool_call_id
                 );
               }
             }
@@ -845,11 +864,28 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               const errorPart: any = {
                 type: "text",
                 text: part.content,
-                isError: true,
+                ...(runHasFinalAnswer
+                  ? { isWarning: true }
+                  : { isError: true }),
               };
               const meta = buildMetadata(part.invocation_id);
               if (meta) errorPart.metadata = meta;
               content.push(errorPart);
+            }
+            continue;
+          }
+
+          if (part.type === "warning") {
+            flushReasoning(part.invocation_id);
+            if (part.content) {
+              const warningPart: any = {
+                type: "text",
+                text: part.content,
+                isWarning: true,
+              };
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) warningPart.metadata = meta;
+              content.push(warningPart);
             }
             continue;
           }
@@ -930,7 +966,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                Record<string, unknown> | undefined;
+                | Record<string, unknown>
+                | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||

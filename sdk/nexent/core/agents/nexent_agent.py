@@ -1116,7 +1116,11 @@ class NexentAgent:
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
                         if hasattr(step_log, "error") and step_log.error is not None:
-                            observer.add_message("", ProcessType.ERROR, str(step_log.error))
+                            # Action-step failures are observations in the ReAct loop:
+                            # the model receives them and can repair/retry on the next
+                            # step. Surface them as warnings so the UI does not imply
+                            # that the whole run has already failed.
+                            observer.add_message("", ProcessType.WARNING, str(step_log.error))
 
                     if step_log is None:
                         raise ValueError("Agent run produced no output")
@@ -1144,7 +1148,7 @@ class NexentAgent:
 
                     # Check if we need to stop from external stop_event
                     if self.agent.stop_event.is_set():
-                        observer.add_message(self.agent.agent_name, ProcessType.ERROR,
+                        observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
                 except Exception as e:
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
@@ -1421,7 +1425,11 @@ class NexentAgent:
                 upload_tool.forward(str(path), relative.as_posix())
             except Exception as exc:
                 logger.error("Failed to upload workspace output %s: %s", path, exc)
-                self.observer.add_message("", ProcessType.ERROR, f"Failed to upload output file {relative}: {exc}")
+                self.observer.add_message(
+                    "",
+                    ProcessType.WARNING,
+                    f"Failed to upload output file {relative}: {exc}",
+                )
 
         if self._workspace_uploads:
             self.observer.add_message(
