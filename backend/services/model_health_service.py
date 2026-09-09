@@ -34,13 +34,7 @@ def _normalize_embedding_url(base_url: str) -> str:
 
 
 def _embedding_url_candidates(base_url: str) -> List[str]:
-    """Ordered URLs to probe for an embedding model: endpoint form first, then as given.
-
-    Providers differ in whether embeddings are served at the bare base URL or at the
-    explicit /embeddings endpoint, so both forms are candidates. Whichever answers
-    first is the URL worth persisting, because the runtime adapter POSTs to the
-    stored value verbatim.
-    """
+    """Ordered URLs to probe: the /embeddings endpoint first, then the URL as given."""
     if not base_url:
         return []
     normalized = _normalize_embedding_url(base_url)
@@ -169,19 +163,20 @@ async def _perform_connectivity_check(
     connectivity: bool
 
     if model_type in EMBEDDING_TYPES:
-        # Probe the /embeddings endpoint first and the URL exactly as stored second,
-        # so this verdict is reached against a URL the runtime adapter can also use.
+        is_multimodal = model_type == "multi_embedding"
+        slot = "multiEmbedding" if is_multimodal else "embedding"
+        adapter_config = {
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_type": model_type,
+        }
+        if is_multimodal:
+            adapter_config["model_factory"] = model_factory
         for candidate_url in _embedding_url_candidates(model_base_url):
-            if model_type == "embedding":
-                emb = await build_adapter_fresh(
-                    {"base_url": candidate_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
-                    "embedding", "embedding", None, model_name=model_name,
-                ).dimension_check(timeout=effective_timeout)
-            else:
-                emb = await build_adapter_fresh(
-                    {"model_factory": model_factory, "base_url": candidate_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
-                    "multi_embedding", "multiEmbedding", None, model_name=model_name,
-                ).dimension_check(timeout=effective_timeout)
+            emb = await build_adapter_fresh(
+                {**adapter_config, "base_url": candidate_url},
+                model_type, slot, None, model_name=model_name,
+            ).dimension_check(timeout=effective_timeout)
             if len(emb) > 0 and len(emb[0]) > 0:
                 return True
         return False

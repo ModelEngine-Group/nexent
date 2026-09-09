@@ -275,13 +275,9 @@ def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
 
 
 async def resolve_embedding_base_url(model_data: Dict[str, Any]) -> Tuple[Optional[str], Optional[int]]:
-    """Probe the embedding URL candidates and return the one that actually answered.
+    """Return the first candidate URL that served embeddings, plus its dimension.
 
-    Returns:
-        A (base_url, dimension) pair for the first candidate that served embeddings,
-        or (None, None) when none did. The returned base_url is the value to persist:
-        the runtime adapter POSTs to the stored URL verbatim, so storing anything
-        other than the URL that was just validated breaks the model at call time.
+    Returns (None, None) when no candidate answered.
     """
     for candidate_url in _embedding_url_candidates(model_data.get("base_url", "")):
         dimension = await embedding_dimension_check({**model_data, "base_url": candidate_url})
@@ -351,9 +347,6 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
 
         # If embedding or multi_embedding, verify connectivity and get dimension.
-        # Providers differ in whether embeddings are served at the bare base URL
-        # or at the explicit /embeddings endpoint, so both are probed and the one
-        # that answered is stored.
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
             resolved_url, dimension = await resolve_embedding_base_url(model_data)
             if dimension is None:
@@ -608,10 +601,7 @@ async def update_single_model_for_tenant(
                 existing_model_type not in ("embedding", "multi_embedding"):
             model_data["max_tokens"] = model_data["max_output_tokens"]
 
-        # Re-probe when the URL actually changes, so an edited embedding model
-        # stores the endpoint that was just validated rather than the raw input.
-        # The payload may be partial, so probe against the stored record merged
-        # with the incoming fields.
+        # Re-probe a changed URL so the stored value is the one that was validated.
         if "base_url" in model_data \
                 and existing_model_type in ("embedding", "multi_embedding") \
                 and model_data["base_url"] != existing_models[0].get("base_url"):

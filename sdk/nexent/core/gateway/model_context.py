@@ -26,10 +26,6 @@ class ModelContext:
     observer: Any = None                 # cross-cutting: LLM/VLM/ModelEngine STT/TTS
     timeout_seconds: Optional[float] = None  # cross-cutting: all HTTP-backed adapters
 
-    def cache_key(self) -> tuple:
-        return (self.tenant_id or "", self.modality, self.slot or "",
-                self.model_name, self.factory)
-
 
 @dataclass
 class LLMContext(ModelContext):
