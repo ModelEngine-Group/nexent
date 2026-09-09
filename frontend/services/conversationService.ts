@@ -10,6 +10,7 @@ import type {
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
+import type { GenerateConversationTitleParams } from "@/lib/conversationTitle";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -1154,7 +1155,7 @@ export const conversationService = {
   },
 
   // Generate conversation title from user question
-  async generateTitle(params: { conversation_id: number; question: string }) {
+  async generateTitle(params: GenerateConversationTitleParams) {
     const response = await fetch(API_ENDPOINTS.conversation.generateTitle, {
       method: "POST",
       headers: getAuthHeaders(),
