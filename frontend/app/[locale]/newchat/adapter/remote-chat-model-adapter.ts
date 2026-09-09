@@ -10,6 +10,7 @@ import type {
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
+import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 
@@ -2106,6 +2107,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           // uncorrelated logs so internal data is never rendered as chat text.
           if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
+            completeTrailingToolCalls(contentParts);
             yield buildStreamResult(contentParts);
             continue;
           }
@@ -2452,6 +2454,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (update) planRegistry.updateStep(update.stepId, update.status);
           } else if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
+            completeTrailingToolCalls(contentParts);
             yield buildStreamResult(contentParts);
           } else if (chunk.type === "nl2a") {
             if (acceptNl2aBoundary(chunk)) {
