@@ -1,6 +1,7 @@
 type ToolCallPart = {
   type?: string;
   status?: { type?: string };
+  result?: unknown;
 };
 
 /**
@@ -15,5 +16,9 @@ export function completeTrailingToolCalls(parts: ToolCallPart[]): void {
 
     if (part.status?.type === "incomplete") continue;
     part.status = { type: "complete" };
+    // assistant-ui derives a tool call's status from the message while its
+    // result is undefined. An empty result records successful completion
+    // without inventing output for tools that did not emit any.
+    if (part.result === undefined) part.result = "";
   }
 }
