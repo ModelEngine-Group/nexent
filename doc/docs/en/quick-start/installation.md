@@ -387,6 +387,7 @@ LOCAL_SESSION_MAX_AGE_SECONDS=3600
 CAS_HEARTBEAT_URL=
 CAS_HEARTBEAT_INTERVAL_SECONDS=300
 CAS_HEARTBEAT_COOKIE_NAME=
+CAS_RENEW_ENABLED=true
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -403,6 +404,8 @@ When CAS omits the role attribute selected by `CAS_ROLE_ATTRIBUTE`, returns it e
 When CAS omits the tenant attribute selected by `CAS_TENANT_ATTRIBUTE` or returns it empty, Nexent uses `CAS_DEFAULT_TENANT_ID`.
 
 `CAS_HEARTBEAT_URL` enables a separate activity-driven heartbeat for CAS users. The first visible-page activity sends a GET immediately; later clicks, keyboard input, mouse movement, touch input, focus, or visibility changes send at most one request per `CAS_HEARTBEAT_INTERVAL_SECONDS` across browser tabs. If the configured Cookie is readable, Nexent sends `X-Auth-Token: <cookie-name>=<cookie-value>`; otherwise it sends the heartbeat without that header. The heartbeat endpoint must allow the Nexent origin, GET, OPTIONS, and `X-Auth-Token` through CORS. This heartbeat only keeps the authentication source active; the existing silent renewal continues to refresh the local Nexent session.
+
+`CAS_RENEW_ENABLED` defaults to `true`. Set it to `false` to disable only automatic browser iframe renewal; CAS login, activity heartbeat, and renewal endpoints remain available. Heartbeat does not extend the local Nexent JWT. Session expiry handling remains unchanged, so `CAS_LOGIN_MODE=force` still redirects to login and reloads the page at expiry. After upgrading the frontend and backend, update `deploy/env/.env`, recreate the backend containers to load the new environment, and reload open browser pages. Restore `true` and repeat these steps to enable renewal again.
 
 Common CAS URLs:
 
@@ -452,6 +455,7 @@ LOCAL_SESSION_MAX_AGE_SECONDS=3600
 CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
 CAS_HEARTBEAT_INTERVAL_SECONDS=300
 CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
+CAS_RENEW_ENABLED=true
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local

@@ -84,7 +84,12 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     let cancelled = false;
 
     casService.getConfig().then((config) => {
-      if (cancelled || !config.enabled || config.login_mode === "disabled")
+      if (
+        cancelled ||
+        !config.enabled ||
+        config.login_mode === "disabled" ||
+        !config.renew_enabled
+      )
         return;
       const expiresAt = getTokenExpiresAt();
       if (!expiresAt) return;

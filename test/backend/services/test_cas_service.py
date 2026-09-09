@@ -4,6 +4,8 @@ import unittest
 from datetime import datetime
 from unittest.mock import MagicMock
 
+import pytest
+
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
@@ -35,6 +37,7 @@ consts_mock.const.CAS_HEARTBEAT_URL = ""
 consts_mock.const.CAS_LOGIN_MODE = "button"
 consts_mock.const.CAS_LOGOUT_URL = ""
 consts_mock.const.CAS_RENEW_BEFORE_SECONDS = 300
+consts_mock.const.CAS_RENEW_ENABLED = True
 consts_mock.const.CAS_RENEW_TIMEOUT_SECONDS = 10
 consts_mock.const.CAS_ROLE_ATTRIBUTE = "memberOf"
 consts_mock.const.CAS_ROLE_MAP_JSON = '{"cn=admins":"ADMIN"}'
@@ -74,6 +77,19 @@ for _name, _module in _ORIGINAL_MODULES.items():
     else:
         sys.modules[_name] = _module
 sys.modules.pop("services.cas_service", None)
+
+
+@pytest.mark.parametrize("renew_enabled", [True, False])
+def test_ac001_ac002_config_exposes_independent_renewal_switch(monkeypatch, renew_enabled):
+    monkeypatch.setitem(get_cas_config.__globals__, "CAS_RENEW_ENABLED", renew_enabled)
+
+    config = get_cas_config()
+
+    assert config["renew_enabled"] is renew_enabled
+    assert config["enabled"] is True
+    assert config["login_mode"] == "button"
+    assert config["renew_before_seconds"] == 300
+    assert config["renew_timeout_seconds"] == 10
 
 
 class TestCasServiceParsing(unittest.TestCase):

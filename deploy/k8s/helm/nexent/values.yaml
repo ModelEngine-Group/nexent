@@ -78,6 +78,7 @@ nexent-common:
       heartbeatUrl: ""
       heartbeatIntervalSeconds: "300"
       heartbeatCookieName: ""
+      renewEnabled: "true"
       renewBeforeSeconds: "300"
       renewTimeoutSeconds: "10"
       syntheticEmailDomain: "cas.local"
