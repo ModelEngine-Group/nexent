@@ -1,6 +1,6 @@
 "use client";
 
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Thread, type WelcomeSuggestion } from "./thread";
@@ -26,6 +26,8 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  selectedModelId?: string;
+  onModelChange?: (modelId: string) => void;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -41,6 +43,12 @@ export interface ChatProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
+  readOnlyReason?: string;
+  landingContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -70,6 +78,8 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  selectedModelId,
+  onModelChange,
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -82,6 +92,12 @@ export const Chat: FC<ChatProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   readOnly = false,
+  readOnlyReason,
+  landingContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -93,6 +109,39 @@ export const Chat: FC<ChatProps> = ({
   if (!selectedAgent) {
     if (isLoadingAgents) {
       return <AgentsLoadingState />;
+    }
+    if (workbenchPresentation || landingContent) {
+      return (
+        <Thread
+          agent={{
+            id: "__workbench_empty__",
+            name: "智能体工作台",
+            description: "",
+            model: "",
+            max_step: 8,
+            provide_run_summary: false,
+            tools: [],
+          }}
+          welcomeContent={landingContent}
+          selectedModelId={selectedModelId}
+          onModelChange={onModelChange}
+          showModelSelector={showModelSelector}
+          chatMode={chatMode}
+          onChatModeChange={onChatModeChange}
+          isDictationConfigured={isDictationConfigured}
+          readOnly={readOnly}
+          readOnlyReason={readOnlyReason}
+          showConversationTitle={false}
+          workbenchPresentation={workbenchPresentation}
+          workbenchResources={workbenchResources}
+          onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+          onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+          knowledgeScope={knowledgeScope}
+          knowledgePreview={knowledgePreview}
+          knowledgeCapabilities={knowledgeCapabilities}
+          onKnowledgeScopeChange={onKnowledgeScopeChange}
+        />
+      );
     }
     return (
       <AgentLandingPage
@@ -112,6 +161,8 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      selectedModelId={selectedModelId}
+      onModelChange={onModelChange}
       showConversationTitle={showConversationTitle}
       isDictationConfigured={isDictationConfigured}
       knowledgeScope={knowledgeScope}
@@ -124,6 +175,11 @@ export const Chat: FC<ChatProps> = ({
       runtimeMetadata={runtimeMetadata}
       onRuntimeMetadataChange={onRuntimeMetadataChange}
       readOnly={readOnly}
+      readOnlyReason={readOnlyReason}
+      workbenchPresentation={workbenchPresentation}
+      workbenchResources={workbenchResources}
+      onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+      onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
     />
   );
 };

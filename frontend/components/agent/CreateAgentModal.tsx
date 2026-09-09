@@ -60,7 +60,9 @@ export default function CreateAgentModal({
     });
 
     if (!result.success || !result.data?.agent_id) {
-      message.error(result.message || t("businessLogic.config.error.saveFailed"));
+      message.error(
+        result.message || t("businessLogic.config.error.saveFailed")
+      );
       return;
     }
 
@@ -131,7 +133,9 @@ export default function CreateAgentModal({
               validator: (_, value: string) =>
                 !value || isValidAgentName(value)
                   ? Promise.resolve()
-                  : Promise.reject(new Error(t("agent.validation.namePattern"))),
+                  : Promise.reject(
+                      new Error(t("agent.validation.namePattern"))
+                    ),
             },
             {
               ...createAgentNameConflictValidator(t, "name"),

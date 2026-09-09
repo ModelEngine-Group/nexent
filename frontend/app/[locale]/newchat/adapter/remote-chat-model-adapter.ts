@@ -9,6 +9,8 @@ import type {
 } from "@assistant-ui/react";
 
 import { conversationService } from "@/services/conversationService";
+import { ApiError } from "@/services/api";
+import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
@@ -197,7 +199,9 @@ export interface Nl2aResourceCandidate {
 }
 
 export type Nl2aInstallationFormKind =
-  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
+  | "SKILL_CONFIG"
+  | "MCP_REMOTE"
+  | "MCP_CONTAINER";
 
 export interface Nl2aResourceInstallationOption {
   option_id: string;
@@ -277,6 +281,10 @@ interface NexentRunConfig {
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
   onRuntimeMetadataSent?: (version?: number) => void;
+  workbenchConfig?: import("@/features/workbench").WorkbenchSessionConfig;
+  workbenchConfigVersion?: number;
+  onWorkbenchConfigVersion?: (version: number) => void;
+  onWorkbenchConfigConflict?: (query: string) => Promise<void>;
 }
 
 function notifyKnowledgeScopeResolved(
@@ -317,6 +325,7 @@ export interface SubAgentPartMetadata {
   subagentId: number | string;
   runId: string;
   agentName: string;
+  invocationName?: string;
   depth: number;
   task?: string;
   isRunning?: boolean;
@@ -327,12 +336,14 @@ interface SubAgentStartPayload {
   agent_name?: string;
   task?: string;
   invocation_id?: string;
+  invocation_name?: string;
 }
 
 interface SubAgentEndPayload {
   agent_id?: number | string | null;
   agent_name?: string;
   invocation_id?: string;
+  invocation_name?: string;
 }
 
 function parseSubAgentStart(content: string): SubAgentStartPayload {
@@ -1430,7 +1441,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const history = historyMessages.map((msg) => {
       const customMetadata = isNl2Agent
         ? (msg.metadata?.custom as
-            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
+            | { nl2agentCardAction?: Nl2AgentCardAction }
+            | undefined)
         : undefined;
       const text = customMetadata?.nl2agentCardAction
         ? JSON.stringify(customMetadata.nl2agentCardAction)
@@ -1502,6 +1514,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
     );
 
+    // Workbench v3 owns model selection; legacy composer state is only a projection.
+    const workbenchConfig = custom?.workbenchConfig;
+    if (workbenchConfig)
+      requestBody.model_id = workbenchConfig.model_id ?? undefined;
+
     let backendConversationId = hasServerConversationId
       ? numericServerThreadId
       : null;
@@ -1526,7 +1543,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (abortHandled) return;
       abortHandled = true;
       const abortReason = abortSignal?.reason as
-        { detach?: boolean } | undefined;
+        | { detach?: boolean }
+        | undefined;
       if (abortReason?.detach) {
         log.log(
           `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
@@ -1554,7 +1572,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     let agentResponse:
-      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
+      | ReadableStreamDefaultReader<Uint8Array>
+      | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
@@ -1588,13 +1607,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : (requestBody.model_id as number | undefined),
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
+          entrypoint: workbenchConfig ? "workbench" : undefined,
+          workbench: workbenchConfig,
+          expected_workbench_config_version: custom?.workbenchConfigVersion,
         },
         abortSignal,
         (conversationId) => {
           const numericId = Number(conversationId);
           if (!Number.isNaN(numericId) && numericId > 0) {
             backendConversationId = numericId;
-            if (abortSignal?.aborted) {
+            if (userAborted) {
               custom?.onGenerationStopped?.(numericId);
               void stopBackendRun(numericId);
             }
@@ -1612,10 +1634,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         (runId) => {
           backendRunId = runId;
           onRunId?.(runId);
-          if (abortSignal?.aborted) {
+          if (userAborted) {
             void stopBackendRun(runId);
           }
-        }
+        },
+        (version) => custom?.onWorkbenchConfigVersion?.(version)
       );
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
@@ -1632,6 +1655,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       log.error("[ChatModelAdapter] Agent request failed:", error);
+      if (
+        error instanceof ApiError &&
+        error.code === "WORKBENCH_CONFIG_VERSION_CONFLICT"
+      ) {
+        await custom?.onWorkbenchConfigConflict?.(visibleQuery);
+      }
       throw error;
     }
 
@@ -1770,6 +1799,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       runId: string;
       agentId: number | string;
       agentName: string;
+      invocationName?: string;
       task?: string;
       depth: number;
       isRunning: boolean;
@@ -1798,6 +1828,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         subagentId: top.agentId,
         runId: top.runId,
         agentName: top.agentName,
+        invocationName: top.invocationName,
         depth: top.depth,
         task: top.task,
         isRunning: top.isRunning,
@@ -1873,6 +1904,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         subagentId: entry.agentId,
         runId: entry.runId,
         agentName: entry.agentName,
+        invocationName: entry.invocationName,
         depth: entry.depth,
         task: entry.task,
         isRunning: entry.isRunning,
@@ -1997,6 +2029,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
+
+          if (chunk.type === "workbench_config_resolved") {
+            notifyWorkbenchConfigResolved(
+              chunk.content,
+              custom?.onWorkbenchConfigVersion
+            );
+            continue;
+          }
 
           if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
@@ -2225,6 +2265,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               runId,
               agentId,
               agentName: payload.agent_name || chunk.agent_name || "subagent",
+              invocationName: payload.invocation_name,
               task: payload.task,
               depth:
                 typeof chunk.depth === "number"
@@ -2444,7 +2485,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
-          if (chunk.type === "knowledge_scope_resolved") {
+          if (chunk.type === "workbench_config_resolved") {
+            notifyWorkbenchConfigResolved(
+              chunk.content,
+              custom?.onWorkbenchConfigVersion
+            );
+          } else if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
               chunk.content as unknown,
               custom?.onKnowledgeScopeResolved

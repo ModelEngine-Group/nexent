@@ -26,6 +26,7 @@ from consts.model import (
     VersionCompareRequest,
     VersionUpdateRequest,
     NL2AgentRunRequest,
+    WorkbenchCapabilityPreviewRequest,
 )
 from consts.exceptions import (
     ForbiddenError,
@@ -33,6 +34,8 @@ from consts.exceptions import (
     AppException,
     UnauthorizedError,
     ValidationError,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
@@ -59,6 +62,7 @@ from management.services.agent.service import (
 )
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
+from services.workbench_service import build_workbench_capability_preview
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from services.agent_version_service import (
@@ -84,6 +88,54 @@ from utils.auth_utils import (
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
+
+
+@agent_config_router.get("/workbench/bootstrap")
+async def get_workbench_bootstrap_api(
+    authorization: Optional[str] = Header(None),
+):
+    """Return server-authoritative Workbench modes and creation capabilities."""
+    get_current_user_id(authorization)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "schema_version": 3,
+            "modes": {
+                "generic_chat": {"enabled": False},
+                "single_agent_chat": {"enabled": True},
+                "multi_agent_chat": {"enabled": False},
+                "skill_create": {"enabled": False},
+                "agent_create": {"enabled": False},
+            },
+        },
+    }
+
+
+@agent_config_router.post("/workbench/capabilities/preview")
+async def preview_workbench_capabilities_api(
+    request: WorkbenchCapabilityPreviewRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Lock an Agent version and return its published Workbench defaults."""
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        data = build_workbench_capability_preview(
+            agent_id=request.agent_id,
+            version_no=request.version_no,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return {"code": 0, "message": "success", "data": data}
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail={"code": "WORKBENCH_RESOURCE_UNAVAILABLE"},
+        ) from exc
 
 
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")
@@ -136,10 +188,20 @@ async def agent_run_api(
         )
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
+    except WorkbenchError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
     except ValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(e),
+        ) from e
+    except WorkbenchConfigVersionConflict as e:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail={
+                "code": "WORKBENCH_CONFIG_VERSION_CONFLICT",
+                "current_version": e.current_version,
+            },
         ) from e
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")

@@ -127,6 +127,7 @@ export interface ThreadProps {
   generatedTitle?: string;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
@@ -149,7 +150,12 @@ export interface ThreadProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
+  readOnlyReason?: string;
   showComposer?: boolean;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 /**
@@ -163,15 +169,10 @@ const useAgentModels = (
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
 
-    if (
-      model_ids &&
-      model_ids.length > 0 &&
-      model_names &&
-      model_names.length > 0
-    ) {
+    if (model_ids && model_ids.length > 0) {
       return model_ids.map((id, i) => ({
         id: String(id),
-        name: model_names[i] ?? `Model ${id}`,
+        name: model_names?.[i] || `Model ${id}`,
       }));
     }
 
@@ -197,6 +198,7 @@ export const Thread: FC<ThreadProps> = ({
   generatedTitle,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   conversationId,
   onBack,
   selectedModelId,
@@ -216,7 +218,12 @@ export const Thread: FC<ThreadProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   readOnly = false,
+  readOnlyReason,
   showComposer = true,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -418,6 +425,7 @@ export const Thread: FC<ThreadProps> = ({
         agent={agent}
         welcomeTitle={welcomeTitle}
         welcomeSuggestions={welcomeSuggestions}
+        welcomeContent={welcomeContent}
         onBack={onBack}
         models={models}
         selectedModelId={selectedModelId}
@@ -437,6 +445,7 @@ export const Thread: FC<ThreadProps> = ({
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
+        readOnlyReason={readOnlyReason}
         showComposer={showComposer}
         hasMessages={hasMessages}
         displayName={displayName}
@@ -454,6 +463,10 @@ export const Thread: FC<ThreadProps> = ({
         onCreateShare={createShare}
         selection={selection}
         onPanelClose={close}
+        workbenchPresentation={workbenchPresentation}
+        workbenchResources={workbenchResources}
+        onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+        onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
       />
       <Dialog
         open={Boolean(manualShareUrl)}
@@ -515,6 +528,7 @@ interface ThreadViewProps {
   agent: Agent | PublishedAgent;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -553,13 +567,19 @@ interface ThreadViewProps {
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
+  readOnlyReason?: string;
   showComposer: boolean;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   onBack,
   models,
   selectedModelId,
@@ -595,7 +615,12 @@ const ThreadView: FC<ThreadViewProps> = ({
   runtimeMetadata,
   onRuntimeMetadataChange,
   readOnly,
+  readOnlyReason,
   showComposer,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
 
@@ -720,11 +745,13 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent
-              agent={agent}
-              title={welcomeTitle}
-              suggestions={welcomeSuggestions}
-            />
+            (welcomeContent ?? (
+              <ThreadWelcomeContent
+                agent={agent}
+                title={welcomeTitle}
+                suggestions={welcomeSuggestions}
+              />
+            ))
           )}
         </ThreadPrimitive.Viewport>
 
@@ -754,6 +781,11 @@ const ThreadView: FC<ThreadViewProps> = ({
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
+              disabledReason={readOnlyReason}
+              workbenchPresentation={workbenchPresentation}
+              workbenchResources={workbenchResources}
+              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
             />
           </ThreadPrimitive.ViewportFooter>
         )}
@@ -875,9 +907,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
                   <button
                     key={suggestion.id}
                     type="button"
-                    onClick={() =>
-                      handleSampleQuestionClick(suggestion.prompt)
-                    }
+                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
                     className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -1270,11 +1300,13 @@ const AssistantMessage: FC<{
                 Boolean((part as { image?: string }).image)) ||
               (part.type === "text" &&
                 Boolean(
-                  (part as {
-                    isSearchImage?: boolean;
-                    imageSource?: SourcePartLike;
-                  }).isSearchImage &&
-                    (part as { imageSource?: SourcePartLike }).imageSource
+                  (
+                    part as {
+                      isSearchImage?: boolean;
+                      imageSource?: SourcePartLike;
+                    }
+                  ).isSearchImage &&
+                  (part as { imageSource?: SourcePartLike }).imageSource
                 ));
             const chainPath: `group-${string}`[] = isImagePart
               ? ["group-image"]

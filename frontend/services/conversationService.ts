@@ -100,6 +100,34 @@ export const conversationService = {
 
     return data.data;
   },
+  async updateWorkbenchConfig(
+    conversationId: number,
+    config: import("@/features/workbench").WorkbenchSessionConfig,
+    expectedVersion: number
+  ): Promise<{
+    workbench_config: import("@/features/workbench").WorkbenchSessionConfig;
+    workbench_config_version: number;
+  }> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.workbenchConfig(conversationId),
+      {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ config, expected_version: expectedVersion }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.detail?.code || data.code || response.status,
+        data.detail?.message ||
+          data.message ||
+          "Workbench config update failed",
+        data.detail
+      );
+    }
+    return data.data;
+  },
 
   async getKnowledgeCapabilities(
     agentId: number,
@@ -1021,6 +1049,9 @@ export const conversationService = {
       knowledge_scope?: ConversationKnowledgeScope;
       metadata?: Record<string, unknown> | null;
       expected_metadata_version?: number;
+      entrypoint?: "workbench";
+      workbench?: import("@/features/workbench").WorkbenchSessionConfig;
+      expected_workbench_config_version?: number;
       runtime_mode?: "nl2agent" | "nl2skill";
       draft_snapshot?: Record<string, unknown>;
       complexity?: "simple" | "complicated";
@@ -1029,7 +1060,8 @@ export const conversationService = {
     signal?: AbortSignal,
     onConversationId?: (id: string) => void,
     onRuntimeMetadataVersion?: (version: number) => void,
-    onRunId?: (id: string) => void
+    onRunId?: (id: string) => void,
+    onWorkbenchConfigVersion?: (version: number) => void
   ): Promise<
     ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown }
   > {
@@ -1077,6 +1109,16 @@ export const conversationService = {
         requestParams.expected_metadata_version =
           params.expected_metadata_version;
       }
+      if (params.entrypoint !== undefined) {
+        requestParams.entrypoint = params.entrypoint;
+      }
+      if (params.workbench !== undefined) {
+        requestParams.workbench = params.workbench;
+      }
+      if (params.expected_workbench_config_version !== undefined) {
+        requestParams.expected_workbench_config_version =
+          params.expected_workbench_config_version;
+      }
 
       // Build URL with query parameters for resume mode
       let url = API_ENDPOINTS.agent.run;
@@ -1117,16 +1159,34 @@ export const conversationService = {
           onRuntimeMetadataVersion(parsedVersion);
         }
       }
+      const workbenchConfigVersion = response.headers.get(
+        "X-Workbench-Config-Version"
+      );
+      if (workbenchConfigVersion !== null && onWorkbenchConfigVersion) {
+        const parsedVersion = Number(workbenchConfigVersion);
+        if (Number.isInteger(parsedVersion) && parsedVersion >= 0) {
+          onWorkbenchConfigVersion(parsedVersion);
+        }
+      }
 
       if (!response.ok) {
         let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        let code: string | number = response.status;
+        let details: Record<string, unknown> | undefined;
         try {
           const errorData = await response.json();
-          errorMessage = errorData.detail || errorData.message || errorMessage;
+          const detail = errorData.detail;
+          if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+            code = typeof detail.code === "string" ? detail.code : response.status;
+            errorMessage = typeof detail.message === "string" ? detail.message : errorMessage;
+            details = typeof detail.current_version === "number" ? { current_version: detail.current_version } : undefined;
+          } else {
+            errorMessage = typeof detail === "string" ? detail : typeof errorData.message === "string" ? errorData.message : errorMessage;
+          }
         } catch {
           // Preserve the HTTP status when the error response is not JSON.
         }
-        throw new Error(errorMessage);
+        throw new ApiError(code, errorMessage, details);
       }
 
       if (!response.body) {

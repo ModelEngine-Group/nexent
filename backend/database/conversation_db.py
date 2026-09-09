@@ -8,6 +8,8 @@ from sqlalchemy import asc, desc, func, insert, select, update
 from consts.exceptions import (
     ConversationNotFoundError,
     RuntimeMetadataVersionConflict,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
 )
 
 from .client import as_dict, db_client, get_db_session
@@ -38,6 +40,12 @@ def _serialize_unit_content(content: Any) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+def _optional_conversation_column(name: str, fallback: Any):
+    """Keep rolling-schema and unit-test stubs readable during migration."""
+    column = getattr(ConversationRecord, name, None)
+    return column if column is not None else fallback
+
+
 class SearchRecord(TypedDict):
     message_id: int
     source_type: str
@@ -66,6 +74,8 @@ class ConversationHistory(TypedDict):
     knowledge_scope: Optional[Dict[str, Any]]
     runtime_metadata: Dict[str, Any]
     runtime_metadata_version: int
+    workbench_config: Optional[Dict[str, Any]]
+    workbench_config_version: int
     create_time: int
     message_records: List[MessageRecord]
     search_records: List[SearchRecord]
@@ -117,7 +127,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None,
                         chat_mode: Optional[str] = None,
                         knowledge_scope: Optional[Dict[str, Any]] = None,
-                        runtime_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        runtime_metadata: Optional[Dict[str, Any]] = None,
+                        workbench_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -143,6 +154,9 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
         if runtime_metadata is not None:
             data["runtime_metadata"] = deepcopy(runtime_metadata)
             data["runtime_metadata_version"] = 1
+        if workbench_config is not None:
+            data["workbench_config"] = deepcopy(workbench_config)
+            data["workbench_config_version"] = 1
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -154,6 +168,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             ConversationRecord.knowledge_scope,
             ConversationRecord.runtime_metadata,
             ConversationRecord.runtime_metadata_version,
+            _optional_conversation_column("workbench_config", None),
+            _optional_conversation_column("workbench_config_version", 0),
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time'),
             (func.extract('epoch', ConversationRecord.update_time)
@@ -171,6 +187,16 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
             "knowledge_scope": record.knowledge_scope,
             "runtime_metadata": record.runtime_metadata or {},
             "runtime_metadata_version": record.runtime_metadata_version or 0,
+            "workbench_config": (
+                record.workbench_config
+                if isinstance(getattr(record, "workbench_config", None), dict)
+                else None
+            ),
+            "workbench_config_version": (
+                record.workbench_config_version
+                if isinstance(getattr(record, "workbench_config_version", None), int)
+                else 0
+            ),
             "create_time": int(record.create_time),
             "update_time": int(record.update_time)
         }
@@ -722,6 +748,137 @@ def resolve_conversation_runtime_metadata(
         return {
             "runtime_metadata": deepcopy(record.runtime_metadata or {}),
             "runtime_metadata_version": int(record.runtime_metadata_version or 0),
+        }
+
+
+def _assert_workbench_topology(record, config: Dict[str, Any]) -> None:
+    """Reject topology changes while holding the same lock used for the update."""
+    current = record.workbench_config
+    if isinstance(current, dict) and current.get("schema_version") == 3:
+        if current.get("mode") != config.get("mode") or current.get("agent_mounts", []) != config.get("agent_mounts", []):
+            raise WorkbenchError("WORKBENCH_TOPOLOGY_LOCKED")
+    elif isinstance(record.agent_id, int):
+        mounts = config.get("agent_mounts", [])
+        if len(mounts) != 1 or mounts[0].get("agent_id") != record.agent_id:
+            raise WorkbenchError("WORKBENCH_TOPOLOGY_LOCKED")
+
+
+def replace_conversation_workbench_config(
+    conversation_id: int,
+    user_id: str,
+    config: Dict[str, Any],
+    expected_version: int,
+    only_if_changed: bool = False,
+) -> Dict[str, Any]:
+    """Atomically replace canonical Workbench config and compatibility projections."""
+
+    with get_db_session() as session:
+        stmt = (
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .with_for_update()
+        )
+        record = session.scalars(stmt).first()
+        if record is None:
+            raise ConversationNotFoundError("Conversation not found")
+
+        current_version = int(record.workbench_config_version or 0)
+        if expected_version != current_version:
+            raise WorkbenchConfigVersionConflict(
+                current_version,
+                deepcopy(record.workbench_config),
+            )
+
+        _assert_workbench_topology(record, config)
+        normalized = deepcopy(config)
+        if only_if_changed and normalized == record.workbench_config:
+            return {
+                "workbench_config": deepcopy(record.workbench_config),
+                "workbench_config_version": current_version,
+                "agent_id": record.agent_id,
+                "knowledge_scope": deepcopy(record.knowledge_scope),
+            }
+        mounts = normalized.get("agent_mounts") or []
+        projected_agent_id = mounts[0].get("agent_id") if len(mounts) == 1 else None
+        projected_scope = deepcopy(normalized.get("knowledge_scope"))
+
+        record.workbench_config = normalized
+        record.workbench_config_version = current_version + 1
+        record.agent_id = projected_agent_id
+        record.knowledge_scope = projected_scope
+        record.updated_by = user_id
+        record.update_time = func.current_timestamp()
+        session.flush()
+
+        return {
+            "workbench_config": deepcopy(record.workbench_config),
+            "workbench_config_version": int(record.workbench_config_version),
+            "agent_id": record.agent_id,
+            "knowledge_scope": deepcopy(record.knowledge_scope),
+        }
+
+
+def replace_conversation_workbench_and_metadata(
+    conversation_id: int,
+    user_id: str,
+    config: Dict[str, Any],
+    expected_config_version: int,
+    metadata: Dict[str, Any],
+    expected_metadata_version: Optional[int],
+) -> Dict[str, Any]:
+    """Preflight and replace both independent runtime declarations atomically."""
+
+    with get_db_session() as session:
+        stmt = (
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == int(conversation_id),
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == 'N',
+            )
+            .with_for_update()
+        )
+        record = session.scalars(stmt).first()
+        if record is None:
+            raise ConversationNotFoundError("Conversation not found")
+
+        current_config_version = int(record.workbench_config_version or 0)
+        current_metadata_version = int(record.runtime_metadata_version or 0)
+        if expected_config_version != current_config_version:
+            raise WorkbenchConfigVersionConflict(
+                current_config_version,
+                deepcopy(record.workbench_config),
+            )
+        if (
+            expected_metadata_version is not None
+            and expected_metadata_version != current_metadata_version
+        ):
+            raise RuntimeMetadataVersionConflict(current_metadata_version)
+
+        _assert_workbench_topology(record, config)
+        normalized = deepcopy(config)
+        mounts = normalized.get("agent_mounts") or []
+        config_changed = normalized != record.workbench_config
+        record.workbench_config = normalized
+        record.workbench_config_version = current_config_version + int(config_changed)
+        record.agent_id = mounts[0].get("agent_id") if len(mounts) == 1 else None
+        record.knowledge_scope = deepcopy(normalized.get("knowledge_scope"))
+        record.runtime_metadata = deepcopy(metadata)
+        record.runtime_metadata_version = current_metadata_version + 1
+        record.updated_by = user_id
+        record.update_time = func.current_timestamp()
+        session.flush()
+        return {
+            "workbench_config": deepcopy(record.workbench_config),
+            "workbench_config_version": int(record.workbench_config_version),
+            "agent_id": record.agent_id,
+            "knowledge_scope": deepcopy(record.knowledge_scope),
+            "runtime_metadata": deepcopy(record.runtime_metadata),
+            "runtime_metadata_version": int(record.runtime_metadata_version),
         }
 
 
@@ -1337,6 +1494,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationRecord.knowledge_scope,
             ConversationRecord.runtime_metadata,
             ConversationRecord.runtime_metadata_version,
+            _optional_conversation_column("workbench_config", None),
+            _optional_conversation_column("workbench_config_version", 0),
             (func.extract('epoch', ConversationRecord.create_time)
              * 1000).label('create_time')
         ).where(
@@ -1444,6 +1603,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             'knowledge_scope': conversation.get('knowledge_scope'),
             'runtime_metadata': conversation.get('runtime_metadata') or {},
             'runtime_metadata_version': int(conversation.get('runtime_metadata_version') or 0),
+            'workbench_config': conversation.get('workbench_config'),
+            'workbench_config_version': int(conversation.get('workbench_config_version') or 0),
             'create_time': int(conversation['create_time']),
             'message_records': message_list,
             'search_records': [as_dict(record) for record in search_records],

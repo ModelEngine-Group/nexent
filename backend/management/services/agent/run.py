@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from http import HTTPStatus
 import json
 import logging
@@ -31,6 +32,7 @@ from consts.exceptions import (
     MemoryPreparationException,
     RuntimeMetadataValidationError,
     RuntimeMetadataVersionConflict,
+    WorkbenchConfigVersionConflict,
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from nexent.core.utils.observer import ProcessType
@@ -38,6 +40,7 @@ from consts.model import (
     AgentRequest,
     MessageRequest,
     ConversationKnowledgeScopeRequest,
+    WorkbenchSessionConfig,
 )
 from database.agent_db import (
     search_agent_info_by_agent_id
@@ -71,6 +74,8 @@ from services.conversation_management_service import (
     update_conversation_knowledge_scope_service,
     update_message_status,
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
+    update_conversation_workbench_config_service,
+    update_conversation_workbench_and_metadata_service,
 )
 from services.memory_config_service import build_memory_context
 from services.memory_backend_adapter import _build_ingestion_event_service
@@ -936,11 +941,23 @@ async def prepare_agent_run(
     runtime_knowledge_context = getattr(agent_request, "_runtime_knowledge_context", None)
     if isinstance(runtime_knowledge_context, dict):
         create_run_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
+    runtime_skill_snapshot = getattr(agent_request, "_runtime_skill_snapshot", None)
+    if runtime_skill_snapshot is not None:
+        create_run_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
+    runtime_generation_config = getattr(agent_request, "_runtime_generation_config", None)
+    if runtime_generation_config is not None:
+        create_run_kwargs["runtime_generation_config"] = runtime_generation_config
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )
+    runtime_mount_plan = getattr(agent_request, "_runtime_mount_plan", None)
+    if runtime_mount_plan is not None:
+        from services.workbench_service import compile_runtime_mount_plan
+
+        executable_tree = compile_runtime_mount_plan(runtime_mount_plan, agent_run_info.agent_config)
+        agent_run_info.agent_config = executable_tree.root.agent_config
     agent_run_info.runtime_metadata = dict(
         getattr(agent_request, "_runtime_metadata_snapshot", {}) or {}
     )
@@ -1100,11 +1117,11 @@ async def generate_stream(
         ):
             yield data_chunk
 
-    except MemoryPreparationException:
+    except MemoryPreparationException as prep_error:
         if not enable_memory:
             # No-memory path has no fallback; surface the failure cleanly.
             logger.error(
-                "Agent run error without memory: %r", None, exc_info=True
+                "Agent run preparation failed without memory: %s", type(prep_error.__cause__ or prep_error).__name__, exc_info=True
             )
             await channel.publish(_safe_agent_stream_error_chunk())
             yield _safe_agent_stream_error_chunk()
@@ -1272,6 +1289,77 @@ async def run_agent_stream(
         if conversation is None:
             raise ForbiddenError("Conversation is not accessible to the current identity")
 
+    canonical_workbench = None
+    if agent_request.entrypoint == "workbench" and not resume:
+        from services.workbench_service import (
+            attach_runtime_knowledge_tree,
+            assert_workbench_version,
+            resolve_workbench_config,
+            runtime_skill_snapshot as build_runtime_skill_snapshot,
+        )
+        from services.knowledge_scope_service import snapshot_runtime_knowledge_tree
+
+        requested_workbench = agent_request.workbench
+        if conversation is not None:
+            assert_workbench_version(conversation, agent_request.expected_workbench_config_version)
+            if requested_workbench is None and isinstance(conversation.get("workbench_config"), dict):
+                from consts.model import WorkbenchSessionConfig
+
+                requested_workbench = WorkbenchSessionConfig.model_validate(conversation["workbench_config"])
+            if agent_request.metadata is not None and agent_request.expected_metadata_version is not None:
+                current_metadata_version = int(conversation.get("runtime_metadata_version") or 0)
+                if agent_request.expected_metadata_version != current_metadata_version:
+                    raise AppException(
+                        ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                        details={"current_version": current_metadata_version},
+                    )
+        if requested_workbench is None:
+            raise ValidationError("Workbench configuration is required")
+        canonical_workbench, resolved_tree = resolve_workbench_config(
+            requested_workbench,
+            tenant_id=resolved_tenant_id,
+            is_debug=bool(agent_request.is_debug),
+            user_id=resolved_user_id,
+        )
+        resolved_tree = attach_runtime_knowledge_tree(
+            resolved_tree,
+            snapshot_runtime_knowledge_tree(
+                int(resolved_tree.root.identity.agent_id),
+                resolved_tenant_id,
+                int(resolved_tree.root.identity.version_no),
+            ),
+        )
+        root_identity = resolved_tree.root.identity
+        agent_request.agent_id = root_identity.agent_id
+        agent_request.version_no = root_identity.version_no
+        if resolved_tree.overlay.model_id is not None:
+            agent_request.model_id = resolved_tree.overlay.model_id
+        if resolved_tree.overlay.requested_output_tokens is not None:
+            agent_request.requested_output_tokens = (
+                resolved_tree.overlay.requested_output_tokens
+            )
+        agent_request.knowledge_scope = canonical_workbench.knowledge_scope
+        agent_request.__dict__["_runtime_skill_snapshot"] = (
+            build_runtime_skill_snapshot(resolved_tree)
+        )
+        agent_request.__dict__["_runtime_mount_plan"] = resolved_tree
+        agent_request.__dict__["_runtime_root_identity"] = {
+            "agent_id": root_identity.agent_id,
+            "version_no": root_identity.version_no,
+            "runtime_ref": root_identity.runtime_ref,
+            "invocation_name": root_identity.invocation_name,
+            "display_name": root_identity.display_name,
+            "origin": root_identity.origin,
+        }
+        agent_request.__dict__["_runtime_generation_config"] = (
+            canonical_workbench.generation_config.model_dump(mode="json")
+        )
+        if conversation is not None:
+            assert_workbench_version(
+                conversation,
+                agent_request.expected_workbench_config_version,
+            )
+
     metadata_supplied = "metadata" in agent_request.model_fields_set
     metadata_update_requested = metadata_supplied and agent_request.metadata is not None
     if metadata_update_requested:
@@ -1304,7 +1392,11 @@ async def run_agent_stream(
         request_scope = ConversationKnowledgeScopeRequest.model_validate(raw_request_scope)
     else:
         request_scope = None
-    stored_scope = conversation.get("knowledge_scope") if conversation else None
+    stored_scope = (
+        conversation.get("knowledge_scope")
+        if conversation and canonical_workbench is None
+        else None
+    )
     if not isinstance(stored_scope, dict):
         stored_scope = None
     source_scope = request_scope
@@ -1323,6 +1415,14 @@ async def run_agent_stream(
             version_no=agent_request.version_no,
             is_debug=bool(agent_request.is_debug),
             request_tool_params=agent_request.tool_params,
+            runtime_agent_tree=(
+                [deepcopy(dict(node)) for node in getattr(
+                    getattr(agent_request, "_runtime_mount_plan", None),
+                    "knowledge_tree",
+                    (),
+                )]
+                or None
+            ),
         )
         agent_request.tool_params = resolved_scope.tool_params
         agent_request.__dict__["_runtime_knowledge_context"] = {
@@ -1367,6 +1467,10 @@ async def run_agent_stream(
             "agent_id": agent_request.agent_id,
             "chat_mode": "planning" if agent_request.enable_plan else "execution",
         }
+        if canonical_workbench is not None:
+            conversation_kwargs["workbench_config"] = canonical_workbench.model_dump(
+                mode="json"
+            )
         if resolved_scope is not None:
             conversation_kwargs["knowledge_scope"] = resolved_scope.desired_scope
         if metadata_update_requested:
@@ -1381,6 +1485,46 @@ async def run_agent_stream(
         )
 
     if not resume:
+        joint_runtime_state = None
+        if (
+            canonical_workbench is not None
+            and not is_new_conversation
+            and metadata_update_requested
+            and not agent_request.is_debug
+        ):
+            try:
+                joint_runtime_state = update_conversation_workbench_and_metadata_service(
+                    conversation_id=agent_request.conversation_id,
+                    user_id=resolved_user_id,
+                    config=canonical_workbench.model_dump(mode="json"),
+                    expected_config_version=agent_request.expected_workbench_config_version,
+                    metadata=agent_request.metadata or {},
+                    expected_metadata_version=agent_request.expected_metadata_version,
+                )
+            except RuntimeMetadataVersionConflict as exc:
+                raise AppException(
+                    ErrorCode.CHAT_METADATA_VERSION_CONFLICT,
+                    details={"current_version": exc.current_version},
+                ) from exc
+            conversation = {**(conversation or {}), **joint_runtime_state}
+        elif canonical_workbench is not None and not is_new_conversation and not agent_request.is_debug:
+            updated = update_conversation_workbench_config_service(
+                conversation_id=agent_request.conversation_id,
+                user_id=resolved_user_id,
+                config=canonical_workbench.model_dump(mode="json"),
+                expected_version=agent_request.expected_workbench_config_version,
+                only_if_changed=True,
+            )
+            conversation = {**(conversation or {}), **updated}
+
+        if canonical_workbench is not None and not agent_request.is_debug:
+            workbench_state = (
+                conversation_data if is_new_conversation else (conversation or {})
+            )
+            agent_request.__dict__["_workbench_config_version"] = int(
+                workbench_state.get("workbench_config_version") or 0
+            )
+
         if agent_request.is_debug:
             metadata_snapshot = dict(agent_request.metadata or {}) if metadata_update_requested else {}
             metadata_version = None
@@ -1399,6 +1543,9 @@ async def run_agent_stream(
                 )
                 or 0
             )
+        elif joint_runtime_state is not None:
+            metadata_snapshot = dict(joint_runtime_state["runtime_metadata"] or {})
+            metadata_version = int(joint_runtime_state["runtime_metadata_version"])
         elif not metadata_update_requested:
             metadata_snapshot = dict((conversation or {}).get("runtime_metadata") or {})
             metadata_version = int((conversation or {}).get("runtime_metadata_version") or 0)
@@ -1444,6 +1591,7 @@ async def run_agent_stream(
         and not resume
         and not is_new_conversation
         and agent_request.conversation_id is not None
+        and agent_request.entrypoint != "workbench"
     ):
         update_conversation_knowledge_scope_service(
             conversation_id=agent_request.conversation_id,
@@ -1458,6 +1606,7 @@ async def run_agent_stream(
         and not is_new_conversation
         and agent_request.conversation_id is not None
         and agent_request.agent_id is not None
+        and agent_request.entrypoint != "workbench"
     ):
         update_conversation_agent_id_service(
             conversation_id=agent_request.conversation_id,
@@ -1740,6 +1889,16 @@ async def run_agent_stream(
                 yield "data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": agent_request.conversation_id}}, ensure_ascii=False) + "\n\n"
 
             scope_event = getattr(agent_request, "_resolved_knowledge_scope_event", None)
+            if canonical_workbench is not None:
+                yield "data: " + json.dumps({
+                    "type": "workbench_config_resolved",
+                    "content": {
+                        "config_version": getattr(agent_request, "_workbench_config_version", 0),
+                        "schema_version": 3,
+                        "mode": canonical_workbench.mode,
+                        "agent_mounts": [mount.model_dump(mode="json") for mount in canonical_workbench.agent_mounts],
+                    },
+                }, ensure_ascii=False) + "\n\n"
             if scope_event is not None:
                 yield (
                     "data: "
@@ -1784,6 +1943,11 @@ async def run_agent_stream(
     )
     if runtime_metadata_version is not None:
         headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)
+    workbench_config_version = getattr(
+        agent_request, "_workbench_config_version", None
+    )
+    if workbench_config_version is not None:
+        headers["X-Workbench-Config-Version"] = str(workbench_config_version)
 
     return StreamingResponse(
         stream_with_agent_context(),

@@ -2,8 +2,11 @@ import hashlib
 import json
 import re
 import unicodedata
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
+
+from nexent.core.agents.agent_model import AgentConfig
 
 from agents.create_agent_info import _resolve_runtime_tool_records
 from consts.exceptions import ValidationError
@@ -167,6 +170,15 @@ def _walk_agent_tree(
         )
         nodes.extend(_walk_agent_tree(child_id, tenant_id, child_version, seen))
     return nodes
+
+
+def snapshot_runtime_knowledge_tree(
+    agent_id: int,
+    tenant_id: str,
+    version_no: int,
+) -> List[Dict[str, Any]]:
+    """Freeze the knowledge-capable static tree for one request."""
+    return deepcopy(_walk_agent_tree(agent_id, tenant_id, version_no))
 
 
 def get_agent_knowledge_capabilities(
@@ -364,10 +376,14 @@ def resolve_knowledge_scope(
     version_no: Optional[int],
     is_debug: bool,
     request_tool_params: Optional[ToolParamsRequest] = None,
+    runtime_agent_tree: Optional[List[Dict[str, Any]]] = None,
 ) -> ResolvedKnowledgeScope:
     """Resolve one desired scope into per-agent tool overrides for this run."""
-    resolved_version = resolve_root_version(agent_id, tenant_id, version_no, is_debug)
-    agent_tree = _walk_agent_tree(agent_id, tenant_id, resolved_version)
+    if runtime_agent_tree is None:
+        resolved_version = resolve_root_version(agent_id, tenant_id, version_no, is_debug)
+        agent_tree = _walk_agent_tree(agent_id, tenant_id, resolved_version)
+    else:
+        agent_tree = deepcopy(runtime_agent_tree)
     desired = scope.model_dump(mode="json")
     warnings: List[Dict[str, Any]] = []
 
@@ -409,7 +425,7 @@ def resolve_knowledge_scope(
     aidp_capable = False
 
     for node in agent_tree:
-        agent_name = node.get("agent_name")
+        agent_name = node.get("runtime_ref") or node.get("agent_name")
         if not agent_name:
             continue
         for tool in node["tools"]:
@@ -520,6 +536,84 @@ def resolve_knowledge_scope(
         aidp_capable=aidp_capable,
         warnings=warnings,
     )
+
+
+def resolve_executable_knowledge_scope(
+    root: AgentConfig,
+    scope: ConversationKnowledgeScopeRequest,
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> tuple[AgentConfig, ResolvedKnowledgeScope]:
+    """Apply an authorized scope to a copied executable tree using runtime identities.
+
+    System roots need no persisted Agent ID. Resource authorization remains in
+    the existing scope resolver; this adapter never queries Agent repositories.
+    """
+    from utils.runtime_config_utils import clone_runtime_config
+
+    compiled = clone_runtime_config(root)
+    nodes: Dict[str, AgentConfig] = {}
+    projection: List[Dict[str, Any]] = []
+
+    def visit(agent: AgentConfig) -> None:
+        runtime_ref = agent.runtime_ref
+        if not runtime_ref or runtime_ref in nodes:
+            raise ValidationError("Executable Agent runtime references must be present and unique")
+        nodes[runtime_ref] = agent
+        projection.append({
+            "runtime_ref": runtime_ref,
+            "tools": [
+                {
+                    "class_name": tool.class_name,
+                    "name": tool.name,
+                    "params": [
+                        {"name": name, "default": clone_runtime_config(value)}
+                        for name, value in (tool.params or {}).items()
+                        if name in (LOCAL_RANGE_PARAM, AIDP_RANGE_PARAM)
+                    ],
+                }
+                for tool in agent.tools
+                if tool.class_name in (LOCAL_TOOL_CLASS, AIDP_TOOL_CLASS)
+            ],
+        })
+        for child in agent.managed_agents:
+            visit(child)
+
+    visit(compiled)
+    resolved = resolve_knowledge_scope(
+        scope, agent_id=0, tenant_id=tenant_id, user_id=user_id,
+        version_no=None, is_debug=False, runtime_agent_tree=projection,
+    )
+    overrides = resolved.tool_params.model_dump(mode="python")["agents"]
+    for runtime_ref, agent in nodes.items():
+        tool_overrides = overrides.get(runtime_ref, {}).get("tools", {})
+        for tool in agent.tools:
+            params = tool_overrides.get(tool.name or tool.class_name)
+            if params is None:
+                continue
+            tool.params = {**(tool.params or {}), **deepcopy(params)}
+            metadata = dict(tool.metadata or {})
+            if tool.class_name == LOCAL_TOOL_CLASS:
+                allowed = list(params[LOCAL_RANGE_PARAM])
+                metadata["allowed_index_names"] = allowed
+                metadata["display_name_to_index_map"] = {
+                    name: index for name, index in metadata.get("display_name_to_index_map", {}).items()
+                    if index in allowed
+                }
+                metadata["index_name_to_display_map"] = {
+                    index: name for index, name in metadata.get("index_name_to_display_map", {}).items()
+                    if index in allowed
+                }
+            elif tool.class_name == AIDP_TOOL_CLASS:
+                allowed = list(params[AIDP_RANGE_PARAM])
+                metadata["allowed_kds_set"] = allowed
+                metadata["kds_name_to_id_map"] = {
+                    name: value for name, value in metadata.get("kds_name_to_id_map", {}).items()
+                    if value in allowed
+                }
+            tool.metadata = metadata
+    return compiled, resolved
 
 
 def build_runtime_knowledge_policy(language: str) -> str:

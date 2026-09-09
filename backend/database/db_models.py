@@ -91,6 +91,17 @@ class ConversationRecord(TableBase):
         server_default=text("0"),
         doc="Monotonic version of conversation runtime metadata",
     )
+    workbench_config = Column(
+        JSONB,
+        nullable=True,
+        doc="Canonical schema-v3 Workbench conversation declaration",
+    )
+    workbench_config_version = Column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        doc="Monotonic version of the canonical Workbench declaration",
+    )
 
 
 class ConversationMessage(TableBase):

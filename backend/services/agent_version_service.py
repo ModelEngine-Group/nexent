@@ -991,7 +991,18 @@ async def list_published_agents_impl(
                 "allow_chat_metadata": bool(agent.get("allow_chat_metadata", False)),
             })
 
-        return simple_agent_list
+        try:
+            from services.resource_tag_projection import project_authorized_resource_tags
+
+            return project_authorized_resource_tags(
+                simple_agent_list,
+                resource_type="agent",
+                id_field="agent_id",
+                default_tenant_id=tenant_id,
+            )
+        except Exception as error:  # noqa: BLE001 - tags are display-only list metadata
+            logger.warning("Failed to project published Agent tags: %s", error)
+            return [{**agent, "tags": []} for agent in simple_agent_list]
 
     except Exception as e:
         logger.error(f"Failed to list published agents: {str(e)}")

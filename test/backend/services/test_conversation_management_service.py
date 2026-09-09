@@ -1580,6 +1580,42 @@ class TestBuildStreamingMessage(unittest.TestCase):
         self.assertIsNone(result['last_unit'])
 
 
+def test_history_preserves_workbench_config_and_version(mocker):
+    config = {
+        "schema_version": 3,
+        "mode": "single_agent_chat",
+        "agent_mounts": [{"agent_id": 33, "version_no": 2}],
+        "skill_mounts": [],
+        "knowledge_scope": {"local": {"mode": "override", "knowledge_ids": [11, 12]}},
+    }
+    mock_get = mocker.patch(
+        "backend.services.conversation_management_service.get_conversation_history",
+        return_value={
+            "conversation_id": 110, "create_time": "2026-09-08",
+            "message_records": [], "search_records": [], "image_records": [],
+            "workbench_config": config, "workbench_config_version": 1,
+        },
+    )
+    for version in (1, 4):
+        mock_get.return_value["workbench_config_version"] = version
+        result = get_conversation_history_service(110, "user-1")[0]
+        assert result["workbench_config"] == config
+        assert result["workbench_config_version"] == version
+
+
+def test_legacy_history_has_no_workbench_config_and_version_zero(mocker):
+    mocker.patch(
+        "backend.services.conversation_management_service.get_conversation_history",
+        return_value={
+            "conversation_id": 110, "create_time": "2026-09-08",
+            "message_records": [], "search_records": [], "image_records": [],
+        },
+    )
+    result = get_conversation_history_service(110, "user-1")[0]
+    assert result["workbench_config"] is None
+    assert result["workbench_config_version"] == 0
+
+
 class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
     """Test edge cases for get_conversation_history_service."""
 

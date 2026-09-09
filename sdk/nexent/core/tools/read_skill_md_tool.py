@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Optional, Tuple
 
 from smolagents.tools import Tool
@@ -55,6 +56,8 @@ class ReadSkillMdTool(Tool):
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
+        authorized_skill_names: Optional[list[str]] = None,
+        isolated_skills_root: bool = False,
     ):
         """Initialize the tool with local skills directory and agent context.
 
@@ -70,12 +73,23 @@ class ReadSkillMdTool(Tool):
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
+        self.isolated_skills_root = isolated_skills_root
+        self.authorized_skill_names = (
+            frozenset(authorized_skill_names) if authorized_skill_names is not None else None
+        )
 
     def _get_skill_manager(self):
         """Lazy load skill manager."""
         if self.skill_manager is None:
-            from nexent.skills import SkillManager
-            self.skill_manager = SkillManager(self.local_skills_dir)
+            if self.isolated_skills_root:
+                from nexent.skills.skill_manager import SkillManager
+                manager = object.__new__(SkillManager)
+                manager.base_skills_dir = os.path.abspath(self.local_skills_dir)
+                manager._initialized = True
+                self.skill_manager = manager
+            else:
+                from nexent.skills import SkillManager
+                self.skill_manager = SkillManager(self.local_skills_dir)
         return self.skill_manager
 
     def _strip_frontmatter(self, content: str) -> str:
@@ -110,6 +124,9 @@ class ReadSkillMdTool(Tool):
 
         for path in possible_paths:
             full_path = os.path.join(skill_dir, path)
+            if self.authorized_skill_names is not None:
+                if not Path(full_path).resolve().is_relative_to(Path(skill_dir).resolve()):
+                    return "File access is not authorized", False
             if os.path.exists(full_path):
                 content = _read_text_file(full_path)
                 # Strip frontmatter if it's a markdown file
@@ -134,6 +151,8 @@ class ReadSkillMdTool(Tool):
             Combined markdown content
         """
         try:
+            if self.authorized_skill_names is not None and skill_name not in self.authorized_skill_names:
+                return "Skill access is not authorized"
             manager = self._get_skill_manager()
 
             # If skill_name is empty, read directly from local_skills_dir

@@ -1,4 +1,10 @@
 {
+  "workbench.creationExamples.skill.invoiceExtraction": "Create an Invoice Information Extraction Skill: upload invoice images or PDFs and identify the invoice code, number, date, buyer, seller, amount, and tax. Support standard and special VAT invoices, structured JSON output, and batch uploads.",
+  "workbench.creationExamples.skill.contractReview": "Create a Contract Review Skill: upload PDF or Word contracts, extract parties, amounts, fulfillment dates, payment terms, liability, and dispute resolution clauses. Flag missing information and high-risk clauses, and produce structured review results.",
+  "workbench.creationExamples.skill.meetingNotes": "Create a Meeting Notes Skill: upload audio or transcripts, identify topics, conclusions, action items, owners, and deadlines, and generate structured minutes with Markdown export.",
+  "workbench.creationExamples.agent.knowledgeAssistant": "Create an enterprise knowledge assistant that answers employees' natural-language questions, searches multiple knowledge bases, synthesizes accurate answers from distributed information, and cites its sources.",
+  "workbench.creationExamples.agent.customerService": "Create a customer support application that identifies question intent, answers pre-sales and after-sales questions using product knowledge, asks clarifying questions, escalates unresolved issues to a human, and preserves citations.",
+  "workbench.creationExamples.agent.businessAnalysis": "Create a business data analysis assistant supporting Excel and CSV uploads, natural-language questions about key metrics, year-over-year and period-over-period comparisons, anomaly detection, conclusions, visualization suggestions, and metric definitions.",
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | AI Agents",
   "mainPage.layout.titleTemplate": "%s | {productName} AI Agents",

@@ -38,6 +38,8 @@ from database.conversation_db import (
     update_conversation_agent_id,
     update_conversation_chat_mode,
     update_conversation_knowledge_scope,
+    replace_conversation_workbench_config,
+    replace_conversation_workbench_and_metadata,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -383,6 +385,7 @@ def create_new_conversation(
     chat_mode: Optional[str] = None,
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
+    workbench_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -405,11 +408,57 @@ def create_new_conversation(
             create_kwargs["knowledge_scope"] = knowledge_scope
         if runtime_metadata is not None:
             create_kwargs["runtime_metadata"] = runtime_metadata
+        if workbench_config is not None:
+            create_kwargs["workbench_config"] = workbench_config
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise Exception(str(e))
+
+
+def update_conversation_workbench_config_service(
+    conversation_id: int,
+    config: Dict[str, Any],
+    expected_version: int,
+    user_id: str,
+    only_if_changed: bool = False,
+) -> Dict[str, Any]:
+    """Validate and atomically replace a conversation Workbench declaration."""
+
+    from consts.model import WorkbenchSessionConfig
+
+    normalized = WorkbenchSessionConfig.model_validate(config).model_dump(mode="json")
+    return replace_conversation_workbench_config(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        config=normalized,
+        expected_version=expected_version,
+        only_if_changed=only_if_changed,
+    )
+
+
+def update_conversation_workbench_and_metadata_service(
+    conversation_id: int,
+    config: Dict[str, Any],
+    expected_config_version: int,
+    metadata: Dict[str, Any],
+    expected_metadata_version: Optional[int],
+    user_id: str,
+) -> Dict[str, Any]:
+    """Validate Workbench config and commit it with runtime metadata atomically."""
+
+    from consts.model import WorkbenchSessionConfig
+
+    normalized = WorkbenchSessionConfig.model_validate(config).model_dump(mode="json")
+    return replace_conversation_workbench_and_metadata(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        config=normalized,
+        expected_config_version=expected_config_version,
+        metadata=metadata,
+        expected_metadata_version=expected_metadata_version,
+    )
 
 
 def get_conversation_service(
@@ -492,6 +541,7 @@ def update_conversation_knowledge_scope_service(
     knowledge_scope: Optional[Dict[str, Any]],
     user_id: str,
     tenant_id: str,
+    expected_workbench_config_version: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Validate, preview, and replace a user-owned conversation knowledge scope."""
     conversation = get_conversation(
@@ -503,6 +553,24 @@ def update_conversation_knowledge_scope_service(
         raise ConversationNotFoundError(
             f"Conversation {conversation_id} does not exist or is not accessible"
         )
+    canonical = conversation.get("workbench_config")
+    if isinstance(canonical, dict):
+        from services.workbench_service import assert_workbench_version
+
+        assert_workbench_version(conversation, expected_workbench_config_version)
+        next_config = {**canonical, "knowledge_scope": knowledge_scope}
+        updated = update_conversation_workbench_config_service(
+            conversation_id=conversation_id,
+            config=next_config,
+            expected_version=expected_workbench_config_version,
+            user_id=user_id,
+        )
+        return {
+            **updated,
+            "desired_scope": knowledge_scope,
+            "effective_preview": None,
+            "warnings": [],
+        }
     effective_preview = None
     warnings: List[Dict[str, Any]] = []
     if knowledge_scope is not None and conversation.get("agent_id") is not None:
@@ -905,6 +973,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'knowledge_scope': history_data.get('knowledge_scope'),
             'runtime_metadata': history_data.get('runtime_metadata') or {},
             'runtime_metadata_version': int(history_data.get('runtime_metadata_version') or 0),
+            'workbench_config': history_data.get('workbench_config'),
+            'workbench_config_version': int(history_data.get('workbench_config_version') or 0),
             'create_time': history_data['create_time'],
             'message': messages
         }

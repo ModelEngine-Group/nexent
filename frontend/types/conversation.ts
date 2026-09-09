@@ -93,6 +93,10 @@ export interface ApiConversationDetail {
     | null;
   runtime_metadata?: Record<string, unknown>;
   runtime_metadata_version?: number;
+  workbench_config?:
+    | import("@/features/workbench").WorkbenchSessionConfig
+    | null;
+  workbench_config_version?: number;
   message: ApiMessage[];
   streaming_message?: StreamingMessage;
 }

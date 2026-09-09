@@ -5017,6 +5017,46 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
             for call_args in nexent_agent_instance.observer.add_message.call_args_list
         )
 
+    @pytest.mark.parametrize("with_output", [False, True])
+    def test_finalize_workspace_excludes_runtime_skill_snapshots(
+        self, nexent_agent_instance, tmp_path, with_output
+    ):
+        workspace = tmp_path / "run"
+        snapshot = workspace / ".skill_snapshot" / "tenant" / "analyze-image"
+        snapshot.mkdir(parents=True)
+        for name in ("SKILL.md", "examples.md"):
+            (snapshot / name).write_text("Internal skill dependency", encoding="utf-8")
+        output = workspace / "outputs" / "SKILL.md"
+        if with_output:
+            output.parent.mkdir()
+            output.write_text("User-requested skill artifact", encoding="utf-8")
+        upload_tool = MagicMock()
+        upload_tool.uploaded_paths = set()
+        nexent_agent_instance._workspace_uploads = []
+        nexent_agent_instance.workspace_path = str(workspace)
+        nexent_agent_instance.agent = MagicMock(tools={"upload_to_s3": upload_tool})
+
+        def record_upload(file_path, target_filename):
+            nexent_agent_instance._record_workspace_upload({"name": target_filename})
+
+        upload_tool.forward.side_effect = record_upload
+        nexent_agent_instance.observer.add_message.reset_mock()
+        with patch.object(nexent_agent_instance, "_pull_file_workspace_from_sandbox"):
+            nexent_agent_instance._finalize_file_workspace()
+
+        artifacts = [
+            call.args[2] for call in nexent_agent_instance.observer.add_message.call_args_list
+            if call.args[1] == ProcessType.FILE_ARTIFACT
+        ]
+        if with_output:
+            upload_tool.forward.assert_called_once_with(str(output), "outputs/SKILL.md")
+            assert artifacts == [{"artifacts": [{"name": "outputs/SKILL.md"}]}]
+        else:
+            upload_tool.forward.assert_not_called()
+            assert artifacts == []
+        assert (snapshot / "SKILL.md").is_file()
+        assert (snapshot / "examples.md").is_file()
+
     def test_cleanup_rejects_mismatched_run_directory(self, nexent_agent_instance, tmp_path):
         workspace = tmp_path / "user" / "actual-run"
         workspace.mkdir(parents=True)

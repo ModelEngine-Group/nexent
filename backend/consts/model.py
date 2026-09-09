@@ -791,6 +791,99 @@ class ConversationKnowledgeScopeUpdateRequest(BaseModel):
     """Replace a conversation scope, or clear it with null to restore defaults."""
 
     scope: Optional[ConversationKnowledgeScopeRequest] = None
+    expected_workbench_config_version: Optional[int] = Field(default=None, ge=0)
+
+
+WorkbenchMode = Literal[
+    "generic_chat",
+    "single_agent_chat",
+    "multi_agent_chat",
+    "skill_create",
+    "agent_create",
+]
+
+
+class RuntimeAgentMount(BaseModel):
+    """Stable reference to one Agent version selected by the Workbench."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: int = Field(gt=0)
+    version_no: Optional[int] = Field(default=None, gt=0)
+
+
+class RuntimeSkillMount(BaseModel):
+    """Complete root-Agent Skill selection for a Workbench conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_id: int = Field(gt=0)
+    config_values: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkbenchGenerationConfig(BaseModel):
+    """Provider-neutral generation settings persisted with the conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deep_thinking: bool = False
+    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+    top_p: Optional[float] = Field(default=None, gt=0, le=1)
+    requested_output_tokens: Optional[int] = Field(default=None, gt=0)
+
+
+class WorkbenchSessionConfig(BaseModel):
+    """Canonical, persisted Workbench declaration; resolved artifacts are excluded."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[3] = 3
+    mode: WorkbenchMode
+    model_id: Optional[int] = Field(default=None, gt=0)
+    generation_config: WorkbenchGenerationConfig = Field(
+        default_factory=WorkbenchGenerationConfig
+    )
+    agent_mounts: List[RuntimeAgentMount] = Field(default_factory=list, max_length=8)
+    skill_mounts: List[RuntimeSkillMount] = Field(default_factory=list, max_length=20)
+    knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
+
+    @model_validator(mode="after")
+    def validate_mode_resources(self):
+        agent_count = len(self.agent_mounts)
+        if self.mode == "generic_chat" and agent_count != 0:
+            raise ValueError("generic_chat does not accept Agent mounts")
+        if self.mode == "single_agent_chat" and agent_count != 1:
+            raise ValueError("single_agent_chat requires exactly one Agent mount")
+        if self.mode == "multi_agent_chat" and agent_count < 2:
+            raise ValueError("multi_agent_chat requires at least two Agent mounts")
+        if self.mode in {"skill_create", "agent_create"}:
+            if agent_count or self.skill_mounts or self.knowledge_scope is not None:
+                raise ValueError("creation modes do not accept Agent, Skill, or knowledge resources")
+        skill_ids = [mount.skill_id for mount in self.skill_mounts]
+        if len(skill_ids) != len(set(skill_ids)):
+            raise ValueError("skill_mounts contains duplicate skill_id values")
+        agent_keys = [(mount.agent_id, mount.version_no) for mount in self.agent_mounts]
+        if len(agent_keys) != len(set(agent_keys)):
+            raise ValueError("agent_mounts contains duplicate Agent references")
+        return self
+
+
+class WorkbenchConfigUpdateRequest(BaseModel):
+    """Optimistic-lock replacement request for an existing conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: WorkbenchSessionConfig
+    expected_version: int = Field(ge=0)
+
+
+class WorkbenchCapabilityPreviewRequest(BaseModel):
+    """Request defaults and capabilities for one candidate published Agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: int = Field(gt=0)
+    version_no: Optional[int] = Field(default=None, gt=0)
 
 
 class AgentRequest(BaseModel):
@@ -806,6 +899,9 @@ class AgentRequest(BaseModel):
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
     knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
+    entrypoint: Optional[Literal["workbench"]] = None
+    workbench: Optional[WorkbenchSessionConfig] = None
+    expected_workbench_config_version: Optional[int] = Field(default=None, ge=0)
     context_policy: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional request-scoped context policy override",
@@ -824,6 +920,14 @@ class AgentRequest(BaseModel):
     @classmethod
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
+
+    @model_validator(mode="after")
+    def validate_workbench_entrypoint(self):
+        if self.entrypoint == "workbench" and self.workbench is None and self.conversation_id is None:
+            raise ValueError("workbench entrypoint requires a Workbench configuration")
+        if self.workbench is not None and self.entrypoint != "workbench":
+            raise ValueError("Workbench configuration requires entrypoint='workbench'")
+        return self
 
     enable_plan: Optional[bool] = Field(
         default=False,

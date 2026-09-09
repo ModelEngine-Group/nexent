@@ -54,6 +54,7 @@ def get_local_python_authorized_imports() -> List[str]:
 logger = logging.getLogger(__name__)
 
 _WORKSPACE_UPLOAD_EXCLUDED_DIRS = {
+    ".skill_snapshot",
     ".cache",
     ".npm",
     ".parcel-cache",
@@ -533,6 +534,8 @@ class NexentAgent:
                 observer=self.observer,
                 authorized_skill_names=params.get("authorized_skill_names"),
             )
+            if params.get("isolated_skills_root"):
+                kwargs["isolated_skills_root"] = True
             if params.get("workspace_path"):
                 kwargs["workspace_path"] = params["workspace_path"]
                 kwargs["on_complete"] = lambda _result: self._push_file_workspace_to_sandbox()
@@ -540,12 +543,17 @@ class NexentAgent:
         elif class_name == "ReadSkillMdTool":
             from nexent.core.tools.read_skill_md_tool import ReadSkillMdTool
             metadata = tool_config.metadata or {}
-            return ReadSkillMdTool(
+            kwargs = dict(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
             )
+            if params.get("authorized_skill_names") is not None:
+                kwargs["authorized_skill_names"] = params["authorized_skill_names"]
+            if params.get("isolated_skills_root"):
+                kwargs["isolated_skills_root"] = True
+            return ReadSkillMdTool(**kwargs)
         elif class_name == "WriteSkillFileTool":
             from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
             metadata = tool_config.metadata or {}
@@ -558,13 +566,16 @@ class NexentAgent:
         elif class_name == "ReadSkillConfigTool":
             from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
             metadata = tool_config.metadata or {}
-            return ReadSkillConfigTool(
+            kwargs = dict(
                 local_skills_dir=params.get("local_skills_dir"),
                 agent_id=metadata.get("agent_id"),
                 tenant_id=metadata.get("tenant_id"),
                 version_no=metadata.get("version_no", 0),
                 config_overrides=params.get("config_overrides"),
             )
+            if params.get("authorized_skill_names") is not None:
+                kwargs["authorized_skill_names"] = params["authorized_skill_names"]
+            return ReadSkillConfigTool(**kwargs)
         elif class_name == "DownloadFromS3Tool":
             from nexent.core.tools.download_from_s3_tool import DownloadFromS3Tool
             metadata = tool_config.metadata or {}
@@ -658,7 +669,8 @@ class NexentAgent:
             or getattr(sub_agent_config, "_sub_agent_id", None)
         )
         agent_name = (
-            getattr(sub_agent_config, "name", None)
+            getattr(sub_agent_config, "display_name", None)
+            or getattr(sub_agent_config, "name", None)
             or getattr(inner_agent, "name", None)
             or "subagent"
         )
@@ -667,6 +679,15 @@ class NexentAgent:
             observer=self.observer,
             agent_id=resolved_id,
             agent_name=str(agent_name),
+            runtime_identity={
+                key: getattr(sub_agent_config, key, None)
+                for key in ("runtime_ref", "version_no", "display_name", "origin")
+            },
+            invocation_name=(
+                getattr(sub_agent_config, "invocation_name", None)
+                or getattr(inner_agent, "name", None)
+                or str(agent_name)
+            ),
         )
 
     def create_single_agent(
@@ -882,7 +903,7 @@ class NexentAgent:
                 observer=self.observer,
                 tools=tool_list,
                 model=model,
-                name=agent_config.name,
+                name=agent_config.invocation_name or agent_config.name,
                 description=agent_config.description,
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,

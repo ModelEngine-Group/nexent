@@ -30,6 +30,15 @@ class ValidationError(Exception):
     pass
 
 
+class WorkbenchError(ValidationError):
+    """Safe runtime boundary error used by the generation overlay."""
+
+    def __init__(self, code, status_code=422):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
+
+
 class MCPConnectionError(Exception):
     """Mock MCPConnectionError for testing."""
     pass
@@ -71,6 +80,7 @@ sys.modules["consts.capability_profiles"].CATALOG = {}
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
+consts_exceptions_module.WorkbenchError = WorkbenchError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException

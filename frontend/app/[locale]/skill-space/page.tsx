@@ -29,6 +29,7 @@ import {
 import { parseSkillReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { ApiError } from "@/services/api";
 import { deleteSkillByName } from "@/services/skillService";
+import { fetchMyEditableSkills } from "@/services/skillRepositoryService";
 import { cn } from "@/lib/utils";
 import type {
   MineOwnershipFilter,
@@ -151,12 +152,50 @@ export default function SkillRepositoryPage() {
   }, [searchParams, isAdmin]);
 
   const isRepositoryTab = tab === SkillRepositoryTab.REPOSITORY;
+  useEffect(() => {
+    const id = Number(searchParams.get("edit_skill_id"));
+    if (!Number.isInteger(id) || id <= 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        for (let page = 1; ; page += 1) {
+          const result = await fetchMyEditableSkills({
+            ownership: "all",
+            page,
+            page_size: 100,
+            new_skill_padding: false,
+          });
+          if (cancelled) return;
+          const skill = result.items.find(
+            (item): item is MyEditableSkillItem =>
+              "skill_id" in item && item.skill_id === id
+          );
+          if (skill) {
+            setEditingSkill(skill);
+            setSkillBuildLoaded(true);
+            setSkillBuildOpen(true);
+            return;
+          }
+          if (page >= result.pagination.total_pages) {
+            message.warning("Skill 不存在或没有编辑权限");
+            return;
+          }
+        }
+      } catch {
+        if (!cancelled) message.error("Skill 加载失败");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, message]);
   const isMineTab = tab === SkillRepositoryTab.MINE;
   const isReviewTab = tab === SkillRepositoryTab.REVIEW;
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
-    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
-    null;
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
   const { data: mineTagDefinitions } = useTagDefinitions(
     defaultTagLibrary?.bucket_id ?? null
   );
@@ -212,8 +251,9 @@ export default function SkillRepositoryPage() {
       ...(mineTagPredicates.length > 0
         ? { tag_predicates: mineTagPredicates }
         : {}),
-      ...(mineOwnership === "all" && !debouncedMineSearch.trim()
-        && mineTagPredicates.length === 0
+      ...(mineOwnership === "all" &&
+      !debouncedMineSearch.trim() &&
+      mineTagPredicates.length === 0
         ? { new_skill_padding: true }
         : {}),
     }),

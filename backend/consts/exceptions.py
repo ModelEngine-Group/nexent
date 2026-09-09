@@ -238,6 +238,24 @@ class RuntimeMetadataVersionConflict(ValueError):
         super().__init__("Runtime metadata version conflict")
 
 
+class WorkbenchError(ValidationError, ValueError):
+    """Safe Workbench boundary error without resource contents or credentials."""
+
+    def __init__(self, code: str, status_code: int = 422):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
+
+
+class WorkbenchConfigVersionConflict(ValueError):
+    """Raised when a Workbench optimistic-lock check fails."""
+
+    def __init__(self, current_version: int, current_config: Optional[dict] = None):
+        self.current_version = current_version
+        self.current_config = current_config
+        super().__init__("Workbench configuration version conflict")
+
+
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
