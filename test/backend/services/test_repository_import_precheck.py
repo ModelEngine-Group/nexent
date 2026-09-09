@@ -15,7 +15,11 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-sys.modules.setdefault("sqlalchemy", MagicMock())
+# sqlalchemy must look like a package so submodule imports succeed.
+_sqlalchemy_mock = types.ModuleType("sqlalchemy")
+_sqlalchemy_mock.__path__ = []
+sys.modules.setdefault("sqlalchemy", _sqlalchemy_mock)
+sys.modules.setdefault("sqlalchemy.orm", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
@@ -24,8 +28,19 @@ sys.modules.setdefault("database.knowledge_db", MagicMock())
 sys.modules.setdefault("database.model_management_db", MagicMock())
 sys.modules.setdefault("database.remote_mcp_db", MagicMock())
 sys.modules.setdefault("database.tool_db", MagicMock())
+sys.modules.setdefault("database.group_db", MagicMock())
+sys.modules.setdefault("database.user_tenant_db", MagicMock())
+sys.modules.setdefault("database.client", MagicMock())
 
 _consts_model = types.ModuleType("consts.model")
+
+
+class _RepositoryImportRequirementType(str):
+    MODEL = "model"
+    KB = "knowledge_base"
+    MCP = "mcp"
+    SKILL = "skill"
+    TOOL = "tool"
 
 
 class _ModelConnectStatusEnum(Enum):
@@ -43,6 +58,7 @@ class _RepositoryImportRequirementItem(BaseModel):
     description: str | None = None
     available: bool
     reason_code: str | None = None
+    suggested_new_name: str | None = None
 
 
 class _RepositoryImportPrecheckResponse(BaseModel):
@@ -56,14 +72,22 @@ class _RepositoryImportPrecheckResponse(BaseModel):
 
 
 class _ToolSourceEnum(Enum):
+    LOCAL = "local"
     MCP = "mcp"
+    LANGCHAIN = "langchain"
+    BUILTIN = "builtin"
 
 
 _consts_model.ModelConnectStatusEnum = _ModelConnectStatusEnum
+_consts_model.RepositoryImportRequirementType = _RepositoryImportRequirementType
 _consts_model.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
 _consts_model.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
 _consts_model.ToolSourceEnum = _ToolSourceEnum
 sys.modules["consts.model"] = _consts_model
+
+# Keep model availability real while isolating adapter construction and config.
+sys.modules.setdefault("services.model_gateway_service", MagicMock())
+sys.modules.setdefault("utils.config_utils", MagicMock())
 
 from services.repository_import_precheck import build_repository_import_precheck
 

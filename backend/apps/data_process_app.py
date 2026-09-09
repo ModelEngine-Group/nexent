@@ -6,14 +6,15 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+from consts.exceptions import OfficeConversionException
 from consts.model import (
     BatchTaskRequest,
     ConvertStateRequest,
     TaskRequest,
 )
-from consts.exceptions import OfficeConversionException
-from data_process.tasks import process_and_forward, process_sync
+from data_process.tasks import process_sync, submit_process_forward_chain
 from services.data_process_service import get_data_process_service
+
 
 logger = logging.getLogger("data_process.app")
 
@@ -46,11 +47,9 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
     Returns task ID immediately. Processing happens in the background.
     Tasks are forwarded to Elasticsearch when complete.
     """
-    # Create task using the new process_and_forward task
-
     logger.info(
         f"Creating task with source_type: {request.source_type}, model_id: {request.embedding_model_id}")
-    task_result = process_and_forward.delay(
+    task_id = submit_process_forward_chain(
         source=request.source,
         source_type=request.source_type,
         chunking_strategy=request.chunking_strategy,
@@ -58,9 +57,16 @@ async def create_task(request: TaskRequest, authorization: Optional[str] = Heade
         original_filename=request.original_filename,
         authorization=authorization,
         embedding_model_id=request.embedding_model_id,
-        tenant_id=request.tenant_id
+        tenant_id=request.tenant_id,
+        file_id=getattr(request, "file_id", None),
+        telemetry_context=getattr(request, "telemetry_context", {}) or {},
     )
-    return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_result.id})
+    if not task_id:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Failed to enqueue data processing task",
+        )
+    return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_id})
 
 
 @router.post("/process")
@@ -132,8 +138,18 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: Optional[
     Processing happens in the background for each file independently.
     """
     try:
-        task_ids = await service.create_batch_tasks_impl(authorization=authorization, request=request)
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_ids": task_ids})
+        submission_result = await service.create_batch_tasks_impl(
+            authorization=authorization, request=request)
+        # Keep compatibility with service implementations that still return a plain task-id list.
+        if isinstance(submission_result, list):
+            submission_result = {
+                "status": "success" if submission_result else "failed",
+                "task_ids": submission_result,
+                "results": [],
+                "submitted_count": len(submission_result),
+                "failed_count": 0,
+            }
+        return JSONResponse(status_code=HTTPStatus.CREATED, content=submission_result)
     except HTTPException:
         raise
     except Exception as e:

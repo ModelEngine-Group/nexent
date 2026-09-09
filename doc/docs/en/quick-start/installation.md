@@ -8,9 +8,9 @@
 | **RAM**  | 8 GiB | 16 GiB |
 | **Disk** | 40 GiB | 100 GiB |
 | **Architecture** | x86_64 / ARM64 | |
-| **Software** | Docker & Docker Compose installed | Docker 24+, Docker Compose v2+ |
+| **Software** | Docker Engine 18.09+ and Docker Compose v2 | A maintained Docker Engine release and Docker Compose v2 |
 
-> **💡 Note**: The recommended configuration of **8 cores and 16 GiB RAM** provides good performance for production workloads.
+> **💡 Note**: The recommended configuration is suitable for environments that enable the complete application, data processing, and Docker sandboxes. Model services are usually deployed separately and are not included in the resource requirements above.
 
 ## 🚀 Quick Start
 
@@ -26,7 +26,7 @@ git clone https://github.com/ModelEngine-Group/nexent.git
 cd nexent
 ```
 
-> **Tip**: Docker and Kubernetes use `deploy/env/.env`. Before every deployment, the scripts keep all existing values, comments, and old variables, then append variables newly introduced by the current `deploy/env/.env.example`. If `.env` does not exist, they first reuse legacy `docker/.env`, then fall back to the current template. A readable `.env.example` is required. If you need to configure voice models (STT/TTS), update the related values in `deploy/env/.env` before or after deployment.
+> **Tip**: Docker and Kubernetes share `deploy/env/.env`. The deployment script preserves existing configuration and adds variables introduced in `deploy/env/.env.example`. If `.env` does not exist, the script first reuses the legacy `docker/.env`; otherwise, it creates the file from the current template. Make sure `.env.example` is readable before deployment.
 
 #### 2. Deployment Options
 
@@ -45,6 +45,8 @@ After running the command, the script opens Bash TUI menus for deployment option
 - **supabase (selected by default, optional)**: enables user, tenant, and authentication features
 - **terminal (optional)**: enables the OpenSSH terminal tool
 - **monitoring (optional)**: enables observability components and then prompts for a provider
+
+The `application` component also prepares the `nexent-sandbox` image. In v2.5.0, Docker deployments run model-generated code and Skill scripts in a system-scoped Docker sandbox by default. A sandbox is not a fixed Compose service; the Runtime service creates and reuses it according to the runtime strategy.
 
 **Port Policy:**
 - **development (default)**: publishes debug and internal service ports for local troubleshooting
@@ -80,7 +82,7 @@ After a successful deployment, non-sensitive choices are saved to `deploy/docker
 
 1️⃣ **When deploying v1.8.0 or later for the first time**, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123`, without prompting, and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD` in `deploy/env/.env`; non-interactive creation displays the effective password. As an exception, an offline package launched with `--config` prompts for and confirms the password, and that input takes precedence without being displayed.
 
-> This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/user-management).
+> This account is used for permission management only and cannot develop agents or create knowledge bases. Log in with this account and complete: Access tenant resources → Create tenant → Create tenant administrator, then log in with the tenant administrator account to use all features. For role permissions, see [User Management](../user-guide/resource-management).
 
 2️⃣ To recreate the `suadmin` account, follow these steps:
 
@@ -114,7 +116,7 @@ GitHub Actions artifacts are retained for 30 days. If the required artifact has 
 Copy the downloaded archive to the offline host and extract it. The downloaded artifact contains the package files directly, with no nested archive:
 
 ```bash
-unzip nexent-v2.2.1-amd64.zip -d nexent
+unzip nexent-<version>-amd64.zip -d nexent
 cd nexent
 bash deploy.sh --load-images docker
 ```
@@ -169,7 +171,9 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 **Application Services:**
 | Service | Description | Default Port |
 |---------|-------------|--------------|
-| nexent | Backend service | 5010 |
+| nexent-config | Configuration and management API | 5010 |
+| nexent-runtime | Agent runtime API | 5014 |
+| nexent-mcp | MCP management and tool service | 5011/5015 |
 | nexent-web | Web frontend | 3000 |
 | nexent-data-process | Data processing service | 5012 |
 | nexent-northbound | Northbound API service | 5013 |
@@ -180,7 +184,7 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | nexent-postgresql | Relational database |
 | nexent-elasticsearch | Search and indexing engine |
 | nexent-minio | S3-compatible object storage |
-| redis | Caching layer |
+| redis | Cache, distributed locks, and task message broker |
 
 **Supabase Services (when `supabase` is selected):**
 | Service | Description |
@@ -195,6 +199,12 @@ Nexent uses a microservices architecture deployed via Docker Compose.
 | nexent-openssh-server | SSH terminal for AI agents |
 | nexent-monitoring | Optional observability stack |
 
+**On-Demand Execution Environment:**
+
+| Component | Description |
+|---------|-------------|
+| nexent-sandbox | Isolated execution environment created by the Runtime service according to policy for running model-generated code and Skill scripts |
+
 Internal services communicate using the Docker internal network.
 
 ## 💾 Data Persistence
@@ -207,6 +217,7 @@ Nexent uses Docker volumes for data persistence:
 | Elasticsearch | nexent-elasticsearch-data | `{dataDir}/elasticsearch` |
 | Redis | nexent-redis-data | `{dataDir}/redis` |
 | MinIO | nexent-minio-data | `{dataDir}/minio` |
+| Agent runtime workspace | nexent-agent-workspace | Docker named volume configured by `NEXENT_SANDBOX_WORKSPACE_VOLUME` |
 | Supabase DB (when `supabase` is selected) | nexent-supabase-db-data | `{dataDir}/supabase-db` |
 
 Default `dataDir` is `./volumes` (configurable via `ROOT_DIR` in `deploy/env/.env`).
@@ -237,6 +248,8 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 |---------|---------------|---------------|-------------|
 | Web Interface | 3000 | 3000 | Main application access |
 | Backend API | 5010 | 5010 | Backend service |
+| Runtime API | 5014 | 5014 | Agent runtime service |
+| MCP API | 5011/5015 | 5011/5015 | MCP management and tool service |
 | Data Processing | 5012 | 5012 | Data processing API |
 | Northbound API | 5013 | 5013 | Northbound interface service (A2A/MCP integration) |
 | PostgreSQL | 5432 | 5434 | Database connection |
@@ -249,6 +262,26 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 For complete port mapping details, see our [Dev Container Guide](../deployment/devcontainer.md#port-mapping).
 
 ## 🔧 Advanced Configuration
+
+The v2.5.0 deployment template uses Docker sandboxes by default and reuses system-scoped containers to reduce cold-start time. The Runtime service exchanges uploaded and generated files through a dedicated workspace volume. Artifacts that must be retained are synchronized to MinIO after a run.
+
+Common settings are defined in `deploy/env/.env`:
+
+| Variable | Default | Description |
+|------|--------|------|
+| `NEXENT_SANDBOX_DEFAULT_LEVEL` | `docker` | Isolation level: `local`, `docker`, or `wasm` |
+| `NEXENT_SANDBOX_DEFAULT_SCOPE` | `system` | Container lifecycle: `session` or `system` |
+| `NEXENT_SANDBOX_DOCKER_IMAGE` | `nexent/nexent-sandbox:latest` | Docker sandbox image |
+| `NEXENT_SANDBOX_WORKSPACE_VOLUME` | `nexent-agent-workspace` | Docker volume shared by the Runtime service and sandboxes |
+| `NEXENT_SANDBOX_MEMORY_LIMIT_MB` | `2048` | Sandbox memory limit in MiB |
+| `NEXENT_SANDBOX_CPU_QUOTA` | `1.0` | Sandbox CPU quota |
+| `NEXENT_SANDBOX_TIMEOUT_S` | `30` | Per-step execution timeout in seconds |
+| `NEXENT_SANDBOX_NETWORK` | `disabled` | Whether sandbox network access is enabled |
+| `NEXENT_SANDBOX_SHELL_POLICY` | `disabled` | Shell invocation policy: `disabled`, `restricted`, or `boxed` |
+| `NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS` | `true` | Whether output files are automatically synchronized to MinIO |
+| `AGENT_WORKSPACE_ROOT` | `/mnt/nexent/workdir` | Temporary file workspace for each run |
+
+Do not change the isolation level to `local` in production. Redeploy the Runtime service after changing resource, network, or shell policies.
 
 ### Monitoring Configuration
 
@@ -378,10 +411,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=role
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"cas-admin":"ADMIN","cas-user":"USER"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local
@@ -392,6 +430,12 @@ CAS_LOGOUT_URL=/logout
 CAS_SSL_VERIFY=true
 CAS_CA_BUNDLE=
 ```
+
+When CAS omits the role attribute selected by `CAS_ROLE_ATTRIBUTE`, returns it empty, or returns an unsupported role after mapping, Nexent uses `CAS_DEFAULT_ROLE`. Supported default roles are `SU`, `ADMIN`, `DEV`, and `USER`; invalid values fall back to `USER`.
+
+When CAS omits the tenant attribute selected by `CAS_TENANT_ATTRIBUTE` or returns it empty, Nexent uses `CAS_DEFAULT_TENANT_ID`.
+
+`CAS_HEARTBEAT_URL` enables a separate activity-driven heartbeat for CAS users. The first visible-page activity sends a GET immediately; later clicks, keyboard input, mouse movement, touch input, focus, or visibility changes send at most one request per `CAS_HEARTBEAT_INTERVAL_SECONDS` across browser tabs. If the configured Cookie is readable, Nexent sends `X-Auth-Token: <cookie-name>=<cookie-value>`; otherwise it sends the heartbeat without that header. The heartbeat endpoint must allow the Nexent origin, GET, OPTIONS, and `X-Auth-Token` through CORS. This heartbeat only keeps the authentication source active; the existing silent renewal continues to refresh the local Nexent session.
 
 Common CAS URLs:
 
@@ -432,10 +476,15 @@ CAS_LOGIN_MODE=force
 CAS_USER_ATTRIBUTE=userName
 CAS_EMAIL_ATTRIBUTE=email
 CAS_ROLE_ATTRIBUTE=userType
+CAS_DEFAULT_ROLE=USER
 CAS_TENANT_ATTRIBUTE=tenant_id
+CAS_DEFAULT_TENANT_ID=tenant_id
 CAS_ROLE_MAP_JSON={"1":"ADMIN","3":"DEV"}
 CAS_SESSION_MAX_AGE_SECONDS=3600
 LOCAL_SESSION_MAX_AGE_SECONDS=3600
+CAS_HEARTBEAT_URL=https://<ModelEngine IP>:5443/<heartbeat-path>
+CAS_HEARTBEAT_INTERVAL_SECONDS=300
+CAS_HEARTBEAT_COOKIE_NAME=<cookie-name>
 CAS_RENEW_BEFORE_SECONDS=300
 CAS_RENEW_TIMEOUT_SECONDS=10
 CAS_SYNTHETIC_EMAIL_DOMAIN=cas.local

@@ -16,3 +16,7 @@ resources:
 config:
   dashboardUsername: "supabase"
   dashboardPassword: "Huawei123"
+
+service:
+  type: ClusterIP
+  nodePorts: {}

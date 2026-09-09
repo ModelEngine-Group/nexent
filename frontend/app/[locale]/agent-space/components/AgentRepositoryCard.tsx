@@ -4,6 +4,7 @@ import type { MenuProps } from "antd";
 import { Button, Card, Dropdown } from "antd";
 import { Bot, Copy, Download, Eye, MoreHorizontal, PackageX } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
 interface AgentRepositoryCardProps {
@@ -105,7 +106,7 @@ export function AgentRepositoryCard({
               key={tag}
               className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
             >
-              {tag}
+              {getAgentRepositoryTagLabel(tag, t)}
             </span>
           ))}
           {toolCount > 0 ? (

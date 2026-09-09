@@ -55,7 +55,6 @@ export interface AgentVersion {
   source_type: string;
   source_version_no: number;
   status: string;
-  is_a2a: boolean;
   create_time: string;
   update_time: string;
 }
@@ -117,7 +116,6 @@ export interface FetchAgentVersionListResult {
 export interface VersionPublishRequest {
   version_name?: string;
   release_note?: string;
-  publish_as_a2a?: boolean;
 }
 
 /**

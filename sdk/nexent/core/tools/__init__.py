@@ -6,6 +6,7 @@ from .dify_search_tool import DifySearchTool
 from .datamate_search_tool import DataMateSearchTool
 from .idata_search_tool import IdataSearchTool
 from .haotian_search_tool import HaotianSearchTool
+from .ind_aidp_search_tool import IndependentAidpSearchTool
 from .ragflow_search_tool import RAGFlowSearchTool
 from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
@@ -26,6 +27,8 @@ from .analyze_video_tool import AnalyzeVideoTool
 from .parallel_executor import ParallelExecutorTool
 from .store_memory_tool import StoreMemoryTool
 from .search_memory_tool import SearchMemoryTool
+from .download_from_s3_tool import DownloadFromS3Tool
+from .upload_to_s3_tool import UploadToS3Tool
 from .plan_tools import CreatePlanTool, UpdatePlanStepTool
 
 __all__ = [
@@ -38,6 +41,7 @@ __all__ = [
     "DataMateSearchTool",
     "IdataSearchTool",
     "HaotianSearchTool",
+    "IndependentAidpSearchTool",
     "RAGFlowSearchTool",
     "AidpSearchTool",
     "SendEmailTool",
@@ -59,6 +63,8 @@ __all__ = [
     "AnalyzeVideoTool",
     "StoreMemoryTool",
     "SearchMemoryTool",
+    "DownloadFromS3Tool",
+    "UploadToS3Tool",
     "CreatePlanTool",
     "UpdatePlanStepTool",
 ]

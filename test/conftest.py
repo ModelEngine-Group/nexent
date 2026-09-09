@@ -8,6 +8,7 @@ import sys
 import shutil
 import tempfile
 import types
+import importlib.machinery
 from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch as _patch
@@ -30,6 +31,60 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
+
+
+def _restore_project_package_metadata() -> None:
+    """Keep package-level test doubles capable of resolving real submodules."""
+    package_paths = {
+        "agents": os.path.join(_backend_dir, "agents"),
+        "consts": os.path.join(_backend_dir, "consts"),
+        "services": os.path.join(_backend_dir, "services"),
+        "utils": os.path.join(_backend_dir, "utils"),
+        "nexent": os.path.join(_sdk_dir, "nexent"),
+    }
+    for package_name, package_path in package_paths.items():
+        package_module = sys.modules.get(package_name)
+        if package_module is None:
+            continue
+
+        package_module.__path__ = [package_path]
+        package_module.__package__ = package_name
+        package_module.__spec__ = importlib.machinery.ModuleSpec(
+            package_name,
+            loader=None,
+            is_package=True,
+        )
+        package_module.__spec__.submodule_search_locations = [package_path]
+
+    for module_name, module in list(sys.modules.items()):
+        parent_name, separator, child_name = module_name.rpartition(".")
+        if not separator or parent_name not in package_paths:
+            continue
+        parent_module = sys.modules.get(parent_name)
+        if parent_module is not None:
+            setattr(parent_module, child_name, module)
+
+
+def pytest_collectstart(collector):
+    """Repair package metadata before pytest imports each test module."""
+    _restore_project_package_metadata()
+
+
+@pytest.fixture(autouse=True)
+def _restore_project_packages():
+    """Repair package links changed during collection before each test runs."""
+    _restore_project_package_metadata()
+    yield
+
+# Some test modules replace the ``consts`` package in ``sys.modules`` with a
+# lightweight stub during collection.  Keep the agent-stream constant
+# available as a fully-qualified module so later imports do not depend on the
+# replacement parent still behaving like a package.
+_agent_consts_stub = types.ModuleType("consts.agent")
+_agent_consts_stub.SAFE_AGENT_STREAM_ERROR_MESSAGE = (
+    "Agent execution failed. Please try again later."
+)
+sys.modules.setdefault("consts.agent", _agent_consts_stub)
 
 # Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
 # in environments where the optional SDK is not installed.  We register a

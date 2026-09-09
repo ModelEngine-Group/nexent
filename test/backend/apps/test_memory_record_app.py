@@ -24,6 +24,7 @@ sys.path.insert(
 
 # Stub backend modules so the app can be imported without real DB/ES.
 database_pkg = types.ModuleType("database")
+database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 user_tenant_db_mod = types.ModuleType("database.user_tenant_db")
@@ -189,9 +190,8 @@ def test_create_record_returns_event(client):
         json={"layer": "user", "content": "preference", "memory_type": "long_term"},
         headers={"Authorization": "Bearer test"},
     )
-    assert response.status_code == 200
-    assert response.json()["event"] == "ADD"
-    services["record"].create_memory.assert_called_once()
+    assert response.status_code == 410
+    services["record"].create_memory.assert_not_called()
 
 
 def test_create_record_rejects_invalid_layer(client):
@@ -220,7 +220,7 @@ def test_create_tenant_record_requires_admin(client):
         headers={"Authorization": "Bearer test"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 410
     services["record"].create_memory.assert_not_called()
 
 
@@ -240,8 +240,8 @@ def test_create_tenant_record_allows_admin(client):
         headers={"Authorization": "Bearer test"},
     )
 
-    assert response.status_code == 200
-    services["record"].create_memory.assert_called_once()
+    assert response.status_code == 410
+    services["record"].create_memory.assert_not_called()
 
 
 def test_list_records_filters_by_user(client):
@@ -250,11 +250,8 @@ def test_list_records_filters_by_user(client):
         "/memory/records?layer=user&limit=10",
         headers={"Authorization": "Bearer test"},
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["count"] == 1
-    services["record"].list_memories.assert_called_once()
-    assert services["record"].list_memories.call_args.kwargs["user_id"] == "u1"
+    assert response.status_code == 410
+    services["record"].list_memories.assert_not_called()
 
 
 def test_list_tenant_records_are_shared_across_users(client):
@@ -263,8 +260,8 @@ def test_list_tenant_records_are_shared_across_users(client):
         "/memory/records?layer=tenant&limit=10",
         headers={"Authorization": "Bearer test"},
     )
-    assert response.status_code == 200
-    assert services["record"].list_memories.call_args.kwargs["user_id"] is None
+    assert response.status_code == 410
+    services["record"].list_memories.assert_not_called()
 
 
 def test_delete_record_returns_success(client):
@@ -372,8 +369,8 @@ def test_create_record_returns_unindexed_agent_short_term_memory(client):
     }
 
 
-def test_create_record_does_not_log_when_other_layer_not_indexed(client, caplog):
-    """The DEBUG log only applies to the 'agent' layer."""
+def test_create_record_rejects_non_agent_layer_without_logging(client, caplog):
+    """Legacy tenant/user records are rejected before persistence or indexing."""
     cli, services = client
 
     def _create(**kwargs):
@@ -394,7 +391,8 @@ def test_create_record_does_not_log_when_other_layer_not_indexed(client, caplog)
             headers={"Authorization": "Bearer test"},
         )
 
-    assert response.status_code == 200
+    assert response.status_code == 410
+    services["record"].create_memory.assert_not_called()
     matched = [
         record for record in caplog.records if "ES indexing" in record.getMessage()
     ]
@@ -678,33 +676,26 @@ def test_build_context_rejects_invalid_threshold(client):
 
 
 def test_tenant_layer_normalization_in_list(client):
-    """The list endpoint strips whitespace and lower-cases the layer filter."""
+    """Normalized legacy tenant layers remain unavailable."""
     cli, services = client
     response = cli.get(
         "/memory/records?layer=%20TENANT%20&limit=10",
         headers={"Authorization": "Bearer test"},
     )
-    assert response.status_code == 200
-    call_kwargs = services["record"].list_memories.call_args.kwargs
-    assert call_kwargs["layer"] == "tenant"
-    assert call_kwargs["user_id"] is None
-    assert call_kwargs["limit"] == 10
+    assert response.status_code == 410
+    services["record"].list_memories.assert_not_called()
 
 
-def test_create_record_with_minimal_payload(client):
-    """content is required; everything else should be optional with sane defaults."""
+def test_create_user_record_with_minimal_payload_is_gone(client):
+    """A minimal payload defaults to the removed user-record path."""
     cli, services = client
     response = cli.post(
         "/memory/records",
         json={"layer": "user", "content": "minimal payload"},
         headers={"Authorization": "Bearer test"},
     )
-    assert response.status_code == 200
-    args = services["record"].create_memory.call_args.kwargs
-    assert args["content"] == "minimal payload"
-    assert args["memory_type"] is None
-    assert args["agent_id"] is None
-    assert args["concept_tags"] == []
+    assert response.status_code == 410
+    services["record"].create_memory.assert_not_called()
 
 
 def test_create_record_missing_authorization_raises(monkeypatch):

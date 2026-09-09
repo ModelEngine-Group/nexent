@@ -8,6 +8,7 @@ DEPLOYMENT_SCHEMA_VERSION="1"
 DEPLOYMENT_COMPONENTS_DEFAULT="infrastructure,application,data-process,supabase"
 DEPLOYMENT_PORT_POLICY_DEFAULT="development"
 DEPLOYMENT_IMAGE_SOURCE_DEFAULT="general"
+DEPLOYMENT_SANDBOX_MODE_DEFAULT="lightweight"
 DEPLOYMENT_REGISTRY_PROFILE_DEFAULT="general"
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT=""
 DEPLOYMENT_MONITORING_PROVIDER_DEFAULT="otlp"
@@ -16,6 +17,7 @@ DEPLOYMENT_SUPER_ADMIN_PASSWORD_DEFAULT="Nexent@123"
 DEPLOYMENT_COMPONENTS=""
 DEPLOYMENT_PORT_POLICY=""
 DEPLOYMENT_IMAGE_SOURCE=""
+DEPLOYMENT_SANDBOX_MODE=""
 DEPLOYMENT_REGISTRY_PROFILE=""
 DEPLOYMENT_IMAGE_REGISTRY_PREFIX=""
 DEPLOYMENT_APP_VERSION=""
@@ -34,6 +36,7 @@ DEPLOYMENT_LANGUAGE="${DEPLOYMENT_LANGUAGE:-}"
 deployment_component_list="infrastructure application data-process supabase terminal monitoring"
 deployment_port_policy_list="development production"
 deployment_image_source_list="general mainland local-latest"
+deployment_sandbox_mode_list="disabled lightweight full"
 deployment_registry_profile_list="general mainland"
 deployment_monitoring_provider_list="otlp phoenix langfuse langsmith grafana zipkin"
 
@@ -118,6 +121,7 @@ deployment_i18n_format() {
       validation.unknown_component) printf '%s' '未知部署组件：%s' ;;
       validation.unsupported_port_policy) printf '%s' '不支持的端口策略：%s。可用值：development 或 production。' ;;
       validation.unsupported_image_source) printf '%s' '不支持的镜像源：%s。可用值：general、mainland 或 local-latest。' ;;
+      validation.unsupported_sandbox_mode) printf '%s' '不支持的沙箱模式：%s。可用值：disabled、lightweight 或 full。' ;;
       validation.unsupported_registry_profile) printf '%s' '不支持的 registry profile：%s' ;;
       validation.unsupported_image_registry_prefix) printf '%s' '不支持的镜像仓库前缀：%s。请使用 registry.example.com/project 格式，不要包含空格。' ;;
       validation.unsupported_monitoring_provider) printf '%s' '不支持的监控 provider：%s' ;;
@@ -148,6 +152,11 @@ deployment_i18n_format() {
       tui.port.production) printf '只暴露生产入口端口，内部服务保持私有' ;;
       tui.image.title) printf '选择镜像源' ;;
       tui.image.description) printf '每个选项展示将使用的后端镜像 tag 示例。' ;;
+      tui.sandbox.title) printf '选择沙箱模式' ;;
+      tui.sandbox.description) printf '轻量级为默认选项；full 包含文档、设计、前端和 MCP 技能依赖。' ;;
+      tui.sandbox.disabled) printf '不启用 Docker 沙箱，使用本地执行模式' ;;
+      tui.sandbox.lightweight) printf '启用默认轻量级 Docker 沙箱' ;;
+      tui.sandbox.full) printf '启用包含 Anthropic 技能依赖的完整 Docker 沙箱' ;;
       image_build.detail.main) printf '后端 API 服务' ;;
       image_build.detail.web) printf 'Next.js 前端' ;;
       image_build.detail.data_process) printf '文档解析和向量化 Worker' ;;
@@ -156,13 +165,14 @@ deployment_i18n_format() {
       image_build.detail.docs) printf 'VitePress 文档站点' ;;
       local_config.found) printf '%s' '发现已有部署配置：%s' ;;
       local_config.choose) printf '请选择如何处理已保存的部署选项：' ;;
-      local_config.use) printf '  1) 使用本地配置 - 跳过菜单，复用已保存的组件、端口策略、镜像源、镜像仓库前缀和监控 provider。' ;;
+      local_config.use) printf '  1) 使用本地配置 - 跳过菜单，复用已保存的组件、端口策略、镜像源、沙箱模式、镜像仓库前缀和监控 provider。' ;;
       local_config.reconfigure) printf '  2) 重新配置 - 将已保存的值作为默认值，并显示菜单供修改。' ;;
       local_config.reconfigure_hint) printf '     启用/禁用监控、切换 provider 或调整部署范围时请选择此项。' ;;
       prompt.choose_1_2) printf '请选择 [1/2]（默认：1）：' ;;
       summary.components) printf '%s' '部署组件：%s' ;;
       summary.port_policy) printf '%s' '端口策略：%s' ;;
       summary.image_source) printf '%s' '镜像源：%s' ;;
+      summary.sandbox_mode) printf '%s' '沙箱模式：%s' ;;
       summary.image_registry_prefix) printf '%s' '镜像仓库前缀：%s' ;;
       summary.monitoring_provider) printf '%s' '监控 provider：%s' ;;
       summary.docker_services) printf '%s' 'Docker 服务：%s' ;;
@@ -183,6 +193,7 @@ deployment_i18n_format() {
       validation.unknown_component) printf '%s' 'Unknown deployment component: %s' ;;
       validation.unsupported_port_policy) printf '%s' 'Unsupported port policy: %s. Use development or production.' ;;
       validation.unsupported_image_source) printf '%s' 'Unsupported image source: %s. Use general, mainland, or local-latest.' ;;
+      validation.unsupported_sandbox_mode) printf '%s' 'Unsupported sandbox mode: %s. Use disabled, lightweight, or full.' ;;
       validation.unsupported_registry_profile) printf '%s' 'Unsupported registry profile: %s' ;;
       validation.unsupported_image_registry_prefix) printf '%s' 'Unsupported image registry prefix: %s. Use registry.example.com/project format without spaces.' ;;
       validation.unsupported_monitoring_provider) printf '%s' 'Unsupported monitoring provider: %s' ;;
@@ -213,6 +224,11 @@ deployment_i18n_format() {
       tui.port.production) printf 'publish only production entry ports; keep internal services private' ;;
       tui.image.title) printf 'Select image source' ;;
       tui.image.description) printf 'Each option shows the backend image tag pattern that will be used.' ;;
+      tui.sandbox.title) printf 'Select sandbox mode' ;;
+      tui.sandbox.description) printf 'Lightweight is the default; full includes document, design, frontend, and MCP skill dependencies.' ;;
+      tui.sandbox.disabled) printf 'disable the Docker sandbox and use local execution mode' ;;
+      tui.sandbox.lightweight) printf 'enable the default lightweight Docker sandbox' ;;
+      tui.sandbox.full) printf 'enable the full Docker sandbox with Anthropic skill dependencies' ;;
       image_build.detail.main) printf 'backend API service' ;;
       image_build.detail.web) printf 'Next.js frontend' ;;
       image_build.detail.data_process) printf 'document parsing and vectorization worker' ;;
@@ -221,13 +237,14 @@ deployment_i18n_format() {
       image_build.detail.docs) printf 'VitePress documentation site' ;;
       local_config.found) printf '%s' 'Existing deployment config found: %s' ;;
       local_config.choose) printf 'Choose how to handle saved deployment options:' ;;
-      local_config.use) printf '  1) Use local config - skip the menus and reuse the saved components, port policy, image source, image registry prefix, and monitoring provider.' ;;
+      local_config.use) printf '  1) Use local config - skip the menus and reuse the saved components, port policy, image source, sandbox mode, image registry prefix, and monitoring provider.' ;;
       local_config.reconfigure) printf '  2) Reconfigure - load the saved values as defaults, then show the menus so you can change them.' ;;
       local_config.reconfigure_hint) printf '     Choose this option when enabling or disabling monitoring, switching providers, or changing deployment scope.' ;;
       prompt.choose_1_2) printf 'Choose [1/2] (default: 1): ' ;;
       summary.components) printf '%s' 'Deployment components: %s' ;;
       summary.port_policy) printf '%s' 'Port policy: %s' ;;
       summary.image_source) printf '%s' 'Image source: %s' ;;
+      summary.sandbox_mode) printf '%s' 'Sandbox mode: %s' ;;
       summary.image_registry_prefix) printf '%s' 'Image registry prefix: %s' ;;
       summary.monitoring_provider) printf '%s' 'Monitoring provider: %s' ;;
       summary.docker_services) printf '%s' 'Docker services: %s' ;;
@@ -795,6 +812,7 @@ deployment_init_defaults() {
   DEPLOYMENT_COMPONENTS="$DEPLOYMENT_COMPONENTS_DEFAULT"
   DEPLOYMENT_PORT_POLICY="$DEPLOYMENT_PORT_POLICY_DEFAULT"
   DEPLOYMENT_IMAGE_SOURCE="$DEPLOYMENT_IMAGE_SOURCE_DEFAULT"
+  DEPLOYMENT_SANDBOX_MODE="$DEPLOYMENT_SANDBOX_MODE_DEFAULT"
   DEPLOYMENT_REGISTRY_PROFILE="$DEPLOYMENT_REGISTRY_PROFILE_DEFAULT"
   DEPLOYMENT_IMAGE_REGISTRY_PREFIX="$DEPLOYMENT_IMAGE_REGISTRY_PREFIX_DEFAULT"
   DEPLOYMENT_APP_VERSION="${APP_VERSION:-latest}"
@@ -810,7 +828,7 @@ deployment_init_defaults() {
   DEPLOYMENT_DOCKER_PORTS=""
   unset DEPLOYMENT_COMPONENTS_EXPLICIT DEPLOYMENT_PORT_POLICY_EXPLICIT DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT
   unset DEPLOYMENT_IMAGE_REGISTRY_PREFIX_EXPLICIT
-  unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT
+  unset DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT DEPLOYMENT_IMAGE_SOURCE_EXPLICIT DEPLOYMENT_SANDBOX_MODE_EXPLICIT DEPLOYMENT_APP_VERSION_EXPLICIT
 }
 
 deployment_parse_common_args() {
@@ -826,6 +844,10 @@ deployment_parse_common_args() {
         ;;
       --image-source)
         DEPLOYMENT_IMAGE_SOURCE="$2"
+        shift 2
+        ;;
+      --sandbox-mode)
+        DEPLOYMENT_SANDBOX_MODE="$2"
         shift 2
         ;;
       --registry-profile)
@@ -929,6 +951,10 @@ deployment_load_config_file() {
           ;;
         imageSource)
           DEPLOYMENT_IMAGE_SOURCE="$value"
+          loaded_config_value="true"
+          ;;
+        sandboxMode)
+          DEPLOYMENT_SANDBOX_MODE="$value"
           loaded_config_value="true"
           ;;
         registryProfile)
@@ -1114,6 +1140,10 @@ deployment_validate() {
   }
   deployment_is_valid_value "$DEPLOYMENT_IMAGE_SOURCE" $deployment_image_source_list || {
     deployment_error "$(deployment_i18n validation.unsupported_image_source "$DEPLOYMENT_IMAGE_SOURCE")"
+    return 1
+  }
+  deployment_is_valid_value "$DEPLOYMENT_SANDBOX_MODE" $deployment_sandbox_mode_list || {
+    deployment_error "$(deployment_i18n validation.unsupported_sandbox_mode "$DEPLOYMENT_SANDBOX_MODE")"
     return 1
   }
   deployment_is_valid_value "$DEPLOYMENT_REGISTRY_PROFILE" $deployment_registry_profile_list || {
@@ -1495,6 +1525,81 @@ deployment_tui_select_image_source() {
 
 }
 
+deployment_tui_select_sandbox_mode() {
+  [ -t 0 ] || return 0
+  [ -n "${DEPLOYMENT_SANDBOX_MODE_EXPLICIT:-}" ] && return 0
+  [ "$DEPLOYMENT_CONFIG_FILE_LOADED" = "true" ] && return 0
+
+  local modes=(disabled lightweight full)
+  local details=(
+    "$(deployment_i18n tui.sandbox.disabled)"
+    "$(deployment_i18n tui.sandbox.lightweight)"
+    "$(deployment_i18n tui.sandbox.full)"
+  )
+  local cursor=1
+  local i key key_tail
+
+  for i in "${!modes[@]}"; do
+    if [ "${modes[$i]}" = "$DEPLOYMENT_SANDBOX_MODE" ]; then
+      cursor="$i"
+      break
+    fi
+  done
+
+  deployment_tui_render_sandbox_mode() {
+    printf '\033[2J\033[H'
+    printf '%s\n' "$(deployment_i18n tui.sandbox.title)"
+    printf '%s\n' "$(deployment_i18n tui.sandbox.description)"
+    printf '%s\n\n' "$(deployment_i18n tui.radio.help)"
+    local row marker radio
+    for row in "${!modes[@]}"; do
+      marker=" "
+      [ "$row" -eq "$cursor" ] && marker=">"
+      radio=" "
+      [ "$row" -eq "$cursor" ] && radio="*"
+      printf '%s (%s) %s - %s\n' "$marker" "$radio" "${modes[$row]}" "${details[$row]}"
+    done
+  }
+
+  printf '\033[?25l'
+  while true; do
+    deployment_tui_render_sandbox_mode
+    IFS= read -rsn1 key || key=""
+    if [ -z "$key" ]; then
+      DEPLOYMENT_SANDBOX_MODE="${modes[$cursor]}"
+      break
+    fi
+
+    if [ "$key" = $'\033' ]; then
+      IFS= read -rsn2 -t 0.1 key_tail || key_tail=""
+      key="${key}${key_tail}"
+    fi
+
+    case "$key" in
+      $'\033[A'|k|K)
+        cursor=$((cursor - 1))
+        [ "$cursor" -lt 0 ] && cursor=$((${#modes[@]} - 1))
+        ;;
+      $'\033[B'|j|J)
+        cursor=$((cursor + 1))
+        [ "$cursor" -ge "${#modes[@]}" ] && cursor=0
+        ;;
+      q|Q)
+        deployment_tui_cancel
+        return $?
+        ;;
+      *)
+        if deployment_tui_is_back_key "$key"; then
+          deployment_tui_back
+          return $?
+        fi
+        ;;
+    esac
+  done
+  printf '\033[?25h'
+  printf '\033[2J\033[H'
+}
+
 deployment_tui_step_should_run() {
   local step="$1"
   [ -t 0 ] || return 1
@@ -1510,6 +1615,11 @@ deployment_tui_step_should_run() {
       [ -z "${DEPLOYMENT_IMAGE_SOURCE_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
       ;;
     3)
+      [ "${DEPLOYMENT_SANDBOX_MODE_SELECTION_ENABLED:-false}" = "true" ] && \
+        [ -z "${DEPLOYMENT_SANDBOX_MODE_EXPLICIT:-}" ] && \
+        [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
+      ;;
+    4)
       deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ -z "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
       ;;
     *)
@@ -1521,14 +1631,14 @@ deployment_tui_step_should_run() {
 deployment_tui_next_step() {
   local step="$1"
   step=$((step + 1))
-  while [ "$step" -lt 4 ]; do
+  while [ "$step" -lt 5 ]; do
     if deployment_tui_step_should_run "$step"; then
       printf '%s' "$step"
       return 0
     fi
     step=$((step + 1))
   done
-  printf '4'
+  printf '5'
 }
 
 deployment_tui_previous_step() {
@@ -1562,7 +1672,7 @@ deployment_run_tui_configuration() {
     step="$(deployment_tui_next_step "$step")"
   fi
 
-  while [ "$step" -lt 4 ]; do
+  while [ "$step" -lt 5 ]; do
     case "$step" in
       0)
         deployment_ensure_required_components
@@ -1579,6 +1689,10 @@ deployment_run_tui_configuration() {
         result=$?
         ;;
       3)
+        deployment_tui_select_sandbox_mode
+        result=$?
+        ;;
+      4)
         deployment_tui_select_monitoring_provider
         result=$?
         ;;
@@ -1767,6 +1881,29 @@ deployment_apply_image_source() {
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
   export NEXENT_MCP_DOCKER_IMAGE="${NEXENT_MCP_DOCKER_IMAGE:-nexent/nexent-mcp:$version}"
   export NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE:-nexent/nexent-sandbox:$version}"
+  case "$DEPLOYMENT_SANDBOX_MODE" in
+    disabled)
+      export NEXENT_SANDBOX_DEFAULT_LEVEL="local"
+      if [[ "$NEXENT_SANDBOX_IMAGE" == *nexent-sandbox-full:* ]]; then
+        NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE%nexent-sandbox-full:*}nexent-sandbox:${NEXENT_SANDBOX_IMAGE##*:}"
+        export NEXENT_SANDBOX_IMAGE
+      fi
+      ;;
+    lightweight)
+      export NEXENT_SANDBOX_DEFAULT_LEVEL="docker"
+      if [[ "$NEXENT_SANDBOX_IMAGE" == *nexent-sandbox-full:* ]]; then
+        NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE%nexent-sandbox-full:*}nexent-sandbox:${NEXENT_SANDBOX_IMAGE##*:}"
+        export NEXENT_SANDBOX_IMAGE
+      fi
+      ;;
+    full)
+      export NEXENT_SANDBOX_DEFAULT_LEVEL="docker"
+      if [[ "$NEXENT_SANDBOX_IMAGE" == *nexent-sandbox:* ]]; then
+        NEXENT_SANDBOX_IMAGE="${NEXENT_SANDBOX_IMAGE%nexent-sandbox:*}nexent-sandbox-full:${NEXENT_SANDBOX_IMAGE##*:}"
+        export NEXENT_SANDBOX_IMAGE
+      fi
+      ;;
+  esac
   export ELASTICSEARCH_IMAGE="${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}"
   export POSTGRESQL_IMAGE="${POSTGRESQL_IMAGE:-postgres:15-alpine}"
   export REDIS_IMAGE="${REDIS_IMAGE:-redis:alpine}"
@@ -1882,6 +2019,7 @@ deployment_render_docker_env() {
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
     printf 'NEXENT_MCP_DOCKER_IMAGE="%s"\n' "$NEXENT_MCP_DOCKER_IMAGE"
     printf 'NEXENT_SANDBOX_IMAGE="%s"\n' "$NEXENT_SANDBOX_IMAGE"
+    printf 'NEXENT_SANDBOX_DEFAULT_LEVEL="%s"\n' "$NEXENT_SANDBOX_DEFAULT_LEVEL"
     printf 'ELASTICSEARCH_IMAGE="%s"\n' "$ELASTICSEARCH_IMAGE"
     printf 'POSTGRESQL_IMAGE="%s"\n' "$POSTGRESQL_IMAGE"
     printf 'REDIS_IMAGE="%s"\n' "$REDIS_IMAGE"
@@ -2235,6 +2373,7 @@ deployment_render_helm_values() {
     fi
     printf '  portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf '  imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
+    printf '  sandboxMode: "%s"\n' "$DEPLOYMENT_SANDBOX_MODE"
     printf '  imageRegistryPrefix: "%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     deployment_render_helm_monitoring_global_values
     deployment_render_helm_monitoring_chart_values
@@ -2258,6 +2397,7 @@ deployment_persist_local_config() {
     IFS="$old_ifs"
     printf 'portPolicy: "%s"\n' "$DEPLOYMENT_PORT_POLICY"
     printf 'imageSource: "%s"\n' "$DEPLOYMENT_IMAGE_SOURCE"
+    printf 'sandboxMode: "%s"\n' "$DEPLOYMENT_SANDBOX_MODE"
     printf 'imageRegistryPrefix: "%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     printf 'monitoringProvider: "%s"\n' "$DEPLOYMENT_MONITORING_PROVIDER"
   } > "$output_file"
@@ -2269,6 +2409,7 @@ deployment_print_summary() {
   deployment_log "$(deployment_i18n summary.components "$DEPLOYMENT_COMPONENTS")"
   deployment_log "$(deployment_i18n summary.port_policy "$DEPLOYMENT_PORT_POLICY")"
   deployment_log "$(deployment_i18n summary.image_source "$DEPLOYMENT_IMAGE_SOURCE")"
+  deployment_log "$(deployment_i18n summary.sandbox_mode "$DEPLOYMENT_SANDBOX_MODE")"
   if [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ]; then
     deployment_log "$(deployment_i18n summary.image_registry_prefix "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX")"
   fi
@@ -2303,6 +2444,7 @@ deployment_prepare_config() {
       --components) DEPLOYMENT_COMPONENTS_EXPLICIT="true" ;;
       --port-policy) DEPLOYMENT_PORT_POLICY_EXPLICIT="true" ;;
       --image-source) DEPLOYMENT_IMAGE_SOURCE_EXPLICIT="true" ;;
+      --sandbox-mode) DEPLOYMENT_SANDBOX_MODE_EXPLICIT="true" ;;
       --registry-profile) DEPLOYMENT_REGISTRY_PROFILE_EXPLICIT="true" ;;
       --image-registry-prefix|--registry-prefix|--image-registry) DEPLOYMENT_IMAGE_REGISTRY_PREFIX_EXPLICIT="true" ;;
       --app-version|--version) DEPLOYMENT_APP_VERSION_EXPLICIT="true" ;;

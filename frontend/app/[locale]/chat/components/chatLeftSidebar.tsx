@@ -1,4 +1,12 @@
-import { useState, useMemo } from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type TouchEvent as ReactTouchEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   Clock,
@@ -18,8 +26,16 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { conversationService } from "@/services/conversationService";
 import { hasAutomationForConversation } from "@/features/agentAutomation/chatAdapter";
 import { type ConversationManagement } from "@/hooks/chat/useConversationManagement";
-import { ConversationListItem } from "@/types/chat";
+import { ConversationListItem } from "@/types/conversation";
 import log from "@/lib/logger";
+import {
+  isConversationListNearBottom,
+  shouldLoadNextConversationPage,
+} from "@/lib/conversationLoadPolicy";
+import {
+  calculateConversationViewport,
+  getConversationViewportGroupCounts,
+} from "@/lib/conversationViewport";
 
 // conversation status indicator component
 const ConversationStatusIndicator = ({
@@ -98,7 +114,6 @@ export interface ChatSidebarProps {
 }
 
 const CONVERSATION_TITLE_MAX_LENGTH = 100;
-
 export function ChatSidebar({
   streamingConversations,
   completedConversations,
@@ -114,6 +129,21 @@ export function ChatSidebar({
   const [renameError, setRenameError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<number | null>(null);
+  const isLoadingNextPageRef = useRef(false);
+  const conversationListRef = useRef<HTMLDivElement>(null);
+  const conversationContentRef = useRef<HTMLDivElement>(null);
+  const measurementRowRef = useRef<HTMLDivElement>(null);
+  const measurementSecondRowRef = useRef<HTMLDivElement>(null);
+  const measurementHeaderRef = useRef<HTMLParagraphElement>(null);
+  const fetchNextPageRef = useRef(conversationManagement.fetchNextPage);
+  const touchStartYRef = useRef<number | null>(null);
+  const pointerIntentRef = useRef(false);
+  const previousScrollTopRef = useRef(0);
+  const [totalVirtualHeight, setTotalVirtualHeight] = useState(0);
+  const [rowHeight, setRowHeight] = useState(40);
+  const [headerHeight, setHeaderHeight] = useState(28);
+  const conversationMetadata = conversationManagement.conversationMetadata;
+  const resolveInitialPageSize = conversationManagement.resolveInitialPageSize;
 
   // Memoize conversation categorization to avoid redundant work on unrelated state changes
   const { today, week, older } = useMemo(
@@ -122,6 +152,106 @@ export function ChatSidebar({
   );
 
   const onToggleSidebar = () => setCollapsed((prev) => !prev);
+
+  useEffect(() => {
+    fetchNextPageRef.current = conversationManagement.fetchNextPage;
+  }, [conversationManagement.fetchNextPage]);
+
+  useEffect(() => {
+    const metadata = conversationMetadata;
+    if (collapsed) return;
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        const container = conversationListRef.current;
+        const measuredRow = measurementRowRef.current;
+        const measuredSecondRow = measurementSecondRowRef.current;
+        const measuredHeader = measurementHeaderRef.current;
+        if (!container || !measuredRow || !measuredSecondRow || !measuredHeader)
+          return;
+        const nextRowHeight =
+          measuredSecondRow.getBoundingClientRect().top -
+          measuredRow.getBoundingClientRect().top;
+        const nextHeaderHeight = measuredHeader.getBoundingClientRect().height;
+        const viewport = calculateConversationViewport({
+          containerHeight: container.clientHeight,
+          rowHeight: nextRowHeight,
+          groupHeaderHeight: nextHeaderHeight,
+          groupGap: 16,
+          contentPadding: 16,
+          groupCounts: getConversationViewportGroupCounts(metadata),
+        });
+        setRowHeight(nextRowHeight);
+        setHeaderHeight(nextHeaderHeight);
+        setTotalVirtualHeight(viewport.totalHeight);
+        resolveInitialPageSize(viewport.initialLimit);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [collapsed, conversationMetadata, resolveInitialPageSize]);
+
+  const requestNextPage = (hasDownwardUserIntent: boolean) => {
+    const container = conversationListRef.current;
+    if (
+      !container ||
+      !shouldLoadNextConversationPage({
+        hasMore: conversationManagement.hasNextPage,
+        isLoading: isLoadingNextPageRef.current,
+        isNearBottom: isConversationListNearBottom(
+          conversationContentRef.current?.scrollHeight ?? container.scrollHeight,
+          container.scrollTop,
+          container.clientHeight
+        ),
+        hasDownwardUserIntent,
+      })
+    ) {
+      return;
+    }
+
+    isLoadingNextPageRef.current = true;
+    void fetchNextPageRef
+      .current()
+      .catch((error) => log.error("Failed to load more conversations", error))
+      .finally(() => {
+        isLoadingNextPageRef.current = false;
+      });
+  };
+
+  const handleScroll = () => {
+    const scrollTop = conversationListRef.current?.scrollTop ?? 0;
+    requestNextPage(
+      pointerIntentRef.current && scrollTop > previousScrollTopRef.current
+    );
+    previousScrollTopRef.current = scrollTop;
+  };
+
+  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) =>
+    requestNextPage(event.isTrusted && event.deltaY > 0);
+
+  const handleTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
+    touchStartYRef.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const currentY = event.touches[0]?.clientY;
+    const startY = touchStartYRef.current;
+    requestNextPage(
+      event.isTrusted &&
+        currentY !== undefined &&
+        startY !== null &&
+        currentY < startY
+    );
+    touchStartYRef.current = currentY ?? null;
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) =>
+    requestNextPage(
+      event.isTrusted &&
+        ["ArrowDown", "PageDown", "End"].includes(event.key)
+    );
 
   const handleRenameClick = (conversationId: number, currentTitle: string) => {
     setEditingId(conversationId);
@@ -477,8 +607,48 @@ export function ChatSidebar({
           </div>
 
           <div className="flex-1 min-h-0 p-3 pt-0 w-full flex flex-col overflow-hidden">
-            <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
-              <div className="flex flex-col gap-4 pb-4">
+            <div
+              ref={conversationListRef}
+              className="flex-1 min-h-0 flex flex-col overflow-y-auto focus:outline-none"
+              tabIndex={0}
+              onScroll={handleScroll}
+              onWheel={handleWheel}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onKeyDown={handleKeyDown}
+              onPointerDown={() => {
+                pointerIntentRef.current = true;
+              }}
+              onPointerUp={() => {
+                pointerIntentRef.current = false;
+              }}
+            >
+              <div
+                aria-hidden="true"
+                className="fixed invisible pointer-events-none -z-10"
+              >
+                <div className="space-y-1">
+                  <p
+                    ref={measurementHeaderRef}
+                    className="px-3 py-1.5 text-s font-medium tracking-wide"
+                  >
+                    {t("chatLeftSidebar.today")}
+                  </p>
+                  <div
+                    ref={measurementRowRef}
+                    className="flex items-center min-h-10 px-3 py-1"
+                  >
+                    <span className="text-base font-normal font-sans">Conversation</span>
+                  </div>
+                  <div
+                    ref={measurementSecondRowRef}
+                    className="flex items-center min-h-10 px-3 py-1"
+                  >
+                    <span className="text-base font-normal font-sans">Conversation</span>
+                  </div>
+                </div>
+              </div>
+              <div ref={conversationContentRef} className="flex flex-col gap-4 pb-4">
                 {conversationManagement.conversationList.length > 0 ? (
                   <>
                     {renderConversationList(today, t("chatLeftSidebar.today"))}
@@ -504,6 +674,23 @@ export function ChatSidebar({
                   </div>
                 )}
               </div>
+              <div
+                aria-hidden="true"
+                className="shrink-0 w-full"
+                style={{
+                  height: Math.max(
+                    0,
+                    totalVirtualHeight -
+                      conversationManagement.conversationList.length * rowHeight -
+                      [today, week, older].filter((group) => group.length > 0).length * headerHeight -
+                      Math.max(
+                        0,
+                        [today, week, older].filter((group) => group.length > 0).length - 1
+                      ) * 16 -
+                      16
+                  ),
+                }}
+              />
             </div>
           </div>
 

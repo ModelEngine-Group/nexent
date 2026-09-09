@@ -438,6 +438,7 @@ def test_get_task_info_metadata_dict_extraction(monkeypatch, patch_async_result)
         "index_name": "kb-1",
         "source": "/data/file.pdf",
         "original_filename": "file.pdf",
+        "file_id": "fid-metadata",
         "total_chunks": 100,
         "processed_chunks": 25,
     }
@@ -449,6 +450,7 @@ def test_get_task_info_metadata_dict_extraction(monkeypatch, patch_async_result)
     assert result["index_name"] == "kb-1"
     assert result["path_or_url"] == "/data/file.pdf"
     assert result["original_filename"] == "file.pdf"
+    assert result["file_id"] == "fid-metadata"
     assert result["total_chunks"] == 100
     assert result["processed_chunks"] == 25
 
@@ -535,6 +537,7 @@ def test_get_task_info_failed_with_structured_info(monkeypatch, patch_async_resu
         "task_name": "process",
         "source": "/x.txt",
         "original_filename": "x.txt",
+        "file_id": "fid-failed",
     }
     fake = _FakeAsyncResult(
         status="FAILURE",
@@ -551,6 +554,7 @@ def test_get_task_info_failed_with_structured_info(monkeypatch, patch_async_resu
     assert result["task_name"] == "process"
     assert result["path_or_url"] == "/x.txt"
     assert result["original_filename"] == "x.txt"
+    assert result["file_id"] == "fid-failed"
 
 
 def test_get_task_info_failed_with_plain_text_info(monkeypatch, patch_async_result):
@@ -636,6 +640,7 @@ def test_get_task_info_successful_with_result_fields(monkeypatch, patch_async_re
         "processing_time": 1.2,
         "storage_time": 0.4,
         "es_result": {"ok": True},
+        "file_id": "fid-success",
         "ignored": True,
     }
     fake = _FakeAsyncResult(
@@ -651,6 +656,7 @@ def test_get_task_info_successful_with_result_fields(monkeypatch, patch_async_re
     assert result["processing_time"] == 1.2
     assert result["storage_time"] == 0.4
     assert result["es_result"] == {"ok": True}
+    assert result["file_id"] == "fid-success"
     assert "ignored" not in result
 
 

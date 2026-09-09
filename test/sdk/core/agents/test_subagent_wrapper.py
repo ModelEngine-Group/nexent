@@ -50,6 +50,13 @@ def test_setattr_keeps_wrapper_owned_state_on_wrapper(observer: Mock) -> None:
     assert not hasattr(inner, "_observer")
 
 
+def test_wrapper_is_marked_for_runtime_host_execution(observer: Mock) -> None:
+    """Parent sandboxes must proxy managed-agent orchestration to Runtime."""
+    wrapper = SubAgentToolWrapper(InnerAgent(), observer)
+
+    assert wrapper._nexent_execute_on_host is True
+
+
 def test_setattr_forwards_tool_contract_attribute_to_inner_agent(observer: Mock) -> None:
     inner = InnerAgent()
     wrapper = SubAgentToolWrapper(inner, observer)

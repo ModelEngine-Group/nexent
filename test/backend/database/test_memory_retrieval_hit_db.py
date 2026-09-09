@@ -2,6 +2,7 @@
 
 import sys
 import types
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -390,3 +391,40 @@ def test_delete_hits_before_rolls_back_on_error(monkeypatch, mock_session_ctx):
 
     assert memory_retrieval_hit_db.delete_hits_before(object()) == 0
     session.rollback.assert_called_once()
+
+
+def test_ac078_aggregate_dreaming_stats_filters_and_accumulates(monkeypatch):
+    newer = datetime(2026, 1, 3)
+    older = datetime(2026, 1, 2)
+    monkeypatch.setattr(
+        memory_retrieval_hit_db,
+        "list_hits_for_user",
+        MagicMock(return_value=[
+            {"agent_id": "other", "memory_id": 1},
+            {"agent_id": "a1", "memory_id": None},
+            {
+                "agent_id": "a1", "memory_id": 64, "grounded": True,
+                "day": "2026-01-02", "query_hash": "q1",
+                "retrieval_score": 0.4, "occurred_at": older,
+            },
+            {
+                "agent_id": "a1", "memory_id": "64", "grounded": False,
+                "day": "2026-01-03", "query_hash": "q2",
+                "retrieval_score": 0.6, "occurred_at": newer,
+            },
+        ]),
+    )
+
+    result = memory_retrieval_hit_db.aggregate_dreaming_stats(
+        "t1", "u1", "a1", since=datetime(2026, 1, 1)
+    )
+
+    assert result == [{
+        "memory_id": 64,
+        "hit_count": 2,
+        "grounded_count": 1,
+        "days": {"2026-01-02", "2026-01-03"},
+        "query_hashes": {"q1", "q2"},
+        "total_retrieval_score": 1.0,
+        "last_recalled_at": newer,
+    }]

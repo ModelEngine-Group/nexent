@@ -78,6 +78,12 @@ export const DEFAULT_ERROR_MESSAGES: Record<string, string> = {
   [ErrorCode.KNOWLEDGE_SYNC_FAILED]: "Failed to sync knowledge base.",
   [ErrorCode.INDEX_NOT_FOUND]: "Search index not found.",
   [ErrorCode.KNOWLEDGE_SEARCH_FAILED]: "Knowledge search failed.",
+  [ErrorCode.KNOWLEDGE_INDEX_WRITE_BLOCKED]:
+    "Knowledge base ingestion failed because storage space is insufficient.",
+  [ErrorCode.KNOWLEDGE_STORAGE_COMMIT_FAILED]:
+    "File upload failed because the storage service is unavailable.",
+  [ErrorCode.KNOWLEDGE_TASK_SUBMIT_FAILED]:
+    "The file was uploaded, but the ingestion service is unavailable.",
 
   // ==================== 07 MCPTools / MCP 工具 ====================
   // 01 - Tool
@@ -143,6 +149,12 @@ export const DEFAULT_ERROR_MESSAGES: Record<string, string> = {
   [ErrorCode.TENANT_DISABLED]: "Tenant is disabled.",
   [ErrorCode.TENANT_CONFIG_ERROR]: "Tenant configuration error.",
   [ErrorCode.TENANT_RESOURCE_EXCEEDED]: "Tenant resource exceeded.",
+  [ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED]:
+    "Personal knowledge base quota exceeded.",
+  [ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE]:
+    "Personal knowledge base quota usage is unavailable.",
+  [ErrorCode.TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE]:
+    "Personal knowledge base quota cannot be lower than current usage.",
 
   // ==================== 13 External / 外部服务 ====================
   // 01 - DataMate
@@ -179,7 +191,8 @@ export const DEFAULT_ERROR_MESSAGES: Record<string, string> = {
 
   // ==================== 99 System / 系统级 ====================
   // 01 - System Errors
-  [ErrorCode.UNKNOWN_ERROR]: "An unknown error occurred. Please try again later.",
+  [ErrorCode.UNKNOWN_ERROR]:
+    "An unknown error occurred. Please try again later.",
   [ErrorCode.SERVICE_UNAVAILABLE]:
     "Service is temporarily unavailable. Please try again later.",
   [ErrorCode.DATABASE_ERROR]:
@@ -227,4 +240,4 @@ export interface ApiResponse<T = any> {
  */
 export const isApiSuccess = (response: ApiResponse): boolean => {
   return response.code === 0;
-}
+};

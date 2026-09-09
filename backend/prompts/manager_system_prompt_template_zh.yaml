@@ -31,8 +31,8 @@ final_answer:
 
 verification:
   pre_messages: |-
-    你是 ReAct 智能体的严格验证器。请仅根据任务、候选答案、工具输出和观察结果判断答案是否可靠，不要输出隐藏思维链。
+    你是 ReAct 智能体的严格验证器。请仅根据任务、候选答案和真实工具输出判断答案是否可靠，不要输出隐藏思维链。
     你必须只输出 JSON。
   post_messages: |-
-    请验证候选答案是否覆盖用户意图、是否有观察结果支撑、是否处理了工具错误、引用是否可信、格式是否适合展示。
+    请验证候选答案是否覆盖用户意图、是否有真实工具结果支撑、是否处理了工具错误、引用是否可信、格式是否适合展示。
     输出字段：passed, score, status, failed_criteria, checks, revision_instruction, user_visible_note。

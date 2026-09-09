@@ -9,8 +9,8 @@ import {
   getMcpTools,
   updateToolList,
   checkMcpServerHealth,
-  addMcpFromConfig,
-  uploadMcpImage,
+  addMcpFromConfigStream,
+  uploadMcpImageStream,
   getMcpContainerLogs,
   deleteMcpContainer,
   getMcpRecord,
@@ -19,7 +19,10 @@ import { McpServer, McpContainer } from "@/types/agentConfig";
 import log from "@/lib/logger";
 import { MCP_SERVERS_QUERY_KEY, useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { MCP_TOOLS_QUERY_KEYS } from "@/const/mcpTools";
-import { useMcpContainerList } from "@/hooks/mcp/useMcpContainerList";
+import {
+  MCP_CONTAINERS_QUERY_KEY,
+  useMcpContainerList,
+} from "@/hooks/mcp/useMcpContainerList";
 
 export interface UseMcpConfigOptions {
   enabled?: boolean;
@@ -309,7 +312,57 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
     }, 3000);
 
     try {
-      const result = await addMcpFromConfig(payload as any, options.tenantId);
+      const result = await addMcpFromConfigStream(
+        payload as any,
+        options.tenantId,
+        (container) => {
+          const temporaryContainer: McpContainer = {
+            container_id: container.container_id,
+            name: container.container_name || mcpName,
+            host_port: container.host_port || port,
+            mcp_url: container.mcp_url,
+            // The container exists but is still completing MCP readiness checks.
+            status: "unknown",
+            permission: "EDIT",
+          };
+          const temporaryServer = {
+            service_name: mcpName,
+            mcp_url: container.mcp_url || "",
+            status: false,
+            enabled: false,
+            mcp_id: -Date.now(),
+            container_id: container.container_id,
+            container_port: container.host_port || port,
+            permission: "EDIT" as const,
+          };
+
+          queryClient.setQueryData(
+            [...MCP_CONTAINERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryContainer,
+                ...((previous?.data || []).filter(
+                  (item: McpContainer) => item.container_id !== container.container_id
+                )),
+              ],
+            })
+          );
+          queryClient.setQueryData(
+            [...MCP_SERVERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryServer,
+                ...((previous?.data || []).filter(
+                  (item: McpServer & { container_id?: string }) =>
+                    item.container_id !== container.container_id
+                )),
+              ],
+            })
+          );
+        }
+      );
       if (result.success) {
         invalidateMcpContainers();
         invalidateMcpServers();
@@ -317,6 +370,8 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
         options.onContainerAdded?.();
         return { success: true, messageKey: "mcpService.message.addContainerSuccess" };
       } else {
+        invalidateMcpContainers();
+        invalidateMcpServers();
         return {
           success: false,
           message: result.message,
@@ -327,7 +382,7 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
       log.error("Failed to add container:", error);
       return { success: false, message: "Failed to add container", messageKey: "mcpConfig.message.addContainerFailed" };
     }
-  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options]);
+  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options, queryClient]);
 
   // Upload MCP image
   const handleUploadImage = useCallback(async (
@@ -343,20 +398,82 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
         envVars = JSON.stringify({ authorization_token: authorizationToken });
       }
 
-      const result = await uploadMcpImage(file, port, serviceName, envVars, options.tenantId);
+      const result = await uploadMcpImageStream(
+        file,
+        port,
+        serviceName,
+        envVars,
+        options.tenantId,
+        undefined,
+        undefined,
+        undefined,
+        (containerId) => {
+          const temporaryContainer: McpContainer = {
+            container_id: containerId,
+            name: serviceName,
+            host_port: port,
+            status: "unknown",
+            permission: "EDIT",
+          };
+          const temporaryServer = {
+            service_name: serviceName || file.name.replace(/\.tar$/i, ""),
+            mcp_url: "",
+            status: false,
+            enabled: false,
+            mcp_id: -Date.now(),
+            container_id: containerId,
+            container_port: port,
+            permission: "EDIT" as const,
+          };
+          queryClient.setQueryData(
+            [...MCP_CONTAINERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryContainer,
+                ...((previous?.data || []).filter(
+                  (item: McpContainer) => item.container_id !== containerId
+                )),
+              ],
+            })
+          );
+          queryClient.setQueryData(
+            [...MCP_SERVERS_QUERY_KEY, options.tenantId],
+            (previous: any) => ({
+              ...(previous || { success: true }),
+              data: [
+                temporaryServer,
+                ...((previous?.data || []).filter(
+                  (item: McpServer & { container_id?: string }) =>
+                    item.container_id !== containerId
+                )),
+              ],
+            })
+          );
+        }
+      );
       if (result.success) {
         invalidateMcpContainers();
         invalidateMcpServers();
         await refreshToolsAndAgents();
         return { success: true, messageKey: "mcpService.message.uploadImageSuccess" };
       } else {
-        return { success: false, message: result.message, messageKey: "mcpConfig.message.uploadImageFailed" };
+        invalidateMcpContainers();
+        invalidateMcpServers();
+        const isNameConflict = /already exists|name conflict|name already used/i.test(result.message || "");
+        return {
+          success: false,
+          message: result.message,
+          messageKey: isNameConflict
+            ? "mcpService.message.serviceNameAlreadyExists"
+            : "mcpConfig.message.uploadImageFailed",
+        };
       }
     } catch (error) {
       log.error("Failed to upload image:", error);
       return { success: false, message: "Failed to upload image", messageKey: "mcpConfig.message.uploadImageFailed" };
     }
-  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options.tenantId]);
+  }, [invalidateMcpContainers, invalidateMcpServers, refreshToolsAndAgents, options.tenantId, queryClient]);
 
   // Delete container
   const handleDeleteContainer = useCallback(async (container: McpContainer) => {

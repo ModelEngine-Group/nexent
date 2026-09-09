@@ -14,12 +14,14 @@ import {
   Button,
   App,
   Select,
+  Popover,
   Segmented,
   Space,
+  Tooltip,
 } from "antd";
 import { useStorageQuotaBlocked } from "@/hooks/useStorageQuotaBlocked";
 const { TextArea } = Input;
-import { InfoCircleFilled } from "@ant-design/icons";
+import { FilterOutlined, InfoCircleFilled } from "@ant-design/icons";
 import {
   BookText,
   Pilcrow,
@@ -28,6 +30,7 @@ import {
   Glasses,
   CircleOff,
   AlertCircle,
+  Tag,
 } from "lucide-react";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
@@ -46,6 +49,10 @@ import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
 import { extractObjectNameFromUrl } from "@/services/storageService";
 import { Document } from "@/types/knowledgeBase";
+import type {
+  TagDocumentPredicate,
+  TagDocumentBatchStatusEntry,
+} from "@/types/tagManagement";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
@@ -55,6 +62,11 @@ import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import DocumentStatus from "./DocumentStatus";
 import DocumentChunk from "./DocumentChunk";
 import UploadArea from "../upload/UploadArea";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import { tagManagementApi } from "@/services/tagManagementService";
 import { useDocumentContext } from "../../contexts/DocumentContext";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
@@ -72,7 +84,7 @@ const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
 
 interface DocumentListProps {
   documents: Document[];
-  onDelete: (id: string) => void;
+  onDelete: (id: string, fileId?: string) => void;
   // Knowledge base source, e.g. "nexent" or "datamate"
   knowledgeBaseSource?: string;
   // User-facing knowledge base name (display name)
@@ -188,7 +200,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       () => getAccessibleGroupIds(),
       [getAccessibleGroupIds]
     );
-    const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
+    const { groups } = useGroupDetails(
+      groupData?.groups ?? [],
+      accessibleGroupIds
+    );
 
     const groupOptions = groups.map((group) => ({
       label: group.group_name,
@@ -208,6 +223,85 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
     const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
+    const [assignTarget, setAssignTarget] = useState<{
+      docId: string;
+      canEdit: boolean;
+    } | null>(null);
+    const { data: tagLibraries } = useTagLibraries();
+    const documentLibrary =
+      tagLibraries?.find((lib) => lib.bucket_key === "knowledge_content") ??
+      null;
+    const {
+      data: assignDefinitions,
+      refresh: refreshAssignDefinitions,
+    } = useTagDefinitions(documentLibrary?.bucket_id ?? null);
+
+    const [tagManagementOpen, setTagManagementOpen] = useState(false);
+    const [documentPredicates, setDocumentPredicates] = useState<
+      TagDocumentPredicate[]
+    >([]);
+    const [documentBatchStatus, setDocumentBatchStatus] = useState<
+      TagDocumentBatchStatusEntry[]
+    >([]);
+
+    const activeDocumentIds = useMemo(() => {
+      if (documentPredicates.length === 0) return null;
+      return new Set(documentBatchStatus.map((entry) => entry.document_id));
+    }, [documentBatchStatus, documentPredicates]);
+
+    const projectionByDocument = useMemo(() => {
+      const map = new Map<string, TagDocumentBatchStatusEntry>();
+      for (const entry of documentBatchStatus) {
+        map.set(entry.document_id, entry);
+      }
+      return map;
+    }, [documentBatchStatus]);
+
+    // Batch-fetch document tag assignment and projection status for the
+    // currently visible knowledge base; empty when no library context exists.
+    useEffect(() => {
+      const visibleIds = documents.map((doc) => doc.id);
+      if (
+        isCreatingMode ||
+        !knowledgeBaseId ||
+        !documentLibrary ||
+        visibleIds.length === 0
+      ) {
+        setDocumentBatchStatus([]);
+        return;
+      }
+      let cancelled = false;
+      const timeoutId = window.setTimeout(() => {
+        void tagManagementApi
+          .getDocumentBatchStatus(
+            {
+              provider: "local",
+              knowledgeBaseId,
+              documentIds: visibleIds.slice(0, 200),
+            },
+            documentPredicates
+          )
+          .then((entries) => {
+            if (!cancelled) setDocumentBatchStatus(entries);
+          })
+          .catch((error) => {
+            if (!cancelled) {
+              log.error("Failed to load document tag status:", error);
+              setDocumentBatchStatus([]);
+            }
+          });
+      }, 250);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timeoutId);
+      };
+    }, [
+      documentLibrary,
+      documentPredicates,
+      documents,
+      isCreatingMode,
+      knowledgeBaseId,
+    ]);
 
     // Sort documents by create_time (latest first)
     const sortedDocuments = [...documents].sort((a, b) => {
@@ -345,7 +439,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         };
         initDefaultGroup();
       }
-    }, [isCreatingMode, tenantId, accessibleGroupIds, onSelectedGroupIdsChange]);
+    }, [
+      isCreatingMode,
+      tenantId,
+      accessibleGroupIds,
+      onSelectedGroupIdsChange,
+    ]);
 
     // Clear group IDs when permission is set to PRIVATE
     React.useEffect(() => {
@@ -561,6 +660,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
+    const filteredDocuments = activeDocumentIds
+      ? sortedDocuments.filter((doc) => activeDocumentIds.has(doc.id))
+      : sortedDocuments;
+
     const containerHeightClass =
       CONTAINER_HEIGHT_CLASS_MAP[containerHeight] ?? "h-full";
     const titleBarHeightClass =
@@ -672,6 +775,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                     <Can permission="kb.groups:update">
                       <Select
                         mode="multiple"
+                        showSearch={{ optionFilterProp: "label" }}
                         value={isGroupSelectDisabled ? [] : selectedGroupIds}
                         onChange={onSelectedGroupIdsChange}
                         style={{
@@ -779,9 +883,50 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               )}
             </div>
-            {/* Right: overview and detail buttons */}
+            {/* Right: tag filter, Tag Management, overview and detail buttons */}
             {!isCreatingMode && !isDataMate && (
               <div className="flex gap-2 flex-shrink-0 ml-3">
+                {documentLibrary && assignDefinitions && (
+                  <Popover
+                    trigger="click"
+                    placement="bottomRight"
+                    title={t("document.tagFilter.placeholder")}
+                    content={
+                      <div className="w-64">
+                        <TagFilterControls
+                          definitions={assignDefinitions}
+                          value={documentPredicates}
+                          onChange={setDocumentPredicates}
+                        />
+                        {documentPredicates.length > 0 && (
+                          <Button
+                            size="small"
+                            block
+                            className="mt-2"
+                            onClick={() => setDocumentPredicates([])}
+                          >
+                            {t("document.tagFilter.clear")}
+                          </Button>
+                        )}
+                      </div>
+                    }
+                  >
+                    <Button
+                      icon={<FilterOutlined />}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {t("document.tagFilter.placeholder")}
+                    </Button>
+                  </Popover>
+                )}
+                {!isReadOnlyMode && (
+                  <Button
+                    icon={<Tag size={16} />}
+                    onClick={() => setTagManagementOpen(true)}
+                  >
+                    {t("knowledgeBase.button.tagManagement")}
+                  </Button>
+                )}
                 <Button
                   type="primary"
                   icon={<BookText size={16} />}
@@ -845,16 +990,28 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         >
           {showChunk ? (
             <div className="flex h-full min-h-0 flex-col px-8">
-              <DocumentChunk
-                knowledgeBaseName={knowledgeBaseName}
-                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
-                documents={documents}
-                getFileIcon={getFileIcon}
-                currentEmbeddingModel={currentModel}
-                knowledgeBaseEmbeddingModel={knowledgeBaseModel}
-                onChunkCountChange={onChunkCountChange}
-                permission={permission}
-              />
+              <div className="min-h-0 flex-1">
+                <DocumentChunk
+                  knowledgeBaseName={knowledgeBaseName}
+                  knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
+                  documents={documents}
+                  getFileIcon={getFileIcon}
+                  currentEmbeddingModel={currentModel}
+                  knowledgeBaseEmbeddingModel={knowledgeBaseModel}
+                  onChunkCountChange={onChunkCountChange}
+                  permission={permission}
+                />
+              </div>
+              <div className="flex shrink-0 justify-end py-3">
+                <Button
+                  size="large"
+                  onClick={() => {
+                    setShowChunk(false);
+                  }}
+                >
+                  {t("common.back")}
+                </Button>
+              </div>
             </div>
           ) : showDetail ? (
             <div className="px-8 py-4 h-full flex flex-col">
@@ -1021,7 +1178,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               </div>
             )
-          ) : sortedDocuments.length > 0 ? (
+          ) : filteredDocuments.length > 0 ? (
             <div className="overflow-y-auto border border-gray-200 rounded-md h-full">
               <table className="min-w-full bg-white">
                 <thead
@@ -1060,7 +1217,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   </tr>
                 </thead>
                 <tbody className={LAYOUT.TABLE_ROW_DIVIDER}>
-                  {sortedDocuments.map((doc) => (
+                  {filteredDocuments.map((doc) => (
                     <tr key={doc.id} className={LAYOUT.TABLE_ROW_HOVER}>
                       <td className={LAYOUT.CELL_PADDING}>
                         <div className="flex items-center">
@@ -1075,6 +1232,32 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           >
                             {doc.name}
                           </span>
+                          {(() => {
+                            const entry = projectionByDocument.get(doc.id);
+                            const status = entry?.projection_status?.status;
+                            if (status === "pending" || status === "failed") {
+                              return (
+                                <Tooltip
+                                  title={t(
+                                    status === "failed"
+                                      ? "document.tagProjection.failed"
+                                      : "document.tagProjection.pending"
+                                  )}
+                                >
+                                  <span
+                                    className={`ml-1 inline-flex items-center rounded px-1 text-[10px] leading-4 ${
+                                      status === "failed"
+                                        ? "bg-red-100 text-red-700"
+                                        : "bg-amber-100 text-amber-700"
+                                    }`}
+                                  >
+                                    {status}
+                                  </span>
+                                </Tooltip>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </td>
                       <td className={LAYOUT.CELL_PADDING}>
@@ -1082,8 +1265,11 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           <DocumentStatus
                             status={doc.status}
                             showIcon={true}
+                            errorCode={doc.error_code}
+                            errorReason={doc.error_reason}
                             kbId={knowledgeBaseId}
                             docId={doc.id}
+                            fileId={doc.file_id}
                             processedChunkNum={doc.processed_chunk_num}
                             totalChunkNum={doc.total_chunk_num}
                           />
@@ -1122,15 +1308,28 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                                   fileSize: doc.size,
                                 });
                               }}
-                              className={LAYOUT.ACTION_TEXT}
+                              className={LAYOUT.ACTION_PREVIEW_TEXT}
                               title={t("common.preview")}
                             >
                               {t("common.preview")}
                             </button>
+                            <button
+                              onClick={() => {
+                                if (!knowledgeBaseId) return;
+                                setAssignTarget({
+                                  docId: doc.id,
+                                  canEdit: !isReadOnlyMode,
+                                });
+                              }}
+                              className={LAYOUT.ACTION_PREVIEW_TEXT}
+                              title={t("document.action.assignTags")}
+                            >
+                              {t("document.action.assignTags")}
+                            </button>
                             {!isReadOnlyMode && (
                               <button
-                                onClick={() => onDelete(doc.id)}
-                                className={LAYOUT.ACTION_TEXT}
+                                onClick={() => onDelete(doc.id, doc.file_id)}
+                                className={LAYOUT.ACTION_DELETE_TEXT}
                                 title={
                                   doc.status === DOCUMENT_STATUS.PROCESSING ||
                                   doc.status === DOCUMENT_STATUS.FORWARDING
@@ -1205,6 +1404,31 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           ))}
 
         {/* File preview drawer */}
+        <TagDefinitionManagementModal
+          open={tagManagementOpen}
+          onClose={() => {
+            setTagManagementOpen(false);
+            void refreshAssignDefinitions();
+          }}
+          bucketId={documentLibrary?.bucket_id ?? 0}
+          bucketName={documentLibrary?.bucket_name ?? ""}
+          canManage={!isReadOnlyMode}
+        />
+
+        <ResourceTagAssignmentModal
+          open={assignTarget !== null}
+          onClose={() => setAssignTarget(null)}
+          resourceType="knowledge_document"
+          resourceId={assignTarget?.docId ?? ""}
+          definitions={assignDefinitions ?? []}
+          canEdit={assignTarget?.canEdit ?? false}
+          provider="local"
+          knowledgeBaseId={knowledgeBaseId}
+          onManageDefinitions={() => {
+            setTagManagementOpen(true);
+          }}
+        />
+
         {selectedFile && (
           <FilePreviewDrawer
             open={!!selectedFile}

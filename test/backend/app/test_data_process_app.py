@@ -66,8 +66,8 @@ class _TasksStub:
             },
         )
 
-    def process_and_forward_delay(self, **kwargs):
-        return self._delay_result
+    def submit_process_forward_chain(self, **kwargs):
+        return self._delay_result.id
 
     def process_sync_apply_async(self, **kwargs):
         return self._apply_async_result
@@ -169,13 +169,10 @@ def stub_modules(monkeypatch):
     # data_process.tasks
     tasks_mod = types.ModuleType("data_process.tasks")
     _tasks = _TasksStub()
-    class _PAndF:
-        def delay(self, **kwargs):
-            return _tasks.process_and_forward_delay(**kwargs)
     class _PSync:
         def apply_async(self, **kwargs):
             return _tasks.process_sync_apply_async(**kwargs)
-    setattr(tasks_mod, "process_and_forward", _PAndF())
+    setattr(tasks_mod, "submit_process_forward_chain", _tasks.submit_process_forward_chain)
     setattr(tasks_mod, "process_sync", _PSync())
     sys.modules["data_process.tasks"] = tasks_mod
 
@@ -218,6 +215,21 @@ def test_create_task_success():
     resp = client.post("/tasks", json=payload, headers={"Authorization": "Bearer t"})
     assert resp.status_code == 201
     assert resp.json()["task_id"] == "task-stub-id"
+
+
+def test_create_task_returns_service_unavailable_when_chain_enqueue_fails(monkeypatch):
+    app = _build_app()
+    client = TestClient(app)
+    from backend.apps import data_process_app as app_module
+
+    monkeypatch.setattr(app_module, "submit_process_forward_chain", lambda **_: "")
+    resp = client.post(
+        "/tasks",
+        json={"source": "/tmp/a.txt", "source_type": "local", "index_name": "idx"},
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "Failed to enqueue data processing task"
 
 
 def test_process_sync_endpoint_success():
@@ -288,6 +300,43 @@ def test_batch_tasks_success():
     resp = client.post("/tasks/batch", json=payload, headers={"Authorization": "Bearer t"})
     assert resp.status_code == 201
     assert resp.json()["task_ids"] == ["tid-1", "tid-2"]
+
+
+def test_batch_tasks_preserves_per_file_submission_results(monkeypatch):
+    from backend.apps import data_process_app as app_module
+
+    async def detailed_result(*args, **kwargs):
+        return {
+            "status": "partial_success",
+            "task_ids": ["tid-1"],
+            "results": [
+                {"file_id": "fid-1", "status": "SUBMITTED", "task_id": "tid-1"},
+                {
+                    "file_id": "fid-2",
+                    "status": "FAILED",
+                    "error_code": "TASK_SUBMIT_FAILED",
+                    "error_message": "broker unavailable",
+                },
+            ],
+            "submitted_count": 1,
+            "failed_count": 1,
+        }
+
+    monkeypatch.setattr(app_module.service, "create_batch_tasks_impl", detailed_result, raising=True)
+    app = _build_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/tasks/batch",
+        json={"sources": [
+            {"source": "s1", "source_type": "local"},
+            {"source": "s2", "source_type": "local"},
+        ]},
+        headers={"Authorization": "Bearer t"},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "partial_success"
+    assert resp.json()["results"][1]["file_id"] == "fid-2"
 
 
 def test_batch_tasks_error(monkeypatch):

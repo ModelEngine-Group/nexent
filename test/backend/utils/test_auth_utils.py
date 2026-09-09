@@ -18,6 +18,7 @@ from backend.consts.exceptions import (
     TimeoutException,
     SignatureValidationError,
     UnauthorizedError,
+    TokenExpiredError,
     ValidationError,
     NotFoundException,
     MEConnectionException,
@@ -177,6 +178,7 @@ for _exc_name in (
     "TimeoutException",
     "SignatureValidationError",
     "UnauthorizedError",
+    "TokenExpiredError",
     "ValidationError",
     "NotFoundException",
     "MEConnectionException",
@@ -316,6 +318,186 @@ def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
     )
 
     assert claims["exp"] - claims["iat"] == 5432
+
+
+def test_internal_runtime_jwt_round_trip(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    token = au.generate_internal_runtime_jwt("user-1", "tenant-1")
+
+    assert au.verify_internal_runtime_jwt(f"Bearer {token}") == (
+        "user-1",
+        "tenant-1",
+    )
+
+
+def test_internal_runtime_jwt_rejects_expired_token(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    token = au.generate_internal_runtime_jwt(
+        "user-1",
+        "tenant-1",
+        expires_in=-1,
+    )
+
+    with pytest.raises(UnauthorizedError, match="expired"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_rejects_wrong_scope(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    token = au.jwt.encode(
+        {
+            "sub": "user-1",
+            "tenant_id": "tenant-1",
+            "scope": "wrong-scope",
+            "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+            "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+            "iat": now,
+            "exp": now + 60,
+        },
+        au.MOCK_JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(UnauthorizedError, match="scope"):
+        au.verify_internal_runtime_jwt(token)
+
+
+@pytest.mark.parametrize(
+    ("claim_name", "claim_value"),
+    [
+        ("iss", "wrong-issuer"),
+        ("aud", "wrong-audience"),
+    ],
+)
+def test_internal_runtime_jwt_rejects_wrong_issuer_or_audience(
+    monkeypatch,
+    claim_name,
+    claim_value,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    claims = {
+        "sub": "user-1",
+        "tenant_id": "tenant-1",
+        "scope": au.INTERNAL_RUNTIME_JWT_SCOPE,
+        "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+        "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+        "iat": now,
+        "exp": now + 60,
+    }
+    claims[claim_name] = claim_value
+    token = au.jwt.encode(
+        claims,
+        au.MOCK_JWT_SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(UnauthorizedError, match="Invalid internal runtime token"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_rejects_tampered_signature(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    token = au.jwt.encode(
+        {
+            "sub": "user-1",
+            "tenant_id": "tenant-1",
+            "scope": au.INTERNAL_RUNTIME_JWT_SCOPE,
+            "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+            "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+            "iat": now,
+            "exp": now + 60,
+        },
+        "attacker-secret",
+        algorithm="HS256",
+    )
+
+    with pytest.raises(UnauthorizedError, match="Invalid internal runtime token"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_rejects_regular_session_token(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
+    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 3600)
+    token = au.generate_session_jwt("user-1")
+
+    with pytest.raises(UnauthorizedError, match="Invalid internal runtime token"):
+        au.verify_internal_runtime_jwt(token)
+
+
+def test_internal_runtime_jwt_requires_configured_secret(monkeypatch):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "")
+
+    with pytest.raises(ValueError, match="not configured"):
+        au.generate_internal_runtime_jwt("user-1", "tenant-1")
+    with pytest.raises(UnauthorizedError, match="not configured"):
+        au.verify_internal_runtime_jwt("Bearer token")
+
+
+@pytest.mark.parametrize(
+    ("user_id", "tenant_id"),
+    [
+        ("", "tenant-1"),
+        ("user-1", ""),
+    ],
+)
+def test_internal_runtime_jwt_requires_user_and_tenant(
+    monkeypatch,
+    user_id,
+    tenant_id,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    with pytest.raises(ValueError, match="user_id and tenant_id are required"):
+        au.generate_internal_runtime_jwt(user_id, tenant_id)
+
+
+@pytest.mark.parametrize("authorization", [None, "   "])
+def test_verify_internal_runtime_jwt_requires_authorization(
+    monkeypatch,
+    authorization,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+
+    with pytest.raises(UnauthorizedError, match="No authorization header provided"):
+        au.verify_internal_runtime_jwt(authorization)
+
+
+@pytest.mark.parametrize(
+    ("claim_name", "claim_value", "expected_message"),
+    [
+        ("sub", 123, "missing user identity"),
+        ("sub", "   ", "missing user identity"),
+        ("tenant_id", 123, "missing tenant identity"),
+        ("tenant_id", "   ", "missing tenant identity"),
+    ],
+)
+def test_verify_internal_runtime_jwt_requires_string_identities(
+    monkeypatch,
+    claim_name,
+    claim_value,
+    expected_message,
+):
+    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    now = int(time.time())
+    claims = {
+        "sub": "user-1",
+        "tenant_id": "tenant-1",
+        "scope": au.INTERNAL_RUNTIME_JWT_SCOPE,
+        "iss": au.INTERNAL_RUNTIME_JWT_ISSUER,
+        "aud": au.INTERNAL_RUNTIME_JWT_AUDIENCE,
+        "iat": now,
+        "exp": now + 60,
+    }
+    claims[claim_name] = claim_value
+    monkeypatch.setattr(au.jwt, "decode", lambda *args, **kwargs: claims)
+
+    with pytest.raises(UnauthorizedError, match=expected_message):
+        au.verify_internal_runtime_jwt("internal-token")
 
 
 def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
@@ -734,8 +916,8 @@ class TestGetUserAndTenantByAccessKey:
         assert result["tenant_id"] == "tenant456"
         assert result["token_id"] == 1
 
-    def test_get_user_and_tenant_default_tenant(self, monkeypatch):
-        """Test that DEFAULT_TENANT_ID is used when no tenant mapping exists."""
+    def test_get_user_and_tenant_no_tenant_record_raises(self, monkeypatch):
+        """Test that UnauthorizedError is raised when no tenant relationship exists."""
         mock_token_info = {
             "token_id": 1,
             "access_key": "nexent-abc123",
@@ -746,14 +928,11 @@ class TestGetUserAndTenantByAccessKey:
         monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
         monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: None)
 
-        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
+        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
+            au.get_user_and_tenant_by_access_key("nexent-abc123")
 
-        assert result["user_id"] == "user123"
-        assert result["tenant_id"] == au.DEFAULT_TENANT_ID
-        assert result["token_id"] == 1
-
-    def test_get_user_and_tenant_empty_tenant_id(self, monkeypatch):
-        """Test that DEFAULT_TENANT_ID is used when tenant_id is empty."""
+    def test_get_user_and_tenant_empty_tenant_id_raises(self, monkeypatch):
+        """Test that UnauthorizedError is raised when tenant_id is empty."""
         mock_token_info = {
             "token_id": 1,
             "access_key": "nexent-abc123",
@@ -765,9 +944,8 @@ class TestGetUserAndTenantByAccessKey:
         monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
         monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
-        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
-
-        assert result["tenant_id"] == au.DEFAULT_TENANT_ID
+        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
+            au.get_user_and_tenant_by_access_key("nexent-abc123")
 
     def test_get_user_and_tenant_empty_access_key(self):
         """Test with empty access key."""
@@ -921,3 +1099,34 @@ def test_get_current_user_info_combines_authentication_and_language(monkeypatch)
     monkeypatch.setattr(au, "get_user_language", lambda request: "en")
 
     assert au.get_current_user_info("Bearer token", object()) == ("user-1", "tenant-1", "en")
+
+
+def test_get_aksk_config_raises_token_expired():
+    """The get_aksk_config stub raises TokenExpiredError when not configured."""
+    with pytest.raises(TokenExpiredError, match="not configured"):
+        au.get_aksk_config("tenant-1")
+
+
+def test_validate_aksk_authentication_invalid_timestamp(monkeypatch):
+    """Expired AK/SK timestamps raise TokenExpiredError."""
+    old = int(time.time()) - (au.TIMESTAMP_VALIDITY_WINDOW + 10)
+    with pytest.raises(TokenExpiredError, match="Invalid or expired timestamp"):
+        au.validate_aksk_authentication({
+            "X-Access-Key": "ak",
+            "X-Timestamp": str(old),
+            "X-Signature": "sig",
+        }, "body")
+
+
+def test_validate_aksk_authentication_unexpected_error(monkeypatch):
+    """Unexpected AK/SK auth errors surface as TokenExpiredError."""
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(au, "validate_timestamp", boom)
+    with pytest.raises(TokenExpiredError, match="Authentication failed"):
+        au.validate_aksk_authentication({
+            "X-Access-Key": "ak",
+            "X-Timestamp": str(int(time.time())),
+            "X-Signature": "sig",
+        }, "body")

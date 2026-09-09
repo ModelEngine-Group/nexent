@@ -37,8 +37,12 @@ import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
 import { Can } from "@/components/permission/Can";
+import { DreamingConfigCards } from "./DreamingConfigCards";
+import { LongTermMemoryPanel } from "./LongTermMemoryPanel";
+import { ProviderConfigCard } from "./ProviderConfigCard";
 import {
   loadMemoryConfig,
+  setExternalProviderTopK,
   setMemorySwitch,
   type MemoryConfig,
 } from "@/services/memoryService";
@@ -65,20 +69,20 @@ type MemoryForm = {
 
 const scopeMeta: Record<
   MemoryScope,
-  { label: string; description: string; icon: typeof Building2 }
+  { labelKey: string; description: string; icon: typeof Building2 }
 > = {
   tenant: {
-    label: "Tenant",
+    labelKey: "memory.longTerm.scope.tenant",
     description: "组织范围内共享的全局记忆",
     icon: Building2,
   },
   user: {
-    label: "User",
+    labelKey: "memory.longTerm.scope.user",
     description: "与当前用户偏好相关的记忆",
     icon: UserRound,
   },
   agent: {
-    label: "Agent",
+    labelKey: "memory.longTerm.scope.agent",
     description: "由智能体运行过程生成的记忆",
     icon: Bot,
   },
@@ -100,6 +104,7 @@ const defaultConfig: MemoryConfig = {
   shareOption: "always",
   disableAgentIds: [],
   disableUserAgentIds: [],
+  externalProviderTopK: 20,
 };
 
 const memoryScopes = Object.keys(scopeMeta) as MemoryScope[];
@@ -179,7 +184,7 @@ export function MemoryManager() {
   }, []);
 
   useEffect(() => {
-    void Promise.all(memoryScopes.map((item) => refreshRecords(item)));
+    void refreshRecords("agent");
   }, [refreshRecords]);
 
   const visibleRecords = useMemo(() => {
@@ -466,8 +471,10 @@ export function MemoryManager() {
 
   const renderBaseSettings = () => (
     <div className="memory-config-content">
-      <Title level={4}>基础设置</Title>
-      <Text type="secondary">配置记忆能力及智能体间的记忆共享策略</Text>
+      <Title level={4}>{t("memoryManageModal.baseSettings")}</Title>
+      <Text type="secondary">
+        {t("memoryManageModal.baseSettingsDescription")}
+      </Text>
       <Card className="memory-config-card" loading={configLoading}>
         <Flex align="center" justify="space-between" gap={24}>
           <Flex align="center" gap={12}>
@@ -475,7 +482,7 @@ export function MemoryManager() {
             <div>
               <Text strong>{t("memoryManageModal.memoryAbility")}</Text>
               <Text type="secondary" className="memory-setting-description">
-                关闭后，智能体将不再使用记忆能力
+                {t("memoryManageModal.memoryAbilityDescription")}
               </Text>
             </div>
           </Flex>
@@ -486,6 +493,23 @@ export function MemoryManager() {
           />
         </Flex>
       </Card>
+      <DreamingConfigCards />
+      <ProviderConfigCard
+        memoryEnabled={config.memoryEnabled}
+        topK={config.externalProviderTopK}
+        savingTopK={savingConfig}
+        onTopKChange={(value) =>
+          setConfig((current) => ({ ...current, externalProviderTopK: value }))
+        }
+        onTopKSave={async () => {
+          setSavingConfig(true);
+          try {
+            await setExternalProviderTopK(config.externalProviderTopK);
+          } finally {
+            setSavingConfig(false);
+          }
+        }}
+      />
     </div>
   );
 
@@ -502,7 +526,7 @@ export function MemoryManager() {
           className="scope-intro"
         >
           <div>
-            <Title level={4}>{meta.label} 记忆</Title>
+            <Title level={4}>{t(meta.labelKey)} 记忆</Title>
             <Text type="secondary">{meta.description}</Text>
           </div>
           {scope === "user" && (
@@ -616,7 +640,13 @@ export function MemoryManager() {
   };
 
   return (
-    <div className="memory-panel">
+    <div
+      className={`memory-panel ${
+        activeTab === "tenant" || activeTab === "user"
+          ? "memory-panel-long-term"
+          : ""
+      }`}
+    >
       <Tabs
         activeKey={activeTab}
         onChange={(key) => {
@@ -633,7 +663,7 @@ export function MemoryManager() {
             label: (
               <span className="tab-label">
                 <Settings size={17} />
-                基础设置
+                {t("memoryManageModal.baseSettings")}
               </span>
             ),
           },
@@ -644,17 +674,25 @@ export function MemoryManager() {
               label: (
                 <span className="tab-label">
                   <Icon size={17} aria-hidden="true" />
-                  {scopeMeta[key].label}
-                  <span className="tab-count">
-                    {loadingByScope[key] ? "…" : recordsByScope[key].length}
-                  </span>
+                  {t(scopeMeta[key].labelKey)}
+                  {key === "agent" && (
+                    <span className="tab-count">
+                      {loadingByScope.agent ? "…" : recordsByScope.agent.length}
+                    </span>
+                  )}
                 </span>
               ),
             };
           }),
         ]}
       />
-      {activeTab === "base" ? renderBaseSettings() : renderRecordTable()}
+      {activeTab === "base" ? (
+        renderBaseSettings()
+      ) : activeTab === "tenant" || activeTab === "user" ? (
+        <LongTermMemoryPanel scope={activeTab} />
+      ) : (
+        renderRecordTable()
+      )}
 
       <Modal
         open={editorOpen}

@@ -35,17 +35,17 @@ def client(mocker):
     mocker.patch('boto3.client')
     # Patch MinioClient at both possible import paths
     mocker.patch('backend.database.client.MinioClient')
-    # Stub services.vectordatabase_service to avoid real VDB initialization
+    # Stub management.services.knowledge_base.service to avoid real VDB initialization
     import types
     import sys as _sys
-    if "services.vectordatabase_service" not in _sys.modules:
-        services_vdb_mod = types.ModuleType("services.vectordatabase_service")
+    if "management.services.knowledge_base.service" not in _sys.modules:
+        services_vdb_mod = types.ModuleType("management.services.knowledge_base.service")
 
         def _get_vector_db_core():  # minimal stub
             return object()
 
         services_vdb_mod.get_vector_db_core = _get_vector_db_core
-        _sys.modules["services.vectordatabase_service"] = services_vdb_mod
+        _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
     
     # Import after mocking (only backend path is required by app imports)
     from backend.apps.model_managment_app import router
@@ -1839,3 +1839,46 @@ async def test_manage_provider_create_empty(client, auth_header, user_credential
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+# TokenExpiredError -> 401 mapping for every model management endpoint.
+
+
+MODEL_TOKEN_EXPIRED_ENDPOINTS = [
+    ("post", "/model/create", {"json": {"model_name": "m", "model_type": "llm"}}),
+    ("post", "/model/suggest-capacity", {"json": {"model_name": "gpt-4o", "base_url": "https://api.openai.com/v1", "model_type": "llm"}}),
+    ("get", "/model/capacity-coverage", {}),
+    ("post", "/model/provider/create", {"json": {"provider": "siliconflow", "model_type": "llm"}}),
+    ("post", "/model/provider/batch_create", {"json": {"api_key": "k", "provider": "siliconflow", "type": "llm", "models": []}}),
+    ("post", "/model/provider/list", {"json": {"provider": "siliconflow", "model_type": "llm"}}),
+    ("post", "/model/update", {"params": {"display_name": "m"}, "json": {"model_name": "m2"}}),
+    ("post", "/model/batch_update", {"json": [{"model_id": 1, "max_tokens": 4096}]}),
+    ("post", "/model/delete", {"params": {"display_name": "m"}}),
+    ("get", "/model/list", {}),
+    ("get", "/model/llm_list", {}),
+    ("post", "/model/healthcheck", {"params": {"display_name": "m", "model_type": "llm"}}),
+    ("post", "/model/temporary_healthcheck", {"json": {"model_name": "m", "model_type": "llm"}}),
+    ("post", "/model/manage/healthcheck", {"json": {"tenant_id": "t1", "display_name": "m"}}),
+    ("post", "/model/manage/create", {"json": {"tenant_id": "t1", "model_name": "m", "model_type": "llm"}}),
+    ("post", "/model/manage/update", {"json": {"tenant_id": "t1", "current_display_name": "m", "model_name": "m2"}}),
+    ("post", "/model/manage/delete", {"json": {"tenant_id": "t1", "display_name": "m"}}),
+    ("post", "/model/manage/batch_create", {"json": {"tenant_id": "t1", "provider": "p", "type": "llm", "models": []}}),
+    ("post", "/model/manage/list", {"json": {"tenant_id": "t1"}}),
+    ("post", "/model/manage/provider/list", {"json": {"tenant_id": "t1", "provider": "p", "model_type": "llm"}}),
+    ("post", "/model/manage/provider/create", {"json": {"tenant_id": "t1", "provider": "p", "model_type": "llm"}}),
+]
+
+
+@pytest.mark.parametrize("method,url,kwargs", MODEL_TOKEN_EXPIRED_ENDPOINTS)
+def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker, method, url, kwargs):
+    """Expired token maps to 401 on every authenticated model endpoint."""
+    from consts.exceptions import TokenExpiredError
+
+    mocker.patch(
+        "backend.apps.model_managment_app.get_current_user_id",
+        side_effect=TokenExpiredError("expired"),
+    )
+    response = getattr(client, method)(url, headers=auth_header, **kwargs)
+
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert "expired" in response.json()["detail"]

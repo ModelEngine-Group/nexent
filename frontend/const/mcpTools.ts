@@ -129,7 +129,6 @@ export const MCP_GRID_CARD_OUTER =
 export const MCP_TOOLS_QUERY_KEYS = {
   services: ["mcp-tools", "services"] as const,
   tools: (mcpId: number) => ["mcp-tools", "service-tools", mcpId] as const,
-  registryList: ["mcp-tools", "registry"] as const,
   communityList: ["mcp-tools", "community"] as const,
   communityReview: ["mcp-tools", "community-review"] as const,
   communityTags: ["mcp-tools", "community-tags"] as const,

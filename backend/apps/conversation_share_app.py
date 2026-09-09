@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException
+from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
 from services.conversation_share_service import (
     create_share_snapshot_service,
     get_share_asset_service,
@@ -81,6 +81,9 @@ async def create_conversation_share_endpoint(
         return {"code": 0, "message": "success", "data": result}
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except TokenExpiredError as e:
+        logger.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except Exception as e:
         logger.error("Failed to create conversation share: %s", str(e), exc_info=True)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Failed to create share")

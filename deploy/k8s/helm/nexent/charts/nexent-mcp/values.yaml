@@ -18,3 +18,7 @@ resources:
 config:
   skipProxy: "true"
   umask: "0022"
+
+service:
+  type: ClusterIP
+  nodePorts: {}

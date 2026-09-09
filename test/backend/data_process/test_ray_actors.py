@@ -6,6 +6,14 @@ import types
 import pytest
 
 
+class _NoopKnowledgeSpan:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+
 def make_fake_ray_module_identity_decorator():
     fake_ray = types.ModuleType("ray")
 
@@ -88,6 +96,10 @@ def import_module(monkeypatch):
 
     # Stub DataProcessCore and get_file_stream
     monkeypatch.setitem(sys.modules, "nexent.data_process", types.SimpleNamespace(DataProcessCore=FakeDataProcessCore))
+    telemetry_module = types.SimpleNamespace(
+        knowledge_span=lambda *args, **kwargs: _NoopKnowledgeSpan()
+    )
+    monkeypatch.setitem(sys.modules, "utils.knowledge_telemetry", telemetry_module)
 
     # Provide a full stub module for database.attachment_db to avoid importing real Minio client
     fake_attachment_db_mod = types.ModuleType("database.attachment_db")
@@ -716,3 +728,397 @@ def test_split_file_returns_empty_when_no_parts(monkeypatch):
     actor = ray_actors.DataProcessorRayActor()
     assert actor.split_file("x.txt", "local", file_data=b"abc") == []
 
+
+def test_ping_returns_true(monkeypatch):
+    """Test that ping() returns True for health check."""
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+    assert actor.ping() is True
+
+
+def test_normalize_processor_result_variants(monkeypatch):
+    """Test _normalize_processor_result handles various return types."""
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+
+    # Tuple with both chunks and images
+    result1 = ([{"content": "a"}], [{"image": "b"}])
+    chunks, images = actor._normalize_processor_result(result1)
+    assert chunks == [{"content": "a"}]
+    assert images == [{"image": "b"}]
+
+    # Empty tuple
+    result2 = ([], [])
+    chunks, images = actor._normalize_processor_result(result2)
+    assert chunks == []
+    assert images == []
+
+    # None result
+    result3 = None
+    chunks, images = actor._normalize_processor_result(result3)
+    assert chunks == []
+    assert images == []
+
+    # List only (not a tuple)
+    result4 = [{"content": "list-only"}]
+    chunks, images = actor._normalize_processor_result(result4)
+    assert chunks == [{"content": "list-only"}]
+    assert images == []
+
+    # Empty list
+    result5 = []
+    chunks, images = actor._normalize_processor_result(result5)
+    assert chunks == []
+    assert images == []
+
+
+def test_validate_chunks_variants(monkeypatch):
+    """Test _validate_chunks handles edge cases."""
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+
+    # None chunks
+    result = actor._validate_chunks(None, "source.txt")
+    assert result == []
+
+    # Non-list type
+    result = actor._validate_chunks("string", "source.txt")
+    assert result == []
+
+    # Empty list
+    result = actor._validate_chunks([], "source.txt")
+    assert result == []
+
+    # Valid list
+    valid_chunks = [{"content": "valid"}]
+    result = actor._validate_chunks(valid_chunks, "source.txt")
+    assert result == valid_chunks
+
+
+def test_append_image_chunks_skips_invalid_entries(monkeypatch):
+    """Test _append_image_chunks skips non-dict and missing-image_bytes entries."""
+    ray_actors = import_module(monkeypatch)
+
+    class CoreWithBadImages:
+        def file_process(self, *a, **k):
+            return (
+                [{"content": "text", "metadata": {}}],
+                [
+                    "not-a-dict",
+                    {"image_format": "png"},  # Missing image_bytes
+                ],
+            )
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithBadImages)
+    monkeypatch.setattr(
+        ray_actors,
+        "upload_fileobj",
+        lambda file_obj, file_name, prefix=None: {"object_name": f"{prefix}/{file_name}"},
+    )
+    monkeypatch.setattr(
+        ray_actors,
+        "build_s3_url",
+        lambda object_name: f"s3://bucket/{object_name}",
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    chunks = [{"content": "text", "metadata": {}}]
+    images = [
+        "not-a-dict",
+        {"image_format": "png"},
+    ]
+    actor._append_image_chunks("source.pdf", chunks, images)
+    # Only valid text chunk should remain, no image chunks added
+    assert len(chunks) == 1
+    assert chunks[0]["content"] == "text"
+
+
+def test_apply_model_paths_sets_correct_keys(monkeypatch):
+    """Test _apply_model_paths sets the required model path keys."""
+    ray_actors = import_module(monkeypatch)
+    actor = ray_actors.DataProcessorRayActor()
+    params = {}
+    actor._apply_model_paths(params)
+    assert "table_transformer_model_path" in params
+    assert "unstructured_default_model_initialize_params_json_path" in params
+    assert params["table_transformer_model_path"] == "/models/table"
+    assert params["unstructured_default_model_initialize_params_json_path"] == "/models/unstructured.json"
+
+
+def test_process_bytes_with_minio_source(monkeypatch):
+    """Test process_bytes with minio source fetching file data."""
+    ray_actors = import_module(monkeypatch)
+
+    class CoreRecords:
+        captured = {}
+
+        def __init__(self):
+            pass
+
+        def file_process(self, file_data, filename, chunking_strategy, **params):
+            CoreRecords.captured = {
+                "file_data": file_data,
+                "filename": filename,
+                "chunking_strategy": chunking_strategy,
+            }
+            return [{"content": "processed", "metadata": {}}]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreRecords)
+    actor = ray_actors.DataProcessorRayActor()
+
+    # With file_data provided directly
+    chunks = actor.process_bytes(
+        b"file bytes content",
+        "test.pdf",
+        "basic",
+        task_id="task-123",
+        model_id=5,
+        tenant_id="tenant-1"
+    )
+    assert len(chunks) == 1
+    assert CoreRecords.captured["filename"] == "test.pdf"
+    assert CoreRecords.captured["chunking_strategy"] == "basic"
+
+
+def test_split_file_logs_timing_and_parts(monkeypatch, caplog):
+    """Test split_file logs timing and part statistics."""
+    ray_actors = import_module(monkeypatch)
+
+    class PartBytes:
+        def __init__(self, data):
+            self._data = data
+
+        def getvalue(self):
+            return self._data
+
+    class CoreWithSplit:
+        def file_split(self, *a, **k):
+            # Return 3 parts with different sizes
+            return [
+                PartBytes(b"part1 data here"),
+                PartBytes(b"part2 data"),
+                PartBytes(b"part3"),
+            ]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithSplit)
+    actor = ray_actors.DataProcessorRayActor()
+    parts = actor.split_file("large.pdf", "local", file_data=b"large file content")
+
+    assert len(parts) == 3
+    assert parts[0] == b"part1 data here"
+    assert parts[1] == b"part2 data"
+    assert parts[2] == b"part3"
+
+
+def test_split_file_handles_exception_in_getvalue(monkeypatch):
+    """Test split_file continues when part.getvalue() raises."""
+    ray_actors = import_module(monkeypatch)
+
+    class PartGood:
+        def getvalue(self):
+            return b"good part"
+
+    class PartBad:
+        def getvalue(self):
+            raise RuntimeError("getvalue failed")
+
+    class CoreWithBadParts:
+        def file_split(self, *a, **k):
+            return [PartGood(), PartBad(), PartGood()]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", CoreWithBadParts)
+    actor = ray_actors.DataProcessorRayActor()
+    parts = actor.split_file("test.pdf", "local", file_data=b"content")
+
+    # Only good parts should be returned
+    assert len(parts) == 2
+    assert parts[0] == b"good part"
+    assert parts[1] == b"good part"
+
+
+def test_store_chunks_in_redis_with_various_chunks(monkeypatch):
+    """Test store_chunks_in_redis with various chunk inputs."""
+    ray_actors = import_module(monkeypatch)
+    monkeypatch.setattr(ray_actors, "REDIS_BACKEND_URL", "redis://test")
+
+    fake_client = FakeRedisClient()
+    fake_redis_module = types.SimpleNamespace(
+        Redis=types.SimpleNamespace(from_url=lambda *a, **k: fake_client)
+    )
+    monkeypatch.setitem(sys.modules, "redis", fake_redis_module)
+
+    actor = ray_actors.DataProcessorRayActor()
+
+    # Empty list
+    ok = actor.store_chunks_in_redis("k-empty", [])
+    assert ok is True
+    assert json.loads(fake_client.get("k-empty")) == []
+
+    # List with various types
+    ok = actor.store_chunks_in_redis("k-mixed", [
+        {"content": "text", "metadata": {"key": "value"}},
+        {"content": "text2", "numbers": [1, 2, 3]},
+    ])
+    assert ok is True
+    stored = json.loads(fake_client.get("k-mixed"))
+    assert len(stored) == 2
+
+    # Verify expiration was set
+    assert "k-empty" in fake_client.expirations
+    assert fake_client.expirations["k-empty"] == 2 * 60 * 60
+
+
+def test_prepare_process_params(monkeypatch):
+    """Test _prepare_process_params applies model paths and chunk sizes."""
+    ray_actors = import_module(monkeypatch)
+
+    class RecorderCore:
+        captured_params = None
+
+        def __init__(self):
+            pass
+
+        def file_process(self, file_data, filename, chunking_strategy, **params):
+            RecorderCore.captured_params = params
+            return [{"content": "x", "metadata": {}}]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", RecorderCore)
+    monkeypatch.setattr(
+        ray_actors,
+        "get_model_by_model_id",
+        lambda model_id, tenant_id=None: {
+            "expected_chunk_size": 500,
+            "maximum_chunk_size": 1000,
+            "display_name": "test-model",
+            "model_type": "embedding",
+        },
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    params = {"extra_key": "extra_value"}
+    result = actor._prepare_process_params(
+        task_id="task-1",
+        model_id=5,
+        tenant_id="tenant-1",
+        params=params,
+    )
+
+    assert result["task_id"] == "task-1"
+    assert result["new_after_n_chars"] == 500
+    assert result["max_characters"] == 1000
+    assert result["model_type"] == "embedding"
+    assert result["table_transformer_model_path"] == "/models/table"
+    assert result["extra_key"] == "extra_value"
+
+
+def test_run_file_process_with_telemetry_context(monkeypatch):
+    """Test _run_file_process uses knowledge_span for telemetry."""
+    ray_actors = import_module(monkeypatch)
+
+    captured_spans = []
+
+    class MockKnowledgeSpan:
+        def __init__(self, name, operation, **kwargs):
+            self.name = name
+            self.operation = operation
+            self.kwargs = kwargs
+            captured_spans.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class RecordingCore:
+        def __init__(self):
+            self.calls = []
+
+        def file_process(self, file_data, filename, chunking_strategy, **params):
+            self.calls.append((filename, chunking_strategy, params))
+            return [{"content": "test content", "metadata": {"creation_date": "2024-01-01"}}]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", RecordingCore)
+    telemetry_module = types.SimpleNamespace(knowledge_span=MockKnowledgeSpan)
+    monkeypatch.setitem(sys.modules, "utils.knowledge_telemetry", telemetry_module)
+
+    actor = ray_actors.DataProcessorRayActor()
+    result = actor._run_file_process(
+        file_data=b"test data",
+        filename="test.txt",
+        chunking_strategy="basic",
+        process_params={
+            "telemetry_context": {"trace_id": "abc123"},
+            "task_id": "task-1",
+        },
+        log_subject="test",
+    )
+
+    assert len(result) == 1
+    assert result[0]["content"] == "test content"
+    assert len(captured_spans) == 1
+    assert captured_spans[0].kwargs["telemetry_context"] == {"trace_id": "abc123"}
+
+
+def test_actor_initializes_monitoring_when_available(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+    manager = types.SimpleNamespace(is_enabled=True)
+    monitoring_module = types.SimpleNamespace(monitoring_manager=manager)
+    monkeypatch.setitem(sys.modules, "utils.monitoring", monitoring_module)
+
+    actor = ray_actors.DataProcessorRayActor()
+
+    assert actor._monitoring_manager is manager
+
+
+def test_actor_degrades_when_monitoring_status_fails(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class BrokenManager:
+        @property
+        def is_enabled(self):
+            raise RuntimeError("monitoring unavailable")
+
+    monitoring_module = types.SimpleNamespace(monitoring_manager=BrokenManager())
+    monkeypatch.setitem(sys.modules, "utils.monitoring", monitoring_module)
+
+    actor = ray_actors.DataProcessorRayActor()
+
+    assert actor._monitoring_manager is None
+
+
+def test_split_file_fetches_stream_and_model_type_is_optional(monkeypatch):
+    ray_actors = import_module(monkeypatch)
+
+    class Part:
+        def getvalue(self):
+            return b"part"
+
+    class RecordingCore(FakeDataProcessCore):
+        captured_file_data = None
+
+        def file_split(self, file_data, **kwargs):
+            RecordingCore.captured_file_data = file_data
+            return [Part()]
+
+    monkeypatch.setattr(ray_actors, "DataProcessCore", RecordingCore)
+    monkeypatch.setattr(ray_actors, "get_file_stream", lambda source: io.BytesIO(b"stream-data"))
+    monkeypatch.setattr(
+        ray_actors,
+        "get_model_by_model_id",
+        lambda model_id, tenant_id=None: {
+            "expected_chunk_size": 100,
+            "maximum_chunk_size": 200,
+            "display_name": "model-without-type",
+            "model_type": None,
+        },
+    )
+
+    actor = ray_actors.DataProcessorRayActor()
+    params = {}
+    actor._apply_model_chunk_sizes(model_id=1, tenant_id="tenant", params=params)
+    parts = actor.split_file("s3://bucket/source.pdf", "minio")
+
+    assert "model_type" not in params
+    assert parts == [b"part"]
+    assert RecordingCore.captured_file_data == b"stream-data"

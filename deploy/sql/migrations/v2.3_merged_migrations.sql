@@ -309,7 +309,8 @@ COMMENT ON TABLE nexent.ag_skill_repository_t IS 'Skill marketplace repository f
 COMMENT ON COLUMN nexent.ag_skill_repository_t.skill_repository_id IS 'Skill repository listing ID, unique primary key';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.publisher_tenant_id IS 'Publisher tenant ID';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.publisher_user_id IS 'Publisher user ID';
-COMMENT ON COLUMN nexent.ag_skill_repository_t.skill_id IS 'Source skill ID from ag_skill_info_t; unique when active (delete_flag = N)';
+COMMENT ON COLUMN nexent.ag_skill_repository_t.skill_id IS
+    'Source skill ID from ag_skill_info_t; multiple active snapshots may exist across statuses';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.name IS 'Skill name for display and search';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.description IS 'Skill description';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.source IS 'Skill source';
@@ -326,10 +327,6 @@ COMMENT ON COLUMN nexent.ag_skill_repository_t.update_time IS 'Update time';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.created_by IS 'Creator ID';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.updated_by IS 'Updater ID';
 COMMENT ON COLUMN nexent.ag_skill_repository_t.delete_flag IS 'Soft delete flag: Y/N';
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_skill_repository_skill_active
-    ON nexent.ag_skill_repository_t (skill_id)
-    WHERE delete_flag = 'N';
 
 CREATE INDEX IF NOT EXISTS idx_skill_repository_publisher_delete
     ON nexent.ag_skill_repository_t (publisher_tenant_id, delete_flag);

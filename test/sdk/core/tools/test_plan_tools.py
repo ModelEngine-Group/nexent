@@ -10,6 +10,7 @@ import importlib.util
 import json
 import sys
 import types
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -287,8 +288,11 @@ class TestCreatePlanTool:
 
     def test_happy_path_returns_plan_id_and_count(self, make_create_tool, minimal_steps):
         tool = make_create_tool()
-        result = tool.forward(plan_id="plan-1", title="T", steps=minimal_steps)
-        assert result == {"plan_id": "plan-1", "step_count": 3}
+        result = tool.forward(title="T", steps=minimal_steps)
+        assert result["step_count"] == 3
+        # plan_id is auto-generated as a UUID4
+        parsed = uuid.UUID(result["plan_id"])
+        assert parsed.version == 4
 
     def test_first_step_marked_in_progress(self, make_create_tool, minimal_steps):
         captured = {}
@@ -297,7 +301,7 @@ class TestCreatePlanTool:
             captured["plan"] = plan
 
         tool = CreatePlanTool(on_plan_created=on_created)
-        tool.forward(plan_id="p", title="t", steps=minimal_steps)
+        tool.forward(title="t", steps=minimal_steps)
         assert captured["plan"].steps[0].status == "in_progress"
         assert all(s.status == "pending" for s in captured["plan"].steps[1:])
 
@@ -305,7 +309,6 @@ class TestCreatePlanTool:
         tool = make_create_tool()
         with pytest.raises(ValueError, match="at least 3 steps"):
             tool.forward(
-                plan_id="p",
                 title="t",
                 steps=[
                     {"id": "step-1", "title": "a", "description": "b"},
@@ -313,18 +316,24 @@ class TestCreatePlanTool:
                 ],
             )
 
+    def test_missing_title_raises(self, make_create_tool, minimal_steps):
+        """Title is a required positional argument; omitting it raises TypeError."""
+        tool = make_create_tool()
+        with pytest.raises(TypeError):
+            tool.forward(steps=minimal_steps)
+
     def test_more_than_8_steps_warns_not_raises(self, make_create_tool, caplog):
         tool = make_create_tool()
         steps = [{"id": f"step-{i}", "title": f"T{i}", "description": f"D{i}"} for i in range(1, 10)]
         with caplog.at_level("WARNING", logger="plan_tools"):
-            result = tool.forward(plan_id="p", title="t", steps=steps)
+            result = tool.forward(title="t", steps=steps)
         assert result["step_count"] == 9
         assert any("recommended max is 8" in rec.message for rec in caplog.records)
 
     def test_non_list_steps_raises(self, make_create_tool):
         tool = make_create_tool()
         with pytest.raises(ValueError, match="at least 3 steps"):
-            tool.forward(plan_id="p", title="t", steps="not-a-list")
+            tool.forward(title="t", steps="not-a-list")
 
     def test_step_must_be_dict(self, make_create_tool):
         tool = make_create_tool()
@@ -334,7 +343,7 @@ class TestCreatePlanTool:
             {"id": "step-3", "title": "c", "description": "d"},
         ]
         with pytest.raises(ValueError, match="each step must be a dict"):
-            tool.forward(plan_id="p", title="t", steps=steps)
+            tool.forward(title="t", steps=steps)
 
     def test_empty_step_id_rejected(self, make_create_tool):
         tool = make_create_tool()
@@ -344,7 +353,7 @@ class TestCreatePlanTool:
             {"id": "step-3", "title": "a", "description": "b"},
         ]
         with pytest.raises(ValueError, match="step.id is required"):
-            tool.forward(plan_id="p", title="t", steps=steps)
+            tool.forward(title="t", steps=steps)
 
     def test_duplicate_step_id_rejected(self, make_create_tool):
         tool = make_create_tool()
@@ -354,7 +363,7 @@ class TestCreatePlanTool:
             {"id": "step-3", "title": "e", "description": "f"},
         ]
         with pytest.raises(ValueError, match="duplicate step id"):
-            tool.forward(plan_id="p", title="t", steps=steps)
+            tool.forward(title="t", steps=steps)
 
     def test_missing_title_defaults_to_id(self, make_create_tool):
         captured = {}
@@ -368,52 +377,66 @@ class TestCreatePlanTool:
             {"id": "step-2", "title": " ", "description": "d"},
             {"id": "step-3", "title": "real", "description": "f"},
         ]
-        tool.forward(plan_id="p", title="t", steps=steps)
+        tool.forward(title="t", steps=steps)
         # Empty / whitespace-only titles fall back to id
         assert captured["plan"].steps[0].title == "step-1"
         assert captured["plan"].steps[1].title == "step-2"
         assert captured["plan"].steps[2].title == "real"
 
-    def test_blank_plan_id_replaced_with_uuid(self, make_create_tool, minimal_steps):
+    def test_plan_id_is_auto_generated_uuid(self, make_create_tool, minimal_steps):
+        """Every call mints a fresh UUID4-shaped plan_id; non-nullable return value."""
         tool = make_create_tool()
-        result = tool.forward(plan_id="   ", title="t", steps=minimal_steps)
-        assert result["plan_id"]
-        assert result["plan_id"] != "   "
+        result_a = tool.forward(title="t", steps=minimal_steps)
+        result_b = tool.forward(title="t", steps=minimal_steps)
+        assert result_a["plan_id"] != result_b["plan_id"]
+        uuid.UUID(result_a["plan_id"])  # well-formed
+        uuid.UUID(result_b["plan_id"])
+
+    def test_inputs_schema_has_no_plan_id(self, make_create_tool):
+        """Schema exposes only title + steps; plan_id is internal (auto-generated)."""
+        tool = make_create_tool()
+        schema = type(tool).inputs
+        assert set(schema.keys()) == {"title", "steps"}
+        # None of the public inputs are declared nullable
+        for key in ("title", "steps"):
+            assert schema[key].get("nullable") is not True
 
     def test_persist_calls_plan_repo(self, make_create_tool, minimal_steps):
         repo = MagicMock()
         tool = make_create_tool(plan_repo=repo, get_conversation_id=lambda: 42, get_user_id=lambda: "u-1")
-        tool.forward(plan_id="plan-x", title="t", steps=minimal_steps)
+        tool.forward(title="t", steps=minimal_steps)
         repo.save.assert_called_once()
         args, kwargs = repo.save.call_args
         assert kwargs["conversation_id"] == 42
         assert kwargs["user_id"] == "u-1"
-        # plan_dict is the first positional argument
-        assert args[0]["plan_id"] == "plan-x"
+        # plan_dict is the first positional argument; plan_id is the auto UUID
+        plan_dict = args[0]
+        uuid.UUID(plan_dict["plan_id"])
 
     def test_plan_repo_save_failure_is_swallowed(self, make_create_tool, minimal_steps, caplog):
         repo = MagicMock()
         repo.save.side_effect = RuntimeError("redis down")
         tool = make_create_tool(plan_repo=repo)
         with caplog.at_level("WARNING", logger="plan_tools"):
-            result = tool.forward(plan_id="plan-x", title="t", steps=minimal_steps)
-        assert result["plan_id"] == "plan-x"
+            result = tool.forward(title="t", steps=minimal_steps)
+        # Auto-generated plan_id is still surfaced on return
+        assert result["plan_id"]
 
     def test_no_observer_or_repo_is_supported(self, make_create_tool, minimal_steps):
         # When both observer and plan_repo are None, the tool still succeeds.
         tool = make_create_tool()
-        assert tool.forward(plan_id="p", title="t", steps=minimal_steps)["step_count"] == 3
+        assert tool.forward(title="t", steps=minimal_steps)["step_count"] == 3
 
     def test_emits_plan_event_with_serialized_steps(self, make_create_tool, minimal_steps):
         observer = MagicMock()
         tool = make_create_tool(observer=observer)
-        tool.forward(plan_id="plan-e", title="Title", steps=minimal_steps)
+        tool.forward(title="Title", steps=minimal_steps)
         observer.add_message.assert_called_once()
         _, process_type, payload = observer.add_message.call_args.args
         assert process_type == _ProcessType.PLAN
         body = json.loads(payload)
-        assert body["plan_id"] == "plan-e"
         assert body["title"] == "Title"
+        uuid.UUID(body["plan_id"])  # auto-generated
         assert [s["id"] for s in body["steps"]] == ["step-1", "step-2", "step-3"]
 
     def test_observer_failure_is_swallowed(self, make_create_tool, minimal_steps):
@@ -421,7 +444,7 @@ class TestCreatePlanTool:
         observer.add_message.side_effect = RuntimeError("sse broken")
         tool = make_create_tool(observer=observer)
         # Should not raise
-        tool.forward(plan_id="p", title="t", steps=minimal_steps)
+        tool.forward(title="t", steps=minimal_steps)
 
     def test_callback_failure_is_swallowed(self, make_create_tool, minimal_steps):
         def cb(_plan):
@@ -429,7 +452,7 @@ class TestCreatePlanTool:
 
         tool = make_create_tool(on_plan_created=cb)
         # Should not raise
-        tool.forward(plan_id="p", title="t", steps=minimal_steps)
+        tool.forward(title="t", steps=minimal_steps)
 
     def test_callback_receives_plan_object(self, make_create_tool, minimal_steps):
         captured = {}
@@ -440,14 +463,16 @@ class TestCreatePlanTool:
             captured["first_status"] = plan.steps[0].status
 
         tool = make_create_tool(on_plan_created=cb)
-        tool.forward(plan_id="plan-cb", title="t", steps=minimal_steps)
-        assert captured == {"plan_id": "plan-cb", "step_count": 3, "first_status": "in_progress"}
+        tool.forward(title="t", steps=minimal_steps)
+        assert captured["step_count"] == 3
+        assert captured["first_status"] == "in_progress"
+        uuid.UUID(captured["plan_id"])  # auto-generated UUID
 
     def test_default_callbacks_use_zero_and_anonymous(self, make_create_tool, minimal_steps):
         """When get_* are None, save is still attempted with sentinel values."""
         repo = MagicMock()
         tool = make_create_tool(plan_repo=repo)
-        tool.forward(plan_id="p", title="t", steps=minimal_steps)
+        tool.forward(title="t", steps=minimal_steps)
         kwargs = repo.save.call_args.kwargs
         assert kwargs["conversation_id"] == 0
         assert kwargs["user_id"] == "anonymous"

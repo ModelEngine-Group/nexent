@@ -237,6 +237,24 @@ class TestGroupListing:
                 sort_order="desc"
             )
 
+    def test_get_groups_passes_search_filter(self):
+        """Test that the optional search filter reaches the service layer."""
+        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
+             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+            mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
+            mock_get_groups.return_value = {"groups": [], "total": 0}
+
+            response = client.post(
+                "/groups/list",
+                json={"tenant_id": "tenant-123", "search": "engineering"},
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            mock_get_groups.assert_called_once_with(
+                tenant_id="tenant-123", page=None, page_size=None,
+                sort_by="created_at", sort_order="desc", search="engineering"
+            )
+
     def test_get_groups_success_without_pagination(self):
         """Test successful group listing without pagination (returns all data)"""
         mock_groups = [

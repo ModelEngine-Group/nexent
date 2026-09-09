@@ -33,6 +33,7 @@ export type ModelType =
   | "vlm"
   | "vlm2"
   | "vlm3"
+  | "vlm4"
   | "multi_embedding";
 
 // Model option interface
@@ -66,8 +67,6 @@ export interface ModelOption {
 
 // Application configuration interface
 export interface AppConfig {
-  appName: string;
-  appDescription: string;
   iconType: "preset" | "custom";
   iconKey: string; // Selected preset icon key
   customIconUrl: string | null;
@@ -163,6 +162,7 @@ export interface ModelConfig {
   vlm: SingleModelConfig;
   vlm2: SingleModelConfig;
   vlm3: SingleModelConfig;
+  vlm4: SingleModelConfig;
   stt: STTModelConfig;
   tts: TTSModelConfig;
 }

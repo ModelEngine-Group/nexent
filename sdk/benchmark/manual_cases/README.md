@@ -75,4 +75,4 @@ manual_cases/
 2. `case.json` fields: `id`, `history_file`, `queries` (multi-turn continuation questions), `probes` (memory probes only targeting compressed region), `summary_checks`, `task_checks`, `compressed_config` (compression param overrides).
 3. Run `test_benchmark.py`, results appear in `reports/<id>.json`.
 
-> To see the full trace of context construction and compression during a benchmark run, use [`../../ctx_debugger/`](../../ctx_debugger/) (`example_with_benchmark.py` attaches debugger to batch-run benchmark).
+> To see the full trace of context construction and compression during a benchmark run, use [`../tools/ctx_debugger/`](../tools/ctx_debugger/) (`example_with_benchmark.py` attaches debugger to batch-run benchmark).

@@ -52,11 +52,6 @@ class CreatePlanTool(Tool):
     )
 
     inputs = {
-        "plan_id": {
-            "type": "string",
-            "description": "Unique plan identifier (UUID)",
-            "description_zh": "计划唯一标识（UUID）",
-        },
         "title": {
             "type": "string",
             "description": "Short plan title",
@@ -104,7 +99,7 @@ class CreatePlanTool(Tool):
         self._get_conversation_id = get_conversation_id
         self._get_user_id = get_user_id
 
-    def forward(self, plan_id: str, title: str, steps: list) -> dict:
+    def forward(self, title: str, steps: list) -> dict:
         # Local import avoids pulling agent_model into the tool module's
         # import graph; agent_model imports from us via __init__.
         from ..agents.agent_model import AgentPlan, PlanStep
@@ -140,7 +135,7 @@ class CreatePlanTool(Tool):
             ))
 
         plan = AgentPlan(
-            plan_id=str(plan_id).strip() or str(uuid.uuid4()),
+            plan_id=str(uuid.uuid4()),
             title=str(title).strip(),
             steps=plan_steps,
             current_step_index=0,

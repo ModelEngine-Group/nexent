@@ -15,20 +15,22 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from data_process.ray_config import RayConfig
-from utils.logging_utils import configure_logging
+from utils.logging_utils import get_uvicorn_logging_config
 from consts.const import (
     REDIS_URL, REDIS_PORT, FLOWER_PORT, RAY_DASHBOARD_PORT, RAY_DASHBOARD_HOST,
     RAY_ACTOR_NUM_CPUS, RAY_NUM_CPUS, DISABLE_RAY_DASHBOARD, DISABLE_CELERY_FLOWER,
-    DOCKER_ENVIRONMENT, RAY_OBJECT_STORE_MEMORY_GB, RAY_preallocate_plasma, RAY_TEMP_DIR
+    DOCKER_ENVIRONMENT, RAY_OBJECT_STORE_MEMORY_GB, RAY_preallocate_plasma, RAY_TEMP_DIR,
+    DP_PART_PROCESSOR_COUNT,
 )
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging with color formatter
-configure_logging(logging.INFO)
+# Configure logging: console + file, both console and uvicorn share the same config
+import logging.config
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["data_process"]))
 logging.getLogger("ray").setLevel(logging.WARNING)
-logger = logging.getLogger("data_process_service")
+logger = logging.getLogger("data_process")
 
 # Global variables to track processes
 service_processes = {
@@ -178,6 +180,45 @@ class ServiceManager:
             logger.error(traceback.format_exc())
             return False
     
+    @staticmethod
+    def _build_worker_configs(total_cpus: int) -> list[dict[str, Any]]:
+        """Build isolated Celery worker pools for each processing stage."""
+        total_cpus = max(1, int(total_cpus))
+        ray_actor_num_cpus = max(1, int(RAY_ACTOR_NUM_CPUS))
+        process_worker_concurrency = min(
+            DP_PART_PROCESSOR_COUNT,
+            max(1, total_cpus // ray_actor_num_cpus),
+        )
+        forward_worker_concurrency = min(8, total_cpus * 2)
+        forward_aggregate_worker_concurrency = min(2, total_cpus)
+        return [
+            {
+                'name': 'process-worker',
+                'queue': 'process_q',
+                'concurrency': process_worker_concurrency,
+            },
+            {
+                'name': 'process-part-worker',
+                'queue': 'process_part_q',
+                'concurrency': process_worker_concurrency,
+            },
+            {
+                'name': 'forward-worker',
+                'queue': 'forward_q',
+                'concurrency': forward_worker_concurrency,
+            },
+            {
+                'name': 'forward-part-worker',
+                'queue': 'forward_part_q',
+                'concurrency': forward_worker_concurrency,
+            },
+            {
+                'name': 'forward-aggregate-worker',
+                'queue': 'forward_aggregate_q',
+                'concurrency': forward_aggregate_worker_concurrency,
+            },
+        ]
+
     def start_workers(self):
         """Start Celery workers for process and forward queues"""
         if not self.config.get('start_workers', True):
@@ -193,44 +234,23 @@ class ServiceManager:
             # Fallback to 1 if os.cpu_count() is None.
             total_cpus = int(RAY_NUM_CPUS) if RAY_NUM_CPUS else (os.cpu_count() or 1)
 
-            # Get the number of CPUs requested by each actor.
-            ray_actor_num_cpus = RAY_ACTOR_NUM_CPUS
-            
-            # Calculate concurrency for the process-worker. Each worker will spawn an actor,
-            # so we limit concurrency to avoid oversubscribing Ray's CPU resources.
-            process_worker_concurrency = max(1, total_cpus // ray_actor_num_cpus)
-            
-            # For forward-worker, it's I/O bound. A higher concurrency is fine, but we can cap it
-            # relative to CPU count to avoid creating excessive threads on small machines.
-            forward_worker_concurrency = min(8, total_cpus * 2)
+            workers_config = self._build_worker_configs(total_cpus)
+            concurrency_by_name = {
+                config['name']: config['concurrency'] for config in workers_config
+            }
+            process_worker_concurrency = concurrency_by_name['process-worker']
+            forward_worker_concurrency = concurrency_by_name['forward-worker']
+            forward_aggregate_worker_concurrency = concurrency_by_name['forward-aggregate-worker']
+            ray_actor_num_cpus = max(1, int(RAY_ACTOR_NUM_CPUS))
 
             logger.debug(f"Total available CPUs: {total_cpus}")
             logger.debug(f"CPUs per processing actor (RAY_ACTOR_NUM_CPUS): {ray_actor_num_cpus}")
             logger.debug(f"Process-worker concurrency set to: {process_worker_concurrency}")
             logger.debug(f"Forward-worker concurrency set to: {forward_worker_concurrency}")
+            logger.debug(
+                f"Forward-aggregate-worker concurrency set to: {forward_aggregate_worker_concurrency}"
+            )
 
-            # Define worker configurations based on split architecture:
-            # - process-worker handles orchestration (process_q)
-            # - process-part-worker handles split sub-tasks (process_part_q)
-            # - forward-worker handles vectorization/storage (forward_q)
-            workers_config = [
-                {
-                    'name': 'process-worker',
-                    'queue': 'process_q',
-                    'concurrency': process_worker_concurrency
-                },
-                {
-                    'name': 'process-part-worker',
-                    'queue': 'process_part_q',
-                    'concurrency': process_worker_concurrency
-                },
-                {
-                    'name': 'forward-worker', 
-                    'queue': 'forward_q',
-                    'concurrency': forward_worker_concurrency
-                }
-            ]
-            
             # Start each worker in a separate process
             for config in workers_config:
                 # Use full Python path and correct module path
@@ -558,7 +578,14 @@ except Exception as e_exec:
         logger.info(f"📋 Effective service config: {self.config}")
         
         for service_name, start_func, config_key in services:
-            if self.config.get(config_key, True):
+            service_enabled = self.config.get(config_key, True)
+            if service_name == "Ray Cluster":
+                # Redis must be available for cancellation markers, while
+                # recovery must finish before Ray or Celery can consume work.
+                from services.startup_recovery_service import recover_data_process_tasks
+
+                recover_data_process_tasks()
+            if service_enabled:
                 enabled_count += 1
                 logger.info(f"Starting {service_name}...")
                 if start_func():
@@ -863,10 +890,11 @@ def main():
         
         logger.info(f"🌐 Starting API server on {args.api_host}:{args.api_port}")
         uvicorn.run(
-            app, 
+            app,
             host=args.api_host,
             port=args.api_port,
-            log_level="warning"
+            log_level="warning",
+            log_config=get_uvicorn_logging_config(categories=["data_process"]),
         )
         
     except KeyboardInterrupt:

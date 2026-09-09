@@ -39,6 +39,7 @@ export type EditableAgent = Pick<
   | "requested_output_tokens"
   | "is_main_agent"
   | "provide_run_summary"
+  | "allow_chat_metadata"
   | "tools"
   | "duty_prompt"
   | "constraint_prompt"
@@ -70,7 +71,11 @@ interface AgentConfigStoreState {
   hasUnsavedChanges: boolean;
   isCreatingMode: boolean; // true when user is in create mode, even if currentAgentId is null
   isGenerating: boolean; // true when agent generation is in progress
-  defaultLlmConfig: { id: number | null; name: string; displayName: string } | null;
+  defaultLlmConfig: {
+    id: number | null;
+    name: string;
+    displayName: string;
+  } | null;
 
   forceRefreshKey: number;
   saveValidation: (() => Promise<void>) | null;
@@ -100,7 +105,6 @@ interface AgentConfigStoreState {
    */
   triggerForceRefresh: () => void;
 
-
   /**
    * Update tools (selected tools).
    */
@@ -119,7 +123,13 @@ interface AgentConfigStoreState {
   /**
    * Update sub_agent_relations (synced with sub_agent_id_list).
    */
-  updateSubAgentRelations: (relations: Array<{ agent_id: number; version_no: number | null; version_name?: string }>) => void;
+  updateSubAgentRelations: (
+    relations: Array<{
+      agent_id: number;
+      version_no: number | null;
+      version_name?: string;
+    }>
+  ) => void;
 
   /**
    * Update external_sub_agent_id_list.
@@ -166,7 +176,9 @@ interface AgentConfigStoreState {
    * Set the default LLM config from load_config interface.
    * Updates the emptyEditableAgent defaults for model fields.
    */
-  setDefaultLlmConfig: (config: { id: number | null; name: string; displayName: string } | null) => void;
+  setDefaultLlmConfig: (
+    config: { id: number | null; name: string; displayName: string } | null
+  ) => void;
 
   /**
    * Get the current baseline editable agent (null = create or initial state).
@@ -179,7 +191,11 @@ interface AgentConfigStoreState {
  * Factory function to create an empty editable agent.
  * Initializes model fields from the default LLM config when available.
  */
-function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string; displayName: string }): EditableAgent {
+function createEmptyEditableAgent(llmConfig?: {
+  id: number | null;
+  name: string;
+  displayName: string;
+}): EditableAgent {
   return {
     name: "",
     display_name: "",
@@ -192,6 +208,7 @@ function createEmptyEditableAgent(llmConfig?: { id: number | null; name: string;
     requested_output_tokens: null,
     is_main_agent: true,
     provide_run_summary: false,
+    allow_chat_metadata: false,
     tools: [],
     skills: [],
     duty_prompt: "",
@@ -231,6 +248,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         requested_output_tokens: agent.requested_output_tokens ?? null,
         is_main_agent: agent.is_main_agent ?? true,
         provide_run_summary: agent.provide_run_summary,
+        allow_chat_metadata: agent.allow_chat_metadata ?? false,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
         duty_prompt: agent.duty_prompt || "",
@@ -241,7 +259,9 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_logic_model_id: agent.business_logic_model_id || 0,
         prompt_template_id: agent.prompt_template_id ?? 0,
         prompt_template_name: agent.prompt_template_name || "system_default",
-        verification_config: agent.verification_config || { ...DEFAULT_AGENT_VERIFICATION_CONFIG },
+        verification_config: agent.verification_config || {
+          ...DEFAULT_AGENT_VERIFICATION_CONFIG,
+        },
         sub_agent_id_list: agent.sub_agent_id_list || [],
         sub_agent_relations: agent.sub_agent_relations || [],
         external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
@@ -258,17 +278,21 @@ const toEditable = (agent: Agent | null): EditableAgent =>
  * For complex fields (tools, skills), use custom comparators.
  */
 const normalizeArray = (arr: number[]) =>
-  Array.from(new Set((arr ?? []).map((n) => Number(n)).filter((n) => !isNaN(n)))).sort(
-    (a, b) => a - b
-  );
+  Array.from(
+    new Set((arr ?? []).map((n) => Number(n)).filter((n) => !isNaN(n)))
+  ).sort((a, b) => a - b);
 
 const isToolsDirty = (baselineTools: Tool[], editedTools: Tool[]): boolean => {
   if (baselineTools.length !== editedTools.length) {
     return true;
   }
 
-  const sortedBaseline = [...baselineTools].sort((a, b) => Number(a.id) - Number(b.id));
-  const sortedEdited = [...editedTools].sort((a, b) => Number(a.id) - Number(b.id));
+  const sortedBaseline = [...baselineTools].sort(
+    (a, b) => Number(a.id) - Number(b.id)
+  );
+  const sortedEdited = [...editedTools].sort(
+    (a, b) => Number(a.id) - Number(b.id)
+  );
 
   for (let i = 0; i < sortedBaseline.length; i++) {
     const baseTool = sortedBaseline[i];
@@ -286,7 +310,7 @@ const isToolsDirty = (baselineTools: Tool[], editedTools: Tool[]): boolean => {
     }
 
     for (const baseParam of baseParams) {
-      const editParam = editParams.find(p => p.name === baseParam.name);
+      const editParam = editParams.find((p) => p.name === baseParam.name);
       if (!editParam) {
         return true;
       }
@@ -306,8 +330,8 @@ const isToolsDirty = (baselineTools: Tool[], editedTools: Tool[]): boolean => {
       } else if (
         baseValue !== null &&
         editValue !== null &&
-        typeof baseValue === 'object' &&
-        typeof editValue === 'object'
+        typeof baseValue === "object" &&
+        typeof editValue === "object"
       ) {
         if (JSON.stringify(baseValue) !== JSON.stringify(editValue)) {
           return true;
@@ -321,13 +345,20 @@ const isToolsDirty = (baselineTools: Tool[], editedTools: Tool[]): boolean => {
   return false;
 };
 
-const isSkillsDirty = (baselineSkills: Skill[], editedSkills: Skill[]): boolean => {
+const isSkillsDirty = (
+  baselineSkills: Skill[],
+  editedSkills: Skill[]
+): boolean => {
   if (baselineSkills.length !== editedSkills.length) {
     return true;
   }
 
-  const sortedBaseline = [...baselineSkills].sort((a, b) => Number(a.skill_id) - Number(b.skill_id));
-  const sortedEdited = [...editedSkills].sort((a, b) => Number(a.skill_id) - Number(b.skill_id));
+  const sortedBaseline = [...baselineSkills].sort(
+    (a, b) => Number(a.skill_id) - Number(b.skill_id)
+  );
+  const sortedEdited = [...editedSkills].sort(
+    (a, b) => Number(a.skill_id) - Number(b.skill_id)
+  );
 
   for (let i = 0; i < sortedBaseline.length; i++) {
     if (sortedBaseline[i].skill_id !== sortedEdited[i].skill_id) {
@@ -354,6 +385,7 @@ const isDirty = (
       editedAgent.requested_output_tokens != null ||
       editedAgent.is_main_agent !== true ||
       editedAgent.provide_run_summary !== false ||
+      editedAgent.allow_chat_metadata !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
       editedAgent.few_shots_prompt !== "" ||
@@ -361,9 +393,11 @@ const isDirty = (
       editedAgent.business_logic_model_name !== "" ||
       editedAgent.business_logic_model_id !== 0 ||
       (editedAgent.prompt_template_id ?? 0) !== 0 ||
-      (editedAgent.prompt_template_name || "system_default") !== "system_default" ||
-      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
-        JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
+      (editedAgent.prompt_template_name || "system_default") !==
+        "system_default" ||
+      JSON.stringify(
+        editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
+      ) !== JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
       normalizeArray(editedAgent.group_ids || []).length > 0 ||
       normalizeArray(editedAgent.sub_agent_id_list || []).length > 0 ||
       normalizeArray(editedAgent.external_sub_agent_id_list || []).length > 0 ||
@@ -386,210 +420,256 @@ const isDirty = (
     baselineAgent.max_step !== editedAgent.max_step ||
     (baselineAgent.requested_output_tokens ?? null) !==
       (editedAgent.requested_output_tokens ?? null) ||
-    (baselineAgent.is_main_agent ?? true) !== (editedAgent.is_main_agent ?? true) ||
+    (baselineAgent.is_main_agent ?? true) !==
+      (editedAgent.is_main_agent ?? true) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
+    (baselineAgent.allow_chat_metadata ?? false) !==
+      (editedAgent.allow_chat_metadata ?? false) ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
     baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
     baselineAgent.business_description !== editedAgent.business_description ||
-    baselineAgent.business_logic_model_name !== editedAgent.business_logic_model_name ||
-    baselineAgent.business_logic_model_id !== editedAgent.business_logic_model_id ||
-    (baselineAgent.prompt_template_id ?? 0) !== (editedAgent.prompt_template_id ?? 0) ||
-    (baselineAgent.prompt_template_name || "system_default") !== (editedAgent.prompt_template_name || "system_default") ||
-    JSON.stringify(baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) !==
-      JSON.stringify(editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG) ||
+    baselineAgent.business_logic_model_name !==
+      editedAgent.business_logic_model_name ||
+    baselineAgent.business_logic_model_id !==
+      editedAgent.business_logic_model_id ||
+    (baselineAgent.prompt_template_id ?? 0) !==
+      (editedAgent.prompt_template_id ?? 0) ||
+    (baselineAgent.prompt_template_name || "system_default") !==
+      (editedAgent.prompt_template_name || "system_default") ||
+    JSON.stringify(
+      baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
+    ) !==
+      JSON.stringify(
+        editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
+      ) ||
     JSON.stringify(normalizeArray(baselineAgent.group_ids ?? [])) !==
       JSON.stringify(normalizeArray(editedAgent.group_ids ?? [])) ||
     JSON.stringify(normalizeArray(baselineAgent.sub_agent_id_list ?? [])) !==
       JSON.stringify(normalizeArray(editedAgent.sub_agent_id_list ?? [])) ||
-    JSON.stringify(normalizeArray(baselineAgent.external_sub_agent_id_list ?? [])) !==
-      JSON.stringify(normalizeArray(editedAgent.external_sub_agent_id_list ?? [])) ||
+    JSON.stringify(
+      normalizeArray(baselineAgent.external_sub_agent_id_list ?? [])
+    ) !==
+      JSON.stringify(
+        normalizeArray(editedAgent.external_sub_agent_id_list ?? [])
+      ) ||
     isToolsDirty(baselineAgent.tools, editedAgent.tools) ||
     isSkillsDirty(baselineAgent.skills, editedAgent.skills) ||
     baselineAgent.ingroup_permission !== editedAgent.ingroup_permission ||
     baselineAgent.greeting_message !== editedAgent.greeting_message ||
-    JSON.stringify(baselineAgent.example_questions ?? []) !== JSON.stringify(editedAgent.example_questions ?? [])
+    JSON.stringify(baselineAgent.example_questions ?? []) !==
+      JSON.stringify(editedAgent.example_questions ?? [])
   );
 };
 
-export const useAgentConfigStore = create<AgentConfigStoreState>((set, get) => ({
-  currentAgentId: null,
-  currentAgentPermission: null,
-  baselineAgent: null,
-  editedAgent: createEmptyEditableAgent(),
-  hasUnsavedChanges: false,
-  isCreatingMode: false,
-  isGenerating: false,
-  defaultLlmConfig: null,
-  forceRefreshKey: 0,
-  saveValidation: null,
+export const useAgentConfigStore = create<AgentConfigStoreState>(
+  (set, get) => ({
+    currentAgentId: null,
+    currentAgentPermission: null,
+    baselineAgent: null,
+    editedAgent: createEmptyEditableAgent(),
+    hasUnsavedChanges: false,
+    isCreatingMode: false,
+    isGenerating: false,
+    defaultLlmConfig: null,
+    forceRefreshKey: 0,
+    saveValidation: null,
 
-  isReadOnly: () => {
-    const { isCreatingMode, currentAgentId, currentAgentPermission } = get();
-    if (isCreatingMode === false && currentAgentId === null) return true;
-    if (isCreatingMode) return false;
-    return currentAgentPermission === 'READ_ONLY';
-  },
+    isReadOnly: () => {
+      const { isCreatingMode, currentAgentId, currentAgentPermission } = get();
+      if (isCreatingMode === false && currentAgentId === null) return true;
+      if (isCreatingMode) return false;
+      return currentAgentPermission === "READ_ONLY";
+    },
 
-  setCurrentAgent: (agent) => {
-    const agentId = agent ? parseInt(agent.id) : null;
-    const baselineAgent = agent ? toEditable(agent) : null;
-    const { defaultLlmConfig } = get();
-    let editedAgent = baselineAgent ? { ...baselineAgent } : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
+    setCurrentAgent: (agent) => {
+      const agentId = agent ? parseInt(agent.id) : null;
+      const baselineAgent = agent ? toEditable(agent) : null;
+      const { defaultLlmConfig } = get();
+      let editedAgent = baselineAgent
+        ? { ...baselineAgent }
+        : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
 
-    // Check if there's a pending generation cache to restore
-    if (agentId !== null && baselineAgent) {
-      const cached = getAgentGenerationCache(agentId);
-      if (cached && !cached.isGenerating) {
-        // Generation completed while user was away, restore the cached data to editedAgent
-        const cacheUpdates: Partial<EditableAgent> = {};
+      // Check if there's a pending generation cache to restore
+      if (agentId !== null && baselineAgent) {
+        const cached = getAgentGenerationCache(agentId);
+        if (cached && !cached.isGenerating) {
+          // Generation completed while user was away, restore the cached data to editedAgent
+          const cacheUpdates: Partial<EditableAgent> = {};
 
-        if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
-        if (cached.constraintPrompt) cacheUpdates.constraint_prompt = cached.constraintPrompt;
-        if (cached.fewShotsPrompt) cacheUpdates.few_shots_prompt = cached.fewShotsPrompt;
-        if (cached.greetingMessage) cacheUpdates.greeting_message = cached.greetingMessage;
-        if (cached.exampleQuestions) {
-          cacheUpdates.example_questions = typeof cached.exampleQuestions === "string"
-            ? (() => { try { return JSON.parse(cached.exampleQuestions); } catch { return []; } })()
-            : cached.exampleQuestions;
+          if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
+          if (cached.constraintPrompt)
+            cacheUpdates.constraint_prompt = cached.constraintPrompt;
+          if (cached.fewShotsPrompt)
+            cacheUpdates.few_shots_prompt = cached.fewShotsPrompt;
+          if (cached.greetingMessage)
+            cacheUpdates.greeting_message = cached.greetingMessage;
+          if (cached.exampleQuestions) {
+            cacheUpdates.example_questions =
+              typeof cached.exampleQuestions === "string"
+                ? (() => {
+                    try {
+                      return JSON.parse(cached.exampleQuestions);
+                    } catch {
+                      return [];
+                    }
+                  })()
+                : cached.exampleQuestions;
+          }
+
+          // Only restore agent metadata if not already set in baseline
+          if (cached.agentName && !editedAgent.name)
+            cacheUpdates.name = cached.agentName;
+          if (cached.agentDisplayName && !editedAgent.display_name)
+            cacheUpdates.display_name = cached.agentDisplayName;
+          if (cached.agentDescription && !editedAgent.description)
+            cacheUpdates.description = cached.agentDescription;
+          editedAgent = { ...editedAgent, ...cacheUpdates };
         }
-
-        // Only restore agent metadata if not already set in baseline
-        if (cached.agentName && !editedAgent.name) cacheUpdates.name = cached.agentName;
-        if (cached.agentDisplayName && !editedAgent.display_name) cacheUpdates.display_name = cached.agentDisplayName;
-        if (cached.agentDescription && !editedAgent.description) cacheUpdates.description = cached.agentDescription;
-        editedAgent = { ...editedAgent, ...cacheUpdates };
       }
-    }
 
-    set({
-      currentAgentId: agentId,
-      currentAgentPermission: agent ? ((agent as any).permission ?? null) : null,
-      baselineAgent,
-      editedAgent,
-      hasUnsavedChanges: isDirty(baselineAgent, editedAgent),
-      isCreatingMode: false,
-      forceRefreshKey: 0,
-    });
-  },
-
-  enterCreateMode: () => {
-    const { defaultLlmConfig } = get();
-    set({
-      currentAgentId: null,
-      currentAgentPermission: "EDIT",
-      baselineAgent: null,
-      editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
-      hasUnsavedChanges: false,
-      isCreatingMode: true,
-      forceRefreshKey: 0,
-    });
-  },
-
-  triggerForceRefresh: () => {
-    set((state) => ({ forceRefreshKey: state.forceRefreshKey + 1 }));
-  },
-
-  updateTools: (tools) => {
-    set((state) => {
-      const editedAgent = { ...state.editedAgent, tools: [...tools] };
-      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
-      return { editedAgent, hasUnsavedChanges };
-    });
-  },
-
-  updateSkills: (skills) => {
-    set((state) => {
-      const editedAgent = { ...state.editedAgent, skills: [...skills] };
-      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
-      return { editedAgent, hasUnsavedChanges };
-    });
-  },
-
-  updateSubAgentIds: (ids) => {
-    const nextIds = normalizeArray(ids);
-    set((state) => {
-      const editedAgent = { ...state.editedAgent, sub_agent_id_list: nextIds };
-      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
-      return { editedAgent, hasUnsavedChanges };
-    });
-  },
-
-  updateSubAgentRelations: (relations) => {
-    set((state) => {
-      const editedAgent = { ...state.editedAgent, sub_agent_relations: relations };
-      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
-      return { editedAgent, hasUnsavedChanges };
-    });
-  },
-
-  updateExternalSubAgentIds: (ids) => {
-    set((state) => {
-      const editedAgent = { ...state.editedAgent, external_sub_agent_id_list: ids };
-      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
-      return { editedAgent, hasUnsavedChanges };
-    });
-  },
-
-  updateAgentConfig: (payload) => {
-    set((state) => {
-      const editedAgent = { ...state.editedAgent, ...payload };
-      const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
-      return { editedAgent, hasUnsavedChanges };
-    });
-  },
-
-  setSaveValidation: (saveValidation) => {
-    set({ saveValidation });
-  },
-
-  validateBeforeSave: async () => {
-    await get().saveValidation?.();
-  },
-
-  markAsSaved: () => {
-    const { editedAgent } = get();
-    set({
-      baselineAgent: { ...editedAgent },
-      hasUnsavedChanges: false,
-    });
-  },
-
-  discardChanges: () => {
-    set((state) => {
-      const baselineAgent = state.baselineAgent;
-      const { defaultLlmConfig } = state;
-      const editedAgent = baselineAgent ? { ...baselineAgent } : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
-      return {
+      set({
+        currentAgentId: agentId,
+        currentAgentPermission: agent
+          ? ((agent as any).permission ?? null)
+          : null,
+        baselineAgent,
         editedAgent,
+        hasUnsavedChanges: isDirty(baselineAgent, editedAgent),
+        isCreatingMode: false,
+        forceRefreshKey: 0,
+      });
+    },
+
+    enterCreateMode: () => {
+      const { defaultLlmConfig } = get();
+      set({
+        currentAgentId: null,
+        currentAgentPermission: "EDIT",
+        baselineAgent: null,
+        editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
         hasUnsavedChanges: false,
-      };
-    });
-  },
+        isCreatingMode: true,
+        forceRefreshKey: 0,
+      });
+    },
 
-  setIsGenerating: (value: boolean) => {
-    set({ isGenerating: value });
-  },
+    triggerForceRefresh: () => {
+      set((state) => ({ forceRefreshKey: state.forceRefreshKey + 1 }));
+    },
 
-  reset: () => {
-    const { defaultLlmConfig } = get();
-    set({
-      currentAgentId: null,
-      currentAgentPermission: null,
-      baselineAgent: null,
-      editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
-      hasUnsavedChanges: false,
-      isCreatingMode: false,
-      isGenerating: false,
-      forceRefreshKey: 0,
-    });
-  },
+    updateTools: (tools) => {
+      set((state) => {
+        const editedAgent = { ...state.editedAgent, tools: [...tools] };
+        const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+        return { editedAgent, hasUnsavedChanges };
+      });
+    },
 
-  setDefaultLlmConfig: (config) => {
-    set({ defaultLlmConfig: config });
-  },
+    updateSkills: (skills) => {
+      set((state) => {
+        const editedAgent = { ...state.editedAgent, skills: [...skills] };
+        const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+        return { editedAgent, hasUnsavedChanges };
+      });
+    },
 
-  getCurrentAgent: () => {
-    return get().baselineAgent;
-  },
-}));
+    updateSubAgentIds: (ids) => {
+      const nextIds = normalizeArray(ids);
+      set((state) => {
+        const editedAgent = {
+          ...state.editedAgent,
+          sub_agent_id_list: nextIds,
+        };
+        const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+        return { editedAgent, hasUnsavedChanges };
+      });
+    },
+
+    updateSubAgentRelations: (relations) => {
+      set((state) => {
+        const editedAgent = {
+          ...state.editedAgent,
+          sub_agent_relations: relations,
+        };
+        const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+        return { editedAgent, hasUnsavedChanges };
+      });
+    },
+
+    updateExternalSubAgentIds: (ids) => {
+      set((state) => {
+        const editedAgent = {
+          ...state.editedAgent,
+          external_sub_agent_id_list: ids,
+        };
+        const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+        return { editedAgent, hasUnsavedChanges };
+      });
+    },
+
+    updateAgentConfig: (payload) => {
+      set((state) => {
+        const editedAgent = { ...state.editedAgent, ...payload };
+        const hasUnsavedChanges = isDirty(state.baselineAgent, editedAgent);
+        return { editedAgent, hasUnsavedChanges };
+      });
+    },
+
+    setSaveValidation: (saveValidation) => {
+      set({ saveValidation });
+    },
+
+    validateBeforeSave: async () => {
+      await get().saveValidation?.();
+    },
+
+    markAsSaved: () => {
+      const { editedAgent } = get();
+      set({
+        baselineAgent: { ...editedAgent },
+        hasUnsavedChanges: false,
+      });
+    },
+
+    discardChanges: () => {
+      set((state) => {
+        const baselineAgent = state.baselineAgent;
+        const { defaultLlmConfig } = state;
+        const editedAgent = baselineAgent
+          ? { ...baselineAgent }
+          : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
+        return {
+          editedAgent,
+          hasUnsavedChanges: false,
+        };
+      });
+    },
+
+    setIsGenerating: (value: boolean) => {
+      set({ isGenerating: value });
+    },
+
+    reset: () => {
+      const { defaultLlmConfig } = get();
+      set({
+        currentAgentId: null,
+        currentAgentPermission: null,
+        baselineAgent: null,
+        editedAgent: createEmptyEditableAgent(defaultLlmConfig ?? undefined),
+        hasUnsavedChanges: false,
+        isCreatingMode: false,
+        isGenerating: false,
+        forceRefreshKey: 0,
+      });
+    },
+
+    setDefaultLlmConfig: (config) => {
+      set({ defaultLlmConfig: config });
+    },
+
+    getCurrentAgent: () => {
+      return get().baselineAgent;
+    },
+  })
+);

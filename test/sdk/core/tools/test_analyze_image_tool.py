@@ -65,7 +65,7 @@ class TestAnalyzeImageTool:
     def test_forward_impl_success_with_multiple_images(
         self, tool, mock_vlm_model, mock_prompt_loader
     ):
-        mock_vlm_model.analyze_image.side_effect = [
+        mock_vlm_model.invoke_sync.side_effect = [
             SimpleNamespace(content="First image analysis"),
             SimpleNamespace(content="Second image analysis"),
         ]
@@ -73,9 +73,9 @@ class TestAnalyzeImageTool:
         result = tool._forward_impl([b"img1", b"img2"], "What is shown?")
 
         assert result == ["First image analysis", "Second image analysis"]
-        assert mock_vlm_model.analyze_image.call_count == 2
-        for call in mock_vlm_model.analyze_image.call_args_list:
-            assert hasattr(call.kwargs["image_input"], "read")
+        assert mock_vlm_model.invoke_sync.call_count == 2
+        for call in mock_vlm_model.invoke_sync.call_args_list:
+            assert hasattr(call.args[0].media_input, "read")
         assert mock_prompt_loader == [("analyze_image", "en")]
 
     def test_forward_impl_zh_observer_messages(
@@ -86,7 +86,7 @@ class TestAnalyzeImageTool:
             vlm_model=mock_vlm_model,
             storage_client=mock_storage_client,
         )
-        mock_vlm_model.analyze_image.return_value = SimpleNamespace(
+        mock_vlm_model.invoke_sync.return_value = SimpleNamespace(
             content="描述")
 
         result = tool._forward_impl([b"img"], "问题")
@@ -111,7 +111,7 @@ class TestAnalyzeImageTool:
     def test_forward_impl_wraps_model_errors(
         self, tool, mock_vlm_model, mock_prompt_loader
     ):
-        mock_vlm_model.analyze_image.side_effect = Exception("model failed")
+        mock_vlm_model.invoke_sync.side_effect = Exception("model failed")
 
         with pytest.raises(
             Exception,
@@ -119,7 +119,7 @@ class TestAnalyzeImageTool:
         ):
             tool._forward_impl([b"img"], "question")
 
-        mock_vlm_model.analyze_image.assert_called_once()
+        mock_vlm_model.invoke_sync.assert_called_once()
 
 
 class TestAnalyzeImageToolEdgeCases:
@@ -159,7 +159,7 @@ class TestAnalyzeImageToolEdgeCases:
             vlm_model=mock_vlm_model,
             storage_client=mock_storage_client,
         )
-        mock_vlm_model.analyze_image.return_value = SimpleNamespace(
+        mock_vlm_model.invoke_sync.return_value = SimpleNamespace(
             content="Analysis result")
 
         result = tool._forward_impl([b"img"], "question")
@@ -168,14 +168,14 @@ class TestAnalyzeImageToolEdgeCases:
 
     def test_forward_impl_single_image_success(self, tool, mock_vlm_model, mock_prompt_loader):
         """Test successful analysis with a single image."""
-        mock_vlm_model.analyze_image.return_value = SimpleNamespace(
+        mock_vlm_model.invoke_sync.return_value = SimpleNamespace(
             content="Single image description")
 
         result = tool._forward_impl(
             [b"single_image"], "What is in this image?")
 
         assert result == ["Single image description"]
-        mock_vlm_model.analyze_image.assert_called_once()
+        mock_vlm_model.invoke_sync.assert_called_once()
 
     def test_is_chinese_property_english(self, observer_en, mock_vlm_model, mock_storage_client):
         """Test that _is_chinese is False when observer lang is English."""
@@ -310,14 +310,14 @@ class TestAnalyzeImageToolEdgeCases:
             vlm_model=mock_vlm_model,
             storage_client=mock_storage_client,
         )
-        mock_vlm_model.analyze_image.return_value = SimpleNamespace(
+        mock_vlm_model.invoke_sync.return_value = SimpleNamespace(
             content="Result")
 
         # Should not raise any exception
         result = tool._forward_impl([b"img"], "question")
 
         assert result == ["Result"]
-        mock_vlm_model.analyze_image.assert_called_once()
+        mock_vlm_model.invoke_sync.assert_called_once()
 
     def test_tool_name_and_description(self, tool):
         """Test that tool name and description are set correctly."""

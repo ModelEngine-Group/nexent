@@ -93,6 +93,7 @@ export interface SkillFileNode {
   name: string;
   type: "file" | "directory";
   children?: SkillFileNode[];
+  preview_status?: "readable" | "unsupported";
 }
 
 /**
@@ -124,6 +125,8 @@ export type SkillBuildTab = "interactive" | "upload";
 export interface SkillFileContent {
   path: string;
   content: string;
+  status?: "readable" | "unsupported" | "read_error";
+  encoding?: string;
 }
 
 /**

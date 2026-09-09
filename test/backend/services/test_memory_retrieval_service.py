@@ -1,10 +1,20 @@
 """Unit tests for ``backend.services.memory_retrieval_service`` (Phase 2)."""
 
+import importlib
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+pytestmark = pytest.mark.anyio
+
+_MODULE_PREFIXES = ("database", "backend.database", "nexent", "services")
+_ORIGINAL_MODULES = {
+    name: module
+    for name, module in sys.modules.items()
+    if name in _MODULE_PREFIXES or name.startswith(tuple(prefix + "." for prefix in _MODULE_PREFIXES))
+}
 
 
 # Path setup
@@ -16,6 +26,8 @@ sys.path.insert(
 
 # Stub database
 database_pkg = types.ModuleType("database")
+database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
+database_pkg.memory_long_term_db.get_active.return_value = None
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 sys.modules["database"] = database_pkg
@@ -153,6 +165,14 @@ sys.modules["services.memory_record_service"] = memory_record_service_mod
 
 from backend.services import memory_retrieval_service
 
+# The imported module keeps its boundary doubles; restore global import state
+# immediately so collection order cannot corrupt unrelated service/SDK tests.
+for _name in list(sys.modules):
+    if _name in _MODULE_PREFIXES or _name.startswith(tuple(prefix + "." for prefix in _MODULE_PREFIXES)):
+        if _name not in _ORIGINAL_MODULES:
+            del sys.modules[_name]
+sys.modules.update(_ORIGINAL_MODULES)
+
 
 @pytest.fixture
 def fake_record_service():
@@ -197,6 +217,10 @@ def service(fake_record_service, fake_index_service):
 
 
 def test_search_returns_full_context_memories(service):
+    memory_retrieval_service.memory_long_term_db.get_active.return_value = {
+        "version_id": 1, "version_no": 1, "scope": "tenant", "content": "tenant memory",
+        "source": "manual", "evidence_ids": [],
+    }
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn",
         user_id="u1",
@@ -214,8 +238,46 @@ def test_search_returns_full_context_memories(service):
     )
 
     assert len(results) == 1
-    assert results[0].memory_id == 1
+    assert results[0].external_id == "long-term-version:1"
     assert results[0].layer == memory_retrieval_service.MemoryLayer.TENANT
+
+
+def test_ac047_user_context_returns_exactly_one_active_document(service):
+    memory_retrieval_service.memory_long_term_db.get_active.return_value = {
+        "version_id": 8,
+        "version_no": 2,
+        "scope": "user",
+        "content": "dreaming long-term memory",
+        "source": "dreaming",
+        "evidence_ids": ["46", "47"],
+    }
+    request = memory_retrieval_service.MemorySearchRequest(
+        tenant_id="tn",
+        user_id="u1",
+        agent_id="a1",
+        layers=[memory_retrieval_service.MemoryLayer.USER],
+        query="",
+        top_k=1,
+        threshold=0.65,
+    )
+
+    import asyncio
+
+    results = asyncio.new_event_loop().run_until_complete(
+        service.search(request, write_hits=False)
+    )
+
+    assert len(results) == 1
+    dreaming = results[0]
+    assert dreaming.content == "dreaming long-term memory"
+    assert dreaming.layer == memory_retrieval_service.MemoryLayer.USER
+    assert dreaming.source == "dreaming"
+    assert dreaming.metadata["version_id"] == 8
+    assert dreaming.metadata["source_evidence_ids"] == ["46", "47"]
+    memory_retrieval_service.memory_long_term_db.get_active.assert_called_with(
+        "tn", "user", "u1"
+    )
+    memory_retrieval_service.memory_long_term_db.get_active.return_value = None
 
 
 def test_search_returns_vector_results(service):
@@ -290,7 +352,9 @@ def test_search_writes_hits(service):
 
 
 @pytest.mark.asyncio
-async def test_search_uses_default_layers_and_truncates_results(service, monkeypatch):
+async def test_search_uses_default_layers_without_truncating_full_context(
+    service, monkeypatch
+):
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
         layers=None, query="hello", top_k=1, threshold=0.5
@@ -302,7 +366,7 @@ async def test_search_uses_default_layers_and_truncates_results(service, monkeyp
 
     results = await service.search(request, write_hits=False)
 
-    assert results == [full_result]
+    assert results == [full_result, full_result, vector_result]
     service._full_context_search.assert_any_call(request=request, layer="tenant")
     service._full_context_search.assert_any_call(request=request, layer="user")
     service._vector_search.assert_called_once()
@@ -523,8 +587,8 @@ def test_vector_search_returns_empty_when_index_returns_no_hits(service):
 def test_vector_search_hybrid_builds_client(service, monkeypatch):
     embedding_client = object()
     get_client = MagicMock(return_value=embedding_client)
-    embedding_module = sys.modules["nexent.memory.embedding_model"]
-    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client, raising=False)
+    embedding_module = importlib.import_module("nexent.memory.embedding_model")
+    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client)
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
         embedding=[0.1], threshold=0.5,
@@ -546,8 +610,8 @@ def test_vector_search_hybrid_builds_client(service, monkeypatch):
 
 def test_vector_search_hybrid_client_failure_falls_back(service, monkeypatch):
     get_client = MagicMock(side_effect=RuntimeError("client failure"))
-    embedding_module = sys.modules["nexent.memory.embedding_model"]
-    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client, raising=False)
+    embedding_module = importlib.import_module("nexent.memory.embedding_model")
+    monkeypatch.setattr(embedding_module, "get_embedding_client", get_client)
     request = memory_retrieval_service.MemorySearchRequest(
         tenant_id="tn", user_id="u1", agent_id="a1", conversation_id="c1",
         embedding=[0.1], threshold=0.5,

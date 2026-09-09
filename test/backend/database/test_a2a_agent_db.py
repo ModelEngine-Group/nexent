@@ -1211,6 +1211,24 @@ class TestQueryExternalSubAgents:
             # The join returns tuples; MockJoinQuery.all() returns raw list
             assert isinstance(result, list)
 
+    def test_returns_security_fields(self, external_relation):
+        """query_external_sub_agents returns security_schemes/requirements/credentials."""
+        rel, agent = external_relation
+        agent.security_schemes = {"k": {"apiKeySecurityScheme": {"name": "X-Token", "location": "header"}}}
+        agent.security_requirements = [{"schemes": {"k": {}}}]
+        agent.security_credentials = {"k": "secret"}
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            mk.return_value = MockSession({
+                db_models_mock.A2AExternalAgentRelation: [rel],
+                db_models_mock.A2AExternalAgent: [agent],
+            })
+            result = a2a_db.query_external_sub_agents(100, 'tenant-1')
+            assert len(result) > 0
+            entry = result[0]
+            assert entry["security_schemes"] == {"k": {"apiKeySecurityScheme": {"name": "X-Token", "location": "header"}}}
+            assert entry["security_requirements"] == [{"schemes": {"k": {}}}]
+            assert entry["security_credentials"] == {"k": "secret"}
+
 
 class TestListExternalRelationsByLocalAgent:
     def test_returns_empty_when_no_relations(self):
@@ -1459,6 +1477,26 @@ class TestUpdateTaskState:
             mk.return_value = MockSession()
             result = a2a_db.update_task_state('nonexistent', 'TASK_STATE_WORKING')
             assert result is False
+
+
+class TestFailActiveTasksOnStartup:
+    def test_moves_submitted_and_working_tasks_to_failed(self):
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.update.return_value = 2
+        session = MagicMock(name="session")
+        session.query.return_value = query
+        context = MagicMock(name="context")
+        context.__enter__.return_value = session
+        context.__exit__.return_value = None
+
+        with patch.object(a2a_db, '_get_db_session', return_value=context):
+            assert a2a_db.fail_active_tasks_on_startup() == 2
+
+        updates = query.update.call_args.args[0]
+        assert updates["task_state"] == "TASK_STATE_FAILED"
+        assert updates["result_data"]["error"]["code"] == "CONTAINER_RESTARTED"
+        assert updates["completed_at"] is not None
 
 
 class TestListTasks:

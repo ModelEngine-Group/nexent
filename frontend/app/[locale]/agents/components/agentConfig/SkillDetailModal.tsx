@@ -30,17 +30,27 @@ interface SkillDetailModalProps {
 
 const OFFICIAL_SOURCES = new Set(["official", "\u5b98\u65b9"]);
 
-async function loadSkillFileTabs(skillName: string): Promise<SkillFileContent[]> {
+async function loadSkillFileTabs(
+  skillName: string
+): Promise<SkillFileContent[]> {
   const files = await fetchSkillFiles(skillName);
   const paths = flattenSkillFiles(normalizeSkillFiles(files), skillName);
   return Promise.all(
-    paths.map(async (path) => {
+    paths.map(async ({ path, previewStatus }) => {
+      if (previewStatus === "unsupported") {
+        return { path, content: "", status: "unsupported" as const };
+      }
       try {
-        const content = await fetchSkillFileContent(skillName, path);
-        return { path, content: content || "" };
+        const result = await fetchSkillFileContent(skillName, path);
+        return {
+          path,
+          content: result.content,
+          status: result.status,
+          encoding: result.encoding,
+        };
       } catch (error) {
         log.error("Failed to load skill file content:", error);
-        return { path, content: "" };
+        return { path, content: "", status: "read_error" as const };
       }
     })
   );
@@ -192,7 +202,10 @@ function formatSource(source: string | undefined, t: (key: string) => string) {
 }
 
 function flattenSkillFiles(nodes: SkillFileNode[], skillName: string) {
-  const paths: string[] = [];
+  const paths: Array<{
+    path: string;
+    previewStatus: "readable" | "unsupported";
+  }> = [];
 
   const walk = (items: SkillFileNode[], parentPath = "") => {
     items.forEach((item) => {
@@ -205,7 +218,11 @@ function flattenSkillFiles(nodes: SkillFileNode[], skillName: string) {
           : item.name;
 
       if (item.type === "file") {
-        paths.push(path);
+        paths.push({
+          path,
+          previewStatus:
+            item.preview_status === "unsupported" ? "unsupported" : "readable",
+        });
         return;
       }
 

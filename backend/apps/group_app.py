@@ -143,13 +143,16 @@ async def get_groups_endpoint(
         # Validate tenant exists
         get_tenant_info(request.tenant_id)
         # Get groups under given tenant with pagination and sorting
-        result = get_groups_by_tenant(
-            tenant_id=request.tenant_id,
-            page=request.page,
-            page_size=request.page_size,
-            sort_by=request.sort_by,
-            sort_order=request.sort_order
-        )
+        group_kwargs = {
+            "tenant_id": request.tenant_id,
+            "page": request.page,
+            "page_size": request.page_size,
+            "sort_by": request.sort_by,
+            "sort_order": request.sort_order,
+        }
+        if request.search:
+            group_kwargs["search"] = request.search
+        result = get_groups_by_tenant(**group_kwargs)
 
         # Build response content
         content = {

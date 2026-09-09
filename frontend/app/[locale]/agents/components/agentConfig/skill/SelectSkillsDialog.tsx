@@ -8,7 +8,7 @@ import { BlocksIcon, Eye, Pencil, Search, Settings, Tag } from "lucide-react";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import log from "@/lib/logger";
 import { fetchSkillInstances } from "@/services/agentConfigService";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../SkillDetailModal";
 import SkillConfigModal from "./SkillConfigModal";
@@ -23,8 +23,8 @@ interface SelectSkillsDialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onOpenManageTags: () => void;
+  readonly onOpenTagManagement?: () => void;
   readonly onEditSkill?: (skill: Skill) => void;
-  readonly isCreatingMode?: boolean;
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
 }
@@ -53,8 +53,8 @@ export default function SelectSkillsDialog({
   open,
   onClose,
   onOpenManageTags,
+  onOpenTagManagement,
   onEditSkill,
-  isCreatingMode,
   currentAgentId,
   isReadOnly,
 }: SelectSkillsDialogProps) {
@@ -69,10 +69,10 @@ export default function SelectSkillsDialog({
     Record<string, Record<string, unknown>>
   >({});
 
-  const selectedSkills = useAgentConfigStore(
-    (state) => state.editedAgent.skills
+  const selectedSkills = useAgentStore(
+    (state) => state.editedAgent?.skills ?? []
   );
-  const updateSkills = useAgentConfigStore((state) => state.updateSkills);
+  const updateSkills = useAgentStore((state) => state.updateSkills);
   const selectedSkillIds = useMemo(
     () => new Set(selectedSkills.map((skill) => Number(skill.skill_id))),
     [selectedSkills]
@@ -149,7 +149,7 @@ export default function SelectSkillsDialog({
   }, [activeTab, filteredGroups, groupedSkills, open]);
 
   useEffect(() => {
-    if (!open || !currentAgentId || isCreatingMode) {
+    if (!open || !currentAgentId) {
       setSkillInstanceMap({});
       return;
     }
@@ -184,13 +184,13 @@ export default function SelectSkillsDialog({
     return () => {
       cancelled = true;
     };
-  }, [currentAgentId, isCreatingMode, open]);
+  }, [currentAgentId, open]);
 
   const toggleSkill = useCallback(
     (skill: Skill) => {
       if (isReadOnly) return;
 
-      const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+      const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
       const isSelected = currentSkills.some(
         (selectedSkill) =>
           Number(selectedSkill.skill_id) === Number(skill.skill_id)
@@ -227,7 +227,7 @@ export default function SelectSkillsDialog({
   const selectAllVisibleSkills = useCallback(() => {
     if (isReadOnly || selectableSkillsInActiveGroup.length === 0) return;
 
-    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
     const currentSkillIds = new Set(
       currentSkills.map((skill) => Number(skill.skill_id))
     );
@@ -253,7 +253,7 @@ export default function SelectSkillsDialog({
     const visibleSkillIds = new Set(
       activeGroup.skills.map((skill) => Number(skill.skill_id))
     );
-    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
     updateSkills(
       currentSkills.filter(
         (skill) => !visibleSkillIds.has(Number(skill.skill_id))
@@ -293,7 +293,7 @@ export default function SelectSkillsDialog({
         [skill.skill_id]: configValues,
       }));
 
-      const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+      const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
       const configuredSkill = { ...skill, config_values: configValues };
       const selectedIndex = currentSkills.findIndex(
         (selectedSkill) =>
@@ -333,8 +333,20 @@ export default function SelectSkillsDialog({
             onClick={onOpenManageTags}
             className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
           >
-            {t("skillPool.manageTags")}
+            {t("skillPool.bulkAssignTags")}
           </Button>
+          {onOpenTagManagement ? (
+            <Button
+              type="text"
+              size="small"
+              icon={<Tag size={13} />}
+              disabled={!skillMetadataModifiable}
+              onClick={onOpenTagManagement}
+              className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
+            >
+              {t("skillPool.tagManagement")}
+            </Button>
+          ) : null}
         </div>
       }
       open={open}
@@ -496,7 +508,6 @@ export default function SelectSkillsDialog({
           skill={configSkill}
           initialParams={configSkill.config_schemas || []}
           currentAgentId={currentAgentId}
-          isCreatingMode={isCreatingMode}
           zIndex={1100}
           maskClosable
         />

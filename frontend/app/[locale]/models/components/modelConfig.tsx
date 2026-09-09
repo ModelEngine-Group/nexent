@@ -6,6 +6,7 @@ import {
   useRef,
   ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Col, Row, Space, App } from "antd";
@@ -71,6 +72,10 @@ const getModelData = (t: any) => ({
         id: MODEL_TYPES.VLM3,
         name: t("modelConfig.option.videoUnderstandingModel"),
       },
+      {
+        id: MODEL_TYPES.VLM4,
+        name: t("modelConfig.option.audioUnderstandingModel"),
+      },
     ],
   },
   voice: {
@@ -108,6 +113,7 @@ export const ModelConfigSection = forwardRef<
 >((props, ref): ReactNode => {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const queryClient = useQueryClient();
 
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
@@ -159,7 +165,7 @@ export const ModelConfigSection = forwardRef<
     llm: { main: "" },
     embedding: { embedding: "", multi_embedding: "" },
     reranker: { reranker: "" },
-    multimodal: { vlm: "", vlm2: "", vlm3: "" },
+    multimodal: { vlm: "", vlm2: "", vlm3: "", vlm4: "" },
     voice: { tts: "", stt: "" },
   });
 
@@ -259,11 +265,14 @@ export const ModelConfigSection = forwardRef<
   }));
 
   // Load model lists
-  const loadModelLists = async (skipVerify: boolean = false) => {
+  const loadModelLists = async (
+    skipVerify: boolean = false,
+    refreshAgentQueries: boolean = false
+  ) => {
     if (!modelConfig) return;
 
     try {
-      invalidate()
+      await invalidate();
       const [allModels, coverage] = await Promise.all([
         modelService.getAllModels(),
         modelService.getCapacityCoverage(),
@@ -272,6 +281,10 @@ export const ModelConfigSection = forwardRef<
       // Update state with all models
       setModels(allModels);
       setCapacityCoverage(coverage);
+
+      if (refreshAgentQueries) {
+        await queryClient.invalidateQueries({ queryKey: ["agents"] });
+      }
 
       // Load selected models from configuration and check if models still exist
       const llmMain = modelConfig.llm.displayName;
@@ -308,6 +321,7 @@ export const ModelConfigSection = forwardRef<
       const vlm = modelConfig.vlm.displayName;
       const vlm2 = modelConfig.vlm2?.displayName || "";
       const vlm3 = modelConfig.vlm3?.displayName || "";
+      const vlm4 = modelConfig.vlm4?.displayName || "";
       const vlmExists = vlm
         ? allModels.some(
             (m) => m.displayName === vlm && m.type === MODEL_TYPES.VLM
@@ -321,6 +335,11 @@ export const ModelConfigSection = forwardRef<
       const vlm3Exists = vlm3
         ? allModels.some(
             (m) => m.displayName === vlm3 && m.type === MODEL_TYPES.VLM3
+          )
+        : true;
+      const vlm4Exists = vlm4
+        ? allModels.some(
+            (m) => m.displayName === vlm4 && m.type === MODEL_TYPES.VLM4
           )
         : true;
 
@@ -354,6 +373,7 @@ export const ModelConfigSection = forwardRef<
           vlm: vlmExists ? vlm : "",
           vlm2: vlm2Exists ? vlm2 : "",
           vlm3: vlm3Exists ? vlm3 : "",
+          vlm4: vlm4Exists ? vlm4 : "",
         },
         voice: {
           tts: ttsExists ? tts : "",
@@ -407,6 +427,10 @@ export const ModelConfigSection = forwardRef<
         configUpdates.vlm3 = { modelName: "", displayName: "" };
       }
 
+      if (!vlm4Exists && vlm4) {
+        configUpdates.vlm4 = { modelName: "", displayName: "" };
+      }
+
       if (!sttExists && stt) {
         configUpdates.stt = { modelName: "", displayName: "" };
       }
@@ -431,6 +455,7 @@ export const ModelConfigSection = forwardRef<
         !!modelConfig.vlm.modelName ||
         !!modelConfig.vlm2?.modelName ||
         !!modelConfig.vlm3?.modelName ||
+        !!modelConfig.vlm4?.modelName ||
         !!modelConfig.tts.modelName ||
         !!modelConfig.stt.modelName;
 
@@ -489,6 +514,7 @@ export const ModelConfigSection = forwardRef<
       const hasVlm = !!modelConfig.vlm.modelName;
       const hasVlm2 = !!modelConfig.vlm2?.modelName;
       const hasVlm3 = !!modelConfig.vlm3?.modelName;
+      const hasVlm4 = !!modelConfig.vlm4?.modelName;
       const hasTts = !!modelConfig.tts.modelName;
       const hasStt = !!modelConfig.stt.modelName;
 
@@ -499,6 +525,7 @@ export const ModelConfigSection = forwardRef<
         hasVlm ||
         hasVlm2 ||
         hasVlm3 ||
+        hasVlm4 ||
         hasTts ||
         hasStt;
 
@@ -514,6 +541,8 @@ export const ModelConfigSection = forwardRef<
           modelConfig.vlm2?.modelName || "";
         currentSelectedModels.multimodal.vlm3 =
           modelConfig.vlm3?.modelName || "";
+        currentSelectedModels.multimodal.vlm4 =
+          modelConfig.vlm4?.modelName || "";
         currentSelectedModels.voice.tts = modelConfig.tts.modelName;
         currentSelectedModels.voice.stt = modelConfig.stt.modelName;
       } else {
@@ -1113,7 +1142,7 @@ export const ModelConfigSection = forwardRef<
           isOpen={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}
           onSuccess={async (newModel) => {
-            await loadModelLists(true);
+            await loadModelLists(true, true);
             message.success(t("modelConfig.message.addSuccess"));
 
             if (newModel && newModel.name && newModel.type) {
@@ -1130,7 +1159,7 @@ export const ModelConfigSection = forwardRef<
           isOpen={isDeleteModalOpen}
           onClose={() => setIsDeleteModalOpen(false)}
           onSuccess={async () => {
-            await loadModelLists(true);
+            await loadModelLists(true, true);
             return;
           }}
           models={models}

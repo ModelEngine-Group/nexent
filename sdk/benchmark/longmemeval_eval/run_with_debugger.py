@@ -23,8 +23,8 @@ Usage:
         --token_threshold 200000 --baseline_context_chars 800000 \
         --sessions_per_batch 12 --keep_recent_pairs 10 --summary_schema multi_topic
 
-Export to Langfuse:
-    python -m ctx_debugger.langfuse_export <trace.jsonl> \
+Export to Langfuse from the repository root:
+    PYTHONPATH=sdk/benchmark/tools backend/.venv/bin/python -m ctx_debugger.langfuse_export <trace.jsonl> \
       --session-id longmemeval-ctx0-question10-multi \
       --host http://localhost:3100
 """
@@ -32,27 +32,30 @@ import asyncio
 import os
 import sys
 
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCHMARK_DIR = os.path.dirname(HERE)
 SDK_DIR = os.path.dirname(BENCHMARK_DIR)
-CTX_DEBUGGER_DIR = os.path.join(SDK_DIR, "ctx_debugger")
+TOOLS_DIR = os.path.join(BENCHMARK_DIR, "tools")
 
-for p in (SDK_DIR, BENCHMARK_DIR, HERE, CTX_DEBUGGER_DIR):
+for p in (SDK_DIR, BENCHMARK_DIR, TOOLS_DIR, HERE):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-TRACE_PATH = os.environ.get(
-    "NEXENT_CONTEXT_DEBUG", "/tmp/nexent_longmemeval_trace.jsonl"
-)
+from ctx_debugger import resolve_trace_path  # noqa: E402
+
+
+TRACE_PATH = resolve_trace_path("nexent_longmemeval_trace_")
 os.environ["NEXENT_CONTEXT_DEBUG"] = TRACE_PATH
 
 
 def _install_auto_attach():
     """Wrap CoreAgent.__init__ to auto-attach debugger."""
-    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.core_agent import CoreAgent  # noqa: I001
     from ctx_debugger import attach_debugger
     from ctx_debugger.debugger import _wrap_compress_if_needed
     import logging
+
     log = logging.getLogger(__name__)
 
     original_agent_init = CoreAgent.__init__
@@ -89,7 +92,7 @@ def main():
     _install_auto_attach()
 
     os.chdir(HERE)
-    from run_longmemeval import main as longmemeval_main, _build_arg_parser
+    from run_longmemeval import main as longmemeval_main, _build_arg_parser  # noqa: I001
 
     args = _build_arg_parser().parse_args()
     asyncio.run(longmemeval_main(args))

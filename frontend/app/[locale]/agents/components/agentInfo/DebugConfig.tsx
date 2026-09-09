@@ -35,6 +35,7 @@ import DebugMessageList from "./DebugMessageList";
 import { setGlobalA2UIActionHandler, type A2UIAction } from "@/lib/a2ui";
 import DebugOptimizeModal from "./DebugOptimizeModal";
 import { useCompareStream } from "./useCompareStream";
+import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 
 // Check if a file type is supported
 const isSupportedFile = (extension: string, fileType: string): boolean => {
@@ -303,6 +304,9 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   const [inputQuestion, setInputQuestion] = useState("");
   const handleSendRef = useRef<() => void>(() => {});
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
+  const [runtimeMetadata, setRuntimeMetadata] = useState<
+    Record<string, unknown>
+  >({});
   const { availableLlmModels } = useModelList();
   const { agentInfo } = useAgentInfo(parsedAgentId);
   const editedAgent = useAgentConfigStore((state) => state.editedAgent);
@@ -662,6 +666,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
           agent_id: agentIdValue, // Use the properly parsed agent_id
           minio_files: minioFiles.length > 0 ? minioFiles : undefined,
           model_id: selectedModelId ?? undefined,
+          metadata: runtimeMetadata,
         },
         abortControllerRef.current.signal
       ); // Pass AbortSignal
@@ -1081,7 +1086,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
   };
 
   return (
-    <div className="w-full h-full bg-white">
+    <div className="flex h-full w-full flex-col bg-white">
       <DebugOptimizeModal
         open={debugOptimizeOpen}
         agentId={parsedAgentId ?? 0}
@@ -1103,6 +1108,17 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         }}
       />
 
+      {editedAgent?.allow_chat_metadata && (
+        <div className="flex shrink-0 items-center border-b px-3 py-1">
+          <RuntimeMetadataEditor
+            value={runtimeMetadata}
+            onChange={setRuntimeMetadata}
+            disabled={isStreaming || isCompareStreaming}
+          />
+        </div>
+      )}
+
+      <div className="min-h-0 flex-1">
       <AgentDebugging
         key={agentId} // Re-render when agentId changes to ensure state resets
         onStop={handleStop}
@@ -1127,6 +1143,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
         selectedModelId={selectedModelId}
         onModelSelect={setSelectedModelId}
       />
+      </div>
     </div>
   );
 }

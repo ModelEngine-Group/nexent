@@ -10,9 +10,14 @@ export interface TenantListResult {
   total_pages: number;
 }
 
-export function useTenantList(params?: { page?: number; page_size?: number }) {
+export function useTenantList(params?: {
+  page?: number;
+  page_size?: number;
+  enabled?: boolean;
+}) {
   return useQuery({
     queryKey: ["tenants", params?.page ?? 1, params?.page_size ?? 20],
+    enabled: params?.enabled ?? true,
     queryFn: async () => {
       log.info("[useTenantList] Fetching tenants with params:", params);
       const result = await listTenants(params);

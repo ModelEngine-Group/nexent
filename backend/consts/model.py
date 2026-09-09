@@ -1,7 +1,15 @@
+from datetime import datetime
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
@@ -86,6 +94,27 @@ class UserDeleteRequest(BaseModel):
     new_owner_id: Optional[str] = None
 
 
+class ApiUserBatchCreateRequest(BaseModel):
+    """Request model for creating API-only users in one transaction."""
+
+    role: Literal["DEV", "USER"] = "USER"
+    group_id: Optional[int] = Field(None, ge=1)
+    count: int = Field(1, ge=1, le=100)
+
+
+class ApiKeyTargetRequest(BaseModel):
+    """Identify a tenant user by exactly one supported field."""
+
+    user_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[EmailStr] = None
+
+    @model_validator(mode="after")
+    def validate_single_target(self):
+        if bool(self.user_id) == bool(self.email):
+            raise ValueError("Exactly one of user_id or email must be provided")
+        return self
+
+
 class OAuthProviderDefinition(BaseModel):
     name: str
     display_name: str
@@ -137,6 +166,377 @@ class ModelResponse(BaseModel):
     code: int = 200
     message: str = ""
     data: Any
+
+
+class TagDefinitionCreateRequest(BaseModel):
+    definition_key: str | None = Field(None, min_length=1, max_length=100)
+    definition_name: str = Field(..., min_length=1, max_length=255)
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
+    initial_values: list[str] = Field(default_factory=list, max_length=1000)
+    sort_order: int | None = None
+
+    @field_validator("definition_key", "definition_name")
+    @classmethod
+    def strip_required_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Value must not be empty")
+        return normalized
+
+    @field_validator("initial_values")
+    @classmethod
+    def validate_initial_values(cls, values: list[str]) -> list[str]:
+        normalized_values = []
+        seen = set()
+        for value in values:
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("Tag values must not be empty")
+            normalized_key = normalized.lower()
+            if normalized_key in seen:
+                raise ValueError("Tag values must be unique after normalization")
+            seen.add(normalized_key)
+            normalized_values.append(normalized)
+        return normalized_values
+
+    @model_validator(mode="after")
+    def validate_selection_mode_values(self):
+        if self.selection_mode == "no_value" and self.initial_values:
+            raise ValueError("A no-value tag definition cannot contain tag values")
+        if self.selection_mode != "no_value" and not self.initial_values:
+            raise ValueError("At least one tag value is required")
+        return self
+
+
+class TagDefinitionUpdateRequest(BaseModel):
+    definition_name: str | None = Field(None, min_length=1, max_length=255)
+    selection_mode: Literal["single_select", "multi_select", "no_value"] | None = None
+
+    @field_validator("definition_name")
+    @classmethod
+    def strip_definition_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Definition name must not be empty")
+        return normalized
+
+
+class TagValueCreateRequest(BaseModel):
+    display_value: str = Field(..., min_length=1)
+    sort_order: int = 0
+
+    @field_validator("display_value")
+    @classmethod
+    def strip_display_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Tag value must not be empty")
+        return normalized
+
+
+class TagValueUpdateRequest(BaseModel):
+    display_value: str = Field(..., min_length=1)
+
+    @field_validator("display_value")
+    @classmethod
+    def strip_updated_display_value(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Tag value must not be empty")
+        return normalized
+
+
+class TagStatusUpdateRequest(BaseModel):
+    status: Literal["active", "disabled"]
+
+
+class TagOrderUpdateRequest(BaseModel):
+    sort_order: int
+
+
+class TagAuditResponse(BaseModel):
+    created_by: str | None = None
+    updated_by: str | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class TagValueResponse(TagAuditResponse):
+    value_id: int
+    display_value: str
+    normalized_value: str
+    sort_order: int
+    status: Literal["active", "disabled"]
+
+
+class TagDefinitionResponse(TagAuditResponse):
+    definition_id: int
+    bucket_id: int
+    definition_key: str
+    definition_name: str
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
+    sort_order: int
+    status: Literal["active", "disabled"]
+    active_value_count: int = Field(..., ge=0, le=1000)
+    value_capacity: int = Field(..., ge=1, le=1000)
+    values: list[TagValueResponse] | None = Field(default=None, max_length=1000)
+
+
+class TagLibraryResponse(TagAuditResponse):
+    bucket_id: int
+    bucket_key: Literal["default_resource", "knowledge_content"]
+    bucket_name: str
+    status: Literal["active", "disabled"]
+    resource_types: List[
+        Literal[
+            "agent",
+            "skill",
+            "tool",
+            "mcp_service",
+            "knowledge_base",
+            "knowledge_document",
+        ]
+    ] = Field(default_factory=list, max_length=6)
+    definition_count: int = Field(..., ge=0, le=100)
+    definition_capacity: int = Field(..., ge=1, le=100)
+
+
+class TagDefinitionUsageResponse(BaseModel):
+    definition_id: int
+    active_value_count: int = Field(..., ge=0, le=1000)
+    active_usage_count: int = Field(..., ge=0)
+    value_capacity: int = Field(..., ge=1, le=1000)
+
+
+class TagValueUsageResponse(BaseModel):
+    value_id: int
+    active_usage_count: int = Field(..., ge=0)
+
+
+class TagDeleteResponse(BaseModel):
+    success: bool
+
+
+class TagConflictDetailsResponse(BaseModel):
+    definition_id: Optional[int] = None
+    value_id: Optional[int] = None
+    active_value_count: int | None = Field(None, ge=0, le=1000)
+    active_usage_count: int | None = Field(None, ge=0)
+    resources_with_multiple_values: int | None = Field(None, ge=0)
+    limit: int | None = Field(None, ge=1)
+    current_count: int | None = Field(None, ge=0)
+    scope: Literal["definition", "value", "assignment"] | None = None
+
+
+class TagConflictResponse(BaseModel):
+    message: str
+    details: TagConflictDetailsResponse
+
+
+class TagHTTPConflictResponse(BaseModel):
+    detail: TagConflictResponse
+
+
+_LEGACY_FLAT_TAG_FIELDS = ("tags", "labels", "label", "tag")
+
+
+def _reject_legacy_flat_tag_fields(data: Any) -> None:
+    """Reject deprecated flat tag fields on canonical structured writes."""
+
+    if not isinstance(data, dict):
+        return
+    supplied = [field for field in _LEGACY_FLAT_TAG_FIELDS if field in data]
+    if supplied:
+        raise ValueError(
+            "Legacy flat tag fields are rejected by the canonical assignment API "
+            f"({', '.join(supplied)}); submit structured controlled value_ids only. "
+            "Use the migration backfill or the structured assignment endpoints."
+        )
+
+
+class TagAssignmentReplaceRequest(BaseModel):
+    """Controlled value identifiers replacing one resource's assignments."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_flat_writes(cls, data):
+        _reject_legacy_flat_tag_fields(data)
+        return data
+
+    @field_validator("value_ids")
+    @classmethod
+    def validate_value_ids(cls, value_ids: list[int]) -> list[int]:
+        if any(value_id <= 0 for value_id in value_ids):
+            raise ValueError("Tag value IDs must be positive")
+        return list(dict.fromkeys(value_ids))
+
+
+class TagAssignmentValueResponse(BaseModel):
+    definition_id: int
+    definition_key: str
+    definition_name: str
+    selection_mode: Literal["single_select", "multi_select", "no_value"]
+    value_id: int
+    display_value: str
+    value_status: Literal["active", "disabled"]
+
+
+class TagAssignmentResponse(BaseModel):
+    resource_type: Literal[
+        "agent",
+        "skill",
+        "tool",
+        "mcp_service",
+        "knowledge_base",
+        "knowledge_document",
+    ]
+    resource_id: str
+    assignment_count: int = Field(..., ge=0, le=100)
+    assignment_capacity: int = Field(..., ge=1, le=100)
+    assignments: list[TagAssignmentValueResponse] = Field(default_factory=list)
+
+
+class TagDocumentProjectionStatusResponse(BaseModel):
+    """Synchronization status of one provider-backed document tag projection."""
+
+    status: Literal[
+        "pending", "synced", "failed", "unsupported", "not_projected"
+    ]
+    version: int
+    tag_count: int
+    last_error: str | None = None
+    retry_count: int = 0
+    last_attempt_at: datetime | None = None
+    next_attempt_at: datetime | None = None
+    update_time: datetime | None = None
+
+
+class TagLegacyFlatTagsProjectionResponse(BaseModel):
+    """Bounded deprecated flat-array projection derived from structured assignments."""
+
+    resource_type: str
+    resource_id: str
+    tags: list[str] = Field(default_factory=list)
+    count: int = 0
+    limit: int = 100
+    deprecated: Literal[True] = True
+
+
+class TagAssignmentBulkTarget(BaseModel):
+    """One explicit resource target for a bulk replacement request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_id: str = Field(..., min_length=1)
+    provider: str | None = Field(None, min_length=1)
+    knowledge_base_id: str | None = Field(None, min_length=1)
+    value_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_flat_writes(cls, data):
+        _reject_legacy_flat_tag_fields(data)
+        return data
+
+    @field_validator("value_ids")
+    @classmethod
+    def validate_target_value_ids(cls, value_ids: list[int]) -> list[int]:
+        return TagAssignmentReplaceRequest.validate_value_ids(value_ids)
+
+
+class TagAssignmentBulkReplaceRequest(BaseModel):
+    """Explicit resource targets for one resource-type bulk replacement."""
+
+    targets: list[TagAssignmentBulkTarget] = Field(..., min_length=1)
+
+
+class TagAssignmentBulkOutcome(BaseModel):
+    resource_id: str
+    outcome: Literal["updated", "not_found_or_forbidden", "validation"]
+    assignment: TagAssignmentResponse | None = None
+    message: str | None = None
+    details: dict[str, Any] | None = None
+
+
+class TagAssignmentFilter(BaseModel):
+    """One definition predicate; callers combine predicates with AND."""
+
+    definition_id: int = Field(..., gt=0)
+    value_ids: list[int] = Field(..., min_length=1)
+
+    @field_validator("value_ids")
+    @classmethod
+    def validate_filter_value_ids(cls, value_ids: list[int]) -> list[int]:
+        return TagAssignmentReplaceRequest.validate_value_ids(value_ids)
+
+
+class TagResourceFilterRequest(BaseModel):
+    """Filter already-authorized non-document resource ids by tag predicates.
+
+    Callers supply the resource ids their own list flow has already authorized;
+    the tag service narrows that set to resources matching every predicate
+    (OR within a definition, AND across definitions). It never widens scope or
+    returns resources the caller could not already see.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_ids: list[str] = Field(..., min_length=1, max_length=500)
+    predicates: list[TagAssignmentFilter] = Field(default_factory=list)
+
+    @field_validator("resource_ids")
+    @classmethod
+    def validate_filter_resource_ids(cls, resource_ids: list[str]) -> list[str]:
+        normalized = []
+        for resource_id in resource_ids:
+            value = str(resource_id).strip()
+            if not value:
+                raise ValueError("resource_ids must not contain empty values")
+            normalized.append(value)
+        return list(dict.fromkeys(normalized))
+
+
+class TagResourceFilterResponse(BaseModel):
+    """Resource ids from the caller's authorized set that match the predicates."""
+
+    resource_type: str
+    matched_resource_ids: list[str] = Field(default_factory=list)
+
+
+class TagDocumentBatchStatusRequest(BaseModel):
+    """Batch document tag status for one provider knowledge base."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] = Field(..., min_length=1, max_length=200)
+    predicates: list[TagAssignmentFilter] = Field(default_factory=list)
+
+    @field_validator("document_ids")
+    @classmethod
+    def validate_document_ids(cls, document_ids: list[str]) -> list[str]:
+        normalized = []
+        for document_id in document_ids:
+            value = str(document_id).strip()
+            if not value:
+                raise ValueError("document_ids must not contain empty values")
+            normalized.append(value)
+        return list(dict.fromkeys(normalized))
+
+
+class TagDocumentBatchStatusResponse(BaseModel):
+    """One document's tag assignment and provider projection summary."""
+
+    document_id: str
+    assignment_count: int = 0
+    projection_status: TagDocumentProjectionStatusResponse | None = None
 
 
 class ModelRequest(BaseModel):
@@ -204,7 +604,7 @@ class CapacityCoverageBareModel(BaseModel):
     model_id: int
     model_name: str
     model_factory: Optional[str] = None
-    model_type: Literal["llm", "vlm", "vlm2", "vlm3"]
+    model_type: Literal["llm", "vlm", "vlm2", "vlm3", "vlm4"]
     max_tokens: Optional[int] = None
     suggestion_available: bool = False
 
@@ -278,13 +678,12 @@ class ModelConfig(BaseModel):
     vlm: SingleModelConfig
     vlm2: SingleModelConfig = Field(default_factory=_empty_model_config)
     vlm3: SingleModelConfig = Field(default_factory=_empty_model_config)
+    vlm4: SingleModelConfig = Field(default_factory=_empty_model_config)
     stt: STTModelConfig
     tts: TTSModelConfig
 
 
 class AppConfig(BaseModel):
-    appName: str
-    appDescription: str
     iconType: str
     iconKey: Optional[str] = "search"
     customIconUrl: Optional[str] = None
@@ -323,6 +722,77 @@ class ToolParamsRequest(BaseModel):
     )
 
 
+KnowledgeScopeMode = Literal["inherit", "override", "disabled"]
+
+
+class LocalKnowledgeScopeRequest(BaseModel):
+    """Conversation-scoped selection for local knowledge bases."""
+
+    mode: KnowledgeScopeMode = "inherit"
+    knowledge_ids: List[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("knowledge_ids")
+    @classmethod
+    def normalize_knowledge_ids(cls, values: List[str]) -> List[str]:
+        normalized = []
+        for value in values:
+            item = str(value).strip()
+            if not item or len(item) > 32:
+                raise ValueError("knowledge_ids must contain non-empty identifiers of at most 32 characters")
+            if item not in normalized:
+                normalized.append(item)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode_and_ids(self):
+        if self.mode == "override" and not self.knowledge_ids:
+            raise ValueError("local override mode requires at least one knowledge_id")
+        if self.mode != "override" and self.knowledge_ids:
+            raise ValueError(f"local {self.mode} mode does not accept knowledge_ids")
+        return self
+
+
+class AidpKnowledgeScopeRequest(BaseModel):
+    """Conversation-scoped selection for AIDP knowledge bases."""
+
+    mode: KnowledgeScopeMode = "inherit"
+    kds_ids: List[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("kds_ids")
+    @classmethod
+    def normalize_kds_ids(cls, values: List[str]) -> List[str]:
+        normalized = []
+        for value in values:
+            item = str(value).strip()
+            if not item or len(item) > 256:
+                raise ValueError("kds_ids must contain non-empty identifiers of at most 256 characters")
+            if item not in normalized:
+                normalized.append(item)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_mode_and_ids(self):
+        if self.mode == "override" and not self.kds_ids:
+            raise ValueError("AIDP override mode requires at least one kds_id")
+        if self.mode != "override" and self.kds_ids:
+            raise ValueError(f"AIDP {self.mode} mode does not accept kds_ids")
+        return self
+
+
+class ConversationKnowledgeScopeRequest(BaseModel):
+    """Persisted business policy for conversation-scoped knowledge retrieval."""
+
+    schema_version: Literal[1] = 1
+    local: LocalKnowledgeScopeRequest = Field(default_factory=LocalKnowledgeScopeRequest)
+    aidp: AidpKnowledgeScopeRequest = Field(default_factory=AidpKnowledgeScopeRequest)
+
+
+class ConversationKnowledgeScopeUpdateRequest(BaseModel):
+    """Replace a conversation scope, or clear it with null to restore defaults."""
+
+    scope: Optional[ConversationKnowledgeScopeRequest] = None
+
+
 class AgentRequest(BaseModel):
     query: str
     conversation_id: Optional[int] = None
@@ -335,15 +805,26 @@ class AgentRequest(BaseModel):
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
     tool_params: Optional[ToolParamsRequest] = None
+    knowledge_scope: Optional[ConversationKnowledgeScopeRequest] = None
     context_policy: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional request-scoped context policy override",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Conversation runtime metadata available to the agent",
+    )
+    expected_metadata_version: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Optional optimistic-lock version for runtime metadata updates",
     )
 
     @field_validator("context_policy")
     @classmethod
     def validate_context_policy(cls, value):
         return _validated_context_policy(value)
+
     enable_plan: Optional[bool] = Field(
         default=False,
         description="Whether to enable the planning phase before execution"
@@ -360,6 +841,21 @@ class NL2AgentRunRequest(BaseModel):
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    agent_id: int = Field(gt=0)
+
+
+class NL2SkillRunRequest(BaseModel):
+    """Request payload for one ephemeral NL2Skill conversation turn."""
+
+    query: str = Field(min_length=1)
+    history: Optional[List[HistoryItem]] = None
+    draft_snapshot: Optional[Dict[str, Any]] = None
+    complexity: Literal["simple", "complicated"] = "complicated"
+    language: Optional[Literal["zh", "en"]] = None
+    model_id: Optional[int] = Field(
+        default=None,
+        description="Optional model ID override. When not specified, uses the tenant's configured LLM model.",
+    )
 
 
 class MessageUnit(BaseModel):
@@ -391,6 +887,10 @@ class RenameRequest(BaseModel):
     conversation_id: int
     name: str
 
+
+class BatchDeleteConversationRequest(BaseModel):
+    conversation_ids: List[int]
+
 # Pydantic models for API
 class TaskRequest(BaseModel):
     source: str
@@ -400,6 +900,8 @@ class TaskRequest(BaseModel):
     original_filename: Optional[str] = None
     embedding_model_id: Optional[int] = None
     tenant_id: Optional[str] = None
+    file_id: Optional[str] = None
+    telemetry_context: Dict[str, str] = Field(default_factory=dict)
     additional_params: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -448,8 +950,16 @@ class HybridSearchRequest(BaseModel):
                                    description="List of index names to search")
     top_k: int = Field(10, ge=1, le=100,
                        description="Number of results to return")
-    weight_accurate: float = Field(0.5, ge=0.0, le=1.0,
-                                   description="Weight applied to accurate search scores")
+    weight_accurate: Optional[float] = Field(
+        None, ge=0.0, le=1.0,
+        description="Optional caller-specified weight applied to accurate search scores",
+    )
+    tag_predicates: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Document tag predicates: list of {definition_id, value_ids} "
+        "groups combined with OR-within / AND-across semantics. Results are "
+        "restricted to projection-confirmed documents when provided.",
+    )
 
 
 # Request models
@@ -458,7 +968,6 @@ class ProcessParams(BaseModel):
     source_type: str
     index_name: str
     authorization: Optional[str] = None
-    model_id: Optional[int] = None
 
 
 class OpinionRequest(BaseModel):
@@ -626,11 +1135,14 @@ class AgentInfoRequest(BaseModel):
     group_ids: Optional[List[int]] = None
     ingroup_permission: Optional[str] = None
     enable_context_manager: Optional[bool] = None
+    is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
+    allow_chat_metadata: Optional[bool] = None
 
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+    icon_url: Optional[str] = None
     version_no: int = 0
 
     @field_validator("verification_config", mode="before")
@@ -696,6 +1208,7 @@ class ToolInfo(BaseModel):
     origin_name: Optional[str] = None
     category: Optional[str] = None
     labels: Optional[List[str]] = None
+    is_user_selectable: bool = True
 
 
 # used in Knowledge Summary request
@@ -714,12 +1227,12 @@ class ExportAndImportAgentInfo(BaseModel):
     name: str
     display_name: Optional[str] = None
     description: str
-    business_description: str
     author: Optional[str] = None
     max_steps: int
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: bool = True
     provide_run_summary: bool
+    allow_chat_metadata: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
@@ -735,6 +1248,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+    example_questions: Optional[List[str]] = None
 
     @field_validator("context_policy")
     @classmethod
@@ -774,6 +1289,7 @@ class RepositoryImportRequirementItem(BaseModel):
     description: Optional[str] = None
     available: bool
     reason_code: Optional[str] = None
+    suggested_new_name: Optional[str] = None
 
 
 class RepositoryImportPrecheckResponse(BaseModel):
@@ -864,10 +1380,23 @@ class SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class SkillResolution(BaseModel):
+    """User-selected resolution for a duplicate skill during agent import."""
+    skill_name: str
+    action: Literal["rename", "use_existing"]
+    new_name: Optional[str] = None
+
+
+class SkillConflictCheckRequest(BaseModel):
+    """Skill names to check before showing the agent import steps."""
+    skill_names: List[str]
+
+
 class AgentImportRequest(BaseModel):
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None
+    skill_resolutions: Optional[List[SkillResolution]] = None
 
 
 class AgentNameBatchRegenerateItem(BaseModel):
@@ -882,7 +1411,7 @@ class AgentNameBatchRegenerateRequest(BaseModel):
 
 
 class AgentNameBatchCheckItem(BaseModel):
-    name: str
+    name: str = ""
     display_name: Optional[str] = None
     agent_id: Optional[int] = None
 
@@ -1004,9 +1533,7 @@ class TenantCreateRequest(BaseModel):
     )
     locale: Optional[str] = Field(
         default=None,
-        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en'). "
-                    "Determines the source label for auto-installed skills: "
-                    "'zh' → '官方', other locales → 'official'."
+        description="Frontend locale when creating the tenant (e.g. 'zh' or 'en')."
     )
 
 
@@ -1053,6 +1580,8 @@ class GroupListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search group name")
 
 
 class UserListRequest(BaseModel):
@@ -1066,6 +1595,12 @@ class UserListRequest(BaseModel):
         "created_at", description="Field to sort by")
     sort_order: Optional[str] = Field(
         "desc", description="Sort order (asc or desc)")
+    search: Optional[str] = Field(
+        None, max_length=200, description="Search user email")
+    roles: Optional[List[str]] = Field(
+        None, description="Filter by user roles")
+    group_ids: Optional[List[int]] = Field(
+        None, description="Filter by user group IDs")
 
 
 class GroupUserRequest(BaseModel):
@@ -1294,7 +1829,6 @@ class VersionPublishRequest(BaseModel):
     """Request model for publishing a new version"""
     version_name: Optional[str] = Field(None, description="User-defined version name for display")
     release_note: Optional[str] = Field(None, description="Release notes / publish remarks")
-    publish_as_a2a: bool = Field(False, description="Whether to publish this agent as an A2A Server agent")
 
 
 class VersionListItemResponse(BaseModel):
@@ -1306,7 +1840,6 @@ class VersionListItemResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number if rollback")
     source_type: Optional[str] = Field(None, description="Source type: NORMAL / ROLLBACK")
     status: str = Field(..., description="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
 
@@ -1326,7 +1859,6 @@ class VersionDetailResponse(BaseModel):
     source_version_no: Optional[int] = Field(None, description="Source version number")
     source_type: Optional[str] = Field(None, description="Source type")
     status: str = Field(..., description="Version status")
-    is_a2a: bool = Field(False, description="Whether this version is published as an A2A Server agent")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
     agent_info: Optional[dict] = Field(None, description="Agent info snapshot")
@@ -1396,6 +1928,8 @@ class SkillFileData(BaseModel):
     """A single file within a skill."""
     path: str = Field(description="Relative file path within the skill (e.g. 'SKILL.md', 'scripts/run.py')")
     content: str = Field(description="Full file content")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
+    encoding: Optional[str] = Field(default=None, description="Source character encoding to preserve when writing")
 
 
 class SkillUpdateRequest(BaseModel):
@@ -1435,14 +1969,6 @@ class SkillResponse(BaseModel):
     create_time: Optional[str] = None
     updated_by: Optional[str] = None
     update_time: Optional[str] = None
-
-
-class SkillCreateInteractiveRequest(BaseModel):
-    """Request model for interactive skill creation via LLM agent."""
-    user_request: str
-    existing_skill: Optional[Dict[str, Any]] = None
-    complexity: Optional[str] = "simple"
-    language: Optional[str] = "zh"
 
 
 # ---------------------------------------------------------------------------
@@ -1576,30 +2102,13 @@ class ListMcpServicesQuery(BaseModel):
         return value
 
 
-class RegistryListQuery(BaseModel):
-    """Query parameters for listing MCP registry services"""
-    search: Optional[str] = Field(None, description="Search keyword")
-    include_deleted: bool = Field(default=False, description="Include deleted records")
-    updated_since: Optional[str] = Field(None, description="Filter by update time")
-    version: Optional[str] = Field(None, description="Filter by version")
-    cursor: Optional[str] = Field(None, description="Pagination cursor")
-    limit: int = Field(default=30, ge=1, le=100, description="Items per page")
-
-    @field_validator("search", "updated_since", "version", "cursor", mode="before")
-    @classmethod
-    def _strip_text(cls, value: Any):
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped or None
-        return value
-
-
 class CommunityListRequest(BaseModel):
     """Request model for listing community MCP services"""
     search: Optional[str] = Field(None, description="Search keyword")
     tag: Optional[str] = Field(None, description="Filter by tag")
     transport_type: Optional[str] = Field(None,description="Filter by transport: url or container")
     cursor: Optional[str] = Field(None, description="Pagination cursor")
+    page: Optional[int] = Field(None, ge=1, description="Offset pagination page")
     limit: int = Field(default=30, ge=1, le=100, description="Items per page")
 
     @field_validator("search", "tag", "cursor", "transport_type", mode="before")

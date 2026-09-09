@@ -16,6 +16,7 @@ export function useStartEvaluation() {
       agentId: number;
       evaluationSetId: number;
       judgeModelId: number;
+      evaluatorIds?: number[];
     }): Promise<AgentEvaluationRun | null> => {
       setStarting(true);
       try {
@@ -23,6 +24,7 @@ export function useStartEvaluation() {
           agent_id: params.agentId,
           evaluation_set_id: params.evaluationSetId,
           judge_model_id: params.judgeModelId,
+          evaluator_ids: params.evaluatorIds ?? undefined,
         });
         message.success(t("agentEvaluation.message.startSuccess"));
         return run;

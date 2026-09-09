@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import {
   formatMineDate,
   getMineCardMenuActions,
@@ -40,16 +41,12 @@ const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
   reviewUpdate: "agentRepository.mine.menu.reviewUpdate",
 };
 
-const STATUS_BADGE_CLASS: Record<
-  "pending" | "shared" | "rejected",
-  string
-> = {
+const STATUS_BADGE_CLASS: Record<"pending" | "shared" | "rejected", string> = {
   pending:
     "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
   shared:
     "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
-  rejected:
-    "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
+  rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
 export function MyAgentCard({
@@ -68,6 +65,7 @@ export function MyAgentCard({
   const title = agent.name?.trim() || t("agentRepository.card.untitled");
   const description =
     agent.description?.trim() || t("agentRepository.card.noDescription");
+  const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
   const published = (agent.current_version_no ?? 0) > 0;
   const repositoryInfo = agent.repository_info ?? [];
   const hasRepositoryInfo = repositoryInfo.length > 0;
@@ -186,12 +184,28 @@ export function MyAgentCard({
         {description}
       </p>
 
+      {tags.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              {getAgentRepositoryTagLabel(tag, t)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-auto flex flex-col gap-3">
         <div className="flex min-h-[1.75rem] items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
           <div className="min-w-0">
             {versionLabel != null ? (
               <span className="inline-flex items-center gap-1.5">
-                <span className="size-1.5 rounded-full bg-primary" aria-hidden />
+                <span
+                  className="size-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
                 {t("agentRepository.mine.currentVersion", {
                   version: versionLabel,
                 })}
@@ -229,7 +243,15 @@ export function MyAgentCard({
               {t("agentRepository.mine.view")}
             </Button>
           )}
-          {/* Evaluate button hidden: agent evaluation feature temporarily disabled */}
+          <Button
+            type="default"
+            className="min-w-0 flex-1"
+            icon={<LineChart className="size-3.5" aria-hidden />}
+            onClick={onEvaluate}
+            disabled={!canEvaluate}
+          >
+            {t("agentRepository.mine.evaluate")}
+          </Button>
         </div>
       </div>
     </Card>

@@ -70,6 +70,7 @@ with patch('backend.database.attachment_db.minio_client', minio_client_mock):
         download_file,
         get_file_url,
         get_file_size_from_minio,
+        get_file_size_from_minio_strict,
         file_exists,
         copy_file,
         list_files,
@@ -533,6 +534,19 @@ class TestGetFileSizeFromMinio:
         mock_client._ensure_initialized.assert_called_once()
         mock_client.get_file_size.assert_called_once_with('attachments/test.txt', 'explicit-bucket')
 
+    @patch('backend.database.attachment_db.minio_client')
+    def test_get_file_size_from_minio_strict_normalizes_and_preserves_missing(self, mock_client):
+        mock_client.get_file_size_strict.return_value = None
+
+        size = get_file_size_from_minio_strict(
+            's3://source-bucket/knowledge_base/test.txt'
+        )
+
+        assert size is None
+        mock_client.get_file_size_strict.assert_called_once_with(
+            'knowledge_base/test.txt', 'source-bucket'
+        )
+
 
 class TestListFiles:
     """Test cases for list_files function"""
@@ -912,4 +926,3 @@ def test_delete_file_normalizes_s3_url():
 
     assert result["success"] is True
     minio_client_mock.delete_file.assert_called_once_with("attachments/test.txt", "test-bucket")
-

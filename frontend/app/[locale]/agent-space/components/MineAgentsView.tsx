@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Empty, Input, Spin } from "antd";
-import { ChevronLeft, ChevronRight, Plus, Search, Upload } from "lucide-react";
+import { App, Button, Empty, Input, Popover, Spin } from "antd";
+import { ChevronLeft, ChevronRight, Plus, Search, Tag, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import CreateAgentModal, {
+  type CreatedAgentResult,
+} from "@/components/agent/CreateAgentModal";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { deleteAgent } from "@/services/agentConfigService";
 import {
@@ -40,6 +43,8 @@ import { MineApplyListingModal } from "./MineApplyListingModal";
 import { MineReviewStatusModal } from "./MineReviewStatusModal";
 import { CreateNewAgentCard } from "./CreateNewAgentCard";
 import { MyAgentCard } from "./MyAgentCard";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -59,6 +64,9 @@ interface MineAgentsViewProps {
   onOwnershipChange: (ownership: MineOwnershipFilter) => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  tagDefinitions: TagDefinition[];
+  tagPredicates: TagResourcePredicate[];
+  onTagPredicatesChange: (predicates: TagResourcePredicate[]) => void;
   page: number;
   pageSize: number;
   total: number;
@@ -81,6 +89,9 @@ export function MineAgentsView({
   onOwnershipChange,
   searchQuery,
   onSearchChange,
+  tagDefinitions,
+  tagPredicates,
+  onTagPredicatesChange,
   page,
   pageSize,
   total,
@@ -105,6 +116,7 @@ export function MineAgentsView({
   const [importWizardVisible, setImportWizardVisible] = useState(false);
   const [importWizardData, setImportWizardData] =
     useState<ImportAgentData | null>(null);
+  const [createAgentModalVisible, setCreateAgentModalVisible] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalAgent, setReviewModalAgent] =
     useState<MyEditableAgentItem | null>(null);
@@ -128,7 +140,16 @@ export function MineAgentsView({
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const handleCreateAgent = () => {
-    router.push(`/${locale}/agents?create=true&from=agent-space&tab=mine`);
+    setCreateAgentModalVisible(true);
+  };
+
+  const handleAgentCreated = async ({ agentId }: CreatedAgentResult) => {
+    setCreateAgentModalVisible(false);
+    await Promise.all([
+      invalidateAgentRepositoryCaches(queryClient),
+      queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+    ]);
+    router.push(`/${locale}/agents?agent_id=${agentId}`);
   };
 
   const handleImportAgent = async () => {
@@ -143,7 +164,10 @@ export function MineAgentsView({
     });
   };
 
-  const handleEdit = (agentId: number, permission?: MyEditableAgentItem["permission"]) => {
+  const handleEdit = (
+    agentId: number,
+    permission?: MyEditableAgentItem["permission"]
+  ) => {
     if (permission === "READ_ONLY") {
       return;
     }
@@ -186,7 +210,7 @@ export function MineAgentsView({
     if (versionNo <= 0) {
       return;
     }
-    router.push(`/${locale}/space/agents/${agent.agent_id}/evaluate?back_tab=mine`);
+    router.push(`/${locale}/evaluation?agent_id=${agent.agent_id}`);
   };
 
   const closeReviewModal = () => {
@@ -228,9 +252,7 @@ export function MineAgentsView({
         versionNo,
         payload,
       });
-      message.success(
-        t("repository.mine.applySuccess")
-      );
+      message.success(t("repository.mine.applySuccess"));
       closeApplyModal();
     } catch {
       message.error(t("repository.mine.applyError"));
@@ -365,7 +387,8 @@ export function MineAgentsView({
     others: "repository.mine.filter.others",
   };
 
-  const hasActiveFilter = ownership !== "all" || normalizedQuery.length > 0;
+  const hasActiveFilter =
+    ownership !== "all" || normalizedQuery.length > 0 || tagPredicates.length > 0;
   const showFilteredEmpty = !isLoading && !isError && agents.length === 0;
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
   const showPagination = !isLoading && !isError && totalPages > 1;
@@ -373,7 +396,7 @@ export function MineAgentsView({
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full sm:max-w-md">
+        <div className="relative min-w-0 flex-1">
           <Input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
@@ -402,30 +425,64 @@ export function MineAgentsView({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {MINE_OWNERSHIP_FILTERS.map((filter) => (
-          <button
-            key={filter}
-            type="button"
-            onClick={() => onOwnershipChange(filter)}
-            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              ownership === filter
-                ? "bg-primary text-white"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-            }`}
-          >
-            {t(ownershipLabelKey[filter])}
-            <span
-              className={`rounded px-1.5 text-xs ${
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
+          {MINE_OWNERSHIP_FILTERS.map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              onClick={() => onOwnershipChange(filter)}
+              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
                 ownership === filter
-                  ? "bg-white/20"
-                  : "bg-white/70 text-slate-500 dark:bg-slate-900/50 dark:text-slate-400"
+                  ? "bg-primary text-white"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               }`}
             >
-              {counts[filter]}
-            </span>
-          </button>
-        ))}
+              {t(ownershipLabelKey[filter])}
+              <span
+                className={`rounded px-1.5 text-xs ${
+                  ownership === filter
+                    ? "bg-white/20"
+                    : "bg-white/70 text-slate-500 dark:bg-slate-900/50 dark:text-slate-400"
+                }`}
+              >
+                {counts[filter]}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto shrink-0">
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <div className="w-72">
+                <TagFilterControls
+                  definitions={tagDefinitions}
+                  value={tagPredicates}
+                  onChange={onTagPredicatesChange}
+                />
+                {tagPredicates.length > 0 ? (
+                  <button
+                    type="button"
+                    className="mt-2 text-xs text-blue-600 hover:underline"
+                    onClick={() => onTagPredicatesChange([])}
+                  >
+                    {t("repository.tagFilter.clear")}
+                  </button>
+                ) : null}
+              </div>
+            }
+          >
+            <Button
+              type={tagPredicates.length > 0 ? "primary" : "default"}
+              className="h-11"
+              icon={<Tag className="size-3.5" aria-hidden />}
+            >
+              {t("repository.tagFilter.button")}
+            </Button>
+          </Popover>
+        </div>
       </div>
 
       {isLoading ? (
@@ -546,6 +603,12 @@ export function MineAgentsView({
         onSetNotShared={handleSetNotShared}
       />
 
+      <CreateAgentModal
+        open={createAgentModalVisible}
+        onCancel={() => setCreateAgentModalVisible(false)}
+        onCreated={handleAgentCreated}
+      />
+
       <AgentImportWizard
         visible={importWizardVisible}
         onCancel={() => {
@@ -558,7 +621,9 @@ export function MineAgentsView({
           setImportWizardData(null);
           await Promise.all([
             invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
+            queryClient.invalidateQueries({
+              queryKey: [AGENTS_LIST_QUERY_KEY],
+            }),
           ]);
         }}
       />

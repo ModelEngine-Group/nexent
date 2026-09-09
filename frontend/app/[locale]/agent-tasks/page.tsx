@@ -42,6 +42,7 @@ import {
 import { agentAutomationService } from "@/services/agentAutomationService";
 import AutomationDateTimePicker from "@/features/agentAutomation/components/AutomationDateTimePicker";
 import { getAutomationErrorMessage } from "@/features/agentAutomation/errorMessage";
+import { formatDateTimeLocale } from "@/lib/date";
 import type {
   AgentAutomationRun,
   AgentAutomationTask,
@@ -231,15 +232,7 @@ export default function AgentTasksPage() {
   const loadRequestIdRef = useRef(0);
 
   const formatDateTime = (value?: string | null) =>
-    value
-      ? new Intl.DateTimeFormat(
-          i18n.language.startsWith("zh") ? "zh-CN" : "en-US",
-          {
-            dateStyle: "medium",
-            timeStyle: "medium",
-          }
-        ).format(new Date(value))
-      : "-";
+    formatDateTimeLocale(value, i18n.language);
 
   const formatTaskStatus = (status: string) =>
     t(`agentAutomation.status.${status}`, { defaultValue: status });

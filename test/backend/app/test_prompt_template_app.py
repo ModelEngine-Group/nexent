@@ -408,3 +408,44 @@ def test_delete_prompt_template_api_error_mapping(
 
     assert response.status_code == expected_status
     assert response.json()["detail"] == expected_detail
+
+
+def test_all_prompt_template_endpoints_return_401_on_token_expired(
+    mocker, prompt_template_app_module, prompt_template_client, prompt_template_exceptions
+):
+    """Every prompt template endpoint maps an expired token to 401."""
+    from fastapi.testclient import TestClient
+
+    methods = [
+        ("get", "/prompt_templates", None),
+        ("get", "/prompt_templates/1", None),
+        ("post", "/prompt_templates", {
+            "template_name": "t",
+            "description": "d",
+            "template_type": "agent_generate",
+            "template_content_zh": {"user_prompt": "zh"},
+            "template_content_en": {"user_prompt": "en"},
+        }),
+        ("put", "/prompt_templates/1", {
+            "template_name": "t",
+            "description": "d",
+            "template_type": "agent_generate",
+            "template_content_zh": {"user_prompt": "zh"},
+            "template_content_en": {"user_prompt": "en"},
+        }),
+        ("delete", "/prompt_templates/1", None),
+    ]
+
+    for method, url, payload in methods:
+        mock_auth = mocker.patch.object(
+            prompt_template_app_module,
+            "get_current_user_id",
+            side_effect=prompt_template_exceptions.TokenExpiredError("expired"),
+        )
+        kwargs = {"headers": {"Authorization": "Bearer expired"}}
+        if payload is not None:
+            kwargs["json"] = payload
+        response = getattr(prompt_template_client, method)(url, **kwargs)
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+        assert "expired" in response.json()["detail"]
+        mock_auth.assert_called_once()

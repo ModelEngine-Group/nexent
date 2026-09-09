@@ -140,6 +140,7 @@ class MockAgent:
         self.current_version_no = None
         self.version_no = 0
         self.created_by = None
+        self.allow_chat_metadata = False
 
 class MockAgentRelation:
     def __init__(self, selected_agent_version_no=None):

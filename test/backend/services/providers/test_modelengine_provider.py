@@ -375,7 +375,7 @@ class TestModelEngineProvider:
         type_mapping = {
             "chat-model": "llm",
             "embed-model": "embedding",
-            "asr-model": "stt",
+            "asr-model": "vlm4",
             "tts-model": "tts",
             "rerank-model": "rerank",
             "vlm-model": "vlm",

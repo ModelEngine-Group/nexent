@@ -2,6 +2,7 @@
 
 import { Button, Input, Modal, Tag } from "antd";
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
 import {
   MCP_TOOLS_MODAL_WRAP_CLASS,
   McpTransportType,
@@ -12,6 +13,7 @@ import {
   resolveDeploymentType,
 } from "@/lib/mcpTools";
 import TransportIcon from "../../shared/TransportIcon";
+import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 import type { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAdd";
 
 interface CommunityQuickAddModalProps {
@@ -22,7 +24,18 @@ export default function CommunityQuickAddModal({
   controller,
 }: CommunityQuickAddModalProps) {
   const { t } = useTranslation("common");
-  const { source, draft, submitting, updateDraft, close, confirm, nameError } = controller;
+  const {
+    source,
+    draft,
+    submitting,
+    updateDraft,
+    close,
+    confirm,
+    nameError,
+    deploymentStarted,
+    containerId,
+  } = controller;
+  const [logsOpen, setLogsOpen] = useState(false);
 
   if (!source || !draft) return null;
 
@@ -41,15 +54,25 @@ export default function CommunityQuickAddModal({
       wrapClassName={`${MCP_TOOLS_MODAL_WRAP_CLASS}`}
       styles={mcpToolsModalChromeStyles()}
       footer={
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            {deploymentStarted ? (
+              <Button onClick={() => setLogsOpen(true)}>
+                {t("mcpTools.detail.viewContainerLogs")}
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-3">
           <Button onClick={close}>{t("common.cancel")}</Button>
           <Button
             type="primary"
             loading={submitting}
+            disabled={Boolean(containerId)}
             onClick={confirm}
           >
             {t("mcpTools.community.quickAddConfirm")}
           </Button>
+          </div>
         </div>
       }
     >
@@ -184,6 +207,13 @@ export default function CommunityQuickAddModal({
           )}
         </div>
       </div>
+      {deploymentStarted ? (
+        <McpContainerLogsModal
+          open={logsOpen}
+          onCancel={() => setLogsOpen(false)}
+          containerId={containerId}
+        />
+      ) : null}
     </Modal>
   );
 }

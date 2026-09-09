@@ -293,3 +293,38 @@ async def test_load_config_empty_auth_header(config_mocks):
         "", mock_request)
     config_mocks['load_config_impl'].assert_called_once_with(
         "en", "default_tenant")
+
+# ---------------------------------------------------------------------------
+# TokenExpiredError -> 401 mapping
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_save_config_token_expired(config_mocks):
+    """Expired token on save_config maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    global_config = MagicMock()
+    config_mocks['get_current_user_id'].side_effect = TokenExpiredError("expired")
+
+    from backend.apps.config_sync_app import save_config
+
+    with pytest.raises(HTTPException) as exc_info:
+        await save_config(global_config, "Bearer expired-token")
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_load_config_token_expired(config_mocks):
+    """Expired token on load_config maps to 401."""
+    from consts.exceptions import TokenExpiredError
+
+    config_mocks['get_user_info'].side_effect = TokenExpiredError("expired")
+
+    from backend.apps.config_sync_app import load_config
+
+    with pytest.raises(HTTPException) as exc_info:
+        await load_config("Bearer expired-token", MagicMock())
+
+    assert exc_info.value.status_code == 401
+

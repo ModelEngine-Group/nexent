@@ -957,6 +957,9 @@ def query_external_sub_agents(
                 "streaming": agent.streaming,
                 "supported_interfaces": agent.supported_interfaces,
                 "raw_card": agent.raw_card,
+                "security_schemes": agent.security_schemes,
+                "security_requirements": agent.security_requirements,
+                "security_credentials": agent.security_credentials,
                 "is_enabled": relation.is_enabled,
             }
             for relation, agent in results
@@ -1478,6 +1481,32 @@ def update_task_state(
             task.completed_at = now
 
         return True
+
+
+def fail_active_tasks_on_startup() -> int:
+    """Move A2A work owned by the previous northbound process to FAILED."""
+    now = datetime.now(timezone.utc)
+    with _get_db_session() as session:
+        result = session.query(A2ATask).filter(
+            A2ATask.task_state.in_(
+                ("TASK_STATE_SUBMITTED", "TASK_STATE_WORKING")
+            )
+        ).update(
+            {
+                "task_state": "TASK_STATE_FAILED",
+                "state_timestamp": now,
+                "result_data": {
+                    "error": {
+                        "code": "CONTAINER_RESTARTED",
+                        "message": "Northbound service restarted before the task completed",
+                    }
+                },
+                "completed_at": now,
+                "update_time": now,
+            },
+            synchronize_session=False,
+        )
+        return int(result or 0)
 
 
 def list_tasks(

@@ -51,6 +51,8 @@ export function useAuthentication(): AuthenticationContextType {
     closeAuthPromptModal: authUI.closeAuthPromptModal,
 
     openSessionExpiredModal: authUI.openSessionExpiredModal,
-    closeSessionExpiredModal: authUI.closeSessionExpiredModal
+    closeSessionExpiredModal: authUI.closeSessionExpiredModal,
+    openLoginModalAfterSessionExpired:
+      authUI.openLoginModalAfterSessionExpired
   };
 }

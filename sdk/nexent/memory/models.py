@@ -225,6 +225,7 @@ class PipelineMemoryRecord(BaseModel):
 class PipelineConfig(BaseModel):
     mmr_lambda: float = 0.7
     mmr_candidate_top_k: int = 10
+    mmr_candidate_max: int = 200
     mmr_final_top_k: int = 5
     mmr_duplicate_threshold: float = 0.92
     half_life_days: int = 14

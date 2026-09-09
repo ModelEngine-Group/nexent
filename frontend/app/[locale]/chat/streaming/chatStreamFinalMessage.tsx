@@ -45,6 +45,7 @@ import { ChatAttachment } from "../components/chatAttachment";
 import { AlertTriangle } from "lucide-react";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import { AuthenticatedImage } from "../../newchat/ui/authenticated-image";
+import { formatMessageTime } from "@/lib/messageDate";
 
 interface FinalMessageProps {
   message: ChatMessageType;
@@ -59,6 +60,11 @@ interface FinalMessageProps {
   index?: number;
   currentConversationId?: number;
   onCitationHover?: () => void;
+  onCitationClick?: (
+    messageId: string,
+    citationKey: string,
+    answerText: string
+  ) => void;
   shareSelected?: boolean;
 }
 
@@ -79,6 +85,7 @@ function ChatStreamFinalMessageInner({
   index,
   currentConversationId,
   onCitationHover,
+  onCitationClick,
   shareSelected = false,
 }: FinalMessageProps) {
   const { t } = useTranslation("common");
@@ -257,6 +264,7 @@ function ChatStreamFinalMessageInner({
   };
 
   const ttsButtonContent = getTTSButtonContent();
+  const displayTime = formatMessageTime(message.databaseCreateTime);
 
   return (
     <div
@@ -322,7 +330,9 @@ function ChatStreamFinalMessageInner({
         {/* Assistant message part - show final answer or content */}
         {message.role === MESSAGE_ROLES.ASSISTANT &&
           (message.finalAnswer || message.content !== undefined) && (
-            <div className={`${shareSelected ? "bg-blue-100/80" : "bg-white"} rounded-lg w-full mt-2`}>
+            <div
+              className={`${shareSelected ? "bg-blue-100/80" : "bg-white"} rounded-lg w-full mt-2`}
+            >
               {/* Max steps warning - show when message is complete and has maxStepsInfo */}
               {message.isComplete &&
                 message.steps &&
@@ -366,6 +376,18 @@ function ChatStreamFinalMessageInner({
                     content={convertToMarkdownCodeFences(rawContent)}
                     searchResults={message?.searchResults}
                     onCitationHover={onCitationHover}
+                    onCitationClick={(citationKey, citationContext) => {
+                      if (message.id) {
+                        onCitationClick?.(
+                          message.id,
+                          citationKey,
+                          citationContext ||
+                            message.finalAnswer ||
+                            message.content ||
+                            ""
+                        );
+                      }
+                    }}
                     resolveS3Media={Boolean(message.finalAnswer || message.content)}
                     trustedImageUrls={message.images}
                   />
@@ -544,6 +566,14 @@ function ChatStreamFinalMessageInner({
                 )}
             </div>
           )}
+        {displayTime && (
+          <time
+            dateTime={message.databaseCreateTime!.toISOString()}
+            className="mt-1 text-xs text-gray-500"
+          >
+            {displayTime}
+          </time>
+        )}
       </div>
     </div>
   );

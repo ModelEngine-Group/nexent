@@ -1,7 +1,27 @@
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Numeric, Sequence, String, Text, TIMESTAMP, UniqueConstraint, Index, Float, text
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    Computed,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Numeric,
+    Sequence,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
+
 
 # Standard protocol labels used across A2A models
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
@@ -53,6 +73,23 @@ class ConversationRecord(TableBase):
         nullable=False,
         server_default=text("'execution'"),
         doc="UI chat mode for the conversation: 'planning' or 'execution'",
+    )
+    knowledge_scope = Column(
+        JSONB,
+        nullable=True,
+        doc="Conversation-scoped desired policy for local and AIDP knowledge retrieval",
+    )
+    runtime_metadata = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+        doc="Conversation-scoped runtime metadata available to agent runs",
+    )
+    runtime_metadata_version = Column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        doc="Monotonic version of conversation runtime metadata",
     )
 
 
@@ -298,9 +335,13 @@ class ConversationSourceSearch(TableBase):
         String(400), doc="URL link or file path of the search source")
     source_content = Column(String, doc="Original text of the search source")
     score_overall = Column(Numeric(
-        7, 6), doc="Overall similarity score between the source and the user query, calculated by weighted average of details")
+        14, 6), doc="Overall retrieval score between the source and the user query")
     score_accuracy = Column(Numeric(7, 6), doc="Accuracy score")
     score_semantic = Column(Numeric(7, 6), doc="Semantic similarity score")
+    retrieval_highlight_terms = Column(
+        JSONB,
+        doc="Exact lexical terms returned by the retrieval engine for source highlighting",
+    )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")
     cite_index = Column(
@@ -586,6 +627,8 @@ class ToolInfo(TableBase):
     output_type = Column(String(100), doc="Prompt tool output description")
     category = Column(String(100), doc="Tool category description")
     labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
+    is_user_selectable = Column(
+        Boolean, default=True, nullable=False, doc="Whether users can actively select the tool in agent configuration")
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 
@@ -639,10 +682,19 @@ class AgentInfo(TableBase):
         ),
     )
     enable_context_manager = Column(Boolean, default=True, doc="Whether to enable context management (compression) for this agent")
+    is_a2a = Column(Boolean, default=False, nullable=False, doc="Whether to publish this agent as an A2A Server agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
+    allow_chat_metadata = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        server_default=text("false"),
+        doc="Whether Native Chat and Debug users may submit runtime metadata",
+    )
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
+    icon_url = Column(String(1024), doc="Object storage key for the agent icon")
 
 
 class PromptTemplate(TableBase):
@@ -745,6 +797,163 @@ class KnowledgeRecord(TableBase):
     )
 
 
+class KnowledgeStorageObject(TableBase):
+    """Durable ownership and accounting record for one KB source object."""
+
+    __tablename__ = "knowledge_storage_object_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "bucket_name",
+            "object_name",
+            name="uq_knowledge_storage_object_bucket_object",
+        ),
+        CheckConstraint(
+            "raw_bytes >= 0",
+            name="ck_knowledge_storage_object_raw_bytes_nonnegative",
+        ),
+        CheckConstraint(
+            "status IN ('COMMITTED', 'DELETED')",
+            name="ck_knowledge_storage_object_status",
+        ),
+        Index(
+            "idx_knowledge_storage_object_tenant_active",
+            "tenant_id",
+            postgresql_where=text("delete_flag = 'N' AND status = 'COMMITTED'"),
+        ),
+        Index(
+            "idx_knowledge_storage_object_kb_active",
+            "tenant_id",
+            "knowledge_id",
+            postgresql_where=text("delete_flag = 'N' AND status = 'COMMITTED'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    storage_object_id = Column(
+        BigInteger,
+        Sequence("knowledge_storage_object_t_storage_object_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc="Storage object ledger ID",
+    )
+    create_time = Column(
+        TIMESTAMP(timezone=False),
+        nullable=False,
+        server_default=func.now(),
+        doc="Creation time",
+    )
+    update_time = Column(
+        TIMESTAMP(timezone=False),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Update time",
+    )
+    delete_flag = Column(
+        String(1),
+        nullable=False,
+        default="N",
+        server_default=text("'N'"),
+        doc="Whether it is deleted. Optional values: Y/N",
+    )
+    tenant_id = Column(String(100), nullable=False, doc="Tenant isolation key")
+    knowledge_id = Column(BigInteger, nullable=False, doc="Owning knowledge base ID")
+    index_name = Column(String(100), nullable=False, doc="Owning Elasticsearch index name")
+    bucket_name = Column(String(255), nullable=False, doc="MinIO bucket name")
+    object_name = Column(String(1024), nullable=False, doc="MinIO object name")
+    raw_bytes = Column(BigInteger, nullable=False, doc="Authoritative MinIO object size in bytes")
+    status = Column(
+        String(20),
+        nullable=False,
+        default="COMMITTED",
+        server_default=text("'COMMITTED'"),
+        doc="Accounting lifecycle status: COMMITTED or DELETED",
+    )
+
+
+class KnowledgeFileLifecycle(TableBase):
+    """Durable lifecycle record for one knowledge-base upload attempt."""
+
+    __tablename__ = "knowledge_file_lifecycle_t"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('UPLOADING', 'UPLOADED', 'PROCESSING', 'FORWARDING', "
+            "'FAILED', 'COMPLETED', 'DELETE_REQUESTED', 'DELETED')",
+            name="ck_knowledge_file_lifecycle_status",
+        ),
+        Index(
+            "idx_knowledge_file_lifecycle_kb_status",
+            "tenant_id",
+            "knowledge_id",
+            "status",
+        ),
+        Index(
+            "idx_knowledge_file_lifecycle_identity",
+            "tenant_id",
+            "index_name",
+            "object_name",
+        ),
+        Index(
+            "idx_knowledge_file_lifecycle_upload_recovery",
+            "upload_owner_service",
+            "create_time",
+            postgresql_where=text(
+                "delete_flag = 'N' AND status = 'UPLOADING'"
+            ),
+        ),
+        Index(
+            "uq_knowledge_file_lifecycle_active_identity",
+            "tenant_id",
+            "index_name",
+            "object_name",
+            unique=True,
+            postgresql_where=text(
+                "object_name IS NOT NULL AND status NOT IN ('DELETE_REQUESTED', 'DELETED')"
+            ),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    file_id = Column(String(64), primary_key=True, nullable=False, doc="Stable file lifecycle ID")
+    tenant_id = Column(String(100), nullable=False, doc="Tenant isolation key")
+    knowledge_id = Column(BigInteger, nullable=False, doc="Owning knowledge base ID")
+    index_name = Column(String(100), nullable=False, doc="Owning Elasticsearch index")
+    bucket_name = Column(String(255), nullable=True, doc="MinIO bucket")
+    object_name = Column(String(1024), nullable=True, doc="MinIO object name")
+    original_filename = Column(
+        String(1024),
+        nullable=False,
+        doc="Effective filename used by processing and displayed to users",
+    )
+    file_size = Column(BigInteger, nullable=True, doc="Uploaded file size in bytes")
+    upload_owner_service = Column(
+        String(32),
+        nullable=True,
+        doc="Service that owns recovery of an in-progress upload",
+    )
+    uploaded_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful MinIO upload time")
+    completed_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Successful ES indexing time")
+    status = Column(
+        String(30),
+        nullable=False,
+        default="UPLOADING",
+        server_default=text("'UPLOADING'"),
+        doc="File lifecycle status",
+    )
+    stage = Column(String(30), nullable=True, doc="Current processing stage")
+    process_task_id = Column(String(64), nullable=True, doc="Process task ID")
+    forward_task_id = Column(String(64), nullable=True, doc="Forward task ID")
+    parent_task_id = Column(String(64), nullable=True, doc="Parent chain task ID")
+    processing_attempt = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    error_code = Column(String(100), nullable=True, doc="Error code reported by the ingestion flow")
+    error_message = Column(Text, nullable=True, doc="Raw failure summary when no error code exists")
+    error_stage = Column(String(30), nullable=True, doc="Failure stage")
+    failed_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Failure time")
+    deleted_at = Column(TIMESTAMP(timezone=False), nullable=True, doc="Time when the record reached DELETED status")
+    storage_object_id = Column(BigInteger, nullable=True, doc="Linked storage ledger ID")
+    version = Column(Integer, nullable=False, default=0, server_default=text("0"), doc="Optimistic-lock version")
+
+
 class TenantConfig(TableBase):
     """
     Tenant configuration information table
@@ -789,8 +998,7 @@ class MemoryUserConfig(TableBase):
 class MemoryRecord(TableBase):
     """Internal memory records persisted in PostgreSQL.
 
-    This is the authoritative store for tenant/user/agent memory. Tenant and
-    user long-term memories live here exclusively; agent short-term memory
+    This is the authoritative store for agent short-term memory, which
     additionally mirrors the content into Elasticsearch (managed by
     ``services.memory_index_service``).
 
@@ -889,6 +1097,48 @@ class MemoryRecord(TableBase):
                          doc="Last REM Sleep timestamp.")
 
 
+class MemoryLongTermVersion(TableBase):
+    """Immutable Markdown long-term memory shared by tenant and user scopes."""
+
+    __tablename__ = "memory_long_term_version_t"
+    __table_args__ = (
+        CheckConstraint("scope IN ('tenant', 'user')", name="ck_memory_long_term_scope"),
+        Index(
+            "uq_memory_long_term_version_scope_no",
+            "tenant_id", "scope", "subject_id", "version_no", unique=True,
+        ),
+        Index(
+            "uq_memory_long_term_active_scope",
+            "tenant_id", "scope", "subject_id", unique=True,
+            postgresql_where=text("is_active AND delete_flag = 'N'"),
+        ),
+        Index("uq_memory_long_term_run", "dreaming_run_id", unique=True,
+              postgresql_where=text("dreaming_run_id IS NOT NULL")),
+        {"schema": SCHEMA},
+    )
+
+    version_id = Column(BigInteger, Sequence(
+        "memory_long_term_version_t_version_id_seq", schema=SCHEMA), primary_key=True)
+    tenant_id = Column(String(100), nullable=False)
+    scope = Column(String(20), nullable=False)
+    subject_id = Column(String(100), nullable=False)
+    version_no = Column(Integer, nullable=False)
+    parent_version_id = Column(BigInteger)
+    is_active = Column(Boolean, nullable=False, default=False)
+    content = Column(Text, nullable=False)
+    source = Column(String(20), nullable=False)
+    author_user_id = Column(String(100), nullable=False)
+    editor_user_id = Column(String(100), nullable=False)
+    authored_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    dreaming_run_id = Column(BigInteger)
+    character_count = Column(Integer, nullable=False)
+    raw_dreaming_input = Column(Text)
+    generation_audit = Column(JSONB, nullable=False, default=dict)
+    evidence_ids = Column(JSONB, nullable=False, default=list)
+    fallback_details = Column(JSONB, nullable=False, default=dict)
+    omission_details = Column(JSONB, nullable=False, default=dict)
+
+
 class MemoryRetrievalHit(TableBase):
     """Per-hit memory retrieval log row, sourced by ``search_memory`` tools.
 
@@ -945,6 +1195,193 @@ class MemoryRetrievalHit(TableBase):
                         doc="User that last updated the row.")
     delete_flag = Column(String(1), nullable=False, default="N",
                          doc="Soft delete flag (N = active, Y = deleted).")
+
+
+class MemoryDreamingAudit(TableBase):
+    """One durable audit row per manual or scheduled Dreaming run."""
+
+    __tablename__ = "memory_dreaming_audit_t"
+    __table_args__ = (
+        Index(
+            "idx_memory_dreaming_audit_scope",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "started_at",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    run_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_audit_t_run_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100), nullable=False)
+    trigger_source = Column(String(30), nullable=False, default="manual")
+    status = Column(String(30), nullable=False, default="running")
+    current_phase = Column(String(30))
+    started_at = Column(TIMESTAMP(timezone=False), nullable=False, server_default=func.now())
+    finished_at = Column(TIMESTAMP(timezone=False))
+    light_count = Column(Integer, nullable=False, default=0)
+    rem_count = Column(Integer, nullable=False, default=0)
+    promoted_count = Column(Integer, nullable=False, default=0)
+    deferred_count = Column(Integer, nullable=False, default=0)
+    published_version_id = Column(BigInteger)
+    reason = Column(String(100))
+    error = Column(Text)
+    lock_owner = Column(String(100), nullable=True)
+    lock_until = Column(TIMESTAMP(timezone=False), nullable=True)
+
+
+class MemoryDreamingDecision(TableBase):
+    """One normalized candidate decision produced by a Dreaming run."""
+
+    __tablename__ = "memory_dreaming_decision_t"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "decision_order",
+            name="uq_memory_dreaming_decision_run_order",
+        ),
+        Index("idx_memory_dreaming_decision_memory", "memory_id"),
+        {"schema": SCHEMA},
+    )
+
+    decision_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_decision_t_decision_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    run_id = Column(
+        BigInteger,
+        ForeignKey(f"{SCHEMA}.memory_dreaming_audit_t.run_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    decision_order = Column(Integer, nullable=False)
+    memory_id = Column(BigInteger, nullable=False)
+    score = Column(Float, nullable=False)
+    noise = Column(Boolean, nullable=False, default=False)
+    signal_count = Column(Integer, nullable=False, default=0)
+    context_diversity = Column(Integer, nullable=False, default=0)
+    evidence_ids = Column(ARRAY(String(100)), nullable=False, default=list)
+    event = Column(String(20), nullable=False)
+    reason = Column(String(100), nullable=False)
+    archive_suggested = Column(Boolean, nullable=False, default=False)
+
+
+class MemoryDreamingSchedule(TableBase):
+    """Persistent automatic Dreaming schedule for one user/agent scope."""
+
+    __tablename__ = "memory_dreaming_schedule_t"
+    __table_args__ = (
+        Index(
+            "uq_memory_dreaming_schedule_scope",
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            unique=True,
+        ),
+        Index(
+            "idx_memory_dreaming_schedule_due",
+            "enabled",
+            "next_fire_at",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    schedule_id = Column(
+        BigInteger,
+        Sequence("memory_dreaming_schedule_t_schedule_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False)
+    user_id = Column(String(100), nullable=False)
+    agent_id = Column(String(100), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    rule_type = Column(String(20), nullable=False, default="CRON")
+    timezone = Column(String(100), nullable=False, default="Asia/Shanghai")
+    start_at = Column(TIMESTAMP(timezone=False), nullable=False)
+    cron_expr = Column(String(100))
+    interval_seconds = Column(Integer)
+    next_fire_at = Column(TIMESTAMP(timezone=False))
+    last_fire_at = Column(TIMESTAMP(timezone=False))
+    fire_count = Column(Integer, nullable=False, default=0)
+    min_score = Column(Float, nullable=True)
+    min_recall_count = Column(Integer, nullable=True)
+    min_unique_queries = Column(Integer, nullable=True)
+    source_limit = Column(Integer, nullable=True)
+    long_term_max_chars = Column(Integer, nullable=True)
+    summarization_max_attempts = Column(Integer, nullable=True)
+
+
+class MemoryProviderConfig(TableBase):
+    """External memory provider configuration."""
+
+    __tablename__ = "memory_provider_config_t"
+    __table_args__ = (
+        Index("uq_memory_provider_config_tenant_name", "tenant_id", "provider_name",
+              unique=True, postgresql_where=text("delete_flag = 'N'")),
+        Index("idx_memory_provider_config_enabled", "tenant_id", "enabled",
+              postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    provider_config_id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(100), nullable=False)
+    provider_name = Column(String(100), nullable=False)
+    connection_type = Column(String(20), nullable=False, default="plugin")
+    enabled = Column(Boolean, nullable=False, default=False)
+    timeout_seconds = Column(Integer, nullable=False, default=30)
+    last_error_code = Column(String(50))
+
+
+class MemoryProviderConfigParam(TableBase):
+    """EAV parameters for external memory provider configuration."""
+
+    __tablename__ = "memory_provider_config_param_t"
+    __table_args__ = (
+        Index("idx_provider_config_param_provider", "provider_config_id",
+              postgresql_where=text("delete_flag = 'N'")),
+        Index("uq_provider_config_param_name", "provider_config_id", "param_name",
+              unique=True, postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    param_id = Column(Integer, primary_key=True, autoincrement=True)
+    provider_config_id = Column(Integer, nullable=False)
+    param_name = Column(String(200), nullable=False)
+    param_value = Column(Text)
+
+
+class MemoryExternalIngestEventLog(TableBase):
+    """Audit log for external memory ingest events."""
+
+    __tablename__ = "memory_external_ingest_event_log_t"
+    __table_args__ = (
+        Index("idx_external_ingest_log_tenant", "tenant_id", "user_id", "agent_id", "sent_at"),
+        Index("idx_external_ingest_log_idem", "idempotency_key",
+              unique=True, postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    log_id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(100))
+    tenant_id = Column(String(100))
+    user_id = Column(String(100))
+    agent_id = Column(String(100))
+    conversation_id = Column(String(100))
+    event_id = Column(String(255))
+    idempotency_key = Column(Text)
+    unit_ids = Column(Text)
+    response_status = Column(String(30))
+    response_summary = Column(Text)
+    sent_at = Column(TIMESTAMP(timezone=False), server_default=func.now())
 
 
 class McpRecord(TableBase):
@@ -1226,8 +1663,6 @@ class AgentVersion(TableBase):
         30), doc="Source type: NORMAL (normal publish) / ROLLBACK (rollback and republish)")
     status = Column(String(30), default="RELEASED",
                     doc="Version status: RELEASED / DISABLED / ARCHIVED")
-    is_a2a = Column(Boolean, default=False,
-                    doc="Whether this version is published as an A2A Server agent")
 
 
 class AgentRepository(TableBase):
@@ -1298,7 +1733,11 @@ class UserTokenInfo(TableBase):
     User token (AK/SK) information table
     """
     __tablename__ = "user_token_info_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index("ux_user_token_access_key", "access_key", unique=True),
+        Index("ix_user_token_user_active", "user_id", "delete_flag"),
+        {"schema": SCHEMA},
+    )
 
     token_id = Column(Integer, Sequence("user_token_info_t_token_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, doc="Token ID, unique primary key")
@@ -1312,7 +1751,16 @@ class UserTokenUsageLog(TableBase):
     User token usage log table
     """
     __tablename__ = "user_token_usage_log_t"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (
+        Index(
+            "ix_user_token_usage_active_token_time",
+            "token_id",
+            text("create_time DESC"),
+            postgresql_include=["token_usage_id"],
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
 
     token_usage_id = Column(Integer, Sequence("user_token_usage_log_t_token_usage_id_seq", schema=SCHEMA),
                             primary_key=True, nullable=False, doc="Token usage log ID, unique primary key")
@@ -1843,6 +2291,8 @@ class EvaluationSet(TableBase):
 
     source_filename = Column(String(255), doc="Original uploaded filename")
     case_count = Column(Integer, default=0, doc="Total number of cases")
+    generation_status = Column(String(20), default="IDLE", doc="IDLE / GENERATING / DONE / FAILED")
+    generation_progress = Column(Integer, default=0, doc="Generation progress 0-100")
 
     __table_args__ = (
         Index("ix_eval_set_tenant_id", "tenant_id"),
@@ -1874,6 +2324,8 @@ class EvaluationSetCase(TableBase):
     label = Column(JSONB, nullable=False, doc="Case label JSON")
 
     order_no = Column(Integer, default=0, doc="Case order in the set")
+    session_id = Column(String(128), nullable=True, doc="Multi-turn session identifier")
+    turn_order = Column(Integer, default=0, doc="Turn order within a session (1-based)")
 
     __table_args__ = (
         Index("ix_eval_set_case_set_id", "evaluation_set_id"),
@@ -1924,6 +2376,11 @@ class AgentEvaluation(TableBase):
     score_overall = Column(Float, doc="Overall score (0-1)")
 
     error_message = Column(Text, doc="Failure reason")
+    pass_count = Column(Integer, default=0, doc="Number of passed cases")
+    fail_count = Column(Integer, default=0, doc="Number of failed cases")
+    evaluator_config = Column(JSONB, doc="Multi-evaluator config: {evaluator_ids, field_mappings}")
+    analysis_report = Column(JSONB, doc="AI-generated analysis report")
+    annotation_schema_ids = Column(JSONB, default=[], doc="Enabled annotation schema IDs")
 
     __table_args__ = (
         Index("ix_agent_eval_tenant_id", "tenant_id"),
@@ -1957,7 +2414,7 @@ class AgentEvaluationCase(TableBase):
     label = Column(JSONB, nullable=False, doc="Case label snapshot (cleared to {answer:''} for pass cases)")
     predict = Column(JSONB, doc="Predict JSON (answer/raw); NULL for pass cases")
 
-    score = Column(Float, doc="Case score (0-1)")
+    score = Column(JSONB, doc="Case score (float or dict for multi-evaluator)")
     reason = Column(Text, doc="Judge reason; NULL for pass cases")
     pass_status = Column(
         String(16),
@@ -1971,6 +2428,8 @@ class AgentEvaluationCase(TableBase):
         doc="Case status: PENDING/RUNNING/COMPLETED/FAILED",
     )
     error_message = Column(Text, doc="Per-case failure reason")
+    session_id = Column(String(128), nullable=True, doc="Multi-turn session identifier")
+    turn_order = Column(Integer, default=0, doc="Turn order within a session (0-indexed)")
 
     __table_args__ = (
         Index("ix_agent_eval_case_eval_id", "agent_evaluation_id"),
@@ -1978,6 +2437,70 @@ class AgentEvaluationCase(TableBase):
         Index("ix_agent_eval_case_pass_status", "tenant_id", "agent_evaluation_id", "pass_status"),
         {"schema": SCHEMA},
     )
+
+
+class Evaluator(TableBase):
+    """Evaluator definition for agent evaluation tasks."""
+
+    __tablename__ = "evaluator_t"
+    __table_args__ = (
+        Index("ix_evaluator_tenant", "tenant_id", "delete_flag"),
+        Index("ix_evaluator_status", "tenant_id", "status", "delete_flag"),
+        {"schema": SCHEMA},
+    )
+
+    evaluator_id = Column(
+        BigInteger,
+        Sequence("evaluator_t_evaluator_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+    )
+    tenant_id = Column(String(100), nullable=False, default="", doc="Tenant ID; empty = system builtin")
+    name = Column(String(255), nullable=False, doc="Evaluator name (zh)")
+    description = Column(Text, doc="Evaluator description (zh)")
+    name_en = Column(String(255), doc="Evaluator name (en)")
+    description_en = Column(Text, doc="Evaluator description (en)")
+    evaluator_type = Column(String(20), nullable=False, default="llm", doc="llm / code")
+    source = Column(String(20), nullable=False, default="custom", doc="builtin / custom")
+    prompt = Column(Text, doc="LLM evaluator prompt template (zh)")
+    code = Column(Text, doc="Code/runtime evaluator Python function")
+    score_range_min = Column(Float, default=0.0)
+    score_range_max = Column(Float, default=1.0)
+    pass_threshold = Column(Float, default=0.5, doc="Score >= threshold = pass")
+    input_fields = Column(JSONB, nullable=False, default=[], doc='[{name, type, required}]')
+    status = Column(String(20), nullable=False, default="DRAFT", doc="DRAFT / PUBLISHED")
+    version_no = Column(Integer, nullable=False, default=1)
+    version_group_id = Column(BigInteger, doc="Groups versions of the same evaluator; NULL until first publish")
+    is_current = Column(Boolean, default=True, doc="True if this is the current active version")
+    model_id = Column(Integer, doc="LLM model ID; NULL = use task-level judge")
+
+
+class EvaluationAnnotationSchema(TableBase):
+    """Label/annotation template for evaluation cases."""
+
+    __tablename__ = "evaluation_annotation_schema_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    schema_id = Column(BigInteger, Sequence("evaluation_annotation_schema_t_schema_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, default="")
+    name = Column(String(50), nullable=False)
+    description = Column(String(200))
+    annotation_type = Column(String(20), nullable=False, default="classification", doc="classification/boolean/number/text")
+    options = Column(JSONB, doc="For classification: [{\"label\":\"正确\"},...]")
+
+
+class EvaluationAnnotation(TableBase):
+    """Single annotation value for an evaluation case."""
+
+    __tablename__ = "evaluation_annotation_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    annotation_id = Column(BigInteger, Sequence("evaluation_annotation_t_annotation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, default="")
+    agent_evaluation_id = Column(BigInteger, nullable=True, doc="Denormalized for efficient cascade-delete")
+    case_id = Column(BigInteger, nullable=False)
+    schema_id = Column(BigInteger, nullable=False)
+    value = Column(Text)
 
 
 class Notification(TableBase):
@@ -2039,3 +2562,243 @@ class NotificationReceiver(TableBase):
         Index("ix_notification_receiver_notification_id", "notification_id"),
         {"schema": SCHEMA},
     )
+
+
+class TagBucket(TableBase):
+    """Tenant-owned fixed tag library."""
+
+    __tablename__ = "tag_bucket"
+    __table_args__ = (
+        CheckConstraint("btrim(tenant_id) <> ''"),
+        CheckConstraint("status IN ('active', 'disabled')"),
+        CheckConstraint("delete_flag IN ('N', 'Y')"),
+        UniqueConstraint("tenant_id", "bucket_id", name="uq_tag_bucket_tenant_id"),
+        UniqueConstraint("tenant_id", "bucket_key", name="uq_tag_bucket_tenant_key"),
+        {"schema": SCHEMA},
+    )
+
+    bucket_id = Column(BigInteger, primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    bucket_key = Column(String(100), nullable=False)
+    bucket_name = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, server_default=text("'active'"))
+    delete_flag = Column(String(1), nullable=False, server_default=text("'N'"))
+
+
+class DocumentTagProjection(TableBase):
+    """Provider-facing synchronization ledger for knowledge document tag projections."""
+
+    __tablename__ = "document_tag_projection"
+    __table_args__ = (
+        CheckConstraint("btrim(tenant_id) <> ''"),
+        CheckConstraint("provider IN ('local', 'aidp')"),
+        CheckConstraint("btrim(knowledge_base_id) <> ''"),
+        CheckConstraint("btrim(provider_document_id) <> ''"),
+        CheckConstraint("status IN ('pending', 'synced', 'failed', 'unsupported')"),
+        UniqueConstraint(
+            "tenant_id",
+            "provider",
+            "knowledge_base_id",
+            "provider_document_id",
+            name="uq_document_tag_projection_identity",
+        ),
+        Index(
+            "idx_document_tag_projection_tenant_status",
+            "tenant_id",
+            "status",
+            "next_attempt_at",
+        ),
+        Index(
+            "idx_document_tag_projection_kb",
+            "tenant_id",
+            "provider",
+            "knowledge_base_id",
+        ),
+        Index(
+            "idx_document_tag_projection_resource",
+            "tenant_id",
+            "resource_id",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    projection_id = Column(BigInteger, primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    provider = Column(String(20), nullable=False)
+    knowledge_base_id = Column(String(255), nullable=False)
+    provider_document_id = Column(String(512), nullable=False)
+    resource_id = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, server_default=text("'pending'"))
+    version = Column(BigInteger, nullable=False, server_default=text("0"))
+    payload = Column(JSONB, nullable=False, server_default=text("'[]'::JSONB"))
+    retry_count = Column(Integer, nullable=False, server_default=text("0"))
+    last_error = Column(Text)
+    last_attempt_at = Column(TIMESTAMP(timezone=True))
+    next_attempt_at = Column(TIMESTAMP(timezone=True))
+
+
+class TagBucketResourceType(TableBase):
+    """Immutable tenant-local binding from a resource type to a tag library."""
+
+    __tablename__ = "tag_bucket_resource_type"
+    __table_args__ = (
+        CheckConstraint("btrim(tenant_id) <> ''"),
+        CheckConstraint(
+            "resource_type IN ('agent', 'skill', 'tool', 'mcp_service', 'knowledge_base', 'knowledge_document')"
+        ),
+        CheckConstraint("status IN ('active', 'disabled')"),
+        CheckConstraint("delete_flag IN ('N', 'Y')"),
+        UniqueConstraint("tenant_id", "bucket_resource_type_id", name="uq_tag_bucket_resource_type_tenant_id"),
+        UniqueConstraint("tenant_id", "bucket_id", "resource_type", name="uq_tag_bucket_resource_type"),
+        ForeignKeyConstraint(
+            ["tenant_id", "bucket_id"],
+            ["nexent.tag_bucket.tenant_id", "nexent.tag_bucket.bucket_id"],
+            name="fk_tag_bucket_resource_type_bucket",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    bucket_resource_type_id = Column(BigInteger, primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    bucket_id = Column(BigInteger, nullable=False)
+    resource_type = Column(String(50), nullable=False)
+    status = Column(String(20), nullable=False, server_default=text("'active'"))
+    delete_flag = Column(String(1), nullable=False, server_default=text("'N'"))
+
+
+class TagDefinition(TableBase):
+    """A controlled tag key within one tenant tag library."""
+
+    __tablename__ = "tag_definition"
+    __table_args__ = (
+        CheckConstraint("btrim(tenant_id) <> ''"),
+        CheckConstraint("selection_mode IN ('single_select', 'multi_select', 'no_value')"),
+        CheckConstraint("status IN ('active', 'disabled')"),
+        CheckConstraint("delete_flag IN ('N', 'Y')"),
+        UniqueConstraint("tenant_id", "definition_id", name="uq_tag_definition_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "bucket_id"],
+            ["nexent.tag_bucket.tenant_id", "nexent.tag_bucket.bucket_id"],
+            name="fk_tag_definition_bucket",
+        ),
+        Index("idx_tag_definition_bucket", "tenant_id", "bucket_id", "delete_flag"),
+        Index(
+            "uq_tag_definition_active_key",
+            "tenant_id",
+            "bucket_id",
+            "definition_key",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "uq_tag_definition_active_normalized_name",
+            "tenant_id",
+            "bucket_id",
+            "normalized_name",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    definition_id = Column(BigInteger, primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    bucket_id = Column(BigInteger, nullable=False)
+    definition_key = Column(String(100), nullable=False)
+    definition_name = Column(String(255), nullable=False)
+    normalized_name = Column(
+        Text(collation="C"),
+        Computed('lower(btrim(definition_name) COLLATE "C")', persisted=True),
+        nullable=False,
+    )
+    selection_mode = Column(String(20), nullable=False)
+    sort_order = Column(Integer, nullable=False, server_default=text("0"))
+    status = Column(String(20), nullable=False, server_default=text("'active'"))
+    delete_flag = Column(String(1), nullable=False, server_default=text("'N'"))
+
+
+class TagValue(TableBase):
+    """A controlled value belonging to one tag definition."""
+
+    __tablename__ = "tag_value"
+    __table_args__ = (
+        CheckConstraint("btrim(tenant_id) <> ''"),
+        CheckConstraint("btrim(normalized_value) <> ''"),
+        CheckConstraint("btrim(display_value) <> ''"),
+        CheckConstraint("status IN ('active', 'disabled')"),
+        CheckConstraint("delete_flag IN ('N', 'Y')"),
+        UniqueConstraint("tenant_id", "value_id", "definition_id", name="uq_tag_value_tenant_id_definition"),
+        ForeignKeyConstraint(
+            ["tenant_id", "definition_id"],
+            ["nexent.tag_definition.tenant_id", "nexent.tag_definition.definition_id"],
+            name="fk_tag_value_definition",
+        ),
+        Index("idx_tag_value_definition", "tenant_id", "definition_id", "delete_flag"),
+        Index(
+            "uq_tag_value_active_normalized_value",
+            "tenant_id",
+            "definition_id",
+            "normalized_value",
+            unique=True,
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    value_id = Column(BigInteger, primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    definition_id = Column(BigInteger, nullable=False)
+    normalized_value = Column(Text, nullable=False)
+    display_value = Column(Text, nullable=False)
+    sort_order = Column(Integer, nullable=False, server_default=text("0"))
+    status = Column(String(20), nullable=False, server_default=text("'active'"))
+    delete_flag = Column(String(1), nullable=False, server_default=text("'N'"))
+
+
+class ResourceTagAssignment(TableBase):
+    """A resource's binding to one controlled tag value."""
+
+    __tablename__ = "resource_tag_assignment"
+    __table_args__ = (
+        CheckConstraint("btrim(tenant_id) <> ''"),
+        CheckConstraint(
+            "resource_type IN ('agent', 'skill', 'tool', 'mcp_service', 'knowledge_base', 'knowledge_document')"
+        ),
+        CheckConstraint("btrim(resource_id) <> ''"),
+        CheckConstraint("status IN ('active', 'disabled')"),
+        CheckConstraint("delete_flag IN ('N', 'Y')"),
+        UniqueConstraint("tenant_id", "assignment_id", name="uq_resource_tag_assignment_tenant_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "resource_type",
+            "resource_id",
+            "value_id",
+            name="uq_resource_tag_assignment_resource_value",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "definition_id"],
+            ["nexent.tag_definition.tenant_id", "nexent.tag_definition.definition_id"],
+            name="fk_resource_tag_assignment_definition",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "value_id", "definition_id"],
+            [
+                "nexent.tag_value.tenant_id",
+                "nexent.tag_value.value_id",
+                "nexent.tag_value.definition_id",
+            ],
+            name="fk_resource_tag_assignment_value_definition",
+        ),
+        Index("idx_resource_tag_assignment_resource", "tenant_id", "resource_type", "resource_id", "delete_flag"),
+        Index("idx_resource_tag_assignment_definition", "tenant_id", "definition_id", "delete_flag"),
+        {"schema": SCHEMA},
+    )
+
+    assignment_id = Column(BigInteger, primary_key=True, nullable=False)
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    resource_type = Column(String(50), nullable=False)
+    resource_id = Column(Text, nullable=False)
+    definition_id = Column(BigInteger, nullable=False)
+    value_id = Column(BigInteger, nullable=False)
+    status = Column(String(20), nullable=False, server_default=text("'active'"))
+    delete_flag = Column(String(1), nullable=False, server_default=text("'N'"))

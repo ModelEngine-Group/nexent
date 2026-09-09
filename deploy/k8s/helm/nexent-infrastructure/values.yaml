@@ -1,0 +1,37 @@
+global:
+  namespace: nexent
+  rolloutChecksums:
+    sql: ""
+
+nexent-infrastructure-common:
+  secrets:
+    elasticPassword: "nexent@2025"
+    postgresPassword: "nexent@4321"
+    minio:
+      rootUser: "nexent"
+      rootPassword: "nexent@4321"
+      accessKey: ""
+      secretKey: ""
+  sqlFiles:
+    init: ""
+
+nexent-elasticsearch:
+  enabled: true
+  persistence:
+    mode: local
+    storageClassName: nexent-local
+nexent-postgresql:
+  enabled: true
+  persistence:
+    mode: local
+    storageClassName: nexent-local
+nexent-redis:
+  enabled: true
+  persistence:
+    mode: local
+    storageClassName: nexent-local
+nexent-minio:
+  enabled: true
+  persistence:
+    mode: local
+    storageClassName: nexent-local

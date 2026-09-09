@@ -9,7 +9,6 @@ import {
   LogIn,
   UserRoundPlus,
   UserCircle,
-  Power,
 } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
@@ -19,14 +18,12 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
-import { DeleteAccountModal } from "./DeleteAccountModal";
 
 export function AvatarDropdown() {
   const { user, isAuthzReady } = useAuthorizationContext();
-  const { isLoading, logout, revoke, openLoginModal, openRegisterModal } =
+  const { isLoading, logout, openLoginModal, openRegisterModal } =
     useAuthenticationContext();
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
@@ -113,9 +110,6 @@ export function AvatarDropdown() {
     );
   }
 
-  const isCasUser = user.authProvider === "cas";
-
-  // User has logged in, show user menu
   const menuItems: ItemType[] = [
     {
       key: "user-info",
@@ -163,20 +157,6 @@ export function AvatarDropdown() {
         });
       },
     },
-    {
-      key: "revoke",
-      icon: <Power size={16} />,
-      label: t("auth.revoke"),
-      // danger: true,
-      disabled: isCasUser,
-      className: isCasUser
-        ? "cursor-not-allowed opacity-50"
-        : "hover:!bg-red-100 focus:!bg-red-400 focus:!text-white",
-      onClick: () => {
-        if (isCasUser) return;
-        setIsDeleteModalOpen(true);
-      },
-    },
   ];
 
   return (
@@ -198,22 +178,6 @@ export function AvatarDropdown() {
           icon={<UserRound size={18} />}
         />
       </Dropdown>
-
-      {/* Delete Account Confirmation Modal */}
-      <DeleteAccountModal
-        open={isDeleteModalOpen}
-        onOk={() => {
-          revoke();
-          setIsDeleteModalOpen(false);
-        }}
-        onCancel={() => setIsDeleteModalOpen(false)}
-        loading={isLoading}
-        disabled={
-          isCasUser ||
-          user.role === USER_ROLES.ADMIN ||
-          user.role === USER_ROLES.SU
-        }
-      />
     </ConfigProvider>
   );
 }

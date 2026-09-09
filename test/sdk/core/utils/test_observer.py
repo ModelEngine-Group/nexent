@@ -150,7 +150,7 @@ class TestParseTransformer:
         code_content = "print('Hello World')"
 
         result = transformer.transform(content=code_content, lang="zh")
-        expected = "\n🛠️ 使用Python解释器执行代码\n```python\nprint('Hello World')\n```\n"
+        expected = "print('Hello World')"
         assert result == expected
 
     def test_parse_transformer_en(self):
@@ -159,7 +159,7 @@ class TestParseTransformer:
         code_content = "x = 42"
 
         result = transformer.transform(content=code_content, lang="en")
-        expected = "\n🛠️ Used tool python_interpreter\n```python\nx = 42\n```\n"
+        expected = "x = 42"
         assert result == expected
 
     def test_parse_transformer_default_lang(self):
@@ -168,7 +168,7 @@ class TestParseTransformer:
         code_content = "def test(): pass"
 
         result = transformer.transform(content=code_content)
-        expected = "\n🛠️ Used tool python_interpreter\n```python\ndef test(): pass\n```\n"
+        expected = "def test(): pass"
         assert result == expected
 
 
@@ -547,6 +547,159 @@ class TestMessageObserver:
         assert message == {
             "type": ProcessType.EXECUTION_LOGS.value,
             "content": "Wrapper rejected.",
+        }
+
+    def test_execution_logs_extract_valid_nl2a_state_once(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
+            "</nl2a_state>"
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_created",
+            "agent_id": 1042,
+        }
+        assert messages[1]["content"] == '{"status":"success"}'
+        assert messages[2]["content"] == '{"status":"success"}'
+
+    def test_execution_logs_extract_prompt_generation_failure_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"error","code":"draft_save_failed"}\n'
+            '<nl2a_state>{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":["duty_prompt"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "prompt_generation_failed",
+            "agent_id": 1042,
+            "failed_fields": ["duty_prompt"],
+        }
+        assert messages[1]["content"] == (
+            '{"status":"error","code":"draft_save_failed"}'
+        )
+
+    def test_execution_logs_extract_and_deduplicate_generation_completed_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_generation_completed",'
+            '"agent_id":1042}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_generation_completed",
+            "agent_id": 1042,
+        }
+
+    def test_execution_logs_emit_every_saved_fields_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["duty_prompt"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_fields_saved",
+            "agent_id": 1042,
+            "updated_fields": ["duty_prompt"],
+        }
+        assert messages[0]["content"] == messages[2]["content"]
+
+    @pytest.mark.parametrize(
+        "state_payload",
+        [
+            "{invalid json}",
+            '{"event":"agent_draft_created","agent_id":0}',
+            '{"event":"draft_updated","agent_id":1042}',
+            '{"event":"agent_draft_created","agent_id":1042,"extra":true}',
+            '{"event":"agent_generation_completed","agent_id":1042,'
+            '"extra":true}',
+            '{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":["unknown_prompt"]}',
+            '{"event":"prompt_generation_failed","agent_id":1042,'
+            '"failed_fields":[]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":[]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["unknown_prompt"]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["business_description"]}',
+            '{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["description","description"]}',
+            '["agent_draft_created",1042]',
+        ],
+    )
+    def test_execution_logs_hide_invalid_nl2a_state(self, state_payload):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+
+        observer.add_message(
+            "nl2agent",
+            ProcessType.EXECUTION_LOGS,
+            f"<nl2a_state>{state_payload}</nl2a_state>\nVisible result.",
+        )
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert messages == [
+            {
+                "type": ProcessType.EXECUTION_LOGS.value,
+                "content": "Visible result.",
+            }
+        ]
+
+    def test_nl2a_state_extractor_ignores_non_string_content(self):
+        assert MessageObserver._extract_nl2a_state({"agent_id": 1042}) == (
+            None,
+            {"agent_id": 1042},
+        )
+
+    def test_final_answer_never_extracts_nl2a_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '<nl2a_state>{"event":"agent_draft_created","agent_id":1042}'
+            "</nl2a_state>"
+        )
+
+        observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, content)
+
+        message = json.loads(observer.get_cached_message()[0])
+        assert message == {
+            "type": ProcessType.FINAL_ANSWER.value,
+            "content": content,
         }
 
     def test_add_model_reasoning_content(self):

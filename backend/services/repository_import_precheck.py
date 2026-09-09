@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from consts.model import (
-    ModelConnectStatusEnum,
     RepositoryImportPrecheckResponse,
     RepositoryImportRequirementItem,
     ToolSourceEnum,
 )
+from management.services.model.resolver import is_model_available
 from database import skill_db
 from database.knowledge_db import (
     get_knowledge_name_map_by_index_names,
@@ -21,6 +21,7 @@ from database.model_management_db import (
 )
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import query_all_tools
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 _KB_TOOL_CLASS_NAMES = frozenset({
     "KnowledgeBaseSearchTool",
@@ -57,13 +58,7 @@ def _check_model_available(display_name: Optional[str], tenant_id: str) -> Tuple
         return False, _REASON_MODEL_UNAVAILABLE
 
     model_info = get_model_by_model_id(model_id, tenant_id)
-    if not model_info:
-        return False, _REASON_MODEL_UNAVAILABLE
-
-    connect_status = ModelConnectStatusEnum.get_value(
-        model_info.get("connect_status")
-    )
-    if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
+    if not is_model_available(model_info):
         return False, _REASON_MODEL_UNAVAILABLE
 
     return True, None
@@ -312,12 +307,19 @@ def build_repository_import_precheck(
             skill_name,
             existing_skill_names,
         )
+        suggested_new_name = None
+        if not available and reason == _REASON_SKILL_DUPLICATE:
+            suggested_new_name = generate_available_copy_skill_name(
+                skill_name,
+                existing_skill_names,
+            )
         items.append(RepositoryImportRequirementItem(
             type="skill",
             key=f"skill:{skill_name}",
             name=skill_name,
             available=available,
             reason_code=reason,
+            suggested_new_name=suggested_new_name,
         ))
 
     for key, tool_name, class_name, source in _extract_tools(snapshot):

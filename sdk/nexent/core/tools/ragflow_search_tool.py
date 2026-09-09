@@ -4,27 +4,14 @@ from typing import Any, Dict, List, Union
 
 import httpx
 from pydantic import Field
-from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("ragflow_search_tool")
-
-
-def _resolve_default(value: Any) -> Any:
-    """Extract the actual default value from a FieldInfo object.
-
-    smolagents.Tool does not resolve FieldInfo defaults passed as __init__
-    parameter defaults — Python passes the FieldInfo object itself. This
-    helper extracts the underlying .default value so the attribute stores
-    a usable Python primitive instead of a FieldInfo descriptor.
-    """
-    if isinstance(value, FieldInfo):
-        return value.default
-    return value
 
 
 class RAGFlowSearchTool(Tool):
@@ -106,12 +93,12 @@ class RAGFlowSearchTool(Tool):
         server_url: str = Field(description="RAGFlow API base URL (e.g., 'http://localhost:9380')"),
         api_key: str = Field(description="RAGFlow API key"),
         dataset_ids: str = Field(description="JSON string array of RAGFlow dataset IDs", default="[]"),
-        top_k: int = Field(description="Maximum number of search results to return to the LLM", default=3),
+        top_k: int = Field(description="Maximum number of search results to return to the LLM", default=3, ge=1, le=100),
         similarity_threshold: float = Field(
-            description="Minimum similarity score threshold for results", default=0.2
+            description="Minimum similarity score threshold for results", default=0.2, ge=0.0, le=1.0
         ),
         vector_similarity_weight: float = Field(
-            description="Weight of vector similarity in hybrid search (0.0-1.0)", default=0.3
+            description="Weight of vector similarity in hybrid search (0.0-1.0)", default=0.3, ge=0.0, le=1.0
         ),
         keyword: bool = Field(description="Whether to enable keyword search in hybrid mode", default=False),
         highlight: bool = Field(description="Whether to enable highlight in search results", default=True),
@@ -123,15 +110,15 @@ class RAGFlowSearchTool(Tool):
         # does not extract .default from FieldInfo objects. Without this
         # step, optional params (top_k, keyword, etc.) retain their FieldInfo
         # descriptors and fail on JSON serialization in _search_ragflow().
-        server_url = _resolve_default(server_url)
-        api_key = _resolve_default(api_key)
-        dataset_ids = _resolve_default(dataset_ids)
-        top_k = _resolve_default(top_k)
-        similarity_threshold = _resolve_default(similarity_threshold)
-        vector_similarity_weight = _resolve_default(vector_similarity_weight)
-        keyword = _resolve_default(keyword)
-        highlight = _resolve_default(highlight)
-        observer = _resolve_default(observer)
+        server_url = unwrap_field_info(server_url)
+        api_key = unwrap_field_info(api_key)
+        dataset_ids = unwrap_field_info(dataset_ids)
+        top_k = unwrap_field_info(top_k)
+        similarity_threshold = unwrap_field_info(similarity_threshold)
+        vector_similarity_weight = unwrap_field_info(vector_similarity_weight)
+        keyword = unwrap_field_info(keyword)
+        highlight = unwrap_field_info(highlight)
+        observer = unwrap_field_info(observer)
 
         if not server_url or not isinstance(server_url, str):
             raise ValueError("server_url is required and must be a non-empty string")
@@ -156,9 +143,9 @@ class RAGFlowSearchTool(Tool):
 
         self.server_url = server_url.rstrip("/")
         self.api_key = api_key
-        self.top_k = top_k
-        self.similarity_threshold = similarity_threshold
-        self.vector_similarity_weight = vector_similarity_weight
+        self.top_k = max(1, min(int(top_k or 3), 100))
+        self.similarity_threshold = max(0.0, min(float(similarity_threshold if similarity_threshold is not None else 0.2), 1.0))
+        self.vector_similarity_weight = max(0.0, min(float(vector_similarity_weight if vector_similarity_weight is not None else 0.3), 1.0))
         self.keyword = keyword
         self.highlight = highlight
         self.observer = observer

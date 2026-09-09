@@ -19,7 +19,10 @@ import { ChatMessageType, MinioFileItem, FileAttachment } from "@/types/chat";
 
 type CompareSide = "left" | "right";
 type CompareHistoryItem = { role: string; content: string };
-type CompareHistoryMap = { left: CompareHistoryItem[]; right: CompareHistoryItem[] };
+type CompareHistoryMap = {
+  left: CompareHistoryItem[];
+  right: CompareHistoryItem[];
+};
 type RunAgentParams = Parameters<typeof conversationService.runAgent>[0];
 
 interface UseCompareStreamOptions {
@@ -58,7 +61,7 @@ type PersistedChatMessage = {
   id: string;
   role: ChatMessageType["role"];
   content: string;
-  timestamp: string;
+  timestamp?: string;
   isComplete?: boolean;
   finalAnswer?: string;
   error?: string;
@@ -80,7 +83,9 @@ export function useCompareStream({
 }: UseCompareStreamOptions) {
   const translate = useCallback(
     (key: string, defaultText?: string) =>
-      defaultText !== undefined ? t(key, { defaultValue: defaultText }) : t(key),
+      defaultText !== undefined
+        ? t(key, { defaultValue: defaultText })
+        : t(key),
     [t]
   );
   const [leftMessages, setLeftMessages] = useState<ChatMessageType[]>([]);
@@ -161,7 +166,7 @@ export function useCompareStream({
         id: message.id,
         role: message.role,
         content: message.content,
-        timestamp: message.timestamp.toISOString(),
+        timestamp: message.timestamp?.toISOString(),
         isComplete: message.isComplete,
         finalAnswer: message.finalAnswer,
         error: message.error,
@@ -180,7 +185,7 @@ export function useCompareStream({
         id: message.id,
         role: message.role,
         content: message.content,
-        timestamp: new Date(message.timestamp),
+        timestamp: message.timestamp ? new Date(message.timestamp) : undefined,
         isComplete: message.isComplete,
         finalAnswer: message.finalAnswer,
         error: message.error,
@@ -211,10 +216,13 @@ export function useCompareStream({
     []
   );
 
-  const sanitizeSteps = useCallback((steps: unknown): ChatMessageType["steps"] => {
-    if (!Array.isArray(steps)) return undefined;
-    return steps as ChatMessageType["steps"];
-  }, []);
+  const sanitizeSteps = useCallback(
+    (steps: unknown): ChatMessageType["steps"] => {
+      if (!Array.isArray(steps)) return undefined;
+      return steps as ChatMessageType["steps"];
+    },
+    []
+  );
 
   const sanitizeSearchResults = useCallback(
     (searchResults: unknown): ChatMessageType["searchResults"] => {
@@ -224,10 +232,13 @@ export function useCompareStream({
     []
   );
 
-  const sanitizeStringArray = useCallback((items: unknown): string[] | undefined => {
-    if (!Array.isArray(items)) return undefined;
-    return items.filter((item): item is string => typeof item === "string");
-  }, []);
+  const sanitizeStringArray = useCallback(
+    (items: unknown): string[] | undefined => {
+      if (!Array.isArray(items)) return undefined;
+      return items.filter((item): item is string => typeof item === "string");
+    },
+    []
+  );
 
   const sanitizePersistedMessages = useCallback(
     (messages: unknown): PersistedChatMessage[] => {
@@ -316,26 +327,27 @@ export function useCompareStream({
     [sanitizeHistory, sanitizePersistedMessages]
   );
 
-  const getPersistedSnapshot = useCallback(
-    (): { snapshot: PersistedCompareSession; sourceKey: string } | null => {
-      if (!isPersistenceActive || !storageKey || typeof window === "undefined") return null;
-
-      const primarySnapshot = readSnapshotByKey(storageKey);
-      if (primarySnapshot) {
-        return { snapshot: primarySnapshot, sourceKey: storageKey };
-      }
-
-      for (const fallbackKey of fallbackStorageKeys) {
-        const fallbackSnapshot = readSnapshotByKey(fallbackKey);
-        if (fallbackSnapshot) {
-          return { snapshot: fallbackSnapshot, sourceKey: fallbackKey };
-        }
-      }
-
+  const getPersistedSnapshot = useCallback((): {
+    snapshot: PersistedCompareSession;
+    sourceKey: string;
+  } | null => {
+    if (!isPersistenceActive || !storageKey || typeof window === "undefined")
       return null;
-    },
-    [fallbackStorageKeys, isPersistenceActive, readSnapshotByKey, storageKey]
-  );
+
+    const primarySnapshot = readSnapshotByKey(storageKey);
+    if (primarySnapshot) {
+      return { snapshot: primarySnapshot, sourceKey: storageKey };
+    }
+
+    for (const fallbackKey of fallbackStorageKeys) {
+      const fallbackSnapshot = readSnapshotByKey(fallbackKey);
+      if (fallbackSnapshot) {
+        return { snapshot: fallbackSnapshot, sourceKey: fallbackKey };
+      }
+    }
+
+    return null;
+  }, [fallbackStorageKeys, isPersistenceActive, readSnapshotByKey, storageKey]);
 
   useEffect(() => {
     hasHydratedRef.current = false;
@@ -398,7 +410,10 @@ export function useCompareStream({
         },
       };
       try {
-        window.sessionStorage.setItem(storageKey, JSON.stringify(migratedPayload));
+        window.sessionStorage.setItem(
+          storageKey,
+          JSON.stringify(migratedPayload)
+        );
         window.sessionStorage.removeItem(sourceKey);
         debugCompareLog("hydrate-migrate", { from: sourceKey, to: storageKey });
         setDebugState(
@@ -423,10 +438,12 @@ export function useCompareStream({
   ]);
 
   useEffect(() => {
-    if (!isPersistenceActive || !storageKey || typeof window === "undefined") return;
+    if (!isPersistenceActive || !storageKey || typeof window === "undefined")
+      return;
     if (!hasHydratedRef.current) return;
 
-    const pendingHydratedMessageCounts = pendingHydratedMessageCountsRef.current;
+    const pendingHydratedMessageCounts =
+      pendingHydratedMessageCountsRef.current;
     if (pendingHydratedMessageCounts) {
       const hasHydratedMessages =
         leftMessages.length === pendingHydratedMessageCounts.left &&
@@ -506,7 +523,11 @@ export function useCompareStream({
   }, []);
 
   const markCompareStopped = useCallback(
-    (setSideMessages: (value: (prev: ChatMessageType[]) => ChatMessageType[]) => void) => {
+    (
+      setSideMessages: (
+        value: (prev: ChatMessageType[]) => ChatMessageType[]
+      ) => void
+    ) => {
       setSideMessages((prev) => {
         const newMessages = [...prev];
         const lastMsg = newMessages[newMessages.length - 1];
@@ -561,14 +582,18 @@ export function useCompareStream({
 
     if (compareAbortControllersRef.current.left) {
       try {
-        compareAbortControllersRef.current.left.abort(translate("agent.debug.userStop"));
+        compareAbortControllersRef.current.left.abort(
+          translate("agent.debug.userStop")
+        );
       } catch (error) {
         log.error(translate("agent.debug.cancelError"), error);
       }
     }
     if (compareAbortControllersRef.current.right) {
       try {
-        compareAbortControllersRef.current.right.abort(translate("agent.debug.userStop"));
+        compareAbortControllersRef.current.right.abort(
+          translate("agent.debug.userStop")
+        );
       } catch (error) {
         log.error(translate("agent.debug.cancelError"), error);
       }
@@ -639,7 +664,9 @@ export function useCompareStream({
       onStreamEnd: () => void;
     }) => {
       const sessionId = compareSessionIdRef.current;
-      const sideHistory = cloneHistory(compareHistoriesRef.current[params.side]);
+      const sideHistory = cloneHistory(
+        compareHistoriesRef.current[params.side]
+      );
 
       try {
         const requestParams = buildRunParams({
@@ -650,7 +677,9 @@ export function useCompareStream({
           minio_files: params.minioFiles,
         });
 
-        const guardedSetSideMessages: Dispatch<SetStateAction<ChatMessageType[]>> = (value) => {
+        const guardedSetSideMessages: Dispatch<
+          SetStateAction<ChatMessageType[]>
+        > = (value) => {
           if (compareSessionIdRef.current !== sessionId) return;
           params.setSideMessages(value);
         };
@@ -732,7 +761,11 @@ export function useCompareStream({
   );
 
   const runCompare = useCallback(
-    async (question: string, minioFiles?: MinioFileItem[], messageAttachments?: FileAttachment[]) => {
+    async (
+      question: string,
+      minioFiles?: MinioFileItem[],
+      messageAttachments?: FileAttachment[]
+    ) => {
       const conversationIds = ensureCompareConversationIds();
       if (
         compareHistoriesRef.current.left.length === 0 &&
@@ -785,8 +818,16 @@ export function useCompareStream({
         isComplete: false,
       };
 
-      setLeftMessages((prev) => [...prev, leftUserMessage, leftAssistantMessage]);
-      setRightMessages((prev) => [...prev, rightUserMessage, rightAssistantMessage]);
+      setLeftMessages((prev) => [
+        ...prev,
+        leftUserMessage,
+        leftAssistantMessage,
+      ]);
+      setRightMessages((prev) => [
+        ...prev,
+        rightUserMessage,
+        rightAssistantMessage,
+      ]);
 
       const leftController = new AbortController();
       const rightController = new AbortController();

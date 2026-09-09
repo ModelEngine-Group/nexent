@@ -7,13 +7,13 @@ Supports audio from S3, HTTP, and HTTPS URLs.
 
 import logging
 from io import BytesIO
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from jinja2 import StrictUndefined, Template
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.models import OpenAIVLModel
+from ...core.gateway.modality import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
 from ...core.utils.prompt_template_utils import get_prompt_template
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
@@ -74,7 +74,7 @@ class AnalyzeAudioTool(Tool):
                 description="Message observer",
                 default=None,
                 exclude=True),
-            vlm_model: OpenAIVLModel = Field(
+            vlm_model: Any = Field(
                 description="The video understanding model to use",
                 default=None,
                 exclude=True),
@@ -110,15 +110,19 @@ class AnalyzeAudioTool(Tool):
 
 
     def _validate_audio_capable_model(self) -> None:
-        """Fail early for SiliconFlow models that are known not to accept audio input."""
-        client_kwargs = getattr(self.vlm_model, "client_kwargs", {}) or {}
-        base_url = client_kwargs.get("base_url", "") if isinstance(client_kwargs, dict) else ""
-        model_id = str(getattr(self.vlm_model, "model_id", "") or "")
+        """Fail early if the VLM cannot accept audio input (e.g. SiliconFlow non-omni).
 
-        if "siliconflow" in str(base_url).lower() and model_id and "omni" not in model_id.lower():
+Asks the adapter through the uniform :meth:`get_model_info` interface instead
+of reaching into the wrapped model internals.
+
+Raises:
+    ValueError: If the selected VLM does not support audio input.
+"""
+        info = self.vlm_model.get_model_info()
+        if not info.capabilities.get("audio", True):
             raise ValueError(
-                "The selected video understanding model does not support audio input on SiliconFlow. "
-                "Please choose a Qwen3-Omni model for analyze_audio."
+                "The selected audio understanding model does not support audio input. "
+                "Please choose an audio-capable model for analyze_audio."
             )
 
     def _forward_impl(
@@ -128,8 +132,8 @@ class AnalyzeAudioTool(Tool):
             audio_urls_list: Optional[List[bytes]] = None) -> str:
         """Analyze an audio file and return the result as a string."""
         if self.vlm_model is None:
-            error_msg_zh = "视频理解模型未配置，请联系管理员配置视频理解模型后重试。"
-            error_msg_en = "Video understanding model is not configured. Please contact your administrator to configure the video understanding model and try again."
+            error_msg_zh = "音频理解模型未配置，请联系管理员配置音频理解模型后重试。"
+            error_msg_en = "Audio understanding model is not configured. Please contact your administrator to configure the audio understanding model and try again."
             error_msg = error_msg_zh if self._is_chinese else error_msg_en
             logger.error(error_msg)
             raise Exception(error_msg)
@@ -165,10 +169,13 @@ class AnalyzeAudioTool(Tool):
                     content_type = "audio/mpeg"
                 audio_stream = BytesIO(audio_bytes)
                 try:
-                    response = self.vlm_model.analyze_audio(
-                        audio_input=audio_stream,
-                        system_prompt=system_prompt,
-                        content_type=content_type,
+                    response = self.vlm_model.invoke_sync(
+                        VLMRequest(
+                            media_type="audio",
+                            media_input=audio_stream,
+                            prompt=system_prompt,
+                            kwargs={"content_type": content_type},
+                        )
                     )
                 except Exception as e:
                     error_msg_zh = f"音频{index}分析失败: {str(e)}。请检查视频理解模型配置是否正确。"

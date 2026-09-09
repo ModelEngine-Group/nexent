@@ -23,8 +23,9 @@ import {
 const isAidpImageUrl = (url: string): boolean => {
   return (
     typeof url === "string" &&
-    (url.startsWith("http://") || url.startsWith("https://")) &&
-    url.includes("/KnowledgeBase/Tenants/")
+    (((url.startsWith("http://") || url.startsWith("https://")) &&
+      url.includes("/KnowledgeBase/Tenants/")) ||
+      url.startsWith("/api/ind-aidp/images/"))
   );
 };
 
@@ -37,9 +38,9 @@ const isLocalKnowledgeBaseImageUrl = (url: string): boolean => {
 };
 
 /**
- * Image component that keeps separate handling for AIDP and local knowledge
- * base images. Both protected image types are fetched through the backend
- * before rendering, while public HTTP URLs continue to render directly.
+ * Image component that keeps separate handling for protected images and public
+ * images. Callers may also force public images through the backend proxy when
+ * the remote host blocks browser hotlinking or cross-origin requests.
  */
 export const AuthenticatedImage: React.FC<
   ComponentProps<"img"> & {
@@ -47,16 +48,26 @@ export const AuthenticatedImage: React.FC<
     fallback?: React.ReactNode;
     /** Open the already-resolved image in an in-page lightbox on click. */
     preview?: boolean;
+    /** Fetch the image through `/api/image` even when it is publicly reachable. */
+    proxy?: boolean;
   }
-> = ({ src, alt, className, fallback, preview = false, ...imgProps }) => {
+> = ({
+  src,
+  alt,
+  className,
+  fallback,
+  preview = false,
+  proxy = false,
+  ...imgProps
+}) => {
   const isAidpImage = src ? isAidpImageUrl(src) : false;
   const isLocalKnowledgeBaseImage = src
     ? isLocalKnowledgeBaseImageUrl(src)
     : false;
-  const needsAuth = isAidpImage || isLocalKnowledgeBaseImage;
+  const needsBackendFetch = proxy || isAidpImage || isLocalKnowledgeBaseImage;
 
   // Public image: render directly, no fetch required.
-  if (!needsAuth) {
+  if (!needsBackendFetch) {
     return (
       <PlainPreviewableImage
         src={src}

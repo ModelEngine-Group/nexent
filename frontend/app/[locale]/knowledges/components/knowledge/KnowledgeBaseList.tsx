@@ -1,9 +1,16 @@
-import React, { useState, useMemo } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
 
-import { Button, Input, Select, Tooltip } from "antd";
+import { Button, Input, Popover, Select, Tooltip } from "antd";
 import {
   SyncOutlined,
   PlusOutlined,
@@ -13,6 +20,7 @@ import {
 } from "@ant-design/icons";
 import {
   PencilRuler,
+  Tag,
   Eye,
   Glasses,
   Trash2,
@@ -23,16 +31,41 @@ import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
+import PersonalKnowledgeBaseCapacityBar from "./PersonalKnowledgeBaseCapacityBar";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import ResourceTagChips from "@/components/tag/ResourceTagChips";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import { tagManagementApi } from "@/services/tagManagementService";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
+import { formatDateOrFallback } from "@/lib/date";
+import { USER_ROLES } from "@/const/auth";
+import { calculateKnowledgeBaseInitialLimit } from "@/lib/knowledgeBaseViewport";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
   activeKnowledgeBase: KnowledgeBase | null;
   isLoading?: boolean;
+  isLoadingMore?: boolean;
   syncLoading?: boolean;
+  totalCount?: number;
+  hasMore?: boolean;
+  estimatedRowHeight?: number;
+  estimatedItemHeights?: Record<string, number> | null;
+  availableSources?: string[];
+  availableModels?: string[];
+  onLoadMore?: () => void;
+  serverFiltered?: boolean;
+  initialLoadPending?: boolean;
+  onViewportCapacityChange?: (
+    capacity: number,
+    hasMeasuredRows: boolean
+  ) => void;
   onClick: (kb: KnowledgeBase) => void;
   onDelete: (id: string) => void;
   onSync: () => void;
@@ -56,7 +89,18 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   knowledgeBases,
   activeKnowledgeBase,
   isLoading = false,
+  isLoadingMore = false,
   syncLoading = false,
+  totalCount = knowledgeBases.length,
+  hasMore = false,
+  estimatedRowHeight = 112,
+  estimatedItemHeights,
+  availableSources: availableSourceOptions,
+  availableModels: availableModelOptions,
+  onLoadMore,
+  serverFiltered = false,
+  initialLoadPending = false,
+  onViewportCapacityChange,
   onClick,
   onDelete,
   onSync,
@@ -79,6 +123,12 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   // Get user info for tenant ID
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
+  const showPersonalCapacity = user?.role === USER_ROLES.USER;
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const previousScrollTopRef = useRef(0);
+  const [measuredRowHeight, setMeasuredRowHeight] =
+    useState(estimatedRowHeight);
+  const [hasMeasuredRows, setHasMeasuredRows] = useState(false);
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(tenantId);
@@ -136,6 +186,52 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Edit modal states
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [assignTarget, setAssignTarget] = useState<{
+    indexName: string;
+    canEdit: boolean;
+  } | null>(null);
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [matchedTagIds, setMatchedTagIds] = useState<Set<string> | null>(null);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: assignDefinitions, refresh: refreshAssignDefinitions } =
+    useTagDefinitions(defaultLibrary?.bucket_id ?? null);
+
+  useEffect(() => {
+    if (tagPredicates.length === 0) {
+      setMatchedTagIds(null);
+      return;
+    }
+    const resourceIds = knowledgeBases.map((knowledgeBase) =>
+      String(knowledgeBase.id)
+    );
+    if (resourceIds.length === 0) {
+      setMatchedTagIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    void tagManagementApi
+      .filterResourceIds("knowledge_base", resourceIds, tagPredicates)
+      .then((result) => {
+        if (!cancelled) {
+          setMatchedTagIds(new Set(result.matched_resource_ids));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMatchedTagIds(new Set());
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [knowledgeBases, tagPredicates]);
   const [editingKnowledge, setEditingKnowledge] =
     useState<KnowledgeBase | null>(null);
 
@@ -187,21 +283,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     else setSelectedModels(values);
   };
 
-  // Format date function, only keep date part
-  const formatDate = (dateValue: any) => {
-    try {
-      const date =
-        typeof dateValue === "number"
-          ? new Date(dateValue)
-          : new Date(dateValue);
-      return isNaN(date.getTime())
-        ? String(dateValue ?? "")
-        : date.toISOString().split("T")[0]; // Only return YYYY-MM-DD part
-    } catch (e) {
-      return String(dateValue ?? ""); // If parsing fails, return original string
-    }
-  };
-
   // Helper to safely extract timestamp for sorting
   const getTimestamp = (value: any): number => {
     if (!value) return 0;
@@ -219,18 +300,20 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Calculate available filter options
   const availableSources = useMemo(() => {
+    if (availableSourceOptions?.length) return availableSourceOptions;
     const sources = new Set(knowledgeBases.map((kb) => kb.source));
     return Array.from(sources)
       .filter((source) => source)
       .sort();
-  }, [knowledgeBases]);
+  }, [availableSourceOptions, knowledgeBases]);
 
   const availableModels = useMemo(() => {
+    if (availableModelOptions?.length) return availableModelOptions;
     const models = new Set(knowledgeBases.map((kb) => kb.embeddingModel));
     return Array.from(models)
       .filter((model) => model && model !== "unknown")
       .sort();
-  }, [knowledgeBases]);
+  }, [availableModelOptions, knowledgeBases]);
 
   // Filter knowledge bases based on search and filters
   const filteredKnowledgeBases = useMemo(() => {
@@ -241,53 +324,150 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
       modelFilter: effectiveSelectedModels,
     });
 
-    const result = sortedKnowledgeBases.filter((kb) => {
-      // Keyword search: match name, description, or nickname
-      const keyword = effectiveSearchKeyword || "";
-      const kbName = kb.name || "";
-      const kbDescription = kb.description || "";
-      const kbNickname = kb.nickname || "";
+    const result = serverFiltered
+      ? sortedKnowledgeBases
+      : sortedKnowledgeBases.filter((kb) => {
+          // Keyword search: match name, description, or nickname
+          const keyword = effectiveSearchKeyword || "";
+          const kbName = kb.name || "";
+          const kbDescription = kb.description || "";
+          const kbNickname = kb.nickname || "";
 
-      const matchesSearch =
-        !keyword ||
-        kbName.toLowerCase().includes(keyword.toLowerCase()) ||
-        kbDescription.toLowerCase().includes(keyword.toLowerCase()) ||
-        kbNickname.toLowerCase().includes(keyword.toLowerCase());
+          const matchesSearch =
+            !keyword ||
+            kbName.toLowerCase().includes(keyword.toLowerCase()) ||
+            kbDescription.toLowerCase().includes(keyword.toLowerCase()) ||
+            kbNickname.toLowerCase().includes(keyword.toLowerCase());
 
-      // Source filter
-      const matchesSource =
-        effectiveSelectedSources.length === 0 ||
-        effectiveSelectedSources.includes(kb.source);
+          // Source filter
+          const matchesSource =
+            effectiveSelectedSources.length === 0 ||
+            effectiveSelectedSources.includes(kb.source);
 
-      // Model filter
-      const matchesModel =
-        effectiveSelectedModels.length === 0 ||
-        effectiveSelectedModels.includes(kb.embeddingModel);
+          // Model filter
+          const matchesModel =
+            effectiveSelectedModels.length === 0 ||
+            effectiveSelectedModels.includes(kb.embeddingModel);
 
-      const matches = matchesSearch && matchesSource && matchesModel;
+          const matchesTag =
+            matchedTagIds === null || matchedTagIds.has(String(kb.id));
+          const matches =
+            matchesSearch && matchesSource && matchesModel && matchesTag;
 
-      if (!matches) {
-        log.log("KB filtered out:", {
-          name: kb.name,
-          source: kb.source,
-          embeddingModel: kb.embeddingModel,
-          matchesSearch,
-          matchesSource,
-          matchesModel,
+          if (!matches) {
+            log.log("KB filtered out:", {
+              name: kb.name,
+              source: kb.source,
+              embeddingModel: kb.embeddingModel,
+              matchesSearch,
+              matchesSource,
+              matchesModel,
+            });
+          }
+
+          return matches;
         });
-      }
 
-      return matches;
-    });
-
-    log.log("Filtered result:", result.length, "items");
-    return result;
+    const tagFilteredResult =
+      matchedTagIds === null
+        ? result
+        : result.filter((knowledgeBase) =>
+            matchedTagIds.has(String(knowledgeBase.id))
+          );
+    log.log("Filtered result:", tagFilteredResult.length, "items");
+    return tagFilteredResult;
   }, [
     sortedKnowledgeBases,
     effectiveSearchKeyword,
     effectiveSelectedSources,
     effectiveSelectedModels,
+    matchedTagIds,
+    serverFiltered,
   ]);
+
+  useLayoutEffect(() => {
+    const rows = scrollContainerRef.current?.querySelectorAll<HTMLElement>(
+      "[data-knowledge-base-row]"
+    );
+    if (!rows?.length) {
+      if (hasMeasuredRows) setHasMeasuredRows(false);
+      return;
+    }
+    const average =
+      Array.from(rows).reduce(
+        (sum, row) => sum + row.getBoundingClientRect().height,
+        0
+      ) / rows.length;
+    if (average > 0 && Math.abs(average - measuredRowHeight) > 1) {
+      setMeasuredRowHeight(average);
+    }
+    if (!hasMeasuredRows) setHasMeasuredRows(true);
+  }, [filteredKnowledgeBases.length, hasMeasuredRows, measuredRowHeight]);
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !onViewportCapacityChange) return;
+
+    const reportCapacity = () => {
+      if (container.clientHeight <= 0 || measuredRowHeight <= 0) return;
+      onViewportCapacityChange(
+        calculateKnowledgeBaseInitialLimit(
+          container.clientHeight,
+          measuredRowHeight
+        ),
+        hasMeasuredRows
+      );
+    };
+    reportCapacity();
+    const observer = new ResizeObserver(reportCapacity);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [hasMeasuredRows, measuredRowHeight, onViewportCapacityChange]);
+
+  const placeholderHeight = useMemo(() => {
+    const unloadedCount = Math.max(
+      0,
+      totalCount - filteredKnowledgeBases.length
+    );
+    if (!unloadedCount) return 0;
+    if (estimatedItemHeights) {
+      const loadedIds = new Set(filteredKnowledgeBases.map((kb) => kb.id));
+      const reservedHeight = Object.entries(estimatedItemHeights).reduce(
+        (sum, [id, height]) => sum + (loadedIds.has(id) ? 0 : height),
+        0
+      );
+      if (reservedHeight > 0) return reservedHeight;
+    }
+    return unloadedCount * measuredRowHeight;
+  }, [
+    estimatedItemHeights,
+    filteredKnowledgeBases.length,
+    measuredRowHeight,
+    totalCount,
+  ]);
+
+  const handleScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const container = event.currentTarget;
+      const hasDownwardIntent =
+        container.scrollTop > previousScrollTopRef.current;
+      previousScrollTopRef.current = container.scrollTop;
+      if (!hasDownwardIntent || !hasMore || isLoadingMore || !onLoadMore)
+        return;
+
+      const loadedHeight = filteredKnowledgeBases.length * measuredRowHeight;
+      if (container.scrollTop + container.clientHeight >= loadedHeight - 80) {
+        onLoadMore();
+      }
+    },
+    [
+      filteredKnowledgeBases.length,
+      hasMore,
+      isLoadingMore,
+      measuredRowHeight,
+      onLoadMore,
+    ]
+  );
 
   return (
     <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col overflow-hidden">
@@ -303,7 +483,10 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               {t("knowledgeBase.list.title")}
             </h3>
           </div>
-          <div className="flex items-center min-w-0 overflow-x-auto" style={{ gap: "6px" }}>
+          <div
+            className="flex items-center min-w-0 overflow-x-auto"
+            style={{ gap: "6px" }}
+          >
             <Button
               style={{
                 padding: "4px 15px",
@@ -351,6 +534,20 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 <SyncOutlined spin={syncLoading} style={{ color: "white" }} />
               </span>
               <span>{t("knowledgeBase.button.sync")}</span>
+            </Button>
+            <Button
+              style={{
+                padding: "4px 15px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                flexShrink: 0,
+              }}
+              onClick={() => setTagManagementOpen(true)}
+              icon={<Tag className="h-4 w-4" />}
+            >
+              {t("knowledgeBase.button.tagManagement")}
             </Button>
             {showDataMateConfig && (
               <Button
@@ -425,10 +622,49 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               ))}
             </Select>
           )}
+
+          {defaultLibrary && assignDefinitions && (
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              title={t("knowledgeBase.tagFilter.placeholder")}
+              content={
+                <div className="w-64">
+                  <TagFilterControls
+                    definitions={assignDefinitions}
+                    value={tagPredicates}
+                    onChange={setTagPredicates}
+                  />
+                  {tagPredicates.length > 0 && (
+                    <Button
+                      size="small"
+                      block
+                      className="mt-2"
+                      onClick={() => setTagPredicates([])}
+                    >
+                      {t("knowledgeBase.tagFilter.clear")}
+                    </Button>
+                  )}
+                </div>
+              }
+            >
+              <Button
+                icon={<FilterOutlined />}
+                type={tagPredicates.length > 0 ? "primary" : "default"}
+                aria-label={t("knowledgeBase.tagFilter.placeholder")}
+              >
+                {t("knowledgeBase.tagFilter.button")}
+              </Button>
+            </Popover>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto overflow-x-hidden"
+        onScroll={handleScroll}
+      >
         {filteredKnowledgeBases.length > 0 ? (
           <div className="divide-y-0">
             {filteredKnowledgeBases.map((kb, index) => {
@@ -437,6 +673,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
               return (
                 <div
                   key={kb.id}
+                  data-knowledge-base-row
                   className={`${
                     KB_LAYOUT.ROW_PADDING
                   } px-2 hover:bg-gray-50 cursor-pointer transition-colors ${
@@ -472,35 +709,59 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           {/* Permission icon with tooltip */}
                           <Can permission="kb.groups:read">
                             <Tooltip
-                              title={t(getPermissionTooltipKey(kb.ingroup_permission || ""))}
+                              title={t(
+                                getPermissionTooltipKey(
+                                  kb.ingroup_permission || ""
+                                )
+                              )}
                               placement="top"
                             >
                               <div className="ml-3 flex-shrink-0 cursor-pointer">
                                 <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 hover:bg-gray-300 transition-all duration-200 hover:shadow-sm">
-                                  {getPermissionIcon(kb.ingroup_permission || "")}
+                                  {getPermissionIcon(
+                                    kb.ingroup_permission || ""
+                                  )}
                                 </div>
                               </div>
                             </Tooltip>
                           </Can>
                         </div>
-                          <div className="flex items-center ml-2">
+                        <div className="flex items-center ml-2">
                           <Can permission="kb:update">
+                            <Tooltip
+                              title={t("knowledgeBase.action.assignTags")}
+                            >
+                              <Button
+                                type="text"
+                                icon={<Tag className="h-4 w-4" />}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setAssignTarget({
+                                    indexName: kb.id,
+                                    canEdit: kb.permission !== "READ_ONLY",
+                                  });
+                                }}
+                                size="small"
+                              />
+                            </Tooltip>
                             {/* Edit button - only show for Nexent (local) sources and when user has edit permission */}
-                            {(!kb.source || kb.source === "nexent" || kb.source === "elasticsearch") &&
+                            {(!kb.source ||
+                              kb.source === "nexent" ||
+                              kb.source === "elasticsearch") &&
                               kb.permission !== "READ_ONLY" && (
-                              <Tooltip title={t("common.edit")}>
-                                <Button
-                                  type="text"
-                                  icon={<SquarePen className="h-4 w-4" />}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openEditModal(kb);
-                                  }}
-                                  size="small"
-                                />
-                              </Tooltip>
-                            )}
-                            </Can>
+                                <Tooltip title={t("common.edit")}>
+                                  <Button
+                                    type="text"
+                                    icon={<SquarePen className="h-4 w-4" />}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openEditModal(kb);
+                                    }}
+                                    size="small"
+                                  />
+                                </Tooltip>
+                              )}
+                          </Can>
                           <Can permission="kb:delete">
                             {/* Delete button - hide when user has READ_ONLY permission */}
                             {kb.permission !== "READ_ONLY" && (
@@ -517,9 +778,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                                 />
                               </Tooltip>
                             )}
-                            </Can>
-                          </div>
-
+                          </Can>
+                        </div>
                       </div>
                       <div
                         className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
@@ -542,6 +802,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                           })}
                         </span>
 
+                        <span className="inline-flex items-center mr-1">
+                          <ResourceTagChips
+                            resourceType="knowledge_base"
+                            resourceId={kb.id}
+                            max={3}
+                          />
+                        </span>
+
                         {/* Always show source tag regardless of document/chunk count */}
                         <span
                           className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
@@ -560,7 +828,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
                             >
                               {t("knowledgeBase.tag.createdAt", {
-                                date: formatDate(kb.createdAt),
+                                date: formatDateOrFallback(kb.createdAt),
                               })}
                             </span>
 
@@ -569,7 +837,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                               className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}
                             ></div>
 
-{/* Model tag - only show when model is not "unknown" */}
+                            {/* Model tag - only show when model is not "unknown" */}
                             {kb.embeddingModel !== "unknown" && (
                               <span
                                 className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.model} mr-1`}
@@ -581,26 +849,28 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                             )}
                             {kb.is_multimodal &&
                               hasIndexedDocumentsAndChunks(kb) && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.red} mr-1`}
-                              >
-                                multimodal
-                              </span>
-                            )}
+                                <span
+                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.red} mr-1`}
+                                >
+                                  multimodal
+                                </span>
+                              )}
 
                             {/* Model mismatch is shown in the knowledge-base detail header only. */}
 
                             {/* User group tags - only show when not PRIVATE */}
                             <Can permission="group:read">
                               {kb.ingroup_permission !== "PRIVATE" &&
-                                getGroupNames(kb.group_ids).map((groupName, idx) => (
-                                  <span
-                                    key={idx}
-                                    className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                                  >
-                                    {groupName}
-                                  </span>
-                                ))}
+                                getGroupNames(kb.group_ids).map(
+                                  (groupName, idx) => (
+                                    <span
+                                      key={idx}
+                                      className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
+                                    >
+                                      {groupName}
+                                    </span>
+                                  )
+                                )}
                             </Can>
                             {kb.preserve_source_file === false && (
                               <span
@@ -617,6 +887,18 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                 </div>
               );
             })}
+            {placeholderHeight > 0 && (
+              <div aria-hidden="true" style={{ height: placeholderHeight }} />
+            )}
+            {isLoadingMore && (
+              <div className="py-2 text-center text-xs text-gray-400">
+                Loading...
+              </div>
+            )}
+          </div>
+        ) : isLoading || initialLoadPending ? (
+          <div className="py-6 text-center text-sm text-gray-400">
+            Loading...
           </div>
         ) : (
           <div
@@ -631,6 +913,8 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         )}
       </div>
 
+      {showPersonalCapacity && <PersonalKnowledgeBaseCapacityBar />}
+
       {/* Edit Knowledge Base Modal */}
       <KnowledgeBaseEditModal
         open={editModalVisible}
@@ -642,6 +926,25 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             onKnowledgeBaseUpdate(updatedKnowledgeBase);
           }
         }}
+      />
+      <TagDefinitionManagementModal
+        open={tagManagementOpen}
+        onClose={() => {
+          setTagManagementOpen(false);
+          void refreshAssignDefinitions();
+        }}
+        bucketId={defaultLibrary?.bucket_id ?? 0}
+        bucketName={defaultLibrary?.bucket_name ?? ""}
+        canManage={true}
+      />
+      <ResourceTagAssignmentModal
+        open={assignTarget !== null}
+        onClose={() => setAssignTarget(null)}
+        resourceType="knowledge_base"
+        resourceId={assignTarget?.indexName ?? ""}
+        definitions={assignDefinitions ?? []}
+        canEdit={assignTarget?.canEdit ?? false}
+        onManageDefinitions={() => setTagManagementOpen(true)}
       />
     </div>
   );

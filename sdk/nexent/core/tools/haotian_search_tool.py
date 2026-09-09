@@ -6,8 +6,9 @@ import httpx
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ..models.rerank_model import BaseRerank
+from ..gateway.modality import RerankAdapter
 from ..utils.observer import MessageObserver, ProcessType
+from ..utils.pydantic_utils import unwrap_field_info
 from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
 from ...utils.http_client_manager import http_client_manager
 
@@ -110,7 +111,7 @@ class HaotianSearchTool(Tool):
         dataset_ids: Any = Field(
             description="Selected dataset ids (JSON string array or list)"
         ),
-        top_k: int = Field(description="Maximum number of search results", default=3),
+        top_k: int = Field(description="Maximum number of search results", default=3, ge=1, le=100),
         search_method: str = Field(
             description="Search method",
             default="keyword_search",
@@ -127,8 +128,8 @@ class HaotianSearchTool(Tool):
             description="Reranking model name",
             default="",
         ),
-        keyword_weight: float = Field(description="Keyword weight", default=0.1),
-        vector_weight: float = Field(description="Vector weight", default=0.3),
+        keyword_weight: float = Field(description="Keyword weight", default=0.1, ge=0.0, le=1.0),
+        vector_weight: float = Field(description="Vector weight", default=0.3, ge=0.0, le=1.0),
         embedding_provider_name: str = Field(
             description="Embedding provider name",
             default="",
@@ -144,17 +145,24 @@ class HaotianSearchTool(Tool):
         score_threshold: Optional[float] = Field(
             description="Score threshold",
             default=None,
+            ge=0.0,
+            le=1.0,
         ),
         observer: MessageObserver = Field(
             description="Message observer", default=None, exclude=True
         ),
-        rerank_model: BaseRerank = Field(
+        rerank_model: RerankAdapter = Field(
             description="Optional local rerank model (not used by Haotian API)",
             default=None,
             exclude=True,
         ),
     ):
         super().__init__()
+
+        top_k = unwrap_field_info(top_k)
+        keyword_weight = unwrap_field_info(keyword_weight)
+        vector_weight = unwrap_field_info(vector_weight)
+        score_threshold = unwrap_field_info(score_threshold)
 
         if not retrieve_url or not isinstance(retrieve_url, str):
             raise ValueError("retrieve_url is required and must be a non-empty string")
@@ -168,17 +176,17 @@ class HaotianSearchTool(Tool):
         self.authorization = authorization.strip()
 
         self.dataset_ids = self._parse_dataset_ids(dataset_ids)
-        self.top_k = top_k
+        self.top_k = max(1, min(int(top_k or 3), 100))
         self.search_method = search_method
         self.reranking_enable = reranking_enable
         self.reranking_provider_name = reranking_provider_name
         self.reranking_model_name = reranking_model_name
-        self.keyword_weight = keyword_weight
-        self.vector_weight = vector_weight
+        self.keyword_weight = max(0.0, min(float(keyword_weight if keyword_weight is not None else 0.1), 1.0))
+        self.vector_weight = max(0.0, min(float(vector_weight if vector_weight is not None else 0.3), 1.0))
         self.embedding_provider_name = embedding_provider_name
         self.embedding_model_name = embedding_model_name
         self.score_threshold_enabled = score_threshold_enabled
-        self.score_threshold = score_threshold
+        self.score_threshold = (None if score_threshold is None else max(0.0, min(float(score_threshold), 1.0)))
         self.observer = observer
         self.rerank_model = rerank_model
 

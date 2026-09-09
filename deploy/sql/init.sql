@@ -214,6 +214,47 @@ COMMENT ON COLUMN "knowledge_record_t"."updated_by" IS 'Last updater ID, audit f
 COMMENT ON COLUMN "knowledge_record_t"."created_by" IS 'Creator ID, audit field';
 COMMENT ON TABLE "knowledge_record_t" IS 'Records knowledge base description and status information';
 
+CREATE TABLE IF NOT EXISTS "knowledge_storage_object_t" (
+  "storage_object_id" BIGSERIAL,
+  "tenant_id" varchar(100) NOT NULL,
+  "knowledge_id" BIGINT NOT NULL,
+  "index_name" varchar(100) NOT NULL,
+  "bucket_name" varchar(255) NOT NULL,
+  "object_name" varchar(1024) NOT NULL,
+  "raw_bytes" BIGINT NOT NULL,
+  "status" varchar(20) NOT NULL DEFAULT 'COMMITTED',
+  "create_time" timestamp(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "update_time" timestamp(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "created_by" varchar(100),
+  "updated_by" varchar(100),
+  "delete_flag" varchar(1) NOT NULL DEFAULT 'N',
+  CONSTRAINT "knowledge_storage_object_t_pk" PRIMARY KEY ("storage_object_id"),
+  CONSTRAINT "uq_knowledge_storage_object_bucket_object" UNIQUE ("bucket_name", "object_name"),
+  CONSTRAINT "ck_knowledge_storage_object_raw_bytes_nonnegative" CHECK ("raw_bytes" >= 0),
+  CONSTRAINT "ck_knowledge_storage_object_status" CHECK ("status" IN ('COMMITTED', 'DELETED'))
+);
+ALTER TABLE "knowledge_storage_object_t" OWNER TO "root";
+COMMENT ON TABLE "knowledge_storage_object_t" IS 'Durable ownership and accounting ledger for retained knowledge-base source objects';
+COMMENT ON COLUMN "knowledge_storage_object_t"."storage_object_id" IS 'Storage object ledger ID';
+COMMENT ON COLUMN "knowledge_storage_object_t"."tenant_id" IS 'Tenant isolation key';
+COMMENT ON COLUMN "knowledge_storage_object_t"."knowledge_id" IS 'Owning knowledge base ID';
+COMMENT ON COLUMN "knowledge_storage_object_t"."index_name" IS 'Owning Elasticsearch index name';
+COMMENT ON COLUMN "knowledge_storage_object_t"."bucket_name" IS 'MinIO bucket name';
+COMMENT ON COLUMN "knowledge_storage_object_t"."object_name" IS 'MinIO object name';
+COMMENT ON COLUMN "knowledge_storage_object_t"."raw_bytes" IS 'Authoritative MinIO object size in bytes';
+COMMENT ON COLUMN "knowledge_storage_object_t"."status" IS 'Accounting lifecycle status: COMMITTED or DELETED';
+COMMENT ON COLUMN "knowledge_storage_object_t"."create_time" IS 'Creation time, audit field';
+COMMENT ON COLUMN "knowledge_storage_object_t"."update_time" IS 'Update time, audit field';
+COMMENT ON COLUMN "knowledge_storage_object_t"."created_by" IS 'Creator ID, audit field';
+COMMENT ON COLUMN "knowledge_storage_object_t"."updated_by" IS 'Last updater ID, audit field';
+COMMENT ON COLUMN "knowledge_storage_object_t"."delete_flag" IS 'Soft delete flag: N or Y';
+CREATE INDEX IF NOT EXISTS "idx_knowledge_storage_object_tenant_active"
+  ON "knowledge_storage_object_t" ("tenant_id")
+  WHERE "delete_flag" = 'N' AND "status" = 'COMMITTED';
+CREATE INDEX IF NOT EXISTS "idx_knowledge_storage_object_kb_active"
+  ON "knowledge_storage_object_t" ("tenant_id", "knowledge_id")
+  WHERE "delete_flag" = 'N' AND "status" = 'COMMITTED';
+
 -- Create the ag_tool_info_t table
 CREATE TABLE IF NOT EXISTS nexent.ag_tool_info_t (
     tool_id SERIAL PRIMARY KEY NOT NULL,

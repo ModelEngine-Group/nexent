@@ -44,6 +44,8 @@ export function useAuthenticationUI({
   const [isAuthPromptModalOpen, setIsAuthPromptModalOpen] = useState(false);
   const [isSessionExpiredModalOpen, setIsSessionExpiredModalOpen] =
     useState(false);
+  const [isSessionExpiredLoginInProgress, setIsSessionExpiredLoginInProgress] =
+    useState(false);
 
   const handleUnauthenticatedModalClose = useCallback(() => {
     // Only emit back to home event and redirect if user is not authenticated
@@ -125,6 +127,22 @@ export function useAuthenticationUI({
     setIsSessionExpiredModalOpen(false);
     handleUnauthenticatedModalClose();
   }, [clearLocalSession, handleUnauthenticatedModalClose]);
+
+  const openLoginModalAfterSessionExpired = useCallback(() => {
+    setIsSessionExpiredLoginInProgress(true);
+    setIsSessionExpiredModalOpen(false);
+    setIsAuthPromptModalOpen(false);
+    setIsRegisterModalOpen(false);
+    clearLocalSession();
+
+    redirectToForcedLogin(effectivePath)
+      .then((redirected) => {
+        if (!redirected) setIsLoginModalOpen(true);
+      })
+      .finally(() => {
+        setIsSessionExpiredLoginInProgress(false);
+      });
+  }, [clearLocalSession, effectivePath, redirectToForcedLogin]);
 
   const getOAuthErrorMessage = useCallback(
     (error: string) => {
@@ -230,8 +248,8 @@ export function useAuthenticationUI({
     if (isAuthChecking) return;
     // Skip if user is authenticated
     if (isAuthenticated) return;
-    // Skip if session expired modal is already showing (avoid duplicate modals)
-    if (isSessionExpiredModalOpen) return;
+    // Skip while transitioning from the session-expired dialog to login.
+    if (isSessionExpiredModalOpen || isSessionExpiredLoginInProgress) return;
     if (isLoginModalOpen) return;
     if (isRegisterModalOpen) return;
     let cancelled = false;
@@ -251,6 +269,7 @@ export function useAuthenticationUI({
     isSpeedMode,
     isAuthChecking,
     isSessionExpiredModalOpen,
+    isSessionExpiredLoginInProgress,
     isLoginModalOpen,
     isRegisterModalOpen,
     isOAuthCompletePage,
@@ -277,5 +296,6 @@ export function useAuthenticationUI({
     isSessionExpiredModalOpen,
     openSessionExpiredModal,
     closeSessionExpiredModal,
+    openLoginModalAfterSessionExpired,
   };
 }

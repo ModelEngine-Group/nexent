@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from apps.app_factory import create_app
 from apps.agent_app import agent_config_router as agent_router
@@ -30,34 +32,49 @@ from apps.voice_app import voice_config_router as voice_router
 from apps.tenant_app import router as tenant_router
 from apps.group_app import router as group_router
 from apps.user_app import router as user_router
+from apps.api_key_app import router as api_key_router
 from apps.invitation_app import router as invitation_router
 from apps.notification_app import router as notification_router
 from apps.a2a_client_app import router as a2a_client_router
 from apps.monitoring_app import router as monitoring_router
 from apps.a2a_server_app import router as a2a_server_router
 from apps.haotian_app import router as haotian_router
+from apps.ind_aidp_app import router as ind_aidp_router
 from apps.evaluation_set_app import router as evaluation_set_router
 from apps.agent_evaluation_app import router as agent_evaluation_router
+from apps.evaluator_app import router as evaluator_router
+from apps.evaluation_annotation_app import router as evaluation_annotation_router
 from apps.cas_app import router as cas_router
 from apps.memory_config_app import router as memory_config_router
 from apps.memory_record_app import router as memory_record_router
-from apps.quota_app import tenant_quota_router, platform_quota_router
+from apps.memory_long_term_app import router as memory_long_term_router
+from apps.memory_dreaming_app import router as memory_dreaming_router
+from apps.memory_provider_app import router as memory_provider_router
+from apps.tag_management_app import router as tag_management_router
+from apps.quota_app import tenant_quota_router, platform_quota_router, personal_quota_router
 from consts.const import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     ENABLE_AIDP_KNOWLEDGE,
     IS_SPEED_MODE,
 )
+from consts.task_recovery import CONFIG_SERVICE_NAME
 from services.prompt_template_service import sync_system_default_prompt_template
 
-# Create logger instance
 logger = logging.getLogger("base_app")
 
-# Create FastAPI app with common configurations
-app = create_app(title="Nexent Config API", description="Configuration APIs")
+async def recover_config_tasks_on_startup():
+    from services.evaluation_maintenance import start as start_eval_maintenance
+    from services.startup_recovery_service import (
+        recover_config_tasks,
+        schedule_interrupted_upload_cleanup,
+    )
+
+    await asyncio.to_thread(recover_config_tasks)
+    start_eval_maintenance()
+    await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
 
 
-@app.on_event("startup")
 async def sync_default_prompt_template_on_startup():
     """Sync defaults and validate enabled external service configuration."""
     if ENABLE_AIDP_KNOWLEDGE and (not AIDP_SERVER_URL or not AIDP_API_KEY):
@@ -70,6 +87,37 @@ async def sync_default_prompt_template_on_startup():
         logger.info("System default prompt template synced successfully.")
     except Exception as exc:
         logger.error(f"Failed to sync system default prompt template: {str(exc)}")
+
+
+async def start_dreaming_scheduler():
+    from services.memory_dreaming_scheduler import dreaming_scheduler
+    await dreaming_scheduler.start()
+
+
+async def stop_dreaming_scheduler():
+    from services.memory_dreaming_scheduler import dreaming_scheduler
+    await dreaming_scheduler.stop()
+
+
+@asynccontextmanager
+async def config_lifespan(_app):
+    await recover_config_tasks_on_startup()
+    await sync_default_prompt_template_on_startup()
+    await start_dreaming_scheduler()
+    try:
+        yield
+    finally:
+        # Preserve the scheduler's existing graceful shutdown behavior. Task
+        # state recovery remains exclusively in the startup path above.
+        await stop_dreaming_scheduler()
+
+
+app = create_app(
+    title="Nexent Config API",
+    description="Configuration APIs",
+    lifespan=config_lifespan,
+)
+
 
 app.include_router(model_manager_router)
 app.include_router(config_sync_router)
@@ -108,18 +156,27 @@ app.include_router(remote_mcp_router)
 app.include_router(tenant_router)
 app.include_router(group_router)
 app.include_router(user_router)
+app.include_router(api_key_router)
 app.include_router(invitation_router)
 app.include_router(notification_router)
 app.include_router(a2a_client_router)
 app.include_router(a2a_server_router)
 app.include_router(haotian_router)
+app.include_router(ind_aidp_router)
 app.include_router(evaluation_set_router)
 app.include_router(agent_evaluation_router)
+app.include_router(evaluator_router)
+app.include_router(evaluation_annotation_router)
 if ENABLE_AIDP_KNOWLEDGE:
     from ext_components.aidp.apps.aidp_mgmt_app import aidp_mgmt_router
     app.include_router(aidp_mgmt_router)
 # New memory architecture routers (upstream #3497)
 app.include_router(memory_config_router)
 app.include_router(memory_record_router)
+app.include_router(memory_long_term_router)
 app.include_router(tenant_quota_router)
 app.include_router(platform_quota_router)
+app.include_router(personal_quota_router)
+app.include_router(memory_dreaming_router)
+app.include_router(memory_provider_router)
+app.include_router(tag_management_router)

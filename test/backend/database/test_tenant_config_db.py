@@ -1,12 +1,20 @@
 import sys
 import os
+import types
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
 
 import pytest
 from unittest.mock import MagicMock
 
-# First mock the consts module to avoid ModuleNotFoundError
-consts_mock = MagicMock()
+# First mock the consts package to avoid ModuleNotFoundError.
+# ``consts`` must be a real package-like module (i.e. carry ``__path__``) so
+# that child imports such as ``from consts.exceptions import ...`` resolve
+# through sys.modules instead of failing with "not a package". ``const``
+# stays a MagicMock so tests can attach whatever constants they need.
+from types import ModuleType
+
+consts_mock = ModuleType("consts")
+consts_mock.__path__ = []
 consts_mock.const = MagicMock()
 # Set required constants in consts.const
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
@@ -22,9 +30,30 @@ consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 consts_mock.const.TENANT_ID = "tenant_id"
 
+# Provide the exceptions submodule used by tenant_config_db at import time.
+consts_exceptions_mock = ModuleType("consts.exceptions")
+
+
+class TenantResourceLimitError(Exception):
+    pass
+
+
+consts_exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
+
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+sys.modules['consts.exceptions'] = consts_exceptions_mock
+
+exceptions_mock = types.ModuleType("consts.exceptions")
+
+
+class MockTenantResourceLimitError(Exception):
+    pass
+
+
+exceptions_mock.TenantResourceLimitError = MockTenantResourceLimitError
+sys.modules['consts.exceptions'] = exceptions_mock
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -85,6 +114,7 @@ sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 # Now we can safely import the module under test
 from backend.database.tenant_config_db import (
     get_all_configs_by_tenant_id,
+    get_configs_by_tenant_id_and_keys,
     get_tenant_config_info,
     get_single_config_info,
     insert_config,
@@ -94,6 +124,39 @@ from backend.database.tenant_config_db import (
     update_config_by_tenant_config_id_and_data,
     get_all_tenant_ids
 )
+
+
+def test_get_configs_by_tenant_id_and_keys_success(monkeypatch, mock_session):
+    """Return only active configuration values for the requested keys."""
+    session, query = mock_session
+    mock_config = MockTenantConfig(
+        config_key="PERSONAL_KB_QUOTA_user-1",
+        config_value="1024",
+    )
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = [mock_config]
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+
+    result = get_configs_by_tenant_id_and_keys(
+        "test_tenant",
+        ["PERSONAL_KB_QUOTA_DEFAULT", "PERSONAL_KB_QUOTA_user-1"],
+    )
+
+    assert result == {"PERSONAL_KB_QUOTA_user-1": "1024"}
+
+
+def test_get_configs_by_tenant_id_and_keys_empty_keys(monkeypatch):
+    """Avoid opening a database session when no keys are requested."""
+    get_db_session = MagicMock()
+    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", get_db_session)
+
+    assert get_configs_by_tenant_id_and_keys("test_tenant", []) == {}
+    get_db_session.assert_not_called()
 
 
 @pytest.fixture
@@ -537,3 +600,49 @@ def test_database_error_handling(monkeypatch, mock_session):
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_all_configs_by_tenant_id("test_tenant")
+
+
+def test_insert_tenant_id_config_rejects_platform_tenant_limit(monkeypatch, mock_session):
+    """Writing a new tenant identity is rejected at the platform tenant limit."""
+    import backend.database.tenant_config_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session, query = mock_session
+    query.filter.return_value.distinct.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
+    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+
+    with pytest.raises(ResourceLimitError, match="Tenant limit"):
+        module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
+
+
+@pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
+def test_tenant_limit_boundaries(monkeypatch, mock_session, current_count, should_reject):
+    """Tenant identity creation is allowed below the cap and rejected at or above it."""
+    import backend.database.tenant_config_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session, query = mock_session
+    query.filter.return_value.distinct.return_value.count.return_value = current_count
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
+    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+
+    if should_reject:
+        with pytest.raises(ResourceLimitError):
+            module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
+    else:
+        assert module.insert_config({"tenant_id": "tenant-1", "config_key": "TENANT_ID"}) is True

@@ -2,14 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Modal, Form, Input, Button, Switch } from "antd";
-import { useQueryClient } from "@tanstack/react-query";
+import { App, Modal, Form, Input, Button } from "antd";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 const { TextArea } = Input;
 
 import { publishVersion, updateVersion } from "@/services/agentVersionService";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import A2AServerSettingsPanel from "../components/a2a/A2AServerSettingsPanel";
+import { a2aClientService } from "@/services/a2aService";
 import log from "@/lib/logger";
 
 export interface AgentVersionPubulishModalProps {
@@ -21,7 +22,6 @@ export interface AgentVersionPubulishModalProps {
   initialValues?: {
     version_name?: string;
     release_note?: string;
-    is_a2a?: boolean;
   };
   onPublished?: () => void;
   onUpdated?: () => void;
@@ -46,38 +46,24 @@ export default function AgentVersionPubulishModal({
 
   const [isLoading, setIsLoading] = useState(false);
   const [publishForm] = Form.useForm();
-  const [isA2AAgent, setIsA2AAgent] = useState(false);
   const [showA2ASettings, setShowA2ASettings] = useState(false);
-  const [publishedAgentName, setPublishedAgentName] = useState("");
   const [a2aAgentInfo, setA2aAgentInfo] = useState<{
     endpoint_id: string;
     agent_id: number;
   } | null>(null);
-  const [a2aAgentCard, setA2aAgentCard] = useState<{
-    endpoint_id: string;
-    name: string;
-    description?: string;
-    version?: string;
-    streaming?: boolean;
-    agent_card_url: string | null;
-    rest_endpoints: {
-      message_send: string;
-      message_stream: string;
-      tasks_get: string;
-    };
-    jsonrpc_url: string;
-    jsonrpc_methods: string[];
-  } | undefined>(undefined);
+  const { data: a2aSettingsData } = useQuery({
+    queryKey: ["a2aServerSettings", a2aAgentInfo?.agent_id],
+    queryFn: () => a2aClientService.getServerSettings(a2aAgentInfo!.agent_id),
+    enabled: showA2ASettings && !!a2aAgentInfo,
+  });
 
   // Reset form when modal opens or initialValues changes
   useEffect(() => {
     if (open) {
       if (isEdit && initialValues) {
         publishForm.setFieldsValue(initialValues);
-        setIsA2AAgent(initialValues.is_a2a ?? false);
       } else if (!isEdit) {
         publishForm.resetFields();
-        setIsA2AAgent(false);
       }
     }
   }, [open, isEdit, initialValues, publishForm]);
@@ -125,23 +111,14 @@ export default function AgentVersionPubulishModal({
 
     try {
       setIsLoading(true);
-      const publishParams = {
-        ...values,
-        publish_as_a2a: isA2AAgent,
-      };
-      const result = await publishVersion(agentId, publishParams);
+      const result = await publishVersion(agentId, values);
       if (result.success) {
         message.success(t("agent.version.publishSuccess"));
-        setPublishedAgentName(values.version_name || "");
-        if (isA2AAgent && result.data?.a2a_agent) {
+        if (result.data?.a2a_agent) {
           setA2aAgentInfo({
             endpoint_id: result.data.a2a_agent.endpoint_id,
             agent_id: result.data.a2a_agent.agent_id,
           });
-          // Set Agent Card data from backend response
-          if (result.data?.a2a_agent_card) {
-            setA2aAgentCard(result.data.a2a_agent_card);
-          }
           onClose();
           publishForm.resetFields();
           onPublished?.();
@@ -232,16 +209,6 @@ export default function AgentVersionPubulishModal({
               placeholder={t("agent.version.releaseNotePlaceholder")}
             />
           </Form.Item>
-
-          <Form.Item
-            label={t("agent.version.publishAsA2AAgent")}
-            valuePropName="checked"
-          >
-            <Switch
-              checked={isA2AAgent}
-              onChange={(checked) => setIsA2AAgent(checked)}
-            />
-          </Form.Item>
           <Form.Item className="mb-0">
             <div className="flex justify-end gap-2">
               <Button onClick={onClose} disabled={isLoading}>
@@ -269,12 +236,10 @@ export default function AgentVersionPubulishModal({
         footer={null}
         destroyOnHidden
       >
-        {showA2ASettings && agentId && (
+        {showA2ASettings && a2aSettingsData?.data && (
           <A2AServerSettingsPanel
-            agentId={agentId}
-            agentName={publishedAgentName}
-            endpointId={a2aAgentInfo?.endpoint_id}
-            a2aAgentCard={a2aAgentCard ?? undefined}
+            endpointId={a2aSettingsData.data.endpoint_id}
+            supportedInterfaces={a2aSettingsData.data.supported_interfaces}
           />
         )}
       </Modal>

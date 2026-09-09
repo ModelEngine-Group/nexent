@@ -201,6 +201,19 @@ smolagents_mod.tools = smolagents_tools_mod
 _set_module("smolagents", smolagents_mod)
 _set_module("smolagents.tools", smolagents_tools_mod)
 
+# Stub the gateway bridge: the tool only uses these adapter symbols for typing;
+# the real gateway eagerly registers every vendor adapter and pulls absolute
+# ``nexent.*`` / ``smolagents.*`` imports that the mocked env cannot satisfy.
+_gateway_mod = types.ModuleType("sdk.nexent.core.gateway")
+_gateway_mod.__path__ = []
+_gateway_modality_mod = types.ModuleType("sdk.nexent.core.gateway.modality")
+_gateway_modality_mod.__path__ = []
+for _name in ("EmbeddingAdapter", "RerankAdapter"):
+    setattr(_gateway_modality_mod, _name, MagicMock(name=f"gateway.modality.{_name}"))
+_gateway_mod.modality = _gateway_modality_mod
+_set_module("sdk.nexent.core.gateway", _gateway_mod)
+_set_module("sdk.nexent.core.gateway.modality", _gateway_modality_mod)
+
 MODULE_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "tools" / "knowledge_base_search_tool.py"
 MODULE_NAME = "sdk.nexent.core.tools.knowledge_base_search_tool"
 spec = importlib.util.spec_from_file_location(MODULE_NAME, MODULE_PATH)
@@ -321,6 +334,7 @@ class TestKnowledgeBaseSearchTool:
         """Test successful hybrid search"""
         # Mock search results
         mock_results = create_mock_search_result(3)
+        mock_results[0]["highlight_terms"] = ["Test Document"]
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
 
         result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
@@ -336,6 +350,10 @@ class TestKnowledgeBaseSearchTool:
             assert "score" in doc
             assert "index" in doc
             assert doc["title"] == f"Test Document {i}"
+
+        assert result["results"][0]["score_details"][
+            "retrieval_highlight_terms"
+        ] == ["Test Document"]
 
         # Verify vdb_core was called correctly
         knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
@@ -363,6 +381,47 @@ class TestKnowledgeBaseSearchTool:
             query_text="test query",
             top_k=5
         )
+
+    def test_search_hybrid_merges_scores_and_highlight_terms(self, knowledge_base_search_tool):
+        """Hybrid results merge branch scores and highlight terms into score_details."""
+        mock_results = create_mock_search_result(1)
+        mock_results[0]["scores"] = {"accurate": 0.6, "semantic": 0.8}
+        mock_results[0]["highlight_terms"] = ["hybrid term"]
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_hybrid("test query", ["test_index1"], top_k=5)
+
+        score_details = result["results"][0]["score_details"]
+        assert score_details["accurate"] == 0.6
+        assert score_details["semantic"] == 0.8
+        assert score_details["retrieval_highlight_terms"] == ["hybrid term"]
+
+    def test_search_results_without_metadata_stay_untouched(self, knowledge_base_search_tool):
+        """Documents without score metadata must not gain a score_details key."""
+        mock_results = create_mock_search_result(1)
+        knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
+
+        assert "score_details" not in result["results"][0]
+        # The original document dict must not be mutated by formatting.
+        assert "score" not in mock_results[0]["document"]
+
+    def test_search_accurate_merges_highlight_terms(self, knowledge_base_search_tool):
+        """Accurate results expose lexical highlight terms for later rendering."""
+        mock_results = create_mock_search_result(2)
+        mock_results[0]["highlight_terms"] = ["exact term"]
+        mock_results[0]["document"]["score_details"] = {"accuracy": 0.7}
+        knowledge_base_search_tool.vdb_core.accurate_search.return_value = mock_results
+
+        result = knowledge_base_search_tool.search_accurate("test query", ["test_index1"], top_k=5)
+
+        first = result["results"][0]
+        assert first["score_details"]["accuracy"] == 0.7
+        assert first["score_details"]["retrieval_highlight_terms"] == ["exact term"]
+        assert "score_details" not in result["results"][1]
+        # The original document dict must not be mutated by formatting.
+        assert "retrieval_highlight_terms" not in mock_results[0]["document"]["score_details"]
 
     def test_search_semantic_success(self, knowledge_base_search_tool):
         """Test successful semantic search"""
@@ -439,14 +498,14 @@ class TestKnowledgeBaseSearchTool:
         assert "hybrid, accurate, semantic" in str(excinfo.value)
 
     def test_forward_no_results(self, knowledge_base_search_tool):
-        """Test forward method with no search results"""
+        """No results should be an observation so the agent can finish its answer."""
         # Mock empty search results
         knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
 
-        with pytest.raises(Exception) as excinfo:
-            knowledge_base_search_tool.forward("test query")
+        result = json.loads(knowledge_base_search_tool.forward("test query"))
 
-        assert "No results found" in str(excinfo.value)
+        assert "No relevant information" in result
+        assert "selected knowledge bases" in result
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
         """Test forward method uses configured custom index names."""
@@ -1761,7 +1820,7 @@ class TestDocumentPathsAccessControl:
         assert search_results[0].get("url") == "s3://bucket/doc1.txt"
 
     def test_forward_with_document_paths_filter_no_results_after_filter(self, mock_vdb_core, mock_embedding_model, mock_observer):
-        """Test that forward raises exception when all results are filtered out."""
+        """All filtered results should produce a safe no-evidence observation."""
         tool = KnowledgeBaseSearchTool(
             index_names=["kb1"],
             search_mode="hybrid",
@@ -1776,11 +1835,10 @@ class TestDocumentPathsAccessControl:
         mock_results = self._create_mock_vdb_results_with_paths(["s3://bucket/doc1.txt", "s3://bucket/doc2.txt", "s3://bucket/doc3.txt"])
         mock_vdb_core.hybrid_search.return_value = mock_results
 
-        # Should raise exception because after filtering, no results remain
-        with pytest.raises(Exception) as excinfo:
-            tool.forward("test query")
+        result = json.loads(tool.forward("test query"))
 
-        assert "No results found" in str(excinfo.value)
+        assert "No relevant information" in result
+        assert "selected knowledge bases" in result
 
     def test_filter_by_document_paths_unwraps_fieldinfo_default(self, mock_vdb_core, mock_embedding_model):
         """Filter should tolerate a FieldInfo default instead of a concrete list.

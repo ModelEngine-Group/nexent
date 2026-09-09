@@ -3,6 +3,8 @@
 Operation steps: From switching LLM credentials, smoke testing, running full 100 questions, to importing trace into Langfuse.
 For parameter details see README.md in same directory.
 
+In the commands below, `<repo-root>` means the root directory of your Nexent checkout.
+
 ---
 
 ## 0. Prerequisites
@@ -15,7 +17,7 @@ Daily use (environment already set up):
 - LLM optional environment variables (repo root `nexent/.env`, same section as LLM_* above):
   - `LLM_ENABLE_THINKING` — `false` disables thinking for Qwen3-like models (see §8.1)
   - `LLM_EXTRA_BODY` — Generic version, directly pass a JSON to `chat.completions.create`'s `extra_body`
-- Langfuse (optional, for trace visualization): Self-hosted at `http://localhost:3100`; credentials see `sdk/ctx_debugger/langfuse/.env`
+- Langfuse (optional, for trace visualization): Self-hosted at `http://localhost:3100`; credentials see `sdk/benchmark/infra/langfuse/.env`
 
 ### Fresh Environment from Scratch
 
@@ -37,10 +39,10 @@ uv sync --extra benchmark
 
 Prerequisite: Docker installed (Linux install docker engine; Windows install Docker Desktop and enable WSL2 integration).
 
-**Step 1 — Generate `sdk/ctx_debugger/langfuse/.env`** (gitignored, must create on new machine):
+**Step 1 — Generate `sdk/benchmark/infra/langfuse/.env`** (gitignored, must create on new machine):
 
 ```bash
-cat > sdk/ctx_debugger/langfuse/.env <<EOF
+cat > sdk/benchmark/infra/langfuse/.env <<EOF
 # Instance keys (regenerate on each new machine, ENCRYPTION_KEY must be 64-character hex)
 NEXTAUTH_SECRET=$(openssl rand -hex 32)
 SALT=$(openssl rand -hex 16)
@@ -68,7 +70,7 @@ EOF
 **Step 2 — Start**:
 
 ```bash
-cd sdk/ctx_debugger/langfuse
+cd sdk/benchmark/infra/langfuse
 docker compose up -d
 ```
 
@@ -108,7 +110,7 @@ LLM_API_URL="<your-internal-deepseek-base-url>"
 
 Verify:
 ```bash
-grep -E "^LLM_(API_KEY|MODEL_NAME|API_URL)" /home/feiran/nexent/.env
+grep -E "^LLM_(API_KEY|MODEL_NAME|API_URL)" <repo-root>/.env
 ```
 
 > **Pitfall avoidance**: Previous glm-5 (dashscope) would reject classic novels with "inappropriate content"—
@@ -121,8 +123,8 @@ grep -E "^LLM_(API_KEY|MODEL_NAME|API_URL)" /home/feiran/nexent/.env
 Confirm internal DeepSeek reachable, doesn't block content, window large enough:
 
 ```bash
-cd /home/feiran/nexent/sdk/benchmark/eventqa_eval
-../../backend/.venv/bin/python run_eventqa.py \
+cd <repo-root>/sdk/benchmark/eventqa_eval
+../../../backend/.venv/bin/python run_eventqa.py \
     --book_index 0 --limit 1 \
     --max_ingest_chars 200000 --chunk_chars 100000 \
     --token_threshold 200000 \
@@ -140,8 +142,8 @@ no `Error code: 400`, `inappropriate`, `Traceback` appear.
 Run book 0 Gone with the Wind entire book + all 100 questions, narrative schema, production `token_threshold=200000`:
 
 ```bash
-cd /home/feiran/nexent/sdk/benchmark/eventqa_eval
-../../backend/.venv/bin/python run_eventqa.py \
+cd <repo-root>/sdk/benchmark/eventqa_eval
+../../../backend/.venv/bin/python run_eventqa.py \
     --book_index 0 \
     --token_threshold 200000 --chunk_chars 100000 \
     --summary_schema narrative \
@@ -182,9 +184,9 @@ Only go this path when **need visualization of each step's context/compression**
 Replace the above Step 3 command's **entry point**, run from `ctx_debugger` directory:
 
 ```bash
-cd /home/feiran/nexent/sdk/ctx_debugger
+cd <repo-root>/sdk/benchmark/tools/ctx_debugger
 NEXENT_CONTEXT_DEBUG=/tmp/eventqa_book0_narr.jsonl \
-  ../../backend/.venv/bin/python example_with_eventqa.py \
+  ../../../../backend/.venv/bin/python example_with_eventqa.py \
       --book_index 0 \
       --token_threshold 200000 --chunk_chars 100000 \
       --summary_schema narrative \
@@ -196,9 +198,9 @@ Parameters same as `run_eventqa.py`, forwarded unchanged. Trace written to `$NEX
 **This demo's command** (1 book 1 question, entire book ingest):
 
 ```bash
-cd /home/feiran/nexent/sdk/ctx_debugger
+cd <repo-root>/sdk/benchmark/tools/ctx_debugger
 NEXENT_CONTEXT_DEBUG=/tmp/eventqa_narr_trace.jsonl \
-  ../../backend/.venv/bin/python example_with_eventqa.py \
+  ../../../../backend/.venv/bin/python example_with_eventqa.py \
       --book_index 0 --limit 1 \
       --token_threshold 200000 --chunk_chars 100000 \
       --summary_schema narrative \
@@ -208,12 +210,12 @@ NEXENT_CONTEXT_DEBUG=/tmp/eventqa_narr_trace.jsonl \
 ### 4.2 Import to Langfuse
 
 ```bash
-cd /home/feiran/nexent/sdk
-set -a; source ctx_debugger/langfuse/.env; set +a
+cd <repo-root>
+set -a; source sdk/benchmark/infra/langfuse/.env; set +a
 LANGFUSE_HOST=http://localhost:3100 \
 LANGFUSE_PUBLIC_KEY="$LANGFUSE_INIT_PROJECT_PUBLIC_KEY" \
 LANGFUSE_SECRET_KEY="$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
-  ../backend/.venv/bin/python -m ctx_debugger.langfuse_export \
+  PYTHONPATH=sdk/benchmark/tools backend/.venv/bin/python -m ctx_debugger.langfuse_export \
       /tmp/eventqa_book0_narr.jsonl \
       --session-id book0-narrative-full
 ```
@@ -228,8 +230,8 @@ ingest turns / compression spans / main LLM calls / tool calls / token usage.
 ### 4.3 Offline Preview Mapping Structure
 
 ```bash
-cd /home/feiran/nexent/sdk
-../backend/.venv/bin/python -m ctx_debugger.langfuse_export \
+cd <repo-root>
+PYTHONPATH=sdk/benchmark/tools backend/.venv/bin/python -m ctx_debugger.langfuse_export \
     /tmp/eventqa_book0_narr.jsonl --dry-run
 ```
 
@@ -291,8 +293,8 @@ Recovery pipeline three steps:
 ### 7.1 Salvage Existing Probe Results from Trace
 
 ```bash
-cd /home/feiran/nexent/sdk/benchmark/eventqa_eval
-../../backend/.venv/bin/python salvage_trace.py \
+cd <repo-root>/sdk/benchmark/eventqa_eval
+../../../backend/.venv/bin/python salvage_trace.py \
     /tmp/nexent_eventqa_trace.jsonl \
     --book_index 0 --schema narrative
 ```
@@ -311,8 +313,8 @@ Print will tell you where baseline broke ("qids 0..43 done, 56 remaining").
 Following above "qids 0..43 done", remaining qids 44..99 = 57 questions. But for safety **restart from 43** (breakpoint question likely incomplete), i.e., 56 questions:
 
 ```bash
-cd /home/feiran/nexent/sdk/benchmark/eventqa_eval
-../../backend/.venv/bin/python run_eventqa.py \
+cd <repo-root>/sdk/benchmark/eventqa_eval
+../../../backend/.venv/bin/python run_eventqa.py \
     --book_index 0 --skip_compressed \
     --question_start 43 \
     --token_threshold 200000 --chunk_chars 100000 \
@@ -330,8 +332,8 @@ Writes to `outputs/eventqa_full_book0/{summary.json, predictions.jsonl}`, at thi
 ### 7.3 Merge
 
 ```bash
-cd /home/feiran/nexent/sdk/benchmark/eventqa_eval
-../../backend/.venv/bin/python merge_partial.py \
+cd <repo-root>/sdk/benchmark/eventqa_eval
+../../../backend/.venv/bin/python merge_partial.py \
     --book_id eventqa_full_book0 \
     --schema narrative \
     --resume_start_qid 43

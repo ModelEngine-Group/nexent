@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { App, Button, Modal, Spin } from "antd";
+import { App, Button, Modal, Radio, Space, Spin, Tag } from "antd";
 import {
   AlertCircle,
   CheckCircle2,
@@ -79,6 +79,7 @@ export function AgentRepositoryCopyDialog({
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [abnormalOpen, setAbnormalOpen] = useState(true);
   const [availableOpen, setAvailableOpen] = useState(true);
+  const [skillResolutionActions, setSkillResolutionActions] = useState<Record<string, "rename" | "use_existing">>({});
 
   const agentRepositoryId = listing?.agent_repository_id ?? null;
   const listingTitle =
@@ -105,6 +106,12 @@ export function AgentRepositoryCopyDialog({
     [precheck]
   );
 
+  const skillConflictItems = useMemo(
+    () => abnormalItems.filter((item) => item.type === "skill" && item.reason_code === "skill_duplicate"),
+    [abnormalItems]
+  );
+  const hasSkillConflicts = skillConflictItems.length > 0;
+
   const percent = precheck?.percent ?? 0;
   const hasAbnormal = precheck?.has_abnormal ?? false;
 
@@ -120,8 +127,22 @@ export function AgentRepositoryCopyDialog({
     if (!agentRepositoryId) {
       return;
     }
+
+    const skillResolutions = hasSkillConflicts
+      ? skillConflictItems.map((item) => ({
+          skill_name: item.name,
+          action: (skillResolutionActions[item.name] ?? "rename") as "rename" | "use_existing",
+          ...(skillResolutionActions[item.name] !== "use_existing"
+            ? { new_name: item.suggested_new_name || `${item.name} 副本` }
+            : {}),
+        }))
+      : undefined;
+
     try {
-      await importMutation.mutateAsync(agentRepositoryId);
+      await importMutation.mutateAsync({
+        agentRepositoryId,
+        skillResolutions,
+      });
       message.success(
         t("agentRepository.copy.success", { name: listingTitle })
       );
@@ -158,6 +179,7 @@ export function AgentRepositoryCopyDialog({
     setWarningDismissed(false);
     setAbnormalOpen(true);
     setAvailableOpen(true);
+    setSkillResolutionActions({});
   };
 
   return (
@@ -262,6 +284,53 @@ export function AgentRepositoryCopyDialog({
               </span>
             </div>
           </div>
+
+          {hasSkillConflicts ? (
+            <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                {t("agentRepository.copy.skillDuplicate.title", "Skill Name Conflict Detected")}
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                {t("agentRepository.copy.skillDuplicate.message", "Choose how to handle each conflicting skill:")}
+              </p>
+              <div className="space-y-3">
+                {skillConflictItems.map((item) => (
+                  <div
+                    key={item.key}
+                    className="rounded-lg border border-amber-200 bg-white p-3 dark:border-amber-700 dark:bg-slate-800"
+                  >
+                    <div className="mb-2">
+                      <Tag color="orange">{item.name}</Tag>
+                    </div>
+                    <Radio.Group
+                      value={skillResolutionActions[item.name] ?? "rename"}
+                      onChange={(event) => {
+                        setSkillResolutionActions((prev) => ({
+                          ...prev,
+                          [item.name]: event.target.value,
+                        }));
+                      }}
+                    >
+                      <Space direction="vertical" size={8}>
+                        <Radio value="rename">
+                          {t("agentRepository.copy.skillDuplicate.rename", "Install as new skill")}
+                          <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
+                            {t("agentRepository.copy.skillDuplicate.renameTarget", {
+                              name: item.suggested_new_name || `${item.name} 副本`,
+                              defaultValue: `New name: ${item.suggested_new_name || `${item.name} 副本`}`,
+                            })}
+                          </span>
+                        </Radio>
+                        <Radio value="use_existing">
+                          {t("agentRepository.copy.skillDuplicate.useExisting", "Use existing local skill")}
+                        </Radio>
+                      </Space>
+                    </Radio.Group>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {hasAbnormal ? (
             <section className="space-y-2">

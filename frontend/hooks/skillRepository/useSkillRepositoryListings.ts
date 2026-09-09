@@ -14,6 +14,7 @@ import type {
 } from "@/types/skillRepository";
 
 export const SKILL_REPOSITORY_LISTINGS_QUERY_KEY = "skillRepositoryListings";
+export const SKILL_REPOSITORY_TAG_STATS_QUERY_KEY = "skillRepositoryTagStats";
 export const SKILL_REPOSITORY_DETAIL_QUERY_KEY = "skillRepositoryListingDetail";
 export const MY_EDITABLE_SKILLS_QUERY_KEY = "myEditableSkills";
 export const MY_EDITABLE_SKILL_COUNTS_QUERY_KEY = "myEditableSkillCounts";
@@ -44,6 +45,15 @@ export function useSkillRepositoryListings(
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnMount: "always",
+    enabled,
+  });
+}
+
+export function useSkillRepositoryTagStats(enabled = true) {
+  return useQuery({
+    queryKey: [SKILL_REPOSITORY_TAG_STATS_QUERY_KEY],
+    queryFn: () => skillRepositoryService.fetchSkillRepositoryTagStats(),
+    staleTime: 60_000,
     enabled,
   });
 }

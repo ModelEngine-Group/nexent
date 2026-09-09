@@ -1,13 +1,11 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import log from "@/lib/logger";
-import knowledgeBaseService from "@/services/knowledgeBaseService";
 
 import DataConfig from "./KnowledgeBaseConfiguration";
 import AidpKnowledgeConfiguration from "@/ext_components/aidp/components/AidpKnowledgeConfiguration";
@@ -30,30 +28,6 @@ export default function KnowledgesContent() {
   const router = useRouter();
 
   const { pageVariants, pageTransition } = useSetupFlow();
-
-  // Local KB only: initialize knowledge base service data
-  useEffect(() => {
-    // Skip local KB initialization when AIDP is active
-    if (!isDeploymentReady || enableAidpKnowledge) {
-      return;
-    }
-
-    window.dispatchEvent(
-      new CustomEvent("knowledgeBaseDataUpdated", {
-        detail: { forceRefresh: true },
-      })
-    );
-
-    const loadKnowledgeBaseList = async () => {
-      try {
-        await knowledgeBaseService.getKnowledgeBases(true);
-      } catch (error) {
-        log.error("Failed to load knowledge base list:", error);
-      }
-    };
-
-    loadKnowledgeBaseList();
-  }, [isDeploymentReady, enableAidpKnowledge]);
 
   // Loading state: wait for deployment config before deciding which
   // component to render. Prevents flashing of the local KB page when

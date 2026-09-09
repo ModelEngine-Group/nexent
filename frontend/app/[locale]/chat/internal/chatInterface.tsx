@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useTranslation } from "react-i18next";
 
 import { ROLE_ASSISTANT } from "@/const/agentConfig";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -217,6 +218,10 @@ export function ChatInterface() {
   const [selectedMessageId, setSelectedMessageId] = useState<
     string | undefined
   >();
+  const [selectedCitationKey, setSelectedCitationKey] = useState<
+    string | undefined
+  >();
+  const [selectedCitationContext, setSelectedCitationContext] = useState("");
 
   // Add force scroll to bottom state control
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
@@ -558,7 +563,7 @@ export function ChatInterface() {
     const preparingAutomationMessage = shouldAnalyzeAutomation
       ? createPreparingAutomationMessage(
           assistantMessageId,
-          initialAssistantMessage.timestamp
+          initialAssistantMessage.timestamp!
         )
       : null;
 
@@ -945,12 +950,19 @@ export function ChatInterface() {
                 if (title) {
                   conversationManagement.setConversationTitle(title);
                 }
-                void conversationManagement.fetchConversationList().catch((error) => {
-                  log.error(t("chatInterface.refreshDialogListFailedButContinue"), error);
-                });
+                void conversationManagement
+                  .fetchConversationList()
+                  .catch((error) => {
+                    log.error(
+                      t("chatInterface.refreshDialogListFailedButContinue"),
+                      error
+                    );
+                  });
               })
               .catch((error) => {
-                titleGenerationConversationIdsRef.current.delete(conversationId);
+                titleGenerationConversationIdsRef.current.delete(
+                  conversationId
+                );
                 log.error(t("chatStreamHandler.generateTitleFailed"), error);
               });
           }
@@ -1422,6 +1434,16 @@ export function ChatInterface() {
 
           if (data.code === 0 && data.data && data.data.length > 0) {
             const conversationData = data.data[0] as ApiConversationDetail;
+            if (
+              conversationData.conversation_title &&
+              new URL(window.location.href).searchParams.get(
+                "conversation_id"
+              ) === String(dialog.conversation_id)
+            ) {
+              conversationManagement.setConversationTitle(
+                conversationData.conversation_title
+              );
+            }
             restoreConversationAgent(
               conversationData.agent_id ?? dialog.agent_id ?? null
             );
@@ -1551,6 +1573,16 @@ export function ChatInterface() {
 
         if (data.code === 0 && data.data && data.data.length > 0) {
           const conversationData = data.data[0] as ApiConversationDetail;
+          if (
+            conversationData.conversation_title &&
+            new URL(window.location.href).searchParams.get(
+              "conversation_id"
+            ) === String(dialog.conversation_id)
+          ) {
+            conversationManagement.setConversationTitle(
+              conversationData.conversation_title
+            );
+          }
           restoreConversationAgent(
             conversationData.agent_id ?? dialog.agent_id ?? null
           );
@@ -1659,11 +1691,19 @@ export function ChatInterface() {
 
     if (conversationManagement.conversationListQuery.isFetched) {
       linkedConversationHandledRef.current = true;
+      void handleDialogClickRef.current({
+        conversation_id: conversationId,
+        conversation_title: t("chatInterface.newConversation"),
+        agent_id: null,
+        create_time: 0,
+        update_time: 0,
+      });
     }
   }, [
     conversationManagement.conversationList,
     conversationManagement.conversationListQuery.isFetched,
     conversationManagement.conversationListQuery.isLoading,
+    t,
   ]);
 
   // Add function to asynchronously load attachment URLs
@@ -1862,7 +1902,24 @@ export function ChatInterface() {
   const handleMessageSelect = useCallback((messageId: string) => {
     setShowRightPanel(true);
     setSelectedMessageId(messageId);
+    setSelectedCitationKey(undefined);
+    setSelectedCitationContext("");
   }, []);
+
+  const handleCitationClick = useCallback(
+    (messageId: string, citationKey: string, answerText: string) => {
+      // Clicking a citation marker always opens the panel and selects the
+      // matching source card; the flag only gates sentence-level highlight
+      // extraction from the cited answer context.
+      setShowRightPanel(true);
+      setSelectedMessageId(messageId);
+      setSelectedCitationKey(citationKey);
+      setSelectedCitationContext(
+        ENABLE_CITATION_CLICK_HIGHLIGHT ? answerText : ""
+      );
+    },
+    []
+  );
 
   const hydrateConversationMessageIds = useCallback(
     async (conversationId: number) => {
@@ -2235,6 +2292,7 @@ export function ChatInterface() {
               selectedAgentId={selectedAgentId}
               onAgentSelect={handleAgentSelectWithGreeting}
               onCitationHover={clearCompletedIndicator}
+              onCitationClick={handleCitationClick}
               onScroll={clearCompletedIndicator}
               agentGreeting={agentGreeting}
               agentExampleQuestions={agentExampleQuestions}
@@ -2256,6 +2314,8 @@ export function ChatInterface() {
             isVisible={showRightPanel}
             toggleRightPanel={toggleRightPanel}
             selectedMessageId={selectedMessageId}
+            selectedCitationKey={selectedCitationKey}
+            selectedCitationContext={selectedCitationContext}
           />
         </div>
       </Layout>

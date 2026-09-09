@@ -45,7 +45,6 @@ export interface SkillConfigModalProps {
   skill: Skill;
   initialParams: SkillParam[];
   currentAgentId?: number;
-  isCreatingMode?: boolean;
   zIndex?: number;
   maskClosable?: boolean;
 }
@@ -76,7 +75,6 @@ export default function SkillConfigModal({
   skill,
   initialParams,
   currentAgentId,
-  isCreatingMode,
   zIndex = 1000,
   maskClosable = true,
 }: SkillConfigModalProps) {
@@ -245,7 +243,7 @@ export default function SkillConfigModal({
   }, [formValues]);
 
   const handleSave = async () => {
-    if (!currentAgentId && !isCreatingMode) {
+    if (!currentAgentId) {
       message.error(t("agentConfig.skill.noAgentSelected"));
       return;
     }

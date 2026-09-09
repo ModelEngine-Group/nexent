@@ -8,9 +8,13 @@ import { Badge, badgeVariants, type BadgeProps } from "@/components/ui/badge";
 
 const extractDomain = (url: string): string => {
   try {
-    return new URL(url).hostname.replace(/^www\./, "");
+    const parsedUrl = new URL(url);
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return "";
+    }
+    return parsedUrl.hostname.replace(/^www\./, "");
   } catch {
-    return url;
+    return "";
   }
 };
 
@@ -27,8 +31,12 @@ function SourceIcon({
   faviconUrl?: (domain: string) => string;
 }) {
   const domain = extractDomain(url);
-  const src = faviconUrl(domain);
+  const src = domain ? faviconUrl(domain) : "";
   const [errorSrc, setErrorSrc] = useState<string | undefined>(undefined);
+
+  if (!domain) {
+    return <DocumentSourceIcon className={className} {...props} />;
+  }
   const hasError = errorSrc === src;
 
   if (hasError) {
@@ -37,7 +45,7 @@ function SourceIcon({
         data-slot="source-icon-fallback"
         className={cn(
           "bg-muted flex size-3 shrink-0 items-center justify-center rounded-sm text-[10px] font-medium",
-          className,
+          className
         )}
         {...props}
       >
@@ -74,7 +82,7 @@ function DocumentSourceIcon({ className, ...props }: ComponentProps<"span">) {
       data-slot="source-document-icon"
       className={cn(
         "text-muted-foreground flex size-3 shrink-0 items-center justify-center",
-        className,
+        className
       )}
       {...props}
     >
@@ -104,7 +112,7 @@ function Source({
       size={size}
       className={cn(
         "focus-visible:border-ring focus-visible:ring-ring/50 cursor-pointer outline-none focus-visible:ring-[3px]",
-        className,
+        className
       )}
     >
       <a

@@ -7,6 +7,8 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from consts.exceptions import TenantResourceLimitError
+
 from services.cas_service import (
     CAS_SERVER_URL,
     CasAuthenticationError,
@@ -51,6 +53,9 @@ async def callback(ticket: str = "", redirect: str = "/"):
     except CasAuthenticationError as exc:
         logger.warning("CAS callback rejected: %s", exc)
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="CAS authentication failed")
+    except TenantResourceLimitError as exc:
+        logger.warning("CAS callback rejected by tenant resource limit: %s", exc)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except Exception as exc:
         logger.error(f"CAS callback failed: {exc}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="CAS login failed")

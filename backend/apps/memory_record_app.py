@@ -122,8 +122,11 @@ def create_record(
     manual management and for Dreaming promotion.
     """
     user_id, tenant_id = get_current_user_id(authorization)
-    if payload.layer.strip().lower() == "tenant":
-        _require_tenant_admin(user_id)
+    if payload.layer.strip().lower() in {"tenant", "user"}:
+        raise HTTPException(
+            status_code=HTTPStatus.GONE,
+            detail="Tenant and user memory use /memory/long-term/{scope}",
+        )
     service = get_memory_record_service()
     try:
         result = service.create_memory(
@@ -177,6 +180,11 @@ def list_records(
 ):
     user_id, tenant_id = get_current_user_id(authorization)
     normalized_layer = layer.strip().lower() if layer else None
+    if normalized_layer in {"tenant", "user"}:
+        raise HTTPException(
+            status_code=HTTPStatus.GONE,
+            detail="Tenant and user memory use /memory/long-term/{scope}",
+        )
     service = get_memory_record_service()
     rows = service.list_memories(
         tenant_id,

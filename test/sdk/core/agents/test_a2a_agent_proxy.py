@@ -424,6 +424,22 @@ class TestExternalA2AAgentProxy:
         headers = proxy._build_headers()
         assert headers["Authorization"] == "Bearer my-secret"
 
+    def test_build_headers_with_custom_headers(self):
+        """Test _build_headers merges custom_headers."""
+        proxy = ExternalA2AAgentProxy(self._make_info(
+            custom_headers={"X-Custom": "val", "Authorization": "Bearer tok"}
+        ))
+        headers = proxy._build_headers()
+        assert headers["X-Custom"] == "val"
+        assert headers["Authorization"] == "Bearer tok"
+        assert headers["Content-Type"] == "application/json"
+
+    def test_build_headers_without_custom_headers(self):
+        """Test _build_headers works without custom_headers (default None)."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        headers = proxy._build_headers()
+        assert "X-Custom" not in headers
+
     def test_build_message_payload_query_only(self):
         """Test _build_message_payload builds correct structure with only query."""
         proxy = ExternalA2AAgentProxy(self._make_info())
@@ -433,12 +449,20 @@ class TestExternalA2AAgentProxy:
         assert "metadata" not in payload
 
     def test_build_message_payload_with_context(self):
-        """Test _build_message_payload includes context in metadata."""
+        """Test _build_message_payload includes context in Message.metadata."""
         proxy = ExternalA2AAgentProxy(self._make_info())
         context = {"user_id": "user-123", "session": "abc"}
         payload = proxy._build_message_payload("Hello", context=context)
-        assert payload["metadata"] == context
+        assert payload["message"]["metadata"] == context
+        assert payload["message"]["metadata"] is not context
+        assert "metadata" not in payload
         assert payload["message"]["parts"][0]["text"] == "Hello"
+
+    def test_build_message_payload_preserves_explicit_empty_metadata(self):
+        """An empty run snapshot is still carried as Message.metadata."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        payload = proxy._build_message_payload("Hello", context={})
+        assert payload["message"]["metadata"] == {}
 
     def test_get_endpoint_url_jsonrpc_returns_base(self):
         """Test _get_endpoint_url returns base URL unchanged for JSONRPC."""
@@ -575,9 +599,10 @@ class TestExternalA2AAgentProxy:
             async with proxy:
                 await proxy.call("test query", context=context)
 
-            # JSON-RPC format wraps payload in params; context is at params.metadata
+            # JSON-RPC wraps the A2A message in params; metadata remains message-scoped.
             call_kwargs = instance.post.call_args[1]
-            assert call_kwargs["json"]["params"]["metadata"] == context
+            assert call_kwargs["json"]["params"]["message"]["metadata"] == context
+            assert "metadata" not in call_kwargs["json"]["params"]
 
     @pytest.mark.asyncio
     async def test_call_streaming_without_client_raises(self):
@@ -1708,6 +1733,31 @@ class TestExternalA2AAgentWrapper:
         assert wrapper.name == "WrapperAgent"
         assert wrapper.description == "External A2A agent: WrapperAgent"
         assert wrapper._proxy is None
+        assert wrapper.get_runtime_metadata() == {}
+
+    def test_call_forwards_runtime_metadata_to_message_context(self):
+        """The parent run snapshot is forwarded without model-supplied arguments."""
+        wrapper = ExternalA2AAgentWrapper(self._make_info())
+        metadata = {"tenant": {"region": "cn"}}
+        wrapper.set_runtime_metadata(metadata)
+
+        with patch.object(ExternalA2AAgentProxy, "sync_call", return_value="ok") as sync_call:
+            assert wrapper(task="do something") == "ok"
+
+        sync_call.assert_called_once_with(
+            "do something",
+            [],
+            context={"tenant": {"region": "cn"}},
+        )
+        metadata["tenant"]["region"] = "changed"
+        assert wrapper.get_runtime_metadata() == {"tenant": {"region": "cn"}}
+
+    def test_set_runtime_metadata_rejects_non_dict(self):
+        """set_runtime_metadata must reject values that are not mappings."""
+        wrapper = ExternalA2AAgentWrapper(self._make_info())
+
+        with pytest.raises(TypeError, match="runtime metadata must be a dictionary"):
+            wrapper.set_runtime_metadata("not-a-dict")
 
     def test_init_with_skills_description(self):
         """Test ExternalA2AAgentWrapper uses skills description when raw_card available."""

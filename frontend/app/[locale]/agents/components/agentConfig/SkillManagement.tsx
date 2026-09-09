@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SkillGroup, Skill, SkillParam } from "@/types/agentConfig";
 import { Badge, message, Tabs, Tooltip } from "antd";
-import { useAgentConfigStore } from "@/stores/agentConfigStore";
+import { useAgentStore } from "@/stores/agentStore";
+import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { Eye, Pencil, Trash2, Settings } from "lucide-react";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
@@ -24,7 +25,6 @@ import {
 
 interface SkillManagementProps {
   skillGroups: SkillGroup[];
-  isCreatingMode?: boolean;
   currentAgentId?: number | undefined;
   isReadOnly?: boolean;
   onEditSkill?: (skill: Skill) => void;
@@ -34,7 +34,6 @@ interface SkillManagementProps {
 
 export default function SkillManagement({
   skillGroups,
-  isCreatingMode,
   currentAgentId,
   isReadOnly: isReadOnlyProp,
   onEditSkill,
@@ -44,18 +43,17 @@ export default function SkillManagement({
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
-  // Use prop if provided, otherwise fall back to store
-  const storeIsReadOnly = useAgentConfigStore((state) => state.isReadOnly());
-  const isReadOnly = isReadOnlyProp ?? storeIsReadOnly;
+  const agentIsReadOnly = useAgentReadOnly();
+  const isReadOnly = Boolean(isReadOnlyProp) || agentIsReadOnly;
 
-  const originalSelectedSkills = useAgentConfigStore(
-    (state) => state.editedAgent.skills
+  const originalSelectedSkills = useAgentStore(
+    (state) => state.editedAgent?.skills ?? []
   );
   const originalSelectedSkillIdsSet = new Set(
     originalSelectedSkills.map((skill) => Number(skill.skill_id))
   );
 
-  const updateSkills = useAgentConfigStore((state) => state.updateSkills);
+  const updateSkills = useAgentStore((state) => state.updateSkills);
 
   const { groupedSkills, invalidate } = useSkillList();
 
@@ -76,7 +74,7 @@ export default function SkillManagement({
 
   // Fetch per-agent skill instances to get saved config_values
   useEffect(() => {
-    if (!currentAgentId || isCreatingMode) {
+    if (!currentAgentId) {
       setSkillInstanceMap({});
       return;
     }
@@ -107,12 +105,12 @@ export default function SkillManagement({
     return () => {
       cancelled = true;
     };
-  }, [currentAgentId, isCreatingMode]);
+  }, [currentAgentId]);
 
   const handleSkillClick = (skill: Skill) => {
     if (isReadOnly) return;
 
-    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
     const isCurrentlySelected = currentSkills.some(
       (s) => Number(s.skill_id) === Number(skill.skill_id)
     );
@@ -166,7 +164,7 @@ export default function SkillManagement({
         if (result.success) {
           message.success(t("skillManagement.delete.success"));
           const currentSkills =
-            useAgentConfigStore.getState().editedAgent.skills;
+            useAgentStore.getState().editedAgent?.skills ?? [];
           const updatedSkills = currentSkills.filter(
             (s) => Number(s.skill_id) !== Number(skill.skill_id)
           );
@@ -201,7 +199,7 @@ export default function SkillManagement({
     }));
 
     // Update the skill in the edited agent's skills list with the new params
-    const currentSkills = useAgentConfigStore.getState().editedAgent.skills;
+    const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
     const existingIndex = currentSkills.findIndex(
       (s) => Number(s.skill_id) === Number(skill.skill_id)
     );
@@ -407,7 +405,6 @@ export default function SkillManagement({
           skill={configModalSkill}
           initialParams={configModalSkill.config_schemas || []}
           currentAgentId={currentAgentId}
-          isCreatingMode={isCreatingMode}
           zIndex={dialogZIndex}
           maskClosable
         />

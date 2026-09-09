@@ -7,13 +7,13 @@ Supports video from S3, HTTP, and HTTPS URLs.
 
 import logging
 from io import BytesIO
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from jinja2 import StrictUndefined, Template
 from pydantic import Field
 from smolagents.tools import Tool
 
-from ...core.models import OpenAIVLModel
+from ...core.gateway.modality import VLMRequest
 from ...core.utils.observer import MessageObserver, ProcessType
 from ...core.utils.prompt_template_utils import get_prompt_template
 from ...core.utils.tools_common_message import ToolCategory, ToolSign
@@ -74,7 +74,7 @@ class AnalyzeVideoTool(Tool):
                 description="Message observer",
                 default=None,
                 exclude=True),
-            vlm_model: OpenAIVLModel = Field(
+            vlm_model: Any = Field(
                 description="The video understanding model to use",
                 default=None,
                 exclude=True),
@@ -107,6 +107,14 @@ class AnalyzeVideoTool(Tool):
         self.forward = self.mm.load_object(
             input_names=["video_url", "video_urls_list"])(self._forward_impl)
 
+    def _validate_video_capable_model(self) -> None:
+        info = self.vlm_model.get_model_info()
+        if not info.capabilities.get("video", True):
+            raise ValueError(
+                "The selected video understanding model does not support video input. "
+                "Please choose a video-capable model for analyze_video."
+            )
+
     def _forward_impl(
             self,
             video_url: Optional[bytes] = None,
@@ -119,6 +127,7 @@ class AnalyzeVideoTool(Tool):
             error_msg = error_msg_zh if self._is_chinese else error_msg_en
             logger.error(error_msg)
             raise Exception(error_msg)
+        self._validate_video_capable_model()
 
         # Tool running chunk is emitted by the SDK tool-call bridge in
         # core_agent.py so it is consistent across direct and code_action
@@ -151,10 +160,13 @@ class AnalyzeVideoTool(Tool):
                     content_type = "video/mp4"
                 video_stream = BytesIO(video_bytes)
                 try:
-                    response = self.vlm_model.analyze_video(
-                        video_input=video_stream,
-                        system_prompt=system_prompt,
-                        content_type=content_type,
+                    response = self.vlm_model.invoke_sync(
+                        VLMRequest(
+                            media_type="video",
+                            media_input=video_stream,
+                            prompt=system_prompt,
+                            kwargs={"content_type": content_type} if content_type else None,
+                        )
                     )
                 except Exception as e:
                     error_msg_zh = f"视频{index}分析失败: {str(e)}。请检查视频理解模型配置是否正确。"

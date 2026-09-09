@@ -155,14 +155,18 @@ const AttachmentPreview: FC<{
   const localImageUrl = useFileSrc(
     isComposer && isImage ? attachment.file : undefined,
   );
+  const objectName = attachment.object_name || "";
+  const stablePreviewUrl = objectName
+    ? storageService.getPreviewUrl(objectName, name)
+    : undefined;
   const remoteFileUrl =
+    stablePreviewUrl ||
     attachment.preview_url ||
     attachment.presigned_url ||
     attachment.url ||
     attachment.content?.[0]?.image ||
     attachment.content?.[0]?.data;
   const thumbnailUrl = isComposer ? localImageUrl : remoteFileUrl;
-  const objectName = attachment.object_name || "";
   const canOpenRemotePreview = Boolean(objectName || attachment.preview_url);
 
   const handleCardClick = () => {

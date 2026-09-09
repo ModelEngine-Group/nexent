@@ -27,6 +27,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
 
 # ---------------------------------------------------------------------------
 # Path + module stubs (mirror the pattern in test_memory_retrieval_service.py)
@@ -42,6 +49,9 @@ sys.path.insert(
 
 # Stub ``database`` so transitive imports succeed without a real DB.
 database_pkg = types.ModuleType("database")
+database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
+database_pkg.memory_dreaming_db = MagicMock(name="memory_dreaming_db")
+database_pkg.memory_dreaming_db.get_active_version.return_value = None
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 sys.modules["database"] = database_pkg
@@ -274,11 +284,11 @@ services_pkg.__path__ = []  # mark as package so submodule imports work
 sys.modules["services"] = services_pkg
 
 
-# Stub ``services.vectordatabase_service`` — transitively imported by
+# Stub ``management.services.knowledge_base.service`` — transitively imported by
 # ``memory_index_service`` during module import.
-vectordb_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordb_service_mod = types.ModuleType("management.services.knowledge_base.service")
 vectordb_service_mod.get_vector_db_core = MagicMock(name="get_vector_db_core")
-sys.modules["services.vectordatabase_service"] = vectordb_service_mod
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_mod
 
 
 # Stub ``services.memory_index_service`` (transitive only).
@@ -313,6 +323,7 @@ memory_retrieval_service_mod.reset_memory_retrieval_service = MagicMock(
     name="reset_memory_retrieval_service"
 )
 sys.modules["services.memory_retrieval_service"] = memory_retrieval_service_mod
+sys.modules["backend.services.memory_retrieval_service"] = memory_retrieval_service_mod
 
 
 # Stub ``consts.const`` with the constants the unit under test imports.
@@ -812,6 +823,30 @@ class TestBuildContextPipelineEnabled:
         assert context.external == []
         pipeline.run.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_ac_p3_18_pipeline_preserves_external_when_internal_empty(
+        self, service, fake_retrieval_service
+    ):
+        """AC-P3-18: external-only hits still traverse the retrieval pipeline."""
+        fake_retrieval_service.search.return_value = []
+        external_item = ExternalMemoryItem(
+            id="mem0-1", content="Sister Jules has an interview", score=0.9, provider="mem0"
+        )
+        pipeline = service.pipeline
+        pipeline.run_result = PipelineResult(external=[external_item])
+
+        context = await service.build_context(
+            tenant_id="tn",
+            user_id="u",
+            query="sister Jules",
+            embedding_model_info=MagicMock(),
+            external_results=[external_item],
+        )
+
+        assert pipeline.run_calls[0]["internal_results"] == []
+        assert pipeline.run_calls[0]["external_results"] == [external_item]
+        assert context.external == [external_item]
+
 
 # ---------------------------------------------------------------------------
 # MemoryContextService.build_context: pipeline-disabled branch
@@ -819,6 +854,26 @@ class TestBuildContextPipelineEnabled:
 
 
 class TestBuildContextPipelineDisabled:
+    @pytest.mark.asyncio
+    async def test_ac_p3_18_non_pipeline_preserves_external_when_internal_empty(
+        self, service_no_pipeline
+    ):
+        """AC-P3-18: fallback bucketing must retain external-only hits."""
+        service_no_pipeline.retrieval_service.search = AsyncMock(return_value=[])
+        external_item = ExternalMemoryItem(
+            id="mem0-1", content="Sister Jules has an interview", score=0.9, provider="mem0"
+        )
+
+        context = await service_no_pipeline.build_context(
+            tenant_id="tn",
+            user_id="u",
+            query="sister Jules",
+            embedding_model_info=MagicMock(),
+            external_results=[external_item],
+        )
+
+        assert context.external == [external_item]
+
     @pytest.mark.asyncio
     async def test_pipeline_disabled_buckets_results_into_context(self, service_no_pipeline):
         tenant = MemorySearchResult(memory_id=10, layer=MemoryLayer.TENANT)

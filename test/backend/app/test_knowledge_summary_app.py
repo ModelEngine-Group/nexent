@@ -63,7 +63,7 @@ class MockVectorDatabaseCore:
 nexent_nexent_vector_database.VectorDatabaseCore = MockVectorDatabaseCore
 sys.modules['nexent.vector_database.base'] = nexent_nexent_vector_database
 # Create mock for vectordatabase_service BEFORE importing the app
-vectordatabase_service_mock = types.ModuleType('services.vectordatabase_service')
+vectordatabase_service_mock = types.ModuleType('management.services.knowledge_base.service')
 
 
 class MockElasticSearchService:
@@ -81,7 +81,7 @@ def mock_get_vector_db_core():
 
 vectordatabase_service_mock.ElasticSearchService = MockElasticSearchService
 vectordatabase_service_mock.get_vector_db_core = mock_get_vector_db_core
-sys.modules['services.vectordatabase_service'] = vectordatabase_service_mock
+sys.modules['management.services.knowledge_base.service'] = vectordatabase_service_mock
 
 # Mock other services that might be imported
 sys.modules['services.redis_service'] = types.ModuleType('services.redis_service')
@@ -519,3 +519,36 @@ class TestGetSummary:
 
         assert response.status_code == 500
         assert "Failed to get knowledge base summary" in response.json()["detail"]
+
+class TestTokenExpired:
+    """Expired tokens must map to 401 on summary endpoints."""
+
+    @patch('apps.knowledge_summary_app.get_current_user_info')
+    def test_auto_summary_token_expired(self, mock_user_info, test_data):
+        from consts.exceptions import TokenExpiredError
+
+        mock_user_info.side_effect = TokenExpiredError("expired")
+
+        response = client.post(
+            f"/summary/{test_data['index_name']}/auto_summary",
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 401
+        assert "expired" in response.json()["detail"]
+
+    @patch('apps.knowledge_summary_app.get_current_user_id')
+    def test_change_summary_token_expired(self, mock_user_id, test_data):
+        from consts.exceptions import TokenExpiredError
+
+        mock_user_id.side_effect = TokenExpiredError("expired")
+
+        response = client.post(
+            f"/summary/{test_data['index_name']}/summary",
+            json={"summary_result": "test summary"},
+            headers=test_data["auth_header"]
+        )
+
+        assert response.status_code == 401
+        assert "expired" in response.json()["detail"]
+

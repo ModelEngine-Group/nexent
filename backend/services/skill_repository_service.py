@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import math
 import re
@@ -27,6 +28,7 @@ from database.skill_repository_db import (
     increment_skill_repository_downloads,
     insert_skill_repository_record,
     list_skill_repository_by_skill_ids,
+    list_skill_repository_tag_stats,
     list_skill_repository_summaries,
     reset_skill_repository_status,
     update_skill_repository_by_id,
@@ -39,7 +41,8 @@ from services.notification_service import (
     create_repository_review_notification,
     deactivate_notifications,
 )
-from services.skill_service import SkillService
+from management.services.skill.service import SkillService
+from utils.skill_import_utils import generate_available_copy_skill_name
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
@@ -176,6 +179,24 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _normalize_mine_skill_tags(tags: Any) -> List[str]:
+    """Return mine-tab skill tags as a validated string list."""
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    if not isinstance(tags, list):
+        return []
+
+    return [
+        tag.strip()
+        for tag in tags
+        if isinstance(tag, str) and tag.strip()
+    ]
+
+
 def _to_repository_info_item(record: Dict[str, Any]) -> Dict[str, Any]:
     """Map a repository DB row to a my-skills repository_info entry."""
     return {
@@ -210,7 +231,7 @@ def _matches_search(skill: Dict[str, Any], search: Optional[str]) -> bool:
         skill.get("source"),
         skill.get("created_by"),
     ]
-    haystack.extend(_as_list(skill.get("tags")))
+    haystack.extend(_normalize_mine_skill_tags(skill.get("tags")))
     return any(keyword in str(value or "").lower() for value in haystack)
 
 
@@ -778,31 +799,21 @@ def _extract_duplicate_skill_name(error_message: str) -> Optional[str]:
     return None
 
 
-def _truncate_copy_base_name(base_name: str, suffix: str) -> str:
-    """Trim a copied skill base name so the final name fits the database limit."""
-    max_base_length = max(_MAX_COPY_NAME_LENGTH - len(suffix), 1)
-    if len(base_name) <= max_base_length:
-        return base_name
-    return base_name[:max_base_length].rstrip() or base_name[:max_base_length]
-
-
 def _generate_available_copy_skill_name(
     *,
     base_name: str,
     tenant_id: str,
 ) -> str:
     """Generate an available skill name for repository copy within the tenant."""
-    normalized_base = (base_name or "Skill").strip() or "Skill"
-    if not get_skill_by_name(normalized_base, tenant_id):
-        return normalized_base
-
-    index = 1
+    unavailable_names: set[str] = set()
     while True:
-        suffix = " 副本" if index == 1 else f" 副本 {index}"
-        candidate = f"{_truncate_copy_base_name(normalized_base, suffix)}{suffix}"
+        candidate = generate_available_copy_skill_name(
+            base_name,
+            unavailable_names,
+        )
         if not get_skill_by_name(candidate, tenant_id):
             return candidate
-        index += 1
+        unavailable_names.add(candidate)
 
 
 def install_skill_from_repository_impl(
@@ -929,7 +940,7 @@ def _to_mine_skill_item(
         "name": skill.get("name"),
         "description": skill.get("description"),
         "source": skill.get("source"),
-        "tags": skill.get("tags") or [],
+        "tags": _normalize_mine_skill_tags(skill.get("tags")),
         "group_ids": skill.get("group_ids") or [],
         "ingroup_permission": skill.get("ingroup_permission"),
         "created_by": skill.get("created_by"),
@@ -954,6 +965,7 @@ def list_my_editable_skills_impl(
     page_size: int = 10,
     search: Optional[str] = None,
     new_skill_padding: bool = False,
+    tag_predicates: Optional[list] = None,
 ) -> Dict[str, Any]:
     """List editable skills for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -971,6 +983,27 @@ def list_my_editable_skills_impl(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    if tag_predicates:
+        from database.tag_management_db import TagManagementDB
+
+        skill_ids = [
+            str(skill["skill_id"])
+            for skill in skills
+            if skill.get("skill_id") is not None
+        ]
+        matched_ids = set(
+            TagManagementDB.filter_authorized_resource_ids(
+                tenant_id,
+                "skill",
+                skill_ids,
+                tag_predicates,
+            )
+        )
+        skills = [
+            skill
+            for skill in skills
+            if str(skill.get("skill_id")) in matched_ids
+        ]
     counts = _count_skills_by_ownership(skills, user_id)
 
     filtered_skills = [
@@ -982,6 +1015,7 @@ def list_my_editable_skills_impl(
         new_skill_padding
         and normalized_ownership == OWNERSHIP_ALL
         and not (search and search.strip())
+        and not tag_predicates
     )
     paged_skills, total = _paginate_mine_skills_with_optional_padding(
         filtered_skills,
@@ -1041,6 +1075,8 @@ def list_skill_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    tag_predicates: Optional[list] = None,
+    tag: Optional[str] = None,
     sort_by_update_time: bool = False,
 ) -> Dict[str, Any]:
     """List skill repository listings for the caller tenant with optional filters."""
@@ -1050,14 +1086,36 @@ def list_skill_repository_listings_impl(
             f"{', '.join(sorted(VALID_REPOSITORY_STATUSES))}"
         )
 
+    skill_ids = None
+    if tag_predicates:
+        from database.tag_management_db import TagManagementDB
+
+        visible_skill_ids = [
+            str(skill["skill_id"])
+            for skill in SkillService(tenant_id=tenant_id).list_visible_skills(
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if skill.get("skill_id") is not None
+        ]
+        matched_ids = TagManagementDB.filter_authorized_resource_ids(
+            tenant_id,
+            "skill",
+            visible_skill_ids,
+            tag_predicates,
+        )
+        skill_ids = [int(skill_id) for skill_id in matched_ids]
+
     result = list_skill_repository_summaries(
         publisher_tenant_id=tenant_id,
         status=status,
         skill_id=skill_id,
+        skill_ids=skill_ids,
         category_id=category_id,
         page=page,
         page_size=page_size,
         search=search,
+        tag=tag,
         sort_by_update_time=sort_by_update_time,
     )
     user_role = _get_user_role(user_id)
@@ -1080,6 +1138,11 @@ def list_skill_repository_listings_impl(
         ],
         "pagination": result.get("pagination"),
     }
+
+
+def list_skill_repository_tag_stats_impl(tenant_id: str) -> List[Dict[str, Any]]:
+    """Return shared repository tag values with counts for one tenant."""
+    return list_skill_repository_tag_stats(tenant_id)
 
 
 def get_skill_repository_listing_detail_impl(

@@ -18,11 +18,13 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale?: string }>;
 }): Promise<Metadata> {
-  // Simple metadata for now - can be enhanced later with i18n
+  const { locale } = await params;
+  const isZh = locale === "zh";
   return {
     title: `AI Agent Platform`,
-    description:
-      "A powerful AI agent platform for intelligent conversations and automation",
+    description: isZh
+      ? "一个强大的 AI 智能体平台，支持智能对话与流程自动化"
+      : "A powerful AI agent platform for intelligent conversations and automation",
     icons: {
       icon: "/favicon.png",
       shortcut: "/favicon.png",

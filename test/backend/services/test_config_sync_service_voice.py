@@ -28,8 +28,6 @@ minio_client_mock.client = MagicMock()
 minio_config_mock = MagicMock()
 minio_config_mock.validate = MagicMock()
 
-if 'consts.const' in sys.modules and not hasattr(sys.modules['consts.const'], 'APP_DESCRIPTION'):
-    sys.modules.pop('consts.const', None)
 if 'consts' in sys.modules and not hasattr(sys.modules['consts'], '__path__'):
     sys.modules.pop('consts', None)
 

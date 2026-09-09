@@ -15,7 +15,6 @@ import {
   App,
   Upload,
   Tabs,
-  Popconfirm,
   Tag,
 } from "antd";
 import {
@@ -508,10 +507,8 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              padding: "2px 8px",
-              lineHeight: "20px",
-              height: "auto",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
             variant="solid"
           >
@@ -524,10 +521,8 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                padding: "2px 8px",
-                lineHeight: "20px",
-                height: "auto",
                 whiteSpace: "nowrap",
+                flexShrink: 0,
                 cursor: "pointer",
               }}
               variant="solid"
@@ -545,27 +540,26 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       render: (_: any, record: McpServer) => {
         const isAvailable = record.status;
         const key = `${record.service_name}__${record.mcp_url}`;
+        const statusIcon = healthCheckLoading[key] ? (
+          <LoaderCircle className="w-3 h-3 animate-spin" />
+        ) : isAvailable ? (
+          <CheckCircle className="w-3 h-3" />
+        ) : (
+          <CircleX className="w-3 h-3" />
+        );
         return (
           <Tag
             color={healthCheckLoading[key] ? "#2E4053" : isAvailable ? "#229954" : "#E74C3C"}
             style={{
               display: "inline-flex",
               alignItems: "center",
-              padding: "2px 8px",
-              lineHeight: "20px",
-              height: "auto",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
             variant="solid"
           >
-            {healthCheckLoading[key] ? (
-              <LoaderCircle className="w-3 h-3 animate-spin mr-1" />
-            ) : isAvailable ? (
-              <CheckCircle className="w-3 h-3 mr-1" />
-            ) : (
-              <CircleX className="w-3 h-3 mr-1" />
-            )}
-            <span>{t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}</span>
+            <span className="inline-flex items-center mr-1">{statusIcon}</span>
+            {t(isAvailable ? "mcpConfig.status.available" : "mcpConfig.status.unavailable")}
           </Tag>
         );
       },
@@ -608,23 +602,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                 disabled={actionsLocked}
               />
             </Tooltip>
-            <Popconfirm
-              title={t("mcpConfig.delete.confirmTitle")}
-              description={t("mcpConfig.delete.confirmContent", { name: record.service_name })}
-              onConfirm={() => onDeleteServer(record)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                  disabled={actionsLocked}
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+              <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+                onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.service_name }), onOk: () => onDeleteServer(record) })} />
+            </Tooltip>
           </div>
         );
       },
@@ -676,15 +657,13 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              padding: "2px 8px",
-              lineHeight: "20px",
-              height: "auto",
               whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
             variant="solid"
           >
-            <span className="mr-1">{config.icon}</span>
-            <span>{status || "unknown"}</span>
+            <span className="inline-flex items-center mr-1">{config.icon}</span>
+            {status || "unknown"}
           </Tag>
         );
       },
@@ -704,23 +683,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               disabled={updatingTools}
             />
           </Tooltip>
-          <Popconfirm
-            title={t("mcpConfig.deleteContainer.confirmTitle")}
-            description={t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id })}
-            onConfirm={() => onDeleteContainer(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("mcpConfig.containerList.button.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                disabled={actionsLocked}
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("mcpConfig.containerList.button.delete")}>
+            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+              onClick={() => confirm({ title: t("mcpConfig.deleteContainer.confirmTitle"), content: t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id }), onOk: () => onDeleteContainer(record) })} />
+          </Tooltip>
         </div>
       ),
     },
@@ -749,23 +715,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       width: "20%",
       render: (_: any, record: any) => (
         <div className="flex items-center space-x-2">
-          <Popconfirm
-            title={t("mcpConfig.delete.confirmTitle")}
-            description={t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name })}
-            onConfirm={() => onDeleteOpenapiService(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                disabled={actionsLocked}
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+              onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name }), onOk: () => onDeleteOpenapiService(record) })} />
+          </Tooltip>
         </div>
       ),
     },

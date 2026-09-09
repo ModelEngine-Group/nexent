@@ -35,10 +35,14 @@ export class ConfigService {
   }
 
   async saveConfig(config: GlobalConfig): Promise<void> {
+    const app = { ...config.app } as Record<string, unknown>;
+    delete app.appName;
+    delete app.appDescription;
+
     await fetchWithErrorHandling(API_ENDPOINTS.config.save, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify(config),
+      body: JSON.stringify({ ...config, app }),
     });
   }
 }

@@ -37,6 +37,7 @@ class MMRDeduplicator:
         mmr_final_k: int = 5,
         mmr_candidate_top_k: int = 10,
         mmr_duplicate_threshold: float = 0.92,
+        mmr_candidate_max: int = 200,
     ):
         """Initialize the MMR deduplicator."""
         if not 0.0 <= mmr_lambda <= 1.0:
@@ -50,6 +51,7 @@ class MMRDeduplicator:
         self.mmr_final_k = mmr_final_k
         self.mmr_candidate_top_k = mmr_candidate_top_k
         self.mmr_duplicate_threshold = mmr_duplicate_threshold
+        self.mmr_candidate_max = mmr_candidate_max
 
     def dedupe(
         self,
@@ -61,7 +63,11 @@ class MMRDeduplicator:
             return []
 
         sorted_candidates = sorted(candidates, key=lambda r: r.fused_score or 0, reverse=True)
-        pool = sorted_candidates[: self.mmr_candidate_top_k]
+        max_candidates = self.mmr_candidate_max
+        if len(sorted_candidates) > max_candidates:
+            pool = sorted_candidates[:max_candidates]
+        else:
+            pool = sorted_candidates
 
         logger.debug(
             "[mmr] input=%d candidate_pool=%d lambda=%.2f final_k=%d threshold=%.2f",

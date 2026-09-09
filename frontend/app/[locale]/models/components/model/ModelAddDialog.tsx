@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react";
+﻿import { useMemo, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -22,7 +22,7 @@ import {
 import { useConfig } from "@/hooks/useConfig";
 import { useCapacitySuggestion } from "@/hooks/useCapacitySuggestion";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
-import { modelService } from "@/services/modelService";
+import { modelService, isSessionExpiredError } from "@/services/modelService";
 import {
   ModelType,
   SingleModelConfig,
@@ -102,17 +102,13 @@ const DEFAULT_FORM_STATE = {
   ...emptyCapacityForm,
 };
 
-const resolveConnectivityModelType = (type: ModelType): ModelType =>
-  type === MODEL_TYPES.VLM2 || type === MODEL_TYPES.VLM3
-    ? (MODEL_TYPES.VLM as ModelType)
-    : type;
-
 const resolveConfigKey = (type: ModelType): string => type;
 
 const isVlmConfigType = (type: ModelType): boolean =>
   type === MODEL_TYPES.VLM ||
   type === MODEL_TYPES.VLM2 ||
-  type === MODEL_TYPES.VLM3;
+  type === MODEL_TYPES.VLM3 ||
+  type === MODEL_TYPES.VLM4;
 
 const emptyModelConfig = {
   modelName: "",
@@ -660,18 +656,11 @@ export const ModelAddDialog = ({
       const modelType =
         form.type === MODEL_TYPES.EMBEDDING && form.isMultimodal
           ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-          : resolveConnectivityModelType(form.type);
+          : form.type;
 
       let connectivity = false;
 
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        connectivity = await modelService.checkManageTenantModelConnectivity(
-          tenantId,
-          form.displayName || form.name,
-          modelType
-        );
-      } else if (form.type === MODEL_TYPES.STT) {
+      if (form.type === MODEL_TYPES.STT) {
         // For STT models, build the appropriate config based on provider
         const sttConfig: any = {
           modelType: modelType,
@@ -761,6 +750,8 @@ export const ModelAddDialog = ({
         });
       }
     } catch (error) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       setConnectivityStatus({
@@ -941,7 +932,7 @@ export const ModelAddDialog = ({
       },
     };
 
-    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3]) {
+    for (const key of [MODEL_TYPES.VLM, MODEL_TYPES.VLM2, MODEL_TYPES.VLM3, MODEL_TYPES.VLM4]) {
       if (
         key !== configKey &&
         currentModelConfig?.[key]?.displayName === selectedDisplayName
@@ -981,6 +972,8 @@ export const ModelAddDialog = ({
       }));
       await onSuccess(addedModels.length > 0 ? addedModels[0] : undefined);
     } catch (error: any) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error?.message || t("model.dialog.error.addFailedLog");
       const translatedError = translateError(errorMessage, t);
@@ -1329,11 +1322,13 @@ export const ModelAddDialog = ({
         case MODEL_TYPES.VLM:
         case MODEL_TYPES.VLM2:
         case MODEL_TYPES.VLM3:
+        case MODEL_TYPES.VLM4:
           configUpdate = { [configKey]: modelConfig };
           for (const key of [
             MODEL_TYPES.VLM,
             MODEL_TYPES.VLM2,
             MODEL_TYPES.VLM3,
+            MODEL_TYPES.VLM4,
           ]) {
             if (
               key !== configKey &&
@@ -1373,6 +1368,8 @@ export const ModelAddDialog = ({
       // Close the dialog
       handleClose();
     } catch (error) {
+      // session expired — redirect already triggered, skip the toast
+      if (isSessionExpiredError(error)) return;
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const translatedError = translateError(errorMessage, t);
@@ -1509,6 +1506,9 @@ export const ModelAddDialog = ({
             </Option>
             <Option value={MODEL_TYPES.VLM3}>
               {t("model.type.videoUnderstanding")}
+            </Option>
+            <Option value={MODEL_TYPES.VLM4}>
+              {t("model.type.audioUnderstanding")}
             </Option>
             <Option value={MODEL_TYPES.RERANK}>{t("model.type.rerank")}</Option>
             <Option

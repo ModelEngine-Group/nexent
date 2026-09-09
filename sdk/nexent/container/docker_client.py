@@ -263,6 +263,7 @@ class DockerContainerClient(ContainerClient):
         env_vars: Optional[Dict[str, str]] = None,
         host_port: Optional[int] = None,
         image: Optional[str] = None,
+        wait_for_ready: bool = True,
     ) -> Dict[str, Any]:
         """
         Start container and return access URL
@@ -274,6 +275,8 @@ class DockerContainerClient(ContainerClient):
             full_command: Optional complete command list to run inside container (must start an HTTP endpoint).
                          If None, uses the image's default CMD/ENTRYPOINT.
             env_vars: Optional environment variables
+            wait_for_ready: Whether to wait for the MCP endpoint health check
+                before returning the created container.
 
         Returns:
             Dictionary with container_id, service_url, host_port, and status
@@ -401,31 +404,34 @@ class DockerContainerClient(ContainerClient):
                     f"Starting container {container_name} with default image CMD/ENTRYPOINT")
             container = self.client.containers.run(**container_config)
 
-            # Wait a bit for container to start
-            await asyncio.sleep(2)
-
-            # Wait for service to be ready
             host = self._get_service_host(container_name)
             # Use the detected internal port so the URL points at the port the
             # MCP server actually listens on (e.g. --port 3033 in the image),
             # not the random host_port that nothing is bound to in Docker mode.
             service_url = f"http://{host}:{container_port}/mcp"
-            try:
-                await self._wait_for_service_ready(service_url, max_retries=30, authorization_token=authorization_token)
-            except ContainerConnectionError:
-                # If health check fails, log but don't fail immediately
-                logger.warning(
-                    f"Service health check failed for {service_url}, but container is running"
-                )
-                # Check if container is still running
+            if wait_for_ready:
+                # Wait a bit for container to start before probing the endpoint.
+                await asyncio.sleep(2)
                 try:
-                    container.reload()
-                    if container.status != "running":
+                    await self._wait_for_service_ready(
+                        service_url,
+                        max_retries=30,
+                        authorization_token=authorization_token,
+                    )
+                except ContainerConnectionError:
+                    # If health check fails, log but don't fail immediately
+                    logger.warning(
+                        f"Service health check failed for {service_url}, but container is running"
+                    )
+                    # Check if container is still running
+                    try:
+                        container.reload()
+                        if container.status != "running":
+                            raise ContainerError(
+                                f"Container {container_name} stopped unexpectedly")
+                    except NotFound:
                         raise ContainerError(
-                            f"Container {container_name} stopped unexpectedly")
-                except NotFound:
-                    raise ContainerError(
-                        f"Container {container_name} not found after start")
+                            f"Container {container_name} not found after start")
 
             logger.info(
                 f"Container {container_name} started successfully on port {host_port}")

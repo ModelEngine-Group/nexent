@@ -1,14 +1,12 @@
-"""Tests for embedding model metadata and client cache."""
+"""Tests for embedding model metadata and the embedding client factory."""
 
 from unittest.mock import MagicMock
 
-import pytest
-
+from nexent.core.gateway import EmbeddingContext
 from nexent.memory.embedding_model import (
     EmbeddingModelInfo,
     _sanitize_index_component,
     get_embedding_client,
-    reset_embedding_client_cache,
 )
 
 
@@ -96,22 +94,16 @@ class TestEmbeddingModelInfo:
 
 
 # --------------------------------------------------------------------------- #
-# get_embedding_client / reset_embedding_client_cache                            #
+# get_embedding_client                                                         #
 # --------------------------------------------------------------------------- #
 
-class TestEmbeddingClientCache:
-    """Tests for the process-wide HTTP client cache."""
+class TestEmbeddingClientFactory:
+    """Tests for the embedding client factory."""
 
-    def setup_method(self):
-        reset_embedding_client_cache()
-
-    def teardown_method(self):
-        reset_embedding_client_cache()
-
-    def test_cache_miss_creates_instance(self, mocker):
-        """First call with a given key must create and cache the client."""
+    def test_builds_adapter_from_context(self, mocker):
+        """The adapter is constructed from an EmbeddingContext built out of the arguments."""
         mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
         )
         mock_instance = MagicMock()
         mock_init.return_value = mock_instance
@@ -119,151 +111,91 @@ class TestEmbeddingClientCache:
         client = get_embedding_client(
             model_name="text-embedding-3-small",
             dimension=1536,
-            base_url="https://api.openai.com/v1",
+            base_url="https://api.openai.com/v1/embeddings",
             api_key="sk-test",
         )
 
         assert client is mock_instance
         mock_init.assert_called_once_with(
-            model_name="text-embedding-3-small",
-            base_url="https://api.openai.com/v1",
+            EmbeddingContext(
+                model_name="text-embedding-3-small",
+                base_url="https://api.openai.com/v1/embeddings",
+                api_key="sk-test",
+                modality="embedding",
+                factory="openai",
+                embedding_dim=1536,
+                ssl_verify=True,
+            )
+        )
+
+    def test_model_repo_prefixes_model_name(self, mocker):
+        """model_repo is prepended so vendors such as SiliconFlow receive "BAAI/bge-m3"."""
+        mock_init = mocker.patch(
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
+        )
+
+        get_embedding_client(
+            model_name="bge-m3",
+            dimension=1024,
+            base_url="https://api.siliconflow.cn/v1/embeddings",
             api_key="sk-test",
-            embedding_dim=1536,
+            model_repo="BAAI",
+        )
+
+        context = mock_init.call_args[0][0]
+        assert context.model_name == "BAAI/bge-m3"
+        assert context.embedding_dim == 1024
+
+    def test_every_call_builds_a_new_adapter(self, mocker):
+        """Identical arguments must not be served from a shared instance."""
+        mock_init = mocker.patch(
+            "nexent.memory.embedding_model.OpenAICompatibleEmbeddingAdapter"
+        )
+        mock_init.side_effect = lambda context: MagicMock(context=context)
+
+        first = get_embedding_client(
+            model_name="text-embedding-3-small",
+            dimension=1536,
+            base_url="https://api.openai.com/v1/embeddings",
+            api_key="sk-test",
+        )
+        second = get_embedding_client(
+            model_name="text-embedding-3-small",
+            dimension=1536,
+            base_url="https://api.openai.com/v1/embeddings",
+            api_key="sk-test",
+        )
+
+        assert mock_init.call_count == 2
+        assert first is not second
+
+    def test_changed_endpoint_and_credentials_are_not_shared(self):
+        """Same repo/name/dimension with a different endpoint, key or TLS setting
+        must never reuse another caller's client.
+
+        Real adapters are used because constructing one performs no I/O.
+        """
+        tenant_a = get_embedding_client(
+            model_name="bge-m3",
+            dimension=1024,
+            base_url="https://api.siliconflow.cn/v1/embeddings",
+            api_key="sk-tenant-a",
+            model_repo="BAAI",
             ssl_verify=True,
         )
-
-    def test_cache_hit_returns_same_instance(self, mocker):
-        """Subsequent calls with the same key must return the cached instance."""
-        mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
-        )
-        mock_instance = MagicMock()
-        mock_init.return_value = mock_instance
-
-        client1 = get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-        )
-        client2 = get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
+        tenant_b = get_embedding_client(
+            model_name="bge-m3",
+            dimension=1024,
+            base_url="http://10.0.0.7:8000/v1/embeddings",
+            api_key="sk-tenant-b",
+            model_repo="BAAI",
+            ssl_verify=False,
         )
 
-        # Only one instance should have been created
-        assert mock_init.call_count == 1
-        # Both calls should return the same object
-        assert client1 is client2
-
-    def test_different_dimension_returns_different_instance(self, mocker):
-        """Different dimensions are separate cache entries."""
-        mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
-        )
-        mock1 = MagicMock()
-        mock2 = MagicMock()
-        mock_init.side_effect = [mock1, mock2]
-
-        c1 = get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-        )
-        c2 = get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=256,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-        )
-
-        assert mock_init.call_count == 2
-        assert c1 is not c2
-
-    def test_model_repo_used_in_cache_key(self, mocker):
-        """Different model_repo values must produce separate cache entries.
-
-        The cache key is ``(model_repo, model_name, dimension)`` so that
-        tenants using different embedding vendors (e.g. ``openai`` vs.
-        ``local``) get their own client instances.
-        """
-        mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
-        )
-        mock_instance = MagicMock()
-        mock_init.return_value = mock_instance
-
-        # First call with a repo
-        get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-            model_repo="openai",
-        )
-        # Second call with different repo but same model_name + dimension
-        get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://different.example.com",
-            api_key="sk-other",
-            model_repo="other-repo",
-        )
-
-        # Different repos must not collide — one instance per repo.
-        assert mock_init.call_count == 2
-
-    def test_same_model_repo_hits_cache(self, mocker):
-        """Same (model_repo, model_name, dimension) returns the cached client."""
-        mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
-        )
-        mock_instance = MagicMock()
-        mock_init.return_value = mock_instance
-
-        get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-            model_repo="openai",
-        )
-        get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-            model_repo="openai",
-        )
-
-        assert mock_init.call_count == 1
-
-    def test_reset_clears_cache(self, mocker):
-        """reset_embedding_client_cache() must empty the cache so the next call
-        creates a fresh instance."""
-        mock_init = mocker.patch(
-            "nexent.memory.embedding_model.OpenAICompatibleEmbedding"
-        )
-        mock_instance = MagicMock()
-        mock_init.return_value = mock_instance
-
-        get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-        )
-        reset_embedding_client_cache()
-
-        # After reset a new instance must be created
-        get_embedding_client(
-            model_name="text-embedding-3-small",
-            dimension=1536,
-            base_url="https://api.openai.com/v1",
-            api_key="sk-test",
-        )
-
-        assert mock_init.call_count == 2
+        assert tenant_a is not tenant_b
+        assert tenant_a._base_url == "https://api.siliconflow.cn/v1/embeddings"
+        assert tenant_a._headers["Authorization"] == "Bearer sk-tenant-a"
+        assert tenant_a._ssl_verify is True
+        assert tenant_b._base_url == "http://10.0.0.7:8000/v1/embeddings"
+        assert tenant_b._headers["Authorization"] == "Bearer sk-tenant-b"
+        assert tenant_b._ssl_verify is False

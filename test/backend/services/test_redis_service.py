@@ -1715,6 +1715,36 @@ class TestRedisService(unittest.TestCase):
         self.assertEqual(result, 1)
         mock_delete.assert_called_once_with('1')
 
+    def test_cleanup_document_celery_tasks_celery_exc_message_args(self):
+        """Celery's list-shaped exception args are matched and deleted."""
+        self.redis_service._backend_client = self.mock_backend_client
+        self.redis_service._client = self.mock_redis_client
+
+        task_payload = json.dumps({
+            'result': {
+                'exc_type': 'Exception',
+                'exc_message': [json.dumps({
+                    'index_name': 'idx',
+                    'source': '/legacy-failed.txt',
+                    'original_filename': 'legacy-failed.txt',
+                })],
+            },
+        }).encode()
+        self.mock_backend_client.keys.return_value = [b'celery-task-meta-1']
+        self.mock_backend_client.get.return_value = task_payload
+
+        with patch.object(
+            self.redis_service,
+            '_recursively_delete_task_and_parents',
+            return_value=(1, {'1'}),
+        ) as mock_delete:
+            result = self.redis_service._cleanup_document_celery_tasks(
+                'idx', '/legacy-failed.txt'
+            )
+
+        self.assertEqual(result, 1)
+        mock_delete.assert_called_once_with('1')
+
     def test_cleanup_document_celery_tasks_exc_message_path_or_url(self):
         """exc_message may use `path_or_url` instead of `source`."""
         self.redis_service._backend_client = self.mock_backend_client
@@ -2005,6 +2035,18 @@ class TestRedisService(unittest.TestCase):
         result = self.redis_service._extract_error_metadata_from_exc_message(msg)
         self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
 
+    def test_extract_error_metadata_from_exc_message_celery_args_list(self):
+        """Celery's JSON-encoded exception args are unwrapped before parsing."""
+        msg = [json.dumps({"index_name": "idx", "source": "/a.txt"})]
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
+
+    def test_extract_error_metadata_from_exc_message_dict(self):
+        """Already-decoded exception metadata is returned unchanged."""
+        msg = {"index_name": "idx", "source": "/a.txt"}
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, msg)
+
     def test_extract_error_metadata_from_exc_message_second_candidate(self):
         """Escaped-quote variant is tried when the first candidate fails."""
         # Invalid JSON without escapes, but valid with the quote-un-escape
@@ -2039,6 +2081,17 @@ class TestRedisService(unittest.TestCase):
                 raise RuntimeError("can't stringify")
 
         result = self.redis_service._extract_error_metadata_from_exc_message(_Boom())
+        self.assertIsNone(result)
+
+    def test_extract_error_metadata_from_exc_message_bytes(self):
+        """Bytes returned by a result backend are decoded before JSON parsing."""
+        msg = json.dumps({"index_name": "idx", "source": "/a.txt"}).encode("utf-8")
+        result = self.redis_service._extract_error_metadata_from_exc_message(msg)
+        self.assertEqual(result, {"index_name": "idx", "source": "/a.txt"})
+
+    def test_extract_error_metadata_from_exc_message_empty_sequence(self):
+        """An empty Celery args sequence has no metadata."""
+        result = self.redis_service._extract_error_metadata_from_exc_message([])
         self.assertIsNone(result)
 
     def test_cleanup_celery_tasks_parent_id_lookup_exception(self):
@@ -2133,6 +2186,59 @@ class TestRedisService(unittest.TestCase):
         self.redis_service._cleanup_error_info_batch([], 100, {})
         self.mock_redis_client.pipeline.assert_not_called()
         self.mock_backend_client.pipeline.assert_not_called()
+
+    def test_document_delete_fence_has_no_ttl_and_can_be_cleared(self):
+        """Deletion fences are durable markers, unlike task cancellation flags."""
+        self.redis_service._client = self.mock_redis_client
+        self.mock_redis_client.set.return_value = True
+        self.mock_redis_client.exists.side_effect = [1, 0, 0]
+        self.mock_redis_client.delete.return_value = 1
+
+        assert self.redis_service.mark_document_delete_requested(
+            file_id="fid-1"
+        )
+        for fence_call in self.mock_redis_client.set.call_args_list:
+            assert "ex" not in fence_call.kwargs
+            assert "px" not in fence_call.kwargs
+        assert self.redis_service.is_document_delete_requested(
+            file_id="fid-1"
+        )
+        assert self.redis_service.clear_document_delete_fence(
+            file_id="fid-1"
+        ) == 1
+        assert not self.redis_service.is_document_delete_requested(
+            file_id="fid-1"
+        )
+
+    def test_document_fence_handles_empty_identity_and_redis_errors(self):
+        """Fence reads surface Redis outages so callers can use PG fallback."""
+        self.redis_service._client = self.mock_redis_client
+        self.assertFalse(self.redis_service.mark_document_delete_requested(
+            file_id=None))
+        self.assertFalse(self.redis_service.is_document_delete_requested(
+            file_id=None))
+        self.mock_redis_client.set.side_effect = redis.RedisError("write failed")
+        self.assertFalse(self.redis_service.mark_document_delete_requested(
+            file_id="fid-1"))
+        self.mock_redis_client.exists.side_effect = redis.RedisError("read failed")
+        with self.assertRaises(redis.RedisError):
+            self.redis_service.is_document_delete_requested(
+                file_id="fid-1")
+        self.assertEqual(self.redis_service.clear_document_delete_fence(
+            file_id=None), 0)
+        self.mock_redis_client.delete.side_effect = redis.RedisError("delete failed")
+        self.assertEqual(self.redis_service.clear_document_delete_fence(
+            file_id="fid-1"), 0)
+
+    def test_cleanup_single_task_related_keys_removes_split_companions(self):
+        """The aggregated ready marker and per-part payloads are cleaned with the task."""
+        self.redis_service._client = self.mock_redis_client
+        self.redis_service._backend_client = self.mock_backend_client
+        self.mock_redis_client.delete.return_value = 0
+        self.mock_backend_client.delete.return_value = 1
+        self.mock_backend_client.scan_iter.side_effect = [[b"dp:task:chunks:ready"], [b"dp:task:part:0"]]
+        deleted = self.redis_service._cleanup_single_task_related_keys("task")
+        self.assertEqual(deleted, 3)
 
     def test_parse_progress_falsy_raw_returns_defaults(self):
         """A falsy raw payload (None, '', 0) returns (0, default_total)."""
