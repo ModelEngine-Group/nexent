@@ -42,6 +42,7 @@ sys.modules["nexent.memory"] = memory_pkg
 sys.modules["nexent.memory.providers"] = providers_pkg
 sys.modules["nexent.memory.providers.base"] = providers_base
 
+from backend.services import memory_provider_plugin_loader as plugin_loader_module
 from backend.services.memory_provider_plugin_loader import PluginLoader
 
 
@@ -211,6 +212,45 @@ def test_ac_001_builtin_plugin_is_discovered_when_external_directory_is_empty(tm
     loader.load_all()
 
     assert [plugin.name for plugin in loader.list_plugins()] == ["mem0"]
+
+
+def test_include_builtin_plugins_uses_default_builtin_directory(tmp_path, monkeypatch):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    monkeypatch.setattr(
+        plugin_loader_module,
+        "BUILTIN_MEMORY_PROVIDER_PLUGINS_DIR",
+        builtin_dir,
+    )
+
+    loader = PluginLoader(str(external_dir), include_builtin_plugins=True)
+
+    assert loader.builtin_plugins_dir == str(builtin_dir)
+    assert loader._plugin_sources == [
+        ("builtin", builtin_dir),
+        ("external", external_dir),
+    ]
+
+
+def test_empty_external_directory_argument_only_registers_builtin_source(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+
+    loader = PluginLoader("", builtin_plugins_dir=str(builtin_dir))
+
+    assert loader._plugin_sources == [("builtin", builtin_dir)]
+
+
+def test_same_builtin_and_external_directory_is_scanned_once(tmp_path):
+    shared_dir = tmp_path / "shared"
+
+    loader = PluginLoader(
+        str(shared_dir),
+        builtin_plugins_dir=str(shared_dir),
+    )
+
+    assert loader._plugin_sources == [("builtin", shared_dir)]
 
 
 def test_ac_002_builtin_and_external_plugins_are_merged(tmp_path):
@@ -389,6 +429,80 @@ def test_ac_011_concurrent_refresh_exposes_complete_registry(tmp_path):
         )
 
     assert all(result == {"mem0", "hot-added"} for result in results)
+
+
+def test_fingerprint_records_unavailable_entry(tmp_path, monkeypatch):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    unavailable = plugins_dir / "unavailable"
+    loader = PluginLoader(str(plugins_dir))
+    original_stat = Path.stat
+
+    monkeypatch.setattr(Path, "rglob", lambda self, pattern: [unavailable])
+
+    def failing_stat(path):
+        if path == unavailable:
+            raise OSError("entry unavailable")
+        return original_stat(path)
+
+    monkeypatch.setattr(Path, "stat", failing_stat)
+
+    fingerprint = loader._calculate_fingerprint()
+
+    assert (str(unavailable), "unavailable", "OSError") in fingerprint
+
+
+def test_fingerprint_records_unavailable_source(tmp_path, monkeypatch):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    loader = PluginLoader(str(plugins_dir))
+
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda self, pattern: (_ for _ in ()).throw(OSError("source unavailable")),
+    )
+
+    assert ("unavailable", "OSError") in loader._calculate_fingerprint()
+
+
+def test_scan_sources_skips_directory_when_listing_fails(tmp_path, monkeypatch, caplog):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    loader = PluginLoader(str(plugins_dir))
+
+    monkeypatch.setattr(
+        Path,
+        "iterdir",
+        lambda self: (_ for _ in ()).throw(OSError("listing failed")),
+    )
+
+    plugins, loaded_count, failure_count = loader._scan_sources()
+
+    assert plugins == {}
+    assert loaded_count == 0
+    assert failure_count == 1
+    assert "cannot be read" in caplog.text
+
+
+def test_scan_sources_isolates_unexpected_plugin_error(tmp_path, monkeypatch, caplog):
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "broken"
+    plugin_dir.mkdir(parents=True)
+    loader = PluginLoader(str(plugins_dir))
+
+    monkeypatch.setattr(
+        loader,
+        "_load_single_plugin",
+        lambda child: (_ for _ in ()).throw(RuntimeError("unexpected failure")),
+    )
+
+    plugins, loaded_count, failure_count = loader._scan_sources()
+
+    assert plugins == {}
+    assert loaded_count == 0
+    assert failure_count == 1
+    assert "Unexpected error loading plugin" in caplog.text
 
 
 def test_protocol_validation_searchable_only(plugins_dir):
