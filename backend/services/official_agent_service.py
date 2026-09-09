@@ -875,24 +875,10 @@ async def _install_bundle(
 
     await _run_step("mcp", _install_mcp_and_tools())
 
-    from services.agent_service import (
-        _create_skills_for_install,
-        _import_agent_with_skill_links,
+    from management.services.agent.service import (
         import_agent_impl,
+        import_agent_with_skills_impl,
     )
-
-    skill_name_to_id: Dict[str, int] = {}
-    if bundle.skills:
-        skill_name_to_id = await _run_step(
-            "skill",
-            _create_skills_for_install(
-                bundle.skills,
-                tenant_id,
-                user_id,
-                reuse_existing_skills=False,
-                skill_resolutions=skill_resolutions,
-            ),
-        )
 
     if bundle.knowledge_bases:
         if embedding_model_id is None:
@@ -924,12 +910,11 @@ async def _install_bundle(
     if bundle.skills and existing_agent_id is None:
         agent_id_mapping = await _run_step(
             "agent",
-            _import_agent_with_skill_links(
+            import_agent_with_skills_impl(
                 bundle,
-                skill_name_to_id,
+                bundle.skills,
                 authorization,
-                tenant_id=tenant_id,
-                user_id=user_id,
+                skill_resolutions=skill_resolutions,
             ),
         )
     elif existing_agent_id is not None:
