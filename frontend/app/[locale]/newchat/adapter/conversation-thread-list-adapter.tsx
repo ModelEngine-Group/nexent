@@ -37,6 +37,7 @@ import {
   attachExecutionLogsToTool,
   collapseSubAgentParts,
   attachSearchContentToTool,
+  buildExecutionCodePart,
   buildToolCallPart,
   conversationSourcesRegistry,
   extractAidpImageKeys,
@@ -843,6 +844,21 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const meta = buildMetadata(part.invocation_id);
             if (meta) toolCallPart.metadata = meta;
             content.push(toolCallPart);
+            continue;
+          }
+
+          if (part.type === "parse") {
+            flushReasoning(part.invocation_id);
+            if (part.content.trim()) {
+              const executionCodePart = buildExecutionCodePart({
+                type: "parse",
+                content: part.content,
+                unit_index: part.unit_index ?? partIndex,
+              });
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) executionCodePart.metadata = meta;
+              content.push(executionCodePart);
+            }
             continue;
           }
 

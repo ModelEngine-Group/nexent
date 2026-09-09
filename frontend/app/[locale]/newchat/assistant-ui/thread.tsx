@@ -13,6 +13,7 @@ import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
+import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
@@ -1276,15 +1277,20 @@ const AssistantMessage: FC<{
                   }).isSearchImage &&
                     (part as { imageSource?: SourcePartLike }).imageSource
                 ));
+            const isExecutionCodePart =
+              part.type === "data" &&
+              (part as { name?: string }).name === "execution-code";
             const chainPath: `group-${string}`[] = isImagePart
               ? ["group-image"]
               : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
-                : part.type === "tool-call"
-                  ? ["group-chainOfThought", "group-tool"]
-                  : part.type === "source"
-                    ? ["group-source"]
-                    : ["group-default"];
+                : isExecutionCodePart
+                  ? ["group-chainOfThought", "group-execution-code"]
+                  : part.type === "tool-call"
+                    ? ["group-chainOfThought", "group-tool"]
+                    : part.type === "source"
+                      ? ["group-source"]
+                      : ["group-default"];
             if (subagentId !== undefined) {
               const groupKey =
                 `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
@@ -1369,6 +1375,8 @@ const AssistantMessage: FC<{
                   </Reasoning.Root>
                 );
               }
+              case "group-execution-code":
+                return <div data-slot="aui_execution-code">{children}</div>;
               case "group-source":
                 return (
                   <SourceGroupButton
@@ -1430,6 +1438,22 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "execution-code"
+                ) {
+                  const data = (
+                    part as typeof part & {
+                      data?: { code?: unknown; language?: string };
+                    }
+                  ).data;
+                  return (
+                    <ExecutionCodeBlock
+                      code={data?.code}
+                      language={data?.language}
+                    />
+                  );
+                }
                 if (
                   (part as typeof part & { name?: string }).name ===
                   "nl2skill-file"
