@@ -16,7 +16,6 @@ import logging
 import os
 import shutil
 import tempfile
-import uuid
 import zipfile
 from typing import Dict, List, Optional
 
@@ -32,6 +31,10 @@ from consts.model import (
     OfficialAgentMcpPreview,
     SkillResolution,
     SkillZipEntry,
+)
+from management.services.agent.naming import (
+    check_agent_value_duplicate,
+    generate_unique_agent_value,
 )
 
 logger = logging.getLogger("official_agent_service")
@@ -1016,79 +1019,43 @@ async def install_official_agents(
         root_name = getattr(root_agent, "name", None) if root_agent else None
         root_renamed = bool(renames) and bool(root_name) and root_name in renames
         existing_agent_id = None
-        if not root_renamed:
-            existing_agent_id = _find_installed_agent_id(
-                bundle, tenant_id, user_id=user_id
+        from database.agent_db import query_all_agent_info_by_tenant_id
+
+        agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
+        if root_name and not root_renamed and check_agent_value_duplicate(
+            "name", root_name, tenant_id, agents_cache=agents_cache
+        ):
+            renames = dict(renames or {})
+            renames[root_name] = generate_unique_agent_value(
+                "name", root_name, tenant_id, agents_cache=agents_cache
             )
-            if existing_agent_id is not None:
-                # Keep the official copy label consistent even when an
-                # idempotent retry reuses an existing Agent.
-                if root_agent is not None:
-                    from database.agent_db import update_agent_display_name
-                    from database.user_tenant_db import get_user_tenant_by_user_id
+            logger.info(
+                "Official agent '%s' name already exists; creating unique copy name=%s",
+                name,
+                renames[root_name],
+            )
 
-                    user_record = get_user_tenant_by_user_id(user_id) or {}
-                    user_email = str(user_record.get("user_email") or "").strip()
-                    current_display_name = getattr(root_agent, "display_name", None) or root_name
-                    if user_email and not current_display_name.endswith(f"（{user_email}）"):
-                        update_agent_display_name(
-                            existing_agent_id,
-                            tenant_id,
-                            f"{current_display_name}（{user_email}）",
-                            user_id,
-                        )
-                logger.info(
-                    "Official agent '%s' already exists as agent_id=%s; "
-                    "ensuring dependencies before returning it",
-                    name,
-                    existing_agent_id,
-                )
-            elif root_name and _is_agent_installed(bundle, tenant_id):
-                # Agents are user-owned even though their dependencies are
-                # tenant-scoped. Avoid reusing another user's Agent, whose
-                # group permissions could make a successful copy invisible.
-                from database.agent_db import query_all_agent_info_by_tenant_id
-
-                used_names = {
-                    agent.get("name")
-                    for agent in query_all_agent_info_by_tenant_id(tenant_id)
-                }
-                base_name = f"{root_name}_copy_{str(user_id)[:8]}"
-                unique_name = base_name
-                suffix = 2
-                while unique_name in used_names:
-                    unique_name = f"{base_name}_{suffix}"
-                    suffix += 1
-                renames = dict(renames or {})
-                renames[root_name] = unique_name
-                root_renamed = True
-                if root_agent is not None:
-                    from database.user_tenant_db import get_user_tenant_by_user_id
-
-                    user_record = get_user_tenant_by_user_id(user_id) or {}
-                    user_email = str(user_record.get("user_email") or "").strip()
-                    display_suffix = user_email or "当前用户"
-                    root_agent.display_name = (
-                        root_agent.display_name or root_name
-                    ) + f"（{display_suffix}）"
-                unique_name = f"{root_name}__copy_{uuid.uuid4().hex[:8]}"
-                renames[root_name] = unique_name
-                logger.info(
-                    "Official agent '%s' exists for another user; creating "
-                    "visible user copy name=%s",
-                    name,
-                    unique_name,
-                )
-
-        if root_agent is not None and not root_renamed and existing_agent_id is None:
+        if root_agent is not None:
             from database.user_tenant_db import get_user_tenant_by_user_id
 
             user_record = get_user_tenant_by_user_id(user_id) or {}
             user_email = str(user_record.get("user_email") or "").strip()
-            if user_email:
-                current_display_name = getattr(root_agent, "display_name", None) or root_name
-                if not current_display_name.endswith(f"（{user_email}）"):
-                    root_agent.display_name = f"{current_display_name}（{user_email}）"
+            current_display_name = getattr(root_agent, "display_name", None) or root_name
+            labeled_display_name = (
+                f"{current_display_name}（{user_email}）"
+                if user_email
+                else current_display_name
+            )
+            if check_agent_value_duplicate(
+                "display_name", labeled_display_name, tenant_id, agents_cache=agents_cache
+            ):
+                labeled_display_name = generate_unique_agent_value(
+                    "display_name",
+                    labeled_display_name,
+                    tenant_id,
+                    agents_cache=agents_cache,
+                )
+            root_agent.display_name = labeled_display_name
 
         missing_models = await _missing_model_types(bundle, tenant_id)
         if missing_models:
