@@ -301,9 +301,9 @@ class TestAidpSearchToolForward:
         )
 
         parsed = json.loads(result)
-        assert len(parsed) == 2
-        assert parsed[0]["title"] == "Text Doc"
-        assert parsed[1]["title"] == "Image Doc"
+        assert len(parsed["results"]) == 2
+        assert parsed["results"][0]["title"] == "Text Doc"
+        assert parsed["results"][1]["title"] == "Image Doc"
         assert aidp_tool.record_ops == 3
 
         assert mock_observer.add_message.call_count == 3
@@ -338,7 +338,7 @@ class TestAidpSearchToolForward:
 
         result = aidp_tool.forward("text only")
 
-        assert len(json.loads(result)) == 1
+        assert len(json.loads(result)["results"]) == 1
         process_types = [call.args[1] for call in mock_observer.add_message.call_args_list]
         assert aidp_module.ProcessType.PICTURE_WEB not in process_types
 
@@ -356,8 +356,8 @@ class TestAidpSearchToolForward:
 
         result = json.loads(aidp_tool.forward("nothing"))
 
-        assert "No relevant information" in result
-        assert "selected AIDP knowledge bases" in result
+        assert result["results"] == []
+        assert result["scope"]["used"] == ["kb1", "kb2"]
 
     def test_forward_http_error_raises_wrapped_exception(self, aidp_tool):
         aidp_tool._mock_http_client.post.side_effect = httpx.HTTPError("boom")
@@ -612,7 +612,8 @@ class TestAidpSearchToolWhitelist:
 
         result = json.loads(aidp_tool.forward("some query"))
 
-        assert "No AIDP knowledge base is accessible" in result
+        assert result["results"] == []
+        assert result["scope"]["used"] == []
         aidp_tool._mock_http_client.post.assert_not_called()
 
     def test_forward_configured_kds_blocked_by_empty_whitelist(self, aidp_tool):
@@ -623,7 +624,8 @@ class TestAidpSearchToolWhitelist:
 
         result = json.loads(aidp_tool.forward("query"))
 
-        assert "No AIDP knowledge base is accessible" in result
+        assert result["results"] == []
+        assert result["scope"]["used"] == []
         aidp_tool._mock_http_client.post.assert_not_called()
 
     # ------------------------------------------------------------------
@@ -664,15 +666,23 @@ class TestAidpSearchToolWhitelist:
         assert "kb2" in sent_payload["kds_list"]
 
     def test_forward_all_kds_filtered_returns_observation(self, aidp_tool):
-        """Fully filtered user input returns a denial without calling AIDP."""
+        """An all-invalid request falls back to the permitted AIDP scope."""
         aidp_tool.set_allowed_kds(["kb-allowed"])
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"result": []}
+        aidp_tool._mock_http_client.post.return_value = mock_response
 
         result = json.loads(
             aidp_tool.forward("query", kds_list=["kb-bad1", "kb-bad2"])
         )
 
-        assert "No AIDP knowledge base is accessible" in result
-        aidp_tool._mock_http_client.post.assert_not_called()
+        assert result["results"] == []
+        assert result["scope"]["ignored"] == ["kb-bad1", "kb-bad2"]
+        assert result["scope"]["used"] == ["kb-allowed"]
+        assert result["scope"]["fallback_to_all"] is True
+        sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
+        assert sent_payload["kds_list"] == ["kb-allowed"]
 
     def test_forward_no_whitelist_passes_all_kds(self, aidp_tool):
         """When set_allowed_kds was never called, all configured KBs pass."""
@@ -687,6 +697,39 @@ class TestAidpSearchToolWhitelist:
         call_kwargs = aidp_tool._mock_http_client.post.call_args.kwargs
         sent_payload = call_kwargs["json"]
         assert sent_payload["kds_list"] == ["kb1", "kb2"]
+
+    @pytest.mark.parametrize(
+        ("requested", "expected_used", "expected_ignored", "fallback"),
+        [
+            (["kb1", "kb2"], ["kb1", "kb2"], [], False),
+            (["kb1", "kb-missing"], ["kb1"], ["kb-missing"], False),
+            (["kb-missing"], ["kb1", "kb2"], ["kb-missing"], True),
+        ],
+    )
+    def test_forward_corrects_requested_scope(
+        self,
+        requested,
+        expected_used,
+        expected_ignored,
+        fallback,
+        aidp_tool,
+    ):
+        aidp_tool._mock_http_client.post.return_value = MagicMock(
+            raise_for_status=MagicMock(),
+            json=MagicMock(return_value={"result": []}),
+        )
+
+        response = json.loads(aidp_tool.forward("query", kds_list=requested))
+
+        sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
+        assert sent_payload["kds_list"] == expected_used
+        assert response["scope"] == {
+            "requested": requested,
+            "used": expected_used,
+            "ignored": expected_ignored,
+            "adjusted": bool(expected_ignored),
+            "fallback_to_all": fallback,
+        }
 
     # ------------------------------------------------------------------
     # E. State switching
@@ -876,7 +919,7 @@ class TestForwardWithoutObserver:
         tool._http_client = mock_client
         result = tool.forward("no observer query")
         parsed = json.loads(result)
-        assert len(parsed) == 1
+        assert len(parsed["results"]) == 1
 
 
 class TestResolveFieldDefault:

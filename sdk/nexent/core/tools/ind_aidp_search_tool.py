@@ -18,7 +18,12 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+from ..utils.tools_common_message import (
+    SearchResultTextMessage,
+    ToolCategory,
+    ToolSign,
+    build_knowledge_search_response,
+)
 from ...utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("ind_aidp_search_tool")
@@ -296,10 +301,34 @@ class IndependentAidpSearchTool(Tool):
                 json.dumps({"images_url": image_urls}, ensure_ascii=False),
             )
 
+    @staticmethod
+    def _unique_kds(kds: List[str]) -> List[str]:
+        return list(dict.fromkeys(str(item) for item in kds))
+
+    def _resolve_search_scope(
+        self, kds_list: Optional[List[str]]
+    ) -> tuple[List[str], List[str], List[str], bool]:
+        configured_scope = self._unique_kds(self.kds_list)
+        if kds_list is None:
+            return configured_scope, configured_scope, [], False
+
+        requested_scope = self._unique_kds(_parse_kds_list(kds_list))
+        used_scope = [item for item in requested_scope if item in configured_scope]
+        ignored_scope = [item for item in requested_scope if item not in configured_scope]
+        fallback_to_all = bool(requested_scope and not used_scope and configured_scope)
+        if fallback_to_all:
+            used_scope = configured_scope
+        return requested_scope, used_scope, ignored_scope, fallback_to_all
+
     def forward(self, query: str, kds_list: Optional[List[str]] = None) -> str:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
-        search_kds_list = self.kds_list if kds_list is None else _parse_kds_list(kds_list)
+        (
+            requested_scope,
+            search_kds_list,
+            ignored_scope,
+            fallback_to_all,
+        ) = self._resolve_search_scope(kds_list)
         normalized_query = query.strip()
         self._emit_running_prompt(normalized_query)
         try:
@@ -307,11 +336,16 @@ class IndependentAidpSearchTool(Tool):
         except httpx.HTTPError as exc:
             raise IndependentAidpSearchError(f"AIDP HTTP error: {exc}") from exc
         if not records:
-            return json.dumps(
-                "No relevant information was found in the configured AIDP knowledge bases.",
-                ensure_ascii=False,
+            return build_knowledge_search_response(
+                [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
             )
         ui_results, model_results, image_urls = self._process_records(records)
         self.record_ops += len(model_results)
         self._emit_results(ui_results, image_urls)
-        return json.dumps(model_results, ensure_ascii=False)
+        return build_knowledge_search_response(
+            model_results,
+            requested_scope,
+            search_kds_list,
+            ignored_scope,
+            fallback_to_all,
+        )

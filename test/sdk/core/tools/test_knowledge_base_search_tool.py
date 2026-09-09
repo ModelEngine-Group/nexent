@@ -95,10 +95,40 @@ class SearchResultTextMessage:
     def to_model_dict(self):
         return dict(self.data)
 
+
+def build_knowledge_search_response(
+    results, requested_scope, used_scope, ignored_scope, fallback_to_all
+):
+    adjusted = bool(ignored_scope or requested_scope != used_scope)
+    if fallback_to_all:
+        notice = "NOTICE: scope adjusted; search used all available configured knowledge bases."
+    elif ignored_scope:
+        notice = "NOTICE: scope adjusted; unavailable knowledge bases were ignored."
+    elif not used_scope:
+        notice = "NOTICE: no requested knowledge bases were available, so no search was executed."
+    else:
+        notice = "NOTICE: requested knowledge-base scope was used without changes."
+    if not results and used_scope:
+        notice += " No relevant information was found in the selected knowledge bases."
+    return json.dumps(
+        {
+            "notice": notice,
+            "results": results,
+            "scope": {
+                "requested": requested_scope,
+                "used": used_scope,
+                "ignored": ignored_scope,
+                "adjusted": adjusted,
+                "fallback_to_all": fallback_to_all,
+            },
+        }
+    )
+
 tools_common_mod = types.ModuleType("sdk.nexent.core.utils.tools_common_message")
 tools_common_mod.SearchResultTextMessage = SearchResultTextMessage
 tools_common_mod.ToolCategory = _ToolCategory
 tools_common_mod.ToolSign = _ToolSign
+tools_common_mod.build_knowledge_search_response = build_knowledge_search_response
 _set_module("sdk.nexent.core.utils.tools_common_message", tools_common_mod)
 utils_pkg.tools_common_message = tools_common_mod
 
@@ -464,7 +494,7 @@ class TestKnowledgeBaseSearchTool:
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Verify result structure
         assert len(search_results) == 2
@@ -481,7 +511,7 @@ class TestKnowledgeBaseSearchTool:
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Verify result structure
         assert len(search_results) == 4
@@ -504,8 +534,9 @@ class TestKnowledgeBaseSearchTool:
 
         result = json.loads(knowledge_base_search_tool.forward("test query"))
 
-        assert "No relevant information" in result
-        assert "selected knowledge bases" in result
+        assert result["results"] == []
+        assert result["scope"]["used"] == ["test_index1", "test_index2"]
+        assert "No relevant information" in result["notice"]
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
         """Test forward method uses configured custom index names."""
@@ -559,7 +590,7 @@ class TestKnowledgeBaseSearchTool:
         result = knowledge_base_search_tool.forward("test query")
 
         # Parse result
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Verify title fallback
         assert len(search_results) == 1
@@ -681,7 +712,7 @@ class TestKnowledgeBaseSearchToolRerank:
         )
 
         result = tool.forward("test query")
-        results = json.loads(result)
+        results = json.loads(result)["results"]
 
         # Verify rerank was called
         mock_rerank_model.rerank.assert_called_once()
@@ -780,11 +811,11 @@ class TestKnowledgeBaseSearchToolRerank:
         """Test forward method with empty index_names string returns a clear denial message"""
         knowledge_base_search_tool.index_names = ""
 
-        result = knowledge_base_search_tool.forward("test query")
+        result = json.loads(knowledge_base_search_tool.forward("test query"))
 
         # Should return the permission-denial message since no index is available
-        assert "no knowledge base is accessible" in result.lower()
-        assert "permission" in result.lower()
+        assert result["results"] == []
+        assert result["scope"]["used"] == []
 
     def test_forward_single_index_name(self, knowledge_base_search_tool):
         """Test forward method with single index name"""
@@ -1376,7 +1407,7 @@ class TestEdgeCases:
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
         result = knowledge_base_search_tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         assert search_results[0]["content"] == ""
 
@@ -1412,7 +1443,7 @@ class TestEdgeCases:
         knowledge_base_search_tool.vdb_core = mock_vdb_core
 
         result = knowledge_base_search_tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         assert len(search_results) == 2
 
@@ -1440,7 +1471,7 @@ class TestEdgeCases:
         )
 
         result = tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         assert len(search_results) == 3
 
@@ -1813,7 +1844,7 @@ class TestDocumentPathsAccessControl:
         mock_vdb_core.hybrid_search.return_value = mock_results
 
         result = tool.forward("test query")
-        search_results = json.loads(result)
+        search_results = json.loads(result)["results"]
 
         # Only doc1 should be in the result
         assert len(search_results) == 1
@@ -1837,8 +1868,8 @@ class TestDocumentPathsAccessControl:
 
         result = json.loads(tool.forward("test query"))
 
-        assert "No relevant information" in result
-        assert "selected knowledge bases" in result
+        assert result["results"] == []
+        assert result["scope"]["used"] == ["kb1"]
 
     def test_filter_by_document_paths_unwraps_fieldinfo_default(self, mock_vdb_core, mock_embedding_model):
         """Filter should tolerate a FieldInfo default instead of a concrete list.
@@ -1961,6 +1992,47 @@ class TestAllowedIndexNamesWhitelist:
         assert call_kwargs["index_names"] == ["allowed_kb"]
         assert "forbidden_kb" not in call_kwargs["index_names"]
 
+    @pytest.mark.parametrize(
+        ("requested", "expected_used", "expected_ignored", "fallback"),
+        [
+            (["kb1", "kb2"], ["kb1", "kb2"], [], False),
+            (["kb1", "kb-missing"], ["kb1"], ["kb-missing"], False),
+            (["kb-missing"], ["kb1", "kb2", "kb3"], ["kb-missing"], True),
+        ],
+    )
+    def test_forward_corrects_requested_scope(
+        self,
+        requested,
+        expected_used,
+        expected_ignored,
+        fallback,
+        mock_observer,
+        mock_vdb_core,
+        mock_embedding_model,
+    ):
+        mock_vdb_core.hybrid_search.return_value = []
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2", "kb3"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            display_name_to_index_map={},
+        )
+
+        response = json.loads(tool.forward("test query", index_names=requested))
+
+        call_kwargs = mock_vdb_core.hybrid_search.call_args.kwargs
+        assert call_kwargs["index_names"] == expected_used
+        assert response["scope"] == {
+            "requested": requested,
+            "used": expected_used,
+            "ignored": expected_ignored,
+            "adjusted": bool(expected_ignored),
+            "fallback_to_all": fallback,
+        }
+
     def test_forward_with_empty_whitelist_returns_early(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """
         When allowed_index_names is an empty list, forward() returns early without calling hybrid_search.
@@ -1978,9 +2050,10 @@ class TestAllowedIndexNamesWhitelist:
 
         result = tool.forward("test query")
 
-        # Should return early with a clear permission-denial message
-        assert "no knowledge base is accessible" in result.lower()
-        assert "permission" in result.lower()
+        # Should return early with a clear permission-denial observation
+        result = json.loads(result)
+        assert result["results"] == []
+        assert result["scope"]["used"] == []
         mock_vdb_core.hybrid_search.assert_not_called()
 
     def test_forward_without_whitelist_allows_all(self, mock_observer, mock_vdb_core, mock_embedding_model):
@@ -2051,9 +2124,10 @@ class TestAllowedIndexNamesWhitelist:
         result = tool.forward("test query")
 
         mock_vdb_core.hybrid_search.assert_not_called()
-        # Clear permission-denial message is returned
-        assert "no knowledge base is accessible" in result.lower()
-        assert "permission" in result.lower()
+        # Clear permission-denial observation is returned
+        result = json.loads(result)
+        assert result["results"] == []
+        assert result["scope"]["used"] == []
 
     def test_forward_preserves_index_order_after_filtering(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """

@@ -16,7 +16,12 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...utils.observer import MessageObserver, ProcessType
-from ...utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+from ...utils.tools_common_message import (
+    SearchResultTextMessage,
+    ToolCategory,
+    ToolSign,
+    build_knowledge_search_response,
+)
 from ....utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("aidp_search_tool")
@@ -227,6 +232,7 @@ class AidpSearchTool(Tool):
         # user with zero KB permissions could still query any KB the LLM
         # passed. That was a privilege-escalation bug and is now fixed.
         self._allowed_kds_set: set[str] = set()
+        self._allowed_kds_order: List[str] = []
         self._whitelist_installed: bool = False
 
         self._http_client = http_client_manager.get_sync_client(
@@ -489,10 +495,12 @@ class AidpSearchTool(Tool):
         """
         if allowed is None:
             self._allowed_kds_set = set()
+            self._allowed_kds_order = []
             self._whitelist_installed = False
             logger.debug("AidpSearchTool whitelist cleared (not installed)")
         else:
-            self._allowed_kds_set = {str(k) for k in allowed if k}
+            self._allowed_kds_order = list(dict.fromkeys(str(k) for k in allowed if k))
+            self._allowed_kds_set = set(self._allowed_kds_order)
             self._whitelist_installed = True
             logger.info(
                 "AidpSearchTool whitelist installed with %d permitted KB(s)",
@@ -509,6 +517,35 @@ class AidpSearchTool(Tool):
         if not self._whitelist_installed:
             return list(kds)
         return [k for k in kds if k in self._allowed_kds_set]
+
+    @staticmethod
+    def _unique_kds(kds: List[str]) -> List[str]:
+        return list(dict.fromkeys(str(item) for item in kds))
+
+    def _resolve_search_scope(
+        self, kds_list: Optional[List[str]]
+    ) -> tuple[List[str], List[str], List[str], bool]:
+        configured_scope = self._unique_kds(
+            self._convert_to_kds_ids(list(self.kds_list))
+        )
+        configured_available_scope = self._filter_by_whitelist(configured_scope)
+        if kds_list is None or len(kds_list) == 0:
+            return configured_available_scope, configured_available_scope, [], False
+
+        requested_scope = self._unique_kds(
+            self._convert_to_kds_ids(list(kds_list))
+        )
+        available_scope = (
+            self._allowed_kds_order
+            if self._whitelist_installed
+            else configured_scope
+        )
+        used_scope = [item for item in requested_scope if item in available_scope]
+        ignored_scope = [item for item in requested_scope if item not in available_scope]
+        fallback_to_all = bool(requested_scope and not used_scope and available_scope)
+        if fallback_to_all:
+            used_scope = available_scope[:_MAX_KDS]
+        return requested_scope, used_scope, ignored_scope, fallback_to_all
 
     def _convert_to_kds_ids(self, names: List[str]) -> List[str]:
         """Convert kds_name (display name) to kds_id if a mapping exists.
@@ -548,20 +585,12 @@ class AidpSearchTool(Tool):
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
 
-        # Always intersect with the runtime whitelist, regardless of whether
-        # the LLM passed a fresh ``kds_list`` or we fall back to the
-        # configured value. ``_filter_by_whitelist`` is a no-op when no
-        # whitelist has been installed (e.g. SDK unit tests), so it stays
-        # safe to call from anywhere.
-        base_kds = (
-            kds_list
-            if kds_list is not None and len(kds_list) > 0
-            else self.kds_list
-        )
-        # Resolve kds_name (display name) to kds_id before permission
-        # filtering so the whitelist operates on the real ID namespace.
-        base_kds = self._convert_to_kds_ids(list(base_kds))
-        search_kds_list = self._filter_by_whitelist(list(base_kds))
+        (
+            requested_scope,
+            search_kds_list,
+            ignored_scope,
+            fallback_to_all,
+        ) = self._resolve_search_scope(kds_list)
 
         self._emit_running_prompt(query)
 
@@ -577,11 +606,8 @@ class AidpSearchTool(Tool):
             # Permission denial is a valid tool observation, not a transport
             # failure. Returning it lets the agent produce a complete answer
             # while still preventing any request to the AIDP endpoint.
-            return json.dumps(
-                "No AIDP knowledge base is accessible within the selected "
-                "conversation scope. The configured knowledge bases may have "
-                "been removed or your access may have been revoked.",
-                ensure_ascii=False,
+            return build_knowledge_search_response(
+                [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
             )
 
         try:
@@ -599,14 +625,17 @@ class AidpSearchTool(Tool):
                 query,
                 search_kds_list,
             )
-            return json.dumps(
-                "No relevant information was found in the selected AIDP knowledge "
-                "bases. Try a broader or shorter query, or explain that the selected "
-                "scope does not contain enough evidence.",
-                ensure_ascii=False,
+            return build_knowledge_search_response(
+                [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
             )
 
         search_results_json, search_results_return, images_url = self._process_records(records)
         self.record_ops += len(search_results_return)
         self._emit_results(search_results_json, images_url)
-        return json.dumps(search_results_return, ensure_ascii=False)
+        return build_knowledge_search_response(
+            search_results_return,
+            requested_scope,
+            search_kds_list,
+            ignored_scope,
+            fallback_to_all,
+        )

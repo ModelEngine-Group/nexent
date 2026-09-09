@@ -1,6 +1,7 @@
+import json
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class ToolSign(Enum):
@@ -100,3 +101,53 @@ class SearchResultTextMessage:
             "index": index,
             "reference_mark": f"[[{index}]]",
         }
+
+
+def build_knowledge_search_response(
+    results: List[Dict[str, Any]],
+    requested_scope: List[str],
+    used_scope: List[str],
+    ignored_scope: List[str],
+    fallback_to_all: bool,
+) -> str:
+    """Build the model-facing response for scope-aware knowledge searches."""
+    adjusted = bool(ignored_scope or requested_scope != used_scope)
+    if fallback_to_all:
+        notice = (
+            "NOTICE: Knowledge-base scope was adjusted before search. "
+            f"Requested knowledge bases {ignored_scope} were unavailable and ignored. "
+            f"Search was executed across all available configured knowledge bases: {used_scope}. "
+            "Do not retry with the ignored knowledge bases."
+        )
+    elif ignored_scope:
+        notice = (
+            "NOTICE: Knowledge-base scope was adjusted before search. "
+            f"Requested knowledge bases {ignored_scope} were unavailable and ignored. "
+            f"Search was executed with the remaining available knowledge bases: {used_scope}. "
+            "Do not retry with the ignored knowledge bases."
+        )
+    elif not used_scope:
+        notice = (
+            "NOTICE: No requested knowledge bases were available, so no search was executed. "
+            "Do not retry with the ignored knowledge bases."
+        )
+    else:
+        notice = "NOTICE: Requested knowledge-base scope was used without changes."
+
+    if not results and used_scope:
+        notice += " No relevant information was found in the selected knowledge bases."
+
+    return json.dumps(
+        {
+            "notice": notice,
+            "results": results,
+            "scope": {
+                "requested": requested_scope,
+                "used": used_scope,
+                "ignored": ignored_scope,
+                "adjusted": adjusted,
+                "fallback_to_all": fallback_to_all,
+            },
+        },
+        ensure_ascii=False,
+    )
