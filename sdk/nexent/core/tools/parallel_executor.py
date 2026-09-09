@@ -10,50 +10,44 @@ class ParallelExecutorTool(Tool):
     category = None
     tool_sign = None
     description = (
-        "Execute multiple independent agent/tool calls in parallel. "
-        "Each task is a 2-tuple (callable, kwargs_dict) or a 3-tuple "
-        "(callable, kwargs_dict, \"name\").  "
-        "All 2-tuples → returns a list (results in input order).  "
-        "All 3-tuples → returns a dict keyed by name.  "
-        "Only put calls that are independent of each other into one call; "
-        "if one task needs the output of another, call them serially.  "
-        "Timeout (default 120 s) and failures are captured as error strings.  "
-        "max_workers (default 4) limits the max number of threads used in "
-        "parallel; set higher when you have many independent tasks and want "
-        "to finish faster.  "
-        "kwargs values can be any Python object (strings, numbers, PIL Images, "
-        "file handles, audio, etc.) — just reference the variable name; no "
-        "serialization is needed.  "
-        "All results — whether from tools, assistants, timeouts, or errors — "
-        "are returned as plain strings.  Use print() to read them."
+        "Run multiple independent tool or agent calls in parallel. "
+        "parallel_executor is already injected into the Python environment: "
+        "call it directly and never import it. "
+        "Each task must be (available_tool_or_agent, kwargs_dict) or "
+        "(available_tool_or_agent, kwargs_dict, result_key); do not mix formats. "
+        "Use only tools or agents listed in Available Resources; do not import "
+        "or create the callable. "
+        "All 2-tuples return a list in input order; all 3-tuples return a dict "
+        "keyed by result_key. "
+        "Only include independent tasks; dependent calls must be sequential. "
+        "Timeouts and failures are returned as error strings; successful results "
+        "keep their original type. timeout is per task and max_workers controls "
+        "the maximum concurrency."
     )
     description_zh = (
-        "并行执行多个互不依赖的助手或工具调用。"
-        "每个任务是一个二元组 (函数名, {\"参数\": 值}) 或三元组 (函数名, {\"参数\": 值}, \"名称\")。"
-        "全部用二元组 → 返回列表，按传入顺序排列。"
-        "全部用三元组 → 返回字典，key 是名称字符串。"
-        "只有互不依赖的调用才能放入同一个 parallel_executor；"
-        "如果后一个任务需要前一个任务的结果，必须分开串行调用。"
-        "单个任务超时（默认120秒）或失败不会影响其他任务，会以错误字符串形式返回。"
-        "max_workers（默认4）限制并行时使用的最大线程数；当有大量互不依赖的任务时可以提高该值以加快完成速度。"
-        "kwargs 值可以是任意 Python 对象（字符串、数字、PIL图片、文件句柄、音频等），"
-        "直接引用变量名即可，无需序列化。"
-        "所有返回结果——无论来自工具、助手、超时还是异常——均为纯字符串。"
-        "用 print() 读取即可。"
+        "并行执行多个互不依赖的工具或助手调用。"
+        "parallel_executor 已直接注入当前 Python 环境，必须直接调用，禁止使用 import 获取。"
+        "每个任务必须是二元组（可用工具或助手对象，参数字典）或三元组（可用工具或助手对象，参数字典，结果名称）；同一次调用不能混用两种格式。"
+        "只能传入“可用资源”中已经列出的工具或助手，不要导入或创建函数。"
+        "全部使用二元组时返回按输入顺序排列的列表；全部使用三元组时返回以结果名称为 key 的字典。"
+        "任务之间必须互不依赖；有依赖关系时必须串行调用。"
+        "单个任务超时（默认120秒）或失败时返回错误字符串；成功结果保留原始类型。"
+        "timeout 控制单个任务的超时时间，max_workers 控制最大并发数。"
     )
     inputs = {
         "tasks": {
             "type": "array",
             "description": (
-                "A list of tasks where each task is a 2-tuple (callable, kwargs_dict) "
-                "or 3-tuple (callable, kwargs_dict, \"name\"). "
-                "kwargs values can be any Python object — just reference "
-                "the variable name, no serialization needed."
+                "A list of tasks. Each task is (available_tool_or_agent, kwargs_dict) "
+                "or (available_tool_or_agent, kwargs_dict, result_key). "
+                "Use only already available tools or agents; never import "
+                "parallel_executor or the task callable. Do not mix the two formats."
             ),
             "description_zh": (
-                "任务列表，每个任务是一个二元组 (函数名, 参数字典) "
-                "或三元组 (函数名, 参数字典, \"名称\")。"
-                "kwargs 值可以是任意 Python 对象，直接引用变量名即可，无需序列化。"
+                "任务列表。每个任务是二元组（可用工具或助手对象，参数字典） "
+                "或三元组（可用工具或助手对象，参数字典，结果名称）。"
+                "只能使用已经注入且列在可用资源中的工具或助手；禁止 import parallel_executor 或任务对象。"
+                "同一次调用不能混用两种格式。"
             ),
         },
         "timeout": {
@@ -79,8 +73,9 @@ class ParallelExecutorTool(Tool):
     def forward(self, tasks, timeout: int = 120, max_workers: int = 4):
         """Execute the tasks in parallel.
 
-        ``tasks`` is a list where each element is a 2-tuple ``(func, kwargs)``
-        or 3-tuple ``(func, kwargs, \"name\")``.
+        ``tasks`` is a list where each element is a 2-tuple
+        ``(tool_or_agent, kwargs)`` or 3-tuple
+        ``(tool_or_agent, kwargs, \"result_key\")``.
 
         Returns a list (all 2-tuples) or dict (all 3-tuples).
         """
@@ -110,7 +105,8 @@ def _validate_tasks(tasks):
         if not all(len(t) == 2 for t in tasks):
             raise ValueError(
                 "parallel_executor: each task must be a 2-tuple "
-                "(callable, kwargs_dict) or 3-tuple (callable, kwargs_dict, name)."
+                "(tool_or_agent, kwargs_dict) or 3-tuple "
+                "(tool_or_agent, kwargs_dict, result_key)."
             )
         names = [None] * n
 

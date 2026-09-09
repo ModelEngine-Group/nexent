@@ -58,6 +58,8 @@ PARALLEL_EXECUTOR_IMPORT_RE = re.compile(
 
 def _remove_parallel_executor_import(code: str) -> str:
     """Remove redundant imports for the injected parallel_executor tool."""
+    if "parallel_executor" not in code:
+        return code
     return PARALLEL_EXECUTOR_IMPORT_RE.sub("", code)
 
 
