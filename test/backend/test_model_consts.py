@@ -565,10 +565,29 @@ def test_generate_title_request():
     """Test GenerateTitleRequest"""
     req = model_consts.GenerateTitleRequest(
         conversation_id=42,
-        question="How do I learn Python?"
+        question="How do I learn Python?",
+        model_id=7,
     )
     assert req.conversation_id == 42
     assert "Python" in req.question
+    assert req.model_id == 7
+
+    legacy_req = model_consts.GenerateTitleRequest(
+        conversation_id=42,
+        question="How do I learn Python?",
+    )
+    assert legacy_req.model_id is None
+
+
+@pytest.mark.parametrize("model_id", [0, -1])
+def test_generate_title_request_rejects_non_positive_model_id(model_id):
+    """GenerateTitleRequest only accepts positive explicit model IDs."""
+    with pytest.raises(ValueError):
+        model_consts.GenerateTitleRequest(
+            conversation_id=42,
+            question="How do I learn Python?",
+            model_id=model_id,
+        )
 
 
 def test_agent_info_request():

@@ -761,7 +761,7 @@ def test_generate_title_success():
         resp = client.post(
             "/nb/v1/generate_title",
             headers=_build_headers(),
-            json={"conversation_id": 42, "question": "Summarize this conversation"},
+            json={"conversation_id": 42, "question": "Summarize this conversation", "model_id": 7},
         )
 
     assert resp.status_code == 200
@@ -771,7 +771,23 @@ def test_generate_title_success():
         conversation_id=42,
         question="Summarize this conversation",
         language="en",
+        model_id=7,
     )
+
+
+def test_generate_title_validation_error():
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
+        mock_ctx.return_value = MagicMock()
+        mock_generate.side_effect = ValidationError("Selected model is unavailable")
+
+        resp = client.post(
+            "/nb/v1/generate_title",
+            headers=_build_headers(),
+            json={"conversation_id": 42, "question": "Question", "model_id": 7},
+        )
+
+    assert resp.status_code == 422
 
 
 # =============================================================================

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { checkAgentNameConflictBatch } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
+import { trimAgentText } from "@/lib/agentText";
 
 const AGENT_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -30,15 +31,16 @@ type AgentNameConflictStatus =
 
 export async function checkAgentNameConflict(
   field: AgentNameField,
-  value: string,
+  value: string | undefined,
   agentId?: number
 ): Promise<AgentNameConflictStatus> {
-  if (!value.trim()) return "available";
+  const trimmed = trimAgentText(value);
+  if (!trimmed) return "available";
 
   const result = await checkAgentNameConflictBatch({
     items: [
       {
-        [field]: value.trim(),
+        [field]: trimmed,
         agent_id: agentId,
       },
     ],
@@ -85,9 +87,9 @@ export const useSaveGuard = () => {
     const { agentId, editedAgent } = useAgentStore.getState();
     if (!editedAgent || agentId === null) return false;
 
-    const name = editedAgent.name.trim();
-    const displayName = (editedAgent.display_name || "").trim();
-    const description = editedAgent.description.trim();
+    const name = trimAgentText(editedAgent.name);
+    const displayName = trimAgentText(editedAgent.display_name);
+    const description = trimAgentText(editedAgent.description);
 
     if (!displayName) {
       message.error(t("agent.validation.displayNameRequired"));

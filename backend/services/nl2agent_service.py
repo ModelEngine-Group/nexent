@@ -28,7 +28,11 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
+from consts.const import (
+    ENABLE_AIDP_KNOWLEDGE,
+    LOCAL_MCP_SERVER,
+    MODEL_CONFIG_MAPPING,
+)
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import update_agent_draft_fields
 from database.skill_db import query_enabled_skill_instances
@@ -63,6 +67,21 @@ logger = logging.getLogger(__name__)
 MINIMUM_RECOMMENDATION_SCORE = 0.45
 MAX_RECOMMENDATIONS = 5
 MAX_BINDING_CANDIDATES = 12
+
+_LOCAL_KNOWLEDGE_TOOL_NAMES = frozenset({
+    "knowledge_base_search",
+    "ind_aidp_search",
+})
+_AIDP_KNOWLEDGE_TOOL_NAME = "aidp_search"
+
+
+def _is_nl2agent_recommendable_tool(name: str) -> bool:
+    """Return whether a deployment permits NL2Agent to recommend a tool."""
+    if ENABLE_AIDP_KNOWLEDGE:
+        return name not in _LOCAL_KNOWLEDGE_TOOL_NAMES
+    return name != _AIDP_KNOWLEDGE_TOOL_NAME
+
+
 STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
 UNINSTALLED_SOURCE_PAGE_SIZE = 100
@@ -444,6 +463,7 @@ async def _load_installed_resource_catalog(
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or tool.get("is_available") is not True
             or name in internal_names
+            or not _is_nl2agent_recommendable_tool(name)
         ):
             continue
         tool_id = tool.get("tool_id")

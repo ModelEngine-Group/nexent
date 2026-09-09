@@ -187,6 +187,7 @@ backend_database_mod.client = backend_database_client_mod
 sys.modules["backend.database"] = backend_database_mod
 
 from backend.consts.model import MessageRequest, AgentRequest, MessageUnit
+from consts.exceptions import ValidationError
 import unittest
 import json
 import asyncio
@@ -517,6 +518,67 @@ class TestConversationManagementService(unittest.TestCase):
         mock_openai.assert_called_once()
         mock_llm_instance.assert_called_once()
         mock_get_prompt_template.assert_called_once_with(language='zh')
+
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
+    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('backend.services.conversation_management_service.get_model_by_model_id')
+    def test_call_llm_for_title_uses_selected_tenant_model(
+            self, mock_get_model, mock_get_default_model, mock_get_prompt, mock_adapter):
+        selected_config = {
+            "model_id": 7,
+            "model_type": "llm",
+            "display_name": "Selected LLM",
+            "model_factory": "openai",
+        }
+        mock_get_model.return_value = selected_config
+        mock_get_prompt.return_value = {
+            "SYSTEM_PROMPT": "Generate a short title",
+            "USER_PROMPT": "{{question}}",
+        }
+        mock_adapter.return_value.return_value = MagicMock(content="Selected title")
+
+        with self.assertLogs("conversation_management_service", level="INFO") as logs:
+            result = call_llm_for_title("Question", self.tenant_id, "en", model_id=7)
+
+        self.assertEqual(result, "Selected title")
+        self.assertIn(
+            "title_generation: Selected LLM -> Selected title",
+            "\n".join(logs.output),
+        )
+        mock_get_model.assert_called_once_with(7, self.tenant_id)
+        mock_get_default_model.assert_not_called()
+        mock_adapter.assert_called_once_with(
+            selected_config,
+            self.tenant_id,
+            temperature=0.7,
+            top_p=0.95,
+            stream=False,
+            timeout_seconds=None,
+            display_name="Selected LLM",
+        )
+
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
+    @patch('backend.services.conversation_management_service.get_model_by_model_id')
+    def test_call_llm_for_title_rejects_unavailable_selected_model(
+            self, mock_get_model, mock_adapter):
+        mock_get_model.return_value = None
+
+        with self.assertRaisesRegex(ValidationError, "Selected model is unavailable"):
+            call_llm_for_title("Question", self.tenant_id, model_id=7)
+
+        mock_adapter.assert_not_called()
+
+    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
+    @patch('backend.services.conversation_management_service.get_model_by_model_id')
+    def test_call_llm_for_title_rejects_non_llm_selected_model(
+            self, mock_get_model, mock_adapter):
+        mock_get_model.return_value = {"model_id": 7, "model_type": "embedding"}
+
+        with self.assertRaisesRegex(ValidationError, "Selected model is not an LLM model"):
+            call_llm_for_title("Question", self.tenant_id, model_id=7)
+
+        mock_adapter.assert_not_called()
 
     @patch('backend.services.conversation_management_service.rename_conversation')
     def test_update_conversation_title(self, mock_rename_conversation):
@@ -1076,9 +1138,35 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         self.assertEqual(result, "Python Tips")
         mock_call_llm.assert_called_once_with(
-            "How to use Python effectively?", self.tenant_id, "en")
+            "How to use Python effectively?", self.tenant_id, "en", None)
         mock_update_title.assert_called_once_with(
             123, "Python Tips", self.user_id)
+
+    @patch('backend.services.conversation_management_service.call_llm_for_title')
+    @patch('backend.services.conversation_management_service.update_conversation_title')
+    def test_generate_conversation_title_service_forwards_model_id(
+            self, mock_update_title, mock_call_llm):
+        mock_call_llm.return_value = "Python Tips"
+
+        result = asyncio.run(generate_conversation_title_service(
+            123, "How to use Python?", self.user_id, self.tenant_id, "en", model_id=7))
+
+        self.assertEqual(result, "Python Tips")
+        mock_call_llm.assert_called_once_with(
+            "How to use Python?", self.tenant_id, "en", 7)
+        mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id)
+
+    @patch('backend.services.conversation_management_service.call_llm_for_title')
+    @patch('backend.services.conversation_management_service.update_conversation_title')
+    def test_generate_conversation_title_service_does_not_persist_validation_failure(
+            self, mock_update_title, mock_call_llm):
+        mock_call_llm.side_effect = ValidationError("Selected model is unavailable")
+
+        with self.assertRaises(ValidationError):
+            asyncio.run(generate_conversation_title_service(
+                123, "Question", self.user_id, self.tenant_id, model_id=7))
+
+        mock_update_title.assert_not_called()
 
 
 class TestCallLlmForTitleMonitoring(unittest.TestCase):
@@ -1273,8 +1361,10 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         mock_llm.return_value = MagicMock(content="  ")  # whitespace only
         mock_model.return_value = mock_llm
 
-        result = call_llm_for_title("test", "tenant-1", "zh")
+        with self.assertLogs("conversation_management_service", level="INFO") as logs:
+            result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "新对话")  # DEFAULT_ZH_TITLE
+        self.assertIn("title_generation: unknown -> 新对话", "\n".join(logs.output))
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')

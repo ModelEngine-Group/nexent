@@ -25,6 +25,7 @@ import {
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
 import { stripAnsiControlSequences } from "@/lib/ansi";
+import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
@@ -1028,7 +1029,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // always include the field and only set the token bucket when we have
       // historical step data.
       const createdAt = toMessageCreatedAt(msg.create_time);
+      const timing =
+        msg.role === "assistant"
+          ? buildHistoricalMessageTiming(stepTokenCounts)
+          : undefined;
       const metadata = {
+        ...(timing ? { timing } : {}),
         custom: {
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
           ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
