@@ -422,7 +422,7 @@ helm upgrade --install nexent nexent \
 | `nexent-common.config.cas.heartbeatUrl` | `CAS_HEARTBEAT_URL` | 用户活动触发的 CAS Server 心跳 GET 地址；为空时禁用 |
 | `nexent-common.config.cas.heartbeatIntervalSeconds` | `CAS_HEARTBEAT_INTERVAL_SECONDS` | CAS 活跃用户最小心跳间隔，默认 300 秒 |
 | `nexent-common.config.cas.heartbeatCookieName` | `CAS_HEARTBEAT_COOKIE_NAME` | 复制到心跳 `X-Auth-Token` Header 的前端可读 Cookie 名称 |
-| `nexent-common.config.cas.renewEnabled` | `CAS_RENEW_ENABLED` | 是否启用浏览器 iframe 自动无感续期，默认 `"true"`；`"false"` 关闭 |
+| `nexent-common.config.cas.renewEnabled` | `CAS_RENEW_ENABLED` | 是否启用浏览器 iframe 自动无感续期，默认 `"false"`；`"true"` 开启 |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | 距离过期多少秒内触发无感续期 |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | 无感续期等待超时时间 |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | CAS 未返回邮箱时生成邮箱使用的域名 |
@@ -432,7 +432,7 @@ helm upgrade --install nexent nexent \
 
 CAS 心跳仅在 CAS 用户本地会话有效、页面可见且发生用户活动时运行。首次活动立即发送 GET，之后所有浏览器标签页共享配置的最小间隔。配置的 Cookie 可读取时，请求携带 `X-Auth-Token: <cookie-name>=<cookie-value>`；读取不到时仍发送请求但不带该 Header。由于浏览器直接访问心跳地址，认证源必须通过 CORS 允许 Nexent Origin、GET、OPTIONS 和 `X-Auth-Token`。心跳失败不会退出用户，也不会刷新本地 JWT。
 
-关闭自动续期时，将 `nexent-common.config.cas.renewEnabled` 设为字符串 `"false"`；使用部署脚本时，也可在 `deploy/env/.env` 设置 `CAS_RENEW_ENABLED=false`。前后端升级并通过 Helm 更新配置、等待后端滚动更新完成后，刷新已打开的页面。恢复为 `"true"` 可重新开启。该开关不影响 CAS 登录、活动心跳或续期接口，也不改变会话到期处理；`force` 模式下到期仍会自动跳转登录并重新加载页面。
+自动续期默认关闭。需要开启时，将 `nexent-common.config.cas.renewEnabled` 设为字符串 `"true"`；使用部署脚本时，也可在 `deploy/env/.env` 设置 `CAS_RENEW_ENABLED=true`。前后端升级并通过 Helm 更新配置、等待后端滚动更新完成后，刷新已打开的页面。设为 `"false"` 可关闭。该开关不影响 CAS 登录、活动心跳或续期接口，也不改变会话到期处理；`force` 模式下到期仍会自动跳转登录并重新加载页面。
 
 常用 CAS 地址：
 
@@ -487,7 +487,7 @@ nexent-common:
       heartbeatUrl: "https://<ModelEngine IP>:5443/<heartbeat-path>"
       heartbeatIntervalSeconds: 300
       heartbeatCookieName: "<cookie-name>"
-      renewEnabled: "true"
+      renewEnabled: "false"
       renewBeforeSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"
