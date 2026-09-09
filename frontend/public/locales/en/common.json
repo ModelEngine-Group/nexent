@@ -4188,6 +4188,8 @@
   "aidpKnowledge.updateKb": "Update Knowledge Base",
   "aidpKnowledge.updateKbSuccess": "Knowledge base updated",
   "aidpKnowledge.updateKbFailed": "Failed to update knowledge base",
+  "aidpKnowledge.updateKbPermissionFailed": "Name and description saved, but permissions failed to update. Reopen the editor to retry.",
+  "aidpKnowledge.updateKbMetadataFailed": "Permissions saved, but name and description failed to update. Reopen the editor to retry.",
   "aidpKnowledge.kbName": "Name",
   "aidpKnowledge.kbNamePlaceholder": "Knowledge base name",
   "aidpKnowledge.kbNameRequired": "Name is required",
