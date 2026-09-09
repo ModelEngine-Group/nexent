@@ -1270,6 +1270,8 @@ class TestGetAllMcpTools:
 
         # Verify calls
         assert mock_get_tools.call_count == 3
+        assert mock_get_tools.call_args_list[-1].kwargs["mcp_server_name"] == "outer-apis"
+        assert mock_get_tools.call_args_list[-1].kwargs["tenant_id"] == "test_tenant"
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
@@ -5547,8 +5549,9 @@ class TestUpdateToolListMcpErrorExplicit:
            new_callable=AsyncMock, side_effect=ConnectionError("MCP down"))
     @patch("backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list")
     @patch("backend.services.tool_configuration_service.get_mcp_records_by_tenant", return_value=[])
+    @patch("backend.services.tool_configuration_service.query_openapi_services_by_tenant", return_value=[{"mcp_service_name": "weather-api"}])
     async def test_mcp_error_sets_empty_tools_and_continues(
-        self, mock_get_mcp_records, mock_update, mock_mcp, mock_lc, mock_local, mock_refresh
+        self, mock_openapi_services, mock_get_mcp_records, mock_update, mock_mcp, mock_lc, mock_local, mock_refresh
     ):
         """MCP failure must set mcp_tools=[] and still call update_tool_table_from_scan_tool_list."""
         from backend.services.tool_configuration_service import update_tool_list
@@ -5557,7 +5560,7 @@ class TestUpdateToolListMcpErrorExplicit:
         # update_tool_table called with only local + langchain (mcp_tools is [])
         mock_update.assert_called_once_with(
             tenant_id="tenant1", user_id="user1", tool_list=[],
-            enabled_mcp_names=set(),
+            enabled_mcp_names={"outer-apis"},
         )
 
 

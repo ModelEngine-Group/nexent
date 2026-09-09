@@ -97,6 +97,9 @@ services:
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: migrate
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      # Always use the container path. A developer's backend/.env may contain
+      # a host-only Windows path, which is not valid inside this container.
+      OFFICIAL_AGENTS_PATH: /mnt/nexent/official-agents
       skip_proxy: "true"
       UMASK: 0022
     env_file:

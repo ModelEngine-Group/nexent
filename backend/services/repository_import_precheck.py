@@ -74,6 +74,23 @@ def _check_kb_available(index_name: str, tenant_id: str) -> Tuple[bool, Optional
     return True, None
 
 
+def _check_kb_embedding_available(
+    record: Dict[str, Any],
+    tenant_id: str,
+) -> Tuple[bool, Optional[str]]:
+    """Check that an existing official KB still has a usable tenant model."""
+    model_id = record.get("embedding_model_id")
+    model = get_model_by_model_id(model_id, tenant_id) if model_id else None
+    if not model:
+        return False, _REASON_MODEL_UNAVAILABLE
+
+    connect_status = ModelConnectStatusEnum.get_value(model.get("connect_status"))
+    if connect_status != ModelConnectStatusEnum.AVAILABLE.value:
+        return False, _REASON_MODEL_UNAVAILABLE
+
+    return True, None
+
+
 def _check_mcp_available(server_name: str, tenant_id: str) -> Tuple[bool, Optional[str]]:
     if not server_name or not str(server_name).strip():
         return False, _REASON_MCP_NOT_FOUND
@@ -179,6 +196,11 @@ def _extract_knowledge_bases(
     tenant_id: str,
 ) -> List[Tuple[str, str, Optional[str]]]:
     """Return (key, display_name, description) tuples for knowledge bases."""
+    bundle_kb_metadata = {
+        str(getattr(kb, "logical_index_name", "")): kb
+        for kb in (getattr(snapshot, "knowledge_bases", None) or [])
+        if getattr(kb, "logical_index_name", None)
+    }
     index_names: Set[str] = set()
     for agent in snapshot.agent_info.values():
         agent_data = _agent_dict(agent)
@@ -200,11 +222,21 @@ def _extract_knowledge_bases(
     )
     items: List[Tuple[str, str, Optional[str]]] = []
     for index_name in sorted(index_names):
-        display_name = name_map.get(index_name) or index_name
+        bundle_kb = bundle_kb_metadata.get(index_name)
+        display_name = (
+            getattr(bundle_kb, "display_name", None)
+            if bundle_kb is not None
+            else None
+        ) or name_map.get(index_name) or index_name
+        description = (
+            getattr(bundle_kb, "description", None)
+            if bundle_kb is not None
+            else None
+        )
         items.append((
             f"knowledge_base:{index_name}",
             display_name,
-            None,
+            description,
         ))
     return items
 
@@ -254,6 +286,7 @@ def build_repository_import_precheck(
     display_name: str,
     snapshot: Any,
     tenant_id: str,
+    require_kb_embedding_model: bool = False,
 ) -> RepositoryImportPrecheckResponse:
     """Build import precheck response for a repository listing snapshot."""
     tenant_tools = _build_tenant_tool_map(tenant_id)
@@ -282,6 +315,16 @@ def build_repository_import_precheck(
             "index_name": index_name,
             "tenant_id": tenant_id,
         })
+        if not record and getattr(snapshot, "knowledge_bases", None):
+            record = get_knowledge_record({
+                "knowledge_name": kb_name,
+                "tenant_id": tenant_id,
+            })
+            if record:
+                available = True
+                reason = None
+        if record and require_kb_embedding_model:
+            available, reason = _check_kb_embedding_available(record, tenant_id)
         kb_description = record.get("knowledge_describe") if record else description
         items.append(RepositoryImportRequirementItem(
             type="knowledge_base",

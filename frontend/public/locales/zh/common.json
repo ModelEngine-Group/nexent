@@ -2247,6 +2247,7 @@
   "agentRepository.card.untitled": "未命名智能体",
   "agentRepository.card.noDescription": "暂无描述",
   "agentRepository.card.copy": "复制",
+  "agentRepository.card.official": "官方",
   "agentRepository.card.detail": "详情",
   "agentRepository.card.toolCount": "{{count}} 个工具",
   "agentRepository.copy.title": "复制「{{name}}」",

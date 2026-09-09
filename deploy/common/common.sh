@@ -1622,6 +1622,9 @@ deployment_tui_step_should_run() {
     4)
       deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring" && [ -z "${DEPLOYMENT_MONITORING_PROVIDER_EXPLICIT:-}" ] && [ "$DEPLOYMENT_CONFIG_FILE_LOADED" != "true" ]
       ;;
+    4)
+      return 1
+      ;;
     *)
       return 1
       ;;
@@ -1694,6 +1697,9 @@ deployment_run_tui_configuration() {
         ;;
       4)
         deployment_tui_select_monitoring_provider
+        result=$?
+        ;;
+      4)
         result=$?
         ;;
       *)

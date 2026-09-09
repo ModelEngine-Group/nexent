@@ -244,6 +244,10 @@ async def import_openapi_service_api(
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
         result["mcp_refresh"] = mcp_result
 
+        # The agent configuration page reads the persisted tool list. Refreshing
+        # the MCP runtime alone does not make newly imported tools selectable.
+        await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

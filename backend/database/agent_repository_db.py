@@ -227,6 +227,7 @@ def update_agent_repository_by_id(
     """Update a repository listing owned by the publisher tenant. Returns affected row count."""
     allowed_fields = {
         "display_name",
+        "name",
         "description",
         "author",
         "submitted_by",
@@ -486,4 +487,3 @@ def fetch_draft_agent_mine_metadata(
         }
         for row in rows
     }
-

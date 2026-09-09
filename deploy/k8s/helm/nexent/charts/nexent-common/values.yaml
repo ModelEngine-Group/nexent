@@ -69,6 +69,7 @@ config:
   umask: "0022"
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
+  officialAgentsPath: "/mnt/nexent/official-agents"
   memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
   logDir: "/mnt/nexent-data/logs"
   modelEngine:

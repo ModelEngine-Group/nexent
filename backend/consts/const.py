@@ -1,6 +1,7 @@
 import os
 from enum import Enum
 from pathlib import Path
+from urllib.parse import quote, urljoin
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -97,7 +98,18 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
 # Container-internal official skills ZIP directory
-OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
+OFFICIAL_SKILLS_ZIP_PATH = os.getenv(
+    "OFFICIAL_SKILLS_ZIP_PATH", "/mnt/nexent/official-skills-zip"
+)
+
+# Container-internal official agents bundle directory (one JSON per agent)
+OFFICIAL_AGENTS_PATH = os.getenv(
+    "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
+)
+
+OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
+OFFICIAL_AGENT_TENANT_ID = "__nexent_official__"
+OFFICIAL_AGENT_USER_ID = "__nexent_system__"
 
 
 # Preview Configuration
@@ -468,6 +480,13 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
+
+
+def get_tenant_local_mcp_server(tenant_id: str) -> str:
+    """Return the tenant-scoped SSE endpoint for built-in/API-converted tools."""
+    if not tenant_id:
+        raise ValueError("tenant_id is required for the local MCP endpoint")
+    return urljoin(LOCAL_MCP_SERVER.rstrip("/") + "/", f"mcp/{quote(str(tenant_id), safe='')}/sse")
 
 
 # Invite code

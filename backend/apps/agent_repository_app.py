@@ -310,17 +310,33 @@ async def check_repository_import_precheck_api(
 @agent_repository_router.post("/{agent_repository_id}/import")
 async def import_agent_from_repository_api(
     agent_repository_id: int,
-    skill_resolutions: Optional[list[SkillResolution]] = Body(default=None),
+    payload: Optional[object] = Body(default=None),
     authorization: Optional[str] = Header(None),
 ):
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        skill_resolutions = None
+        model_ids = None
+        embedding_model_ids = None
+        if isinstance(payload, list):
+            skill_resolutions = [SkillResolution.model_validate(item) for item in payload]
+        elif isinstance(payload, dict):
+            skill_resolutions = [
+                SkillResolution.model_validate(item)
+                for item in (payload.get("skill_resolutions") or [])
+            ] or None
+            model_ids = payload.get("model_ids")
+            embedding_model_ids = payload.get("embedding_model_ids")
+
         await import_agent_from_repository_impl(
             agent_repository_id=agent_repository_id,
             tenant_id=tenant_id,
             authorization=authorization,
             skill_resolutions=skill_resolutions,
+            model_ids=model_ids,
+            embedding_model_ids=embedding_model_ids,
+            user_id=user_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={})
     except UnauthorizedError as e:

@@ -90,6 +90,10 @@ spec:
               mountPath: /mnt/nexent
             - name: nexent-skills
               mountPath: /mnt/nexent-data/skills
+            - name: nexent-workspace
+              mountPath: /mnt/nexent/official-agents
+              subPath: official-agents
+              readOnly: true
             - name: nexent-memory-plugins
               mountPath: /mnt/nexent-data/memory-provider-plugins
             - name: nexent-logs
