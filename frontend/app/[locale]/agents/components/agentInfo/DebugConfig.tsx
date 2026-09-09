@@ -334,7 +334,13 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
   // Derive debug model selector options from search_info's model_ids,
   // resolving display names against the already-loaded model list.
-  const debugModelIds = useMemo<number[]>(() => agentInfo?.model_ids ?? [], [agentInfo]);
+  const debugModelIds = useMemo<number[]>(
+    () =>
+      (agentInfo?.model_ids ?? []).filter((id) =>
+        availableLlmModels.some((model) => model.id === id)
+      ),
+    [agentInfo, availableLlmModels]
+  );
   const debugModelNames = useMemo(() => {
     return debugModelIds.map((id: number) => {
       const model = availableLlmModels.find((m) => m.id === id);
@@ -349,10 +355,10 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
 
   // Initialize selectedModelId when agent info becomes available
   useEffect(() => {
-    if (debugModelIds.length > 0 && selectedModelId === null) {
-      setSelectedModelId(defaultModelId);
-    }
-  }, [debugModelIds.length, defaultModelId, selectedModelId]);
+    setSelectedModelId((current) =>
+      debugModelIds.includes(current) ? current : (defaultModelId ?? null)
+    );
+  }, [debugModelIds, defaultModelId]);
 
   const comparePersistenceKey =
     parsedAgentId === undefined
@@ -977,7 +983,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
     history: Array<{ role: string; content: string }>;
   }) => {
     if (!parsedAgentId) return;
-    if (!editedAgent?.model_ids || editedAgent.model_ids.length === 0) return;
+    if (debugModelIds.length === 0) return;
 
     const duty = (editedAgent?.duty_prompt || "").trim();
     const constraint = (editedAgent?.constraint_prompt || "").trim();
@@ -1060,7 +1066,7 @@ export default function DebugConfig({ agentId }: DebugConfigProps) {
       <DebugOptimizeModal
         open={debugOptimizeOpen}
         agentId={parsedAgentId ?? 0}
-        modelId={editedAgent?.model_ids?.[0] ?? 0}
+        modelId={debugModelIds[0] ?? 0}
         userQuestion={debugOptimizeSelected?.userQuestion || ""}
         assistantAnswer={debugOptimizeSelected?.assistantAnswer || ""}
         history={debugOptimizeSelected?.history || []}
