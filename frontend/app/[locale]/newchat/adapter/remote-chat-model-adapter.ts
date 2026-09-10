@@ -727,6 +727,8 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "plan_step_update":
     case "execution_logs":
       return null;
+    case "a2ui":
+      return "text";  // A2UI content is now AG-UI ACTIVITY_SNAPSHOT JSON
     default:
       return null;
   }

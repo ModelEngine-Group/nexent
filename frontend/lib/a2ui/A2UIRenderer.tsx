@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import React, { useMemo, useState, useCallback, createContext, useContext, useRef, useEffect } from 'react';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -112,7 +112,7 @@ function getMessagePayload(obj: Record<string, unknown>): Record<string, unknown
       return obj[key] as Record<string, unknown>;
     }
   }
-  return dataMap;
+  return obj;
 }
 
 /**
@@ -273,9 +273,13 @@ export function A2UIRenderer({ content, onAction, className = '' }: A2UIRenderer
   const dataMap = useMemo(() => buildDataMap(parsed.blocks), [parsed.blocks]);
 
   const renderId = useMemo(() => Math.random().toString(36).slice(2, 8), []);
-  console.log(`[A2UI_RENDERER:${renderId}] entry: onAction type:`, typeof effectiveOnAction, 'isA2UI:', parsed.isA2UI, 'blocks:', parsed.blocks.length);
+  if (process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    console.debug(`[A2UI_RENDERER:${renderId}] entry: onAction type:`, typeof effectiveOnAction, 'isA2UI:', parsed.isA2UI, 'blocks:', parsed.blocks.length);
+  }
   if (typeof effectiveOnAction !== 'function') {
-    console.log(`[A2UI_RENDERER:${renderId}] onAction is NOT a function! Call stack:\n`, new Error('A2UI_RENDERER no onAction').stack);
+    // eslint-disable-next-line no-console
+    console.warn(`[A2UI_RENDERER:${renderId}] onAction is NOT a function! Call stack:\n`, new Error('A2UI_RENDERER no onAction').stack);
   }
 
   if (!parsed.isA2UI) {
@@ -720,7 +724,7 @@ function A2UIButtonComponent({ node, nodeMap, onAction, defaultSchema, dataMap, 
   const handleClick = useCallback(() => {
     const formValues = formCtx?.getFormValues() || {};
     const handler = onAction ?? actionFromContext ?? globalA2UIActionHandler ?? undefined;
-    console.log('[A2UI_BUTTON] handleClick called, actionName:', actionName, 'formValues:', formValues, 'onAction defined:', typeof handler === 'function');
+    // console.debug('[A2UI_BUTTON] handleClick called, actionName:', actionName, 'formValues:', formValues, 'onAction defined:', typeof handler === 'function');
     handler?.({
       type: isSubmit ? 'submit' : 'click',
       value: actionName,
@@ -1182,7 +1186,7 @@ function A2UIItemRenderer({ item, onAction, schema }: A2UIItemRendererProps) {
 function A2UIHeading({ item }: { item: Record<string, unknown> }) {
   const props = (item.props as Record<string, unknown>) || {};
   const level = (props.level as number) || 2;
-  const text = props.text || '';
+  const text = String(props.text ?? '');
   const Tag = `h${Math.min(level, 6)}` as keyof JSX.IntrinsicElements;
   const className = level === 1 ? 'text-2xl font-bold' : level === 2 ? 'text-xl font-semibold' : 'text-lg font-medium';
   return React.createElement(Tag, { className }, text);
@@ -1190,13 +1194,13 @@ function A2UIHeading({ item }: { item: Record<string, unknown> }) {
 
 function A2UIText({ item }: { item: Record<string, unknown> }) {
   const props = (item.props as Record<string, unknown>) || {};
-  const text = props.text || props.children || '';
+  const text = String(props.text ?? props.children ?? '');
   return <p className="text-sm leading-relaxed">{text}</p>;
 }
 
 function A2UIButton({ item, onAction, path }: { item: Record<string, unknown>; onAction?: (a: A2UIAction) => void; path?: string }) {
   const props = (item.props as Record<string, unknown>) || {};
-  const label = props.label || props.text || 'Click';
+  const label = String(props.label ?? props.text ?? 'Click');
   const variant = (props.variant as string) || 'default';
   const disabled = props.disabled as boolean | undefined;
   const onClick = useCallback(() => {
@@ -1384,7 +1388,7 @@ function A2UIBadge({ item }: { item: Record<string, unknown> }) {
 
 function A2UICode({ item }: { item: Record<string, unknown> }) {
   const props = (item.props as Record<string, unknown>) || {};
-  const code = props.code || props.text || '';
+  const code = String(props.code ?? props.text ?? '');
   const language = props.language as string | undefined;
 
   return (

@@ -1,6 +1,7 @@
 import { chatConfig, MESSAGE_ROLES } from "@/const/chatConfig";
 import { ChatMessageType, TaskMessageType } from "@/types/chat";
 import { parseA2UIMessage, mightContainA2UI } from '@/lib/a2ui';
+import { isAguiActivitySnapshot, extractA2uiMessages } from '@/lib/a2ui/agui-bridge';
 
 /**
  * Transform chat messages to task messages for TaskWindow rendering
@@ -69,8 +70,18 @@ export function transformMessagesToTaskMessages(
                     : undefined,
             } as any;
 
-            // A2UI transformation
-            if (mightContainA2UI(content.content)) {
+            // A2UI transformation — support both legacy tagged blocks and
+            // new AG-UI ACTIVITY_SNAPSHOT format from the backend.
+            if (isAguiActivitySnapshot(content.content)) {
+              // AG-UI format: extract operations for the A2UIRenderer
+              const extracted = extractA2uiMessages(content.content);
+              Object.assign(taskMsg, {
+                isA2UI: true,
+                a2uiAguiFormat: true,
+                a2uiSnapshot: JSON.parse(content.content),
+                a2uiMessages: extracted.messages,
+              });
+            } else if (mightContainA2UI(content.content)) {
               const parsed = parseA2UIMessage(content.content);
               if (parsed.isA2UI) {
                 Object.assign(taskMsg, {

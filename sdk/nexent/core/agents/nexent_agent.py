@@ -1188,16 +1188,25 @@ class NexentAgent:
                         getattr(observer, "lang", "en"),
                     )
 
-                    # A2UI finalization: validate structured UI content
+                    # A2UI finalization: validate structured UI content and
+                    # convert to AG-UI ACTIVITY_SNAPSHOT wire format.
                     if is_a2ui_enabled() and should_finalize_a2ui_content(final_answer_str):
                         try:
                             a2ui_validation = validate_a2ui_response(final_answer_str)
                             if a2ui_validation.valid:
-                                # Valid A2UI content - emit as A2UI type for frontend
+                                # Wrap A2UI content as AG-UI ACTIVITY_SNAPSHOT for
+                                # assistant-ui's JSONGenerativeUI on the frontend.
+                                from nexent.core.a2ui.a2ui_to_agui import wrap_as_activity_snapshot
+                                snapshot = wrap_as_activity_snapshot(final_answer_str)
+                                import json as _json
+                                a2ui_payload = _json.dumps(
+                                    snapshot if snapshot is not None else final_answer_str,
+                                    ensure_ascii=False,
+                                )
                                 observer.add_message(
                                     self.agent.agent_name,
                                     ProcessType.A2UI,
-                                    final_answer_str,
+                                    a2ui_payload,
                                 )
                             else:
                                 # Validation failed - degrade by stripping A2UI tags

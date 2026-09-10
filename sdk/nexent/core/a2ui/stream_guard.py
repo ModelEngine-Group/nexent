@@ -1,10 +1,17 @@
-"""Streaming guard for buffered A2UI blocks during streaming output."""
+"""Streaming guard for buffered A2UI blocks during streaming output.
+
+Validates and converts complete A2UI blocks into AG-UI ACTIVITY_SNAPSHOT
+events before yielding them, so the frontend can route them through
+assistant-ui's JSONGenerativeUI renderer rather than custom parsing.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
+from .a2ui_to_agui import wrap_as_activity_snapshot
 from .constants import A2UI_CLOSE_TAG, A2UI_OPEN_TAG
 from .parser import may_contain_a2ui_content
 from .validator import validate_a2ui_response
@@ -13,10 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class A2UIStreamGuard:
-    """Buffers and validates A2UI blocks during streaming output.
+    """Buffers, validates, and converts A2UI blocks during streaming output.
 
-    Ensures that complete A2UI blocks are validated before being passed to
-    the frontend. Falls back gracefully when validation fails.
+    Complete A2UI blocks are converted to AG-UI ``ACTIVITY_SNAPSHOT`` events
+    (JSON strings) before being yielded. Non-A2UI text passes through
+    unchanged. Invalid A2UI blocks fall back to plain text with tags stripped.
     """
 
     def __init__(self) -> None:
@@ -27,6 +35,7 @@ class A2UIStreamGuard:
         """Process a chunk of streaming content.
 
         Returns validated text/A2UI fragments ready for output.
+        A2UI blocks are converted to AG-UI ACTIVITY_SNAPSHOT JSON strings.
         """
         if not content:
             return []
@@ -78,7 +87,13 @@ class A2UIStreamGuard:
             # Validate the complete block
             validation = validate_a2ui_response(block)
             if validation.valid:
-                emitted.append(block)
+                # Convert to AG-UI ACTIVITY_SNAPSHOT format
+                snapshot = wrap_as_activity_snapshot(block)
+                if snapshot is not None:
+                    emitted.append(json.dumps(snapshot, ensure_ascii=False))
+                else:
+                    logger.warning("A2UI stream guard: failed to wrap as activity snapshot")
+                    emitted.append(block)
             else:
                 logger.warning("A2UI stream guard: block validation failed: %s", validation.error)
                 # Fall back to text - extract any readable content

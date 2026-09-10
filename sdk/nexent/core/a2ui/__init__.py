@@ -19,6 +19,13 @@ from .constants import (
     A2UI_PROTOCOL_VERSION,
     A2UI_MESSAGE_KEYS,
 )
+from .a2ui_to_agui import (
+    wrap_as_activity_snapshot,
+    parse_a2ui_content,
+    a2ui_messages_to_operations,
+    is_activity_snapshot,
+    extract_surface_id,
+)
 
 __all__ = [
     "A2UIResponsePart",
@@ -41,4 +48,9 @@ __all__ = [
     "build_a2ui_repair_prompt",
     "finalize_a2ui_content",
     "is_a2ui_enabled",
+    "wrap_as_activity_snapshot",
+    "parse_a2ui_content",
+    "a2ui_messages_to_operations",
+    "is_activity_snapshot",
+    "extract_surface_id",
 ]

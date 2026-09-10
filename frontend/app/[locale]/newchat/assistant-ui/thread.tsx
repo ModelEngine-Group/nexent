@@ -102,9 +102,8 @@ import {
   shouldShowDateSeparator,
 } from "@/lib/messageDate";
 import { VerificationPanel } from "../ui/verification-panel";
-import { A2UIChatMessage } from "../../chat/a2ui/A2UIRenderer";
-import type { A2UISurface } from "@/types/chat";
-import { A2UIRenderer as A2UITextRenderer, A2UIActionProvider, setGlobalA2UIActionHandler, mightContainA2UI, type A2UIAction } from "@/lib/a2ui";
+import { A2UIRenderer as A2UITextRenderer, A2UIActionProvider, setGlobalA2UIActionHandler, mightContainA2UI, parseA2UIMessage, type A2UIAction, type A2UIParseResult } from "@/lib/a2ui";
+import { A2uiBridgeSurface } from "@/lib/assistant-ui/generative-config";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -124,6 +123,26 @@ export interface WelcomeSuggestion {
   description: string;
   prompt: string;
   icon: LucideIcon;
+}
+
+// ---------------------------------------------------------------------------
+// A2UI parse result LRU cache — avoids re-parsing the same textContent on
+// every React re-render during SSE streaming (which used to produce 20+
+// duplicate parse calls for a single message as it grew from empty to final).
+// ---------------------------------------------------------------------------
+const A2UI_PARSE_CACHE = new Map<string, A2UIParseResult>();
+const A2UI_PARSE_CACHE_MAX = 64;
+
+function cachedParseA2UI(text: string): A2UIParseResult {
+  const cached = A2UI_PARSE_CACHE.get(text);
+  if (cached) return cached;
+  const result = parseA2UIMessage(text);
+  if (A2UI_PARSE_CACHE.size >= A2UI_PARSE_CACHE_MAX) {
+    const firstKey = A2UI_PARSE_CACHE.keys().next().value;
+    if (firstKey !== undefined) A2UI_PARSE_CACHE.delete(firstKey);
+  }
+  A2UI_PARSE_CACHE.set(text, result);
+  return result;
 }
 
 export interface ThreadProps {
@@ -779,7 +798,8 @@ const ThreadView: FC<ThreadViewProps> = ({
 export const ReadOnlyConversation: FC<{
   agent: Agent | PublishedAgent;
   title: string;
-}> = ({ agent, title }) => {
+  conversationId?: number;
+}> = ({ agent, title, conversationId }) => {
   const { t } = useTranslation();
   const [selection, setSelection] = useState<SourcesPanelSelection | null>(
     null
@@ -1468,8 +1488,27 @@ const AssistantMessage: FC<{
                 }
                 const textContent = textPart.text || "";
                 if (mightContainA2UI(textContent)) {
-                  console.log("[A2UI_DEBUG] Rendering text part with A2UI protocol, content length:", textContent.length, 'handleA2UIAction type:', typeof handleA2UIAction);
-                  return <A2UIActionProvider onAction={handleA2UIAction}><A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} /></A2UIActionProvider>;
+                  // Parse with LRU cache to avoid re-parsing identical content
+                  // on every React re-render during SSE streaming.
+                  const parsed = cachedParseA2UI(textContent);
+                  const legacyRenderer = (
+                    <A2UIActionProvider onAction={handleA2UIAction}>
+                      <A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} />
+                    </A2UIActionProvider>
+                  );
+                  // AG-UI ACTIVITY_SNAPSHOT → native generative-ui path with legacy fallback for custom components
+                  if (parsed.isAguiFormat && parsed.aguiSnapshot) {
+                    return (
+                      <A2uiBridgeSurface
+                        snapshot={parsed.aguiSnapshot}
+                        className="a2ui-chat-message"
+                      >
+                        {legacyRenderer}
+                      </A2uiBridgeSurface>
+                    );
+                  }
+                  // Legacy <a2ui-json>...</a2ui-json> format → legacy renderer
+                  return legacyRenderer;
                 }
                 return <MarkdownText />;
               }
