@@ -17,7 +17,11 @@ import { Agent } from "@/types/agentConfig";
 type CollaborativeAgentListItem = {
   id: number | string;
   name: string;
-  versionName?: string;
+  versionNo?: number;
+};
+
+type RelatedInternalAgent = Agent & {
+  version_no?: number;
 };
 
 interface CollaborativeAgentListProps {
@@ -62,9 +66,9 @@ export function CollaborativeAgentList({
           className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm text-foreground ${toneClasses.item}`}
         >
           <span className="max-w-full truncate">{agent.name}</span>
-          {agent.versionName && (
+          {agent.versionNo != null && (
             <span className="shrink-0 text-xs text-muted-foreground">
-              V{agent.versionName}
+              V{agent.versionNo}
             </span>
           )}
           {!readOnly && onRemove && (
@@ -268,42 +272,44 @@ export default function CollaborativeAgent() {
     ])
   );
 
-  const relatedInternalAgents = relatedAgentIds.map((agentId: number) => {
-    const publishedAgent = publishedAgentMap.get(Number(agentId));
-    const savedVersion = savedVersionMap[Number(agentId)];
-    const hasSavedVersion = savedVersion?.version_no != null;
+  const relatedInternalAgents: RelatedInternalAgent[] = relatedAgentIds.map(
+    (agentId: number) => {
+      const publishedAgent = publishedAgentMap.get(Number(agentId));
+      const savedVersion = savedVersionMap[Number(agentId)];
+      const hasSavedVersion = savedVersion?.version_no != null;
 
-    if (publishedAgent) {
-      const version_name =
-        (hasSavedVersion
-          ? (savedVersion?.version_name ?? publishedAgent.version_name)
-          : publishedAgent.version_name) ?? undefined;
-      const version_no =
-        (hasSavedVersion
-          ? savedVersion?.version_no
-          : (publishedAgent as any).current_version_no) ?? undefined;
+      if (publishedAgent) {
+        const version_name =
+          (hasSavedVersion
+            ? (savedVersion?.version_name ?? publishedAgent.version_name)
+            : publishedAgent.version_name) ?? undefined;
+        const version_no =
+          (hasSavedVersion
+            ? savedVersion?.version_no
+            : (publishedAgent as any).current_version_no) ?? undefined;
+        return {
+          ...publishedAgent,
+          version_name,
+          version_no,
+        };
+      }
+
+      // Legacy agent not found in published list - use name from sub_agent_relations
       return {
-        ...publishedAgent,
-        version_name,
-        version_no,
-      };
+        id: String(agentId),
+        name: savedVersion?.agent_name || `Agent #${agentId}`,
+        display_name: savedVersion?.agent_name || `Agent #${agentId}`,
+        description: "",
+        model: "",
+        max_step: 0,
+        provide_run_summary: false,
+        tools: [],
+        skills: [],
+        version_name: savedVersion?.version_name ?? undefined,
+        version_no: savedVersion?.version_no ?? undefined,
+      } as RelatedInternalAgent;
     }
-
-    // Legacy agent not found in published list - use name from sub_agent_relations
-    return {
-      id: String(agentId),
-      name: savedVersion?.agent_name || `Agent #${agentId}`,
-      display_name: savedVersion?.agent_name || `Agent #${agentId}`,
-      description: "",
-      model: "",
-      max_step: 0,
-      provide_run_summary: false,
-      tools: [],
-      skills: [],
-      version_name: savedVersion?.version_name ?? undefined,
-      version_no: savedVersion?.version_no ?? undefined,
-    } as Agent;
-  });
+  );
 
   // Include the latest store selection so changes from the selector render immediately.
   const displayExternalAgents = currentAgentId
@@ -384,7 +390,7 @@ export default function CollaborativeAgent() {
               agents={relatedInternalAgents.map((agent) => ({
                 id: agent.id,
                 name: agent.display_name || agent.name,
-                versionName: agent.version_name,
+                versionNo: agent.version_no,
               }))}
               label={t("agent.collaborative.label.internal")}
               tone="primary"
