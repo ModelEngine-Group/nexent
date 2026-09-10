@@ -3,14 +3,12 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Modal, Form, Input, Button } from "antd";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
 const { TextArea } = Input;
 
 import { publishVersion, updateVersion } from "@/services/agentVersionService";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import A2AServerSettingsPanel from "../components/a2a/A2AServerSettingsPanel";
-import { a2aClientService } from "@/services/a2aService";
 import log from "@/lib/logger";
 
 export interface AgentVersionPubulishModalProps {
@@ -46,16 +44,6 @@ export default function AgentVersionPubulishModal({
 
   const [isLoading, setIsLoading] = useState(false);
   const [publishForm] = Form.useForm();
-  const [showA2ASettings, setShowA2ASettings] = useState(false);
-  const [a2aAgentInfo, setA2aAgentInfo] = useState<{
-    endpoint_id: string;
-    agent_id: number;
-  } | null>(null);
-  const { data: a2aSettingsData } = useQuery({
-    queryKey: ["a2aServerSettings", a2aAgentInfo?.agent_id],
-    queryFn: () => a2aClientService.getServerSettings(a2aAgentInfo!.agent_id),
-    enabled: showA2ASettings && !!a2aAgentInfo,
-  });
 
   // Reset form when modal opens or initialValues changes
   useEffect(() => {
@@ -114,24 +102,11 @@ export default function AgentVersionPubulishModal({
       const result = await publishVersion(agentId, values);
       if (result.success) {
         message.success(t("agent.version.publishSuccess"));
-        if (result.data?.a2a_agent) {
-          setA2aAgentInfo({
-            endpoint_id: result.data.a2a_agent.endpoint_id,
-            agent_id: result.data.a2a_agent.agent_id,
-          });
-          onClose();
-          publishForm.resetFields();
-          onPublished?.();
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
-          queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
-          setShowA2ASettings(true);
-        } else {
-          onClose();
-          publishForm.resetFields();
-          onPublished?.();
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
-          queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
-        }
+        onClose();
+        publishForm.resetFields();
+        onPublished?.();
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["publishedAgentsList"] });
       } else {
         message.error(result.message || t("agent.version.publishFailed"));
       }
@@ -225,23 +200,6 @@ export default function AgentVersionPubulishModal({
             </div>
           </Form.Item>
         </Form>
-      </Modal>
-
-      <Modal
-        centered
-        width={640}
-        title={t("a2a.server.previewTitle")}
-        open={showA2ASettings}
-        onCancel={() => setShowA2ASettings(false)}
-        footer={null}
-        destroyOnHidden
-      >
-        {showA2ASettings && a2aSettingsData?.data && (
-          <A2AServerSettingsPanel
-            endpointId={a2aSettingsData.data.endpoint_id}
-            supportedInterfaces={a2aSettingsData.data.supported_interfaces}
-          />
-        )}
       </Modal>
     </>
   );
