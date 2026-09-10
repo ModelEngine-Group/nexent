@@ -100,6 +100,74 @@ def test_resolve_share_session_uses_the_logged_in_user_as_the_session_owner(mock
     )
 
 
+def test_resolve_share_context_validates_the_token_without_creating_a_session(mocker):
+    from services import agent_share_service
+
+    record = _share_record(generation=2)
+    record.update({"tenant_id": "tenant-a", "agent_id": 9, "owner_user_id": "owner-a"})
+    mocker.patch.object(agent_share_service, "SUPABASE_JWT_SECRET", "auth-secret")
+    mocker.patch.object(agent_share_service, "get_agent_share_by_public_id", return_value=record)
+    mocker.patch.object(
+        agent_share_service,
+        "parse_agent_share_token",
+        return_value=agent_share_service.AgentShareTokenPayload(record["public_share_id"], 2),
+    )
+    mocker.patch.object(agent_share_service, "require_agent_draft_edit", return_value={"agent_id": 9})
+    mocker.patch.object(agent_share_service, "query_current_version_no", return_value=4)
+    create_session = mocker.patch.object(agent_share_service, "get_or_create_agent_share_session")
+
+    result = agent_share_service.resolve_agent_share_context("opaque-token")
+
+    assert result == {
+        "agent_share_id": 7,
+        "agent_id": 9,
+        "agent_version_no": 4,
+        "owner_user_id": "owner-a",
+        "tenant_id": "tenant-a",
+    }
+    create_session.assert_not_called()
+
+
+def test_share_metadata_whitelists_agent_display_fields(mocker):
+    from services import agent_share_service
+
+    mocker.patch.object(
+        agent_share_service,
+        "resolve_agent_share_context",
+        return_value={
+            "agent_share_id": 7,
+            "agent_id": 9,
+            "agent_version_no": 4,
+            "owner_user_id": "owner-a",
+            "tenant_id": "tenant-a",
+        },
+    )
+    mocker.patch.object(
+        agent_share_service,
+        "search_agent_info_by_agent_id",
+        return_value={
+            "name": "internal-name",
+            "display_name": "Shared Agent",
+            "description": "Public description",
+            "icon_url": "icons/shared.png",
+            "greeting_message": "Welcome",
+            "duty_prompt": "must not escape",
+            "model_ids": [1, 2],
+        },
+    )
+    mocker.patch.object(agent_share_service, "get_agent_share_session", return_value=None)
+
+    result = agent_share_service.get_agent_share_metadata("opaque-token", visitor_user_id="visitor-a")
+
+    assert result == {
+        "display_name": "Shared Agent",
+        "description": "Public description",
+        "icon_url": "icons/shared.png",
+        "greeting_message": "Welcome",
+        "session_recoverable": False,
+    }
+
+
 def test_share_is_unavailable_only_when_the_existing_auth_secret_is_missing(mocker):
     from services import agent_share_service
 

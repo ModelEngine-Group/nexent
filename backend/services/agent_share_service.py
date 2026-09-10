@@ -9,12 +9,15 @@ from database.agent_share_db import (
     create_agent_share,
     get_active_agent_share,
     get_agent_share_by_public_id,
+    get_agent_share_session,
     get_or_create_agent_share_session,
     revoke_agent_share,
     rotate_agent_share as rotate_agent_share_record,
 )
+from database.agent_db import search_agent_info_by_agent_id
 from database.agent_version_db import query_current_version_no
 from services.agent_draft_permission_service import AgentDraftEditError, require_agent_draft_edit
+from services.conversation_management_service import get_conversation_history_service
 from services.agent_share_token_service import AgentShareTokenPayload, build_agent_share_token, parse_agent_share_token
 
 
@@ -108,8 +111,8 @@ def revoke_agent_share_link(*, agent_id: int, tenant_id: str, user_id: str) -> N
         raise AgentShareError("agent_share_not_found")
 
 
-def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str, int]:
-    """Resolve a signed link into the visitor's isolated, hidden conversation."""
+def resolve_agent_share_context(token: str) -> Dict[str, Any]:
+    """Validate an active share link without reading or creating visitor state."""
     secret = _require_share_signing_secret()
     public_share_id = token.split(".", maxsplit=1)[0]
     share = get_agent_share_by_public_id(public_share_id)
@@ -132,14 +135,68 @@ def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str
     version_no = query_current_version_no(agent_id=int(share["agent_id"]), tenant_id=share["tenant_id"])
     if not version_no:
         raise AgentShareError("agent_share_unavailable")
-    session = get_or_create_agent_share_session(
-        agent_share_id=int(share["agent_share_id"]),
+
+    return {
+        "agent_share_id": int(share["agent_share_id"]),
+        "agent_id": int(share["agent_id"]),
+        "agent_version_no": int(version_no),
+        "owner_user_id": str(share["owner_user_id"]),
+        "tenant_id": str(share["tenant_id"]),
+    }
+
+
+def get_agent_share_metadata(token: str, *, visitor_user_id: str) -> Dict[str, Any]:
+    """Return the small public display projection for an authenticated visitor."""
+    context = resolve_agent_share_context(token)
+    try:
+        agent = search_agent_info_by_agent_id(
+            agent_id=context["agent_id"],
+            tenant_id=context["tenant_id"],
+            version_no=context["agent_version_no"],
+        )
+    except ValueError as exc:
+        raise AgentShareError("agent_share_unavailable") from exc
+    session = get_agent_share_session(
+        agent_share_id=context["agent_share_id"],
         visitor_user_id=visitor_user_id,
-        agent_id=int(share["agent_id"]),
-        agent_version_no=int(version_no),
     )
     return {
-        "agent_id": int(share["agent_id"]),
+        "display_name": agent.get("display_name") or agent.get("name") or "",
+        "description": agent.get("description") or "",
+        "icon_url": agent.get("icon_url"),
+        "greeting_message": agent.get("greeting_message") or "",
+        "session_recoverable": session is not None,
+    }
+
+
+def get_agent_share_history(token: str, *, visitor_user_id: str) -> Dict[str, Any]:
+    """Read history through the share/visitor mapping without creating a session."""
+    context = resolve_agent_share_context(token)
+    session = get_agent_share_session(
+        agent_share_id=context["agent_share_id"],
+        visitor_user_id=visitor_user_id,
+    )
+    if session is None:
+        return {"history": [], "session_recoverable": False}
+    return {
+        "history": get_conversation_history_service(
+            int(session["conversation_id"]), visitor_user_id
+        ),
+        "session_recoverable": True,
+    }
+
+
+def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str, int]:
+    """Create or recover the visitor's isolated, hidden conversation on demand."""
+    context = resolve_agent_share_context(token)
+    session = get_or_create_agent_share_session(
+        agent_share_id=context["agent_share_id"],
+        visitor_user_id=visitor_user_id,
+        agent_id=context["agent_id"],
+        agent_version_no=context["agent_version_no"],
+    )
+    return {
+        "agent_id": context["agent_id"],
         "conversation_id": int(session["conversation_id"]),
         "agent_version_no": int(session["agent_version_no"]),
     }

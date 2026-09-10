@@ -61,6 +61,7 @@ def patch_statement_builders(monkeypatch):
     monkeypatch.setattr(db, "select", lambda model_class: FakeStatement(model_class))
     monkeypatch.setattr(db, "update", lambda model_class: FakeStatement(model_class))
     monkeypatch.setattr(db, "AgentShare", FakeAgentShare)
+    monkeypatch.setattr(db, "AgentShareSession", FakeAgentShareSession)
 
 
 @pytest.fixture
@@ -123,6 +124,26 @@ def test_get_active_agent_share_scopes_the_lookup_to_tenant_and_agent(monkeypatc
         ("agent_id", "eq", 10),
         ("status", "eq", "active"),
         ("delete_flag", "eq", "N"),
+    )
+
+
+def test_get_agent_share_session_scopes_the_lookup_to_share_and_visitor(monkeypatch, session):
+    share_session = FakeAgentShareSession(
+        agent_share_id=1,
+        visitor_user_id="visitor-1",
+        conversation_id=10,
+    )
+    session.scalars.return_value.first.return_value = share_session
+    monkeypatch.setattr(db, "as_dict", lambda record: dict(record.__dict__))
+
+    result = db.get_agent_share_session(agent_share_id=1, visitor_user_id="visitor-1")
+
+    assert result == {"agent_share_id": 1, "visitor_user_id": "visitor-1", "conversation_id": 10}
+    statement = session.scalars.call_args.args[0]
+    assert statement.conditions == (
+        ("session_agent_share_id", "eq", 1),
+        ("visitor_user_id", "eq", "visitor-1"),
+        ("session_delete_flag", "eq", "N"),
     )
 
 

@@ -63,7 +63,9 @@ from services.agent_draft_permission_service import AgentDraftEditError
 from services.agent_share_service import (
     AgentShareError,
     enable_agent_share,
+    get_agent_share_history,
     get_agent_share_link,
+    get_agent_share_metadata,
     revoke_agent_share_link,
     resolve_agent_share_session,
     rotate_agent_share_link,
@@ -91,6 +93,7 @@ from utils.auth_utils import (
 
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
+agent_share_router = APIRouter(prefix="/agent-share")
 logger = logging.getLogger("agent_app")
 
 
@@ -740,6 +743,63 @@ async def share_agent_run_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent share is unavailable.") from exc
     except ForbiddenError as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+
+
+def _agent_share_authentication_error(exc: UnauthorizedError) -> HTTPException:
+    return HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Authentication is required.")
+
+
+def _agent_share_unavailable_error(exc: AgentShareError) -> HTTPException:
+    return HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent share is unavailable.")
+
+
+@agent_share_router.get("/{share_token}")
+async def get_agent_share_metadata_api(
+    share_token: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Return safe Agent display metadata only after visitor authentication."""
+    try:
+        visitor_user_id, _ = get_current_user_id(authorization)
+        return get_agent_share_metadata(share_token, visitor_user_id=visitor_user_id)
+    except UnauthorizedError as exc:
+        raise _agent_share_authentication_error(exc) from exc
+    except AgentShareError as exc:
+        raise _agent_share_unavailable_error(exc) from exc
+
+
+@agent_share_router.post("/{share_token}/session")
+async def create_or_restore_agent_share_session_api(
+    share_token: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Create or restore one hidden conversation after an explicit visitor action."""
+    try:
+        visitor_user_id, _ = get_current_user_id(authorization)
+        session = resolve_agent_share_session(share_token, visitor_user_id=visitor_user_id)
+        return {
+            "agent_version_no": session["agent_version_no"],
+            "session_recoverable": True,
+        }
+    except UnauthorizedError as exc:
+        raise _agent_share_authentication_error(exc) from exc
+    except AgentShareError as exc:
+        raise _agent_share_unavailable_error(exc) from exc
+
+
+@agent_share_router.get("/{share_token}/history")
+async def get_agent_share_history_api(
+    share_token: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Read only the authenticated visitor's history for this share link."""
+    try:
+        visitor_user_id, _ = get_current_user_id(authorization)
+        return get_agent_share_history(share_token, visitor_user_id=visitor_user_id)
+    except UnauthorizedError as exc:
+        raise _agent_share_authentication_error(exc) from exc
+    except AgentShareError as exc:
+        raise _agent_share_unavailable_error(exc) from exc
 
 
 @agent_config_router.post("/{agent_id}/publish")

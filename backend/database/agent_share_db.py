@@ -57,6 +57,18 @@ def get_agent_share_by_public_id(public_share_id: str) -> Optional[Dict[str, Any
         return None if record is None else as_dict(record)
 
 
+def get_agent_share_session(*, agent_share_id: int, visitor_user_id: str) -> Optional[Dict[str, Any]]:
+    """Return one visitor's active session without creating a conversation."""
+    with get_db_session() as session:
+        statement = select(AgentShareSession).where(
+            AgentShareSession.agent_share_id == agent_share_id,
+            AgentShareSession.visitor_user_id == visitor_user_id,
+            AgentShareSession.delete_flag == "N",
+        )
+        record = session.scalars(statement).first()
+        return None if record is None else as_dict(record)
+
+
 def get_or_create_agent_share_session(
     *,
     agent_share_id: int,

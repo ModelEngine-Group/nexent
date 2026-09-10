@@ -19,7 +19,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
+from consts.exceptions import ForbiddenError, TokenExpiredError, UnauthorizedError, ValidationError
 from consts.model import NL2AgentRunRequest
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
@@ -137,6 +137,7 @@ sys.modules['services.prompt_service'] = MagicMock()
 from apps.agent_app import (
     agent_config_router,
     agent_runtime_router,
+    agent_share_router,
     nl2agent_run_api,
 )
 
@@ -150,6 +151,10 @@ runtime_client = TestClient(runtime_app)
 config_app = FastAPI()
 config_app.include_router(agent_config_router)
 config_client = TestClient(config_app)
+
+agent_share_app = FastAPI()
+agent_share_app.include_router(agent_share_router)
+agent_share_client = TestClient(agent_share_app)
 
 
 @pytest.fixture
@@ -1900,6 +1905,58 @@ async def test_agent_share_run_uses_the_resolved_visitor_session(mocker, mock_au
         user_id="visitor-a",
         tenant_id="tenant-a",
     )
+
+
+def test_agent_share_metadata_authenticates_before_resolving_token(mocker):
+    mocker.patch(
+        "apps.agent_app.get_current_user_id",
+        side_effect=TokenExpiredError("missing authentication"),
+    )
+    metadata = mocker.patch("apps.agent_app.get_agent_share_metadata")
+
+    response = agent_share_client.get("/agent-share/opaque-token")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication is required."
+    metadata.assert_not_called()
+
+
+def test_agent_share_metadata_exposes_only_the_whitelisted_fields(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "tenant-a"))
+    mocker.patch(
+        "apps.agent_app.get_agent_share_metadata",
+        return_value={
+            "display_name": "Shared Agent",
+            "description": "A safe description",
+            "icon_url": "icons/shared.png",
+            "greeting_message": "Hello",
+            "session_recoverable": False,
+        },
+    )
+
+    response = agent_share_client.get("/agent-share/opaque-token", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "display_name": "Shared Agent",
+        "description": "A safe description",
+        "icon_url": "icons/shared.png",
+        "greeting_message": "Hello",
+        "session_recoverable": False,
+    }
+
+
+def test_agent_share_session_is_created_only_by_the_explicit_session_endpoint(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "tenant-a"))
+    mocker.patch(
+        "apps.agent_app.resolve_agent_share_session",
+        return_value={"agent_id": 123, "conversation_id": 88, "agent_version_no": 4},
+    )
+
+    response = agent_share_client.post("/agent-share/opaque-token/session", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json() == {"agent_version_no": 4, "session_recoverable": True}
 
 
 def test_publish_version_api_success(mocker, mock_auth_header):
