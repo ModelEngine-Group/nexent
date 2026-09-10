@@ -16,6 +16,7 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...utils.observer import MessageObserver, ProcessType
+from ...utils.pydantic_utils import unwrap_field_info
 from ...utils.tools_common_message import (
     SearchResultTextMessage,
     ToolCategory,
@@ -232,7 +233,6 @@ class AidpSearchTool(Tool):
         # user with zero KB permissions could still query any KB the LLM
         # passed. That was a privilege-escalation bug and is now fixed.
         self._allowed_kds_set: set[str] = set()
-        self._allowed_kds_order: List[str] = []
         self._whitelist_installed: bool = False
 
         self._http_client = http_client_manager.get_sync_client(
@@ -495,12 +495,10 @@ class AidpSearchTool(Tool):
         """
         if allowed is None:
             self._allowed_kds_set = set()
-            self._allowed_kds_order = []
             self._whitelist_installed = False
             logger.debug("AidpSearchTool whitelist cleared (not installed)")
         else:
-            self._allowed_kds_order = list(dict.fromkeys(str(k) for k in allowed if k))
-            self._allowed_kds_set = set(self._allowed_kds_order)
+            self._allowed_kds_set = {str(k) for k in allowed if k}
             self._whitelist_installed = True
             logger.info(
                 "AidpSearchTool whitelist installed with %d permitted KB(s)",
@@ -535,17 +533,18 @@ class AidpSearchTool(Tool):
         requested_scope = self._unique_kds(
             self._convert_to_kds_ids(list(kds_list))
         )
-        available_scope = (
-            self._allowed_kds_order
-            if self._whitelist_installed
-            else configured_scope
-        )
-        used_scope = [item for item in requested_scope if item in available_scope]
-        ignored_scope = [item for item in requested_scope if item not in available_scope]
-        fallback_to_all = bool(requested_scope and not used_scope and available_scope)
+        # Keep explicit-scope filtering and all-invalid fallback anchored to
+        # the same effective configured scope used when kds_list is omitted.
+        used_scope = [item for item in requested_scope if item in configured_available_scope]
+        ignored_scope = [item for item in requested_scope if item not in configured_available_scope]
+        fallback_to_all = bool(requested_scope and not used_scope and configured_available_scope)
         if fallback_to_all:
-            used_scope = available_scope[:_MAX_KDS]
+            used_scope = configured_available_scope
         return requested_scope, used_scope, ignored_scope, fallback_to_all
+
+    def _get_kds_name_to_id_map(self) -> Dict[str, str]:
+        kds_map = unwrap_field_info(self.kds_name_to_id_map)
+        return kds_map if isinstance(kds_map, dict) else {}
 
     def _convert_to_kds_ids(self, names: List[str]) -> List[str]:
         """Convert kds_name (display name) to kds_id if a mapping exists.
@@ -560,12 +559,7 @@ class AidpSearchTool(Tool):
         Returns:
             List of resolved kds_id values. Unknown names pass through unchanged.
         """
-        kds_map = self.kds_name_to_id_map
-        if isinstance(kds_map, FieldInfo):
-            if kds_map.default_factory is not None:
-                kds_map = kds_map.default_factory()
-            else:
-                kds_map = kds_map.default
+        kds_map = self._get_kds_name_to_id_map()
         if not kds_map:
             return names
 
@@ -579,13 +573,8 @@ class AidpSearchTool(Tool):
 
     def _convert_to_kds_names(self, kds_ids: List[str]) -> List[str]:
         """Convert internal KDS IDs to display names for model-facing metadata."""
-        kds_map = self.kds_name_to_id_map
-        if isinstance(kds_map, FieldInfo):
-            if kds_map.default_factory is not None:
-                kds_map = kds_map.default_factory()
-            else:
-                kds_map = kds_map.default
-        if not isinstance(kds_map, dict) or not kds_map:
+        kds_map = self._get_kds_name_to_id_map()
+        if not kds_map:
             return list(kds_ids)
 
         id_to_name = {str(kds_id): str(name) for name, kds_id in kds_map.items()}

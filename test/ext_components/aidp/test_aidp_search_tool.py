@@ -659,7 +659,7 @@ class TestAidpSearchToolWhitelist:
     def test_forward_strips_unauthorized_kds_from_user_input(self, aidp_tool):
         """When the LLM passes kds_list that includes a non-whitelisted KB,
         that KB is silently removed and the query proceeds with allowed ones."""
-        aidp_tool.set_allowed_kds(["kb-1", "kb2"])
+        aidp_tool.set_allowed_kds(["kb1", "kb2"])
 
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
@@ -680,18 +680,18 @@ class TestAidpSearchToolWhitelist:
         aidp_tool._mock_http_client.post.return_value = mock_response
 
         # "kb-99" is not whitelisted and must be stripped
-        aidp_tool.forward("query", kds_list=["kb-1", "kb-99", "kb2"])
+        aidp_tool.forward("query", kds_list=["kb1", "kb-99", "kb2"])
 
         # Verify the HTTP call used only whitelisted KBs
         call_kwargs = aidp_tool._mock_http_client.post.call_args.kwargs
         sent_payload = call_kwargs["json"]
         assert "kb-99" not in sent_payload["kds_list"]
-        assert "kb-1" in sent_payload["kds_list"]
+        assert "kb1" in sent_payload["kds_list"]
         assert "kb2" in sent_payload["kds_list"]
 
     def test_forward_all_kds_filtered_returns_observation(self, aidp_tool):
-        """An all-invalid request falls back to the permitted AIDP scope."""
-        aidp_tool.set_allowed_kds(["kb-allowed"])
+        """An all-invalid request behaves like an omitted scope."""
+        aidp_tool.set_allowed_kds(["kb1"])
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {"result": []}
@@ -703,10 +703,10 @@ class TestAidpSearchToolWhitelist:
 
         assert result["results"] == []
         assert result["scope"]["ignored"] == ["kb-bad1", "kb-bad2"]
-        assert result["scope"]["used"] == ["kb-allowed"]
+        assert result["scope"]["used"] == ["kb1"]
         assert result["scope"]["fallback_to_all"] is True
         sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
-        assert sent_payload["kds_list"] == ["kb-allowed"]
+        assert sent_payload["kds_list"] == ["kb1"]
 
     def test_forward_no_whitelist_passes_all_kds(self, aidp_tool):
         """When set_allowed_kds was never called, all configured KBs pass."""
@@ -1053,6 +1053,7 @@ class TestConvertKdsIds:
         """End-to-end: set kds_name_to_id_map, call forward with kds_list
         containing a kds_name, verify the HTTP call uses the converted kds_id."""
         aidp_tool.kds_name_to_id_map = {"kb-a": "real-id-1"}
+        aidp_tool.kds_list = ["real-id-1"]
         aidp_tool.set_allowed_kds(["real-id-1"])
 
         mock_response = MagicMock()

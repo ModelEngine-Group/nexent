@@ -182,7 +182,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             List of actual index_names for ES queries
         """
-        display_map = unwrap_field_info(self.display_name_to_index_map)
+        display_map = self._get_display_name_to_index_map()
         if not display_map:
             return names
 
@@ -194,10 +194,14 @@ class KnowledgeBaseSearchTool(Tool):
                 converted_names.append(name)
         return converted_names
 
+    def _get_display_name_to_index_map(self) -> dict:
+        display_map = unwrap_field_info(self.display_name_to_index_map)
+        return display_map if isinstance(display_map, dict) else {}
+
     def _convert_to_display_names(self, index_names: List[str]) -> List[str]:
         """Convert internal index names to display names for response metadata."""
-        display_map = unwrap_field_info(self.display_name_to_index_map)
-        if not isinstance(display_map, dict) or not display_map:
+        display_map = self._get_display_name_to_index_map()
+        if not display_map:
             return list(index_names)
 
         index_to_display = {
