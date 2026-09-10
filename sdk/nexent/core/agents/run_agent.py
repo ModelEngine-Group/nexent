@@ -2,8 +2,6 @@ import asyncio
 from copy import deepcopy
 import json
 import logging
-from contextvars import copy_context
-from threading import Thread
 from typing import Any, Dict, Union
 
 import httpx
@@ -13,12 +11,32 @@ from ...monitor import (
     set_monitoring_capacity_snapshot,
     set_monitoring_safe_input_budget_snapshot,
 )
+from ..concurrency import ManagedTaskSpec, ThreadManager
+from ..concurrency.helpers import (
+    get_fallback_thread_manager,
+    shutdown_fallback_thread_manager,
+)
 from .agent_model import AgentRunInfo
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+def _get_default_agent_thread_manager() -> ThreadManager:
+    """Return a bounded fallback for direct SDK callers.
+
+    Backend services must inject their process-local manager. The fallback keeps
+    the public SDK call compatible and can be closed explicitly with
+    ``shutdown_default_agent_thread_manager``.
+    """
+    return get_fallback_thread_manager()
+
+
+async def shutdown_default_agent_thread_manager(timeout: float = 15.0):
+    """Close the direct-SDK fallback manager when an embedding process exits."""
+    return await shutdown_fallback_thread_manager(timeout=timeout)
 
 
 def build_run_additional_args(agent_run_info: AgentRunInfo) -> Dict[str, Any]:
@@ -56,9 +74,7 @@ def _log_memory_value_assessment(agent: Any) -> None:
         return
 
     invocation_count = int(getattr(store_tool, "invocation_count", 0) or 0)
-    successful_store_count = int(
-        getattr(store_tool, "successful_store_count", 0) or 0
-    )
+    successful_store_count = int(getattr(store_tool, "successful_store_count", 0) or 0)
     decision = "store_attempted" if invocation_count else "skip"
     logger.info(
         "event=memory_value_assessment tenant_id=%s user_id=%s agent_id=%s "
@@ -199,12 +215,8 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
 def agent_run_thread(agent_run_info: AgentRunInfo):
     try:
-        set_monitoring_capacity_snapshot(
-            getattr(agent_run_info, "capacity_snapshot", None)
-        )
-        set_monitoring_safe_input_budget_snapshot(
-            getattr(agent_run_info, "safe_input_budget_snapshot", None)
-        )
+        set_monitoring_capacity_snapshot(getattr(agent_run_info, "capacity_snapshot", None))
+        set_monitoring_safe_input_budget_snapshot(getattr(agent_run_info, "safe_input_budget_snapshot", None))
         _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
         if mcp_host is None or len(mcp_host) == 0:
@@ -238,8 +250,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             finally:
                 _log_memory_value_assessment(agent)
         else:
-            agent_run_info.observer.add_message(
-                "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
+            agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
             mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
 
             with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
@@ -276,12 +287,14 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
     except Exception as e:
         if "Couldn't connect to the MCP server" in str(e):
-            mcp_connect_error_str = "MCP服务器连接超时。" if agent_run_info.observer.lang == "zh" else "Couldn't connect to the MCP server."
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
+            mcp_connect_error_str = (
+                "MCP服务器连接超时。"
+                if agent_run_info.observer.lang == "zh"
+                else "Couldn't connect to the MCP server."
+            )
+            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
         else:
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
+            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
         raise ValueError(f"Error in agent_run_thread: {e}")
     finally:
         # Agent construction, MCP setup, and executor initialization can fail
@@ -294,21 +307,64 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         )
 
 
-async def agent_run(agent_run_info: AgentRunInfo):
+async def agent_run(
+    agent_run_info: AgentRunInfo,
+    thread_manager: ThreadManager | None = None,
+):
     observer = agent_run_info.observer
+    manager = thread_manager or _get_default_agent_thread_manager()
+    run_id = getattr(agent_run_info, "workspace_run_id", None)
+    if run_id is None and getattr(agent_run_info, "conversation_id", None) is not None:
+        run_id = str(agent_run_info.conversation_id)
+    runtime_metadata = getattr(agent_run_info, "runtime_metadata", {}) or {}
+    execution = manager.submit(
+        "agent-run",
+        ManagedTaskSpec(
+            task_name="agent-run",
+            owner="nexent.core.agents.run_agent",
+            run_id=run_id,
+            attempt_id=runtime_metadata.get("attempt_id"),
+            close_hook=agent_run_info.stop_event.set,
+        ),
+        agent_run_thread,
+        agent_run_info,
+    )
+    agent_run_info.thread_manager = manager
+    agent_run_info.thread_execution_id = execution.execution_id
+    agent_run_info.thread_future = execution.future
 
-    ctx = copy_context()
-    thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
-    thread_agent.start()
+    worker_finished = False
+    try:
+        while not execution.future.done():
+            cached_message = observer.get_cached_message()
+            for message in cached_message:
+                yield message
+                if len(cached_message) < 8:
+                    await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
+        worker_finished = True
 
-    while thread_agent.is_alive():
+        # Consume the exception so the Future does not emit an unobserved failure.
+        # agent_run_thread has already converted it into an observer error message.
+        try:
+            execution.future.result()
+        except Exception:
+            logger.debug(
+                "event=agent_managed_execution_failed execution_id=%s run_id=%s",
+                execution.execution_id,
+                run_id or "",
+                exc_info=True,
+            )
+
         cached_message = observer.get_cached_message()
         for message in cached_message:
             yield message
-            if len(cached_message) < 8:
-                await asyncio.sleep(0.05)
-        await asyncio.sleep(0.1)
-
-    cached_message = observer.get_cached_message()
-    for message in cached_message:
-        yield message
+    finally:
+        if not worker_finished and not execution.future.done():
+            agent_run_info.stop_event.set()
+            manager.cancel(
+                execution.execution_id,
+                reason="agent stream consumer closed",
+                wait_timeout=0,
+                mark_stuck_on_timeout=False,
+            )

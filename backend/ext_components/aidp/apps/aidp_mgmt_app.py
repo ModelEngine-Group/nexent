@@ -23,6 +23,7 @@ from fastapi import APIRouter, File, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
+from nexent.core.concurrency import run_blocking
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
@@ -338,7 +339,10 @@ async def list_knowledge_bases(
 
     server_url, api_key = _credentials()
     started_at = time.perf_counter()
-    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    rows = await run_blocking(
+        "aidp-accessible-rows", _current_accessible_rows, user_id, tenant_id,
+        lane="control-io", owner="config",
+    )
     access_resolve_ms = (time.perf_counter() - started_at) * 1000
     total_count = len(rows)
     if total_count == 0:
@@ -358,11 +362,14 @@ async def list_knowledge_bases(
         kb_id = row["kb_id"]
         async with detail_semaphore:
             try:
-                detail = await asyncio.to_thread(
+                detail = await run_blocking(
+                    "aidp-kb-detail",
                     _load_cached_kb_detail,
                     server_url,
                     api_key,
                     kb_id,
+                    lane="control-io",
+                    owner="config",
                 )
                 return detail, "ACTIVE"
             except AppException as exc:
@@ -438,7 +445,10 @@ async def list_knowledge_bases(
 async def count_knowledge_bases(request: Request) -> JSONResponse:
     """Return the accessible KB count for the calling user/tenant."""
     user_id, tenant_id = await _auth(request)
-    rows = await asyncio.to_thread(_current_accessible_rows, user_id, tenant_id)
+    rows = await run_blocking(
+        "aidp-accessible-rows", _current_accessible_rows, user_id, tenant_id,
+        lane="control-io", owner="config",
+    )
     total = len(rows)
     return JSONResponse(status_code=HTTPStatus.OK, content={"total_count": total})
 
@@ -569,11 +579,14 @@ async def get_knowledge_base(
 
     server_url, api_key = _credentials()
     try:
-        detail = await asyncio.to_thread(
+        detail = await run_blocking(
+            "aidp-kb-detail",
             _load_cached_kb_detail,
             server_url,
             api_key,
             kds_id,
+            lane="control-io",
+            owner="config",
         )
         resource_status = "ACTIVE"
     except AppException as exc:
@@ -662,12 +675,15 @@ async def upload_documents(
     valid_files, validation_failures = _validate_upload_files(files)
     server_url, api_key = _credentials()
     if valid_files:
-        result = await asyncio.to_thread(
+        result = await run_blocking(
+            "aidp-upload-documents",
             upload_aidp_docs_impl,
             server_url,
             api_key,
             kds_id,
             valid_files,
+            lane="control-io",
+            owner="config",
         )
         invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
         invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
@@ -706,19 +722,25 @@ async def list_documents(
     server_url, api_key = _credentials()
     started_at = time.perf_counter()
     list_result, count_result = await asyncio.gather(
-        asyncio.to_thread(
+        run_blocking(
+            "aidp-list-documents",
             list_aidp_docs_impl,
             server_url,
             api_key,
             kds_id,
             page,
             page_size,
+            lane="control-io",
+            owner="config",
         ),
-        asyncio.to_thread(
+        run_blocking(
+            "aidp-document-count",
             _load_cached_doc_count,
             server_url,
             api_key,
             kds_id,
+            lane="control-io",
+            owner="config",
         ),
         return_exceptions=True,
     )

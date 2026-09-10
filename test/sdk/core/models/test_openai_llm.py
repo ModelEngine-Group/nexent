@@ -499,7 +499,7 @@ def test_check_connectivity_success(openai_model_instance):
             "_prepare_completion_kwargs",
             return_value={},
     ) as mock_prepare_kwargs, patch(
-        "nexent.core.models.openai_llm.asyncio.to_thread",
+        "nexent.core.models.openai_llm.run_blocking",
         new_callable=AsyncMock,
         return_value=None,
     ) as mock_to_thread:
@@ -516,7 +516,7 @@ def test_check_connectivity_failure(openai_model_instance):
             "_prepare_completion_kwargs",
             return_value={},
     ), patch(
-        "nexent.core.models.openai_llm.asyncio.to_thread",
+        "nexent.core.models.openai_llm.run_blocking",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ):

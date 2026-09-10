@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 
@@ -7,6 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from jinja2 import StrictUndefined, Template
+from nexent.core.concurrency import run_blocking
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, MessageRequest, MessageUnit
@@ -1043,7 +1043,15 @@ async def generate_conversation_title_service(conversation_id: int, question: st
     """
     try:
         # Call LLM to generate title from question in a separate thread to avoid blocking
-        title = await asyncio.to_thread(call_llm_for_title, question, tenant_id, language)
+        title = await run_blocking(
+            "conversation-title",
+            call_llm_for_title,
+            question,
+            tenant_id,
+            language,
+            lane="model-tool-io",
+            owner="runtime",
+        )
 
         # Update conversation title
         update_conversation_title(conversation_id, title, user_id)

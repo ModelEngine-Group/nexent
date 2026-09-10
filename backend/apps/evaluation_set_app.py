@@ -9,6 +9,8 @@ from fastapi import APIRouter, Body, File, Form, Header, Query, Request, UploadF
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from nexent.core.concurrency import ManagedTaskSpec
+
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import (
     CASE_ANSWER_MAX_LEN,
@@ -35,12 +37,12 @@ from services.evaluation_set_service import (
     list_evaluation_sets_impl,
     update_evaluation_set_case_impl,
 )
+from services.thread_lifecycle_service import config_thread_manager
 from utils.auth_utils import get_current_user_id
 from utils.evaluation_set_excel_utils import (
     build_evaluation_set_excel_template_bytes,
     parse_evaluation_cases_from_excel,
 )
-from utils.thread_utils import pool
 
 
 logger = logging.getLogger(__name__)
@@ -549,7 +551,12 @@ async def generate_cases_async_api(
         set_id, is_new = _resolve_target_set(payload, tenant_id, user_id)
         _update_generation_status(set_id, tenant_id, "GENERATING", 0)
 
-        pool.submit(
+        config_thread_manager.submit(
+            "evaluation",
+            ManagedTaskSpec(
+                task_name="evaluation-set-generation",
+                owner="config",
+            ),
             _generate_cases_async,
             set_id,
             tenant_id,

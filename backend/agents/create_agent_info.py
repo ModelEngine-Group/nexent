@@ -1,4 +1,3 @@
-import asyncio
 import copy
 import json
 import logging
@@ -11,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
@@ -1292,10 +1292,13 @@ async def create_agent_config(
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
                 fixed_search_tool.external_results = external_results
-                fixed_search_result = await asyncio.to_thread(
+                fixed_search_result = await run_blocking(
+                    "memory-presearch",
                     fixed_search_tool.forward,
                     last_user_query or "",
                     5,
+                    lane="model-tool-io",
+                    owner="runtime",
                 )
             else:
                 fixed_search_result = (

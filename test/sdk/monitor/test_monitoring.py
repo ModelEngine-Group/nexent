@@ -243,7 +243,8 @@ class TestMonitoringManager:
                 enable_telemetry=True,
                 service_name="test-service",
                 otlp_endpoint="http://localhost:4318",
-                otlp_protocol="http"
+                otlp_protocol="http",
+                project_name="nexent",
             )
 
             mock_resource_instance = MagicMock()
@@ -263,7 +264,9 @@ class TestMonitoringManager:
 
             manager.configure(config)
 
-            mock_resource.create.assert_called()
+            resource_attributes = mock_resource.create.call_args.args[0]
+            assert resource_attributes["project.name"] == "nexent"
+            assert resource_attributes["openinference.project.name"] == "nexent"
             mock_tracer_provider.assert_called_once()
             mock_span_exporter_http.assert_called_once()
             mock_batch_processor.assert_called_once()

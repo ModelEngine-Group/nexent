@@ -88,8 +88,11 @@ class AgentRunManager:
                 )
             self.agent_runs[run_key] = agent_run_info
             logger.info(
-                f"register agent run instance, user_id: {user_id}, conversation_id: {conversation_id}")
-        runtime_state_service.register_run(user_id=user_id, conversation_id=conversation_id)
+                f"register agent run instance, user_id: {user_id}, conversation_id: {conversation_id}"
+            )
+        runtime_state_service.register_run(
+            user_id=user_id, conversation_id=conversation_id
+        )
 
     def unregister_agent_run(
         self,
@@ -103,7 +106,10 @@ class AgentRunManager:
         with self._lock:
             run_key = self._get_run_key(conversation_id, user_id)
             if run_key in self.agent_runs:
-                if agent_run_info is not None and self.agent_runs[run_key] is not agent_run_info:
+                if (
+                    agent_run_info is not None
+                    and self.agent_runs[run_key] is not agent_run_info
+                ):
                     logger.warning(
                         "ignored stale agent run unregister, user_id: %s, conversation_id: %s",
                         user_id,
@@ -113,12 +119,16 @@ class AgentRunManager:
                 del self.agent_runs[run_key]
                 removed = True
                 logger.info(
-                    f"unregister agent run instance, user_id: {user_id}, conversation_id: {conversation_id}")
+                    f"unregister agent run instance, user_id: {user_id}, conversation_id: {conversation_id}"
+                )
             else:
                 logger.info(
-                    f"no agent run instance found for user_id: {user_id}, conversation_id: {conversation_id}")
+                    f"no agent run instance found for user_id: {user_id}, conversation_id: {conversation_id}"
+                )
         if removed:
-            runtime_state_service.mark_run_finished(user_id=user_id, conversation_id=conversation_id, status=status)
+            runtime_state_service.mark_run_finished(
+                user_id=user_id, conversation_id=conversation_id, status=status
+            )
         return removed
 
     def get_agent_run_info(self, conversation_id: Union[int, str], user_id: str):
@@ -140,10 +150,21 @@ class AgentRunManager:
         agent_run_info = self.get_agent_run_info(conversation_id, user_id)
         if agent_run_info is not None:
             agent_run_info.stop_event.set()
+            thread_manager = getattr(agent_run_info, "thread_manager", None)
+            execution_id = getattr(agent_run_info, "thread_execution_id", None)
+            if thread_manager is not None and execution_id:
+                thread_manager.cancel(
+                    execution_id,
+                    reason="agent run cancellation requested",
+                    wait_timeout=0,
+                    mark_stuck_on_timeout=False,
+                )
             logger.info(
-                f"agent run stopped, user_id: {user_id}, conversation_id: {conversation_id}")
+                f"agent run stopped, user_id: {user_id}, conversation_id: {conversation_id}"
+            )
             return True
         return remote_signal_set
+
 
 # create singleton instance
 agent_run_manager = AgentRunManager()

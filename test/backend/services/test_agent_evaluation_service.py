@@ -79,6 +79,17 @@ _nexent_pkg.storage = _nexent_storage
 _nexent_core.agents = _nexent_core_agents
 _nexent_core.utils = _nexent_core_utils
 
+
+class _ManagedTaskSpec:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+_nexent_concurrency_module = types.ModuleType("nexent.core.concurrency")
+_nexent_concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
+sys.modules["nexent.core.concurrency"] = _nexent_concurrency_module
+_nexent_core.concurrency = _nexent_concurrency_module
+
 _agent_model_mock = MagicMock()
 
 
@@ -379,6 +390,13 @@ _eval_prompt_service_module.build_prompts_for_evaluation_cases = MagicMock(
 sys.modules["services.evaluation_prompt_service"] = _eval_prompt_service_module
 _services_pkg.evaluation_prompt_service = _eval_prompt_service_module
 
+_thread_lifecycle_service_module = types.ModuleType(
+    "services.thread_lifecycle_service"
+)
+_thread_lifecycle_service_module.runtime_thread_manager = MagicMock()
+sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_service_module
+_services_pkg.thread_lifecycle_service = _thread_lifecycle_service_module
+
 # ---- 补齐 services.evaluation_set_service（agent_evaluation_service.py L64）----
 _eval_set_service_module = types.ModuleType("services.evaluation_set_service")
 _eval_set_service_module.resolve_latest_published_version_no = MagicMock(return_value=1)
@@ -501,6 +519,7 @@ def service_module(monkeypatch):
     # through to a ModuleNotFoundError on the parent package.
     _services_pkg.agent_evaluation_service = agent_evaluation_service
     agent_evaluation_service.openpyxl = openpyxl_mock
+    agent_evaluation_service.agent_run_manager = MagicMock()
     # ``services.agent_evaluation_service`` may or may not do
     # ``from openpyxl import Workbook`` at module load depending on the
     # current code shape; either way we install a patch under the module
@@ -816,7 +835,7 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
         json.dumps({"type": "final_answer", "content": "world"}),
     ]
 
-    async def _fake_agent_run(_run_info):
+    async def _fake_agent_run(_run_info, **_kwargs):
         for chunk in final_answer_parts:
             yield chunk
 
@@ -868,7 +887,7 @@ def test_run_agent_to_final_answer_releases_registered_run_on_error(service_modu
         return_value=(run_info, MagicMock(name="memory_ctx"))
     )
 
-    async def _failing_agent_run(_run_info):
+    async def _failing_agent_run(_run_info, **_kwargs):
         raise RuntimeError("agent failed")
         yield  # pragma: no cover
 
@@ -913,7 +932,7 @@ def test_run_agent_to_final_answer_skips_non_final_answer_chunks(service_module)
         json.dumps({"type": "tool_call", "content": "calling tool"}),
     ]
 
-    async def _fake_agent_run(_run_info):
+    async def _fake_agent_run(_run_info, **_kwargs):
         for chunk in chunks:
             yield chunk
 
@@ -948,7 +967,7 @@ def test_run_agent_to_final_answer_skips_non_string_and_invalid_json_chunks(
         '{"unterminated":',
     ]
 
-    async def _fake_agent_run(_run_info):
+    async def _fake_agent_run(_run_info, **_kwargs):
         for chunk in chunks:
             yield chunk
 
@@ -975,7 +994,7 @@ def test_run_agent_to_final_answer_handles_no_final_answer_chunks(service_module
         return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
     )
 
-    async def _fake_agent_run(_run_info):
+    async def _fake_agent_run(_run_info, **_kwargs):
         yield json.dumps({"type": "thought"})
 
     service_module.agent_run = _fake_agent_run
@@ -1066,8 +1085,8 @@ def test_create_agent_evaluation_run_happy_path(service_module):
     create_mock = _wire_full_db_module(service_module)
     pool_mock = MagicMock()
     future = MagicMock()
-    pool_mock.submit.return_value = future
-    service_module.pool = pool_mock
+    pool_mock.submit.return_value = types.SimpleNamespace(future=future)
+    service_module.runtime_thread_manager = pool_mock
 
     run = service_module.create_agent_evaluation_run_impl(
         tenant_id="t1",
@@ -1124,7 +1143,10 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
     """The published version number flows from ``resolve_latest_published_version_no``."""
     create_mock = _wire_full_db_module(service_module)
     service_module.resolve_latest_published_version_no.return_value = 13
-    service_module.pool = MagicMock()
+    service_module.runtime_thread_manager = MagicMock()
+    service_module.runtime_thread_manager.submit.return_value = types.SimpleNamespace(
+        future=MagicMock()
+    )
 
     service_module.create_agent_evaluation_run_impl(
         tenant_id="t1",
@@ -1521,7 +1543,7 @@ def test_run_agent_to_final_answer_parses_straggler_messages(service_module):
     ]
     service_module.prepare_agent_run = AsyncMock(return_value=(run_info, None))
 
-    async def _fake_agent_run(_ri):
+    async def _fake_agent_run(_ri, **_kwargs):
         yield json.dumps({"type": "final_answer", "content": "done"})
 
     service_module.agent_run = _fake_agent_run
@@ -1826,8 +1848,8 @@ class TestScoreWithEvaluators:
     def test_with_llm_evaluators_submits_to_executor(self, service_module, monkeypatch):
         executor = MagicMock()
         future = MagicMock()
-        executor.submit.return_value = future
-        monkeypatch.setattr(service_module, "_LLM_EVAL_EXECUTOR", executor)
+        executor.submit.return_value = types.SimpleNamespace(future=future)
+        monkeypatch.setattr(service_module, "runtime_thread_manager", executor)
         monkeypatch.setattr(
             service_module,
             "_collect_llm_results",

@@ -303,6 +303,17 @@ sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
+_concurrency_mod = _create_stub_module("nexent.core.concurrency")
+
+
+async def _run_blocking(_task_name, fn, *args, **kwargs):
+    kwargs.pop("lane", None)
+    kwargs.pop("owner", None)
+    return fn(*args, **kwargs)
+
+
+_concurrency_mod.run_blocking = _run_blocking
+sys.modules['nexent.core.concurrency'] = _concurrency_mod
 nexent_agents_module = _create_stub_module("nexent.core.agents")
 nexent_agents_module.__path__ = []
 sys.modules['nexent.core.utils'] = _create_stub_module("nexent.core.utils")

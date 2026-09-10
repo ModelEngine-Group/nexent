@@ -10,6 +10,8 @@ import struct
 import wave
 from typing import Any, Dict
 
+from nexent.core.concurrency import run_blocking
+
 from ...registry import register_adapter
 from .openai import OpenAIVLMAdapter
 
@@ -50,7 +52,8 @@ class ModelEngineVLMAdapter(OpenAIVLMAdapter):
             ],
         }
         try:
-            await asyncio.to_thread(
+            await run_blocking(
+                "modelengine-vlm-connectivity",
                 self._model.client.chat.completions.create,
                 model=self._model.model_id,
                 messages=[content_parts],

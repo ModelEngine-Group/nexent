@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ..concurrency import ManagedTaskSpec, get_current_thread_manager
+
 # Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
@@ -275,7 +277,6 @@ class ExternalA2AAgentProxy:
             Extracted text response from the external agent.
         """
         import asyncio
-        import threading
 
         async def execute():
             async with self as proxy:
@@ -296,23 +297,23 @@ class ExternalA2AAgentProxy:
             # No running loop, create and use new one directly
             return run_in_new_loop()
         else:
-            # Already in async context, run in a separate thread
-            result_container = [None]
-            exception_container = [None]
+            # A synchronous tool call can run inside the Agent event loop.
+            # Route the private event loop through the isolated tool lane.
+            manager = get_current_thread_manager()
+            if manager is None:
+                from .run_agent import _get_default_agent_thread_manager
 
-            def thread_target():
-                try:
-                    result_container[0] = run_in_new_loop()
-                except Exception as e:
-                    exception_container[0] = e
-
-            thread = threading.Thread(target=thread_target)
-            thread.start()
-            thread.join()
-
-            if exception_container[0]:
-                raise exception_container[0]
-            return result_container[0]
+                manager = _get_default_agent_thread_manager()
+            return manager.run_sync(
+                "model-tool-io",
+                ManagedTaskSpec(
+                    task_name="a2a-sync-call",
+                    owner="nexent.core.agents.a2a_agent_proxy",
+                    close_hook=self.stop_event.set,
+                ),
+                run_in_new_loop,
+                timeout=self.agent_info.timeout,
+            )
 
     TERMINAL_STATE_KEYWORDS = frozenset(("COMPLETED", "FAILED", "CANCELED"))
 

@@ -7,6 +7,7 @@ from ...monitor.monitoring import (
     OPENINFERENCE_INPUT_VALUE,
 )
 from ..utils.token_estimation import estimate_tokens_text
+from ..concurrency import run_blocking
 import logging
 import threading
 import asyncio
@@ -777,7 +778,8 @@ class OpenAIModel(OpenAIServerModel):
             )
 
             # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
-            await asyncio.to_thread(
+            await run_blocking(
+                "openai-llm-connectivity",
                 self.client.chat.completions.create,
                 stream=False,
                 **completion_kwargs,

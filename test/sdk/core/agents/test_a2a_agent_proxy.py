@@ -219,6 +219,25 @@ def _load_a2a_agent_proxy_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    concurrency_module = ModuleType("sdk.nexent.core.concurrency")
+
+    class ManagedTaskSpec:
+        def __init__(self, task_name, owner, close_hook=None):
+            self.task_name = task_name
+            self.owner = owner
+            self.close_hook = close_hook
+
+    class DirectTestManager:
+        def run_sync(self, _lane, _spec, fn, *args, **kwargs):
+            from concurrent.futures import ThreadPoolExecutor
+
+            kwargs.pop("timeout", None)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(fn, *args, **kwargs).result()
+
+    concurrency_module.ManagedTaskSpec = ManagedTaskSpec
+    concurrency_module.get_current_thread_manager = lambda: DirectTestManager()
+    sys.modules["sdk.nexent.core.concurrency"] = concurrency_module
 
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.a2a_agent_proxy", module_path)
     module = importlib.util.module_from_spec(spec)
@@ -1190,6 +1209,25 @@ class TestExternalA2AAgentProxy:
 
             with pytest.raises(RuntimeError, match="network error"):
                 proxy.sync_call("hello")
+
+    @pytest.mark.asyncio
+    async def test_tc_tlm_014_sync_call_in_async_context_uses_managed_tool_lane(self):
+        """The sync bridge must not create and join a raw thread."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        manager = MagicMock()
+        manager.run_sync.return_value = "managed response"
+
+        with patch.object(
+            a2a_agent_proxy,
+            "get_current_thread_manager",
+            return_value=manager,
+        ):
+            result = proxy.sync_call("hello")
+
+        assert result == "managed response"
+        call = manager.run_sync.call_args
+        assert call.args[0] == "model-tool-io"
+        assert call.args[1].task_name == "a2a-sync-call"
 
     @pytest.mark.asyncio
     async def test_extract_text_from_events_artifact_update(self):
