@@ -10,6 +10,7 @@ from services.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
+    _extract_feature_capability_hints_from_raw,
 )
 
 
@@ -135,6 +136,7 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     "max_tokens": DEFAULT_LLM_MAX_TOKENS
                 }
                 cleaned_model.update(_extract_capacity_hints(model_obj))
+                cleaned_model.update(_extract_feature_capability_hints_from_raw(model_obj))
                 # 1. rerank
                 if 'rerank' in m_id:
                     cleaned_model.update({"model_tag": "rerank", "model_type": "rerank"})
