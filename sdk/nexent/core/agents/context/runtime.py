@@ -135,8 +135,8 @@ class ManagedContextRuntime:
         return self.context_manager.config.context_window_tokens
 
     @property
-    def hard_input_budget_tokens(self) -> int | None:
-        return self.context_manager.hard_input_budget_tokens
+    def effective_input_limit_tokens(self) -> int | None:
+        return self.context_manager.effective_input_limit_tokens
 
     @property
     def processing_mode(self) -> str | None:

@@ -8,7 +8,7 @@ import logging
 import math
 import threading
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Optional, Sequence
 
@@ -59,16 +59,17 @@ class ContextManager:
         self._pending_history_summary_event: dict[str, Any] | None = None
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
 
-    def _soft_input_budget_tokens(self) -> int:
-        return self.config.soft_input_budget_tokens or self.config.token_threshold
+    def _compaction_trigger_threshold_tokens(self) -> int:
+        return self.config.compaction_trigger_threshold_tokens or self.config.token_threshold
 
-    def _hard_input_budget_tokens(self) -> int:
-        return self.config.hard_input_budget_tokens or int(self.config.token_threshold * 1.1)
+    def _compaction_target_tokens(self) -> int:
+        return self.config.compaction_target_tokens or max(
+            1, int(self._compaction_trigger_threshold_tokens() * 0.75)
+        )
 
     @property
-    def hard_input_budget_tokens(self) -> int:
-        """Effective hard budget, including the legacy fallback calculation."""
-        return self._hard_input_budget_tokens()
+    def effective_input_limit_tokens(self) -> int:
+        return self.config.effective_input_limit_tokens
 
     @property
     def processing_mode(self) -> str:
@@ -151,37 +152,68 @@ class ContextManager:
 
         if (
             policy.processing_mode == ContextProcessingMode.ADAPTIVE_COMPACT
-            and raw_tokens > self._soft_input_budget_tokens()
+            and self.config.effective_input_limit_tokens > 0
+            and raw_tokens >= self._compaction_trigger_threshold_tokens()
         ):
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
-            if turns:
+            if turns or summary:
                 history_triggered = True
-                result = self._history_compressor.compress(summary, turns, model)
-                self._record_compression(result.records)
-                if result.candidate is not None:
-                    self._history_candidate = result.candidate
-                    new_coverage = result.candidate.covered_through_message_id
+                original_history_tokens = sum(
+                    item.token_estimate for item in final_items
+                    if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
+                )
+                current_summary, current_turns = summary, turns
+                last_valid = None
+                attempts = 0
+                for attempt in range(1, 4):
+                    result = self._history_compressor.compress(current_summary, current_turns, model)
+                    attempts = attempt
+                    self._record_compression(result.records)
+                    candidate = result.candidate
+                    if candidate is None:
+                        if last_valid is None and result.fallback_turns:
+                            fallback_by_id = {item.id: item for item in result.fallback_turns}
+                            final_items = [fallback_by_id.get(item.id, item) for item in final_items]
+                        break
+                    candidate_item = candidate.as_item()
+                    previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
+                    previous_tokens += sum(item.token_estimate for item in current_turns)
+                    if candidate_item.token_estimate >= previous_tokens:
+                        break
+                    last_valid = candidate
                     final_items = [
-                        item
-                        for item in final_items
-                        if item.type
-                        not in {
-                            ContextItemType.HISTORY_SUMMARY,
-                            ContextItemType.CONVERSATION_TURN,
-                        }
-                    ]
-                    final_items.append(result.candidate.as_item())
-                    persist_status = self._persist_candidate(result.candidate)
+                        item for item in final_items
+                        if item.type not in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
+                    ] + [candidate_item]
+                    complete_tokens = self._estimate_items(
+                        final_items, purpose_stable, purpose_dynamic, canonical_tools
+                    )
+                    if complete_tokens <= self._compaction_target_tokens():
+                        break
+                    current_summary, current_turns = candidate_item, []
+                if last_valid is not None:
+                    final_history_tokens = last_valid.as_item().token_estimate
+                    last_valid = replace(
+                        last_valid,
+                        history_tokens_before=original_history_tokens,
+                        history_tokens_after=final_history_tokens,
+                        compaction_attempts=attempts,
+                        compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
+                        compaction_target_tokens=self._compaction_target_tokens(),
+                    )
+                    self._history_candidate = last_valid
+                    new_coverage = last_valid.covered_through_message_id
+                    final_items = [
+                        item for item in final_items if item.type != ContextItemType.HISTORY_SUMMARY
+                    ] + [last_valid.as_item()]
+                    persist_status = self._persist_candidate(last_valid)
                     self._pending_history_summary_event = {
-                        **deepcopy(result.candidate.as_item().content),
+                        **deepcopy(last_valid.as_item().content),
                         "persist_status": persist_status,
                     }
-                elif result.fallback_turns:
-                    fallback_by_id = {item.id: item for item in result.fallback_turns}
-                    final_items = [fallback_by_id.get(item.id, item) for item in final_items]
 
-            final_items = self._compact_to_soft_budget(
+            final_items = self._compact_to_compaction_target(
                 final_items,
                 purpose_stable,
                 purpose_dynamic,
@@ -198,11 +230,14 @@ class ContextManager:
         final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
         self._last_compressed_token_count = final_tokens
-        hard = self._hard_input_budget_tokens()
-        over_hard = final_tokens > hard
-        compact_exhausted = over_hard
-        if over_hard:
-            logger.warning("Context remains over hard budget after safe compact: %s > %s", final_tokens, hard)
+        effective_limit = self.config.effective_input_limit_tokens
+        exceeds_limit = bool(effective_limit and final_tokens > effective_limit)
+        attempts_exhausted = history_triggered and len(self._step_local_log) >= 3
+        if exceeds_limit:
+            logger.warning(
+                "Context exceeds Effective Input Limit after compaction: %s > %s",
+                final_tokens, effective_limit,
+            )
 
         representations = tuple((item.id, str(item.metadata.get("representation", "raw"))) for item in final_items)
         hits = sum(item.representation_cache_stats[0] for item in items)
@@ -233,8 +268,10 @@ class ContextManager:
                 if run_context.selection_decision
                 else None,
                 processing_mode=policy.processing_mode.value,
-                soft_budget=self._soft_input_budget_tokens(),
-                hard_budget=hard,
+                effective_input_limit_tokens=effective_limit,
+                compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
+                compaction_target_tokens=self._compaction_target_tokens(),
+                compaction_attempts=min(3, len(self._step_local_log)),
                 raw_token_estimate=raw_tokens,
                 final_token_estimate=final_tokens,
                 loaded_summary_unit_id=(loaded.content.get("unit_id") if loaded else None),
@@ -253,8 +290,8 @@ class ContextManager:
                 ),
                 representation_cache_hits=hits,
                 representation_cache_misses=misses,
-                compact_exhausted=compact_exhausted,
-                over_hard_budget=over_hard,
+                compaction_attempts_exhausted=attempts_exhausted,
+                exceeds_effective_input_limit=exceeds_limit,
                 messages_fingerprint=self._fingerprint(messages),
                 tools_fingerprint=self._fingerprint(canonical_tools),
                 system_messages_fingerprint=self._fingerprint(system_messages),
@@ -276,9 +313,9 @@ class ContextManager:
         self._pending_history_summary_event = None
         return deepcopy(event) if event is not None else None
 
-    def _compact_to_soft_budget(self, items, purpose_stable, purpose_dynamic, tools, *, model):
+    def _compact_to_compaction_target(self, items, purpose_stable, purpose_dynamic, tools, *, model):
         result = list(items)
-        if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._soft_input_budget_tokens():
+        if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._compaction_target_tokens():
             return result
         keep_recent = max(0, self.config.keep_recent_steps)
         actions = [item for item in result if item.type == ContextItemType.CURRENT_ACTION]
@@ -309,7 +346,7 @@ class ContextManager:
                 result[index] = compact
                 if (
                     self._estimate_items(result, purpose_stable, purpose_dynamic, tools)
-                    <= self._soft_input_budget_tokens()
+                    <= self._compaction_target_tokens()
                 ):
                     return result
         if self.config.enable_long_term_memory_selection and long_term_items:
@@ -321,7 +358,7 @@ class ContextManager:
         task = json.dumps(task_item.content, ensure_ascii=False, default=str) if task_item else ""
         model_id = str(getattr(model, "model_id", None) or getattr(model, "model_name", None)
                        or model.__class__.__name__)
-        target_tokens = max(64, self._soft_input_budget_tokens() // 4)
+        target_tokens = max(64, self._compaction_target_tokens() // 4)
         versions = tuple(sorted(str(item.metadata.get("version_id") or item.id) for item in memory_items))
         cache_key = (*versions, task, target_tokens, model_id)
         cached = self._memory_compact_cache.get(cache_key)

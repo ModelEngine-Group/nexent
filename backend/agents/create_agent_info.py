@@ -1406,12 +1406,14 @@ async def create_agent_config(
         request_requested_output_tokens=request_requested_output_tokens,
     )
     if safe_input_budget_snapshot is not None:
-        soft_input_budget_tokens = safe_input_budget_snapshot["soft_input_budget_tokens"]
-        hard_input_budget_tokens = safe_input_budget_snapshot["hard_input_budget_tokens"]
-        context_token_threshold = soft_input_budget_tokens
+        effective_input_limit_tokens = safe_input_budget_snapshot["provider_input_limit_tokens"]
+        compaction_trigger_threshold_tokens = int(effective_input_limit_tokens * 0.8)
+        compaction_target_tokens = int(effective_input_limit_tokens * 0.6)
+        context_token_threshold = compaction_trigger_threshold_tokens
     else:
-        soft_input_budget_tokens = 0
-        hard_input_budget_tokens = 0
+        effective_input_limit_tokens = 0
+        compaction_trigger_threshold_tokens = 0
+        compaction_target_tokens = 0
         context_token_threshold = input_budget
 
     context_window_tokens = (
@@ -1488,8 +1490,9 @@ async def create_agent_config(
     cm_config = ContextManagerConfig(
         token_threshold=context_token_threshold,
         context_window_tokens=context_window_tokens,
-        soft_input_budget_tokens=soft_input_budget_tokens,
-        hard_input_budget_tokens=hard_input_budget_tokens,
+        effective_input_limit_tokens=effective_input_limit_tokens,
+        compaction_trigger_threshold_tokens=compaction_trigger_threshold_tokens,
+        compaction_target_tokens=compaction_target_tokens,
         policy_layers=policy_layers,
     )
 

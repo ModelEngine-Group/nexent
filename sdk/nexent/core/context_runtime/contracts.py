@@ -40,8 +40,10 @@ class ContextEvidence:
     prefix_change_reasons: tuple[str, ...] = ()
     policy_fingerprint: str | None = None
     processing_mode: str = "passthrough"
-    soft_budget: int = 0
-    hard_budget: int = 0
+    effective_input_limit_tokens: int = 0
+    compaction_trigger_threshold_tokens: int = 0
+    compaction_target_tokens: int = 0
+    compaction_attempts: int = 0
     raw_token_estimate: int = 0
     final_token_estimate: int = 0
     loaded_summary_unit_id: int | None = None
@@ -54,8 +56,8 @@ class ContextEvidence:
     current_action_compact_count: int = 0
     representation_cache_hits: int = 0
     representation_cache_misses: int = 0
-    compact_exhausted: bool = False
-    over_hard_budget: bool = False
+    compaction_attempts_exhausted: bool = False
+    exceeds_effective_input_limit: bool = False
     model_call_count: int = 0
     loop_status: str | None = None
     messages_fingerprint: str | None = None
@@ -142,8 +144,8 @@ class ContextRuntime(Protocol):
         """Stable model context-window capacity for this runtime."""
 
     @property
-    def hard_input_budget_tokens(self) -> int | None:
-        """Effective hard input budget for this runtime."""
+    def effective_input_limit_tokens(self) -> int | None:
+        """Effective Provider input limit for this runtime."""
 
     @property
     def processing_mode(self) -> str | None:
@@ -214,7 +216,7 @@ class UnconfiguredContextRuntime:
         return None
 
     @property
-    def hard_input_budget_tokens(self) -> int | None:
+    def effective_input_limit_tokens(self) -> int | None:
         return None
 
     @property

@@ -133,6 +133,48 @@ def test_adaptive_incrementally_compresses_only_summary_and_completed_turns(monk
     )
 
 
+def test_proactive_compaction_uses_previous_result_and_persists_only_final(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+
+    class ShrinkingModel:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, messages, stop_sequences=None):
+            self.calls += 1
+            sizes = (12000, 10000, 1000)
+            content = "# Compact Result of History\n\n## State\n\n" + "x" * sizes[self.calls - 1]
+            return type("Response", (), {"content": content, "token_usage": None})()
+
+    persisted = []
+    manager = ContextManager(ContextManagerConfig(
+        effective_input_limit_tokens=10000,
+        policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+        history_summary_sink=persisted.append,
+    ))
+    large_turns = [
+        ContextItemInput(id="turn:21:22", type="conversation_turn", content={
+            "user_message": "question " * 3000,
+            "assistant_final_answer": "answer " * 3000,
+            "attachments": [], "user_message_id": 21, "assistant_message_id": 22,
+        })
+    ]
+    model = ShrinkingModel()
+    run = manager.prepare_run_context(_Memory([]), "", large_turns)
+    result = manager.assemble_final_context(
+        model=model, memory=_Memory([]), current_run_start_idx=0, run_context=run,
+    )
+
+    assert model.calls == 3
+    assert len(persisted) == 1
+    snapshot = persisted[0]
+    assert snapshot.compaction_attempts == 3
+    assert snapshot.history_tokens_before > snapshot.history_tokens_after
+    assert snapshot.compaction_trigger_threshold_tokens == 8000
+    assert snapshot.compaction_target_tokens == 6000
+    assert result.evidence.compaction_attempts == 3
+
+
 def test_summary_two_uses_summary_one_and_only_turns_after_its_coverage(monkeypatch):
     """A later checkpoint must not reintroduce raw turns covered by Summary 1."""
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
@@ -400,7 +442,7 @@ def test_persistence_failure_does_not_block_current_context(monkeypatch):
     assert result.evidence.new_summary_coverage == 22
 
 
-def test_no_drop_over_hard_budget_is_explicit_in_evidence(monkeypatch):
+def test_input_limit_excess_is_evidence_and_does_not_drop_required_content(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     manager = ContextManager(ContextManagerConfig(
         soft_input_budget_tokens=5, hard_input_budget_tokens=6,
@@ -412,9 +454,8 @@ def test_no_drop_over_hard_budget_is_explicit_in_evidence(monkeypatch):
         model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
     assert "required current task" in str(result.messages)
-    assert result.evidence.over_hard_budget is True
-    assert result.evidence.compact_exhausted is True
-    assert result.evidence.final_token_estimate > result.evidence.hard_budget
+    assert result.evidence.exceeds_effective_input_limit is True
+    assert result.evidence.final_token_estimate > result.evidence.effective_input_limit_tokens
 
 
 def test_new_history_summary_event_is_consumed_once(monkeypatch):

@@ -778,16 +778,6 @@ Additional Args:
             # Don't let logging errors break the model call
             self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
-    @staticmethod
-    def _ensure_context_within_hard_budget(final_context: Any) -> None:
-        """Stop before the provider call when safe compaction cannot fit input."""
-        evidence = final_context.evidence
-        if evidence.over_hard_budget is True:
-            raise ValueError(
-                "Context input remains over the model hard budget after compaction: "
-                f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
-            )
-
     def _emit_history_summary_event(self) -> None:
         payload = self.context_runtime.consume_history_summary_event()
         if isinstance(payload, dict):
@@ -813,7 +803,6 @@ Additional Args:
         )
         get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
-        self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
@@ -1553,7 +1542,6 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         )
         get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
-        self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
 
         # Create the final memory step with error
