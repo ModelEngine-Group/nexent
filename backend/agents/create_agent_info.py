@@ -286,7 +286,26 @@ def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
 
 
 def _safe_input_budget_for_monitoring(snapshot: Any) -> dict:
-    return snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
+    """Translate the legacy W2 snapshot into the canonical runtime vocabulary."""
+    data = snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
+    effective_input_limit_tokens = data.get("provider_input_limit_tokens", 0)
+    compaction_trigger_threshold_tokens = data.get("soft_input_budget_tokens")
+    if compaction_trigger_threshold_tokens is None and effective_input_limit_tokens:
+        compaction_trigger_threshold_tokens = int(effective_input_limit_tokens * 0.8)
+    return {
+        "provider": data.get("provider"),
+        "model_name": data.get("model_name"),
+        "effective_input_limit_tokens": effective_input_limit_tokens,
+        "compaction_trigger_threshold_tokens": compaction_trigger_threshold_tokens or 0,
+        "compaction_target_tokens": (
+            int(effective_input_limit_tokens * 0.6)
+            if effective_input_limit_tokens
+            else 0
+        ),
+        "requested_output_tokens": data.get("requested_output_tokens"),
+        "fingerprint": data.get("fingerprint"),
+        "warnings": data.get("warnings") or [],
+    }
 
 
 def _resolve_safe_input_budget(
@@ -1420,9 +1439,11 @@ async def create_agent_config(
         request_requested_output_tokens=request_requested_output_tokens,
     )
     if safe_input_budget_snapshot is not None:
-        effective_input_limit_tokens = safe_input_budget_snapshot["provider_input_limit_tokens"]
-        compaction_trigger_threshold_tokens = int(effective_input_limit_tokens * 0.8)
-        compaction_target_tokens = int(effective_input_limit_tokens * 0.6)
+        effective_input_limit_tokens = safe_input_budget_snapshot["effective_input_limit_tokens"]
+        compaction_trigger_threshold_tokens = safe_input_budget_snapshot[
+            "compaction_trigger_threshold_tokens"
+        ]
+        compaction_target_tokens = safe_input_budget_snapshot["compaction_target_tokens"]
         context_token_threshold = compaction_trigger_threshold_tokens
     else:
         effective_input_limit_tokens = 0
