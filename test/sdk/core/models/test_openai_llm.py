@@ -716,6 +716,49 @@ def test_provider_context_overflow_rebuilds_and_retries(openai_model_instance):
     assert openai_model_instance.client.chat.completions.create.call_count == 2
 
 
+def test_provider_context_overflow_rejects_non_list_rebuild(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(TypeError, match="must return FinalContext or a message list"):
+            openai_model_instance.__call__(messages, context_rebuild=lambda: object())
+
+
+def test_provider_context_overflow_stops_after_two_recovery_dispatches(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "still too large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryExhausted,
+            match="persisted after two recovery dispatches",
+        ):
+            openai_model_instance.__call__(
+                messages,
+                context_rebuild=lambda: messages,
+                _overflow_recovery_ordinal=2,
+            )
+
+
+def test_provider_context_overflow_without_rebuild_is_retry_unsafe(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryUnsafe,
+            match="cannot be safely rebuilt",
+        ):
+            openai_model_instance.__call__(messages, context_rebuild=None)
+
+
 def test_provider_context_overflow_does_not_recover_unrelated_error(openai_model_instance):
     messages = [{"role": "user", "content": [{"text": "hello"}]}]
     rebuild = MagicMock()

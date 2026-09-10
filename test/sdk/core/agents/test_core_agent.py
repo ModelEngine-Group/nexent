@@ -366,6 +366,20 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
     context_manager.get_summary.assert_called_once_with()
 
 
+def test_provider_overflow_recovery_is_disabled_after_a_tool_call():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    agent._history_step_count = 1
+    agent.memory = SimpleNamespace(steps=[
+        SimpleNamespace(tool_calls=["previous-run-tool"]),
+        SimpleNamespace(tool_calls=None),
+    ])
+
+    assert agent._provider_overflow_recovery_safe() is True
+
+    agent.memory.steps.append(SimpleNamespace(tool_calls=["current-run-tool"]))
+    assert agent._provider_overflow_recovery_safe() is False
+
+
 
 
 

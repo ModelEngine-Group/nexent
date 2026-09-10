@@ -110,6 +110,7 @@ class _ContextManager:
 
     def __init__(self):
         self.calls = []
+        self.force_compactions = []
 
     def prepare_run_context(self, *, memory, fallback_system_prompt, items=None):
         self.calls.append(("prepare_run_context", fallback_system_prompt, items))
@@ -122,6 +123,7 @@ class _ContextManager:
 
     def assemble_final_context(self, **kwargs):
         self.calls.append(("assemble_final_context", kwargs["purpose"], kwargs.get("tools")))
+        self.force_compactions.append(kwargs.get("force_compaction", False))
         contracts = sys.modules["nexent.core.context_runtime.contracts"]
         return contracts.FinalContext(
             messages=[{"role": "system", "content": kwargs["purpose"]}],
@@ -216,5 +218,31 @@ def test_managed_runtime_uses_item_snapshot_without_explicit_prepare_run():
         runtime.prepare_step(model=None, memory=_Memory(), current_run_start_idx=0)
 
         assert manager.calls[0] == ("prepare_run_context", "", [item])
+    finally:
+        _restore(snapshot)
+
+
+def test_managed_runtime_forces_compaction_for_both_overflow_recovery_paths():
+    managed_module, snapshot = _bootstrap()
+    try:
+        manager = _ContextManager()
+        runtime = managed_module.ManagedContextRuntime(manager)
+        memory = _Memory()
+
+        step = runtime.recover_step(
+            model=None, memory=memory, current_run_start_idx=0, tools=[{"name": "search"}],
+        )
+        final_answer = runtime.recover_final_answer(
+            model=None,
+            memory=memory,
+            current_run_start_idx=0,
+            task="task",
+            final_answer_templates={"final_answer": {}},
+        )
+
+        assert manager.force_compactions == [True, True]
+        assert step.messages == [{"role": "system", "content": "step"}]
+        assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
+        assert runtime.finalize_evidence(status="completed").model_call_count == 2
     finally:
         _restore(snapshot)
