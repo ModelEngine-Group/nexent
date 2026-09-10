@@ -1835,6 +1835,73 @@ def test_clear_agent_new_mark_api_exception(mocker, mock_auth_header):
 # ---------------------------------------------------------------------------
 
 
+def test_agent_share_management_apis_require_authenticated_owner(mocker, mock_auth_header):
+    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_enable = mocker.patch("apps.agent_app.enable_agent_share")
+    mock_get = mocker.patch("apps.agent_app.get_agent_share_link")
+    mock_rotate = mocker.patch("apps.agent_app.rotate_agent_share_link")
+    mock_revoke = mocker.patch("apps.agent_app.revoke_agent_share_link")
+    mock_get_user_id.return_value = ("owner-a", "tenant-a")
+    share = {"agent_id": 123, "share_token": "opaque-token", "generation": 1, "status": "active"}
+    mock_enable.return_value = share
+    mock_get.return_value = share
+    mock_rotate.return_value = {**share, "generation": 2}
+
+    assert config_client.get("/agent/123/share", headers=mock_auth_header).json() == share
+    assert config_client.post("/agent/123/share", headers=mock_auth_header).json() == share
+    assert config_client.post("/agent/123/share/rotate", headers=mock_auth_header).json()["generation"] == 2
+    assert config_client.delete("/agent/123/share", headers=mock_auth_header).status_code == 204
+
+    mock_get.assert_called_once_with(agent_id=123, tenant_id="tenant-a", user_id="owner-a")
+    mock_enable.assert_called_once_with(agent_id=123, tenant_id="tenant-a", user_id="owner-a")
+    mock_rotate.assert_called_once_with(agent_id=123, tenant_id="tenant-a", user_id="owner-a")
+    mock_revoke.assert_called_once_with(agent_id=123, tenant_id="tenant-a", user_id="owner-a")
+
+
+def test_agent_share_management_api_returns_bad_request_for_share_errors(mocker, mock_auth_header):
+    from services.agent_share_service import AgentShareError
+
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("owner-a", "tenant-a"))
+    mocker.patch("apps.agent_app.enable_agent_share", side_effect=AgentShareError("agent_not_published"))
+
+    response = config_client.post("/agent/123/share", headers=mock_auth_header)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "agent_not_published"
+
+
+@pytest.mark.asyncio
+async def test_agent_share_run_uses_the_resolved_visitor_session(mocker, mock_auth_header):
+    from apps import agent_app
+    from consts.model import AgentRequest
+
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "tenant-a"))
+    mocker.patch(
+        "apps.agent_app.resolve_agent_share_session",
+        return_value={"agent_id": 123, "conversation_id": 88, "agent_version_no": 4},
+    )
+    run_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        return_value="stream-response",
+    )
+    request = AgentRequest(query="hello", agent_id=999, conversation_id=777, version_no=2)
+
+    result = await agent_app.share_agent_run_api("opaque-token", request, MagicMock(), "Bearer token")
+
+    assert result == "stream-response"
+    assert request.agent_id == 123
+    assert request.conversation_id == 88
+    assert request.version_no == 4
+    run_stream.assert_awaited_once_with(
+        agent_request=request,
+        http_request=ANY,
+        authorization="Bearer token",
+        user_id="visitor-a",
+        tenant_id="tenant-a",
+    )
+
+
 def test_publish_version_api_success(mocker, mock_auth_header):
     """Test publish_version_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")

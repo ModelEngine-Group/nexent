@@ -60,6 +60,14 @@ from management.services.agent.service import (
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
 from services.agent_draft_permission_service import AgentDraftEditError
+from services.agent_share_service import (
+    AgentShareError,
+    enable_agent_share,
+    get_agent_share_link,
+    revoke_agent_share_link,
+    resolve_agent_share_session,
+    rotate_agent_share_link,
+)
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from services.agent_version_service import (
     publish_version_impl,
@@ -658,6 +666,80 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
 
 # Agent Version Management APIs
 # ---------------------------------------------------------------------------
+
+
+def _agent_share_management_error(exc: AgentShareError) -> HTTPException:
+    if str(exc) in {"agent_not_found", "agent_not_draft", "agent_deleted", "agent_read_only"}:
+        return HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
+    return HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+
+
+@agent_config_router.get("/{agent_id}/share")
+async def get_agent_share_api(agent_id: int, authorization: str = Header(None)):
+    """Return the active Agent share link for its editable owner."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        return get_agent_share_link(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+    except AgentShareError as exc:
+        raise _agent_share_management_error(exc) from exc
+
+
+@agent_config_router.post("/{agent_id}/share")
+async def enable_agent_share_api(agent_id: int, authorization: str = Header(None)):
+    """Enable one login-gated share link for a published Agent."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        return enable_agent_share(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+    except AgentShareError as exc:
+        raise _agent_share_management_error(exc) from exc
+
+
+@agent_config_router.post("/{agent_id}/share/rotate")
+async def rotate_agent_share_api(agent_id: int, authorization: str = Header(None)):
+    """Invalidate the current share token and return its replacement."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        return rotate_agent_share_link(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+    except AgentShareError as exc:
+        raise _agent_share_management_error(exc) from exc
+
+
+@agent_config_router.delete("/{agent_id}/share", status_code=HTTPStatus.NO_CONTENT)
+async def revoke_agent_share_api(agent_id: int, authorization: str = Header(None)):
+    """Disable the active Agent share link."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        revoke_agent_share_link(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+        return Response(status_code=HTTPStatus.NO_CONTENT)
+    except AgentShareError as exc:
+        raise _agent_share_management_error(exc) from exc
+
+
+@agent_runtime_router.post("/share/{share_token}/run")
+async def share_agent_run_api(
+    share_token: str,
+    agent_request: AgentRequest,
+    http_request: Request,
+    authorization: str = Header(None),
+):
+    """Run an Agent through a login-gated share link and isolated session."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        share_session = resolve_agent_share_session(share_token, visitor_user_id=user_id)
+        agent_request.agent_id = share_session["agent_id"]
+        agent_request.conversation_id = share_session["conversation_id"]
+        agent_request.version_no = share_session["agent_version_no"]
+        return await run_agent_stream(
+            agent_request=agent_request,
+            http_request=http_request,
+            authorization=authorization,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+    except AgentShareError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent share is unavailable.") from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
 
 
 @agent_config_router.post("/{agent_id}/publish")

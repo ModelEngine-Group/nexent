@@ -117,7 +117,8 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         agent_id: Optional[int] = None,
                         chat_mode: Optional[str] = None,
                         knowledge_scope: Optional[Dict[str, Any]] = None,
-                        runtime_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        runtime_metadata: Optional[Dict[str, Any]] = None,
+                        is_agent_share: bool = False) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -133,7 +134,11 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
     """
     with get_db_session() as session:
         # Prepare data dictionary
-        data = {"conversation_title": conversation_title, "delete_flag": 'N'}
+        data = {
+            "conversation_title": conversation_title,
+            "delete_flag": 'N',
+            "is_agent_share": is_agent_share,
+        }
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:
@@ -844,7 +849,8 @@ def get_conversation_list(
             (func.extract('epoch', ConversationRecord.update_time)
              * 1000).label('update_time')
         ).where(
-            ConversationRecord.delete_flag == 'N'
+            ConversationRecord.delete_flag == 'N',
+            ConversationRecord.is_agent_share.is_(False),
         ).order_by(
             desc(ConversationRecord.create_time),
             desc(ConversationRecord.conversation_id),
@@ -901,6 +907,7 @@ def get_conversation_list_page(
         ).where(
             ConversationRecord.delete_flag == 'N',
             ConversationRecord.created_by == user_id,
+            ConversationRecord.is_agent_share.is_(False),
         ).order_by(
             desc(ConversationRecord.create_time),
             desc(ConversationRecord.conversation_id),

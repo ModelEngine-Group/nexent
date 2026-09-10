@@ -74,6 +74,12 @@ class ConversationRecord(TableBase):
         server_default=text("'execution'"),
         doc="UI chat mode for the conversation: 'planning' or 'execution'",
     )
+    is_agent_share = Column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        doc="Whether this conversation belongs exclusively to an Agent share session",
+    )
     knowledge_scope = Column(
         JSONB,
         nullable=True,
@@ -406,6 +412,60 @@ class ConversationShareAsset(TableBase):
     size = Column(BigInteger, doc="File size in bytes")
     source_kind = Column(String(50), doc="attachment, source, image, markdown")
     metadata_json = Column(JSONB, doc="Original reference metadata")
+
+
+class AgentShare(TableBase):
+    """A revocable, login-gated link to one published Agent."""
+
+    __tablename__ = "agent_share_t"
+    __table_args__ = (
+        Index(
+            "uq_agent_share_active",
+            "tenant_id",
+            "agent_id",
+            unique=True,
+            postgresql_where=text("status = 'active' AND delete_flag = 'N'"),
+        ),
+        Index("idx_agent_share_owner", "tenant_id", "owner_user_id", "delete_flag"),
+        {"schema": SCHEMA},
+    )
+
+    agent_share_id = Column(
+        BigInteger,
+        Sequence("agent_share_t_agent_share_id_seq", schema=SCHEMA),
+        primary_key=True,
+        nullable=False,
+        doc=_PRIMARY_KEY_DOC,
+    )
+    public_share_id = Column(String(36), nullable=False, unique=True, doc="Public share identifier")
+    tenant_id = Column(String(100), nullable=False, doc=_TENANT_ID_DOC)
+    agent_id = Column(Integer, nullable=False, doc="Published root Agent ID")
+    owner_user_id = Column(String(100), nullable=False, doc="Agent share manager user ID")
+    token_generation = Column(Integer, nullable=False, default=1, doc="Current share Token generation")
+    token_nonce = Column(String(128), nullable=False, doc="Server-side HMAC nonce")
+    status = Column(String(16), nullable=False, default="active", doc="active or revoked")
+
+
+class AgentShareSession(TableBase):
+    """One share conversation for each authenticated user."""
+
+    __tablename__ = "agent_share_session_t"
+    __table_args__ = (
+        Index(
+            "uq_agent_share_session_visitor",
+            "agent_share_id",
+            "visitor_user_id",
+            unique=True,
+        ),
+        Index("idx_agent_share_session_conversation", "conversation_id", "delete_flag"),
+        {"schema": SCHEMA},
+    )
+
+    share_session_id = Column(String(36), primary_key=True, nullable=False, doc="Share session UUID")
+    agent_share_id = Column(BigInteger, nullable=False, doc="Parent Agent share ID")
+    visitor_user_id = Column(String(100), nullable=False, doc="Authenticated conversation owner")
+    conversation_id = Column(BigInteger, nullable=False, unique=True, doc="Bound conversation ID")
+    agent_version_no = Column(Integer, nullable=False, doc="Published Agent version pinned at creation")
 
 
 class ModelRecord(TableBase):
