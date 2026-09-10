@@ -17,6 +17,7 @@ import { Agent } from "@/types/agentConfig";
 type CollaborativeAgentListItem = {
   id: number | string;
   name: string;
+  versionName?: string;
 };
 
 interface CollaborativeAgentListProps {
@@ -61,6 +62,11 @@ export function CollaborativeAgentList({
           className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm text-foreground ${toneClasses.item}`}
         >
           <span className="max-w-full truncate">{agent.name}</span>
+          {agent.versionName && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              V{agent.versionName}
+            </span>
+          )}
           {!readOnly && onRemove && (
             <button
               type="button"
@@ -378,6 +384,7 @@ export default function CollaborativeAgent() {
               agents={relatedInternalAgents.map((agent) => ({
                 id: agent.id,
                 name: agent.display_name || agent.name,
+                versionName: agent.version_name,
               }))}
               label={t("agent.collaborative.label.internal")}
               tone="primary"
