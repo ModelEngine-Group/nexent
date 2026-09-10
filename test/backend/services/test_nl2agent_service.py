@@ -1390,8 +1390,9 @@ async def test_build_run_info_is_ephemeral(mocker):
     capacity_snapshot = {"capacity_fingerprint": "capacity-fingerprint"}
     resolved_capacity_snapshot = MagicMock(context_window_tokens=32768)
     safe_input_budget_snapshot = {
-        "soft_input_budget_tokens": 24000,
-        "hard_input_budget_tokens": 30000,
+        "effective_input_limit_tokens": 30000,
+        "compaction_trigger_threshold_tokens": 24000,
+        "compaction_target_tokens": 18000,
     }
     join_query = mocker.patch(
         "services.nl2agent_service.join_minio_file_description_to_query",
@@ -1459,10 +1460,8 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.query == "final query"
     assert run_info.agent_config.name == "__nl2agent_runtime__"
     assert run_info.agent_config.context_manager_config.token_threshold == 24000
-    assert (
-        run_info.agent_config.context_manager_config.hard_input_budget_tokens
-        == 30000
-    )
+    assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
+    assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000
     assert run_info.agent_config.capacity_snapshot == capacity_snapshot
     assert (
         run_info.agent_config.safe_input_budget_snapshot
@@ -1680,8 +1679,9 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     context_config = run_info.agent_config.context_manager_config
     assert context_config.token_threshold == 8192
     assert context_config.context_window_tokens == 8192
-    assert context_config.soft_input_budget_tokens == 0
-    assert context_config.hard_input_budget_tokens == 0
+    assert context_config.compaction_trigger_threshold_tokens == 0
+    assert context_config.effective_input_limit_tokens == 0
+    assert context_config.compaction_target_tokens == 0
     assert run_info.model_config_list == model_configs
     assert run_info.history == []
     assert len(run_info.context_input.items) == 2

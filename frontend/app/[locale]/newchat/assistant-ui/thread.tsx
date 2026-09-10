@@ -50,6 +50,7 @@ import {
   CopyIcon,
   DownloadIcon,
   FileTextIcon,
+  LoaderCircleIcon,
   ImageIcon,
   MoreHorizontalIcon,
   RefreshCwIcon,
@@ -97,6 +98,47 @@ import {
   type Nl2SkillFileCardData,
   type VerificationContent,
 } from "../adapter/remote-chat-model-adapter";
+
+type HistorySummaryData = {
+  status?: "compacting" | "accepted";
+  summary?: { markdown?: string } | string;
+  covered_through_message_id?: number;
+};
+
+const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
+  const { t } = useTranslation();
+  if (data.status === "compacting") {
+    return (
+      <div className="my-2 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+        <LoaderCircleIcon className="size-4 animate-spin" aria-hidden="true" />
+        {t("taskWindow.historySummary.compacting")}
+      </div>
+    );
+  }
+  const markdown =
+    typeof data.summary === "string"
+      ? data.summary
+      : data.summary?.markdown || "";
+  if (!markdown) return null;
+  return (
+    <details className="my-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+      <summary className="flex cursor-pointer items-center gap-2 font-medium">
+        <FileTextIcon className="size-4" aria-hidden="true" />
+        {t("taskWindow.historySummary.title")}
+        {typeof data.covered_through_message_id === "number" && (
+          <span className="text-xs font-normal text-muted-foreground">
+            {t("taskWindow.historySummary.coveredThrough", {
+              id: data.covered_through_message_id,
+            })}
+          </span>
+        )}
+      </summary>
+      <div className="mt-3 whitespace-pre-wrap border-t pt-3 text-muted-foreground">
+        {markdown}
+      </div>
+    </details>
+  );
+};
 import {
   formatMessageDate,
   formatMessageTime,
@@ -1481,6 +1523,19 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "history-summary"
+                ) {
+                  return (
+                    <HistorySummaryCard
+                      data={
+                        (part as typeof part & { data?: unknown })
+                          .data as HistorySummaryData
+                      }
+                    />
+                  );
+                }
                 if (
                   (part as typeof part & { name?: string }).name ===
                   "execution-code"

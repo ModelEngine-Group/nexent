@@ -1382,11 +1382,20 @@ class MonitoringManager:
                 list(getattr(evidence, "prefix_change_reasons", ()) or ()),
                 ensure_ascii=False,
             ),
-            "context.budget.soft": getattr(evidence, "soft_budget", 0),
-            "context.budget.hard": getattr(evidence, "hard_budget", 0),
+            "context.effective_input_limit_tokens": getattr(
+                evidence, "effective_input_limit_tokens", 0
+            ),
+            "context.compaction_trigger_threshold_tokens": getattr(
+                evidence, "compaction_trigger_threshold_tokens", 0
+            ),
+            "context.compaction_target_tokens": getattr(
+                evidence, "compaction_target_tokens", 0
+            ),
             "context.tokens.pre_compression": getattr(evidence, "raw_token_estimate", 0),
             "context.tokens.post_compression": getattr(evidence, "final_token_estimate", 0),
-            "context.budget.hard_exceeded": bool(getattr(evidence, "over_hard_budget", False)),
+            "context.compaction.exceeds_effective_input_limit": bool(
+                getattr(evidence, "exceeds_effective_input_limit", False)
+            ),
             "context.compression.attempted": bool(getattr(evidence, "compression_attempted", False)),
             "context.compression.fallback_compaction": bool(getattr(evidence, "fallback_compaction_used", False)),
             "context.compression.records": json.dumps(compression_records, ensure_ascii=False, sort_keys=True),
