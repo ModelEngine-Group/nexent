@@ -97,13 +97,39 @@ export type Nl2AgentCardActionSubtype =
   | "installed_resource_binding"
   | "resource_gap_resolution";
 
-export interface Nl2AgentCardAction {
+export interface Nl2AgentResourceGapResolutionAction {
   type: "nl2agent_card_action";
-  subtype: Nl2AgentCardActionSubtype;
+  subtype: "resource_gap_resolution";
   agent_id: number;
-  action: string;
-  result: Record<string, unknown>;
+  action: "resolve_requirements";
+  result: {
+    requirements: Array<
+      | {
+          requirement_id: string;
+          resolution: "unchanged";
+          query: string;
+          resource_name_hint: string | null;
+          search_terms: string[];
+        }
+      | {
+          requirement_id: string;
+          resolution: "revised" | "skill_created";
+          query: string;
+        }
+    >;
+    abandoned_requirement_ids: string[];
+  };
 }
+
+export type Nl2AgentCardAction =
+  | Nl2AgentResourceGapResolutionAction
+  | {
+      type: "nl2agent_card_action";
+      subtype: Nl2AgentCardActionSubtype;
+      agent_id: number;
+      action: string;
+      result: Record<string, unknown>;
+    };
 
 export type Nl2AgentDraftField = "description" | Nl2aPromptField;
 

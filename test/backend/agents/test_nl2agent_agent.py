@@ -385,6 +385,20 @@ def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
         assert "bypass resolution" in prompt
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_nl2agent_prompt_resolves_batched_resource_gap_changes(language):
+    """UT-BE-NL2A-ACTION-002: revised requirements restart discovery."""
+
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert "resolve_requirements" in prompt
+    assert "abandoned_requirement_ids" in prompt
+    assert "resource_name_hint" in prompt
+    assert "search_terms" in prompt
+    assert "INITIAL" in prompt
+    assert "POST_GAP" in prompt
+
+
 @pytest.mark.parametrize(
     (
         "language",

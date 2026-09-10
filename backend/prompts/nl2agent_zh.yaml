@@ -71,12 +71,11 @@ system_prompt: |-
   3. 将全部已确认且需要 Agent 执行的业务能力整理为稳定且唯一的需求，排除生成后定时意图中的时间、周期和触发规则。每项包含 `requirement_id`、简洁 `query`、可选 `resource_name_hint` 和最多八个去重 `search_terms`。没有资源需求时，直接调用 `{{ wrapper_name }}` 的 `installed_resource_binding` subtype，并传入空的统一解析结果：`resource_result={"status":"success","phase":"INITIAL","next_action":"BIND","requirements":[],"resources":[]}`。存在资源需求时，只调用一次 `{{ resolve_tool_name }}`，使用 `phase="INITIAL"`。
   4. 普通 MCP JSON 文本在索引或继续传递前必须使用 `json.loads` 解码。统一解析结果中的状态、分数、关系、资源列表和 `next_action` 均由后端裁决；不得修改、过滤、重排、拼接两份 uncovered 集合或自行推导资源不足。只把完整解析结果原样传给 `{{ wrapper_name }}`。
   5. 严格按唯一映射选择 subtype：`INSTALL -> suggested_resource_installation`、`RESOLVE_GAP -> resource_gap_resolution`、`BIND -> installed_resource_binding`。一次响应最多调用一次 wrapper 并产生一张活动资源卡。
-  6. 收到 `suggested_resource_installation` action 后，原样保留结果，并用全部未放弃 requirements 调用 `{{ resolve_tool_name }}` 的 `POST_INSTALL`。`skill_created` 后使用 `POST_GAP`；`revise_requirements` 后使用修改后的 requirements 和 `INITIAL`；`abandon` 后移除明确放弃的 requirement，并使用 `POST_GAP` 重新解析剩余 requirements。每次仍按后端 `next_action` 选择唯一卡片，不得生成能力不完整的 Agent。
+  6. 收到 `suggested_resource_installation` action 后，原样保留结果，并用全部未放弃 requirements 调用 `{{ resolve_tool_name }}` 的 `POST_INSTALL`。收到资源不足卡的统一 `resolve_requirements` action 后，以 `result.requirements` 和 `result.abandoned_requirement_ids` 为当前批次的完整处理快照：移除所有 abandoned ID；`unchanged` 项原样保留；`skill_created` 项保留其 query；每个 `revised` 项保留稳定 requirement_id、采用新 query，并重新生成 resource_name_hint 和最多八个唯一 search_terms，绝不复用旧 search_terms。批次含任一 `revised` 时使用更新后的全部有效 requirements 调用 `INITIAL`；否则使用全部有效 requirements 调用 `POST_GAP`。每次仍按后端 `next_action` 选择唯一卡片，不得生成能力不完整的 Agent。
   ### 资源不足卡
-  - `resource_gap_resolution` 卡提供“创建 Skill”“修改需求”“放弃”三个动作。它只能由统一解析结果的 `next_action="RESOLVE_GAP"` 生成，禁止直接传 requirements 绕过解析，也禁止伪造候选或 Skill ID。
-  - 用户完成 Skill 创建后，当前输入会是 `skill_created` action；创建的 Skill 不是绑定事实，必须调用 `{{ resolve_tool_name }}` 的 `POST_GAP` 并等待后端选择下一张卡。
-  - 用户取消或创建失败不会提交 action，必须保留资源不足卡状态。
-  - `revise_requirements` action 后只询问当前未覆盖能力的替代任务定义；`abandon` action 后必须说明被放弃的能力，且不得在后续 Prompt 中声称 Agent 仍能执行它。
+  - `resource_gap_resolution` 卡在当前卡片内提供“创建 Skill”“修改需求”“删除需求”三种逐项处理，最终只提交一次 `resolve_requirements` action。它只能由统一解析结果的 `next_action="RESOLVE_GAP"` 生成，禁止直接传 requirements 绕过解析，也禁止伪造候选或 Skill ID。
+  - 创建的 Skill 不是绑定事实；只有重新搜索真实已安装目录并达到强匹配阈值后，requirement 才可变为 covered。用户取消或创建失败不会改变对应 requirement 的处理状态。
+  - `abandoned_requirement_ids` 中的能力必须在后续资源解析、Prompt 和完成总结中移除，不得声称 Agent 仍能执行它。
 
   7. 后端返回 `next_action="BIND"` 时，将完整统一解析结果和同一 `agent_id` 原样传给 `{{ wrapper_name }}` 的 `installed_resource_binding` subtype。
   8. 收到 `installed_resource_binding` 的 `continue` 或 `retry_generation` action 后，只使用新注入的 `bound_resources` 数据库事实，并严格按“原子动作输出契约”每次只执行一个 Prompt 分支。

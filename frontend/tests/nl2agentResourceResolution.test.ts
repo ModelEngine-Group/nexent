@@ -7,6 +7,16 @@ const {
   getNl2AgentCardPhase,
   isSafeNl2AgentResourceCard,
 } = require("../lib/nl2agent-resource-resolution.ts");
+const {
+  abandonResourceGapRequirement,
+  buildResourceGapResolutionResult,
+  canSubmitResourceGapResolution,
+  createResourceGapRequirementStates,
+  markResourceGapSkillCreated,
+  restoreResourceGapRequirement,
+  saveResourceGapRequirementEdit,
+  startResourceGapRequirementEdit,
+} = require("../lib/nl2agent-resource-gap.ts");
 
 test("v2 installation cards reject configuration and installation details", () => {
   assert.equal(
@@ -62,4 +72,67 @@ test("card subtypes map to mutually exclusive resource phases", () => {
   );
   assert.equal(getNl2AgentCardPhase("installed_resource_binding"), "binding");
   assert.equal(getNl2AgentCardPhase("requirement_clarification"), "clarifying");
+});
+
+const gapRequirements = [
+  {
+    requirement_id: "inventory",
+    query: "查询库存",
+    resource_name_hint: "库存系统",
+    search_terms: ["库存", "inventory"],
+  },
+  {
+    requirement_id: "report",
+    query: "生成日报",
+    resource_name_hint: null,
+    search_terms: ["日报", "report"],
+  },
+  {
+    requirement_id: "email",
+    query: "发送邮件",
+    resource_name_hint: "邮件服务",
+    search_terms: ["邮件", "email"],
+  },
+];
+
+test("resource-gap resolution keeps a complete snapshot and emits one batch action", () => {
+  let states = createResourceGapRequirementStates(gapRequirements);
+  states = startResourceGapRequirementEdit(states, "inventory");
+  states = saveResourceGapRequirementEdit(
+    states,
+    "inventory",
+    "查询 ERP 中的实时库存"
+  );
+  states = abandonResourceGapRequirement(states, "report");
+  states = markResourceGapSkillCreated(states, "email");
+
+  assert.equal(canSubmitResourceGapResolution(states), true);
+  assert.deepEqual(buildResourceGapResolutionResult(gapRequirements, states), {
+    requirements: [
+      {
+        requirement_id: "inventory",
+        resolution: "revised",
+        query: "查询 ERP 中的实时库存",
+      },
+      {
+        requirement_id: "email",
+        resolution: "skill_created",
+        query: "发送邮件",
+      },
+    ],
+    abandoned_requirement_ids: ["report"],
+  });
+});
+
+test("resource-gap resolution blocks unfinished edits and restores deleted changes", () => {
+  let states = createResourceGapRequirementStates(gapRequirements);
+  states = startResourceGapRequirementEdit(states, "inventory");
+  assert.equal(canSubmitResourceGapResolution(states), false);
+
+  states = saveResourceGapRequirementEdit(states, "inventory", "更新库存查询");
+  states = abandonResourceGapRequirement(states, "inventory");
+  states = restoreResourceGapRequirement(states, "inventory");
+
+  assert.equal(states.inventory.status, "revised");
+  assert.equal(states.inventory.query, "更新库存查询");
 });

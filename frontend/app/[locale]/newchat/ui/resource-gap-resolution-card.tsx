@@ -2,13 +2,32 @@
 
 import { useEffect, useId, useRef, useState, type FC } from "react";
 import { useAui } from "@assistant-ui/react";
-import { AlertTriangle, PencilLine, PlusCircle, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  PencilLine,
+  PlusCircle,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import {
+  abandonResourceGapRequirement,
+  buildResourceGapResolutionResult,
+  canSubmitResourceGapResolution,
+  cancelResourceGapRequirementEdit,
+  createResourceGapRequirementStates,
+  markResourceGapSkillCreated,
+  restoreResourceGapRequirement,
+  saveResourceGapRequirementEdit,
+  startResourceGapRequirementEdit,
+} from "@/lib/nl2agent-resource-gap";
 import type {
-  Nl2AgentCardAction,
+  Nl2AgentResourceGapResolutionAction,
   Nl2aResourceGapResolutionPayload,
 } from "../adapter/remote-chat-model-adapter";
 
@@ -21,8 +40,13 @@ export const ResourceGapResolutionCard: FC<{
   const reactId = useId();
   const cardKey = `resource_gap_resolution:${payload.agent_id}:${reactId}`;
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
-  const resumedRequestId = useRef<number | null>(null);
+  const [states, setStates] = useState(() =>
+    createResourceGapRequirementStates(payload.requirements)
+  );
+  const [editingValues, setEditingValues] = useState<Record<string, string>>(
+    {}
+  );
+  const completedRequestIds = useRef<Set<number>>(new Set());
   const {
     registerCard,
     submitCard,
@@ -37,24 +61,27 @@ export const ResourceGapResolutionCard: FC<{
 
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
 
-  const submit = (
-    actionName: "skill_created" | "revise_requirements" | "abandon",
-    requirementId = selectedRequirementId
-  ) => {
-    if (isLocked) return;
+  const submit = () => {
+    if (isLocked || !canSubmitResourceGapResolution(states)) return;
     setIsSubmitted(true);
     submitCard(cardKey);
-    const action: Nl2AgentCardAction = {
+    const action: Nl2AgentResourceGapResolutionAction = {
       type: "nl2agent_card_action",
       subtype: payload.subtype,
       agent_id: payload.agent_id,
-      action: actionName,
-      result: { requirement_id: requirementId },
+      action: "resolve_requirements",
+      result: buildResourceGapResolutionResult(payload.requirements, states),
     };
     aui.thread().append({
       role: "user",
       content: [
-        { type: "text", text: t(`nl2agent.resourceGap.${actionName}`) },
+        {
+          type: "text",
+          text: t(
+            "nl2agent.resourceGap.resolve_requirements",
+            "Confirm requirement changes"
+          ),
+        },
       ],
       metadata: { custom: { nl2agentCardAction: action } },
       startRun: true,
@@ -66,13 +93,20 @@ export const ResourceGapResolutionCard: FC<{
       !skillCreationRequest?.completed ||
       skillCreationRequest.agentId !== payload.agent_id ||
       skillCreationRequest.cardKey !== cardKey ||
-      resumedRequestId.current === skillCreationRequest.requestId
+      completedRequestIds.current.has(skillCreationRequest.requestId)
     ) {
       return;
     }
-    resumedRequestId.current = skillCreationRequest.requestId;
-    submit("skill_created", skillCreationRequest.requirementId);
+    completedRequestIds.current.add(skillCreationRequest.requestId);
+    setStates((current) =>
+      markResourceGapSkillCreated(current, skillCreationRequest.requirementId)
+    );
   }, [cardKey, payload.agent_id, skillCreationRequest]);
+
+  const isSkillCreationPending =
+    skillCreationRequest?.agentId === payload.agent_id &&
+    skillCreationRequest.cardKey === cardKey &&
+    !skillCreationRequest.completed;
 
   return (
     <section className="my-4 overflow-hidden rounded-lg border border-amber-200 bg-amber-50/30 shadow-sm">
@@ -91,18 +125,230 @@ export const ResourceGapResolutionCard: FC<{
         </div>
       </div>
       <div className="space-y-3 p-4">
-        <ul className="space-y-2 text-sm text-muted-foreground">
-          {payload.requirements.map((requirement) => (
-            <li key={requirement.requirement_id} className="flex items-center justify-between gap-3">
-              <span>{requirement.query}</span>
-              <div className="flex gap-1">
-                <Button type="button" size="sm" disabled={isLocked} onClick={() => requestSkillCreation(payload.agent_id, cardKey, requirement.requirement_id)}><PlusCircle className="mr-1 size-4" />{t("nl2agent.resourceGap.createSkill", "Create Skill")}</Button>
-                <Button type="button" size="sm" variant="outline" disabled={isLocked} onClick={() => submit("revise_requirements", requirement.requirement_id)}><PencilLine className="size-4" /></Button>
-                <Button type="button" size="sm" variant="ghost" disabled={isLocked} onClick={() => submit("abandon", requirement.requirement_id)}><XCircle className="size-4" /></Button>
-              </div>
-            </li>
-          ))}
+        <ul className="space-y-2 text-sm">
+          {payload.requirements.map((requirement) =>
+            (() => {
+              const state = states[requirement.requirement_id];
+              const isAbandoned = state.status === "abandoned";
+              const isEditing = state.status === "editing";
+              const isSkillCreated = state.status === "skill_created";
+              return (
+                <li
+                  key={requirement.requirement_id}
+                  className={`rounded-md border p-3 ${
+                    isAbandoned
+                      ? "border-muted bg-muted/50 text-muted-foreground"
+                      : "border-border"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      {isEditing ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Input
+                            aria-label={t(
+                              "nl2agent.resourceGap.editInputLabel",
+                              "Requirement"
+                            )}
+                            autoFocus
+                            className="min-w-56 flex-1"
+                            value={
+                              editingValues[requirement.requirement_id] ??
+                              state.query
+                            }
+                            onChange={(event) =>
+                              setEditingValues((current) => ({
+                                ...current,
+                                [requirement.requirement_id]:
+                                  event.target.value,
+                              }))
+                            }
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={
+                              !editingValues[requirement.requirement_id]?.trim()
+                            }
+                            onClick={() => {
+                              setStates((current) =>
+                                saveResourceGapRequirementEdit(
+                                  current,
+                                  requirement.requirement_id,
+                                  editingValues[requirement.requirement_id] ??
+                                    state.query
+                                )
+                              );
+                              setEditingValues((current) => {
+                                const {
+                                  [requirement.requirement_id]: _,
+                                  ...rest
+                                } = current;
+                                return rest;
+                              });
+                            }}
+                          >
+                            {t("nl2agent.resourceGap.save", "Save")}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setStates((current) =>
+                                cancelResourceGapRequirementEdit(
+                                  current,
+                                  requirement.requirement_id
+                                )
+                              );
+                              setEditingValues((current) => {
+                                const {
+                                  [requirement.requirement_id]: _,
+                                  ...rest
+                                } = current;
+                                return rest;
+                              });
+                            }}
+                          >
+                            {t("nl2agent.resourceGap.cancel", "Cancel")}
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className={isAbandoned ? "line-through" : undefined}>
+                          {state.query}
+                        </p>
+                      )}
+                      {state.status === "revised" && (
+                        <p className="mt-1 text-xs text-blue-600">
+                          {t("nl2agent.resourceGap.revised", "Modified")}
+                        </p>
+                      )}
+                      {isAbandoned && (
+                        <p className="mt-1 text-xs">
+                          {t(
+                            "nl2agent.resourceGap.removed",
+                            "Removed from requirements"
+                          )}
+                        </p>
+                      )}
+                      {isSkillCreated && (
+                        <p className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
+                          <CheckCircle2 className="size-3.5" />
+                          {t(
+                            "nl2agent.resourceGap.skillCreated",
+                            "Skill created"
+                          )}
+                        </p>
+                      )}
+                    </div>
+                    {!isEditing && (
+                      <div className="flex flex-wrap gap-1">
+                        {isAbandoned ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={isLocked}
+                            onClick={() =>
+                              setStates((current) =>
+                                restoreResourceGapRequirement(
+                                  current,
+                                  requirement.requirement_id
+                                )
+                              )
+                            }
+                          >
+                            <RotateCcw className="mr-1 size-4" />
+                            {t("nl2agent.resourceGap.restore", "Undo")}
+                          </Button>
+                        ) : !isSkillCreated ? (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={isLocked || isSkillCreationPending}
+                              onClick={() =>
+                                requestSkillCreation(
+                                  payload.agent_id,
+                                  cardKey,
+                                  requirement.requirement_id
+                                )
+                              }
+                            >
+                              <PlusCircle className="mr-1 size-4" />
+                              {t(
+                                "nl2agent.resourceGap.createSkill",
+                                "Create Skill"
+                              )}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={isLocked}
+                              onClick={() => {
+                                setStates((current) =>
+                                  startResourceGapRequirementEdit(
+                                    current,
+                                    requirement.requirement_id
+                                  )
+                                );
+                                setEditingValues((current) => ({
+                                  ...current,
+                                  [requirement.requirement_id]: state.query,
+                                }));
+                              }}
+                            >
+                              <PencilLine className="size-4" />
+                              <span className="sr-only">
+                                {t(
+                                  "nl2agent.resourceGap.revise",
+                                  "Revise requirement"
+                                )}
+                              </span>
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={isLocked}
+                              onClick={() =>
+                                setStates((current) =>
+                                  abandonResourceGapRequirement(
+                                    current,
+                                    requirement.requirement_id
+                                  )
+                                )
+                              }
+                            >
+                              <Trash2 className="size-4" />
+                              <span className="sr-only">
+                                {t(
+                                  "nl2agent.resourceGap.delete",
+                                  "Delete requirement"
+                                )}
+                              </span>
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })()
+          )}
         </ul>
+        <div className="flex justify-end border-t pt-3">
+          <Button
+            type="button"
+            disabled={isLocked || !canSubmitResourceGapResolution(states)}
+            onClick={submit}
+          >
+            <CheckCircle2 className="mr-1 size-4" />
+            {t("nl2agent.resourceGap.confirm", "Confirm and continue")}
+          </Button>
+        </div>
       </div>
     </section>
   );
