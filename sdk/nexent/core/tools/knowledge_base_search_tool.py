@@ -332,11 +332,6 @@ class KnowledgeBaseSearchTool(Tool):
         if is_rerank:
             effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 
-        if len(search_index_names) == 0:
-            return self._build_scope_response(
-                [], requested_scope, search_index_names, ignored_scope, fallback_to_all
-            )
-
         kb_search_data = self._run_search(
             query=query,
             index_names=search_index_names,
