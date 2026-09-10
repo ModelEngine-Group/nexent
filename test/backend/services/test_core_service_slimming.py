@@ -291,7 +291,10 @@ def agent_reader(monkeypatch, model_resolver):
 
 
 def test_ac007_projection_keeps_distinct_legacy_name_rules(agent_reader, monkeypatch, model_resolver):
-    records = {1: {"display_name": None}, 2: {"display_name": "Second"}}
+    records = {
+        1: {"display_name": None, "connect_status": "available"},
+        2: {"display_name": "Second", "connect_status": "available"},
+    }
     monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda mid, *args: records.get(mid))
     data = {"model_ids": [1, 9, 2, 2]}
     listed = agent_reader.project_agent_models(data, "tenant", {})
@@ -301,6 +304,21 @@ def test_ac007_projection_keeps_distinct_legacy_name_rules(agent_reader, monkeyp
     assert listed.fields["model_name"] == "Second"
     assert detail.fields["model_name"] is None
     assert listed.deleted_model_ids == detail.deleted_model_ids == frozenset({9})
+
+
+def test_ac007_projection_filters_unavailable_models(agent_reader, monkeypatch, model_resolver):
+    records = {
+        7: {"display_name": "Unavailable", "connect_status": "unavailable"},
+        8: {"display_name": "Available", "connect_status": "available"},
+    }
+    monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda mid, *args: records[mid])
+
+    projection = agent_reader.project_agent_models({"model_ids": [7, 8]}, "tenant", {})
+
+    assert projection.fields["model_ids"] == [8]
+    assert projection.fields["model_names"] == ["Available"]
+    assert projection.fields["model_name"] == "Available"
+    assert projection.availability_model_ids == [7, 8]
 
 
 def test_ac010_deleted_model_reason_is_added_once(agent_reader):
@@ -389,6 +407,21 @@ def test_ac007_availability_uses_real_shared_model_predicate(agent_reader, model
         else agent_reader.AgentUnavailableReason.MODEL_NOT_CONFIGURED
     ]
     assert reasons == expected
+
+
+def test_ac007_agent_available_when_any_configured_model_is_available(agent_reader, model_resolver, monkeypatch):
+    records = {
+        7: {"connect_status": "unavailable"},
+        8: {"connect_status": "available"},
+    }
+    monkeypatch.setattr(model_resolver, "get_model_by_model_id", lambda mid, *args: records[mid])
+
+    ok, reasons = agent_reader.check_agent_availability(
+        1, "tenant", {"agent_id": 1, "model_ids": [7, 8]}
+    )
+
+    assert ok is True
+    assert reasons == []
 
 
 def test_ac007_deleted_tool_model_and_duplicate_order(agent_reader, monkeypatch):
