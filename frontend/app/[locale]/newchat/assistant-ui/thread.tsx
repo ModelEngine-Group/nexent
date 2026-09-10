@@ -149,6 +149,7 @@ import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
+import { formatWarningText } from "@/lib/warningText";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
 import type {
@@ -1494,10 +1495,13 @@ const AssistantMessage: FC<{
                   );
                 }
                 if (textPart.isWarning) {
+                  const warningText = formatWarningText(textPart.text ?? "");
                   return (
-                    <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-amber-500 dark:text-amber-400" />
-                      <span className="break-all">{textPart.text}</span>
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
+                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
+                      <span className="line-clamp-3 min-w-0 break-all">
+                        {warningText}
+                      </span>
                     </div>
                   );
                 }
