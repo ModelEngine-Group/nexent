@@ -15,6 +15,7 @@ from collections.abc import Generator
 from rich.console import Group
 from rich.text import Text
 
+from smolagents import Tool
 from smolagents.agents import CodeAgent, handle_agent_output_types, AgentError, ActionOutput, RunResult
 from smolagents.local_python_executor import fix_final_answer_code
 from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
@@ -46,6 +47,23 @@ from .plan_repo import PlanRepo
 
 logger = logging.getLogger(__name__)
 
+
+class NativePythonInterpreterTool(Tool):
+    """Schema-only bridge that exposes CodeAgent execution to native tool calling."""
+
+    name = "python_interpreter"
+    description = "Execute one Python code snippet in the persistent restricted agent interpreter."
+    inputs = {
+        "code": {
+            "type": "string",
+            "description": "Python source code to execute.",
+        },
+    }
+    output_type = "string"
+
+    def forward(self, code: str) -> str:
+        raise RuntimeError("python_interpreter is dispatched by CoreAgent and cannot be called directly")
+
 RUNTIME_METADATA_BLOCK_RE = re.compile(
     r'<runtime_metadata\b.*</runtime_metadata>',
     flags=re.DOTALL,
@@ -61,6 +79,50 @@ def _remove_parallel_executor_import(code: str) -> str:
     if "parallel_executor" not in code:
         return code
     return PARALLEL_EXECUTOR_IMPORT_RE.sub("", code)
+
+
+def parse_native_tool_call(chat_message: ChatMessage, available_tool_names: set[str]) -> tuple[str, Dict[str, Any], str]:
+    """Validate one provider-native tool call and convert it to executor code."""
+    tool_calls = list(chat_message.tool_calls or [])
+    if len(tool_calls) != 1:
+        raise ValueError(
+            f"Expected exactly one native tool call, received {len(tool_calls)}. "
+            "Return one tool call and wait for its result before continuing."
+        )
+
+    tool_call = tool_calls[0]
+    function = tool_call.function
+    name = str(function.name or "")
+    if name not in available_tool_names:
+        raise ValueError(f"Unknown native tool call: {name!r}")
+    if not name.isidentifier():
+        raise ValueError(f"Native tool name is not a valid Python identifier: {name!r}")
+
+    arguments = function.arguments
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Native tool arguments are not valid JSON: {exc}") from exc
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        raise ValueError("Native tool arguments must be a JSON object.")
+    invalid_keys = [key for key in arguments if not isinstance(key, str) or not key.isidentifier()]
+    if invalid_keys:
+        raise ValueError(f"Native tool arguments contain invalid parameter names: {invalid_keys!r}")
+
+    keywords = [
+        ast.keyword(arg=key, value=ast.parse(repr(value), mode="eval").body)
+        for key, value in arguments.items()
+    ]
+    code = ast.unparse(ast.Expression(body=ast.Call(
+        func=ast.Name(id=name, ctx=ast.Load()),
+        args=[],
+        keywords=keywords,
+    )))
+    call_id = str(tool_call.id or f"call_{uuid.uuid4().hex}")
+    return code, arguments, call_id
 
 
 def parse_code_blobs(text: str) -> str:
@@ -501,6 +563,12 @@ class CoreAgent(CodeAgent):
     ):
         # Pop SDK-specific kwargs before passing the rest to smolagents' CodeAgent.
         self.enable_planning: bool = kwargs.pop("enable_planning", False)
+        self.action_protocol: str = kwargs.pop("action_protocol", "code")
+        if self.action_protocol not in {"code", "native"}:
+            raise ValueError(f"Unsupported action protocol: {self.action_protocol!r}")
+        self.native_tool_choice: str = kwargs.pop("native_tool_choice", "required")
+        if self.native_tool_choice not in {"required", "auto"}:
+            raise ValueError(f"Unsupported native tool choice: {self.native_tool_choice!r}")
         redis_client = kwargs.pop("redis_client", None)
         self.conversation_id = kwargs.pop("conversation_id", None)
         self.user_id = kwargs.pop("user_id", None)
@@ -524,6 +592,8 @@ class CoreAgent(CodeAgent):
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
+        self._native_executed_call_keys: set[str] = set()
+        self._native_python_interpreter_tool = NativePythonInterpreterTool()
         # Override smolagent default to prevent extracting ```python blocks from KB content.
         # code_block_tags[0] and [1] are used by the system prompt template for opening/closing
         # tags (e.g., ``` and ```). extract_code_from_text iterates all tags as language
@@ -559,6 +629,8 @@ class CoreAgent(CodeAgent):
                 names.update(str(name) for name in container.keys())
             except AttributeError:
                 continue
+        if getattr(self, "action_protocol", "code") == "native":
+            names.add("python_interpreter")
         return names
 
     def _managed_agent_names(self) -> set:
@@ -622,6 +694,8 @@ class CoreAgent(CodeAgent):
             except AttributeError:
                 iterable = container
             tools.extend(list(iterable or ()))
+        if getattr(self, "action_protocol", "code") == "native":
+            tools.append(self._native_python_interpreter_tool)
         return tools
 
     def _guardrail_wrap_tools(self) -> None:
@@ -838,7 +912,8 @@ Additional Args:
             self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
         memory_step.model_input_messages = input_messages
-        stop_sequences = ["Observation:", "Calling tools:"]
+        action_protocol = getattr(self, "action_protocol", "code")
+        stop_sequences = [] if action_protocol == "native" else ["Observation:", "Calling tools:"]
 
         # Prepare additional arguments
         additional_args: dict[str, Any] = {}
@@ -869,10 +944,13 @@ Additional Args:
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
         try:
+            if action_protocol == "native":
+                additional_args["tools_to_call_from"] = self._context_tools()
+                additional_args["tool_choice"] = getattr(self, "native_tool_choice", "required")
             chat_message: ChatMessage = self.model(input_messages,
                                                    stop_sequences=stop_sequences, **additional_args)
             memory_step.model_output_message = chat_message
-            model_output = chat_message.content
+            model_output = chat_message.content or ""
             memory_step.token_usage = chat_message.token_usage
             memory_step.model_output = model_output
 
@@ -887,7 +965,34 @@ Additional Args:
 
         # Parse
         try:
-            if self._use_structured_outputs_internally:
+            native_arguments: Dict[str, Any] | None = None
+            native_call_id: str | None = None
+            native_tool_name: str | None = None
+            native_call_key: str | None = None
+            if action_protocol == "native":
+                code_action, native_arguments, native_call_id = parse_native_tool_call(
+                    chat_message,
+                    self._known_tool_names(),
+                )
+                native_tool_name = next(iter(chat_message.tool_calls)).function.name
+                if native_tool_name == "python_interpreter":
+                    if set(native_arguments) != {"code"} or not isinstance(native_arguments["code"], str):
+                        raise ValueError("python_interpreter requires exactly one string argument named 'code'.")
+                    code_action = native_arguments["code"]
+                native_call_key = json.dumps(
+                    [native_tool_name, native_arguments],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+                if native_call_key in self._native_executed_call_keys:
+                    raise InvalidActionFormatError(
+                        "The same native tool call and arguments were already executed in this run. "
+                        "Use the previous observation, choose a different action, or call final_answer.",
+                        self.logger,
+                    )
+            elif self._use_structured_outputs_internally:
                 code_action = json.loads(model_output)["code"]
                 code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
             else:
@@ -914,7 +1019,12 @@ Additional Args:
 
         except AgentExecutionError:
             raise
-        except Exception:
+        except Exception as exc:
+            if action_protocol == "native":
+                raise InvalidActionFormatError(
+                    f"Invalid provider-native action: {exc}",
+                    self.logger,
+                ) from exc
             if _looks_like_incomplete_action_output(
                 model_output,
                 available_tool_names=self._known_tool_names(),
@@ -940,11 +1050,13 @@ Additional Args:
             raise FinalAnswerError()
 
         tool_call = ToolCall(
-            name="python_interpreter",
-            arguments=code_action,
-            id=f"call_{len(self.memory.steps)}",
+            name=native_tool_name or "python_interpreter",
+            arguments=native_arguments if native_arguments is not None else code_action,
+            id=native_call_id or f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]
+        if native_call_key is not None:
+            self._native_executed_call_keys.add(native_call_key)
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
@@ -953,7 +1065,7 @@ Additional Args:
         try:
             monitoring_manager = get_monitoring_manager()
             with monitoring_manager.trace_tool_call(
-                "python_interpreter",
+                native_tool_name or "python_interpreter",
                 self.name,
                 {"code": code_action, "step_number": memory_step.step_number},
             ):
@@ -1140,6 +1252,7 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         if reset:
             self.memory.reset()
             self.monitor.reset()
+            getattr(self, "_native_executed_call_keys", set()).clear()
         self.context_runtime.prepare_run(
             memory=self.memory,
             fallback_system_prompt=self.system_prompt,

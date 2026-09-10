@@ -34,6 +34,20 @@ def _messages(**kwargs):
     return ContextItemRenderer().render(normalize_context_inputs(build_context_inputs(**kwargs)))
 
 
+def test_native_action_context_has_no_executable_code_protocol():
+    rendered = str(_messages(
+        language="zh",
+        action_protocol="native",
+        skills=[{"name": "docx", "description": "Create documents"}],
+        few_shots="<code>read_skill_md('docx')</code>",
+    ))
+
+    assert "每个响应必须且只能包含一个原生工具调用" in rendered
+    assert "不得直接输出最终答案文本" in rendered
+    assert "<code>read_skill_md" not in rendered
+    assert "每轮只调用一个技能工具" in rendered
+
+
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_runtime_system_context_does_not_guide_observation_markers(language):
     rendered = str(_messages(language=language))

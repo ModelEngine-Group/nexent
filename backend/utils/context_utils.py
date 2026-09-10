@@ -119,6 +119,7 @@ def _build_execution_flow_text(
     is_manager: bool = True,
     enable_planning: bool = False,
     priority: int = 60,
+    action_protocol: str = "code",
 ) -> str:
     """Build the execution-flow prompt section.
 
@@ -126,6 +127,43 @@ def _build_execution_flow_text(
     Content: Think/Code loop instructions + output format specs
     Note: memory_list affects one line in the Think section (manager only)
     """
+    if action_protocol == "native":
+        if language == "zh":
+            lines = [
+                "### 原生工具调用执行协议",
+                "每个模型响应必须通过供应商原生的结构化 tool call 表达下一步动作。",
+                "1. 每个响应必须且只能包含一个原生工具调用；调用后等待工具结果，再决定下一步。",
+                "2. 不得在文本、Markdown 代码块或 <code> 标签中模拟工具调用。文本推理不构成动作，也不会被执行。",
+                "3. 工具参数必须是符合工具 schema 的 JSON 对象，不得拼接多个调用或重复相同参数的调用。",
+                "4. 需要执行 Python 时调用 python_interpreter；需要使用技能时调用 read_skill_md、read_skill_config 或 run_skill_script。",
+                "5. 只有任务真正完成时才调用 final_answer，并将完整、面向用户的 Markdown 回答放在 answer 参数中。不得直接输出最终答案文本。",
+                "6. 工具失败后根据 observation 修正参数或选择其他工具；不要原样重试已经执行过的调用。",
+            ]
+            if enable_planning:
+                lines.append("7. 预计超过三个步骤的任务，第一次行动必须是调用 create_plan。")
+            lines.extend([
+                "final_answer 中不得编造检索引用；使用检索事实时，原样使用结果提供的 [[a1]] 形式 reference_mark。",
+                "已上传或生成的文件必须使用工具结果中的永久 S3 URL，不得输出预签名 URL 或本地路径。",
+            ])
+        else:
+            lines = [
+                "### Native Tool-Calling Protocol",
+                "Every model response must express its next action as a provider-native structured tool call.",
+                "1. Return exactly one native tool call per response, then wait for its result before deciding the next action.",
+                "2. Never simulate tool calls in prose, Markdown fences, or <code> tags. Text reasoning is not an executable action.",
+                "3. Arguments must be a JSON object matching the tool schema. Never concatenate calls or repeat an executed call with identical arguments.",
+                "4. Call python_interpreter for Python execution, and use read_skill_md, read_skill_config, or run_skill_script for skills.",
+                "5. Only when the task is complete, call final_answer with the complete user-facing Markdown response in its answer argument. Never emit a direct textual final answer.",
+                "6. After a tool failure, use the observation to repair the arguments or choose another tool; do not replay an executed call unchanged.",
+            ]
+            if enable_planning:
+                lines.append("7. If the task is expected to take more than three steps, the first action must call create_plan.")
+            lines.extend([
+                "Do not invent retrieval citations in final_answer; copy the [[a1]]-style reference_mark supplied by retrieval results.",
+                "For uploaded or generated files, use the permanent S3 URL from the tool result, never a presigned URL or local path.",
+            ])
+        return "\n".join(lines)
+
     has_memory = memory_list and len(memory_list) > 0
 
     if language == "zh":
@@ -298,12 +336,30 @@ def _build_code_norms_text(
     language: str = "zh",
     is_manager: bool = True,
     priority: int = 20,
+    action_protocol: str = "code",
 ) -> str:
     """Build the Python code-norms prompt section.
 
     Section: "### python代码规范" / "### Python Code Specifications"
     Content: 12 fixed code rules (11 for managed agents)
     """
+    if action_protocol == "native":
+        if language == "zh":
+            return (
+                "### 原生工具参数规范\n"
+                "1. 每轮恰好调用一个工具，并使用 schema 中定义的参数名和类型；\n"
+                "2. 不要输出可执行代码块；需要代码执行时，将代码作为 python_interpreter 的 code 参数；\n"
+                "3. 不重复已执行的相同工具和参数；\n"
+                "4. 完成任务必须调用 final_answer。"
+            )
+        return (
+            "### Native Tool Argument Rules\n"
+            "1. Call exactly one tool per turn using parameter names and types from its schema;\n"
+            "2. Do not emit executable code blocks; pass code through the python_interpreter code argument;\n"
+            "3. Do not repeat an executed tool call with identical arguments;\n"
+            "4. Complete the task by calling final_answer."
+        )
+
     if language == "zh":
         lines = ["### python代码规范"]
         lines.append("1. 如果认为是需要执行的代码，使用'<code>代码</code>'格式，并且每个执行轮次最多输出一个'<code>...</code>'代码块；如果需要多个工具调用，将它们写在同一个代码块中。如果是不需要执行仅用于展示的代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'格式，其中语言类型例如python、java、javascript等；")
@@ -416,6 +472,7 @@ def build_context_inputs(
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
+    action_protocol: str = "code",
     # Piecewise data sources
     tools: Optional[Dict[str, Any]] = None,
     skills: Optional[List[Dict[str, str]]] = None,
@@ -440,6 +497,8 @@ def build_context_inputs(
     include_app_context: bool = True,
 ) -> List[ContextItemInput]:
     """Build an authorized, naturally granular SDK context input snapshot."""
+    if action_protocol not in {"code", "native"}:
+        raise ValueError(f"unsupported action protocol: {action_protocol!r}")
     inputs: List[ContextItemInput] = []
 
     def add_system(
@@ -507,11 +566,14 @@ def build_context_inputs(
             inputs.append(ContextItemInput(
                 id=f"skill:{name}", type=ContextItemType.SKILL, content=dict(skill),
                 source=(f"skill:{name}",), priority=70,
-                metadata={"render_group": "skills", "language": language, "authority": "agent"},
+                metadata={
+                    "render_group": "skills", "language": language,
+                    "action_protocol": action_protocol, "authority": "agent",
+                },
             ))
 
     add_system("execution_flow", _build_execution_flow_text(
-        None, language, is_manager, enable_planning
+        None, language, is_manager, enable_planning, action_protocol=action_protocol
     ), 60, "platform")
     add_system("available_resources_header", _build_available_resources_header_text(
         is_manager, language
@@ -614,6 +676,7 @@ def build_context_inputs(
             content={
                 "template": "skills_usage", "skills": skills or [],
                 "language": language, "is_manager": is_manager,
+                "action_protocol": action_protocol,
             },
             source=("agent_prompt:skills_usage",), priority=40,
             metadata={"authority": "platform"},
@@ -630,7 +693,12 @@ def build_context_inputs(
             25,
             "platform",
         )
-    add_system("code_norms", _build_code_norms_text(language, is_manager), 20, "platform")
-    if few_shots:
+    add_system(
+        "code_norms",
+        _build_code_norms_text(language, is_manager, action_protocol=action_protocol),
+        20,
+        "platform",
+    )
+    if few_shots and action_protocol == "code":
         add_system("footer", _build_footer_text(few_shots, language), 10)
     return inputs

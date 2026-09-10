@@ -18,6 +18,34 @@ from unittest.mock import MagicMock, call, patch
 from threading import Event
 
 
+def test_parse_native_tool_call_accepts_one_structured_call():
+    message = SimpleNamespace(tool_calls=[SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(
+            name="read_skill_md",
+            arguments='{"skill_name":"docx","additional_files":["examples.md"]}',
+        ),
+    )])
+
+    code, arguments, call_id = core_agent_module.parse_native_tool_call(
+        message,
+        {"read_skill_md", "final_answer"},
+    )
+
+    assert code == "read_skill_md(skill_name='docx', additional_files=['examples.md'])"
+    assert arguments == {"skill_name": "docx", "additional_files": ["examples.md"]}
+    assert call_id == "call-1"
+
+
+@pytest.mark.parametrize("tool_calls", [[], [object(), object()]])
+def test_parse_native_tool_call_requires_exactly_one_call(tool_calls):
+    with pytest.raises(ValueError, match="exactly one native tool call"):
+        core_agent_module.parse_native_tool_call(
+            SimpleNamespace(tool_calls=tool_calls),
+            {"read_skill_md"},
+        )
+
+
 # ---------------------------------------------------------------------------
 # Prepare mocks for external dependencies
 # ---------------------------------------------------------------------------

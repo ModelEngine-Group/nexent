@@ -110,6 +110,7 @@ def _format_memory_context(
 def _format_skills_description(
     skills: List[Dict[str, str]],
     language: str = "zh",
+    action_protocol: str = "code",
 ) -> str:
     """Format skill descriptions with full 6-step usage process.
 
@@ -132,6 +133,29 @@ def _format_skills_description(
         skills_block_lines.append("  </skill>")
     skills_block_lines.append("</available_skills>")
     skills_block = "\n".join(skills_block_lines)
+
+    if action_protocol == "native":
+        if language == "zh":
+            return "\n".join([
+                "### 可用技能",
+                "",
+                skills_block,
+                "",
+                "技能是预定义的执行指南。匹配用户请求时，先通过原生工具调用 read_skill_md 加载完整指南。",
+                "按需使用 read_skill_config 读取配置，使用 run_skill_script 执行指南指定的脚本。",
+                "每轮只调用一个技能工具并等待结果；不要用文本或代码块模拟调用，也不要重复相同调用。",
+                "引用的附加文件应按需通过 read_skill_md 的 additional_files 参数读取，不要一次加载无关文件。",
+            ])
+        return "\n".join([
+            "### Available Skills",
+            "",
+            skills_block,
+            "",
+            "Skills are predefined execution guides. When a request matches, first load the complete guide with a native read_skill_md tool call.",
+            "Use read_skill_config for configuration and run_skill_script for scripts required by the guide.",
+            "Call one skill tool per turn and wait for its result. Never simulate calls in text or code blocks, and never repeat an identical call.",
+            "Read referenced additional files only as needed through read_skill_md additional_files; do not load unrelated files eagerly.",
+        ])
 
     if language == "zh":
         lines.append("### 可用技能")
@@ -476,6 +500,7 @@ def _format_skills_usage_requirements(
     skills: List[Dict[str, str]],
     language: str = "zh",
     is_manager: bool = True,
+    action_protocol: str = "code",
 ) -> str:
     """Format skills usage requirements section.
 
@@ -486,6 +511,21 @@ def _format_skills_usage_requirements(
         no_skills_msg = "- 当前没有可用的技能" if language == "zh" else "- No skills are currently available"
         prefix = "3. 技能\n" if language == "zh" else "3. Skills\n"
         return prefix + no_skills_msg
+
+    if action_protocol == "native":
+        if language == "zh":
+            return (
+                "3. 技能\n"
+                "- 匹配技能时，第一步必须原生调用 read_skill_md 加载指南。\n"
+                "- 严格按指南执行；每轮只原生调用一个技能工具并等待结果。\n"
+                "- run_skill_script 失败时先修复并重试，成功前不得声称产物已生成。"
+            )
+        return (
+            "3. Skills\n"
+            "- When a skill matches, the first action must be a native read_skill_md call.\n"
+            "- Follow the guide faithfully; make one native skill-tool call per turn and wait for its result.\n"
+            "- If run_skill_script fails, repair and retry it before claiming an artifact was produced."
+        )
 
     lines = []
 

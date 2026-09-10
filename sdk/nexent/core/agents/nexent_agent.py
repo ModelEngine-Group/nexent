@@ -892,6 +892,8 @@ class NexentAgent:
                 instructions=agent_config.instructions,
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
+                action_protocol=agent_config.action_protocol,
+                native_tool_choice=agent_config.native_tool_choice,
                 redis_client=self.redis_client,
                 conversation_id=self.conversation_id,
                 user_id=self.user_id,

@@ -14,9 +14,14 @@ import time
 import json
 from typing import List, Optional, Dict, Any
 
-from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from smolagents import Tool
-from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
+from smolagents.models import (
+    ChatMessage,
+    ChatMessageToolCall,
+    ChatMessageToolCallFunction,
+    MessageRole,
+    OpenAIServerModel,
+)
 
 from .capacity_budget import (
     CallerMaxTokensOverrideForbidden,
@@ -361,6 +366,7 @@ class OpenAIModel(OpenAIServerModel):
                 reasoning_char_count = 0
                 empty_choices_chunk_count = 0
                 nonstandard_chunk_count = 0
+                tool_call_parts: Dict[int, Dict[str, str]] = {}
 
                 # Reset output mode
                 self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
@@ -391,10 +397,33 @@ class OpenAIModel(OpenAIServerModel):
                         if chunk_finish_reason is not None:
                             finish_reason = str(chunk_finish_reason)
 
-                        new_token = getattr(chunk.choices[0].delta, "content", None)
-                        reasoning_content = getattr(chunk.choices[0].delta, "reasoning", None)
+                        delta = chunk.choices[0].delta
+                        delta_role = getattr(delta, "role", None)
+                        if delta_role is not None:
+                            role = delta_role
+                        new_token = getattr(delta, "content", None)
+                        reasoning_content = getattr(delta, "reasoning", None)
                         if reasoning_content is None:
-                            reasoning_content = getattr(chunk.choices[0].delta, "reasoning_content", None)
+                            reasoning_content = getattr(delta, "reasoning_content", None)
+
+                        for position, delta_tool_call in enumerate(getattr(delta, "tool_calls", None) or []):
+                            index = getattr(delta_tool_call, "index", None)
+                            index = position if index is None else int(index)
+                            part = tool_call_parts.setdefault(
+                                index,
+                                {"id": "", "name": "", "arguments": ""},
+                            )
+                            call_id = getattr(delta_tool_call, "id", None)
+                            if call_id:
+                                part["id"] = str(call_id)
+                            function = getattr(delta_tool_call, "function", None)
+                            if function is not None:
+                                name_fragment = getattr(function, "name", None)
+                                if name_fragment:
+                                    part["name"] += str(name_fragment)
+                                arguments_fragment = getattr(function, "arguments", None)
+                                if arguments_fragment:
+                                    part["arguments"] += str(arguments_fragment)
 
                         # Handle reasoning_content if it exists and is not null
                         if reasoning_content is not None:
@@ -419,7 +448,6 @@ class OpenAIModel(OpenAIServerModel):
 
                             self.observer.add_model_new_token(new_token)
                             token_join.append(new_token)
-                            role = chunk.choices[0].delta.role
 
                         chunk_list.append(chunk)
                         if self.stop_event.is_set():
@@ -431,6 +459,17 @@ class OpenAIModel(OpenAIServerModel):
                     # Send end marker
                     self.observer.flush_remaining_tokens()
                     model_output = "".join(token_join)
+                    native_tool_calls = [
+                        ChatMessageToolCall(
+                            function=ChatMessageToolCallFunction(
+                                name=part["name"],
+                                arguments=part["arguments"],
+                            ),
+                            id=part["id"] or f"call_{index}",
+                            type="function",
+                        )
+                        for index, part in sorted(tool_call_parts.items())
+                    ]
                     self.last_finish_reason = finish_reason
                     if finish_reason == "length":
                         logger.warning(
@@ -503,6 +542,7 @@ class OpenAIModel(OpenAIServerModel):
                         "reasoning_char_count": reasoning_char_count,
                         "empty_choices_chunk_count": empty_choices_chunk_count,
                         "nonstandard_chunk_count": nonstandard_chunk_count,
+                        "tool_call_count": len(native_tool_calls),
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
                     }
@@ -520,7 +560,7 @@ class OpenAIModel(OpenAIServerModel):
                             "chunk_count": len(chunk_list)
                         })
 
-                    if not model_output.strip():
+                    if not model_output.strip() and not native_tool_calls:
                         logger.warning(
                             "event=empty_model_response model_id=%s provider=%s "
                             "finish_reason=%s chunk_count=%d content_chunk_count=%d "
@@ -546,9 +586,21 @@ class OpenAIModel(OpenAIServerModel):
                             f"output_tokens={output_tokens})"
                         )
 
-                    message = ChatMessage.from_dict(
-                        ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
-                                              content=model_output).model_dump(include={"role", "content", "tool_calls"}))
+                    message = ChatMessage.from_dict({
+                        "role": "assistant",
+                        "content": model_output or None,
+                        "tool_calls": [
+                            {
+                                "id": tool_call.id,
+                                "type": tool_call.type,
+                                "function": {
+                                    "name": tool_call.function.name,
+                                    "arguments": tool_call.function.arguments,
+                                },
+                            }
+                            for tool_call in native_tool_calls
+                        ] or None,
+                    })
 
                     from smolagents.monitoring import TokenUsage
 

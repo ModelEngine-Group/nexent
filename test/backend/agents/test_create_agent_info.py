@@ -527,6 +527,8 @@ from backend.agents.create_agent_info import (
     create_agent_run_info,
     join_minio_file_description_to_query,
     prepare_prompt_templates,
+    resolve_action_protocol,
+    resolve_native_tool_choice,
     _get_skills_for_template,
     _get_skill_script_tools,
     _extract_url_from_card,
@@ -546,6 +548,20 @@ from backend.agents.create_agent_info import (
     _resolve_safe_input_budget,
     _get_external_provider_service_for_search,
 )
+
+
+@pytest.mark.parametrize("model_name", ["deepseek-v4-flash", "QWEN3.8-MAX", "repo/deepseek-v4-flash"])
+def test_resolve_action_protocol_enables_validated_native_models(model_name):
+    assert resolve_action_protocol({"model_name": model_name}) == "native"
+
+
+def test_resolve_action_protocol_keeps_unvalidated_models_on_code_mode():
+    assert resolve_action_protocol({"model_name": "gpt-compatible-unknown"}) == "code"
+
+
+def test_resolve_native_tool_choice_uses_auto_for_qwen_thinking_mode():
+    assert resolve_native_tool_choice({"model_name": "qwen3.8-max"}) == "auto"
+    assert resolve_native_tool_choice({"model_name": "deepseek-v4-flash"}) == "required"
 
 
 def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
@@ -2371,6 +2387,8 @@ class TestCreateAgentConfig:
                 max_steps=5,
                 requested_output_tokens=None,
                 model_name="test_model",
+                action_protocol=ANY,
+                native_tool_choice=ANY,
                 provide_run_summary=True,
                 allow_chat_metadata=False,
                 managed_agents=[],
@@ -2456,6 +2474,8 @@ class TestCreateAgentConfig:
                     max_steps=5,
                     requested_output_tokens=None,
                     model_name="test_model",
+                    action_protocol=ANY,
+                    native_tool_choice=ANY,
                     provide_run_summary=True,
                     allow_chat_metadata=False,
                     managed_agents=[mock_sub_agent_config],
@@ -2742,6 +2762,8 @@ class TestCreateAgentConfig:
                 max_steps=5,
                 requested_output_tokens=None,
                 model_name="main_model",
+                action_protocol=ANY,
+                native_tool_choice=ANY,
                 provide_run_summary=True,
                 allow_chat_metadata=False,
                 managed_agents=[],

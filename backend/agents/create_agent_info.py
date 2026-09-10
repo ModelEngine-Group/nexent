@@ -89,6 +89,41 @@ from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
+NATIVE_TOOL_CALLING_MODELS = frozenset({
+    "deepseek-v4-flash",
+    "qwen3.8-max",
+})
+
+
+def resolve_action_protocol(model_info: Optional[Dict[str, Any]]) -> str:
+    """Select native actions only for models validated against that protocol."""
+    if not model_info:
+        return "code"
+    candidates = (
+        model_info.get("model_name"),
+        model_info.get("display_name"),
+    )
+    for candidate in candidates:
+        normalized = str(candidate or "").strip().casefold().rsplit("/", 1)[-1]
+        if normalized in NATIVE_TOOL_CALLING_MODELS:
+            return "native"
+    return "code"
+
+
+def resolve_native_tool_choice(model_info: Optional[Dict[str, Any]]) -> str:
+    """Adapt native tool forcing to provider/model constraints."""
+    if not model_info:
+        return "required"
+    candidates = (
+        model_info.get("model_name"),
+        model_info.get("display_name"),
+    )
+    for candidate in candidates:
+        normalized = str(candidate or "").strip().casefold().rsplit("/", 1)[-1]
+        if normalized == "qwen3.8-max":
+            return "auto"
+    return "required"
+
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
     from nexent.core.tools.search_memory_tool import SearchMemoryTool
@@ -1398,6 +1433,9 @@ async def create_agent_config(
         capacity_snapshot = None
         resolved_capacity_snapshot = None
 
+    action_protocol = resolve_action_protocol(model_info)
+    native_tool_choice = resolve_native_tool_choice(model_info)
+
     requested_output_tokens = agent_info.get("requested_output_tokens")
     safe_input_budget_snapshot = _resolve_safe_input_budget(
         capacity_snapshot=resolved_capacity_snapshot,
@@ -1437,6 +1475,7 @@ async def create_agent_config(
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,
+        action_protocol=action_protocol,
         tools=render_kwargs["tools"],
         skills=skills,
         managed_agents=render_kwargs["managed_agents"],
@@ -1506,6 +1545,8 @@ async def create_agent_config(
         max_steps=agent_info.get("max_steps", 15),
         requested_output_tokens=requested_output_tokens,
         model_name=model_name,
+        action_protocol=action_protocol,
+        native_tool_choice=native_tool_choice,
         provide_run_summary=agent_info.get("provide_run_summary", False),
         allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
         managed_agents=managed_agents,

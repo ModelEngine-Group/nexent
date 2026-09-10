@@ -38,6 +38,7 @@ def _render_text(item: ContextItem, *, default_role: str) -> list[dict[str, Any]
                 content.get("skills", []),
                 language=content.get("language", "zh"),
                 is_manager=bool(content.get("is_manager", True)),
+                action_protocol=content.get("action_protocol", "code"),
             )
         elif template == "agent_fallback":
             text = _format_agent_fallback({}, {}, language=content.get("language", "zh"))
@@ -204,9 +205,11 @@ class ContextItemRenderer:
             )
         language = first.metadata.get("language", "zh")
         is_manager = bool(first.metadata.get("is_manager", True))
+        action_protocol = first.metadata.get("action_protocol", "code")
         if any(
             item.metadata.get("language", "zh") != language
             or bool(item.metadata.get("is_manager", True)) != is_manager
+            or item.metadata.get("action_protocol", "code") != action_protocol
             for item in items[1:]
         ):
             raise ContextItemRenderingError(
@@ -218,7 +221,11 @@ class ContextItemRenderer:
                 data = {str(item["name"]): item for item in contents}
                 text = _format_tools_description(data, language=language, is_manager=is_manager)
             elif first.type == ContextItemType.SKILL:
-                text = _format_skills_description(contents, language=language)
+                text = _format_skills_description(
+                    contents,
+                    language=language,
+                    action_protocol=action_protocol,
+                )
             elif first.type == ContextItemType.MEMORY:
                 text = _format_memory_context(contents, language=language)
             elif first.type == ContextItemType.MANAGED_AGENT:

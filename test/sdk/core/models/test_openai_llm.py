@@ -291,11 +291,30 @@ class SimpleChatMessage:
     def __init__(self, role=None, content=None, tool_calls=None):
         self.role = role
         self.content = content
+        self.tool_calls = tool_calls
         self.raw = None
     @staticmethod
     def from_dict(d):
-        return SimpleChatMessage(role=d.get("role"), content=d.get("content"))
+        return SimpleChatMessage(
+            role=d.get("role"),
+            content=d.get("content"),
+            tool_calls=d.get("tool_calls"),
+        )
 mock_models_module.ChatMessage = SimpleChatMessage
+class SimpleToolCallFunction:
+    def __init__(self, arguments, name, description=None):
+        self.arguments = arguments
+        self.name = name
+        self.description = description
+
+class SimpleToolCall:
+    def __init__(self, function, id, type):
+        self.function = function
+        self.id = id
+        self.type = type
+
+mock_models_module.ChatMessageToolCallFunction = SimpleToolCallFunction
+mock_models_module.ChatMessageToolCall = SimpleToolCall
 mock_models_module.MessageRole = MagicMock()
 mock_smolagents.models = mock_models_module
 mock_memory_module = MagicMock()
@@ -1306,6 +1325,64 @@ def test_call_with_chatmessage_instance_passed_through(openai_model_instance):
 
     # Ensure the final returned message is the constructed result (from_dict used for output)
     assert result == mock_result_message
+
+
+def test_call_aggregates_streamed_native_tool_call_without_text(openai_model_instance):
+    """A tool-only provider stream is a valid assistant action, not an empty response."""
+    messages = [{"role": "user", "content": [{"text": "Create a document"}]}]
+    first = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(
+            finish_reason=None,
+            delta=types.SimpleNamespace(
+                role="assistant",
+                content=None,
+                reasoning=None,
+                reasoning_content=None,
+                tool_calls=[types.SimpleNamespace(
+                    index=0,
+                    id="call-native-1",
+                    function=types.SimpleNamespace(
+                        name="read_skill_md",
+                        arguments='{"skill_name":',
+                    ),
+                )],
+            ),
+        )],
+        usage=None,
+    )
+    second = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(
+            finish_reason="tool_calls",
+            delta=types.SimpleNamespace(
+                role=None,
+                content=None,
+                reasoning=None,
+                reasoning_content=None,
+                tool_calls=[types.SimpleNamespace(
+                    index=0,
+                    id=None,
+                    function=types.SimpleNamespace(name=None, arguments='"docx"}'),
+                )],
+            ),
+        )],
+        usage=None,
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [first, second]
+        result = openai_model_instance.__call__(messages)
+
+    assert result.content is None
+    assert result.tool_calls == [{
+        "id": "call-native-1",
+        "type": "function",
+        "function": {
+            "name": "read_skill_md",
+            "arguments": '{"skill_name":"docx"}',
+        },
+    }]
+    assert openai_model_instance.last_finish_reason == "tool_calls"
+    assert openai_model_instance.last_response_diagnostics["tool_call_count"] == 1
 
 def test_call_invalid_dict_message_raises_value_error(openai_model_instance):
     """Passing a dict missing 'content' should raise ValueError during normalization."""
