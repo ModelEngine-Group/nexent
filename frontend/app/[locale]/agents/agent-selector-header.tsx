@@ -108,6 +108,10 @@ export default function AgentSelectorHeader({
       const selectedAgentId = Number(agent.id);
       requestedAgentIdRef.current = selectedAgentId;
 
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      nextSearchParams.set("agent_id", String(selectedAgentId));
+      router.replace(`${pathname}?${nextSearchParams.toString()}`);
+
       // Clear NEW mark when agent is selected for editing
       if (agent.is_new === true) {
         try {
@@ -133,9 +137,6 @@ export default function AgentSelectorHeader({
         }
         if (result.success && result.data) {
           initialize(result.data);
-          const nextSearchParams = new URLSearchParams(searchParams.toString());
-          nextSearchParams.set("agent_id", String(selectedAgentId));
-          router.replace(`${pathname}?${nextSearchParams.toString()}`);
         } else {
           message.error(
             result.message || t("agentConfig.agents.detailsLoadFailed")

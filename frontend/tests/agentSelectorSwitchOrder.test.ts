@@ -7,7 +7,7 @@ const selectorPath = new URL(
   import.meta.url
 );
 
-test("loads and initializes the selected agent before changing its URL", async () => {
+test("changes the URL before initializing the selected agent", async () => {
   const selector = await readFile(selectorPath, "utf8");
   const initializeIndex = selector.indexOf("initialize(result.data);");
   const replaceIndex = selector.indexOf(
@@ -17,7 +17,7 @@ test("loads and initializes the selected agent before changing its URL", async (
   assert.notEqual(initializeIndex, -1);
   assert.notEqual(replaceIndex, -1);
   assert.ok(
-    initializeIndex < replaceIndex,
-    "selector must initialize the selected agent before updating the URL"
+    replaceIndex < initializeIndex,
+    "selector must update the URL before initializing the selected agent"
   );
 });
