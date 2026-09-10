@@ -113,6 +113,28 @@ class ContextRuntime(Protocol):
     ) -> FinalContext:
         """Return all model messages for final-answer generation."""
 
+    def recover_step(
+        self,
+        *,
+        model: Model,
+        memory: AgentMemory,
+        current_run_start_idx: int,
+        tools: Sequence[ModelTool] | None = None,
+    ) -> FinalContext:
+        """Force a source-backed step rebuild after Provider overflow."""
+
+    def recover_final_answer(
+        self,
+        *,
+        model: Model,
+        memory: AgentMemory,
+        current_run_start_idx: int,
+        task: str,
+        final_answer_templates: Mapping[str, Mapping[str, str]],
+        tools: Sequence[ModelTool] | None = None,
+    ) -> FinalContext:
+        """Force a source-backed final-answer rebuild after Provider overflow."""
+
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:
         """Return display-only messages without triggering compression."""
 
@@ -183,6 +205,12 @@ class UnconfiguredContextRuntime:
         final_answer_templates: Mapping[str, Mapping[str, str]],
         tools: Sequence[ModelTool] | None = None,
     ) -> FinalContext:
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
+
+    def recover_step(self, **kwargs) -> FinalContext:
+        raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
+
+    def recover_final_answer(self, **kwargs) -> FinalContext:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 
     def render_summary_messages(self, *, memory: AgentMemory) -> list[ModelMessage]:

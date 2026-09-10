@@ -787,6 +787,13 @@ Additional Args:
                 json.dumps(payload, ensure_ascii=False),
             )
 
+    def _provider_overflow_recovery_safe(self) -> bool:
+        """Only replay while the current Agent run has produced no tool effect."""
+        return not any(
+            getattr(step, "tool_calls", None)
+            for step in self.memory.steps[self._history_step_count:]
+        )
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -847,8 +854,27 @@ Additional Args:
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
         try:
+            def rebuild_after_provider_overflow():
+                rebuilt = self.context_runtime.recover_step(
+                    model=self.model,
+                    memory=self.memory,
+                    current_run_start_idx=self._history_step_count,
+                    tools=self._context_tools(),
+                )
+                get_monitoring_manager().record_final_context_evidence(
+                    rebuilt.evidence, step_number=self.step_number
+                )
+                self._emit_history_summary_event()
+                return rebuilt
+
             chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=stop_sequences, **additional_args)
+                                                   stop_sequences=stop_sequences,
+                                                   context_rebuild=(
+                                                       rebuild_after_provider_overflow
+                                                       if self._provider_overflow_recovery_safe()
+                                                       else None
+                                                   ),
+                                                   **additional_args)
             memory_step.model_output_message = chat_message
             model_output = chat_message.content
             memory_step.token_usage = chat_message.token_usage
@@ -1561,7 +1587,29 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             # Use streaming call (model.__call__) to generate final answer
             # This will trigger observer.add_model_new_token() and
             # observer.add_model_reasoning_content() in OpenAIModel
-            chat_message: ChatMessage = self.model(messages)
+            def rebuild_final_after_provider_overflow():
+                rebuilt = self.context_runtime.recover_final_answer(
+                    model=self.model,
+                    memory=self.memory,
+                    current_run_start_idx=self._history_step_count,
+                    tools=self._context_tools(),
+                    task=task,
+                    final_answer_templates=self.prompt_templates,
+                )
+                get_monitoring_manager().record_final_context_evidence(
+                    rebuilt.evidence, step_number=self.step_number
+                )
+                self._emit_history_summary_event()
+                return rebuilt
+
+            chat_message: ChatMessage = self.model(
+                messages,
+                context_rebuild=(
+                    rebuild_final_after_provider_overflow
+                    if self._provider_overflow_recovery_safe()
+                    else None
+                ),
+            )
 
             # Update role and content from the completed message
             role = chat_message.role

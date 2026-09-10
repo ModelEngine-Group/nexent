@@ -34,6 +34,11 @@ from .prompt_cache import (
 )
 from .message_utils import content_has_multimodal_blocks, prepare_messages_for_smolagents_text_flattening
 from .retry import DEFAULT_MODEL_RETRY, ModelRetryConfig, classify_model_error
+from .context_overflow import (
+    ProviderContextOverflowRetryExhausted,
+    ProviderContextOverflowRetryUnsafe,
+    is_provider_context_overflow,
+)
 
 logger = logging.getLogger("openai_llm")
 
@@ -160,6 +165,7 @@ class OpenAIModel(OpenAIServerModel):
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
                  _token_tracker=None, safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+                 context_rebuild=None, _overflow_recovery_ordinal: int = 0,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -200,6 +206,8 @@ class OpenAIModel(OpenAIServerModel):
                     tools_to_call_from=tools_to_call_from,
                     _token_tracker=token_tracker,
                     safe_input_budget_snapshot=safe_input_budget_snapshot,
+                    context_rebuild=context_rebuild,
+                    _overflow_recovery_ordinal=_overflow_recovery_ordinal,
                     **kwargs,
                 )
 
@@ -330,6 +338,7 @@ class OpenAIModel(OpenAIServerModel):
             )
 
         for attempt in range(1, self.retry_config.max_attempts + 1):
+            first_token_received = False
             if self.stop_event.is_set():
                 if token_tracker:
                     self._monitoring.add_span_event("model_stopped", {
@@ -367,7 +376,6 @@ class OpenAIModel(OpenAIServerModel):
 
                 # Track streaming metrics
                 stream_start_time = time.time()
-                first_token_received = False
 
                 try:
                     for chunk in current_request:
@@ -566,8 +574,6 @@ class OpenAIModel(OpenAIServerModel):
                         self._monitoring.add_span_event("error_occurred", {"error_type": type(
                             e).__name__, "error_message": str(e)})
 
-                    if "context_length_exceeded" in str(e):
-                        raise ValueError(f"Token limit exceeded: {str(e)}")
                     raise e
             except EmptyModelResponseError:
                 # Some reasoning-capable OpenAI-compatible providers
@@ -594,6 +600,47 @@ class OpenAIModel(OpenAIServerModel):
                 self.stop_event.wait(backoff)
                 continue
             except Exception as e:
+                if token_tracker:
+                    self._monitoring.add_span_event("error_occurred", {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    })
+                if is_provider_context_overflow(e):
+                    if first_token_received or context_rebuild is None:
+                        raise ProviderContextOverflowRetryUnsafe(
+                            "Provider context overflow cannot be safely rebuilt: "
+                            f"{e}"
+                        ) from e
+                    if _overflow_recovery_ordinal >= 2:
+                        raise ProviderContextOverflowRetryExhausted(
+                            "Provider context overflow persisted after two recovery dispatches"
+                        ) from e
+                    rebuilt = context_rebuild()
+                    rebuilt_messages = getattr(rebuilt, "messages", rebuilt)
+                    if not isinstance(rebuilt_messages, list):
+                        raise TypeError(
+                            "context_rebuild must return FinalContext or a message list"
+                        )
+                    rebuilt_evidence = getattr(rebuilt, "evidence", None)
+                    if rebuilt_evidence is not None:
+                        self.last_context_evidence = rebuilt_evidence
+                    self._monitoring.add_span_event("provider_context_overflow", {
+                        "recovery_dispatch": _overflow_recovery_ordinal + 1,
+                        "compaction_attempts": getattr(
+                            rebuilt_evidence, "compaction_attempts", None
+                        ),
+                    })
+                    return self.__call__(
+                        messages=rebuilt_messages,
+                        stop_sequences=stop_sequences,
+                        response_format=response_format,
+                        tools_to_call_from=tools_to_call_from,
+                        _token_tracker=token_tracker,
+                        safe_input_budget_snapshot=trusted_budget_snapshot,
+                        context_rebuild=context_rebuild,
+                        _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
+                        **kwargs,
+                    )
                 if classify_model_error(e) != "retryable":
                     raise
                 if attempt >= self.retry_config.max_attempts:
@@ -752,9 +799,13 @@ class OpenAIModel(OpenAIServerModel):
             "w2.w1_fingerprint": snapshot.w1_fingerprint,
             "w2.requested_output_tokens": snapshot.requested_output_tokens,
             "w2.output_reserve_source": snapshot.output_reserve_source,
-            "w2.provider_input_limit_tokens": snapshot.provider_input_limit_tokens,
-            "w2.soft_input_budget_tokens": snapshot.soft_input_budget_tokens,
-            "w2.hard_input_budget_tokens": snapshot.hard_input_budget_tokens,
+            "context.effective_input_limit_tokens": snapshot.provider_input_limit_tokens,
+            "context.compaction_trigger_threshold_tokens": int(
+                snapshot.provider_input_limit_tokens * 0.8
+            ),
+            "context.compaction_target_tokens": int(
+                snapshot.provider_input_limit_tokens * 0.6
+            ),
             "w2.uncertainty_reserve_tokens": snapshot.uncertainty_reserve_tokens,
             "w2.uncertainty_reserve_basis": snapshot.uncertainty_reserve_basis,
         }

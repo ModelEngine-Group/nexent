@@ -58,6 +58,7 @@ class ContextManager:
         self._previous_stable_items: dict[str, str] = {}
         self._pending_history_summary_event: dict[str, Any] | None = None
         self._memory_compact_cache: dict[tuple[Any, ...], list[ContextItem]] = {}
+        self._run_compaction_attempts = 0
 
     def _compaction_trigger_threshold_tokens(self) -> int:
         return self.config.compaction_trigger_threshold_tokens or self.config.token_threshold
@@ -82,6 +83,7 @@ class ContextManager:
         items: Optional[Sequence[Any]] = None,
     ) -> ManagedRunContext:
         self._history_candidate = None
+        self._run_compaction_attempts = 0
         self._current_item_cache.clear()
         source = self._item_source(items)
         if fallback_system_prompt and not any(item.type == ContextItemType.SYSTEM for item in source):
@@ -120,6 +122,7 @@ class ContextManager:
         task: str | None = None,
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
+        force_compaction: bool = False,
     ) -> FinalContext:
         run_context = run_context or self.prepare_run_context(memory, "")
         policy = resolve_policy(self.config.policy_layers)
@@ -152,8 +155,14 @@ class ContextManager:
 
         if (
             policy.processing_mode == ContextProcessingMode.ADAPTIVE_COMPACT
-            and self.config.effective_input_limit_tokens > 0
-            and raw_tokens >= self._compaction_trigger_threshold_tokens()
+            and self._run_compaction_attempts < 3
+            and (
+                force_compaction
+                or (
+                    self.config.effective_input_limit_tokens > 0
+                    and raw_tokens >= self._compaction_trigger_threshold_tokens()
+                )
+            )
         ):
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
@@ -166,7 +175,10 @@ class ContextManager:
                 current_summary, current_turns = summary, turns
                 last_valid = None
                 attempts = 0
-                for attempt in range(1, 4):
+                remaining_attempts = 3 - self._run_compaction_attempts
+                for _ in range(remaining_attempts):
+                    self._run_compaction_attempts += 1
+                    attempt = self._run_compaction_attempts
                     result = self._history_compressor.compress(current_summary, current_turns, model)
                     attempts = attempt
                     self._record_compression(result.records)
@@ -271,7 +283,7 @@ class ContextManager:
                 effective_input_limit_tokens=effective_limit,
                 compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
                 compaction_target_tokens=self._compaction_target_tokens(),
-                compaction_attempts=min(3, len(self._step_local_log)),
+                compaction_attempts=self._run_compaction_attempts,
                 raw_token_estimate=raw_tokens,
                 final_token_estimate=final_tokens,
                 loaded_summary_unit_id=(loaded.content.get("unit_id") if loaded else None),
