@@ -4,7 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Popover, Spin } from "antd";
-import { ChevronLeft, ChevronRight, Plus, Search, Tag, Upload } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Search,
+  Tag,
+  Upload,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal, {
@@ -41,10 +48,14 @@ import {
 } from "@/types/agentRepository";
 import { MineApplyListingModal } from "./MineApplyListingModal";
 import { MineReviewStatusModal } from "./MineReviewStatusModal";
+import { AgentUsageGuideModal } from "./AgentUsageGuideModal";
 import { CreateNewAgentCard } from "./CreateNewAgentCard";
 import { MyAgentCard } from "./MyAgentCard";
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -54,6 +65,10 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
 
 export interface ReviewDeepLinkTarget {
   agentRepositoryId: number;
+  agentId: number;
+}
+
+export interface UsageGuideDeepLinkTarget {
   agentId: number;
 }
 
@@ -77,9 +92,11 @@ interface MineAgentsViewProps {
   onRetry: () => void;
   onViewDetail: (agentId: number, versionNo: number) => void;
   reviewDeepLink?: ReviewDeepLinkTarget | null;
+  usageGuideDeepLink?: UsageGuideDeepLinkTarget | null;
   deepLinkFallbackAgent?: MyEditableAgentItem | null;
   deepLinkFallbackLoading?: boolean;
   onReviewDeepLinkConsumed?: () => void;
+  onUsageGuideDeepLinkConsumed?: () => void;
 }
 
 export function MineAgentsView({
@@ -102,9 +119,11 @@ export function MineAgentsView({
   onRetry,
   onViewDetail,
   reviewDeepLink = null,
+  usageGuideDeepLink = null,
   deepLinkFallbackAgent = null,
   deepLinkFallbackLoading = false,
   onReviewDeepLinkConsumed,
+  onUsageGuideDeepLinkConsumed,
 }: MineAgentsViewProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -129,7 +148,10 @@ export function MineAgentsView({
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
+  const [usageGuideAgent, setUsageGuideAgent] =
+    useState<MyEditableAgentItem | null>(null);
   const consumedDeepLinkRef = useRef<number | null>(null);
+  const consumedUsageGuideRef = useRef<number | null>(null);
 
   const createListingMutation = useCreateAgentRepositoryListing();
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
@@ -346,6 +368,61 @@ export function MineAgentsView({
     t,
   ]);
 
+  useEffect(() => {
+    if (!usageGuideDeepLink) {
+      consumedUsageGuideRef.current = null;
+      return;
+    }
+
+    if (consumedUsageGuideRef.current === usageGuideDeepLink.agentId) {
+      return;
+    }
+
+    const listStillLoading = isLoading;
+    const fallbackStillLoading = deepLinkFallbackLoading;
+    if (listStillLoading && fallbackStillLoading) {
+      return;
+    }
+
+    const agentFromList = agents.find(
+      (item): item is MyEditableAgentItem =>
+        !isNewAgentPaddingItem(item) &&
+        item.agent_id === usageGuideDeepLink.agentId
+    );
+    const agent = agentFromList ?? deepLinkFallbackAgent;
+
+    if (!agent) {
+      if (listStillLoading || fallbackStillLoading) {
+        return;
+      }
+      message.error(t("notifications.deepLink.agentNotFound"));
+      consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+      onUsageGuideDeepLinkConsumed?.();
+      return;
+    }
+
+    setUsageGuideAgent(agent);
+    consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
+  }, [
+    agents,
+    deepLinkFallbackAgent,
+    deepLinkFallbackLoading,
+    isLoading,
+    onUsageGuideDeepLinkConsumed,
+    t,
+    usageGuideDeepLink,
+  ]);
+
+  const closeUsageGuide = () => {
+    const wasOpenedByDeepLink =
+      usageGuideAgent?.agent_id === usageGuideDeepLink?.agentId &&
+      consumedUsageGuideRef.current === usageGuideDeepLink?.agentId;
+    setUsageGuideAgent(null);
+    if (wasOpenedByDeepLink) {
+      onUsageGuideDeepLinkConsumed?.();
+    }
+  };
+
   const handleSetNotShared = async () => {
     if (!reviewModalInfo) {
       return;
@@ -388,7 +465,9 @@ export function MineAgentsView({
   };
 
   const hasActiveFilter =
-    ownership !== "all" || normalizedQuery.length > 0 || tagPredicates.length > 0;
+    ownership !== "all" ||
+    normalizedQuery.length > 0 ||
+    tagPredicates.length > 0;
   const showFilteredEmpty = !isLoading && !isError && agents.length === 0;
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
   const showPagination = !isLoading && !isError && totalPages > 1;
@@ -530,6 +609,7 @@ export function MineAgentsView({
                     onViewReview={(mode) => handleViewReview(agent, mode)}
                     onDelete={() => handleDeleteAgent(agent)}
                     onEvaluate={() => handleEvaluate(agent)}
+                    onUsageGuide={() => setUsageGuideAgent(agent)}
                     isApplying={
                       applyingAgentId === agent.agent_id &&
                       createListingMutation.isPending
@@ -601,6 +681,13 @@ export function MineAgentsView({
         isUpdatingStatus={updateStatusMutation.isPending}
         onClose={closeReviewModal}
         onSetNotShared={handleSetNotShared}
+      />
+
+      <AgentUsageGuideModal
+        agent={usageGuideAgent}
+        locale={locale}
+        open={usageGuideAgent !== null}
+        onClose={closeUsageGuide}
       />
 
       <CreateAgentModal

@@ -106,6 +106,9 @@ export const API_ENDPOINTS = {
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
     icon: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/icon`,
+    share: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/share`,
+    shareRotate: (agentId: number) =>
+      `${API_BASE_URL}/agent/${agentId}/share/rotate`,
     versions: {
       version: (agentId: number, versionNo: number) =>
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,

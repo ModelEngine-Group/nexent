@@ -36,6 +36,10 @@ import {
 import type { AgentRepositoryListingItem, MineOwnershipFilter } from "@/types/agentRepository";
 import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
+import {
+  clearAgentUsageGuidePath,
+  parseAgentUsageGuideParams,
+} from "@/lib/agentUsageGuide";
 import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
@@ -139,10 +143,23 @@ export default function AgentRepositoryPage() {
     () => parseReviewDeepLinkParams(searchParams),
     [searchParams]
   );
+  const usageGuideDeepLink = useMemo(
+    () => parseAgentUsageGuideParams(searchParams),
+    [searchParams]
+  );
 
   const handleReviewDeepLinkConsumed = useCallback(() => {
     router.replace(`/${locale}/agent-space?tab=mine`);
   }, [locale, router]);
+
+  const handleUsageGuideDeepLinkConsumed = useCallback(() => {
+    if (!usageGuideDeepLink) {
+      return;
+    }
+    router.replace(
+      clearAgentUsageGuidePath(locale, usageGuideDeepLink.agentId)
+    );
+  }, [locale, router, usageGuideDeepLink]);
 
   const listingParams = useMemo(
     () => ({
@@ -207,12 +224,12 @@ export default function AgentRepositoryPage() {
   } = useMyEditableAgents(
     {
       ownership: "all",
-      agent_id: reviewDeepLink?.agentId,
+      agent_id: reviewDeepLink?.agentId ?? usageGuideDeepLink?.agentId,
       page: 1,
       page_size: 1,
       new_agent_padding: false,
     },
-    isMineTab && reviewDeepLink != null
+    isMineTab && (reviewDeepLink != null || usageGuideDeepLink != null)
   );
 
   const { data: mineCountData } = useMyEditableAgents(
@@ -539,9 +556,11 @@ export default function AgentRepositoryPage() {
                   onRetry={() => refetchMine()}
                   onViewDetail={handleMineViewDetail}
                   reviewDeepLink={reviewDeepLink}
+                  usageGuideDeepLink={usageGuideDeepLink}
                   deepLinkFallbackAgent={deepLinkFallbackAgent}
                   deepLinkFallbackLoading={isDeepLinkMineLoading}
                   onReviewDeepLinkConsumed={handleReviewDeepLinkConsumed}
+                  onUsageGuideDeepLinkConsumed={handleUsageGuideDeepLinkConsumed}
                 />
               ) : null}
             </div>

@@ -31,6 +31,7 @@ interface MyAgentCardProps {
   onViewReview: (mode: "review" | "reviewUpdate") => void;
   onDelete: () => void;
   onEvaluate: () => void;
+  onUsageGuide: () => void;
   isApplying?: boolean;
   isDeleting?: boolean;
 }
@@ -57,6 +58,7 @@ export function MyAgentCard({
   onViewReview,
   onDelete,
   onEvaluate,
+  onUsageGuide,
   isApplying = false,
   isDeleting = false,
 }: MyAgentCardProps) {
@@ -105,14 +107,25 @@ export function MyAgentCard({
     menuItems.push({ type: "divider" });
   }
 
-  menuItems.push({
-    key: "delete",
-    danger: true,
-    icon: <Trash2 className="size-3.5" aria-hidden />,
-    label: t("common.delete"),
-    disabled: isDeleting,
-    onClick: onDelete,
-  });
+  if (published) {
+    menuItems.push({
+      key: "usageGuide",
+      icon: <Share2 className="size-3.5" aria-hidden />,
+      label: t("agentRepository.mine.menu.usageGuide"),
+      onClick: onUsageGuide,
+    });
+  }
+
+  if (canEdit) {
+    menuItems.push({
+      key: "delete",
+      danger: true,
+      icon: <Trash2 className="size-3.5" aria-hidden />,
+      label: t("common.delete"),
+      disabled: isDeleting,
+      onClick: onDelete,
+    });
+  }
 
   return (
     <Card
@@ -167,7 +180,7 @@ export function MyAgentCard({
           </div>
         </div>
 
-        {canEdit ? (
+        {canEdit || published ? (
           <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
             <Button
               type="text"
