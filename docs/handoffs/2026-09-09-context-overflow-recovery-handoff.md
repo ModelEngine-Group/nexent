@@ -26,7 +26,7 @@ Review donor overflow classification, context event, monitoring, OpenAI adapter,
 - A deterministic real Provider overflow and Langfuse trace were not available in this environment; mock tests are not presented as substitutes.
 - The summary-quality revision adds a canonical `HistorySummaryInput`, exact seven-section parsing, dynamic output limits, a 5%/32-token minimum reduction gate, and an achievable-history stop condition.
 - Internal summary model streaming is isolated from the Agent observer. The stream emits `compacting`, then either removes that transient state or publishes one validated `accepted` summary.
-- `210 passed` for the focused ContextManager, context-runtime, and CoreAgent suite locally.
+- `212 passed` for the focused ContextManager, context-runtime, and CoreAgent suite after merging the latest `origin/develop`.
 - The revised main and web images were built and deployed to `nexent-context-recovery-20260910`; the Web endpoint returns HTTP 200 and all application containers are running.
 - The dedicated test model `Context Compaction E2E LLM` now uses a 16,384-token context window with a 512-token output reserve. Expected canonical budgets are Effective Input Limit 15,872, Compaction Trigger Threshold 12,697, and Compaction Target 9,523 tokens.
 - Real WebUI replay triggered compaction at a raw estimate of 20,667 tokens. One valid summary reduced compressible history from 9,218 to 2,248 tokens, stopped with `history_target_reached`, persisted unit `83`, and retained the Fact-118/119/120 markers.

@@ -930,6 +930,15 @@ async def list_published_agents_impl(
                 agent_info=agent_info,
                 model_cache=model_cache
             )
+            for model_id in valid_model_ids:
+                if model_id not in model_cache:
+                    model_cache[model_id] = get_model_by_model_id(model_id, tenant_id)
+            available_model_ids = [
+                model_id
+                for model_id in valid_model_ids
+                if (model_cache.get(model_id) or {}).get("connect_status") == "available"
+            ]
+            agent_info["model_ids"] = available_model_ids
 
             # Preserve the raw data so we can adjust availability for duplicates
             enriched_agents.append({

@@ -1851,7 +1851,8 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
     mock_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
     mock_get_model_by_model_id.return_value = mock_model_info
 
@@ -1958,7 +1959,8 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
     # Mock model info without display_name
     mock_model_info = {
         "model_id": 456,
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
         # No display_name field
     }
     mock_get_model_by_model_id.return_value = mock_model_info
@@ -2050,7 +2052,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
     # Assert
     expected_result = {
         "agent_id": 123,
-        "model_ids": [456],
+        "model_ids": [],
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
@@ -2108,14 +2110,16 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
 
     # Mock model info for business logic model
     mock_business_logic_model_info = {
         "model_id": 789,
         "display_name": "Claude-3.5",
-        "provider": "anthropic"
+        "provider": "anthropic",
+        "connect_status": "available"
     }
 
     # Mock get_model_by_model_id to return different values based on input
@@ -2207,7 +2211,8 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
 
     # Mock get_model_by_model_id to return None for business_logic_model_id
@@ -2299,13 +2304,15 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
 
     # Mock model info for business logic model without display_name
     mock_business_logic_model_info = {
         "model_id": 789,
-        "provider": "anthropic"
+        "provider": "anthropic",
+        "connect_status": "available"
         # No display_name field
     }
 
@@ -2946,7 +2953,7 @@ async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
     mock_convert_list.return_value = []
     # Do not mutate model_cache here so that the "model_id not in model_cache" branch runs.
     mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
-    mock_get_model.return_value = {"model_name": "m", "display_name": "M"}
+    mock_get_model.return_value = {"model_name": "m", "display_name": "M", "connect_status": "available"}
 
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
@@ -17143,9 +17150,9 @@ async def test_list_all_agent_info_impl_filters_deleted_models(
     # Mock model info for valid models (get_model_by_model_id takes 2 args: model_id and tenant_id)
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {"display_name": "Model 1", "model_id": 1, "connect_status": "available"}
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {"display_name": "Model 3", "model_id": 3, "connect_status": "available"}
         return None
     mock_get_model.side_effect = get_model_side_effect
 
@@ -17312,9 +17319,9 @@ async def test_get_agent_info_impl_filters_deleted_models(
     # Mock get_model_by_model_id for valid models
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {"display_name": "Model 1", "model_id": 1, "connect_status": "available"}
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {"display_name": "Model 3", "model_id": 3, "connect_status": "available"}
         return None
     mock_get_model_by_model_id.side_effect = get_model_side_effect
 

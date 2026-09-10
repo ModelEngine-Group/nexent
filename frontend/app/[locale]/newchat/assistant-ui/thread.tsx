@@ -13,6 +13,7 @@ import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
+import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
@@ -64,6 +65,7 @@ import {
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
+import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "../ui/model-selector";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
@@ -201,6 +203,8 @@ export interface ThreadProps {
 const useAgentModels = (
   agent: Agent | PublishedAgent
 ): readonly ModelOption[] => {
+  const { models: availableModels } = useModelList();
+
   return useMemo(() => {
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
@@ -211,27 +215,45 @@ const useAgentModels = (
       model_names &&
       model_names.length > 0
     ) {
-      return model_ids.map((id, i) => ({
+      const configuredModels = model_ids.map((id, i) => ({
         id: String(id),
         name: model_names[i] ?? `Model ${id}`,
       }));
+      const availableModelIds = new Set(
+        availableModels
+          .filter((model) => model.connect_status === "available")
+          .map((model) => String(model.id))
+      );
+      return configuredModels.filter((model) =>
+        availableModelIds.has(model.id)
+      );
     }
 
     // Fallback for single model: check model_name on typedAgent
     const modelName = (typedAgent as unknown as { model_name?: string })
       .model_name;
-    if (modelName) {
+    const modelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status === "available" &&
+        (model.displayName === modelName || model.name === modelName)
+    );
+    if (modelName && modelIsAvailable) {
       return [{ id: modelName, name: modelName }];
     }
 
     // Fallback to the single model field (used by AgentDraft / debug panel)
     const singleModel = (typedAgent as unknown as { model?: string }).model;
-    if (singleModel) {
+    const singleModelIsAvailable = availableModels.some(
+      (model) =>
+        model.connect_status === "available" &&
+        (model.displayName === singleModel || model.name === singleModel)
+    );
+    if (singleModel && singleModelIsAvailable) {
       return [{ id: singleModel, name: singleModel }];
     }
 
     return [];
-  }, [agent]);
+  }, [agent, availableModels]);
 };
 
 export const Thread: FC<ThreadProps> = ({
@@ -262,6 +284,28 @@ export const Thread: FC<ThreadProps> = ({
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
+  const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
+  const selectedModelIsValid = Boolean(
+    selectedModelId && models.some((model) => model.id === selectedModelId)
+  );
+  const fallbackModelId = models[0]?.id;
+  const effectiveSelectedModelId = selectedModelIsValid
+    ? selectedModelId
+    : localSelectedModelId &&
+        models.some((model) => model.id === localSelectedModelId)
+      ? localSelectedModelId
+      : fallbackModelId;
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      if (!models.some((model) => model.id === modelId)) return;
+      if (selectedModelId !== undefined) {
+        onModelChange?.(modelId);
+      } else {
+        setLocalSelectedModelId(modelId);
+      }
+    },
+    [models, onModelChange, selectedModelId]
+  );
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
@@ -462,8 +506,8 @@ export const Thread: FC<ThreadProps> = ({
         welcomeSuggestions={welcomeSuggestions}
         onBack={onBack}
         models={models}
-        selectedModelId={selectedModelId}
-        onModelChange={onModelChange}
+        selectedModelId={effectiveSelectedModelId}
+        onModelChange={handleModelChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
@@ -917,9 +961,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
                   <button
                     key={suggestion.id}
                     type="button"
-                    onClick={() =>
-                      handleSampleQuestionClick(suggestion.prompt)
-                    }
+                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
                     className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -1312,21 +1354,28 @@ const AssistantMessage: FC<{
                 Boolean((part as { image?: string }).image)) ||
               (part.type === "text" &&
                 Boolean(
-                  (part as {
-                    isSearchImage?: boolean;
-                    imageSource?: SourcePartLike;
-                  }).isSearchImage &&
-                    (part as { imageSource?: SourcePartLike }).imageSource
+                  (
+                    part as {
+                      isSearchImage?: boolean;
+                      imageSource?: SourcePartLike;
+                    }
+                  ).isSearchImage &&
+                  (part as { imageSource?: SourcePartLike }).imageSource
                 ));
+            const isExecutionCodePart =
+              part.type === "data" &&
+              (part as { name?: string }).name === "execution-code";
             const chainPath: `group-${string}`[] = isImagePart
               ? ["group-image"]
               : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
-                : part.type === "tool-call"
-                  ? ["group-chainOfThought", "group-tool"]
-                  : part.type === "source"
-                    ? ["group-source"]
-                    : ["group-default"];
+                : isExecutionCodePart
+                  ? ["group-chainOfThought", "group-execution-code"]
+                  : part.type === "tool-call"
+                    ? ["group-chainOfThought", "group-tool"]
+                    : part.type === "source"
+                      ? ["group-source"]
+                      : ["group-default"];
             if (subagentId !== undefined) {
               const groupKey =
                 `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
@@ -1411,6 +1460,8 @@ const AssistantMessage: FC<{
                   </Reasoning.Root>
                 );
               }
+              case "group-execution-code":
+                return <div data-slot="aui_execution-code">{children}</div>;
               case "group-source":
                 return (
                   <SourceGroupButton
@@ -1482,6 +1533,22 @@ const AssistantMessage: FC<{
                         (part as typeof part & { data?: unknown })
                           .data as HistorySummaryData
                       }
+                    />
+                  );
+                }
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "execution-code"
+                ) {
+                  const data = (
+                    part as typeof part & {
+                      data?: { code?: unknown; language?: string };
+                    }
+                  ).data;
+                  return (
+                    <ExecutionCodeBlock
+                      code={data?.code}
+                      language={data?.language}
                     />
                   );
                 }

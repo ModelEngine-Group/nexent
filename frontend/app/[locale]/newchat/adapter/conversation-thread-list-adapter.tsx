@@ -37,6 +37,7 @@ import {
   attachExecutionLogsToTool,
   collapseSubAgentParts,
   attachSearchContentToTool,
+  buildExecutionCodePart,
   buildToolCallPart,
   conversationSourcesRegistry,
   extractAidpImageKeys,
@@ -846,6 +847,21 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (part.type === "parse") {
+            flushReasoning(part.invocation_id);
+            if (part.content.trim()) {
+              const executionCodePart = buildExecutionCodePart({
+                type: "parse",
+                content: part.content,
+                unit_index: part.unit_index ?? partIndex,
+              });
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) executionCodePart.metadata = meta;
+              content.push(executionCodePart);
+            }
+            continue;
+          }
+
           if (part.type === "execution_logs") {
             flushReasoning(part.invocation_id);
             attachExecutionLogsToTool(content, part);
@@ -1392,6 +1408,16 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       remoteId: "",
       externalId: "",
     };
+  },
+
+  // New conversations do not have a backend ID until their first agent run.
+  // Accept metadata updates so assistant-ui can retain the selected agent in
+  // its local thread state while users switch between conversations.
+  async updateCustom(
+    _remoteId: string,
+    _custom: Record<string, unknown> | undefined
+  ): Promise<void> {
+    return;
   },
 
   async rename(remoteId: string, newTitle: string): Promise<void> {
