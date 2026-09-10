@@ -5,9 +5,9 @@ import subprocess
 import sys
 import threading
 import types
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
-import zipfile
 from xml.etree import ElementTree as ET
 
 import pytest

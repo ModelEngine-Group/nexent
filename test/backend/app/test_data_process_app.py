@@ -1,39 +1,40 @@
 import sys
 import types
-from typing import Any, Dict, List, Optional, Tuple
 from http import HTTPStatus
+from typing import Any
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+
 class _TaskRequest(BaseModel):
     source: str
     source_type: str
     chunking_strategy: str = "basic"
-    index_name: Optional[str] = None
-    original_filename: Optional[str] = None
-    embedding_model_id: Optional[int] = None
-    tenant_id: Optional[str] = None
+    index_name: str | None = None
+    original_filename: str | None = None
+    embedding_model_id: int | None = None
+    tenant_id: str | None = None
 
 
 class _BatchTaskRequest(BaseModel):
-    sources: List[_TaskRequest]
+    sources: list[_TaskRequest]
 
 
 class _ConvertStateRequest(BaseModel):
-    process_state: Optional[str] = None
-    forward_state: Optional[str] = None
+    process_state: str | None = None
+    forward_state: str | None = None
 
 
 class _DummyResult:
-    def __init__(self, id_: str, payload: Optional[Dict[str, Any]] = None, exc: Optional[Exception] = None):
+    def __init__(self, id_: str, payload: dict[str, Any] | None = None, exc: Exception | None = None):
         self.id = id_
         self._payload = payload or {}
         self._exc = exc
 
-    def get(self, timeout: Optional[int] = None):
+    def get(self, timeout: int | None = None):
         if self._exc:
             raise self._exc
         return self._payload
@@ -71,7 +72,7 @@ class _ServiceStub:
     async def stop(self):
         self.stopped = True
 
-    async def create_batch_tasks_impl(self, authorization: Optional[str], request: _BatchTaskRequest) -> Dict[str, Any]:
+    async def create_batch_tasks_impl(self, authorization: str | None, request: _BatchTaskRequest) -> dict[str, Any]:
         task_ids = [f"tid-{i}" for i, _ in enumerate(request.sources, start=1)]
         return {
             "status": "success",
@@ -86,10 +87,10 @@ class _ServiceStub:
             return None
         return object()
 
-    async def convert_to_base64(self, image: object) -> Tuple[str, str]:
+    async def convert_to_base64(self, image: object) -> tuple[str, str]:
         return ("ZmFrZSBiYXNlNjQ=", "image/png")
 
-    async def get_all_tasks(self) -> List[Dict[str, Any]]:
+    async def get_all_tasks(self) -> list[dict[str, Any]]:
         return [
             {
                 "id": "1",
@@ -155,9 +156,9 @@ class _ServiceStub:
 def stub_modules(monkeypatch):
     # consts.model
     model_mod = types.ModuleType("consts.model")
-    setattr(model_mod, "TaskRequest", _TaskRequest)
-    setattr(model_mod, "BatchTaskRequest", _BatchTaskRequest)
-    setattr(model_mod, "ConvertStateRequest", _ConvertStateRequest)
+    model_mod.TaskRequest = _TaskRequest
+    model_mod.BatchTaskRequest = _BatchTaskRequest
+    model_mod.ConvertStateRequest = _ConvertStateRequest
     sys.modules["consts.model"] = model_mod
 
     # data_process.tasks
@@ -166,14 +167,14 @@ def stub_modules(monkeypatch):
     class _PSync:
         def apply_async(self, **kwargs):
             return _tasks.process_sync_apply_async(**kwargs)
-    setattr(tasks_mod, "submit_process_forward_chain", _tasks.submit_process_forward_chain)
-    setattr(tasks_mod, "process_sync", _PSync())
+    tasks_mod.submit_process_forward_chain = _tasks.submit_process_forward_chain
+    tasks_mod.process_sync = _PSync()
     sys.modules["data_process.tasks"] = tasks_mod
 
     # services.data_process_service
     service_stub = _ServiceStub()
     svc_mod = types.ModuleType("services.data_process_service")
-    setattr(svc_mod, "get_data_process_service", lambda: service_stub)
+    svc_mod.get_data_process_service = lambda: service_stub
     sys.modules["services.data_process_service"] = svc_mod
 
     # data_process.utils
@@ -181,16 +182,16 @@ def stub_modules(monkeypatch):
     class _DocumentDeleteRequested(RuntimeError):
         pass
 
-    setattr(utils_mod, "DocumentDeleteRequested", _DocumentDeleteRequested)
-    setattr(utils_mod, "ensure_document_not_deleted", lambda **_kwargs: None)
-    setattr(utils_mod, "is_document_delete_requested", lambda **_kwargs: False)
-    setattr(utils_mod, "update_file_lifecycle", lambda **_kwargs: None)
+    utils_mod.DocumentDeleteRequested = _DocumentDeleteRequested
+    utils_mod.ensure_document_not_deleted = lambda **_kwargs: None
+    utils_mod.is_document_delete_requested = lambda **_kwargs: False
+    utils_mod.update_file_lifecycle = lambda **_kwargs: None
     async def get_task_details(task_id: str):
         if task_id == "missing":
             return None
         return {"id": task_id, "ok": True}
-    setattr(utils_mod, "get_task_details", get_task_details)
-    setattr(utils_mod, "load_chunks_from_redis", lambda _key: [{"content": "hello"}])
+    utils_mod.get_task_details = get_task_details
+    utils_mod.load_chunks_from_redis = lambda _key: [{"content": "hello"}]
     sys.modules["data_process.utils"] = utils_mod
 
     # yield to tests

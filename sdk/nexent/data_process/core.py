@@ -1,12 +1,12 @@
 import logging
 import os
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
-from io import BytesIO
+from nexent.monitor import get_monitoring_manager
 
 from .base import FileProcessor
 from .model_registry import ModelRegistry
-from nexent.monitor import get_monitoring_manager
 
 
 logger = logging.getLogger("data_process.core")
@@ -31,7 +31,7 @@ class DataProcessCore:
 
     # Supported chunking strategies
     CHUNKING_STRATEGIES = {"basic", "by_title", "none"}
-    
+
     EXTRACT_IMAGE_EXTENSIONS = {".pdf", ".doc",
                                 ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
 
@@ -151,7 +151,7 @@ class DataProcessCore:
         extract_image_processor_instance = (
             self._get_processor(extractor) if extractor else None
         )
-        
+
         extension = os.path.splitext(filename)[1].lower()
         if self.model_registry.model_paths.get("unstructured_default") and processor_name == "Unstructured":
             self.ensure_model("unstructured_default")

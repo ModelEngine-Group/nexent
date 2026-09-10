@@ -1,10 +1,10 @@
-import pytest
-from pytest_mock import MockFixture
-from unittest.mock import Mock, MagicMock
-from io import BytesIO
 import sys
 import types
+from io import BytesIO
+from unittest.mock import MagicMock, Mock
 
+import pytest
+from pytest_mock import MockFixture
 
 fake_unstructured = types.ModuleType("unstructured_inference")
 fake_models = types.ModuleType("unstructured_inference.models")

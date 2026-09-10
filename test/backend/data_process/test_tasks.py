@@ -1,8 +1,6 @@
 """Focused tests for the Celery parser task boundary."""
 
-import types
 
-import pytest
 
 
 def _configure_celery_environment(monkeypatch):

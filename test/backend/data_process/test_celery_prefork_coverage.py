@@ -53,8 +53,8 @@ def tasks(monkeypatch):
 @pytest.fixture()
 def parser_runtime(monkeypatch):
     _configure_celery_environment(monkeypatch)
+    from data_process import parse_tasks
     from data_process import parser_runtime as module
-    import data_process.parse_tasks as parse_tasks
 
     _disable_celery_result_backend(monkeypatch, parse_tasks)
     return module
@@ -73,7 +73,7 @@ class FakeSelf:
 
 
 def test_task_helpers_and_error_paths(tasks, monkeypatch):
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks
 
     assert parse_tasks._count_image_metadata_chunks(None) == 0
     assert parse_tasks._count_image_metadata_chunks(
@@ -428,7 +428,7 @@ def test_parser_runtime_initialization_and_image_append(parser_runtime, monkeypa
 
 
 def test_parse_task_storage_bootstrap_and_part_tasks(parser_runtime, monkeypatch):
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks
 
     class Client:
         def __init__(self):
@@ -508,7 +508,7 @@ def test_parse_task_storage_bootstrap_and_part_tasks(parser_runtime, monkeypatch
 
 
 def test_parse_aggregation_and_process_tasks(parser_runtime, monkeypatch):
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks
 
     monkeypatch.setattr(parse_tasks, "load_chunks_from_redis", lambda key: [{"content": key}])
     stored = []
@@ -673,8 +673,8 @@ def test_model_registry_lazy_loading_and_validation(monkeypatch, tmp_path):
 
 
 def test_model_registry_table_loader(monkeypatch, tmp_path):
-    from nexent.data_process.model_registry import ModelRegistry
     from nexent.data_process import extract_image
+    from nexent.data_process.model_registry import ModelRegistry
 
     model_path = tmp_path / "table"
     model_path.mkdir()
@@ -734,8 +734,7 @@ def test_worker_validation_signals_and_service_checks(monkeypatch):
 
 def test_worker_ready_bootstrap_and_process_resource_paths(monkeypatch):
     _configure_celery_environment(monkeypatch)
-    from data_process import worker
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks, worker
 
     monkeypatch.setattr(worker, "QUEUES", "parse_q")
     monkeypatch.setattr(worker, "DP_PARSE_MIN_PROCESSES", 2)
@@ -783,7 +782,7 @@ def test_worker_redis_validation_and_startup_error_paths(monkeypatch):
 
 
 def test_parse_storage_lifecycle_bootstrap_and_aggregation_error_paths(parser_runtime, monkeypatch):
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks
 
     class Client:
         def __init__(self, value=None, ready_count=1):
@@ -853,7 +852,7 @@ def test_parse_storage_lifecycle_bootstrap_and_aggregation_error_paths(parser_ru
 
 
 def test_parse_bootstrap_timeout_and_process_split_path(parser_runtime, monkeypatch):
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks
 
     client = types.SimpleNamespace(
         sadd=lambda *args: None,
@@ -935,8 +934,8 @@ def test_task_base_helpers_lifecycle_and_batch_edge_cases(tasks, monkeypatch):
 
 
 def test_parse_task_hooks_and_low_level_failure_branches(parser_runtime, monkeypatch):
-    import data_process.parse_tasks as parse_tasks
     import data_process.tasks as tasks_module
+    from data_process import parse_tasks
 
     monkeypatch.setattr(parse_tasks, "REDIS_BACKEND_URL", None)
     with pytest.raises(RuntimeError, match="REDIS_BACKEND_URL"):
@@ -1195,7 +1194,7 @@ def test_parser_runtime_initialization_guards_and_source_error_paths(parser_runt
 
 
 def test_parser_task_low_level_redis_and_error_cleanup_paths(parser_runtime, monkeypatch):
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks
 
     redis_module = types.ModuleType("redis")
     redis_module.Redis = types.SimpleNamespace(from_url=lambda *args, **kwargs: (args, kwargs))
@@ -1246,8 +1245,7 @@ def test_parser_task_low_level_redis_and_error_cleanup_paths(parser_runtime, mon
 
 def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monkeypatch):
     _configure_celery_environment(monkeypatch)
-    from data_process import worker
-    import data_process.parse_tasks as parse_tasks
+    from data_process import parse_tasks, worker
 
     monkeypatch.setattr(worker, "QUEUES", "parse_q")
     monkeypatch.setattr(parse_tasks.parser_bootstrap, "apply_async", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("dispatch")))

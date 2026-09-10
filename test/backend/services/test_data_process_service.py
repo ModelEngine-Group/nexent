@@ -1,16 +1,16 @@
-import sys
-import unittest
-import os
-import io
-import base64
 import asyncio
-import time
+import base64
+import io
+import os
+import sys
 import types
-from unittest.mock import patch, MagicMock, AsyncMock
+import unittest
 import warnings
-from PIL import Image
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from celery import states
+from PIL import Image
 
 # Set required environment variables
 os.environ['REDIS_URL'] = 'redis://mock:6379/0'
@@ -129,6 +129,7 @@ sys.modules.setdefault('data_process.utils', _data_process_utils)
 # patch below resolves. Python's normal import system will resolve the submodule
 # from `backend/services/` once the package is registered.
 import os as _os
+
 _backend_services_dir = _os.path.join(
     _os.path.dirname(_os.path.abspath(__file__)),
     '..', '..', '..', 'backend', 'services'
@@ -143,13 +144,17 @@ if 'backend.services' not in sys.modules:
 # `nexent.data_process.core`, `transformers`, `torch`, etc. are already in
 # sys.modules so the heavy import chain succeeds. This also installs the module
 # under sys.modules, so the subsequent patch(...) call resolves correctly.
-import backend.services.data_process_service as _dps  # noqa: E402,F401
+import backend.services.data_process_service as _dps
+
 del _dps
 
 # from backend.services.data_process_service import DataProcessService, get_data_process_service
 with patch('data_process.utils.get_task_info') as mock_get_task_info, \
         patch('backend.services.data_process_service.get_all_task_ids_from_redis') as mock_get_redis_task_ids:
-    from backend.services.data_process_service import DataProcessService, get_data_process_service
+    from backend.services.data_process_service import (
+        DataProcessService,
+        get_data_process_service,
+    )
 
 
 class TestDataProcessService(unittest.TestCase):

@@ -1,13 +1,14 @@
-import os
 import base64
 import hashlib
-import tempfile
+import os
 import subprocess
-from typing import List, Dict, Any, Optional
+import tempfile
 import zipfile
+from typing import Any, Dict, List, Optional
 from xml.etree import ElementTree
 
 from .base import FileProcessor
+
 
 Presentation = None
 partition = None
@@ -78,7 +79,7 @@ class UniversalImageExtractor(FileProcessor):
 
 
     def _convert_file(self, input_path: str, target_format: str) -> str:
-    
+
         """
         Convert a file to the target format using LibreOffice.
 
@@ -365,10 +366,10 @@ class UniversalImageExtractor(FileProcessor):
         seen = set()
         emu_per_inch = params.get("emu_per_inch", 914400)
         dpi = params.get("dpi", 96)
-        
+
         def _emu_to_px(emu: int, emu_per_inch: int, dpi: int) -> int:
             return int((emu / emu_per_inch) * dpi)
-        
+
 
         slide_w = _emu_to_px(prs.slide_width, emu_per_inch, dpi)
         slide_h = _emu_to_px(prs.slide_height, emu_per_inch, dpi)
