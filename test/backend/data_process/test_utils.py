@@ -331,6 +331,51 @@ def test_get_all_task_ids_empty_redis(monkeypatch):
     assert get_all_task_ids_from_redis(redis_client) == []
 
 
+def test_document_lifecycle_and_delete_fence_helpers(monkeypatch):
+    from backend.data_process import utils
+
+    transitions = []
+    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle.get_file_record = lambda **kwargs: (
+        {"file_id": "fid", "status": "PROCESSING"}
+        if kwargs.get("file_id") == "fid"
+        else {"file_id": "source-fid", "status": "PROCESSING"}
+    )
+    lifecycle.transition_file_record = lambda file_id, **kwargs: transitions.append((file_id, kwargs))
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+
+    utils.update_file_lifecycle(
+        file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FORWARDING", stage="FORWARD"
+    )
+    utils.update_file_lifecycle(
+        file_id=None, tenant_id=None, index_name="idx", source="source", status="FAILED", stage="PROCESS"
+    )
+    assert [item[0] for item in transitions] == ["fid", "source-fid"]
+
+    utils.update_file_lifecycle(
+        file_id="fid", tenant_id="tenant", index_name=None, source="source", status="FAILED", stage="PROCESS"
+    )
+    lifecycle.get_file_record = lambda **_kwargs: {"file_id": "fid", "status": "DELETED"}
+    utils.update_file_lifecycle(
+        file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FAILED", stage="PROCESS"
+    )
+
+    redis_service = sys.modules["services.redis_service"]
+    monkeypatch.setattr(redis_service, "get_redis_service", lambda: types.SimpleNamespace(
+        is_document_delete_requested=lambda **_kwargs: True,
+    ))
+    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id="fid") is True
+    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id=None) is False
+    with pytest.raises(utils.DocumentDeleteRequested):
+        utils.ensure_document_not_deleted(index_name="idx", source="source", file_id="fid")
+
+    monkeypatch.setattr(redis_service, "get_redis_service", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
+    lifecycle.get_file_record = lambda **_kwargs: {"file_id": "fid", "status": "DELETE_REQUESTED"}
+    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id="fid") is True
+    lifecycle.get_file_record = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db down"))
+    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id="fid") is False
+
+
 # ----------------------------------------------------------------------
 # get_task_info — backend_available / status parsing
 # ----------------------------------------------------------------------

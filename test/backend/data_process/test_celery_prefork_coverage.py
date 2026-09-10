@@ -1243,6 +1243,125 @@ def test_parser_task_low_level_redis_and_error_cleanup_paths(parser_runtime, mon
         parse_tasks.process.pop_request()
 
 
+def test_parse_cancellation_and_cleanup_boundaries(parser_runtime, monkeypatch):
+    """Cover cancellation boundaries without starting a worker or loading a model."""
+    from data_process import parse_tasks
+
+    class FailingRedis:
+        def delete(self, *_keys):
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(parse_tasks, "_redis_client", lambda: FailingRedis())
+    import database.attachment_db as attachment
+    monkeypatch.setattr(attachment, "delete_file", lambda _uri: {"success": False, "error": "gone"})
+    parse_tasks.cleanup_parser_artifacts(
+        "cleanup", [{"part_index": 0, "uri": "s3://part"}], include_final=True
+    )
+
+    monkeypatch.setitem(sys.modules, "database.attachment_db", None)
+    parse_tasks.cleanup_parser_artifacts("missing-attachment", None, include_final=False)
+    monkeypatch.setitem(sys.modules, "database.attachment_db", attachment)
+
+    cleanup_calls = []
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: cleanup_calls.append((args, kwargs)))
+    parse_tasks.cleanup_failed_parser_parts(
+        None, RuntimeError("chord"), None, task_id="failed", part_refs=[{"part_index": 0}]
+    )
+    assert cleanup_calls[-1][1]["include_final"] is True
+
+    cancelled = parse_tasks._build_process_cancelled_result(
+        task_id="cancelled", source="source", index_name="idx", original_filename="file.txt", file_id="fid"
+    )
+    assert cancelled["cancelled"] is True
+
+    class BootstrapRedis:
+        def __init__(self):
+            self.counts = iter((0, 1))
+
+        def sadd(self, *_args):
+            return 1
+
+        def expire(self, *_args):
+            return True
+
+        def scard(self, _key):
+            return next(self.counts)
+
+        def set(self, *_args, **_kwargs):
+            return True
+
+    bootstrap_client = BootstrapRedis()
+    monkeypatch.setattr(parse_tasks, "_redis_client", lambda: bootstrap_client)
+    monkeypatch.setattr(parse_tasks, "DP_REDIS_CHUNKS_WAIT_TIMEOUT_S", 1)
+    clock = iter((0, 0)).__next__
+    monkeypatch.setattr(parse_tasks.time, "time", clock)
+    monkeypatch.setattr(parse_tasks.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: types.SimpleNamespace(preload_models=[]))
+    parse_tasks.parser_bootstrap.push_request(id="bootstrap-sleep")
+    try:
+        assert parse_tasks.parser_bootstrap.run("generation", 1)["ready"] is True
+    finally:
+        parse_tasks.parser_bootstrap.pop_request()
+
+    monkeypatch.setattr(
+        parse_tasks,
+        "ensure_document_not_deleted",
+        lambda **_kwargs: (_ for _ in ()).throw(parse_tasks.DocumentDeleteRequested("deleted")),
+    )
+    parse_tasks.process_part.push_request(id="part-cancelled")
+    try:
+        part_result = parse_tasks.process_part.run(
+            {"uri": "s3://part", "part_index": 0}, "file.txt", "basic", "part-key", parser_task_id="parent"
+        )
+    finally:
+        parse_tasks.process_part.pop_request()
+    assert part_result["cancelled"] is True
+
+    aggregate_cleanup = []
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: aggregate_cleanup.append(kwargs))
+    monkeypatch.setattr(parse_tasks, "ensure_document_not_deleted", lambda **_kwargs: None)
+    parse_tasks.aggregate_store_chunks.push_request(id="aggregate-cancelled")
+    try:
+        result = parse_tasks.aggregate_store_chunks.run(
+            [{"part_redis_key": "part-key", "part_index": 0, "cancelled": True}],
+            "final-key",
+            source="source",
+            index_name="idx",
+            task_id="aggregate-cancelled",
+        )
+    finally:
+        parse_tasks.aggregate_store_chunks.pop_request()
+    assert result["cancelled"] is True and aggregate_cleanup[-1]["include_final"] is True
+
+    monkeypatch.setattr(parse_tasks, "is_document_delete_requested", lambda **_kwargs: True)
+    parse_tasks.process.push_request(id="process-pre-cancel")
+    try:
+        assert parse_tasks.process.run("source", "local", index_name="idx")["cancelled"] is True
+    finally:
+        parse_tasks.process.pop_request()
+
+    runtime = types.SimpleNamespace(
+        read_source=lambda *_args: b"data",
+        process_source=lambda **_kwargs: [{"content": "chunk"}],
+    )
+    monkeypatch.setattr(parse_tasks, "is_document_delete_requested", lambda **_kwargs: False)
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(parse_tasks, "update_file_lifecycle", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        parse_tasks,
+        "ensure_document_not_deleted",
+        lambda **_kwargs: (_ for _ in ()).throw(parse_tasks.DocumentDeleteRequested("deleted")),
+    )
+    post_cleanup = []
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: post_cleanup.append(kwargs))
+    parse_tasks.process.push_request(id="process-post-cancel")
+    try:
+        assert parse_tasks.process.run("source", "local", index_name="idx")["cancelled"] is True
+    finally:
+        parse_tasks.process.pop_request()
+    assert post_cleanup
+
+
 def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monkeypatch):
     _configure_celery_environment(monkeypatch)
     from data_process import parse_tasks, worker
