@@ -191,7 +191,6 @@ def test_table_agent_and_pptx_dependencies_are_loaded_lazily(monkeypatch):
     fake_tables.tables_agent = fake_agent
     monkeypatch.setitem(sys.modules, "unstructured_inference.models.tables", fake_tables)
     monkeypatch.setattr(sys.modules["unstructured_inference.models"], "tables", fake_tables)
-    monkeypatch.setattr(extract_image_module, "tables", None)
     monkeypatch.setattr(extract_image_module, "tables_agent", None)
 
     assert extract_image_module.get_tables_agent() is fake_agent
@@ -210,7 +209,7 @@ def test_table_agent_and_pptx_dependencies_are_loaded_lazily(monkeypatch):
     fake_pptx = types.ModuleType("pptx")
     fake_pptx.Presentation = FakePresentation
     monkeypatch.setitem(sys.modules, "pptx", fake_pptx)
-    monkeypatch.setattr(extract_image_module, "Presentation", extract_image_module._PRESENTATION_UNSET)
+    monkeypatch.setattr(extract_image_module, "Presentation", None)
     assert UniversalImageExtractor()._extract_pptx("sample.pptx") == []
 
 
@@ -380,6 +379,7 @@ def test_excel_helpers_positive_and_negative_paths(tmp_path):
 def test_pptx_extraction_paths(monkeypatch):
     extractor = UniversalImageExtractor()
 
+    monkeypatch.setitem(sys.modules, "pptx", None)
     monkeypatch.setattr(extract_image_module, "Presentation", None)
     with pytest.raises(RuntimeError, match="python-pptx is required"):
         extractor._extract_pptx("sample.pptx")

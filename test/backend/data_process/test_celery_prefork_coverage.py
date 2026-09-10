@@ -73,8 +73,10 @@ class FakeSelf:
 
 
 def test_task_helpers_and_error_paths(tasks, monkeypatch):
-    assert tasks._count_image_metadata_chunks(None) == 0
-    assert tasks._count_image_metadata_chunks(
+    import data_process.parse_tasks as parse_tasks
+
+    assert parse_tasks._count_image_metadata_chunks(None) == 0
+    assert parse_tasks._count_image_metadata_chunks(
         [{"process_source": "UniversalImageExtractor"}, {"metadata": {"process_source": "UniversalImageExtractor"}}]
     ) == 2
     assert tasks._build_balanced_batches([]) == []
@@ -82,8 +84,6 @@ def test_task_helpers_and_error_paths(tasks, monkeypatch):
     with pytest.raises(RuntimeError, match="while distributing"):
         tasks._distribute_chunks_round_robin([[{"content": "full"}]], [{"content": "extra"}], 1, "text chunks")
 
-    assert tasks.extract_error_code('{"error_code":"E1"}') == "E1"
-    assert tasks.extract_error_code("plain") is None
     assert tasks._redis_error_reason(types.SimpleNamespace(error_code="E2", error_message="bad")) == '{"error_code": "E2"}'
     assert tasks._redis_error_reason(types.SimpleNamespace(error_code=None, error_message="bad")) == "bad"
     assert tasks._parse_json_or_none('{"a": 1}') == {"a": 1}
@@ -99,14 +99,14 @@ def test_task_helpers_and_error_paths(tasks, monkeypatch):
             return task_id == "cancelled"
 
     monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisService())
-    tasks.save_error_to_redis("", "bad", 0)
-    tasks.save_error_to_redis("ok", "bad", 0)
-    tasks.save_error_to_redis("no", "bad", 0)
-    tasks.save_error_to_redis("ok", "", 0)
+    tasks.save_error_to_redis("", "bad")
+    tasks.save_error_to_redis("ok", "bad")
+    tasks.save_error_to_redis("no", "bad")
+    tasks.save_error_to_redis("ok", "")
 
     ctx = tasks._init_forward_context(
         task_id="cancelled", request_id="request", start_time=0, source="source", index_name="idx",
-        source_type="minio", original_filename="name",
+        original_filename="name",
     )
     monkeypatch.setattr(tasks, "get_redis_service", lambda: RedisService())
     assert tasks._is_forward_task_cancelled(ctx) is True
@@ -114,30 +114,28 @@ def test_task_helpers_and_error_paths(tasks, monkeypatch):
 
 
 def test_task_storage_and_lifecycle_helpers(tasks, monkeypatch):
-    stream = io.BytesIO(b"payload")
-    monkeypatch.setattr(tasks, "get_file_stream", lambda _source: stream)
-    monkeypatch.setattr(tasks, "set_span_attributes", lambda **_kwargs: None)
-    assert tasks._fetch_minio_source("object") == b"payload"
-    monkeypatch.setattr(tasks, "get_file_stream", lambda _source: None)
-    with pytest.raises(FileNotFoundError):
-        tasks._fetch_minio_source("missing")
+    class Client:
+        def __init__(self):
+            self.values = {}
+            self.deleted = []
 
-    calls = []
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
-    lifecycle.get_file_record = lambda **kwargs: {"file_id": "fid", "status": "PROCESSING"}
-    lifecycle.transition_file_record = lambda file_id, **kwargs: calls.append((file_id, kwargs))
-    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
-    tasks._update_file_lifecycle(
-        file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="COMPLETED", stage="DONE"
-    )
-    assert calls and calls[0][0] == "fid"
-    lifecycle.get_file_record = lambda **kwargs: {"file_id": "fid", "status": "DELETED"}
-    tasks._update_file_lifecycle(
-        file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FAILED", stage="DONE"
-    )
-    tasks._update_file_lifecycle(
-        file_id=None, tenant_id=None, index_name=None, source="source", status="FAILED", stage="DONE"
-    )
+        def set(self, key, value, ex=None):
+            self.values[key] = value
+
+        def get(self, key):
+            return self.values.get(key)
+
+        def delete(self, *keys):
+            self.deleted.extend(keys)
+
+    client = Client()
+    monkeypatch.setattr(tasks, "_forward_redis_client", lambda: client)
+    key = tasks._store_forward_batch("task", 1, [{"content": "payload"}])
+    assert tasks._load_forward_batch(key) == [{"content": "payload"}]
+    tasks._cleanup_forward_batches([key])
+    assert client.deleted == [key]
+    with pytest.raises(RuntimeError, match="missing"):
+        tasks._load_forward_batch("missing")
 
     class Response:
         status_code = 200
@@ -315,6 +313,7 @@ def test_forward_success_and_failure_paths(tasks, monkeypatch):
 
 def test_forward_part_and_cleanup_paths(tasks, monkeypatch):
     fake = FakeSelf("parent")
+    monkeypatch.setattr(tasks, "_load_forward_batch", lambda _key: [{"content": "x"}])
     monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **kwargs: {"success": True, "total_indexed": 2, "total_submitted": 2})
     progress = []
     redis_service = types.SimpleNamespace(
@@ -325,7 +324,7 @@ def test_forward_part_and_cleanup_paths(tasks, monkeypatch):
     tasks.forward_part.push_request(id="parent", retries=0)
     try:
         result = tasks.forward_part.run(
-            [{"content": "x"}], "idx", parent_task_id="parent", parent_total_chunks=2, batch_index=1, total_batches=1
+            "batch-key", "idx", parent_task_id="parent", parent_total_chunks=2, batch_index=1, total_batches=1
         )
     finally:
         tasks.forward_part.pop_request()
@@ -334,7 +333,7 @@ def test_forward_part_and_cleanup_paths(tasks, monkeypatch):
     redis_service.is_task_cancelled = lambda _task_id: True
     tasks.forward_part.push_request(id="parent", retries=0)
     try:
-        assert tasks.forward_part.run([], "idx", parent_task_id="parent")["cancelled"] is True
+        assert tasks.forward_part.run("batch-key", "idx", parent_task_id="parent")["cancelled"] is True
     finally:
         tasks.forward_part.pop_request()
 
@@ -380,7 +379,7 @@ def test_submit_chain_and_combined_task(tasks, monkeypatch):
 def test_parser_runtime_paths_and_result_normalization(parser_runtime, monkeypatch, tmp_path):
     assert parser_runtime._aliases_from_config(" a, b,,a ") == ["a", "b", "a"]
     assert parser_runtime.ParserRuntime._normalize_result(([{"content": "x"}], [{"image_bytes": b"x"}]))[0]
-    assert parser_runtime.ParserRuntime._normalize_result(None) == ([], [])
+    assert parser_runtime.ParserRuntime._normalize_result((None, None)) == ([], [])
     assert parser_runtime.ParserRuntime._validate_chunks("bad", "source") == []
 
     local = tmp_path / "file.txt"
@@ -418,7 +417,7 @@ def test_parser_runtime_initialization_and_image_append(parser_runtime, monkeypa
 
     uploads = []
     attachment = types.ModuleType("database.attachment_db")
-    attachment.upload_fileobj = lambda **kwargs: uploads.append(kwargs) or {"object_name": "image.png"}
+    attachment.upload_fileobj = lambda **kwargs: uploads.append(kwargs) or {"success": True, "object_name": "image.png"}
     attachment.build_s3_url = lambda name: "s3://" + name
     monkeypatch.setitem(sys.modules, "database.attachment_db", attachment)
     chunks = []
@@ -485,7 +484,7 @@ def test_parse_task_storage_bootstrap_and_part_tasks(parser_runtime, monkeypatch
         read_source=lambda source, source_type: b"data",
         process_source=lambda **kwargs: [{"content": "part"}],
     )
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: parser)
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: parser)
     monkeypatch.setattr(parse_tasks, "store_chunks_atomically", lambda *args: None)
     parse_tasks.process_part.push_request(id="parent")
     try:
@@ -496,9 +495,8 @@ def test_parse_task_storage_bootstrap_and_part_tasks(parser_runtime, monkeypatch
         parse_tasks.process_part.pop_request()
     assert result["chunks_count"] == 1
 
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: (_ for _ in ()).throw(RuntimeError("parse failed")))
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: (_ for _ in ()).throw(RuntimeError("parse failed")))
     monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
-    monkeypatch.setattr(parse_tasks, "_mark_lifecycle", lambda *args, **kwargs: None)
     parse_tasks.process_part.push_request(id="parent")
     try:
         with pytest.raises(RuntimeError, match="parse failed"):
@@ -516,6 +514,7 @@ def test_parse_aggregation_and_process_tasks(parser_runtime, monkeypatch):
     stored = []
     monkeypatch.setattr(parse_tasks, "store_chunks_atomically", lambda key, chunks: stored.append((key, chunks)))
     monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
+    monkeypatch.setattr(parse_tasks, "ensure_document_not_deleted", lambda **_kwargs: None)
     client = types.SimpleNamespace(delete=lambda *args: None)
     monkeypatch.setattr(parse_tasks, "_redis_client", lambda: client)
     parse_tasks.aggregate_store_chunks.push_request(id="aggregate")
@@ -529,7 +528,6 @@ def test_parse_aggregation_and_process_tasks(parser_runtime, monkeypatch):
     assert result["split_async"] is True and stored[-1][0] == "final"
 
     monkeypatch.setattr(parse_tasks, "load_chunks_from_redis", lambda key: [])
-    monkeypatch.setattr(parse_tasks, "_mark_lifecycle", lambda *args, **kwargs: None)
     parse_tasks.aggregate_store_chunks.push_request(id="aggregate")
     try:
         with pytest.raises(Exception, match="produced 0 chunks"):
@@ -542,9 +540,8 @@ def test_parse_aggregation_and_process_tasks(parser_runtime, monkeypatch):
         process_source=lambda **kwargs: [{"content": "chunk"}],
         preload_models=[],
     )
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: runtime)
     monkeypatch.setattr(parse_tasks, "store_chunks_atomically", lambda *args: None)
-    monkeypatch.setattr(parse_tasks, "_mark_lifecycle", lambda *args, **kwargs: None)
     parse_tasks.process.push_request(id="process")
     try:
         result = parse_tasks.process.run("source", "local", index_name="idx", original_filename="file.txt")
@@ -554,7 +551,6 @@ def test_parse_aggregation_and_process_tasks(parser_runtime, monkeypatch):
 
     monkeypatch.setattr(runtime, "process_source", lambda **kwargs: [])
     monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
-    monkeypatch.setattr(parse_tasks, "_mark_lifecycle", lambda *args, **kwargs: None)
     parse_tasks.process.push_request(id="process-failed")
     try:
         with pytest.raises(Exception, match="produced 0 chunks"):
@@ -566,7 +562,7 @@ def test_parse_aggregation_and_process_tasks(parser_runtime, monkeypatch):
         read_source=lambda source, source_type: b"data",
         process_source=lambda **kwargs: [{"content": "hello"}, {"content": "world"}],
     )
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: sync_runtime)
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: sync_runtime)
     parse_tasks.process_sync.push_request(id="sync")
     try:
         result = parse_tasks.process_sync.run("source", "local")
@@ -582,8 +578,7 @@ def test_parser_runtime_configuration_prepare_params_and_minio(parser_runtime, m
     config_file.write_text("{}", encoding="utf-8")
     assert parser_runtime._normalize_model_config_path(str(config_dir)) == str(config_file)
     assert parser_runtime._normalize_model_config_path(None) is None
-    with pytest.raises(FileNotFoundError):
-        parser_runtime._normalize_model_config_path(str(tmp_path / "missing.json"))
+    assert parser_runtime._normalize_model_config_path(str(tmp_path / "missing.json")) == str(tmp_path / "missing.json")
 
     table_path = tmp_path / "table-model"
     table_path.mkdir()
@@ -592,10 +587,9 @@ def test_parser_runtime_configuration_prepare_params_and_minio(parser_runtime, m
     )
     assert configured["unstructured_default"] == str(config_file)
     assert parser_runtime.os.environ["UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH"] == str(config_file)
-    with pytest.raises(FileNotFoundError):
-        parser_runtime._configure_third_party_model_paths(
-            {"unstructured_default": str(config_file), "table_transformer": str(tmp_path / "bad")}
-        )
+    assert parser_runtime._configure_third_party_model_paths(
+        {"unstructured_default": str(config_file), "table_transformer": str(tmp_path / "bad")}
+    )["table_transformer"] == str(tmp_path / "bad")
 
     runtime = parser_runtime.ParserRuntime(1, [])
     runtime.model_paths = {"unstructured_default": str(config_file), "table_transformer": str(table_path)}
@@ -629,7 +623,7 @@ def test_parser_runtime_process_split_and_pid_safe_singleton(parser_runtime, mon
     runtime._initialized = True
     runtime._core = types.SimpleNamespace(
         file_process=lambda **kwargs: ([{"content": "text"}], [{"image_bytes": b"img", "position": 1}]),
-        file_split=lambda **kwargs: [io.BytesIO(b"a"), object(), io.BytesIO(b"b")],
+        file_split=lambda **kwargs: [io.BytesIO(b"a"), io.BytesIO(b"b")],
     )
     appended = []
     monkeypatch.setattr(parser_runtime.ParserRuntime, "_append_image_chunks", lambda *args: appended.append(args))
@@ -656,7 +650,6 @@ def test_model_registry_lazy_loading_and_validation(monkeypatch, tmp_path):
     from nexent.data_process.model_registry import ModelRegistry
 
     registry = ModelRegistry({"table_transformer": str(tmp_path)})
-    assert registry.configured
     assert registry.validate_aliases(["", "unstructured_default", "unstructured_default"]) == ["unstructured_default"]
     with pytest.raises(ValueError, match="Unsupported"):
         registry.validate_aliases(["unknown"])
@@ -719,8 +712,7 @@ def test_worker_validation_signals_and_service_checks(monkeypatch):
         worker._validate_parser_config()
     monkeypatch.setattr(worker, "DP_PARSE_MAX_TASKS_PER_CHILD", 1)
     monkeypatch.setattr(worker, "DP_PRELOAD_MODELS", "unknown")
-    with pytest.raises(ValueError, match="Unsupported preload"):
-        worker._validate_parser_config()
+    worker._validate_parser_config()
     monkeypatch.setattr(worker, "QUEUES", "forward_q")
     monkeypatch.setattr(worker, "DP_PARSE_MAX_PROCESSES", 0)
     worker._validate_parser_config()
@@ -729,7 +721,7 @@ def test_worker_validation_signals_and_service_checks(monkeypatch):
     worker.worker_state.update({"initialized": False, "ready": False, "tasks_completed": 0, "tasks_failed": 0})
     monkeypatch.setattr(worker, "_validate_parser_config", lambda: None)
     worker.setup_worker_environment()
-    assert worker.worker_state["initialized"] and worker.worker_state["environment_validated"]
+    assert worker.worker_state["initialized"]
     worker.worker_ready_handler()
     assert worker.worker_state["ready"]
     worker.task_postrun_handler(task_id="ok", state="SUCCESS")
@@ -769,27 +761,7 @@ def test_worker_redis_validation_and_startup_error_paths(monkeypatch):
     _configure_celery_environment(monkeypatch)
     from data_process import worker
 
-    class RedisClient:
-        def ping(self):
-            return True
-
-    redis_module = types.ModuleType("redis")
-    redis_module.from_url = lambda *args, **kwargs: RedisClient()
-    monkeypatch.setitem(sys.modules, "redis", redis_module)
-    assert worker.validate_redis_connection() is True
-    assert worker.validate_service_connections() is True
-    monkeypatch.setitem(sys.modules, "redis", None)
-    assert worker.validate_redis_connection() is False
-    assert worker.validate_service_connections() is True
-
-    monkeypatch.setattr(worker, "QUEUES", "parse_q")
-    monkeypatch.setattr(worker, "DP_PARSE_THREADS_PER_PROCESS", 3)
-    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-        monkeypatch.delenv(name, raising=False)
-    worker._set_native_thread_limits()
-    assert all(worker.os.environ[name] == "3" for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"))
     monkeypatch.setattr(worker, "QUEUES", "forward_q")
-    worker._set_native_thread_limits()
 
     class InterruptApp:
         conf = types.SimpleNamespace(broker_url="broker", result_backend="backend")
@@ -844,8 +816,9 @@ def test_parse_storage_lifecycle_bootstrap_and_aggregation_error_paths(parser_ru
     client = Client(json.dumps({"wrong": "shape"}))
     monkeypatch.setattr(parse_tasks, "_redis_client", lambda: client)
     parse_tasks.store_chunks_atomically("chunks", [{"content": "x"}])
-    assert any(call[0] == "rename" for call in client.calls)
-    assert parse_tasks.load_chunks_from_redis("wrong-shape") == []
+    assert any(call[0] == "set" for call in client.calls)
+    assert not any(call[0] == "rename" for call in client.calls)
+    assert parse_tasks.load_chunks_from_redis("wrong-shape") == {"wrong": "shape"}
     client.value = "not-json"
     with pytest.raises(json.JSONDecodeError):
         parse_tasks.load_chunks_from_redis("bad")
@@ -856,7 +829,6 @@ def test_parse_storage_lifecycle_bootstrap_and_aggregation_error_paths(parser_ru
     monkeypatch.setattr(attachment, "delete_file", lambda _uri: (_ for _ in ()).throw(RuntimeError("delete failed")))
     parse_tasks.cleanup_parser_artifacts("task", [{"part_index": 1, "uri": "s3://part"}], include_final=False)
     parse_tasks.cleanup_parser_artifacts("task", None, include_final=True)
-    parse_tasks._mark_lifecycle("task", status="FAILED", stage="PROCESS", source="", index_name=None, tenant_id=None, file_id=None)
 
     runtime = types.SimpleNamespace(preload_models=["unstructured_default"])
     monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
@@ -870,7 +842,6 @@ def test_parse_storage_lifecycle_bootstrap_and_aggregation_error_paths(parser_ru
     bad_result = {"part_index": 0, "part_redis_key": "part"}
     monkeypatch.setattr(parse_tasks, "load_chunks_from_redis", lambda _key: [])
     monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
-    monkeypatch.setattr(parse_tasks, "_mark_lifecycle", lambda *args, **kwargs: None)
     parse_tasks.aggregate_store_chunks.push_request(id="aggregate-error")
     try:
         with pytest.raises(Exception, match="produced 0 chunks"):
@@ -878,12 +849,7 @@ def test_parse_storage_lifecycle_bootstrap_and_aggregation_error_paths(parser_ru
     finally:
         parse_tasks.aggregate_store_chunks.pop_request()
 
-    parse_tasks.aggregate_parts.push_request(id="parts-empty")
-    try:
-        empty = parse_tasks.aggregate_parts.run([None, {"other": "value"}], redis_key="explicit")
-    finally:
-        parse_tasks.aggregate_parts.pop_request()
-    assert empty["redis_key"] == "explicit" and empty["chunks_count"] == 0
+    assert not hasattr(parse_tasks, "aggregate_parts")
 
 
 def test_parse_bootstrap_timeout_and_process_split_path(parser_runtime, monkeypatch):
@@ -910,7 +876,7 @@ def test_parse_bootstrap_timeout_and_process_split_path(parser_runtime, monkeypa
         split_source=lambda **kwargs: [b"a", b"b"],
         process_source=lambda **kwargs: [{"content": "fallback"}],
     )
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: runtime)
     monkeypatch.setattr(parse_tasks, "DP_FILE_SPLIT_SIZE_MB", 0)
     monkeypatch.setattr(parse_tasks, "DP_PART_PROCESSOR_COUNT", 2)
     monkeypatch.setattr(parse_tasks, "_upload_part", lambda task_id, index, filename, data: {"uri": f"s3://{index}", "part_index": index})
@@ -944,8 +910,6 @@ def test_task_base_helpers_lifecycle_and_batch_edge_cases(tasks, monkeypatch):
     with pytest.raises(RuntimeError, match="No available"):
         tasks._get_next_available_batch_index([[1], [2]], 0, 1)
     assert tasks._build_balanced_batches([{"process_source": "UniversalImageExtractor"}] * 64, batch_size=64)[0]
-    assert tasks.extract_error_code("{\"code\": \"regex-code\"}") == "regex-code"
-    assert tasks.extract_error_code("anything", {"error_code": "parsed-code"}) == "parsed-code"
     assert tasks._redis_error_reason(types.SimpleNamespace(error_code=None, error_message="x" * 205)).endswith("...")
 
     lifecycle_calls = []
@@ -974,8 +938,6 @@ def test_parse_task_hooks_and_low_level_failure_branches(parser_runtime, monkeyp
     import data_process.parse_tasks as parse_tasks
     import data_process.tasks as tasks_module
 
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: None)
-    parse_tasks.ParserTask().before_start("id", (), {})
     monkeypatch.setattr(parse_tasks, "REDIS_BACKEND_URL", None)
     with pytest.raises(RuntimeError, match="REDIS_BACKEND_URL"):
         parse_tasks._redis_client()
@@ -985,34 +947,24 @@ def test_parse_task_hooks_and_low_level_failure_branches(parser_runtime, monkeyp
     with pytest.raises(RuntimeError, match="Failed to upload"):
         parse_tasks._upload_part("task", 0, "file.txt", b"x")
 
-    lifecycle_calls = []
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
-    lifecycle.get_file_record = lambda **kwargs: {"file_id": "fid", "status": "PROCESSING"}
-    lifecycle.transition_file_record = lambda *args, **kwargs: lifecycle_calls.append((args, kwargs))
-    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
-    parse_tasks._mark_lifecycle(
-        "task", status="FORWARDING", stage="FORWARD", source="source", index_name="idx", tenant_id="tenant", file_id="fid"
-    )
-    assert lifecycle_calls
-
     client = types.SimpleNamespace(delete=lambda *args: None)
     monkeypatch.setattr(parse_tasks, "_redis_client", lambda: client)
     monkeypatch.setattr(parse_tasks, "load_chunks_from_redis", lambda _key: [{"content": "loaded"}])
     stored = []
     monkeypatch.setattr(parse_tasks, "store_chunks_atomically", lambda key, chunks: stored.append((key, chunks)))
-    parse_tasks.aggregate_parts.push_request(id="parts")
+    monkeypatch.setattr(parse_tasks, "ensure_document_not_deleted", lambda **_kwargs: None)
+    parse_tasks.aggregate_store_chunks.push_request(id="parts")
     try:
-        result = parse_tasks.aggregate_parts.run(
-            [{"part_redis_key": "part"}, [{"content": "inline"}]], redis_key="explicit"
+        result = parse_tasks.aggregate_store_chunks.run(
+            [{"part_redis_key": "part", "part_index": 0}], "explicit", source="source", index_name="idx"
         )
     finally:
-        parse_tasks.aggregate_parts.pop_request()
-    assert result["chunks_count"] == 2 and stored
+        parse_tasks.aggregate_store_chunks.pop_request()
+    assert result["chunks_count"] == 1 and stored
 
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: (_ for _ in ()).throw(RuntimeError("parse")))
-    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("cleanup")))
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: (_ for _ in ()).throw(RuntimeError("parse")))
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
     monkeypatch.setattr(tasks_module, "save_error_to_redis", lambda *args: (_ for _ in ()).throw(RuntimeError("redis")))
-    monkeypatch.setattr(parse_tasks, "_mark_lifecycle", lambda *args, **kwargs: None)
     parse_tasks.process_part.push_request(id="part-failure")
     try:
         with pytest.raises(RuntimeError, match="parse"):
@@ -1027,7 +979,7 @@ def test_parse_task_hooks_and_low_level_failure_branches(parser_runtime, monkeyp
         process_source=lambda **kwargs: (_ for _ in ()).throw(Exception(json.dumps({"message": "bad", "error_code": "E"}))),
         preload_models=[],
     )
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: runtime)
     monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
     parse_tasks.process.push_request(id="process-json-error")
     try:
@@ -1106,8 +1058,10 @@ def test_load_forward_retry_and_http_connection_paths(tasks, monkeypatch):
 def test_forward_part_failures_and_large_batch_forward(tasks, monkeypatch):
     from celery.exceptions import Retry
 
+    monkeypatch.setattr(tasks, "_load_forward_batch", lambda _key: [{"content": "x"}])
+    monkeypatch.setattr(tasks, "ensure_document_not_deleted", lambda **_kwargs: None)
     monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **kwargs: {"success": True, "total_indexed": 1, "total_submitted": 1})
-    no_parent = tasks.forward_part.run([{"content": "x"}], "idx")
+    no_parent = tasks.forward_part.run("batch-key", "idx")
     assert no_parent["total_indexed"] == 1
 
     monkeypatch.setattr(tasks, "_send_chunks_to_es", lambda **kwargs: (_ for _ in ()).throw(
@@ -1118,7 +1072,7 @@ def test_forward_part_failures_and_large_batch_forward(tasks, monkeypatch):
     tasks.forward_part.push_request(id="nonretry", retries=0)
     try:
         with pytest.raises(Exception, match="bulk"):
-            tasks.forward_part.run([{"content": "x"}], "idx", parent_task_id="parent")
+            tasks.forward_part.run("batch-key", "idx", parent_task_id="parent")
     finally:
         tasks.forward_part.pop_request()
     assert cancelled == ["parent"]
@@ -1128,7 +1082,7 @@ def test_forward_part_failures_and_large_batch_forward(tasks, monkeypatch):
     tasks.forward_part.push_request(id="retry", retries=1)
     try:
         with pytest.raises(Retry):
-            tasks.forward_part.run([{"content": "x"}], "idx", parent_task_id=None)
+            tasks.forward_part.run("batch-key", "idx", parent_task_id=None)
     finally:
         tasks.forward_part.pop_request()
 
@@ -1136,6 +1090,7 @@ def test_forward_part_failures_and_large_batch_forward(tasks, monkeypatch):
     monkeypatch.setattr(tasks, "_update_file_lifecycle", lambda **kwargs: None)
     monkeypatch.setattr(tasks, "get_file_size", lambda *args: 1)
     monkeypatch.setattr(tasks, "get_redis_service", lambda: types.SimpleNamespace(save_progress_info=lambda *args: None))
+    monkeypatch.setattr(tasks, "_store_forward_batch", lambda task_id, batch_index, batch: f"batch-{batch_index}")
     monkeypatch.setattr(tasks, "group", lambda signatures: list(signatures))
     monkeypatch.setattr(tasks, "chord", lambda signatures: lambda callback: types.SimpleNamespace(
         get=lambda: {"success": True, "total_indexed": len(chunks), "total_submitted": len(chunks)}
@@ -1209,22 +1164,17 @@ def test_parser_runtime_initialization_guards_and_source_error_paths(parser_runt
     monkeypatch.setattr(runtime, "ensure_initialized", lambda: None)
     assert runtime.core is runtime._core
 
-    reentrant = parser_runtime.ParserRuntime(1, [])
-    reentrant._initializing = True
-    with pytest.raises(RuntimeError, match="already in progress"):
-        reentrant.ensure_initialized()
-
     failed = parser_runtime.ParserRuntime(1, [])
     monkeypatch.setattr(parser_runtime, "_configure_third_party_model_paths", lambda _paths: (_ for _ in ()).throw(ValueError("bad model path")))
     with pytest.raises(ValueError, match="bad model path"):
         failed.ensure_initialized()
-    assert failed._core is None and failed._initializing is False
+    assert failed._core is None and failed.initialized is False
 
     model_db = types.ModuleType("database.model_management_db")
     model_db.get_model_by_model_id = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db unavailable"))
     monkeypatch.setitem(sys.modules, "database.model_management_db", model_db)
     runtime._initialized = True
-    runtime._core = types.SimpleNamespace(file_process=lambda **_kwargs: [{"content": "chunk"}])
+    runtime._core = types.SimpleNamespace(file_process=lambda **_kwargs: ([{"content": "chunk"}], []))
     assert runtime.process_source(
         file_data=b"data", filename="file.txt", chunking_strategy="basic", model_id=1, tenant_id="tenant"
     ) == [{"content": "chunk"}]
@@ -1254,19 +1204,6 @@ def test_parser_task_low_level_redis_and_error_cleanup_paths(parser_runtime, mon
     assert client[0] == (parse_tasks.REDIS_BACKEND_URL,)
     assert client[1]["decode_responses"] is True
 
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
-    lifecycle.get_file_record = lambda **_kwargs: None
-    lifecycle.transition_file_record = lambda *_args, **_kwargs: None
-    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
-    parse_tasks._mark_lifecycle(
-        "task", status="FAILED", stage="PROCESS", source="source", index_name="idx", tenant_id=None, file_id=None
-    )
-    lifecycle.get_file_record = lambda **_kwargs: {"file_id": "fid", "status": "PROCESSING"}
-    lifecycle.transition_file_record = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("db down"))
-    parse_tasks._mark_lifecycle(
-        "task", status="FAILED", stage="PROCESS", source="source", index_name="idx", tenant_id=None, file_id=None
-    )
-
     monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("cleanup")))
     tasks_module = sys.modules["data_process.tasks"]
     monkeypatch.setattr(tasks_module, "save_error_to_redis", lambda *args: (_ for _ in ()).throw(RuntimeError("redis")))
@@ -1282,8 +1219,8 @@ def test_parser_task_low_level_redis_and_error_cleanup_paths(parser_runtime, mon
         process_source=lambda **_kwargs: [{"content": "x"}],
         split_source=lambda **_kwargs: [b"one", b"two"],
     )
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
-    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("cleanup")))
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
     parse_tasks.process.push_request(id="process-error")
     try:
         with pytest.raises(Exception, match="read failed"):
@@ -1292,7 +1229,7 @@ def test_parser_task_low_level_redis_and_error_cleanup_paths(parser_runtime, mon
     finally:
         parse_tasks.process.pop_request()
 
-    monkeypatch.setattr(parse_tasks, "ensure_parser_runtime", lambda: runtime)
+    monkeypatch.setattr(parse_tasks, "get_parser_runtime", lambda: runtime)
     monkeypatch.setattr(runtime, "read_source", lambda *_args: b"data")
     monkeypatch.setattr(runtime, "split_source", lambda **_kwargs: [b"one", b"two"])
     monkeypatch.setattr(parse_tasks, "DP_FILE_SPLIT_SIZE_MB", 0)
@@ -1315,15 +1252,6 @@ def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monke
     monkeypatch.setattr(worker, "QUEUES", "parse_q")
     monkeypatch.setattr(parse_tasks.parser_bootstrap, "apply_async", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("dispatch")))
     worker.worker_ready_handler()
-
-    validate_redis_connection = worker.validate_redis_connection
-    monkeypatch.setattr(worker, "validate_redis_connection", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
-    assert worker.validate_service_connections() is False
-    redis_module = types.ModuleType("redis")
-    redis_module.from_url = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("connect"))
-    monkeypatch.setitem(sys.modules, "redis", redis_module)
-    with pytest.raises(RuntimeError, match="connect"):
-        validate_redis_connection()
 
     monkeypatch.setitem(sys.modules, "utils.monitoring", None)
     monkeypatch.setattr(worker, "QUEUES", "forward_q")
@@ -1349,10 +1277,6 @@ def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monke
         assert core._load_processor(name).__class__.__name__ in {"UnstructuredProcessor", "OpenPyxlProcessor", "UniversalImageExtractor", "FileSplitter"}
     with pytest.raises(ValueError, match="Unsupported processor"):
         core._load_processor("unknown")
-    core._processor_factories.pop("Unstructured")
-    with pytest.raises(ValueError, match="Unsupported processor"):
-        core._get_processor("Unstructured")
-    core._processor_factories["Unstructured"] = lambda: types.SimpleNamespace(process_file=lambda *args, **kwargs: [{"content": "ok"}])
     assert core._get_processor("Unstructured") is core.processors["Unstructured"]
     core.model_registry.model_paths = {"unstructured_default": "model.json", "table_transformer": "table"}
     ensured = []
@@ -1362,4 +1286,5 @@ def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monke
     assert core.file_process(b"data", "file.pdf", model_type="multi_embedding")[0]
     assert ensured == ["unstructured_default", "unstructured_default", "table_transformer"]
     assert core.preload_models([]) == {}
-    assert core.ensure_model("missing") is None
+    core.ensure_model("missing")
+    assert ensured[-1] == "missing"

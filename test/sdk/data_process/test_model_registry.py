@@ -39,9 +39,9 @@ def test_model_registry_rejects_unknown_preload_alias():
         raise AssertionError("unknown model alias was accepted")
 
 
-def test_model_registry_is_not_configured_when_all_model_paths_are_empty():
+def test_model_registry_accepts_empty_model_paths_until_model_access():
     from nexent.data_process.model_registry import ModelRegistry
 
     registry = ModelRegistry({"unstructured_default": None, "table_transformer": None})
 
-    assert registry.configured is False
+    assert registry.model_paths == {"unstructured_default": None, "table_transformer": None}

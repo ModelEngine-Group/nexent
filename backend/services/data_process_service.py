@@ -9,23 +9,42 @@ import tempfile
 import threading
 import time
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiohttp
 import redis
 from celery import states
 from PIL import Image
 
-from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
+from consts.const import (
+    CLIP_MODEL_PATH,
+    IMAGE_FILTER,
+    MAX_CONCURRENT_CONVERSIONS,
+    REDIS_BACKEND_URL,
+    REDIS_URL,
+)
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, OfficeConversionException
 from consts.model import BatchTaskRequest
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
-from data_process.utils import get_all_task_ids_from_redis, get_task_info
-from database.attachment_db import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
+from data_process.utils import (
+    get_all_task_ids_from_redis,
+    get_task_info,
+)
+from data_process.utils import (
+    get_task_details as get_task_details_info,
+)
+from database.attachment_db import (
+    delete_file,
+    file_exists,
+    get_file_size_from_minio,
+    get_file_stream,
+    upload_file,
+)
 from utils.file_management_utils import convert_office_to_pdf
 from utils.knowledge_ingestion_errors import classify_ingestion_exception
+
 
 # Optional heavy dependencies are loaded only when their feature is used.  The
 # names remain patchable for compatibility with existing tests/integrations.
@@ -34,7 +53,8 @@ class _LazyModelFactory:
         self.attribute = attribute
 
     def from_pretrained(self, *args, **kwargs):
-        from transformers import CLIPModel as _CLIPModel, CLIPProcessor as _CLIPProcessor
+        from transformers import CLIPModel as _CLIPModel
+        from transformers import CLIPProcessor as _CLIPProcessor
 
         factory = _CLIPModel if self.attribute == "CLIPModel" else _CLIPProcessor
         return factory.from_pretrained(*args, **kwargs)
@@ -96,7 +116,7 @@ class DataProcessService:
                 logger.warning(
                     "REDIS_BACKEND_URL not set, Redis client not initialized.")
         except Exception as e:
-            logger.error(f"Failed to initialize Redis client: {str(e)}")
+            logger.error(f"Failed to initialize Redis client: {e!s}")
 
     def _init_clip_model(self):
         """Initializes the CLIP model and processor."""
@@ -113,7 +133,7 @@ class DataProcessService:
             logger.info("CLIP model loaded successfully")
         except Exception as e:
             logger.warning(
-                f"Failed to load CLIP model, size-only filtering will be used: {str(e)}")
+                f"Failed to load CLIP model, size-only filtering will be used: {e!s}")
             self.clip_available = False
 
     async def start(self):
@@ -144,13 +164,17 @@ class DataProcessService:
             except Exception as e:
                 self._inspector = None
                 raise Exception(
-                    f"Failed to create inspector with celery_app: {str(e)}")
+                    f"Failed to create inspector with celery_app: {e!s}")
 
-    async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def get_task(self, task_id: str) -> dict[str, Any] | None:
         """Get task by ID (async)"""
         return await get_task_info(task_id)
 
-    async def get_all_tasks(self, filter: bool = True) -> List[Dict[str, Any]]:
+    async def get_task_details(self, task_id: str) -> dict[str, Any] | None:
+        """Get detailed task information, including the stored result."""
+        return await get_task_details_info(task_id)
+
+    async def get_all_tasks(self, filter: bool = True) -> list[dict[str, Any]]:
         """Get all tasks
 
         Args:
@@ -165,9 +189,9 @@ class DataProcessService:
 
             # Collect task IDs from different sources and keep runtime metadata
             task_ids = set()
-            runtime_task_meta: Dict[str, Dict[str, Any]] = {}
+            runtime_task_meta: dict[str, dict[str, Any]] = {}
 
-            def _normalize_runtime_meta(task: Dict[str, Any]) -> Dict[str, Any]:
+            def _normalize_runtime_meta(task: dict[str, Any]) -> dict[str, Any]:
                 task_name_full = task.get('name', '') or ''
                 task_name = task_name_full.split(
                     '.')[-1] if task_name_full else ''
@@ -251,7 +275,7 @@ class DataProcessService:
                     task_ids.add(task_id)
             except Exception as redis_error:
                 logger.warning(
-                    f"Failed to query Redis for stored task IDs: {str(redis_error)}")
+                    f"Failed to query Redis for stored task IDs: {redis_error!s}")
 
             task_id_list = list(task_ids)
             # Batch fetch all task info
@@ -288,12 +312,12 @@ class DataProcessService:
                         continue
                 all_tasks.append(task_info)
         except Exception as e:
-            logger.error(f"Error retrieving all tasks: {str(e)}")
+            logger.error(f"Error retrieving all tasks: {e!s}")
             all_tasks = []
 
         return all_tasks
 
-    async def get_index_tasks(self, index_name: str, filter: bool = True) -> List[Dict[str, Any]]:
+    async def get_index_tasks(self, index_name: str, filter: bool = True) -> list[dict[str, Any]]:
         """Get all active tasks for a specific index
 
         Args:
@@ -322,7 +346,7 @@ class DataProcessService:
             return False
         return True
 
-    async def load_image(self, image_url: str) -> Optional[Image.Image]:
+    async def load_image(self, image_url: str) -> Image.Image | None:
         """Asynchronously load an image from URL, local file path, or base64 string
 
         Args:
@@ -336,7 +360,7 @@ class DataProcessService:
         async with aiohttp.ClientSession(connector=connector, trust_env=True, timeout=timeout) as session:
             return await self._load_image(session, image_url)
 
-    async def _load_image(self, session: aiohttp.ClientSession, path: str) -> Optional[Image.Image]:
+    async def _load_image(self, session: aiohttp.ClientSession, path: str) -> Image.Image | None:
         """Internal method to load an image from various sources"""
         try:
             if path.startswith('s3://'):
@@ -383,7 +407,7 @@ class DataProcessService:
 
                     return image
                 except Exception as e:
-                    logger.info(f"Failed to load local image: {str(e)}")
+                    logger.info(f"Failed to load local image: {e!s}")
                     return None
 
             # If not a local file or base64, treat as URL
@@ -431,11 +455,11 @@ class DataProcessService:
                             os.unlink(temp_file.name)
 
         except Exception as e:
-            logger.info(f"Error loading {path}: {str(e)}")
+            logger.info(f"Error loading {path}: {e!s}")
             return None
 
     async def filter_important_image(self, image_url: str, positive_prompt: str = "an important image",
-                                     negative_prompt: str = "an unimportant image") -> Dict[str, Any]:
+                                     negative_prompt: str = "an unimportant image") -> dict[str, Any]:
         """Filter whether an image is important using CLIP model
 
         Args:
@@ -540,7 +564,7 @@ class DataProcessService:
             except Exception as e:
                 # CLIP model processing failed, fall back to size-only filtering
                 logger.warning(
-                    f"CLIP processing failed, using size-only filter: {str(e)}")
+                    f"CLIP processing failed, using size-only filter: {e!s}")
                 return {
                     "is_important": True,
                     "confidence": 0.8,  # Arbitrary high confidence value
@@ -551,10 +575,10 @@ class DataProcessService:
                 }
 
         except Exception as e:
-            logger.error(f"Error processing image: {str(e)}")
-            raise Exception(f"Error processing image: {str(e)}")
+            logger.error(f"Error processing image: {e!s}")
+            raise Exception(f"Error processing image: {e!s}")
 
-    async def create_batch_tasks_impl(self, authorization: Optional[str], request: BatchTaskRequest):
+    async def create_batch_tasks_impl(self, authorization: str | None, request: BatchTaskRequest):
         task_ids = []
         results = []
 
@@ -680,7 +704,7 @@ class DataProcessService:
         content_type = f"image/{image.format.lower() if image.format else 'jpeg'}"
         return image_data, content_type
 
-    async def process_uploaded_text_file(self, file_content: bytes, filename: str, chunking_strategy: str = "basic") -> Dict[str, Any]:
+    async def process_uploaded_text_file(self, file_content: bytes, filename: str, chunking_strategy: str = "basic") -> dict[str, Any]:
         """Process uploaded file bytes into text/chunks using SDK DataProcessCore.
 
         Args:
@@ -709,7 +733,7 @@ class DataProcessService:
         )
 
         full_text = ""
-        chunk_texts: List[str] = []
+        chunk_texts: list[str] = []
         for chunk in chunks:
             if 'content' in chunk:
                 chunk_content = chunk['content']
@@ -816,7 +840,7 @@ class DataProcessService:
                         logger.warning(
                             f"Failed to cleanup temp dir '{temp_dir}': {cleanup_err}")
 
-    def convert_celery_states_to_custom(self, process_celery_state: Optional[str], forward_celery_state: Optional[str]) -> str:
+    def convert_celery_states_to_custom(self, process_celery_state: str | None, forward_celery_state: str | None) -> str:
         """Map Celery task states to a custom frontend state string.
 
         This implements the business logic that was previously in the app layer.

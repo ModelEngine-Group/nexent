@@ -68,11 +68,11 @@ def test_worker_configs_use_prefork_for_parser_and_threads_for_other_stages(serv
     configs = service_module.ServiceManager._build_worker_configs(4)
 
     assert configs[0]["queue"] == "parse_q"
-    assert configs[0]["pool"] == "prefork"
     assert configs[0]["concurrency"] == 3
-    assert configs[0]["min_processes"] == 1
-    assert configs[0]["max_tasks_per_child"] == 1000
-    assert all(config["pool"] == "threads" for config in configs[1:])
+    assert all("pool" not in config for config in configs)
+    assert [config["queue"] for config in configs] == [
+        "parse_q", "process_q", "forward_q", "forward_part_q", "forward_aggregate_q"
+    ]
 
 
 def test_parser_readiness_uses_result_backend(service_module, monkeypatch):
@@ -87,7 +87,7 @@ def test_parser_readiness_uses_result_backend(service_module, monkeypatch):
     manager._wait_for_parser_ready()
 
     redis_module.from_url.assert_called_once_with(
-        "redis://test:6379/1", decode_responses=True
+        "redis://test:6379/1", decode_responses=True, socket_connect_timeout=5, socket_timeout=2
     )
 
 

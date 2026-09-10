@@ -8,19 +8,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-# Install consts.exceptions at module level so OfficeConversionException is bound
-# in the app module's namespace on first import.
-_exc_mod = types.ModuleType("consts.exceptions")
-
-
-class _OfficeConversionException(Exception):
-    """Stub exception for Office document conversion failures."""
-
-
-_exc_mod.OfficeConversionException = _OfficeConversionException  # type: ignore[attr-defined]
-sys.modules["consts.exceptions"] = _exc_mod
-
-
 class _TaskRequest(BaseModel):
     source: str
     source_type: str
@@ -58,8 +45,8 @@ class _TasksStub:
         self._apply_async_result = _DummyResult(
             "task-sync-id",
             payload={
-                "text": "hello world",
-                "chunks": [{"content": "hello"}],
+            "text": "hello world",
+                "chunks_key": "dp:task-sync-id:chunks",
                 "chunks_count": 1,
                 "processing_time": 0.1,
                 "text_length": 11,
@@ -84,8 +71,15 @@ class _ServiceStub:
     async def stop(self):
         self.stopped = True
 
-    async def create_batch_tasks_impl(self, authorization: Optional[str], request: _BatchTaskRequest) -> List[str]:
-        return [f"tid-{i}" for i, _ in enumerate(request.sources, start=1)]
+    async def create_batch_tasks_impl(self, authorization: Optional[str], request: _BatchTaskRequest) -> Dict[str, Any]:
+        task_ids = [f"tid-{i}" for i, _ in enumerate(request.sources, start=1)]
+        return {
+            "status": "success",
+            "task_ids": task_ids,
+            "results": [{"status": "SUBMITTED", "task_id": task_id} for task_id in task_ids],
+            "submitted_count": len(task_ids),
+            "failed_count": 0,
+        }
 
     async def load_image(self, url: str):
         if url == "none":
@@ -184,11 +178,19 @@ def stub_modules(monkeypatch):
 
     # data_process.utils
     utils_mod = types.ModuleType("data_process.utils")
+    class _DocumentDeleteRequested(RuntimeError):
+        pass
+
+    setattr(utils_mod, "DocumentDeleteRequested", _DocumentDeleteRequested)
+    setattr(utils_mod, "ensure_document_not_deleted", lambda **_kwargs: None)
+    setattr(utils_mod, "is_document_delete_requested", lambda **_kwargs: False)
+    setattr(utils_mod, "update_file_lifecycle", lambda **_kwargs: None)
     async def get_task_details(task_id: str):
         if task_id == "missing":
             return None
         return {"id": task_id, "ok": True}
     setattr(utils_mod, "get_task_details", get_task_details)
+    setattr(utils_mod, "load_chunks_from_redis", lambda _key: [{"content": "hello"}])
     sys.modules["data_process.utils"] = utils_mod
 
     # yield to tests

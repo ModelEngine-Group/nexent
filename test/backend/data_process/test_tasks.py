@@ -34,7 +34,7 @@ def test_parser_task_payload_contains_object_reference_only(monkeypatch):
     assert parse_tasks.aggregate_store_chunks.name == "data_process.tasks.aggregate_store_chunks"
 
 
-def test_aggregate_parts_reads_redis_references(monkeypatch):
+def test_aggregate_store_chunks_reads_redis_references(monkeypatch):
     _configure_celery_environment(monkeypatch)
     from data_process import parse_tasks
 
@@ -49,12 +49,16 @@ def test_aggregate_parts_reads_redis_references(monkeypatch):
         "store_chunks_atomically",
         lambda key, chunks: stored.append((key, chunks)),
     )
-    result = parse_tasks.aggregate_parts.run(
-        [{"part_redis_key": "part-a"}, [{"content": "inline"}]],
-        marker="ok",
+    monkeypatch.setattr(parse_tasks, "ensure_document_not_deleted", lambda **_kwargs: None)
+    monkeypatch.setattr(parse_tasks, "cleanup_parser_artifacts", lambda *args, **kwargs: None)
+    result = parse_tasks.aggregate_store_chunks.run(
+        [{"part_redis_key": "part-a", "part_index": 0}],
+        "final-key",
+        source="source",
+        index_name="index",
+        task_id="aggregate",
     )
     assert result["chunks"] is None
-    assert result["chunks_count"] == 2
-    assert result["marker"] == "ok"
-    assert result["redis_key"].startswith("dp:")
-    assert stored == [(result["redis_key"], [{"content": "part-a"}, {"content": "inline"}])]
+    assert result["chunks_count"] == 1
+    assert result["redis_key"] == "final-key"
+    assert stored == [("final-key", [{"content": "part-a"}])]

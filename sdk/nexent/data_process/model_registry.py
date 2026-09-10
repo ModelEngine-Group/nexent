@@ -19,10 +19,6 @@ class ModelRegistry:
         self.model_paths = dict(model_paths or {})
         self._models: Dict[str, Any] = {}
 
-    @property
-    def configured(self) -> bool:
-        return any(bool(path) for path in self.model_paths.values())
-
     def validate_aliases(self, aliases: Iterable[str]) -> list[str]:
         normalized: list[str] = []
         for alias in aliases:
@@ -55,6 +51,10 @@ class ModelRegistry:
         return self._models[alias]
 
     def _load_unstructured_default(self) -> Any:
+        model_path = self._normalize_path(self.model_paths.get("unstructured_default"))
+        if model_path:
+            os.environ["UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH"] = model_path
+
         # The third-party loader owns its singleton cache.  Import it only when
         # a parser child explicitly preloads or first needs this model.
         from unstructured_inference.models.base import get_model
@@ -69,8 +69,9 @@ class ModelRegistry:
         from . import extract_image
 
         extract_image.TABLE_TRANSFORMER_MODEL_PATH = model_path
+        agent = extract_image.get_tables_agent()
         extract_image.custom_load_table_model()
-        return extract_image.get_tables_agent()
+        return agent
 
     @staticmethod
     def _normalize_path(path_value: Optional[str]) -> Optional[str]:

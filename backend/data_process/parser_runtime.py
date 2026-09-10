@@ -7,8 +7,9 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Iterable
 from io import BytesIO
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 from consts.const import (
     DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -19,14 +20,15 @@ from consts.const import (
     UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH,
 )
 
+
 logger = logging.getLogger("data_process.parser_runtime")
 
-_runtime: Optional["ParserRuntime"] = None
-_runtime_pid: Optional[int] = None
+_runtime: ParserRuntime | None = None
+_runtime_pid: int | None = None
 _runtime_lock = threading.Lock()
 
 
-def _aliases_from_config(value: str) -> List[str]:
+def _aliases_from_config(value: str) -> list[str]:
     return [alias.strip() for alias in (value or "").split(",") if alias.strip()]
 
 
@@ -36,27 +38,22 @@ def _set_native_thread_limits(thread_count: int) -> None:
         os.environ[name] = str(thread_count)
 
 
-def _normalize_model_config_path(path_value: Optional[str]) -> Optional[str]:
+def _normalize_model_config_path(path_value: str | None) -> str | None:
     if not path_value:
         return None
     if os.path.isdir(path_value):
         path_value = os.path.join(path_value, "config.json")
-    if not os.path.isfile(path_value):
-        raise FileNotFoundError(f"Model configuration does not exist: {path_value}")
     return path_value
 
 
-def _configure_third_party_model_paths(model_paths: Dict[str, Optional[str]]) -> Dict[str, Optional[str]]:
-    """Normalize the existing deployment values in the parser child only."""
+def _configure_third_party_model_paths(model_paths: dict[str, str | None]) -> dict[str, str | None]:
+    """Normalize deployment values; model loaders validate paths when used."""
     normalized = {
         "unstructured_default": _normalize_model_config_path(
             model_paths.get("unstructured_default")
         ),
         "table_transformer": model_paths.get("table_transformer"),
     }
-    table_path = normalized["table_transformer"]
-    if table_path and not os.path.exists(table_path):
-        raise FileNotFoundError(f"Model path does not exist: {table_path}")
     unstructured_path = normalized.get("unstructured_default")
     if unstructured_path:
         # unstructured-inference 1.2.0 reads this established variable inside
@@ -77,9 +74,7 @@ class ParserRuntime:
         }
         self._core: Any = None
         self._initialized = False
-        self._initializing = False
         self._lock = threading.Lock()
-        self.initialized_at: Optional[float] = None
 
     @property
     def core(self) -> Any:
@@ -96,9 +91,6 @@ class ParserRuntime:
         with self._lock:
             if self._initialized:
                 return
-            if self._initializing:
-                raise RuntimeError("Parser runtime initialization is already in progress")
-            self._initializing = True
             started = time.perf_counter()
             try:
                 _set_native_thread_limits(self.thread_count)
@@ -110,7 +102,6 @@ class ParserRuntime:
                 self._core = DataProcessCore(model_paths=normalized_paths)
                 self._core.preload_models(self.preload_models)
                 self._initialized = True
-                self.initialized_at = time.time()
                 logger.info(
                     "Parser runtime ready pid=%s preload_models=%s elapsed=%.3fs",
                     os.getpid(),
@@ -126,17 +117,15 @@ class ParserRuntime:
                     time.perf_counter() - started,
                 )
                 raise
-            finally:
-                self._initializing = False
 
     def _prepare_params(
         self,
         *,
-        task_id: Optional[str],
-        model_id: Optional[int],
-        tenant_id: Optional[str],
-        params: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        task_id: str | None,
+        model_id: int | None,
+        tenant_id: str | None,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
         process_params = dict(params)
         process_params["table_transformer_model_path"] = self.model_paths.get("table_transformer")
         process_params[
@@ -185,11 +174,11 @@ class ParserRuntime:
         file_data: bytes,
         filename: str,
         chunking_strategy: str,
-        task_id: Optional[str] = None,
-        model_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        task_id: str | None = None,
+        model_id: int | None = None,
+        tenant_id: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         self.ensure_initialized()
         result = self._core.file_process(
             file_data=file_data,
@@ -213,8 +202,8 @@ class ParserRuntime:
         file_data: bytes,
         filename: str,
         target_parts: int,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> List[bytes]:
+        params: dict[str, Any] | None = None,
+    ) -> list[bytes]:
         self.ensure_initialized()
         split_params = dict(params or {})
         split_params.pop("max_size", None)
@@ -225,23 +214,22 @@ class ParserRuntime:
             target_parts=target_parts,
             **split_params,
         )
-        return [part.getvalue() for part in parts or [] if hasattr(part, "getvalue")]
+        return [part.getvalue() for part in parts]
 
     @staticmethod
-    def _normalize_result(result: Any) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        if isinstance(result, tuple) and len(result) == 2:
-            return result[0] or [], result[1] or []
-        return result or [], []
+    def _normalize_result(result: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        chunks, images_info = result
+        return chunks or [], images_info or []
 
     @staticmethod
-    def _validate_chunks(chunks: Any, source: str) -> List[Dict[str, Any]]:
+    def _validate_chunks(chunks: Any, source: str) -> list[dict[str, Any]]:
         if not isinstance(chunks, list):
             logger.warning("Parser returned non-list chunks for source=%s", source)
             return []
         return chunks
 
     @staticmethod
-    def _append_image_chunks(source: str, chunks: List[Dict[str, Any]], images_info: List[Dict[str, Any]]) -> None:
+    def _append_image_chunks(source: str, chunks: list[dict[str, Any]], images_info: list[dict[str, Any]]) -> None:
         from database.attachment_db import build_s3_url, upload_fileobj
 
         for index, image_data in enumerate(images_info):
@@ -252,6 +240,11 @@ class ParserRuntime:
                 file_name=f"{index}.{image_data.get('image_format', 'png')}",
                 prefix="images_in_attachments",
             )
+            if not result.get("success", False):
+                raise RuntimeError(
+                    f"Failed to upload extracted image {index}: "
+                    f"{result.get('error', 'unknown error')}"
+                )
             image_url = build_s3_url(result.get("object_name", ""))
             chunks.append(
                 {
@@ -264,7 +257,7 @@ class ParserRuntime:
                     ),
                     "filename": source,
                     "metadata": {
-                        "chunk_index": len(chunks) + index,
+                        "chunk_index": len(chunks),
                         "process_source": "UniversalImageExtractor",
                         "image_url": image_url,
                     },

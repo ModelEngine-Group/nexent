@@ -480,14 +480,11 @@ class TestDataProcessCore:
             core._load_processor("unknown")
 
         core.processors["FileSplitter"] = None
-        core._processor_factories["FileSplitter"] = lambda: "splitter"
-        assert core._get_processor("FileSplitter") == "splitter"
+        assert core._get_processor("FileSplitter").__class__.__name__ == "FileSplitter"
         with pytest.raises(ValueError, match="Unsupported processor"):
             core._get_processor("missing")
         core.processors["Unstructured"] = None
-        core._processor_factories.pop("Unstructured")
-        with pytest.raises(ValueError, match="Unsupported processor"):
-            core._get_processor("Unstructured")
+        assert core._get_processor("Unstructured").__class__.__name__ == "UnstructuredProcessor"
 
         core.model_registry.model_paths = {"unstructured_default": "default", "table_transformer": "table"}
         model_calls = []

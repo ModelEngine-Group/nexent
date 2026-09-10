@@ -34,20 +34,14 @@ from consts.const import (
     DP_PARSER_WORKER_GENERATION,
     DP_PRELOAD_MODELS,
     QUEUES,
-    REDIS_URL,
     WORKER_CONCURRENCY,
     WORKER_NAME,
 )
 
 from .app import app
 
-logger = logging.getLogger("data_process.worker")
 
-# Keep parent-worker validation independent from the SDK package.  Importing
-# ``nexent.data_process`` executes the SDK package initializer and defeats the
-# purpose of keeping Celery's main process light; the registry performs the
-# authoritative model construction/validation inside the parser child.
-SUPPORTED_PRELOAD_MODEL_ALIASES = {"unstructured_default", "table_transformer"}
+logger = logging.getLogger("data_process.worker")
 
 worker_state = {
     "initialized": False,
@@ -56,8 +50,6 @@ worker_state = {
     "process_id": None,
     "tasks_completed": 0,
     "tasks_failed": 0,
-    "environment_validated": False,
-    "services_validated": False,
 }
 _worker_generation = DP_PARSER_WORKER_GENERATION or str(uuid.uuid4())
 
@@ -81,10 +73,6 @@ def _validate_parser_config() -> None:
         raise ValueError("DP_PARSE_THREADS_PER_PROCESS must be >= 1")
     if DP_PARSE_MAX_TASKS_PER_CHILD < 0:
         raise ValueError("DP_PARSE_MAX_TASKS_PER_CHILD must be >= 0")
-    aliases = [alias.strip() for alias in DP_PRELOAD_MODELS.split(",") if alias.strip()]
-    unknown = sorted(set(aliases) - SUPPORTED_PRELOAD_MODEL_ALIASES)
-    if unknown:
-        raise ValueError(f"Unsupported preload model alias(es): {', '.join(unknown)}")
 
 
 # ============================================================================
@@ -101,7 +89,6 @@ def setup_worker_environment(**kwargs):
 
     _validate_parser_config()
     worker_state["initialized"] = True
-    worker_state["environment_validated"] = True
     logger.info("Worker environment initialized in %.2fs", time.time() - start_time)
 
 
@@ -191,45 +178,8 @@ def task_failure_handler(sender=None, task_id=None, exception=None, **kwds):
 
 
 # ============================================================================
-# Service validation
-# ============================================================================
-
-def validate_service_connections() -> bool:
-    try:
-        validate_redis_connection()
-        worker_state["services_validated"] = True
-        return True
-    except Exception as exc:
-        logger.error("Service connection validation failed: %s", exc)
-        return False
-
-
-def validate_redis_connection() -> bool:
-    try:
-        import redis
-
-        client = redis.from_url(REDIS_URL, socket_timeout=5)
-        client.ping()
-        return True
-    except ImportError:
-        logger.warning("Redis client not installed; skipping connection validation")
-        return False
-    except Exception:
-        logger.exception("Redis connection failed")
-        raise
-
-
-# ============================================================================
 # Worker startup
 # ============================================================================
-
-def _set_native_thread_limits() -> None:
-    """Prevent each parser child from multiplying its process by BLAS threads."""
-    if not _is_parser_worker():
-        return
-    value = str(DP_PARSE_THREADS_PER_PROCESS)
-    for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-        os.environ.setdefault(variable, value)
 
 
 def start_worker():
@@ -246,9 +196,7 @@ def start_worker():
 
     queues = QUEUES
     worker_name = WORKER_NAME
-    parser_worker = "parse_q" in _queue_set()
-    _validate_parser_config()
-    _set_native_thread_limits()
+    parser_worker = _is_parser_worker()
 
     logger.info("Start Celery worker '%s' queues=%s", worker_name, queues)
     logger.info("Worker concurrency=%s parser_worker=%s", WORKER_CONCURRENCY, parser_worker)

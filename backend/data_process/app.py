@@ -8,6 +8,7 @@ from celery.backends.base import DisabledBackend
 
 from consts.const import ELASTICSEARCH_SERVICE, REDIS_BACKEND_URL, REDIS_URL
 
+
 # Configure logging
 logger = logging.getLogger("data_process.app")
 
@@ -45,21 +46,15 @@ app.conf.update(
     # Explicitly set result backend
     broker_url=REDIS_URL,
     result_backend=REDIS_BACKEND_URL,
-    # Explicitly route the newly isolated forward child and aggregate tasks.
-    # Other tasks keep their queue from the @app.task declaration.
+    # Route parser, forwarding, and aggregation tasks to their isolated queues.
     task_routes={
         f'{import_path}.process': {'queue': 'parse_q'},
-        f'{parse_import_path}.process': {'queue': 'parse_q'},
         f'{import_path}.process_part': {'queue': 'parse_q'},
-        f'{parse_import_path}.process_part': {'queue': 'parse_q'},
         f'{import_path}.aggregate_store_chunks': {'queue': 'process_q'},
-        f'{import_path}.aggregate_parts': {'queue': 'process_q'},
-        f'{parse_import_path}.aggregate_store_chunks': {'queue': 'process_q'},
-        f'{parse_import_path}.parser_bootstrap': {'queue': 'parse_q'},
+        f'{import_path}.parser_bootstrap': {'queue': 'parse_q'},
         f'{import_path}.forward': {'queue': 'forward_q'},
         f'{import_path}.process_and_forward': {'queue': 'process_q'},
         f'{import_path}.process_sync': {'queue': 'parse_q'},
-        f'{parse_import_path}.process_sync': {'queue': 'parse_q'},
         f'{import_path}.forward_part': {'queue': 'forward_part_q'},
         f'{import_path}.aggregate_forward_parts': {'queue': 'forward_aggregate_q'},
     },

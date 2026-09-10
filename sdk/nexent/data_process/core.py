@@ -65,12 +65,6 @@ class DataProcessCore:
             "UniversalImageExtractor": None,
             "FileSplitter": None,
         }
-        self._processor_factories = {
-            "Unstructured": lambda: self._load_processor("Unstructured"),
-            "OpenPyxl": lambda: self._load_processor("OpenPyxl"),
-            "UniversalImageExtractor": lambda: self._load_processor("UniversalImageExtractor"),
-            "FileSplitter": lambda: self._load_processor("FileSplitter"),
-        }
         self.model_registry = ModelRegistry(model_paths)
         logger.debug("DataProcessCore initialization completed")
 
@@ -98,10 +92,7 @@ class DataProcessCore:
             raise ValueError(f"Unsupported processor: {name}")
         processor = self.processors.get(name)
         if processor is None:
-            factory = self._processor_factories.get(name)
-            if factory is None:
-                raise ValueError(f"Unsupported processor: {name}")
-            processor = factory()
+            processor = self._load_processor(name)
             self.processors[name] = processor
         return processor
 
@@ -160,9 +151,6 @@ class DataProcessCore:
         extract_image_processor_instance = (
             self._get_processor(extractor) if extractor else None
         )
-
-        if not processor_instance:
-            raise ValueError(f"Unsupported processor: {processor_name}")
         
         extension = os.path.splitext(filename)[1].lower()
         if self.model_registry.model_paths.get("unstructured_default") and processor_name == "Unstructured":
@@ -244,9 +232,6 @@ class DataProcessCore:
             splitter_instance = self._get_processor(splitter_name)
         except ValueError:
             logger.warning("Splitter not found: %s", splitter_name)
-            return [BytesIO(file_data)]
-        if not splitter_instance:
-            logger.error(f"Splitter not found: {splitter_name}")
             return [BytesIO(file_data)]
 
         max_size = params.pop("max_size", None)

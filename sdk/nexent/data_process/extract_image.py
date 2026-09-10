@@ -9,21 +9,18 @@ from xml.etree import ElementTree
 
 from .base import FileProcessor
 
-_PRESENTATION_UNSET = object()
-Presentation = _PRESENTATION_UNSET
+Presentation = None
 partition = None
-tables = None
 tables_agent = None
 TABLE_TRANSFORMER_MODEL_PATH = ""
 
 
 def get_tables_agent():
     """Load and return the third-party table agent only when it is needed."""
-    global tables, tables_agent
+    global tables_agent
     if tables_agent is None:
         from unstructured_inference.models import tables as tables_module
 
-        tables = tables_module
         tables_agent = tables_module.tables_agent
         tables_module.load_agent = custom_load_table_model
     return tables_agent
@@ -143,9 +140,11 @@ class UniversalImageExtractor(FileProcessor):
         results = []
         seen = set()
 
+        global partition
         partition_fn = partition
         if partition_fn is None:
             from unstructured.partition.auto import partition as partition_fn
+            partition = partition_fn
 
         elements = partition_fn(
             filename=pdf_path,
@@ -356,16 +355,12 @@ class UniversalImageExtractor(FileProcessor):
 
     def _extract_pptx(self, pptx_path: str, **params) -> List[Dict]:
         global Presentation
-        presentation_cls = Presentation
-        if presentation_cls is None:
-            raise RuntimeError("python-pptx is required to extract images from PPTX files.")
-        if presentation_cls is _PRESENTATION_UNSET:
+        if Presentation is None:
             try:
-                from pptx import Presentation as presentation_cls
+                from pptx import Presentation
             except ImportError as exc:
                 raise RuntimeError("python-pptx is required to extract images from PPTX files.") from exc
-            Presentation = presentation_cls
-        prs = presentation_cls(pptx_path)
+        prs = Presentation(pptx_path)
         results = []
         seen = set()
         emu_per_inch = params.get("emu_per_inch", 914400)
