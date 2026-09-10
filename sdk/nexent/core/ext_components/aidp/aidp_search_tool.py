@@ -527,8 +527,10 @@ class AidpSearchTool(Tool):
             self._convert_to_kds_ids(list(self.kds_list))
         )
         configured_available_scope = self._filter_by_whitelist(configured_scope)
-        if kds_list is None or len(kds_list) == 0:
+        if kds_list is None:
             return configured_available_scope, configured_available_scope, [], False
+        if len(kds_list) == 0:
+            return [], [], [], False
 
         requested_scope = self._unique_kds(
             self._convert_to_kds_ids(list(kds_list))

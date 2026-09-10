@@ -107,6 +107,24 @@ def test_forward_can_override_configured_kds_without_mutating_configuration():
     }
 
 
+def test_forward_explicit_empty_scope_returns_empty_without_request():
+    tool = make_tool(kds_list=["kb-fixed"])
+    tool._execute_request = MagicMock(return_value=[])
+
+    result = json.loads(tool.forward("question", kds_list=[]))
+
+    tool._execute_request.assert_not_called()
+    assert result["results"] == []
+    assert result["scope"] == {
+        "requested": [],
+        "used": [],
+        "ignored": [],
+        "adjusted": False,
+        "fallback_to_all": False,
+    }
+    assert "No knowledge bases were selected or available" in result["notice"]
+
+
 @pytest.mark.parametrize(
     ("requested", "expected_used", "expected_ignored", "fallback"),
     [
@@ -144,6 +162,7 @@ def test_parse_kds_list_json_string_and_validation():
     tool_module = ind_aidp_search_tool_module
     assert tool_module._parse_kds_list('["a", "a", "b"]') == ["a", "a", "b"]
     assert tool_module._parse_kds_list([1, 2]) == ["1", "2"]
+    assert tool_module._parse_kds_list([], allow_empty=True) == []
 
     with pytest.raises(ValueError, match="JSON"):
         tool_module._parse_kds_list("{not-json")

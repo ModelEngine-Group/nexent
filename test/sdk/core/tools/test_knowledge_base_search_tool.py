@@ -100,12 +100,15 @@ def build_knowledge_search_response(
     results, requested_scope, used_scope, ignored_scope, fallback_to_all
 ):
     adjusted = bool(ignored_scope or requested_scope != used_scope)
-    if fallback_to_all:
+    if not used_scope:
+        if ignored_scope:
+            notice = "NOTICE: The requested knowledge bases were unavailable, and no other knowledge bases were available. No search was executed."
+        else:
+            notice = "NOTICE: No knowledge bases were selected or available. No search was executed."
+    elif fallback_to_all:
         notice = "NOTICE: scope adjusted; search used all available configured knowledge bases."
     elif ignored_scope:
         notice = "NOTICE: scope adjusted; unavailable knowledge bases were ignored."
-    elif not used_scope:
-        notice = "NOTICE: no requested knowledge bases were available, so no search was executed."
     else:
         notice = "NOTICE: requested knowledge-base scope was used without changes."
     if not results and used_scope:
@@ -2058,6 +2061,32 @@ class TestAllowedIndexNamesWhitelist:
             "adjusted": bool(expected_ignored),
             "fallback_to_all": fallback,
         }
+
+    def test_forward_explicit_empty_scope_returns_empty_without_search(
+        self, mock_observer, mock_vdb_core, mock_embedding_model
+    ):
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["kb1", "kb2"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            display_name_to_index_map={},
+        )
+
+        response = json.loads(tool.forward("test query", index_names=[]))
+
+        assert response["results"] == []
+        assert response["scope"] == {
+            "requested": [],
+            "used": [],
+            "ignored": [],
+            "adjusted": False,
+            "fallback_to_all": False,
+        }
+        assert "No knowledge bases were selected or available" in response["notice"]
+        mock_vdb_core.hybrid_search.assert_not_called()
 
     def test_forward_with_empty_whitelist_returns_early(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """

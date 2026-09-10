@@ -47,13 +47,14 @@ def _field_default(value: Any, fallback: Any) -> Any:
     return fallback if value is None else value
 
 
-def _parse_kds_list(value: Any) -> List[str]:
+def _parse_kds_list(value: Any, allow_empty: bool = False) -> List[str]:
     try:
         parsed = json.loads(value) if isinstance(value, str) else value
     except json.JSONDecodeError as exc:
         raise ValueError(f"kds_list must be a valid JSON array: {exc}") from exc
-    if not isinstance(parsed, list) or not 1 <= len(parsed) <= _MAX_KDS:
-        raise ValueError(f"kds_list must contain 1-{_MAX_KDS} knowledge base IDs")
+    min_length = 0 if allow_empty else 1
+    if not isinstance(parsed, list) or not min_length <= len(parsed) <= _MAX_KDS:
+        raise ValueError(f"kds_list must contain {min_length}-{_MAX_KDS} knowledge base IDs")
     result = [str(item).strip() for item in parsed]
     if any(not item for item in result):
         raise ValueError("kds_list cannot contain empty knowledge base IDs")
@@ -312,7 +313,9 @@ class IndependentAidpSearchTool(Tool):
         if kds_list is None:
             return configured_scope, configured_scope, [], False
 
-        requested_scope = self._unique_kds(_parse_kds_list(kds_list))
+        requested_scope = self._unique_kds(_parse_kds_list(kds_list, allow_empty=True))
+        if not requested_scope:
+            return [], [], [], False
         used_scope = [item for item in requested_scope if item in configured_scope]
         ignored_scope = [item for item in requested_scope if item not in configured_scope]
         fallback_to_all = bool(requested_scope and not used_scope and configured_scope)
@@ -330,6 +333,10 @@ class IndependentAidpSearchTool(Tool):
             fallback_to_all,
         ) = self._resolve_search_scope(kds_list)
         normalized_query = query.strip()
+        if not search_kds_list:
+            return build_knowledge_search_response(
+                [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
+            )
         self._emit_running_prompt(normalized_query)
         try:
             records = self._execute_request(normalized_query, search_kds_list)

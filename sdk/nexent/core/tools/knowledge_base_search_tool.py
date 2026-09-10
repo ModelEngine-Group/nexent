@@ -249,6 +249,8 @@ class KnowledgeBaseSearchTool(Tool):
 
         if index_names is None:
             return available_scope, available_scope, [], False
+        if len(index_names) == 0:
+            return [], [], [], False
 
         requested_scope = self._unique_names(
             self._convert_to_index_names(list(index_names))

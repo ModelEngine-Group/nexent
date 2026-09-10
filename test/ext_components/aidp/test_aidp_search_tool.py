@@ -640,6 +640,34 @@ class TestAidpSearchToolWhitelist:
         assert result["scope"]["used"] == []
         aidp_tool._mock_http_client.post.assert_not_called()
 
+    def test_forward_explicit_empty_scope_returns_empty_without_http_call(self, aidp_tool):
+        """An explicitly empty scope means no knowledge base should be searched."""
+        result = json.loads(aidp_tool.forward("query", kds_list=[]))
+
+        assert result["results"] == []
+        assert result["scope"] == {
+            "requested": [],
+            "used": [],
+            "ignored": [],
+            "adjusted": False,
+            "fallback_to_all": False,
+        }
+        assert "No knowledge bases were selected or available" in result["notice"]
+        aidp_tool._mock_http_client.post.assert_not_called()
+
+    def test_forward_invalid_scope_with_no_available_kds_reports_no_search(self, aidp_tool):
+        """An invalid request with an empty whitelist must not claim a search ran."""
+        aidp_tool.set_allowed_kds([])
+
+        result = json.loads(aidp_tool.forward("query", kds_list=["kb-missing"]))
+
+        assert result["results"] == []
+        assert result["scope"]["used"] == []
+        assert result["scope"]["ignored"] == ["kb-missing"]
+        assert "no other knowledge bases were available" in result["notice"]
+        assert "No search was executed" in result["notice"]
+        aidp_tool._mock_http_client.post.assert_not_called()
+
     def test_forward_configured_kds_blocked_by_empty_whitelist(self, aidp_tool):
         """Even the tool's own configured kds_list is blocked when the
         whitelist is empty."""

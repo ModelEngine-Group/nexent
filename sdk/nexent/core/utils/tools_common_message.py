@@ -112,7 +112,19 @@ def build_knowledge_search_response(
 ) -> str:
     """Build the model-facing response for scope-aware knowledge searches."""
     adjusted = bool(ignored_scope or requested_scope != used_scope)
-    if fallback_to_all:
+    if not used_scope:
+        if ignored_scope:
+            notice = (
+                "NOTICE: The requested knowledge bases were unavailable, and no "
+                f"other knowledge bases were available: {ignored_scope}. "
+                "No search was executed."
+            )
+        else:
+            notice = (
+                "NOTICE: No knowledge bases were selected or available. "
+                "No search was executed."
+            )
+    elif fallback_to_all:
         notice = (
             "NOTICE: Knowledge-base scope was adjusted before search. "
             f"Requested knowledge bases {ignored_scope} were unavailable and ignored. "
@@ -124,11 +136,6 @@ def build_knowledge_search_response(
             "NOTICE: Knowledge-base scope was adjusted before search. "
             f"Requested knowledge bases {ignored_scope} were unavailable and ignored. "
             f"Search was executed with the remaining available knowledge bases: {used_scope}. "
-            "Do not retry with the ignored knowledge bases."
-        )
-    elif not used_scope:
-        notice = (
-            "NOTICE: No requested knowledge bases were available, so no search was executed. "
             "Do not retry with the ignored knowledge bases."
         )
     else:
