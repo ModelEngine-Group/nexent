@@ -623,7 +623,125 @@ function parseFileAttachments(
 }
 
 /**
+ * Normalize an AG-UI protocol event chunk into a legacy Nexus-format SseChunk.
+ * Returns null for events that should be skipped (lifecycle boundaries).
+ *
+ * AG-UI events use upper-case `type` (e.g. "TEXT_MESSAGE_CONTENT", "RUN_STARTED")
+ * with fields like `delta`, `messageId`, `toolCallId`.  The legacy format uses
+ * lower-case `type` (e.g. "model_output_thinking") with `content`, `tool_call_id`.
+ * This bridges the two so the rest of the adapter needs minimal changes.
+ */
+function normalizeAgUiChunk(raw: Record<string, unknown>): SseChunk | null {
+  const type = (raw.type as string) || "";
+
+  // ---- Lifecycle: skip ------------------------------------------------
+  if (
+    type === "RUN_STARTED" ||
+    type === "RUN_FINISHED" ||
+    type === "STEP_STARTED" ||
+    type === "STEP_FINISHED" ||
+    type === "TEXT_MESSAGE_START" ||
+    type === "TEXT_MESSAGE_END" ||
+    type === "REASONING_MESSAGE_START" ||
+    type === "REASONING_MESSAGE_END" ||
+    type === "TOOL_CALL_START" ||
+    type === "TOOL_CALL_ARGS" ||
+    type === "TOOL_CALL_END"
+  ) {
+    return null;
+  }
+
+  // ---- Error ---------------------------------------------------------
+  if (type === "RUN_ERROR") {
+    return {
+      type: "error",
+      content: (raw.message as string) || "run error",
+    } as unknown as SseChunk;
+  }
+
+  // ---- Text content --------------------------------------------------
+  if (type === "TEXT_MESSAGE_CONTENT") {
+    return {
+      type: "final_answer",
+      content: raw.delta ?? "",
+      invocation_id: raw.subagentRunId as string | undefined,
+    } as unknown as SseChunk;
+  }
+
+  // ---- Reasoning content ---------------------------------------------
+  if (type === "REASONING_MESSAGE_CONTENT") {
+    return {
+      type: "model_output_thinking",
+      content: raw.delta ?? "",
+      invocation_id: raw.subagentRunId as string | undefined,
+    } as unknown as SseChunk;
+  }
+
+  // ---- Tool result ---------------------------------------------------
+  if (type === "TOOL_CALL_RESULT") {
+    const toolCallId = raw.toolCallId as string | undefined;
+    return {
+      type: "tool",
+      content: raw.content ?? "",
+      tool_call_id: toolCallId,
+      invocation_id: raw.subagentRunId as string | undefined,
+    } as unknown as SseChunk;
+  }
+
+  // ---- Subagent boundaries -------------------------------------------
+  if (type === "SUBAGENT_STARTED") {
+    return {
+      type: "subagent_start",
+      content: "",
+      agent_id: raw.subagentRunId,
+      agent_name: raw.subagentName,
+      invocation_id: raw.subagentRunId,
+    } as unknown as SseChunk;
+  }
+  if (type === "SUBAGENT_FINISHED") {
+    return {
+      type: "subagent_end",
+      content: "",
+      agent_id: raw.subagentRunId,
+      invocation_id: raw.subagentRunId,
+    } as unknown as SseChunk;
+  }
+
+  // ---- A2UI ActivitySnapshot ------------------------------------------
+  if (type === "ACTIVITY_SNAPSHOT") {
+    // Preserve the full AG-UI event as content for the A2UI parser
+    return {
+      type: "a2ui",
+      content: JSON.stringify(raw),
+    } as unknown as SseChunk;
+  }
+
+  // ---- State delta ---------------------------------------------------
+  if (type === "STATE_DELTA") {
+    const delta = raw.delta as Record<string, unknown> | undefined;
+    const key = delta ? Object.keys(delta)[0] : null;
+    return {
+      type: key === "plan_step" ? "plan_step_update" : "plan",
+      content: delta,
+    } as unknown as SseChunk;
+  }
+
+  // ---- CUSTOM: map source → ProcessType-equivalent --------------------
+  if (type === "CUSTOM") {
+    const source = (raw.source as string) || "";
+    return {
+      type: source,
+      content: raw.event,
+    } as unknown as SseChunk;
+  }
+
+  // ---- Unknown AG-UI type: skip ---------------------------------------
+  return null;
+}
+
+/**
  * Parses one SSE line `data: {...}` into an SseChunk object.
+ * Handles both legacy Nexus ProcessType format and AG-UI protocol events.
  * Returns null for non-data lines or malformed JSON.
  */
 function parseSseChunk(line: string): SseChunk | null {
@@ -632,11 +750,21 @@ function parseSseChunk(line: string): SseChunk | null {
   if (!jsonStr) return null;
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-    if (typeof parsed.type === "string") return parsed as unknown as SseChunk;
+    if (typeof parsed.type !== "string") return null;
+
+    // ---- AG-UI detection ------------------------------------------------
+    // AG-UI events use UPPER_CASE types (RUN_STARTED, TEXT_MESSAGE_CONTENT, etc.)
+    // Legacy Nexus uses snake_case (model_output_thinking, final_answer, etc.)
+    if (/^[A-Z_]+$/.test(parsed.type)) {
+      const normalized = normalizeAgUiChunk(parsed);
+      if (normalized) return normalized;
+      return null;
+    }
+
     if (typeof parsed.status === "string") {
       return { type: "status", content: parsed.status };
     }
-    return null;
+    return parsed as unknown as SseChunk;
   } catch {
     return null;
   }

@@ -34,6 +34,7 @@ from consts.exceptions import (
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from nexent.core.utils.observer import ProcessType
+from management.services.agent.agui_event_encoder import AgUiEventEncoder
 from consts.model import (
     AgentRequest,
     MessageRequest,
@@ -1262,6 +1263,16 @@ async def run_agent_stream(
         http_request.headers.get("x-user-timezone") if http_request else None,
     )  # pragma: no cover
 
+    # AG-UI protocol mode: when the frontend sends "x-agui-format: true",
+    # we wrap every Nexus ProcessType chunk into an AG-UI protocol event
+    # (RUN_STARTED / TEXT_MESSAGE_CONTENT / ACTIVITY_SNAPSHOT / ...).
+    # This lets the frontend consume the stream directly with useAgUiRuntime.
+    agui_mode = (
+        http_request.headers.get("x-agui-format", "").lower() == "true"
+        if http_request
+        else False
+    )
+
     conversation = None
     if not agent_request.is_debug and agent_request.conversation_id is not None:
         conversation = get_conversation_service(
@@ -1718,6 +1729,55 @@ async def run_agent_stream(
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():
+        # ---- AG-UI encoder (lazy, only active when agui_mode=True) ---------
+        encoder = None
+        # Track whether any agent chunk has been emitted so we know if
+        # RUN_FINISHED should be emitted or is already handled by RUN_ERROR.
+        agui_has_emitted = False
+        agui_run_error_sent = False
+
+        if agui_mode:
+            encoder = AgUiEventEncoder(
+                thread_id=str(agent_request.conversation_id or f"thread_{uuid.uuid4().hex[:12]}"),
+            )
+
+        def _wrap_sse(event_obj: dict) -> str:
+            """Serialize an AG-UI event dict into an SSE data-line."""
+            return "data: " + json.dumps(event_obj, ensure_ascii=False) + "\n\n"
+
+        def _maybe_encode_chunk(data_chunk: str) -> list[str]:
+            """Try to parse a raw SSE line, run it through the encoder, and
+            return 0+ AG-UI SSE lines.  Returns the original chunk unchanged
+            if it's not a Nexus ProcessType chunk (e.g. conversation_created)."""
+            if encoder is None:
+                return [data_chunk]
+
+            # Strip SSE framing to get the raw JSON body
+            body = data_chunk.strip()
+            if body.startswith("data:"):
+                body = body[len("data:"):].strip()
+            if body.endswith("\n\n"):
+                body = body[:-2].strip()
+
+            try:
+                chunk_dict = json.loads(body)
+            except (json.JSONDecodeError, ValueError):
+                # Not JSON — pass through unchanged
+                return [data_chunk]
+
+            # Only Nexus ProcessType chunks (have a "type" that matches our enum)
+            # get encoded.  Other special events (conversation_created, etc.)
+            # fall through unchanged so the frontend adapter can still see them.
+            process_type = chunk_dict.get("type", "")
+            known_types = {pt.value for pt in ProcessType}
+            if process_type not in known_types:
+                return [data_chunk]
+
+            # ---- Encode to AG-UI events ----------------------------------
+            agui_events = encoder.encode(chunk_dict)
+            agui_has_emitted = True
+            return [_wrap_sse(ev) for ev in agui_events]
+
         try:
             producer_task = None
             if channel is not None:
@@ -1733,6 +1793,17 @@ async def run_agent_stream(
                 _agent_stream_producer_tasks.add(producer_task)
                 producer_task.add_done_callback(
                     _agent_stream_producer_tasks.discard
+                )
+
+            # ---- Run boundary: RUN_STARTED (AG-UI mode only) ----------------
+            if encoder is not None:
+                yield _wrap_sse(
+                    encoder.run_started_event(
+                        input_state={
+                            "query": agent_request.query,
+                            "agent_id": getattr(agent_request, "agent_id", None),
+                        }
+                    )
                 )
 
             # Emit conversation_created event for new conversations
@@ -1752,21 +1823,51 @@ async def run_agent_stream(
 
             if channel is not None:
                 async for data_chunk in channel.subscribe_with_history(0):
-                    yield data_chunk
+                    if encoder is None:
+                        yield data_chunk
+                    else:
+                        for agui_line in _maybe_encode_chunk(data_chunk):
+                            yield agui_line
             else:
                 # Debug/A2A streams intentionally retain the direct execution
                 # path and its existing disconnect semantics.
                 with agent_monitoring_context(agent_metadata):
                     async for data_chunk in stream_gen:
-                        yield data_chunk
+                        if encoder is None:
+                            yield data_chunk
+                        else:
+                            for agui_line in _maybe_encode_chunk(data_chunk):
+                                yield agui_line
         except Exception as stream_exc:
             logger.error(
                 "Agent stream response error: %r",
                 stream_exc,
                 exc_info=True,
             )
-            yield _safe_agent_stream_error_chunk()
+            if encoder is not None and not agui_run_error_sent:
+                # Emit AG-UI RUN_ERROR so useAgUiRuntime sees the failure
+                yield _wrap_sse(
+                    encoder._run_error_event(str(stream_exc))
+                )
+                # Also emit RUN_FINISHED with error outcome
+                yield _wrap_sse(
+                    encoder.run_finished_event(
+                        outcome="success",  # AG-UI has no error outcome; RUN_ERROR covers this
+                    )
+                )
+                agui_run_error_sent = True
+            else:
+                yield _safe_agent_stream_error_chunk()
         finally:
+            # ---- Run boundary: RUN_FINISHED (AG-UI mode only) ---------------
+            if encoder is not None and not agui_run_error_sent:
+                try:
+                    yield _wrap_sse(
+                        encoder.run_finished_event(outcome="success")
+                    )
+                except Exception:
+                    pass  # Generator may already be closed
+
             agent_run_manager.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
                 resolved_user_id,
