@@ -54,7 +54,10 @@ WITH legacy_source AS (
 ), issues AS (
     SELECT source_name, source_row_id, tenant_id,
            resource_type || '/' || COALESCE(resource_id::TEXT, '?') AS resource,
-           'null_or_empty_tenant'::TEXT AS reason, 1::BIGINT AS issue_count, payload AS sample
+           CASE WHEN source_name = 'skill.skill_tags'
+                THEN 'skipped_skill_tags_without_tenant'
+                ELSE 'null_or_empty_tenant' END::TEXT AS reason,
+           1::BIGINT AS issue_count, payload AS sample
     FROM legacy_source WHERE tenant_id IS NULL OR btrim(tenant_id) = ''
     UNION ALL
     SELECT source.source_name, source.source_row_id, source.tenant_id,
@@ -86,7 +89,9 @@ WITH legacy_source AS (
     UNION ALL
     SELECT source_name, source_row_id, tenant_id,
            resource_type || '/' || COALESCE(resource_id::TEXT, '?'),
-           CASE WHEN source_name = 'mcp_community.tags'
+           CASE WHEN source_name = 'agent_repository.tags'
+                THEN 'skipped_agent_tags_without_canonical_source'
+                WHEN source_name = 'mcp_community.tags'
                 THEN 'community_canonical_source_unprovable'
                 ELSE 'canonical_source_missing_or_tenant_mismatch' END,
            canonical_match_count, payload
@@ -517,7 +522,10 @@ WITH legacy_normalized AS (
     CROSS JOIN LATERAL jsonb_array_elements(
         CASE WHEN jsonb_typeof(skill.skill_tags::JSONB) = 'array' THEN skill.skill_tags::JSONB ELSE '[]'::JSONB END
     ) AS element(value)
-    WHERE jsonb_typeof(element.value) = 'string' AND NULLIF(btrim(element.value #>> '{}'), '') IS NOT NULL
+    WHERE skill.tenant_id IS NOT NULL
+      AND btrim(skill.tenant_id) <> ''
+      AND jsonb_typeof(element.value) = 'string'
+      AND NULLIF(btrim(element.value #>> '{}'), '') IS NOT NULL
     UNION
     SELECT repository.publisher_tenant_id, 'agent', repository.agent_id::TEXT,
            lower(btrim(tag) COLLATE "C")

@@ -136,6 +136,23 @@ const getI18nKeyByType = (type: string): string => {
   return typeToKeyMap[type] || "";
 };
 
+function getSelectableAgentModels(
+  modelIds: number[] | undefined,
+  modelNames: string[] | undefined,
+  availableModels: { id: number; connect_status?: string }[]
+) {
+  const configuredModels = (modelIds || []).map((id, index) => ({
+    id,
+    name: modelNames?.[index] || String(id),
+  }));
+  const availableModelIds = new Set(
+    availableModels
+      .filter((model) => model.connect_status === "available")
+      .map((model) => model.id)
+  );
+  return configuredModels.filter((model) => availableModelIds.has(model.id));
+}
+
 export function ChatInterface() {
   const [input, setInput] = useState("");
   // Replace the original messages state
@@ -280,11 +297,16 @@ export function ChatInterface() {
       setSelectedAgentId(agentId);
       setAgentGreeting(greeting || null);
       setAgentExampleQuestions(exampleQuestions || []);
-      setAgentModelIds(modelIds || []);
-      setAgentModelNames(modelNames || []);
-      setSelectedModelId(modelIds && modelIds.length > 0 ? modelIds[0] : null);
+      const selectableModels = getSelectableAgentModels(
+        modelIds,
+        modelNames,
+        availableModels
+      );
+      setAgentModelIds(selectableModels.map((model) => model.id));
+      setAgentModelNames(selectableModels.map((model) => model.name));
+      setSelectedModelId(selectableModels[0]?.id ?? null);
     },
-    []
+    [availableModels]
   );
 
   const restoreConversationAgent = useCallback(
@@ -338,12 +360,24 @@ export function ChatInterface() {
 
     setAgentGreeting(agent.greeting_message || null);
     setAgentExampleQuestions(agent.example_questions || []);
-    setAgentModelIds(agent.model_ids || []);
-    setAgentModelNames(agent.model_names || []);
-    setSelectedModelId(
-      agent.model_ids && agent.model_ids.length > 0 ? agent.model_ids[0] : null
+    const selectableModels = getSelectableAgentModels(
+      agent.model_ids,
+      agent.model_names,
+      availableModels
     );
-  }, [handleAgentSelectWithGreeting, publishedAgents, selectedAgentId]);
+    setAgentModelIds(selectableModels.map((model) => model.id));
+    setAgentModelNames(selectableModels.map((model) => model.name));
+    setSelectedModelId((current) =>
+      selectableModels.some((model) => model.id === current)
+        ? current
+        : (selectableModels[0]?.id ?? null)
+    );
+  }, [
+    availableModels,
+    handleAgentSelectWithGreeting,
+    publishedAgents,
+    selectedAgentId,
+  ]);
 
   useEffect(() => {
     const agentId = sessionStorage.getItem("selectedAgentId");

@@ -1393,6 +1393,16 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     };
   },
 
+  // New conversations do not have a backend ID until their first agent run.
+  // Accept metadata updates so assistant-ui can retain the selected agent in
+  // its local thread state while users switch between conversations.
+  async updateCustom(
+    _remoteId: string,
+    _custom: Record<string, unknown> | undefined
+  ): Promise<void> {
+    return;
+  },
+
   async rename(remoteId: string, newTitle: string): Promise<void> {
     const candidateId = await waitForServerConversationId(remoteId);
     const conversationId = Number(candidateId);

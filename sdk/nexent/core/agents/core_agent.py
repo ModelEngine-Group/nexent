@@ -50,6 +50,17 @@ RUNTIME_METADATA_BLOCK_RE = re.compile(
     r'<runtime_metadata\b.*</runtime_metadata>',
     flags=re.DOTALL,
 )
+PARALLEL_EXECUTOR_IMPORT_RE = re.compile(
+    r"^[ \t]*from[ \t]+[\w.]+[ \t]+import[ \t]+parallel_executor[ \t]*(?:#.*)?(?:\r?\n|$)",
+    flags=re.MULTILINE,
+)
+
+
+def _remove_parallel_executor_import(code: str) -> str:
+    """Remove redundant imports for the injected parallel_executor tool."""
+    if "parallel_executor" not in code:
+        return code
+    return PARALLEL_EXECUTOR_IMPORT_RE.sub("", code)
 
 
 def parse_code_blobs(text: str) -> str:
@@ -882,6 +893,7 @@ Additional Args:
             else:
                 code_action = parse_code_blobs(model_output)
             code_action = fix_final_answer_code(code_action)
+            code_action = _remove_parallel_executor_import(code_action)
             memory_step.code_action = code_action
             # Record parsing results
             self.observer.add_message(
