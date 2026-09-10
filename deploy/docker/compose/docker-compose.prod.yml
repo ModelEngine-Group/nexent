@@ -235,7 +235,6 @@ services:
       NEXENT_SQL_STARTUP_MODE: "off"
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       DOCKER_ENVIRONMENT: "true"
-      DISABLE_RAY_DASHBOARD: ${DISABLE_RAY_DASHBOARD:-false}
       DISABLE_CELERY_FLOWER: ${DISABLE_CELERY_FLOWER:-false}
       PYTHONPATH: "/opt/backend"
       skip_proxy: "true"
@@ -255,7 +254,7 @@ services:
       - nexent
     entrypoint: >
       /bin/sh -c "
-        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py || (cd /opt/backend && OPENBLAS_NUM_THREADS=1 UVICORN_LOOP=asyncio uvicorn data_process_service:app --host 0.0.0.0 --port 5012)'
+        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py'
       "
 
   redis:

@@ -295,19 +295,16 @@ FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
-# Ray Configuration
+# Data processing parser configuration
 DP_PART_PROCESSOR_COUNT = int(os.getenv("DP_PART_PROCESSOR_COUNT", "3"))
 DP_FILE_SPLIT_SIZE_MB = int(os.getenv("DP_FILE_SPLIT_SIZE_MB", "5"))
-RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
-RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
-RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
-RAY_NUM_CPUS = DP_PART_PROCESSOR_COUNT * RAY_ACTOR_NUM_CPUS
-RAY_OBJECT_STORE_MEMORY_GB = float(os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
-RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
-RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
-# Disable plasma preallocation to reduce idle memory usage
-# When set to false, Ray will allocate object store memory on-demand instead of preallocating
-RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
+DP_PARSE_MAX_PROCESSES = int(os.getenv("DP_PARSE_MAX_PROCESSES", "3"))
+DP_PARSE_MIN_PROCESSES = int(os.getenv("DP_PARSE_MIN_PROCESSES", "1"))
+DP_PARSE_THREADS_PER_PROCESS = int(os.getenv("DP_PARSE_THREADS_PER_PROCESS", "2"))
+DP_PARSE_MAX_TASKS_PER_CHILD = int(os.getenv("DP_PARSE_MAX_TASKS_PER_CHILD", "1000"))
+DP_PRELOAD_MODELS = os.getenv("DP_PRELOAD_MODELS", "unstructured_default").strip()
+DP_PARSER_STARTUP_TIMEOUT_S = int(os.getenv("DP_PARSER_STARTUP_TIMEOUT_S", "300"))
+DP_PARSER_WORKER_GENERATION = os.getenv("DP_PARSER_WORKER_GENERATION", "").strip()
 
 
 # Logging Configuration
@@ -321,8 +318,6 @@ LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
 
 
 # Service Control Flags
-DISABLE_RAY_DASHBOARD = os.getenv(
-    "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
@@ -342,10 +337,9 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 
 # Worker Configuration
-RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
 QUEUES = os.getenv(
     "QUEUES",
-    "process_q,process_part_q,forward_q,forward_part_q,forward_aggregate_q",
+    "process_q,parse_q,forward_q,forward_part_q,forward_aggregate_q",
 )
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
@@ -354,15 +348,6 @@ WORKER_NAME = os.getenv("WORKER_NAME")
 WORKER_CONCURRENCY = int(
     os.getenv("WORKER_CONCURRENCY", str(DP_PART_PROCESSOR_COUNT + 1))
 )
-RAY_WARM_ACTOR_POOL_SIZE_PART = int(
-    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
-RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
-    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
-RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
-RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
-    "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")
-RAY_GLOBAL_ACTOR_POOL_NAMESPACE = os.getenv(
-    "RAY_GLOBAL_ACTOR_POOL_NAMESPACE", "nexent-data-process")
 
 
 # Voice Service Configuration

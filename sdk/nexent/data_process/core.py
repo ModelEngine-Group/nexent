@@ -1,15 +1,12 @@
 import logging
 import os
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
-from .extract_image import UniversalImageExtractor
-from io import BytesIO
+from nexent.monitor import get_monitoring_manager
 
 from .base import FileProcessor
-from .file_splitter import FileSplitter
-from .openpyxl_processor import OpenPyxlProcessor
-from .unstructured_processor import UnstructuredProcessor
-from nexent.monitor import get_monitoring_manager
+from .model_registry import ModelRegistry
 
 
 logger = logging.getLogger("data_process.core")
@@ -34,7 +31,7 @@ class DataProcessCore:
 
     # Supported chunking strategies
     CHUNKING_STRATEGIES = {"basic", "by_title", "none"}
-    
+
     EXTRACT_IMAGE_EXTENSIONS = {".pdf", ".doc",
                                 ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
 
@@ -56,17 +53,56 @@ class DataProcessCore:
         ".docx",
     }
 
-    def __init__(self):
+    def __init__(self, model_paths: Optional[Dict[str, Optional[str]]] = None):
         """
         Initialize the core data processing component
         """
-        self.processors: Dict[str, FileProcessor] = {
-            "Unstructured": UnstructuredProcessor(),
-            "OpenPyxl": OpenPyxlProcessor(),
-            "UniversalImageExtractor": UniversalImageExtractor(),
-            "FileSplitter": FileSplitter(),
+        # Keep the public mapping for compatibility, but defer every concrete
+        # processor import and construction until its path is selected.
+        self.processors: Dict[str, Optional[FileProcessor]] = {
+            "Unstructured": None,
+            "OpenPyxl": None,
+            "UniversalImageExtractor": None,
+            "FileSplitter": None,
         }
+        self.model_registry = ModelRegistry(model_paths)
         logger.debug("DataProcessCore initialization completed")
+
+    def _load_processor(self, name: str) -> FileProcessor:
+        if name == "Unstructured":
+            from .unstructured_processor import UnstructuredProcessor
+
+            return UnstructuredProcessor()
+        if name == "OpenPyxl":
+            from .openpyxl_processor import OpenPyxlProcessor
+
+            return OpenPyxlProcessor()
+        if name == "UniversalImageExtractor":
+            from .extract_image import UniversalImageExtractor
+
+            return UniversalImageExtractor()
+        if name == "FileSplitter":
+            from .file_splitter import FileSplitter
+
+            return FileSplitter()
+        raise ValueError(f"Unsupported processor: {name}")
+
+    def _get_processor(self, name: str) -> FileProcessor:
+        if name not in self.processors:
+            raise ValueError(f"Unsupported processor: {name}")
+        processor = self.processors.get(name)
+        if processor is None:
+            processor = self._load_processor(name)
+            self.processors[name] = processor
+        return processor
+
+    def preload_models(self, aliases: List[str]) -> Dict[str, Any]:
+        """Eagerly load the selected models in the current process."""
+        return self.model_registry.preload(aliases)
+
+    def ensure_model(self, alias: str) -> Any:
+        """Lazily load one model in the current process."""
+        return self.model_registry.get(alias)
 
     def file_process(
         self,
@@ -111,15 +147,22 @@ class DataProcessCore:
             processor_name, extractor = self._select_processor_by_filename(
                 filename, params)
 
-        processor_instance = self.processors.get(processor_name)
+        processor_instance = self._get_processor(processor_name)
         extract_image_processor_instance = (
-            self.processors.get(extractor) if extractor else None
+            self._get_processor(extractor) if extractor else None
         )
 
-        if not processor_instance:
-            raise ValueError(f"Unsupported processor: {processor_name}")
-        
         extension = os.path.splitext(filename)[1].lower()
+        if self.model_registry.model_paths.get("unstructured_default") and processor_name == "Unstructured":
+            self.ensure_model("unstructured_default")
+        if (
+            extractor
+            and extension in self.EXTRACT_IMAGE_EXTENSIONS
+            and self.model_registry.model_paths.get("table_transformer")
+        ):
+            self.ensure_model("unstructured_default")
+            self.ensure_model("table_transformer")
+
         if extract_image_processor_instance:
             with monitoring_manager.trace_operation(
                 "knowledge.preprocess.image_extract",
@@ -185,9 +228,10 @@ class DataProcessCore:
             return [BytesIO(file_data)]
 
         splitter_name = splitter or "FileSplitter"
-        splitter_instance = self.processors.get(splitter_name)
-        if not splitter_instance:
-            logger.error(f"Splitter not found: {splitter_name}")
+        try:
+            splitter_instance = self._get_processor(splitter_name)
+        except ValueError:
+            logger.warning("Splitter not found: %s", splitter_name)
             return [BytesIO(file_data)]
 
         max_size = params.pop("max_size", None)
@@ -265,27 +309,12 @@ class DataProcessCore:
         unstructured_processor = self.processors.get("Unstructured")
 
         generic_formats = []
-        if isinstance(unstructured_processor, UnstructuredProcessor) and hasattr(
-            unstructured_processor, "get_supported_formats"
-        ):
+        if unstructured_processor is not None and hasattr(unstructured_processor, "get_supported_formats"):
             generic_formats = unstructured_processor.get_supported_formats()
         else:
             generic_formats = [
-                ".txt",
-                ".pdf",
-                ".docx",
-                ".doc",
-                ".html",
-                ".htm",
-                ".md",
-                ".rtf",
-                ".odt",
-                ".pptx",
-                ".ppt",
-                ".epub",
-                ".json",
-                ".xml",
-                ".csv",
+                ".txt", ".pdf", ".docx", ".doc", ".html", ".htm", ".md",
+                ".rtf", ".odt", ".pptx", ".ppt", ".epub", ".json", ".xml", ".csv",
             ]
 
         return {"excel": list(self.EXCEL_EXTENSIONS), "generic": generic_formats}

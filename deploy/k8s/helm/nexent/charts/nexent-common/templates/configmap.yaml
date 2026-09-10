@@ -100,16 +100,14 @@ data:
   # Data Processing Service Configuration
   REDIS_PORT: {{ .Values.config.redis.port | quote }}
   FLOWER_PORT: {{ .Values.config.dataProcess.flowerPort | quote }}
-  RAY_DASHBOARD_PORT: {{ .Values.config.dataProcess.rayDashboardPort | quote }}
-  RAY_DASHBOARD_HOST: {{ .Values.config.dataProcess.rayDashboardHost | quote }}
-  RAY_ACTOR_NUM_CPUS: {{ .Values.config.dataProcess.rayActorNumCpus | quote }}
   DP_PART_PROCESSOR_COUNT: {{ .Values.config.dataProcess.partProcessorCount | quote }}
   DP_FILE_SPLIT_SIZE_MB: {{ .Values.config.dataProcess.fileSplitSizeMb | quote }}
-  RAY_NUM_CPUS: {{ default (mul (int .Values.config.dataProcess.partProcessorCount) (int .Values.config.dataProcess.rayActorNumCpus)) .Values.config.dataProcess.rayNumCpus | quote }}
-  RAY_OBJECT_STORE_MEMORY_GB: {{ .Values.config.dataProcess.rayObjectStoreMemoryGb | quote }}
-  RAY_TEMP_DIR: {{ .Values.config.dataProcess.rayTempDir | quote }}
-  RAY_LOG_LEVEL: {{ .Values.config.dataProcess.rayLogLevel | quote }}
-  DISABLE_RAY_DASHBOARD: {{ .Values.config.dataProcess.disableRayDashboard | quote }}
+  DP_PARSE_MAX_PROCESSES: {{ .Values.config.dataProcess.parseMaxProcesses | quote }}
+  DP_PARSE_MIN_PROCESSES: {{ .Values.config.dataProcess.parseMinProcesses | quote }}
+  DP_PARSE_THREADS_PER_PROCESS: {{ .Values.config.dataProcess.parseThreadsPerProcess | quote }}
+  DP_PARSE_MAX_TASKS_PER_CHILD: {{ .Values.config.dataProcess.parseMaxTasksPerChild | quote }}
+  DP_PRELOAD_MODELS: {{ .Values.config.dataProcess.preloadModels | quote }}
+  DP_PARSER_STARTUP_TIMEOUT_S: {{ .Values.config.dataProcess.parserStartupTimeout | quote }}
   DISABLE_CELERY_FLOWER: {{ .Values.config.dataProcess.disableCeleryFlower | quote }}
   DOCKER_ENVIRONMENT: {{ .Values.config.dataProcess.dockerEnvironment | quote }}
   ENABLE_UPLOAD_IMAGE: {{ .Values.config.dataProcess.enableUploadImage | quote }}

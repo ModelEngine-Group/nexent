@@ -39,7 +39,6 @@ dependencies = [
 
 [project.optional-dependencies]
 data-process = [
-    "ray[default]>=2.9.3",
     "celery>=5.3.6",
     "flower>=2.0.1",
     "nest_asyncio>=1.5.6",

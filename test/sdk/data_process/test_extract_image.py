@@ -5,9 +5,9 @@ import subprocess
 import sys
 import threading
 import types
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
-import zipfile
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -185,6 +185,34 @@ def test_custom_load_table_model_initializes_when_missing(monkeypatch):
     assert called == ["model-path"]
 
 
+def test_table_agent_and_pptx_dependencies_are_loaded_lazily(monkeypatch):
+    fake_agent = SimpleNamespace(model=None, _lock=threading.Lock())
+    fake_tables = types.ModuleType("unstructured_inference.models.tables")
+    fake_tables.tables_agent = fake_agent
+    monkeypatch.setitem(sys.modules, "unstructured_inference.models.tables", fake_tables)
+    monkeypatch.setattr(sys.modules["unstructured_inference.models"], "tables", fake_tables)
+    monkeypatch.setattr(extract_image_module, "tables_agent", None)
+
+    assert extract_image_module.get_tables_agent() is fake_agent
+    initialized = []
+    fake_agent.initialize = lambda path: initialized.append(path)
+    monkeypatch.setattr(extract_image_module, "TABLE_TRANSFORMER_MODEL_PATH", "table-model")
+    extract_image_module.custom_load_table_model()
+    assert initialized == ["table-model"]
+
+    class FakePresentation:
+        def __init__(self, _path):
+            self.slide_width = 914400
+            self.slide_height = 914400
+            self.slides = []
+
+    fake_pptx = types.ModuleType("pptx")
+    fake_pptx.Presentation = FakePresentation
+    monkeypatch.setitem(sys.modules, "pptx", fake_pptx)
+    monkeypatch.setattr(extract_image_module, "Presentation", None)
+    assert UniversalImageExtractor()._extract_pptx("sample.pptx") == []
+
+
 def test_hash_namespace_write_temp_file(mocker, tmp_path):
     extractor = UniversalImageExtractor()
 
@@ -351,6 +379,7 @@ def test_excel_helpers_positive_and_negative_paths(tmp_path):
 def test_pptx_extraction_paths(monkeypatch):
     extractor = UniversalImageExtractor()
 
+    monkeypatch.setitem(sys.modules, "pptx", None)
     monkeypatch.setattr(extract_image_module, "Presentation", None)
     with pytest.raises(RuntimeError, match="python-pptx is required"):
         extractor._extract_pptx("sample.pptx")

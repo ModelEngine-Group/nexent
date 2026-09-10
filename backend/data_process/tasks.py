@@ -6,41 +6,24 @@ import json
 import logging
 import math
 import os
-import re
-import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import aiohttp
-import ray
 import requests
 from celery import Task, chain, chord, group, states
 from celery.exceptions import Retry
 from celery.result import allow_join_result
 
 from consts.const import (
-    DISABLE_RAY_DASHBOARD,
-    DP_FILE_SPLIT_SIZE_MB,
-    DP_PART_PROCESSOR_COUNT,
-    DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-    DP_REDIS_CHUNKS_WAIT_TIMEOUT_S,
     ELASTICSEARCH_SERVICE,
     FORWARD_REDIS_RETRY_DELAY_S,
     FORWARD_REDIS_RETRY_MAX,
-    MAX_TIMEOUT,
-    PER_WAVE_TIMEOUT,
-    RAY_ACTOR_NUM_CPUS,
-    RAY_ACTOR_WARM_TIMEOUT_S,
-    RAY_GLOBAL_ACTOR_POOL_NAME,
-    RAY_GLOBAL_ACTOR_POOL_NAMESPACE,
-    RAY_NUM_CPUS,
     REDIS_BACKEND_URL,
-    ROOT_DIR,
 )
 from consts.error_code import ErrorCode
-from database.attachment_db import get_file_stream
 from database.knowledge_db import get_knowledge_record
 from services.redis_service import get_redis_service
 from utils.file_management_utils import get_file_size
@@ -48,16 +31,41 @@ from utils.knowledge_ingestion_errors import (
     ClassifiedIngestionException,
     classify_ingestion_exception,
 )
-from utils.knowledge_telemetry import knowledge_span, set_span_attributes, trace_knowledge_operation
+from utils.knowledge_telemetry import set_span_attributes, trace_knowledge_operation
 
 from .app import app
-from .ray_actors import DataProcessorRayActor
+from .parse_tasks import process
+from .utils import (
+    DocumentDeleteRequested,
+    ensure_document_not_deleted,
+    is_document_delete_requested,
+)
+from .utils import (
+    update_file_lifecycle as _update_file_lifecycle,
+)
 
 
 logger = logging.getLogger("data_process.tasks")
+
+
+class LoggingTask(Task):
+    """Base task class with consistent task lifecycle logging."""
+
+    def on_success(self, retval, task_id, args, kwargs):
+        logger.debug("Task %s[%s] completed successfully", self.name, task_id)
+        return super().on_success(retval, task_id, args, kwargs)
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        logger.error("Task %s[%s] failed: %s", self.name, task_id, exc)
+        return super().on_failure(exc, task_id, args, kwargs, einfo)
+
+    def on_retry(self, exc, task_id, args, kwargs, einfo):
+        logger.warning("Task %s[%s] retrying: %s", self.name, task_id, exc)
+        return super().on_retry(exc, task_id, args, kwargs, einfo)
 ASYNC_SPLIT_RETRY_MAX = max(
     FORWARD_REDIS_RETRY_MAX * 5, FORWARD_REDIS_RETRY_MAX)
 FORWARD_ES_CHUNK_BATCH_SIZE = 64
+FORWARD_BATCH_TTL_SECONDS = 2 * 60 * 60
 IMAGE_METADATA_PROCESS_SOURCE = "UniversalImageExtractor"
 _NON_RETRYABLE_FORWARD_CODES = {
     ErrorCode.KNOWLEDGE_INDEX_WRITE_BLOCKED.value,
@@ -66,214 +74,8 @@ _NON_RETRYABLE_FORWARD_CODES = {
 }
 
 
-class DocumentDeleteRequested(RuntimeError):
-    """Raised when a task reaches a document that is being deleted."""
-
-
-def _is_document_delete_requested(
-    *,
-    index_name: Optional[str],
-    source: Optional[str],
-    file_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
-) -> bool:
-    """Read the file-ID fence and use the matching PG row only on Redis errors."""
-    if not file_id:
-        return False
-    try:
-        redis_fence_requested = get_redis_service().is_document_delete_requested(
-            file_id=file_id,
-        )
-        # A healthy Redis miss is the normal path. Do not query PG for every
-        # processing-stage fence check; PG is reserved for Redis failures.
-        return bool(redis_fence_requested)
-    except Exception as redis_exc:
-        logger.warning(
-            "Deletion fence lookup failed for index=%s source=%s file_id=%s: %s",
-            index_name,
-            source,
-            file_id,
-            redis_exc,
-        )
-    try:
-        from database.knowledge_file_lifecycle_db import get_file_record
-
-        record = get_file_record(
-            file_id=file_id,
-            tenant_id=tenant_id,
-            index_name=index_name,
-            include_hidden=True,
-        )
-        return bool(record and str(record.get("status") or "").upper() in {"DELETE_REQUESTED", "DELETED"})
-    except Exception as lifecycle_exc:
-        # A deployment without the lifecycle migration must retain the legacy
-        # behavior; a database lookup failure therefore does not cancel work.
-        logger.debug(
-            "Durable deletion status lookup unavailable for index=%s source=%s file_id=%s: %s",
-            index_name,
-            source,
-            file_id,
-            lifecycle_exc,
-        )
-        return False
-
-
-def _ensure_document_not_deleted(
-    *,
-    index_name: Optional[str],
-    source: Optional[str],
-    file_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
-) -> None:
-    if _is_document_delete_requested(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    ):
-        raise DocumentDeleteRequested(
-            f"Document deletion requested for index={index_name}, source={source}, file_id={file_id}"
-        )
-
-
-def _update_file_lifecycle(
-    *,
-    file_id: Optional[str],
-    tenant_id: Optional[str],
-    index_name: Optional[str],
-    source: Optional[str],
-    status: Optional[str],
-    stage: str,
-    updated_by: Optional[str] = None,
-    **fields: Any,
-) -> None:
-    """Best-effort durable status update with a legacy path fallback.
-
-    Data-process workers can be deployed before the lifecycle migration, so a
-    missing table must never turn a processing result into a second failure.
-    """
-    if not index_name:
-        return
-    try:
-        from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
-
-        record = None
-        if file_id and tenant_id:
-            record = get_file_record(
-                file_id=file_id,
-                tenant_id=tenant_id,
-                index_name=index_name,
-                include_hidden=True,
-            )
-        if not record and source:
-            record = get_file_record(
-                tenant_id=tenant_id,
-                index_name=index_name,
-                object_name=source,
-                include_hidden=True,
-            )
-        if not record or record.get("status") in {"DELETE_REQUESTED", "DELETED"}:
-            return
-        transition_file_record(
-            record["file_id"],
-            status=status,
-            stage=stage,
-            expected_statuses=(record.get("status"),),
-            updated_by=updated_by,
-            **fields,
-        )
-    except Exception as lifecycle_exc:
-        logger.warning(
-            "Failed to update file lifecycle for index=%s source=%s: %s",
-            index_name,
-            source,
-            lifecycle_exc,
-        )
-
-
-@trace_knowledge_operation("knowledge.minio.fetch", "minio.fetch")
-def _fetch_minio_source(source: str) -> bytes:
-    file_stream = get_file_stream(source)
-    if file_stream is None:
-        raise FileNotFoundError(f"Unable to fetch file from URL: {source}")
-    data = file_stream.read()
-    set_span_attributes(file_size_bytes=len(data), stage="minio.fetch")
-    return data
-
-
-def _wait_for_split_ready(
-    redis_key: str,
-    timeout_s: int,
-    poll_interval_ms: int,
-    cancellation_check: Optional[Callable[[], bool]] = None,
-) -> int:
-    """
-    Wait until async split aggregation is marked ready in Redis.
-    Returns aggregated chunk count.
-    Raises TimeoutError on timeout.
-    """
-    if not REDIS_BACKEND_URL:
-        raise RuntimeError("REDIS_BACKEND_URL not configured")
-
-    import redis
-
-    client = redis.Redis.from_url(REDIS_BACKEND_URL, decode_responses=True)
-    ready_key = f"{redis_key}:ready"
-    deadline = time.time() + timeout_s
-
-    while time.time() < deadline:
-        if cancellation_check and cancellation_check():
-            raise DocumentDeleteRequested(
-                f"Document deletion requested while waiting for '{redis_key}'"
-            )
-        if client.get(ready_key):
-            cached = client.get(redis_key)
-            if cached:
-                try:
-                    chunks = json.loads(cached)
-                    return len(chunks) if isinstance(chunks, list) else 0
-                except Exception:
-                    return 0
-            return 0
-        time.sleep(max(0.01, poll_interval_ms / 1000.0))
-
-    raise TimeoutError(
-        f"Timed out waiting for async split aggregation at key '{ready_key}' after {timeout_s}s"
-    )
-
-
-def _estimate_parallel_parts() -> int:
-    try:
-        total_cpus = RAY_NUM_CPUS
-    except Exception:
-        total_cpus = os.cpu_count() or 1
-    actor_cpus = max(1, int(RAY_ACTOR_NUM_CPUS))
-    cpu_capacity = max(1, total_cpus // actor_cpus)
-    return min(DP_PART_PROCESSOR_COUNT, cpu_capacity)
-
-
-def _compute_split_wait_timeout(parts_count: int) -> int:
-    base_timeout = DP_REDIS_CHUNKS_WAIT_TIMEOUT_S
-    waves = math.ceil(max(1, parts_count) / _estimate_parallel_parts())
-    dynamic_timeout = base_timeout + \
-        max(0, waves - 1) * max(1, PER_WAVE_TIMEOUT)
-    return min(MAX_TIMEOUT, dynamic_timeout)
-
-
-def _count_image_metadata_chunks(chunks: Optional[List[Dict[str, Any]]]) -> int:
-    if not chunks:
-        return 0
-    return sum(
-        1
-        for chunk in chunks
-        if isinstance(chunk, dict)
-        and (chunk.get("process_source") or chunk.get("metadata", {}).get("process_source"))
-        == IMAGE_METADATA_PROCESS_SOURCE
-    )
-
-
 def _get_next_available_batch_index(
-    batches: List[List[Dict[str, Any]]],
+    batches: list[list[dict[str, Any]]],
     start_idx: int,
     batch_size: int,
 ) -> int:
@@ -287,8 +89,8 @@ def _get_next_available_batch_index(
 
 
 def _distribute_chunks_round_robin(
-    batches: List[List[Dict[str, Any]]],
-    chunks: List[Dict[str, Any]],
+    batches: list[list[dict[str, Any]]],
+    chunks: list[dict[str, Any]],
     batch_size: int,
     error_context: str,
 ) -> None:
@@ -305,9 +107,9 @@ def _distribute_chunks_round_robin(
 
 
 def _build_balanced_batches(
-    formatted_chunks: List[Dict[str, Any]],
+    formatted_chunks: list[dict[str, Any]],
     batch_size: int = FORWARD_ES_CHUNK_BATCH_SIZE,
-) -> List[List[Dict[str, Any]]]:
+) -> list[list[dict[str, Any]]]:
     """
     Split chunks into max-size batches and spread image-metadata chunks evenly.
     """
@@ -327,7 +129,7 @@ def _build_balanced_batches(
         if chunk.get("process_source") != IMAGE_METADATA_PROCESS_SOURCE
     ]
 
-    batches: List[List[Dict[str, Any]]] = [[] for _ in range(total_batches)]
+    batches: list[list[dict[str, Any]]] = [[] for _ in range(total_batches)]
 
     _distribute_chunks_round_robin(
         batches=batches,
@@ -345,39 +147,6 @@ def _build_balanced_batches(
     return batches
 
 
-# Thread lock for initializing Ray to prevent race conditions
-ray_init_lock = threading.Lock()
-
-ROOT_DIR_DISPLAY = ROOT_DIR or "{ROOT_DIR}"
-
-
-def extract_error_code(reason: str, parsed_error: Optional[Dict] = None) -> Optional[str]:
-    """
-    Extract error code from error message or parsed error dict.
-    Returns error code if matched, None otherwise.
-    """
-    if parsed_error:
-        code = classify_ingestion_exception(parsed_error, "").error_code
-        if code:
-            return code
-
-    code = classify_ingestion_exception(reason, "").error_code
-    if code:
-        return code
-
-    # Keep the legacy regex fallback for callers/tests that patch ``tasks.re``.
-    # The classifier remains the source of truth; this only covers malformed
-    # payloads that are not valid JSON mappings.
-    try:
-        match = re.search(
-            r'["\'](?:error_code|code)["\']\s*:\s*["\']([^"\']+)["\']',
-            reason,
-        )
-    except Exception:
-        return None
-    return match.group(1) if match else None
-
-
 def _redis_error_reason(classified: ClassifiedIngestionException) -> str:
     """Keep Redis compatible with the lifecycle code-or-message representation."""
     if classified.error_code:
@@ -386,14 +155,13 @@ def _redis_error_reason(classified: ClassifiedIngestionException) -> str:
     return message[:200] + "..." if len(message) > 200 else message
 
 
-def save_error_to_redis(task_id: str, error_reason: str, start_time: float):
+def save_error_to_redis(task_id: str, error_reason: str):
     """
     Save error information to Redis
 
     Args:
         task_id: Celery task ID
         error_reason: Short error reason summary
-        start_time: Task start timestamp (unused, kept for compatibility)
     """
     if not task_id:
         logger.warning("Cannot save error info: task_id is empty")
@@ -413,83 +181,50 @@ def save_error_to_redis(task_id: str, error_reason: str, start_time: float):
                 f"Failed to save error info for task {task_id}: save_error_info returned False")
     except Exception as e:
         logger.error(
-            f"Failed to save error info to Redis for task {task_id}: {str(e)}", exc_info=True)
-
-
-def init_ray_in_worker():
-    """
-    Initializes Ray within a Celery worker, ensuring it is done only once.
-    This function is designed to be called from within a task.
-    """
-    if ray.is_initialized():
-        logger.debug("Ray is already initialized.")
-        return
-
-    logger.info("Ray not initialized. Initializing Ray for Celery worker...")
-    try:
-        # `configure_logging=False` prevents Ray from setting up its own loggers,
-        # which can interfere with Celery's logging.
-        # `faulthandler=False` is critical to prevent the
-        # `AttributeError: 'LoggingProxy' object has no attribute 'fileno'`
-        # error when running inside a Celery worker.
-        # We also explicitly control the Ray dashboard behavior here to ensure
-        # that Celery workers respect the global DISABLE_RAY_DASHBOARD setting.
-        ray.init(
-            configure_logging=False,
-            faulthandler=False,
-            include_dashboard=not DISABLE_RAY_DASHBOARD,
-        )
-        logger.info("Ray initialized successfully for Celery worker.")
-    except Exception as e:
-        logger.error(f"Failed to initialize Ray for Celery worker: {e}")
-        raise RuntimeError("Failed to initialize Ray for Celery worker") from e
+            f"Failed to save error info to Redis for task {task_id}: {e!s}", exc_info=True)
 
 
 def run_async(coro):
-    """
-    Safely run async coroutine in Celery task context
-    Handles existing event loops and avoids conflicts
-    """
+    """Run an async HTTP operation from a synchronous Celery task."""
+    return asyncio.run(coro)
+
+
+def _forward_redis_client():
+    if not REDIS_BACKEND_URL:
+        raise RuntimeError("REDIS_BACKEND_URL is not configured")
+    import redis
+
+    return redis.Redis.from_url(REDIS_BACKEND_URL, decode_responses=True)
+
+
+def _store_forward_batch(task_id: str, batch_index: int, chunks: list[dict[str, Any]]) -> str:
+    """Store one ES batch and return its Redis reference."""
+    key = f"dp:{task_id}:forward:batch:{batch_index}"
+    _forward_redis_client().set(
+        key,
+        json.dumps(chunks, ensure_ascii=False),
+        ex=FORWARD_BATCH_TTL_SECONDS,
+    )
+    return key
+
+
+def _load_forward_batch(batch_key: str) -> list[dict[str, Any]]:
+    cached = _forward_redis_client().get(batch_key)
+    if not cached:
+        raise RuntimeError(f"Forward batch is missing from Redis: {batch_key}")
+    chunks = json.loads(cached)
+    if not isinstance(chunks, list):
+        raise RuntimeError(f"Forward batch is not a list: {batch_key}")
+    return chunks
+
+
+def _cleanup_forward_batches(batch_keys: list[str]) -> None:
+    if not batch_keys:
+        return
     try:
-        # Check if we're already in an async context
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop, safe to use asyncio.run
-            return asyncio.run(coro)
-
-        # We're in an existing event loop context
-        if loop.is_running():
-            # Try to use nest_asyncio for compatibility
-            try:
-                import nest_asyncio
-                nest_asyncio.apply()
-                return loop.run_until_complete(coro)
-            except ImportError:
-                logger.warning(
-                    "nest_asyncio not available, creating new thread for async operation")
-                # Fallback: run in a new thread
-                import concurrent.futures
-
-                def run_in_thread():
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        return new_loop.run_until_complete(coro)
-                    finally:
-                        new_loop.close()
-                        asyncio.set_event_loop(None)
-
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(run_in_thread)
-                    return future.result()
-        else:
-            # Loop exists but not running, safe to use run_until_complete
-            return loop.run_until_complete(coro)
-
-    except Exception as e:
-        logger.error(f"Error running async coroutine: {str(e)}")
-        raise
+        _forward_redis_client().delete(*batch_keys)
+    except Exception:
+        logger.warning("Failed to clean forward batch keys=%s", batch_keys, exc_info=True)
 
 
 def _delete_source_file_via_http_sync(
@@ -498,15 +233,15 @@ def _delete_source_file_via_http_sync(
     index_name: str,
     path_or_url: str,
     scope: str,
-    authorization: Optional[str] = None,
+    authorization: str | None = None,
     timeout_s: float = 30.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     base = (base_url or "").rstrip("/")
     if not base:
         raise RuntimeError("ELASTICSEARCH_SERVICE is not configured")
     url = f"{base}/indices/{index_name}/documents"
     params = {"path_or_url": path_or_url, "scope": scope}
-    headers: Dict[str, str] = {}
+    headers: dict[str, str] = {}
     if authorization:
         headers["Authorization"] = authorization
 
@@ -530,9 +265,9 @@ def _delete_source_file_via_http_sync(
 def _build_forward_error(
     message: str,
     index_name: str,
-    source: Optional[str],
-    original_filename: Optional[str],
-    error_code: Optional[str] = None,
+    source: str | None,
+    original_filename: str | None,
+    error_code: str | None = None,
 ) -> Exception:
     error = {
         "message": message,
@@ -546,7 +281,7 @@ def _build_forward_error(
     return Exception(json.dumps(error, ensure_ascii=False))
 
 
-def _parse_json_or_none(text: str) -> Optional[Dict[str, Any]]:
+def _parse_json_or_none(text: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(text)
         return parsed if isinstance(parsed, dict) else None
@@ -561,8 +296,8 @@ class _ForwardContext:
     start_time: float
     source: str
     index_name: str
-    source_type: str
-    original_filename: Optional[str]
+    original_filename: str | None
+    file_id: str | None = None
 
 
 def _init_forward_context(
@@ -572,8 +307,8 @@ def _init_forward_context(
     start_time: float,
     source: str,
     index_name: str,
-    source_type: str,
-    original_filename: Optional[str],
+    original_filename: str | None,
+    file_id: str | None = None,
 ) -> _ForwardContext:
     return _ForwardContext(
         task_id=task_id,
@@ -581,8 +316,8 @@ def _init_forward_context(
         start_time=start_time,
         source=source,
         index_name=index_name,
-        source_type=source_type,
         original_filename=original_filename,
+        file_id=file_id,
     )
 
 
@@ -598,12 +333,17 @@ def _is_forward_task_cancelled(ctx: _ForwardContext) -> bool:
         return False
 
 
-def _build_forward_cancelled_result(ctx: _ForwardContext) -> Dict[str, Any]:
+def _build_forward_cancelled_result(ctx: _ForwardContext) -> dict[str, Any]:
     return {
         'task_id': ctx.task_id,
+        'file_id': ctx.file_id,
         'source': ctx.source,
         'index_name': ctx.index_name,
         'original_filename': ctx.original_filename,
+        # Keep cancellation explicit for the cleanup task.  The deletion
+        # fence may be cleared by the coordinator before this chain callback
+        # runs, so cleanup must not infer cancellation from Redis alone.
+        'cancelled': True,
         'chunks_stored': 0,
         'storage_time': 0,
         'es_result': {
@@ -619,47 +359,19 @@ def _build_forward_cancelled_result(ctx: _ForwardContext) -> Dict[str, Any]:
 def _load_forward_chunks(
     self: Task,
     *,
-    processed_data: Dict[str, Any],
+    processed_data: dict[str, Any],
     original_source: str,
     original_index_name: str,
-    filename: Optional[str],
-) -> Tuple[Optional[List[Dict[str, Any]]], bool, str, str, Optional[str]]:
+    filename: str | None,
+) -> tuple[list[dict[str, Any]] | None, bool, str, str, str | None]:
     chunks = processed_data.get('chunks')
     split_async = bool(processed_data.get('split_async'))
 
     # If chunks are not in payload, try loading from Redis via the redis_key
     if (not chunks) and processed_data.get('redis_key'):
         redis_key = processed_data.get('redis_key')
-        if not REDIS_BACKEND_URL:
-            raise Exception(json.dumps({
-                "message": "REDIS_BACKEND_URL not configured to retrieve chunks",
-                "index_name": original_index_name,
-                "task_name": "forward",
-                "source": original_source,
-                "original_filename": filename
-            }, ensure_ascii=False))
         try:
-            import redis
-            client = redis.Redis.from_url(
-                REDIS_BACKEND_URL, decode_responses=True)
-            ready_key = f"{redis_key}:ready"
-            if split_async:
-                ready_flag = client.get(ready_key)
-                if not ready_flag:
-                    retry_num = getattr(self.request, 'retries', 0)
-                    logger.info(
-                        f"[{self.request.id}] FORWARD TASK: Async split not ready for key {redis_key}. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
-                    raise self.retry(
-                        countdown=FORWARD_REDIS_RETRY_DELAY_S,
-                        max_retries=ASYNC_SPLIT_RETRY_MAX,
-                        exc=Exception(json.dumps({
-                            "message": "Async split not ready; will retry",
-                            "index_name": original_index_name,
-                            "task_name": "forward",
-                            "source": original_source,
-                            "original_filename": filename
-                        }, ensure_ascii=False))
-                    )
+            client = _forward_redis_client()
             cached = client.get(redis_key)
             if cached:
                 try:
@@ -671,18 +383,18 @@ def _load_forward_chunks(
                     raw_preview = cached[:120] if isinstance(
                         cached, str) else str(type(cached))
                     logger.error(
-                        f"[{self.request.id}] FORWARD TASK: JSON decode error for key '{redis_key}': {str(jde)}; raw_prefix={raw_preview!r}")
+                        f"[{self.request.id}] FORWARD TASK: JSON decode error for key '{redis_key}': {jde!s}; raw_prefix={raw_preview!r}")
                     raise
             else:
                 if split_async:
                     retry_num = getattr(self.request, 'retries', 0)
                     logger.info(
-                        f"[{self.request.id}] FORWARD TASK: Async split ready but chunks missing for key {redis_key}. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
+                        f"[{self.request.id}] FORWARD TASK: Async split chunks missing for key {redis_key}. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
                     raise self.retry(
                         countdown=FORWARD_REDIS_RETRY_DELAY_S,
                         max_retries=ASYNC_SPLIT_RETRY_MAX,
                         exc=Exception(json.dumps({
-                            "message": "Async split ready but chunks missing; will retry",
+                            "message": "Async split chunks missing; will retry",
                             "index_name": original_index_name,
                             "task_name": "forward",
                             "source": original_source,
@@ -697,7 +409,7 @@ def _load_forward_chunks(
                     countdown=FORWARD_REDIS_RETRY_DELAY_S,
                     max_retries=FORWARD_REDIS_RETRY_MAX,
                     exc=Exception(json.dumps({
-                        "message": "Chunks not ready in Redis; will retry",
+                        "message": "Chunks missing in Redis; will retry",
                         "index_name": original_index_name,
                         "task_name": "forward",
                         "source": original_source,
@@ -708,7 +420,7 @@ def _load_forward_chunks(
             raise
         except Exception as exc:
             raise Exception(json.dumps({
-                "message": f"Failed to retrieve chunks from Redis: {str(exc)}",
+                "message": f"Failed to retrieve chunks from Redis: {exc!s}",
                 "index_name": original_index_name,
                 "task_name": "forward",
                 "source": original_source,
@@ -740,9 +452,9 @@ def _load_forward_chunks(
                 f"[{self.request.id}] FORWARD TASK: Empty chunks while waiting for async split. Retry {retry_num + 1}/{ASYNC_SPLIT_RETRY_MAX} in {FORWARD_REDIS_RETRY_DELAY_S}s")
             raise self.retry(
                 countdown=FORWARD_REDIS_RETRY_DELAY_S,
-                max_retries=ASYNC_SPLIT_RETRY_MAX,
-                exc=Exception(json.dumps({
-                    "message": "Chunks not ready in Redis (empty); will retry",
+                    max_retries=ASYNC_SPLIT_RETRY_MAX,
+                    exc=Exception(json.dumps({
+                        "message": "Chunks empty in Redis; will retry",
                     "index_name": original_index_name,
                     "task_name": "forward",
                     "source": original_source,
@@ -756,9 +468,9 @@ def _load_forward_chunks(
 
 
 def _extract_error_code_from_es_response(
-    parsed_body: Optional[Dict[str, Any]],
+    parsed_body: dict[str, Any] | None,
     text: str,
-) -> Optional[str]:
+) -> str | None:
     # Some gateways return a non-code JSON body while retaining the upstream
     # error_code in the raw response text. Check both representations.
     return (
@@ -770,16 +482,16 @@ def _extract_error_code_from_es_response(
 
 @trace_knowledge_operation("knowledge.forward.elasticsearch", "forward.elasticsearch")
 def _send_chunks_to_es(
-    chunks: List[Dict[str, Any]],
+    chunks: list[dict[str, Any]],
     index_name: str,
     authorization: str | None,
-    task_id: Optional[str] = None,
+    task_id: str | None = None,
     source: str = "",
     original_filename: str = "",
     large_mode: bool = False,
-    file_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    file_id: str | None = None,
+    tenant_id: str | None = None,
+) -> dict[str, Any]:
     async def _post():
         elasticsearch_url = ELASTICSEARCH_SERVICE
         if not elasticsearch_url:
@@ -800,12 +512,14 @@ def _send_chunks_to_es(
             connector = aiohttp.TCPConnector(verify_ssl=False)
             timeout = aiohttp.ClientTimeout(total=600)
 
-            request_params: Dict[str, str] = {}
+            request_params: dict[str, str] = {}
 
             if large_mode:
                 request_params["large_mode"] = "true"
 
-            _ensure_document_not_deleted(
+            # Check immediately before the external write so a delete request
+            # that wins during formatting cannot start a new indexing request.
+            ensure_document_not_deleted(
                 index_name=index_name,
                 source=source,
                 file_id=file_id,
@@ -845,18 +559,18 @@ def _send_chunks_to_es(
             raise
         except aiohttp.ClientConnectorError as e:
             logger.error(
-                f"[{task_id}] FORWARD TASK: Connection error to {full_url}: {str(e)}")
+                f"[{task_id}] FORWARD TASK: Connection error to {full_url}: {e!s}")
             raise _build_forward_error(
-                message=f"Failed to connect to API: {str(e)}",
+                message=f"Failed to connect to API: {e!s}",
                 index_name=index_name,
                 source=source,
                 original_filename=original_filename,
             )
         except asyncio.TimeoutError as e:
             logger.warning(
-                f"[{task_id}] FORWARD TASK: Timeout when indexing documents: {str(e)}.")
+                f"[{task_id}] FORWARD TASK: Timeout when indexing documents: {e!s}.")
             raise _build_forward_error(
-                message=f"Timeout when indexing documents: {str(e)}",
+                message=f"Timeout when indexing documents: {e!s}",
                 index_name=index_name,
                 source=source,
                 original_filename=original_filename,
@@ -864,9 +578,9 @@ def _send_chunks_to_es(
         except Exception as e:
             classified = classify_ingestion_exception(e, "FORWARD")
             logger.error(
-                f"[{task_id}] FORWARD TASK: Unexpected error when indexing documents: {str(e)}.")
+                f"[{task_id}] FORWARD TASK: Unexpected error when indexing documents: {e!s}.")
             raise _build_forward_error(
-                message=f"Unexpected error when indexing documents: {str(e)}",
+                message=f"Unexpected error when indexing documents: {e!s}",
                 index_name=index_name,
                 source=source,
                 original_filename=original_filename,
@@ -876,420 +590,27 @@ def _send_chunks_to_es(
     return run_async(_post())
 
 
-@ray.remote(num_cpus=0)
-class GlobalRayActorPoolManager:
-    """
-    Cluster-wide shared actor pool manager.
-    A single detached manager serves all Celery worker processes.
-    """
-
-    def __init__(self, warm_timeout_s: float):
-        self.warm_timeout_s = warm_timeout_s
-        self.actors: List[Any] = []
-        self.rr_index = 0
-
-    def _create_and_warm_actor(self) -> Optional[Any]:
-        actor = DataProcessorRayActor.remote()
-        try:
-            ray.get(actor.ping.remote(), timeout=self.warm_timeout_s)
-            return actor
-        except Exception as exc:
-            try:
-                ray.kill(actor, no_restart=True)
-            except Exception:
-                pass
-            logger.warning(
-                f"[GlobalRayActorPoolManager] Warm actor failed in {self.warm_timeout_s:.1f}s: {exc}"
-            )
-            return None
-
-    def ensure_pool(self, desired: int, max_allowed: int) -> int:
-        desired = max(0, int(desired))
-        max_allowed = max(1, int(max_allowed))
-        desired = min(desired, max_allowed)
-        while len(self.actors) > desired:
-            actor = self.actors.pop()
-            try:
-                ray.kill(actor, no_restart=True)
-            except Exception:
-                logger.warning(
-                    "[GlobalRayActorPoolManager] Failed to stop excess actor",
-                    exc_info=True,
-                )
-        if self.actors:
-            self.rr_index %= len(self.actors)
-        else:
-            self.rr_index = 0
-        missing = max(0, desired - len(self.actors))
-        for _ in range(missing):
-            actor = self._create_and_warm_actor()
-            if actor is not None:
-                self.actors.append(actor)
-        return len(self.actors)
-
-    def get_actor(self) -> Any:
-        if not self.actors:
-            actor = self._create_and_warm_actor()
-            if actor is None:
-                raise RuntimeError(
-                    "Global actor pool is empty and actor warm-up failed")
-            self.actors.append(actor)
-        idx = self.rr_index % len(self.actors)
-        self.rr_index += 1
-        return self.actors[idx]
-
-
-def _get_or_create_global_pool_manager() -> Any:
-    with ray_init_lock:
-        init_ray_in_worker()
-
-    # Prefer atomic get/create when supported.
-    try:
-        return GlobalRayActorPoolManager.options(
-            name=RAY_GLOBAL_ACTOR_POOL_NAME,
-            namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE,
-            lifetime="detached",
-            get_if_exists=True,
-        ).remote(RAY_ACTOR_WARM_TIMEOUT_S)
-    except TypeError:
-        pass
-
-    try:
-        return ray.get_actor(
-            RAY_GLOBAL_ACTOR_POOL_NAME, namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE)
-    except Exception:
-        pass
-
-    try:
-        return GlobalRayActorPoolManager.options(
-            name=RAY_GLOBAL_ACTOR_POOL_NAME,
-            namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE,
-            lifetime="detached",
-        ).remote(RAY_ACTOR_WARM_TIMEOUT_S)
-    except Exception:
-        # Name race: another worker may have created it in the meantime.
-        return ray.get_actor(
-            RAY_GLOBAL_ACTOR_POOL_NAME, namespace=RAY_GLOBAL_ACTOR_POOL_NAMESPACE)
-
-
-def prewarm_ray_actors(target_size: Optional[int] = None) -> int:
-    """
-    Ensure a global shared pool of warm Ray actors exists for low-latency task execution.
-    """
-    desired = DP_PART_PROCESSOR_COUNT if target_size is None else max(
-        0, int(target_size))
-    manager = _get_or_create_global_pool_manager()
-    current_after = ray.get(
-        manager.ensure_pool.remote(
-            desired=desired, max_allowed=_estimate_parallel_parts())
-    )
-    logger.info(
-        f"Global Ray actor pool ready: current={current_after}, desired={desired}"
-    )
-    return current_after
-
-
-def get_ray_actor() -> Any:
-    """
-    Return a warm actor from the global shared pool with round-robin selection.
-    """
-    manager = _get_or_create_global_pool_manager()
-    return ray.get(manager.get_actor.remote())
-
-
-def _get_split_actor() -> Any:
-    """
-    Reuse warm DataProcessorRayActor instances for split operations.
-    This keeps split path aligned with prewarmed actor pool.
-    """
-    return get_ray_actor()
-
-
-class LoggingTask(Task):
-    """Base task class with enhanced logging"""
-
-    def on_success(self, retval, task_id, args, kwargs):
-        """Log successful task completion"""
-        logger.debug(f"Task {self.name}[{task_id}] completed successfully")
-        return super().on_success(retval, task_id, args, kwargs)
-
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
-        """Log task failure with enhanced error handling"""
-        logger.error(f"Task {self.name}[{task_id}] failed: {exc}")
-        # Log exception details for debugging
-        if hasattr(exc, '__class__'):
-            exc_type = exc.__class__.__name__
-            exc_msg = str(exc)
-            logger.error(f"Exception type: {exc_type}, message: {exc_msg}")
-        # Let Celery handle the exception serialization automatically
-        return super().on_failure(exc, task_id, args, kwargs, einfo)
-
-    def on_retry(self, exc, task_id, args, kwargs, einfo):
-        """Log task retry"""
-        logger.warning(f"Task {self.name}[{task_id}] retrying: {exc}")
-        return super().on_retry(exc, task_id, args, kwargs, einfo)
-
-
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_part', queue='process_part_q')
-@trace_knowledge_operation("knowledge.process.part", "process.ray_part")
-def process_part(
-        self,
-        part_bytes: bytes,
-        filename: str,
-        chunking_strategy: str,
-        part_redis_key: str,
-        source: Optional[str] = None,
-        source_type: Optional[str] = None,
-        model_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        index_name: Optional[str] = None,
-        file_id: Optional[str] = None,
-        **params
-) -> Dict[str, Any]:
-    """
-    Hidden sub-task to process a file part with Ray.
-    """
-    if _is_document_delete_requested(
-        index_name=index_name,
-        source=source,
-        file_id=file_id or params.get("file_id"),
-        tenant_id=tenant_id,
-    ):
-        logger.info(
-            "[process_part] Skipping deleted document source=%s file_id=%s",
-            source,
-            file_id,
-        )
-        return {
-            "part_redis_key": part_redis_key,
-            "chunks_count": 0,
-            "cancelled": True,
-        }
-
-    actor = get_ray_actor()
-    try:
-        chunks_ref = actor.process_bytes.remote(
-            part_bytes,
-            filename,
-            chunking_strategy,
-            task_id=None,
-            model_id=model_id,
-            tenant_id=tenant_id,
-            **params
-        )
-        chunks = ray.get(chunks_ref) or []
-
-        if _is_document_delete_requested(
-            index_name=index_name,
-            source=source,
-            file_id=file_id or params.get("file_id"),
-            tenant_id=tenant_id,
-        ):
-            logger.info(
-                "[process_part] Discarding chunks after deletion request source=%s file_id=%s",
-                source,
-                file_id,
-            )
-            return {
-                "part_redis_key": part_redis_key,
-                "chunks_count": 0,
-                "cancelled": True,
-            }
-
-        if not REDIS_BACKEND_URL:
-            raise RuntimeError("REDIS_BACKEND_URL not configured")
-
-        import redis
-        client = redis.Redis.from_url(REDIS_BACKEND_URL, decode_responses=True)
-        client.set(part_redis_key, json.dumps(chunks, ensure_ascii=False))
-        client.expire(part_redis_key, 2 * 60 * 60)
-
-        return {
-            "part_redis_key": part_redis_key,
-            "chunks_count": len(chunks),
-        }
-    except Exception as e:
-        logger.error(
-            f"[process_part] Failed to process part for '{filename}': {str(e)}")
-        return {
-            "part_redis_key": part_redis_key,
-            "chunks_count": 0,
-        }
-
-
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.aggregate_parts', queue='process_part_q')
-def aggregate_parts(
-        self,
-        parts_results: List[List[Dict[str, Any]]],
-        source: Optional[str] = None,
-        index_name: Optional[str] = None,
-        original_filename: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Hidden sub-task to aggregate part chunks.
-    """
-    merged: List[Dict[str, Any]] = []
-    for part_chunks in parts_results or []:
-        if part_chunks:
-            merged.extend(part_chunks)
-    return {
-        "chunks": merged,
-        "source": source,
-        "index_name": index_name,
-        "original_filename": original_filename
-    }
-
-
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.aggregate_store_chunks', queue='process_part_q')
-@trace_knowledge_operation("knowledge.process.redis_aggregate", "process.redis")
-def aggregate_store_chunks(
-        self,
-        parts_results: List[Dict[str, Any]],
-        redis_key: str,
-        source: Optional[str] = None,
-        index_name: Optional[str] = None,
-        original_filename: Optional[str] = None,
-        file_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Hidden sub-task to aggregate part chunks and store into Redis for forward task.
-    """
-    if _is_document_delete_requested(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-    ):
-        return {
-            "chunks_count": 0,
-            "redis_key": redis_key,
-            "source": source,
-            "index_name": index_name,
-            "original_filename": original_filename,
-            "file_id": file_id,
-            "cancelled": True,
-        }
-
-    if not REDIS_BACKEND_URL:
-        raise Exception(json.dumps({
-            "message": "REDIS_BACKEND_URL not configured to store chunks",
-            "index_name": index_name,
-            "task_name": "process",
-            "source": source,
-            "original_filename": original_filename,
-            "file_id": file_id,
-        }, ensure_ascii=False))
-
-    try:
-        import redis
-        client = redis.Redis.from_url(
-            REDIS_BACKEND_URL, decode_responses=True)
-
-        merged: List[Dict[str, Any]] = []
-        for part_result in parts_results or []:
-            part_key = (part_result or {}).get("part_redis_key")
-            if not part_key:
-                continue
-            cached = client.get(part_key)
-            if not cached:
-                continue
-            try:
-                part_chunks = json.loads(cached)
-                if isinstance(part_chunks, list):
-                    merged.extend(part_chunks)
-            except Exception:
-                continue
-            # best-effort cleanup for part payload key
-            try:
-                client.delete(part_key)
-            except Exception:
-                pass
-
-        if _is_document_delete_requested(
-            index_name=index_name,
-            source=source,
-            file_id=file_id,
-        ):
-            return {
-                "chunks_count": 0,
-                "redis_key": redis_key,
-                "source": source,
-                "index_name": index_name,
-                "original_filename": original_filename,
-                "file_id": file_id,
-                "cancelled": True,
-            }
-
-        serialized = json.dumps(merged, ensure_ascii=False)
-        client.set(redis_key, serialized)
-        client.expire(redis_key, 2 * 60 * 60)
-        ready_key = f"{redis_key}:ready"
-        client.set(ready_key, "1")
-        client.expire(ready_key, 2 * 60 * 60)
-        logger.info(
-            f"[{self.request.id}] PROCESS TASK: Stored aggregated chunks in Redis at key '{redis_key}', count={len(merged)}")
-    except Exception as exc:
-        raise Exception(json.dumps({
-            "message": f"Failed to store chunks to Redis: {str(exc)}",
-            "index_name": index_name,
-            "task_name": "process",
-            "source": source,
-            "original_filename": original_filename
-        }, ensure_ascii=False))
-
-    return {
-        "chunks_count": len(merged),
-        "redis_key": redis_key,
-        "source": source,
-        "index_name": index_name,
-        "original_filename": original_filename,
-        "file_id": file_id,
-    }
-
-
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward_part', queue='forward_part_q')
 @trace_knowledge_operation("knowledge.forward.batch", "forward.batch")
 def forward_part(
         self,
-        chunks: List[Dict[str, Any]],
+        batch_key: str,
         index_name: str,
-        authorization: Optional[str] = None,
-        parent_task_id: Optional[str] = None,
-        parent_total_chunks: Optional[int] = None,
-        source: Optional[str] = None,
-        original_filename: Optional[str] = None,
-        file_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        batch_index: Optional[int] = None,
-        total_batches: Optional[int] = None,
-        large_mode: Optional[bool] = False,
-) -> Dict[str, Any]:
+        authorization: str | None = None,
+        parent_task_id: str | None = None,
+        parent_total_chunks: int | None = None,
+        source: str | None = None,
+        original_filename: str | None = None,
+        batch_index: int | None = None,
+        total_batches: int | None = None,
+        large_mode: bool | None = False,
+        file_id: str | None = None,
+        tenant_id: str | None = None,
+) -> dict[str, Any]:
     """
-    Forward sub-task that indexes a chunk batch.
+    Forward one Redis-backed chunk batch.
     """
     try:
-        # Respect cancellation from parent task and durable document fence.
-        if _is_document_delete_requested(
-            index_name=index_name,
-            source=source,
-            file_id=file_id,
-            tenant_id=tenant_id,
-        ):
-            logger.info(
-                "Skipping deleted forward batch %s/%s for source=%s file_id=%s",
-                batch_index,
-                total_batches,
-                source,
-                file_id,
-            )
-            return {
-                "success": True,
-                "total_indexed": 0,
-                "total_submitted": 0,
-                "batch_index": batch_index,
-                "total_batches": total_batches,
-                "cancelled": True,
-            }
-
         # Respect cancellation from parent task if available
         if parent_task_id:
             try:
@@ -1313,21 +634,23 @@ def forward_part(
                     "success": True,
                     "total_indexed": 0,
                     "total_submitted": 0,
+                    "batch_key": batch_key,
                     "batch_index": batch_index,
                     "total_batches": total_batches,
                     "cancelled": True,
                 }
 
+        chunks = _load_forward_batch(batch_key)
         es_result = _send_chunks_to_es(
             chunks=chunks,
             index_name=index_name,
             authorization=authorization,
+            task_id=None,
             source=source,
             original_filename=original_filename,
             large_mode=large_mode,
             file_id=file_id,
             tenant_id=tenant_id,
-            task_id=getattr(self.request, "id", None),
         )
 
         if not isinstance(es_result, dict) or not es_result.get("success"):
@@ -1340,6 +663,13 @@ def forward_part(
                 "source": source,
                 "original_filename": original_filename
             }, ensure_ascii=False))
+
+        ensure_document_not_deleted(
+            index_name=index_name,
+            source=source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        )
 
         # Update parent task progress per finished batch so frontend can show real-time indexing count.
         if parent_task_id:
@@ -1361,14 +691,22 @@ def forward_part(
             "success": True,
             "total_indexed": es_result.get("total_indexed", 0),
             "total_submitted": es_result.get("total_submitted", len(chunks)),
+            "batch_key": batch_key,
             "batch_index": batch_index,
             "total_batches": total_batches,
         }
     except DocumentDeleteRequested:
+        logger.info(
+            "Skipping forward batch because document deletion was requested parent_task_id=%s batch=%s/%s",
+            parent_task_id,
+            batch_index,
+            total_batches,
+        )
         return {
             "success": True,
             "total_indexed": 0,
             "total_submitted": 0,
+            "batch_key": batch_key,
             "batch_index": batch_index,
             "total_batches": total_batches,
             "cancelled": True,
@@ -1395,7 +733,7 @@ def forward_part(
         retry_num = getattr(self.request, 'retries', 0)
         logger.warning(
             f"[{self.request.id}] FORWARD PART: Failed batch {batch_index}/{total_batches} "
-            f"(retry {retry_num + 1}/{FORWARD_REDIS_RETRY_MAX}): {str(e)}"
+            f"(retry {retry_num + 1}/{FORWARD_REDIS_RETRY_MAX}): {e!s}"
         )
         raise self.retry(
             countdown=FORWARD_REDIS_RETRY_DELAY_S,
@@ -1413,791 +751,70 @@ def forward_part(
 @trace_knowledge_operation("knowledge.forward.aggregate", "forward.aggregate")
 def aggregate_forward_parts(
         self,
-        parts_results: List[Dict[str, Any]],
-        source: Optional[str] = None,
-        index_name: Optional[str] = None,
-        original_filename: Optional[str] = None,
-        file_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-) -> Dict[str, Any]:
+        parts_results: list[dict[str, Any]],
+        source: str | None = None,
+        index_name: str | None = None,
+        original_filename: str | None = None,
+        file_id: str | None = None,
+        tenant_id: str | None = None,
+) -> dict[str, Any]:
     """
-    Aggregate forward_part results.
+    Aggregate forward_part results and remove their Redis batch references.
     """
-    if _is_document_delete_requested(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    ):
-        return {
+    total_indexed = 0
+    total_submitted = 0
+    cancelled = False
+    batch_keys = [
+        result.get("batch_key")
+        for result in parts_results or []
+        if result and result.get("batch_key")
+    ]
+    try:
+        for result in parts_results or []:
+            if not result:
+                continue
+            if result.get("cancelled"):
+                cancelled = True
+                continue
+            total_indexed += int(result.get("total_indexed", 0) or 0)
+            total_submitted += int(result.get("total_submitted", 0) or 0)
+
+        cancelled = cancelled or is_document_delete_requested(
+            index_name=index_name,
+            source=source,
+            file_id=file_id,
+            tenant_id=tenant_id,
+        )
+        result = {
             "success": True,
-            "total_indexed": 0,
-            "total_submitted": 0,
+            "total_indexed": total_indexed,
+            "total_submitted": total_submitted,
             "source": source,
             "index_name": index_name,
             "original_filename": original_filename,
             "file_id": file_id,
-            "cancelled": True,
         }
-
-    total_indexed = 0
-    total_submitted = 0
-    for result in parts_results or []:
-        if not result:
-            continue
-        total_indexed += int(result.get("total_indexed", 0) or 0)
-        total_submitted += int(result.get("total_submitted", 0) or 0)
-
-    return {
-        "success": True,
-        "total_indexed": total_indexed,
-        "total_submitted": total_submitted,
-        "source": source,
-        "index_name": index_name,
-        "original_filename": original_filename,
-        "file_id": file_id,
-    }
-
-
-def _split_file_for_processing(
-    request_id: str,
-    source: str,
-    source_type: str,
-    task_id: str,
-    params: Dict[str, Any],
-    file_size_bytes: int,
-    file_data: Optional[bytes] = None,
-) -> List[bytes]:
-    params.pop("max_size", None)
-    params.pop("target_parts", None)
-    logger.info(
-        f"[{request_id}] PROCESS TASK: Splitting file before processing "
-        f"(file_size={file_size_bytes}, target_parts={DP_PART_PROCESSOR_COUNT})")
-
-    split_actor_get_start = time.perf_counter()
-    with knowledge_span(
-        "knowledge.process.split_actor_acquire",
-        "process.split_actor_acquire",
-        task_id=task_id,
-        source_type=source_type,
-        processor_count=DP_PART_PROCESSOR_COUNT,
-    ):
-        split_actor = _get_split_actor()
-    split_actor_get_elapsed = time.perf_counter() - split_actor_get_start
-    logger.info(
-        f"[{request_id}] PROCESS TASK: split actor ready in {split_actor_get_elapsed:.3f}s")
-
-    split_call_start = time.perf_counter()
-    split_kwargs = {
-        "source": source,
-        "destination": source_type,
-        "task_id": task_id,
-        "target_parts": DP_PART_PROCESSOR_COUNT,
-        **params,
-    }
-    if file_data is not None:
-        split_kwargs["file_data"] = file_data
-
-    with knowledge_span(
-        "knowledge.process.file_split_rpc",
-        "process.file_split_rpc",
-        task_id=task_id,
-        source_type=source_type,
-        file_size_bytes=file_size_bytes,
-        processor_count=DP_PART_PROCESSOR_COUNT,
-    ) as span:
-        parts_ref = split_actor.split_file.remote(**split_kwargs)
-        parts = ray.get(parts_ref)
-        if span is not None:
-            span.set_attribute("file.parts_count", len(parts or []))
-    split_call_elapsed = time.perf_counter() - split_call_start
-    logger.info(
-        f"[{request_id}] PROCESS TASK: split_file RPC done in {split_call_elapsed:.3f}s "
-        f"(source_type={source_type})")
-
-    if parts:
-        part_sizes = [len(p) for p in parts]
-        total_bytes = sum(part_sizes)
-        min_size = min(part_sizes)
-        max_part_size = max(part_sizes)
-        avg_size = total_bytes / len(part_sizes)
-        logger.info(
-            f"[{request_id}] PROCESS TASK: Split stats: parts={len(part_sizes)}, "
-            f"total={total_bytes/1024/1024:.2f}MB, "
-            f"min={min_size/1024:.2f}KB, max={max_part_size/1024:.2f}KB, avg={avg_size/1024:.2f}KB")
-
-    return parts
-
-
-def _run_processing_for_parts(
-    request_id: str,
-    source: str,
-    source_type: str,
-    task_id: str,
-    chunking_strategy: str,
-    filename_for_processing: str,
-    parts: List[bytes],
-    index_name: Optional[str],
-    original_filename: Optional[str],
-    embedding_model_id: Optional[int],
-    tenant_id: Optional[str],
-    params: Dict[str, Any],
-    file_id: Optional[str] = None,
-) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[int]]:
-    _ensure_document_not_deleted(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    )
-    if not parts:
-        logger.warning(
-            f"[{request_id}] PROCESS TASK: Split returned no parts; fallback to full-file processing")
-        process_actor = get_ray_actor()
-        chunks_ref = process_actor.process_file.remote(
-            source,
-            chunking_strategy,
-            destination=source_type,
-            task_id=task_id,
-            model_id=embedding_model_id,
-            tenant_id=tenant_id,
-            **params
-        )
-        logger.info(
-            f"[{request_id}] PROCESS TASK: Waiting for Ray processing to complete...")
-        return False, ray.get(chunks_ref), None
-
-    if len(parts) == 1:
-        process_actor = get_ray_actor()
-        chunks_ref = process_actor.process_bytes.remote(
-            parts[0],
-            filename_for_processing,
-            chunking_strategy,
-            task_id=None,
-            model_id=embedding_model_id,
-            tenant_id=tenant_id,
-            file_id=file_id,
-            **{key: value for key, value in params.items() if key != "file_id"}
-        )
-        logger.info(
-            f"[{request_id}] PROCESS TASK: Waiting for Ray processing to complete...")
-        return False, ray.get(chunks_ref), None
-
-    redis_key = f"dp:{task_id}:chunks"
-    group_tasks = group(
-        process_part.s(
-            part_bytes=part,
-            filename=filename_for_processing,
-            chunking_strategy=chunking_strategy,
-            part_redis_key=f"dp:{task_id}:part:{idx}",
-            source=source,
-            source_type=source_type,
-            model_id=embedding_model_id,
-            tenant_id=tenant_id,
-            index_name=index_name,
-            file_id=file_id,
-            **{key: value for key, value in params.items() if key != "file_id"}
-        ) for idx, part in enumerate(parts)
-    )
-    callback = aggregate_store_chunks.s(
-        redis_key=redis_key,
-        source=source,
-        index_name=index_name,
-        original_filename=original_filename,
-        file_id=file_id,
-    ).set(queue='process_part_q')
-    logger.info(
-        f"[{request_id}] PROCESS TASK: Dispatching {len(parts)} part tasks...")
-    with knowledge_span(
-        "knowledge.process.part_dispatch",
-        "process.part_dispatch",
-        task_id=task_id,
-        part_count=len(parts),
-        parallel_parts=_estimate_parallel_parts(),
-        queue_name="process_part_q",
-    ):
-        chord(group_tasks)(callback)
-
-    split_wait_timeout = _compute_split_wait_timeout(len(parts))
-    logger.info(
-        f"[{request_id}] PROCESS TASK: Waiting split aggregation, timeout={split_wait_timeout}s, "
-        f"parts={len(parts)}, est_parallel={_estimate_parallel_parts()}")
-    with knowledge_span(
-        "knowledge.process.part_wait",
-        "process.part_wait",
-        task_id=task_id,
-        part_count=len(parts),
-        parallel_parts=_estimate_parallel_parts(),
-        timeout_seconds=split_wait_timeout,
-        poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-    ):
-        split_chunk_count = _wait_for_split_ready(
-            redis_key=redis_key,
-            timeout_s=split_wait_timeout,
-            poll_interval_ms=DP_REDIS_CHUNKS_POLL_INTERVAL_MS,
-            cancellation_check=lambda: _is_document_delete_requested(
-                index_name=index_name,
-                source=source,
-                file_id=file_id,
-                tenant_id=tenant_id,
-            ),
-        )
-    return True, None, split_chunk_count
-
-
-@trace_knowledge_operation("knowledge.process.split_and_ray", "process.split_and_ray")
-def _process_source_with_split(
-    request_id: str,
-    source: str,
-    source_type: str,
-    task_id: str,
-    chunking_strategy: str,
-    index_name: Optional[str],
-    original_filename: Optional[str],
-    embedding_model_id: Optional[int],
-    tenant_id: Optional[str],
-    params: Dict[str, Any],
-    file_id: Optional[str] = None,
-    file_data: Optional[bytes] = None,
-) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[int]]:
-    _ensure_document_not_deleted(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    )
-    file_size_bytes = (
-        len(file_data)
-        if file_data is not None
-        else os.path.getsize(source)
-    )
-    split_threshold_bytes = DP_FILE_SPLIT_SIZE_MB * 1024 * 1024
-    if file_size_bytes <= split_threshold_bytes:
-        logger.info(
-            f"[{request_id}] PROCESS TASK: File size {file_size_bytes} does not exceed "
-            f"split threshold {split_threshold_bytes}; processing without FileSplitter")
-        process_actor = get_ray_actor()
-        if file_data is not None:
-            chunks_ref = process_actor.process_bytes.remote(
-                file_data,
-                original_filename or os.path.basename(source),
-                chunking_strategy,
-                task_id=task_id,
-                model_id=embedding_model_id,
-                tenant_id=tenant_id,
-                **params,
-            )
-        else:
-            chunks_ref = process_actor.process_file.remote(
-                source,
-                chunking_strategy,
-                destination=source_type,
-                task_id=task_id,
-                model_id=embedding_model_id,
-                tenant_id=tenant_id,
-                **params,
-            )
-        chunks = ray.get(chunks_ref)
-        _ensure_document_not_deleted(
-            index_name=index_name,
-            source=source,
-            file_id=file_id,
-            tenant_id=tenant_id,
-        )
-        if chunks:
-            redis_key = f"dp:{task_id}:chunks"
-            stored = ray.get(
-                process_actor.store_chunks_in_redis.remote(redis_key, chunks))
-            if not stored:
-                raise RuntimeError("Failed to persist processed chunks in Redis")
-        return False, chunks, None
-
-    parts = _split_file_for_processing(
-        request_id=request_id,
-        source=source,
-        source_type=source_type,
-        task_id=task_id,
-        params=params,
-        file_size_bytes=file_size_bytes,
-        file_data=file_data,
-    )
-    filename_for_processing = original_filename or os.path.basename(source)
-    split_async, chunks, split_chunk_count = _run_processing_for_parts(
-        request_id=request_id,
-        source=source,
-        source_type=source_type,
-        task_id=task_id,
-        chunking_strategy=chunking_strategy,
-        filename_for_processing=filename_for_processing,
-        parts=parts,
-        index_name=index_name,
-        original_filename=original_filename,
-        embedding_model_id=embedding_model_id,
-        tenant_id=tenant_id,
-        file_id=file_id,
-        params=params,
-    )
-
-    if split_async:
-        logger.info(
-            f"[{request_id}] PROCESS TASK: Async split finished with {split_chunk_count or 0} chunks")
-    else:
-        logger.info(
-            f"[{request_id}] PROCESS TASK: Ray processing completed, got {len(chunks) if chunks else 0} chunks")
-
-    if not split_async:
-        _ensure_document_not_deleted(
-            index_name=index_name,
-            source=source,
-            file_id=file_id,
-            tenant_id=tenant_id,
-        )
-        redis_key = f"dp:{task_id}:chunks"
-        process_actor = get_ray_actor()
-        store_ref = process_actor.store_chunks_in_redis.remote(redis_key, chunks)
-        stored = ray.get(store_ref)
-        if not stored:
-            raise RuntimeError("Failed to persist processed chunks in Redis")
-        logger.info(
-            f"[{request_id}] PROCESS TASK: Stored chunks in Redis at key '{redis_key}'")
-
-    return split_async, chunks, split_chunk_count
-
-
-def _build_no_valid_chunks_error(
-    split_async: bool,
-    index_name: Optional[str],
-    source: str,
-    original_filename: Optional[str],
-) -> Exception:
-    message = (
-        "Async split completed but produced 0 chunks"
-        if split_async else
-        "Ray processing completed but produced 0 chunks"
-    )
-    return Exception(json.dumps({
-        "message": message,
-        "index_name": index_name,
-        "task_name": "process",
-        "source": source,
-        "original_filename": original_filename,
-        "error_code": "no_valid_chunks"
-    }, ensure_ascii=False))
-
-
-def _build_process_cancelled_result(
-    *,
-    task_id: str,
-    source: str,
-    index_name: Optional[str],
-    original_filename: Optional[str],
-    file_id: Optional[str],
-) -> Dict[str, Any]:
-    """Return a chain-compatible result when deletion wins the race."""
-    return {
-        "task_id": task_id,
-        "source": source,
-        "index_name": index_name,
-        "original_filename": original_filename,
-        "file_id": file_id,
-        "redis_key": f"dp:{task_id}:chunks",
-        "chunks": None,
-        "split_async": False,
-        "cancelled": True,
-        "message": "Processing cancelled because document deletion was requested.",
-    }
-
-
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.process', queue='process_q')
-@trace_knowledge_operation("knowledge.process", "process")
-def process(
-        self,
-        source: str,
-        source_type: str,
-        chunking_strategy: str = "basic",
-        index_name: Optional[str] = None,
-        original_filename: Optional[str] = None,
-        embedding_model_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        **params
-) -> Dict:
-    """
-    Process a file and extract text/chunks
-
-    Args:
-        source: Source file path, URL, or text content
-        source_type: Type of source ("local", "minio")
-        chunking_strategy: Strategy for chunking the document
-        index_name: Name of the index (for metadata)
-        original_filename: The original name of the file
-        embedding_model_id: Embedding model ID for chunk size configuration
-        tenant_id: Tenant ID for retrieving model configuration
-        **params: Additional parameters
-    """
-    start_time = time.time()
-    task_id = self.request.id
-    file_id = params.get("file_id")
-    if _is_document_delete_requested(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    ):
-        logger.info(
-            "Skipping deleted process task source=%s file_id=%s task_id=%s",
-            source,
-            file_id,
-            task_id,
-        )
-        return _build_process_cancelled_result(
-            task_id=task_id,
-            source=source,
-            index_name=index_name,
-            original_filename=original_filename,
-            file_id=file_id,
-        )
-    _update_file_lifecycle(
-        file_id=file_id,
-        tenant_id=tenant_id,
-        index_name=index_name,
-        source=source,
-        status="PROCESSING",
-        stage="PROCESS",
-        process_task_id=task_id,
-    )
-    # _warn_if_queue_mismatch("PROCESS TASK", "process_q", self.request)
-
-    logger.info(
-        f"[{self.request.id}] PROCESS TASK: source_type: {source_type}")
-
-    self.update_state(
-        state=states.STARTED,
-        meta={
-            'source': source,
-            'source_type': source_type,
-            'index_name': index_name,
-            'original_filename': original_filename,
-            'file_id': file_id,
-            'task_name': 'process',
-            'start_time': start_time,
-            'stage': 'extracting_text'
-        }
-    )
-    try:
-        # Process the file based on the source type
-        file_size_mb = 0
-        split_chunk_count = None
-        image_metadata_chunk_count = 0
-        elapsed_time = 0.0
-        chunks: Optional[List[Dict[str, Any]]] = None
-        split_async = False
-
-        if source_type == "local":
-            # Check file existence and size for optimization
-            if not os.path.exists(source):
-                raise FileNotFoundError(f"File does not exist: {source}")
-
-            file_size = os.path.getsize(source)
-            file_size_mb = file_size / (1024 * 1024)
-
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: File size: {file_size_mb:.2f}MB")
-
-            split_async, chunks, split_chunk_count = _process_source_with_split(
-                request_id=self.request.id,
-                source=source,
-                source_type=source_type,
-                task_id=task_id,
-                chunking_strategy=chunking_strategy,
-                index_name=index_name,
-                original_filename=original_filename,
-                embedding_model_id=embedding_model_id,
-                tenant_id=tenant_id,
-                file_id=file_id,
-                params=params,
-            )
-            elapsed_time = time.time() - start_time
-            processing_speed = file_size_mb / \
-                elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: File processing completed. Processing speed {processing_speed:.2f} MB/s")
-
-        elif source_type == "minio":
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: Processing from URL: {source}")
-
-            # Measure MinIO fetch time in process worker logs for observability
-            fetch_start = time.perf_counter()
-            file_data = _fetch_minio_source(source)
-            fetch_elapsed = time.perf_counter() - fetch_start
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: MinIO fetch done in {fetch_elapsed:.3f}s, "
-                f"bytes={len(file_data)}")
-
-            split_async, chunks, split_chunk_count = _process_source_with_split(
-                request_id=self.request.id,
-                source=source,
-                source_type=source_type,
-                task_id=task_id,
-                chunking_strategy=chunking_strategy,
-                index_name=index_name,
-                original_filename=original_filename,
-                embedding_model_id=embedding_model_id,
-                tenant_id=tenant_id,
-                file_id=file_id,
-                params=params,
-                file_data=file_data,
-            )
-            elapsed_time = time.time() - start_time
-            logger.info(
-                f"[{self.request.id}] PROCESS TASK: URL processing completed in {elapsed_time:.2f}s")
-
-        else:
-            # For other source types, implement accordingly
-            raise NotImplementedError(
-                f"Source type '{source_type}' not yet supported")
-
-        _ensure_document_not_deleted(
-            index_name=index_name,
-            source=source,
-            file_id=file_id,
-            tenant_id=tenant_id,
-        )
-
-        if split_async:
-            chunk_count = split_chunk_count or 0
-            if chunk_count == 0:
-                raise _build_no_valid_chunks_error(
-                    split_async=True,
-                    index_name=index_name,
-                    source=source,
-                    original_filename=original_filename,
-                )
-            # For async split, chunks are persisted in Redis; count image-metadata chunks from cached payload.
-            try:
-                if REDIS_BACKEND_URL:
-                    import redis
-                    redis_key = f"dp:{task_id}:chunks"
-                    client = redis.Redis.from_url(
-                        REDIS_BACKEND_URL, decode_responses=True)
-                    cached = client.get(redis_key)
-                    if cached:
-                        cached_chunks = json.loads(cached)
-                        if isinstance(cached_chunks, list):
-                            image_metadata_chunk_count = _count_image_metadata_chunks(
-                                cached_chunks)
-            except Exception as image_count_exc:
-                logger.warning(
-                    f"[{self.request.id}] PROCESS TASK: Failed counting image metadata chunks for async split: {image_count_exc}")
-        else:
-            chunk_count = len(chunks) if chunks else 0
-            if chunk_count == 0:
-                raise _build_no_valid_chunks_error(
-                    split_async=False,
-                    index_name=index_name,
-                    source=source,
-                    original_filename=original_filename,
-                )
-            image_metadata_chunk_count = _count_image_metadata_chunks(chunks)
-
-        logger.info(
-            f"[{self.request.id}] PROCESS TASK: Chunk composition: total={chunk_count}, "
-            f"image_metadata={image_metadata_chunk_count}, text={max(0, chunk_count - image_metadata_chunk_count)}")
-        set_span_attributes(chunk_count=chunk_count, stage="process.complete")
-
-        # Update task state to SUCCESS after Ray processing completes
-        # This transitions from STARTED (PROCESSING) to SUCCESS (WAIT_FOR_FORWARDING)
-        self.update_state(
-            state=states.SUCCESS,
-            meta={
-                'chunks_count': chunk_count,
-                'processing_time': elapsed_time,
-                'source': source,
-                'index_name': index_name,
-                'original_filename': original_filename,
-                'file_id': file_id,
-                'task_name': 'process',
-                'stage': 'text_extracted',
-                'file_size_mb': file_size_mb,
-                'processing_speed_mb_s': file_size_mb / elapsed_time if file_size_mb > 0 and elapsed_time > 0 else 0
-            }
-        )
-
-        _update_file_lifecycle(
-            file_id=file_id,
-            tenant_id=tenant_id,
-            index_name=index_name,
-            source=source,
-            status="FORWARDING",
-            stage="FORWARD",
-            process_task_id=task_id,
-        )
-
-        logger.info(
-            f"[{self.request.id}] PROCESS TASK: Processing complete, waiting for forward task")
-
-        # Prepare data for the next task in the chain; pass redis_key
-        returned_data = {
-            'redis_key': f"dp:{task_id}:chunks",
-            'chunks': None,
-            'source': source,
-            'index_name': index_name,
-            'original_filename': original_filename,
-            'task_id': task_id,
-            'split_async': split_async,
-            'image_metadata_chunk_count': image_metadata_chunk_count,
-            'file_id': file_id,
-        }
-
-        return returned_data
-
-    except DocumentDeleteRequested:
-        return _build_process_cancelled_result(
-            task_id=task_id,
-            source=source,
-            index_name=index_name,
-            original_filename=original_filename,
-            file_id=file_id,
-        )
-    except Exception as e:
-        logger.error(f"Error processing file {source}: {str(e)}")
-        # task_id is already defined at the start of the function
-        try:
-            # Try to parse the exception as JSON (it might be our custom JSON error)
-            error_message = str(e)
-            parsed_error = None
-
-            try:
-                parsed_error = json.loads(error_message)
-                if isinstance(parsed_error, dict):
-                    error_message = parsed_error.get("message", error_message)
-                    logger.debug(
-                        f"Parsed JSON error for task {task_id}"
-                    )
-            except (json.JSONDecodeError, TypeError):
-                # Not a JSON string, use as-is
-                logger.debug(
-                    f"Exception is not JSON format for task {task_id}, using raw message"
-                )
-
-            # Build error_info for re-raising
-            error_info = {
-                "message": error_message,
-                "index_name": index_name,
-                "task_name": "process",
-                "source": source,
-                "original_filename": original_filename,
-                "file_id": file_id,
-            }
-
-            classified = classify_ingestion_exception(parsed_error or error_message, "PROCESS")
-            error_code = classified.error_code
-            _update_file_lifecycle(
-                file_id=file_id,
-                tenant_id=tenant_id,
-                index_name=index_name,
-                source=source,
-                status="FAILED",
-                stage="PROCESS",
-                error_code=error_code,
-                error_message=classified.error_message,
-                error_stage="PROCESS",
-                failed_at=datetime.utcnow(),
-                process_task_id=task_id,
-            )
-            if error_code:
-                error_info["error_code"] = error_code
-
-            reason_to_store = _redis_error_reason(classified)
-
-            # Save error info to Redis BEFORE re-raising
-            logger.info(
-                f"Attempting to save error info for task {task_id} with reason: {reason_to_store[:100]}..."
-            )
-            save_error_to_redis(task_id, reason_to_store, start_time)
-
-            self.update_state(
-                meta={
-                    "source": error_info.get("source", ""),
-                    "index_name": error_info.get("index_name", ""),
-                    "task_name": error_info.get("task_name", ""),
-                    "original_filename": error_info.get(
-                        "original_filename", ""
-                    ),
-                    "file_id": file_id,
-                    "custom_error": error_info.get("message", str(e)),
-                    "stage": "text_extraction_failed",
-                }
-            )
-            raise Exception(json.dumps(error_info, ensure_ascii=False))
-        except Exception as ex:
-            logger.error(f"Error serializing process exception: {str(ex)}")
-            # Try to save error even if serialization fails
-            try:
-                error_message = str(e)
-                parsed_error = None
-
-                try:
-                    parsed_error = json.loads(error_message)
-                    if isinstance(parsed_error, dict):
-                        error_message = parsed_error.get(
-                            "message", error_message
-                        )
-                        logger.debug(
-                            "Fallback serialization: parsed JSON error for task "
-                            f"{task_id}"
-                        )
-                except (json.JSONDecodeError, TypeError):
-                    logger.debug(
-                        "Fallback serialization: exception is not JSON format "
-                        f"for task {task_id}, using raw message"
-                    )
-                    parsed_error = None
-
-                classified = classify_ingestion_exception(parsed_error or error_message, "PROCESS")
-                error_code = classified.error_code
-                _update_file_lifecycle(
-                    file_id=file_id,
-                    tenant_id=tenant_id,
-                    index_name=index_name,
-                    source=source,
-                    status="FAILED",
-                    stage="PROCESS",
-                    error_code=error_code,
-                    error_message=classified.error_message,
-                    error_stage="PROCESS",
-                    failed_at=datetime.utcnow(),
-                    process_task_id=task_id,
-                )
-
-                reason_to_store = _redis_error_reason(classified)
-
-                save_error_to_redis(task_id, reason_to_store, start_time)
-            except Exception:
-                pass
-            self.update_state(
-                meta={
-                    "custom_error": str(e),
-                    "stage": "text_extraction_failed",
-                }
-            )
-            raise
+        if cancelled:
+            result["cancelled"] = True
+        return result
+    finally:
+        _cleanup_forward_batches(batch_keys)
 
 
 @app.task(bind=True, base=LoggingTask, name='data_process.tasks.forward', queue='forward_q')
 @trace_knowledge_operation("knowledge.forward", "forward")
 def forward(
         self,
-        processed_data: Dict,
+        processed_data: dict,
         index_name: str,
         source: str,
         source_type: str = 'minio',
-        original_filename: Optional[str] = None,
-        authorization: Optional[str] = None,
-        telemetry_context: Optional[Dict[str, str]] = None,
-        tenant_id: Optional[str] = None,
-        file_id: Optional[str] = None,
-) -> Dict:
+        original_filename: str | None = None,
+        authorization: str | None = None,
+        telemetry_context: dict[str, str] | None = None,
+        tenant_id: str | None = None,
+        file_id: str | None = None,
+) -> dict:
     """
     Vectorize and store processed chunks in Elasticsearch
 
@@ -2219,29 +836,6 @@ def forward(
     original_index_name = index_name
     filename = original_filename
     file_id = file_id or (processed_data or {}).get("file_id")
-    if _is_document_delete_requested(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    ):
-        logger.info(
-            "Skipping deleted forward task source=%s file_id=%s task_id=%s",
-            source,
-            file_id,
-            task_id,
-        )
-        return _build_forward_cancelled_result(
-            _init_forward_context(
-                task_id=task_id,
-                request_id=str(self.request.id),
-                start_time=start_time,
-                source=source,
-                index_name=index_name,
-                source_type=source_type,
-                original_filename=original_filename,
-            )
-        )
     _update_file_lifecycle(
         file_id=file_id,
         tenant_id=tenant_id,
@@ -2259,24 +853,27 @@ def forward(
             start_time=start_time,
             source=source,
             index_name=index_name,
-            source_type=source_type,
             original_filename=original_filename,
+            file_id=file_id,
         )
 
-        # Before doing any heavy work, check whether this task has been explicitly cancelled.
-        if _is_forward_task_cancelled(ctx):
+        # Avoid loading chunks or starting indexing after either cancellation
+        # signal has won the race.
+        if (
+            (processed_data or {}).get("cancelled")
+            or is_document_delete_requested(
+                index_name=index_name,
+                source=source,
+                file_id=file_id,
+                tenant_id=tenant_id,
+            )
+            or _is_forward_task_cancelled(ctx)
+        ):
             logger.info(
-                f"[{self.request.id}] FORWARD TASK: Detected cancellation flag for task {task_id}; "
+                f"[{self.request.id}] FORWARD TASK: Detected cancellation for task {task_id}; "
                 f"skipping chunk forwarding for source '{source}' in index '{index_name}'."
             )
             return _build_forward_cancelled_result(ctx)
-
-        _ensure_document_not_deleted(
-            index_name=original_index_name,
-            source=original_source,
-            file_id=file_id,
-            tenant_id=tenant_id,
-        )
 
         chunks, split_async, original_source, original_index_name, filename = _load_forward_chunks(
             self,
@@ -2312,7 +909,11 @@ def forward(
                 "filename": filename_resolved,
                 "path_or_url": original_source,
                 "content": content,
-                "process_source": chunk.get("process_source", "Unstructured"),
+                "process_source": (
+                    chunk.get("process_source")
+                    or metadata.get("process_source")
+                    or "Unstructured"
+                ),
                 "source_type": source_type,
                 "file_size": file_size,
                 "create_time": metadata.get("creation_date"),
@@ -2392,22 +993,27 @@ def forward(
                 f"[{self.request.id}] FORWARD TASK: Batch distribution ready: total_batches={total_batches}, "
                 f"batch_size={FORWARD_ES_CHUNK_BATCH_SIZE}, image_metadata_total={image_chunks_total}, "
                 f"image_per_batch={image_distribution}")
+            batch_refs = [
+                _store_forward_batch(task_id, idx + 1, batch)
+                for idx, batch in enumerate(batches)
+            ]
             group_tasks = group(
                 forward_part.s(
-                    chunks=batch,
+                    batch_key=batch_key,
                     index_name=original_index_name,
                     authorization=authorization,
                     parent_task_id=task_id,
                     parent_total_chunks=total_chunks,
                     source=original_source,
                     original_filename=original_filename,
-                    file_id=file_id,
-                    tenant_id=tenant_id,
                     batch_index=idx + 1,
                     total_batches=total_batches,
+                    file_id=file_id,
+                    tenant_id=tenant_id,
                     # If request was split into multiple groups, force all groups to use large path.
                     large_mode=True,
-                ).set(queue='forward_part_q') for idx, batch in enumerate(batches)
+                ).set(queue='forward_part_q')
+                for idx, batch_key in enumerate(batch_refs)
             )
             callback = aggregate_forward_parts.s(
                 source=original_source,
@@ -2422,13 +1028,14 @@ def forward(
         logger.debug(
             f"[{self.request.id}] FORWARD TASK: API response from main_server for source '{original_source}': {es_result}")
 
-        if _is_document_delete_requested(
+        if isinstance(es_result, dict) and es_result.get("cancelled"):
+            return _build_forward_cancelled_result(ctx)
+        ensure_document_not_deleted(
             index_name=original_index_name,
             source=original_source,
             file_id=file_id,
             tenant_id=tenant_id,
-        ):
-            return _build_forward_cancelled_result(ctx)
+        )
 
         if isinstance(es_result, dict) and es_result.get("success"):
             total_indexed = es_result.get("total_indexed", 0)
@@ -2519,6 +1126,11 @@ def forward(
             'es_result': es_result
         }
     except DocumentDeleteRequested:
+        logger.info(
+            "Forward task cancelled because document deletion was requested task_id=%s source=%s",
+            task_id,
+            original_source,
+        )
         return _build_forward_cancelled_result(ctx)
     except Exception as e:
         # If it's an Exception, all go here (including our custom JSON message)
@@ -2554,7 +1166,7 @@ def forward(
             # Save error info to Redis BEFORE re-raising
             logger.info(
                 f"Attempting to save error info for task {task_id} with reason: {reason_to_store[:100]}...")
-            save_error_to_redis(task_id, reason_to_store, start_time)
+            save_error_to_redis(task_id, reason_to_store)
 
             self.update_state(
                 meta={
@@ -2568,7 +1180,7 @@ def forward(
                 }
             )
         except Exception:
-            logger.error(f"Error forwarding chunks: {str(e)}")
+            logger.error(f"Error forwarding chunks: {e!s}")
             # Try to save error even if parsing fails
             try:
                 error_message = str(e)
@@ -2590,7 +1202,7 @@ def forward(
 
                 reason_to_store = _redis_error_reason(classified)
 
-                save_error_to_redis(task_id, reason_to_store, start_time)
+                save_error_to_redis(task_id, reason_to_store)
             except Exception:
                 pass
             self.update_state(
@@ -2612,10 +1224,10 @@ def forward(
 @trace_knowledge_operation("knowledge.cleanup", "cleanup")
 def cleanup_source(
     self,
-    forward_result: Dict[str, Any],
-    authorization: Optional[str] = None,
-    telemetry_context: Optional[Dict[str, str]] = None,
-) -> Dict[str, Any]:
+    forward_result: dict[str, Any],
+    authorization: str | None = None,
+    telemetry_context: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """
     Conditionally delete the MinIO source file after successful indexing.
 
@@ -2629,7 +1241,7 @@ def cleanup_source(
     source = (forward_result or {}).get("source")
     file_id = (forward_result or {}).get("file_id")
 
-    cleanup_info: Dict[str, Any] = {
+    cleanup_info: dict[str, Any] = {
         "attempted": False,
         "skipped_reason": None,
         "success": None,
@@ -2644,7 +1256,7 @@ def cleanup_source(
         forward_result["source_cleanup"] = cleanup_info
         return forward_result
 
-    if _is_document_delete_requested(
+    if (forward_result or {}).get("cancelled") or is_document_delete_requested(
         index_name=index_name,
         source=source,
         file_id=file_id,
@@ -2728,13 +1340,13 @@ def submit_process_forward_chain(
         source: str,
         source_type: str,
         chunking_strategy: str,
-        index_name: Optional[str] = None,
-        original_filename: Optional[str] = None,
-        authorization: Optional[str] = None,
-        embedding_model_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        telemetry_context: Optional[Dict[str, str]] = None,
-        file_id: Optional[str] = None,
+        index_name: str | None = None,
+        original_filename: str | None = None,
+        authorization: str | None = None,
+        embedding_model_id: int | None = None,
+        tenant_id: str | None = None,
+        telemetry_context: dict[str, str] | None = None,
+        file_id: str | None = None,
 ) -> str:
     """
     Build and enqueue a Celery chain: process -> forward.
@@ -2768,7 +1380,7 @@ def submit_process_forward_chain(
     task_chain = chain(
         process.s(
             **process_kwargs,
-        ).set(queue='process_q'),
+        ).set(queue='parse_q'),
         forward.s(
             **forward_kwargs,
         ).set(queue='forward_q'),
@@ -2792,20 +1404,18 @@ def process_and_forward(
         source: str,
         source_type: str,
         chunking_strategy: str,
-        index_name: Optional[str] = None,
-        original_filename: Optional[str] = None,
-        authorization: Optional[str] = None,
-        embedding_model_id: Optional[int] = None,
-        tenant_id: Optional[str] = None,
-        telemetry_context: Optional[Dict[str, str]] = None,
-        file_id: Optional[str] = None,
+        index_name: str | None = None,
+        original_filename: str | None = None,
+        authorization: str | None = None,
+        embedding_model_id: int | None = None,
+        tenant_id: str | None = None,
+        telemetry_context: dict[str, str] | None = None,
+        file_id: str | None = None,
 ) -> str:
     """
-    Compatibility wrapper for task messages created before direct chain submission.
+    Combined task that chains processing and forwarding
 
-    New API requests call ``submit_process_forward_chain`` directly so the
-    returned task ID always identifies the real processing chain.  This task
-    remains registered only so already queued wrapper messages can finish.
+    This task delegates to a chain of process -> forward
 
     Args:
         source: Source file path, URL, or text content
@@ -2820,14 +1430,14 @@ def process_and_forward(
     Returns:
         Task ID of the chain
     """
-    if _is_document_delete_requested(
+    if is_document_delete_requested(
         index_name=index_name,
         source=source,
         file_id=file_id,
         tenant_id=tenant_id,
     ):
         logger.info(
-            "Skipping process-forward submission for deleted document source=%s file_id=%s",
+            "Skipping process-forward submission because document deletion was requested source=%s file_id=%s",
             source,
             file_id,
         )
@@ -2852,121 +1462,3 @@ def process_and_forward(
     if chain_id:
         logger.info(f"Created task chain ID: {chain_id}")
     return chain_id
-
-
-@app.task(bind=True, base=LoggingTask, name='data_process.tasks.process_sync')
-def process_sync(
-        self,
-        source: str,
-        source_type: str,
-        chunking_strategy: str = "basic",
-        timeout: int = 30,
-        **params
-) -> Dict:
-    """
-    Synchronous process task that returns text directly (for real-time API)
-
-    Args:
-        source: Source file path, URL, or text content
-        source_type: source of the file("local", "minio")
-        chunking_strategy: Strategy for chunking the document
-        timeout: Timeout for the operation
-        **params: Additional parameters
-
-    Returns:
-        Dict containing the extracted text and metadata
-    """
-    start_time = time.time()
-    task_id = self.request.id
-
-    # Check if we're in a valid Celery context before updating state
-    is_celery_context = hasattr(
-        self, 'request') and self.request.id is not None
-
-    # Update task state to PROCESSING only if in Celery context
-    if is_celery_context:
-        self.update_state(
-            state=states.STARTED,
-            meta={
-                'source': source,
-                'source_type': source_type,
-                'task_name': 'process_sync',
-                'start_time': start_time,
-                'sync_mode': True
-            }
-        )
-
-    logger.info(
-        f"Synchronous processing file: {source} with strategy: {chunking_strategy}")
-
-    # Get the data processor instance
-    actor = get_ray_actor()
-
-    try:
-        # Process the file based on the source type
-        if source_type == "local":
-            # The unified actor call, mapping 'file' source_type to 'local' destination
-            chunks_ref = actor.process_file.remote(
-                source,
-                chunking_strategy,
-                destination=source_type,
-                task_id=task_id,
-                **params
-            )
-
-            chunks = ray.get(chunks_ref)
-        else:
-            raise NotImplementedError(
-                f"Source type '{source_type}' not yet implemented")
-
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-
-        # Extract text from chunks
-        text_content = "\n\n".join(
-            [chunk.get("content", "") for chunk in chunks])
-
-        # Update task state to COMPLETE only if in Celery context
-        if is_celery_context:
-            self.update_state(
-                state=states.SUCCESS,
-                meta={
-                    'chunks_count': len(chunks),
-                    'processing_time': elapsed_time,
-                    'source': source,
-                    'task_name': 'process_sync',
-                    'text_length': len(text_content),
-                    'sync_mode': True
-                }
-            )
-
-        logger.info(
-            f"Synchronously processed {len(chunks)} chunks from {source} in {elapsed_time:.2f}s")
-
-        return {
-            'task_id': task_id,
-            'source': source,
-            'text': text_content,
-            'chunks': chunks,
-            'chunks_count': len(chunks),
-            'processing_time': elapsed_time,
-            'text_length': len(text_content)
-        }
-
-    except Exception as e:
-        logger.error(f"Error synchronously processing file {source}: {str(e)}")
-
-        # Update task state to FAILURE with custom metadata only if in Celery context
-        if is_celery_context:
-            self.update_state(
-                meta={
-                    'source': source,
-                    'task_name': 'process_sync',
-                    'custom_error': str(e),
-                    'sync_mode': True,
-                    'stage': 'sync_processing_failed'
-                }
-            )
-
-        # Re-raise to let Celery handle exception serialization
-        raise
