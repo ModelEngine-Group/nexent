@@ -308,34 +308,40 @@ class IndependentAidpSearchTool(Tool):
 
     def _resolve_search_scope(
         self, kds_list: Optional[List[str]]
-    ) -> tuple[List[str], List[str], List[str], bool]:
+    ) -> tuple[List[str], List[str], List[str], bool, bool]:
         configured_scope = self._unique_kds(self.kds_list)
         if kds_list is None:
-            return configured_scope, configured_scope, [], False
+            return configured_scope, [], [], False, False
 
         requested_scope = self._unique_kds(_parse_kds_list(kds_list, allow_empty=True))
         if not requested_scope:
-            return [], [], [], False
+            return configured_scope, [], [], False, False
         used_scope = [item for item in requested_scope if item in configured_scope]
-        ignored_scope = [item for item in requested_scope if item not in configured_scope]
+        unavailable_scope = [item for item in requested_scope if item not in configured_scope]
         fallback_to_all = bool(requested_scope and not used_scope and configured_scope)
         if fallback_to_all:
             used_scope = configured_scope
-        return requested_scope, used_scope, ignored_scope, fallback_to_all
+        return used_scope, [], unavailable_scope, fallback_to_all, True
 
     def forward(self, query: str, kds_list: Optional[List[str]] = None) -> str:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
         (
-            requested_scope,
             search_kds_list,
-            ignored_scope,
+            permission_denied_scope,
+            unavailable_scope,
             fallback_to_all,
+            scope_was_specified,
         ) = self._resolve_search_scope(kds_list)
         normalized_query = query.strip()
         if not search_kds_list:
             return build_knowledge_search_response(
-                [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
+                [],
+                search_kds_list,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
         self._emit_running_prompt(normalized_query)
         try:
@@ -344,15 +350,21 @@ class IndependentAidpSearchTool(Tool):
             raise IndependentAidpSearchError(f"AIDP HTTP error: {exc}") from exc
         if not records:
             return build_knowledge_search_response(
-                [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
+                [],
+                search_kds_list,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
         ui_results, model_results, image_urls = self._process_records(records)
         self.record_ops += len(model_results)
         self._emit_results(ui_results, image_urls)
         return build_knowledge_search_response(
             model_results,
-            requested_scope,
             search_kds_list,
-            ignored_scope,
+            permission_denied_scope,
+            unavailable_scope,
             fallback_to_all,
+            scope_was_specified,
         )

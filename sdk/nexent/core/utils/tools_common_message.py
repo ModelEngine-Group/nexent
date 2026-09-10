@@ -105,56 +105,66 @@ class SearchResultTextMessage:
 
 def build_knowledge_search_response(
     results: List[Dict[str, Any]],
-    requested_scope: List[str],
     used_scope: List[str],
-    ignored_scope: List[str],
+    permission_denied_scope: List[str],
+    unavailable_scope: List[str],
     fallback_to_all: bool,
+    scope_was_specified: bool,
 ) -> str:
-    """Build the model-facing response for scope-aware knowledge searches."""
-    adjusted = bool(ignored_scope or requested_scope != used_scope)
+    """Build a concise model-facing response for a knowledge-base search."""
+
+    def format_scope(scope: List[str]) -> str:
+        return json.dumps(scope, ensure_ascii=False)
+
+    filtered_messages = []
+    if permission_denied_scope:
+        filtered_messages.append(
+            f"no read permission: {format_scope(permission_denied_scope)}"
+        )
+    if unavailable_scope:
+        filtered_messages.append(
+            f"not configured or unavailable: {format_scope(unavailable_scope)}"
+        )
+    filtered_notice = "; ".join(filtered_messages)
+
     if not used_scope:
-        if ignored_scope:
+        if filtered_notice:
             notice = (
-                "NOTICE: The requested knowledge bases were unavailable, and no "
-                f"other knowledge bases were available: {ignored_scope}. "
-                "No search was executed."
+                f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). "
+                "No accessible knowledge bases remained, so search was not executed."
             )
         else:
             notice = (
-                "NOTICE: No knowledge bases were selected or available. "
-                "No search was executed."
+                "NOTICE: No configured knowledge bases are accessible, so search was "
+                "not executed."
             )
-    elif fallback_to_all:
+    elif filtered_notice and fallback_to_all:
         notice = (
-            "NOTICE: Knowledge-base scope was adjusted before search. "
-            f"Requested knowledge bases {ignored_scope} were unavailable and ignored. "
-            f"Search was executed across all available configured knowledge bases: {used_scope}. "
-            "Do not retry with the ignored knowledge bases."
+            f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). "
+            f"Search was broadened to all available configured knowledge bases {format_scope(used_scope)}. "
+            "Do not retry the filtered knowledge bases."
         )
-    elif ignored_scope:
+    elif filtered_notice:
         notice = (
-            "NOTICE: Knowledge-base scope was adjusted before search. "
-            f"Requested knowledge bases {ignored_scope} were unavailable and ignored. "
-            f"Search was executed with the remaining available knowledge bases: {used_scope}. "
-            "Do not retry with the ignored knowledge bases."
+            f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). "
+            f"Search was executed in the remaining available knowledge bases {format_scope(used_scope)}. "
+            "Do not retry the filtered knowledge bases."
         )
+    elif scope_was_specified:
+        notice = "NOTICE: Search was executed in the requested knowledge bases."
     else:
-        notice = "NOTICE: Requested knowledge-base scope was used without changes."
+        notice = (
+            "NOTICE: No knowledge-base scope was specified. Search was executed "
+            "using the agent's configured accessible knowledge bases."
+        )
 
     if not results and used_scope:
-        notice += " No relevant information was found in the selected knowledge bases."
+        notice += " No relevant information was found."
 
     return json.dumps(
         {
             "notice": notice,
             "results": results,
-            "scope": {
-                "requested": requested_scope,
-                "used": used_scope,
-                "ignored": ignored_scope,
-                "adjusted": adjusted,
-                "fallback_to_all": fallback_to_all,
-            },
         },
         ensure_ascii=False,
     )

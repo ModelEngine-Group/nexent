@@ -357,7 +357,9 @@ class TestAidpSearchToolForward:
         result = json.loads(aidp_tool.forward("nothing"))
 
         assert result["results"] == []
-        assert result["scope"]["used"] == ["kb1", "kb2"]
+        assert set(result) == {"notice", "results"}
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "No relevant information was found" in result["notice"]
 
     def test_forward_reports_display_names_but_sends_kds_ids(self, aidp_tool):
         aidp_tool.kds_name_to_id_map = {
@@ -374,13 +376,9 @@ class TestAidpSearchToolForward:
         )
 
         assert aidp_tool._mock_http_client.post.call_args.kwargs["json"]["kds_list"] == ["kb1"]
-        assert result["scope"] == {
-            "requested": ["AIDP FAQ", "missing-kb"],
-            "used": ["AIDP FAQ"],
-            "ignored": ["missing-kb"],
-            "adjusted": True,
-            "fallback_to_all": False,
-        }
+        assert set(result) == {"notice", "results"}
+        assert 'not configured or unavailable: ["missing-kb"]' in result["notice"]
+        assert 'remaining available knowledge bases ["AIDP FAQ"]' in result["notice"]
         assert "kb1" not in result["notice"]
 
     def test_forward_http_error_raises_wrapped_exception(self, aidp_tool):
@@ -637,23 +635,22 @@ class TestAidpSearchToolWhitelist:
         result = json.loads(aidp_tool.forward("some query"))
 
         assert result["results"] == []
-        assert result["scope"]["used"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
         aidp_tool._mock_http_client.post.assert_not_called()
 
-    def test_forward_explicit_empty_scope_returns_empty_without_http_call(self, aidp_tool):
-        """An explicitly empty scope means no knowledge base should be searched."""
+    def test_forward_explicit_empty_scope_uses_configured_scope(self, aidp_tool):
+        """An empty scope has the same meaning as an omitted scope."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"result": []}
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
         result = json.loads(aidp_tool.forward("query", kds_list=[]))
 
         assert result["results"] == []
-        assert result["scope"] == {
-            "requested": [],
-            "used": [],
-            "ignored": [],
-            "adjusted": False,
-            "fallback_to_all": False,
-        }
-        assert "No knowledge bases were selected or available" in result["notice"]
-        aidp_tool._mock_http_client.post.assert_not_called()
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "No relevant information was found" in result["notice"]
+        assert aidp_tool._mock_http_client.post.call_args.kwargs["json"]["kds_list"] == ["kb1", "kb2"]
 
     def test_forward_invalid_scope_with_no_available_kds_reports_no_search(self, aidp_tool):
         """An invalid request with an empty whitelist must not claim a search ran."""
@@ -662,10 +659,8 @@ class TestAidpSearchToolWhitelist:
         result = json.loads(aidp_tool.forward("query", kds_list=["kb-missing"]))
 
         assert result["results"] == []
-        assert result["scope"]["used"] == []
-        assert result["scope"]["ignored"] == ["kb-missing"]
-        assert "no other knowledge bases were available" in result["notice"]
-        assert "No search was executed" in result["notice"]
+        assert 'not configured or unavailable: ["kb-missing"]' in result["notice"]
+        assert "No accessible knowledge bases remained" in result["notice"]
         aidp_tool._mock_http_client.post.assert_not_called()
 
     def test_forward_configured_kds_blocked_by_empty_whitelist(self, aidp_tool):
@@ -677,7 +672,7 @@ class TestAidpSearchToolWhitelist:
         result = json.loads(aidp_tool.forward("query"))
 
         assert result["results"] == []
-        assert result["scope"]["used"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
         aidp_tool._mock_http_client.post.assert_not_called()
 
     # ------------------------------------------------------------------
@@ -717,6 +712,28 @@ class TestAidpSearchToolWhitelist:
         assert "kb1" in sent_payload["kds_list"]
         assert "kb2" in sent_payload["kds_list"]
 
+    def test_forward_notice_distinguishes_permission_and_unknown_kds(self, aidp_tool):
+        aidp_tool.kds_name_to_id_map = {
+            "AIDP FAQ": "kb1",
+            "AIDP API Guide": "kb2",
+        }
+        aidp_tool.set_allowed_kds(["kb1"])
+        aidp_tool._mock_http_client.post.return_value = MagicMock(
+            raise_for_status=MagicMock(),
+            json=MagicMock(return_value={"result": []}),
+        )
+
+        result = json.loads(
+            aidp_tool.forward(
+                "query", kds_list=["AIDP FAQ", "AIDP API Guide", "missing-kb"]
+            )
+        )
+
+        sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
+        assert sent_payload["kds_list"] == ["kb1"]
+        assert 'no read permission: ["AIDP API Guide"]' in result["notice"]
+        assert 'not configured or unavailable: ["missing-kb"]' in result["notice"]
+
     def test_forward_all_kds_filtered_returns_observation(self, aidp_tool):
         """An all-invalid request behaves like an omitted scope."""
         aidp_tool.set_allowed_kds(["kb1"])
@@ -730,9 +747,9 @@ class TestAidpSearchToolWhitelist:
         )
 
         assert result["results"] == []
-        assert result["scope"]["ignored"] == ["kb-bad1", "kb-bad2"]
-        assert result["scope"]["used"] == ["kb1"]
-        assert result["scope"]["fallback_to_all"] is True
+        assert 'not configured or unavailable: ["kb-bad1", "kb-bad2"]' in result["notice"]
+        assert 'broadened to all available configured knowledge bases ["kb1"]' in result["notice"]
+        assert "Do not retry the filtered knowledge bases" in result["notice"]
         sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
         assert sent_payload["kds_list"] == ["kb1"]
 
@@ -775,13 +792,17 @@ class TestAidpSearchToolWhitelist:
 
         sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
         assert sent_payload["kds_list"] == expected_used
-        assert response["scope"] == {
-            "requested": requested,
-            "used": expected_used,
-            "ignored": expected_ignored,
-            "adjusted": bool(expected_ignored),
-            "fallback_to_all": fallback,
-        }
+        if expected_ignored:
+            assert "not configured or unavailable" in response["notice"]
+            for ignored_kb in expected_ignored:
+                assert ignored_kb in response["notice"]
+            assert "Do not retry the filtered knowledge bases" in response["notice"]
+            if fallback:
+                assert "broadened to all available configured knowledge bases" in response["notice"]
+            else:
+                assert "remaining available knowledge bases" in response["notice"]
+        else:
+            assert "Search was executed in the requested knowledge bases" in response["notice"]
 
     # ------------------------------------------------------------------
     # E. State switching

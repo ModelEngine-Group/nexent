@@ -97,33 +97,41 @@ class SearchResultTextMessage:
 
 
 def build_knowledge_search_response(
-    results, requested_scope, used_scope, ignored_scope, fallback_to_all
+    results,
+    used_scope,
+    permission_denied_scope,
+    unavailable_scope,
+    fallback_to_all,
+    scope_was_specified,
 ):
-    adjusted = bool(ignored_scope or requested_scope != used_scope)
+    def format_scope(scope):
+        return json.dumps(scope, ensure_ascii=False)
+
+    filtered_messages = []
+    if permission_denied_scope:
+        filtered_messages.append(f"no read permission: {format_scope(permission_denied_scope)}")
+    if unavailable_scope:
+        filtered_messages.append(f"not configured or unavailable: {format_scope(unavailable_scope)}")
+    filtered_notice = "; ".join(filtered_messages)
     if not used_scope:
-        if ignored_scope:
-            notice = "NOTICE: The requested knowledge bases were unavailable, and no other knowledge bases were available. No search was executed."
+        if filtered_notice:
+            notice = f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). No accessible knowledge bases remained, so search was not executed."
         else:
-            notice = "NOTICE: No knowledge bases were selected or available. No search was executed."
-    elif fallback_to_all:
-        notice = "NOTICE: scope adjusted; search used all available configured knowledge bases."
-    elif ignored_scope:
-        notice = "NOTICE: scope adjusted; unavailable knowledge bases were ignored."
+            notice = "NOTICE: No configured knowledge bases are accessible, so search was not executed."
+    elif filtered_notice and fallback_to_all:
+            notice = f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). Search was broadened to all available configured knowledge bases {format_scope(used_scope)}. Do not retry the filtered knowledge bases."
+    elif filtered_notice:
+        notice = f"NOTICE: Requested knowledge bases were filtered ({filtered_notice}). Search was executed in the remaining available knowledge bases {format_scope(used_scope)}. Do not retry the filtered knowledge bases."
+    elif scope_was_specified:
+        notice = "NOTICE: Search was executed in the requested knowledge bases."
     else:
-        notice = "NOTICE: requested knowledge-base scope was used without changes."
+        notice = "NOTICE: No knowledge-base scope was specified. Search was executed using the agent's configured accessible knowledge bases."
     if not results and used_scope:
-        notice += " No relevant information was found in the selected knowledge bases."
+        notice += " No relevant information was found."
     return json.dumps(
         {
             "notice": notice,
             "results": results,
-            "scope": {
-                "requested": requested_scope,
-                "used": used_scope,
-                "ignored": ignored_scope,
-                "adjusted": adjusted,
-                "fallback_to_all": fallback_to_all,
-            },
         }
     )
 
@@ -538,7 +546,8 @@ class TestKnowledgeBaseSearchTool:
         result = json.loads(knowledge_base_search_tool.forward("test query"))
 
         assert result["results"] == []
-        assert result["scope"]["used"] == ["test_index1", "test_index2"]
+        assert set(result) == {"notice", "results"}
+        assert "No knowledge-base scope was specified" in result["notice"]
         assert "No relevant information" in result["notice"]
 
     def test_forward_reports_display_names_but_searches_internal_indices(
@@ -558,13 +567,7 @@ class TestKnowledgeBaseSearchTool:
             embedding_model=knowledge_base_search_tool.embedding_model,
             top_k=5,
         )
-        assert result["scope"] == {
-            "requested": ["Product Docs", "FAQ Docs"],
-            "used": ["Product Docs", "FAQ Docs"],
-            "ignored": [],
-            "adjusted": False,
-            "fallback_to_all": False,
-        }
+        assert "No knowledge-base scope was specified" in result["notice"]
         assert "test_index1" not in result["notice"]
 
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
@@ -844,7 +847,7 @@ class TestKnowledgeBaseSearchToolRerank:
 
         # Should return the permission-denial message since no index is available
         assert result["results"] == []
-        assert result["scope"]["used"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
 
     def test_forward_single_index_name(self, knowledge_base_search_tool):
         """Test forward method with single index name"""
@@ -1898,7 +1901,8 @@ class TestDocumentPathsAccessControl:
         result = json.loads(tool.forward("test query"))
 
         assert result["results"] == []
-        assert result["scope"]["used"] == ["kb1"]
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "No relevant information was found" in result["notice"]
 
     def test_filter_by_document_paths_unwraps_fieldinfo_default(self, mock_vdb_core, mock_embedding_model):
         """Filter should tolerate a FieldInfo default instead of a concrete list.
@@ -2021,6 +2025,32 @@ class TestAllowedIndexNamesWhitelist:
         assert call_kwargs["index_names"] == ["allowed_kb"]
         assert "forbidden_kb" not in call_kwargs["index_names"]
 
+    def test_forward_notice_distinguishes_permission_and_unknown_indices(
+        self, mock_observer, mock_vdb_core, mock_embedding_model
+    ):
+        mock_vdb_core.hybrid_search.return_value = []
+        tool = KnowledgeBaseSearchTool(
+            top_k=5,
+            index_names=["allowed_kb", "forbidden_kb"],
+            observer=mock_observer,
+            embedding_model=mock_embedding_model,
+            vdb_core=mock_vdb_core,
+            search_mode="hybrid",
+            allowed_index_names=["allowed_kb"],
+            display_name_to_index_map={
+                "Allowed KB": "allowed_kb",
+                "Forbidden KB": "forbidden_kb",
+            },
+        )
+
+        result = json.loads(
+            tool.forward("test query", index_names=["Allowed KB", "Forbidden KB", "Missing KB"])
+        )
+
+        assert mock_vdb_core.hybrid_search.call_args.kwargs["index_names"] == ["allowed_kb"]
+        assert 'no read permission: ["Forbidden KB"]' in result["notice"]
+        assert 'not configured or unavailable: ["Missing KB"]' in result["notice"]
+
     @pytest.mark.parametrize(
         ("requested", "expected_used", "expected_ignored", "fallback"),
         [
@@ -2054,15 +2084,18 @@ class TestAllowedIndexNamesWhitelist:
 
         call_kwargs = mock_vdb_core.hybrid_search.call_args.kwargs
         assert call_kwargs["index_names"] == expected_used
-        assert response["scope"] == {
-            "requested": requested,
-            "used": expected_used,
-            "ignored": expected_ignored,
-            "adjusted": bool(expected_ignored),
-            "fallback_to_all": fallback,
-        }
+        if expected_ignored:
+            assert "not configured or unavailable" in response["notice"]
+            for ignored_index in expected_ignored:
+                assert ignored_index in response["notice"]
+            if fallback:
+                assert "broadened to all available configured knowledge bases" in response["notice"]
+            else:
+                assert "remaining available knowledge bases" in response["notice"]
+        else:
+            assert "Search was executed in the requested knowledge bases" in response["notice"]
 
-    def test_forward_explicit_empty_scope_returns_empty_without_search(
+    def test_forward_explicit_empty_scope_uses_configured_scope(
         self, mock_observer, mock_vdb_core, mock_embedding_model
     ):
         tool = KnowledgeBaseSearchTool(
@@ -2075,18 +2108,13 @@ class TestAllowedIndexNamesWhitelist:
             display_name_to_index_map={},
         )
 
+        mock_vdb_core.hybrid_search.return_value = []
         response = json.loads(tool.forward("test query", index_names=[]))
 
         assert response["results"] == []
-        assert response["scope"] == {
-            "requested": [],
-            "used": [],
-            "ignored": [],
-            "adjusted": False,
-            "fallback_to_all": False,
-        }
-        assert "No knowledge bases were selected or available" in response["notice"]
-        mock_vdb_core.hybrid_search.assert_not_called()
+        assert "No knowledge-base scope was specified" in response["notice"]
+        assert "No relevant information was found" in response["notice"]
+        assert mock_vdb_core.hybrid_search.call_args.kwargs["index_names"] == ["kb1", "kb2"]
 
     def test_forward_with_empty_whitelist_returns_early(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """
@@ -2108,7 +2136,7 @@ class TestAllowedIndexNamesWhitelist:
         # Should return early with a clear permission-denial observation
         result = json.loads(result)
         assert result["results"] == []
-        assert result["scope"]["used"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
         mock_vdb_core.hybrid_search.assert_not_called()
 
     def test_forward_without_whitelist_allows_all(self, mock_observer, mock_vdb_core, mock_embedding_model):
@@ -2182,7 +2210,7 @@ class TestAllowedIndexNamesWhitelist:
         # Clear permission-denial observation is returned
         result = json.loads(result)
         assert result["results"] == []
-        assert result["scope"]["used"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
 
     def test_forward_preserves_index_order_after_filtering(self, mock_observer, mock_vdb_core, mock_embedding_model):
         """

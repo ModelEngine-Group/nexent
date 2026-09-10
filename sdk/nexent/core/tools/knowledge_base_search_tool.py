@@ -216,18 +216,20 @@ class KnowledgeBaseSearchTool(Tool):
     def _build_scope_response(
         self,
         results: List[dict],
-        requested_scope: List[str],
         used_scope: List[str],
-        ignored_scope: List[str],
+        permission_denied_scope: List[str],
+        unavailable_scope: List[str],
         fallback_to_all: bool,
+        scope_was_specified: bool,
     ) -> str:
-        """Serialize scope metadata with display names while searching by indices."""
+        """Serialize search results with display names in the model-facing notice."""
         return build_knowledge_search_response(
             results,
-            self._convert_to_display_names(requested_scope),
             self._convert_to_display_names(used_scope),
-            self._convert_to_display_names(ignored_scope),
+            self._convert_to_display_names(permission_denied_scope),
+            self._convert_to_display_names(unavailable_scope),
             fallback_to_all,
+            scope_was_specified,
         )
 
     @staticmethod
@@ -236,7 +238,7 @@ class KnowledgeBaseSearchTool(Tool):
 
     def _resolve_search_scope(
         self, index_names: Optional[List[str]]
-    ) -> tuple[List[str], List[str], List[str], bool]:
+    ) -> tuple[List[str], List[str], List[str], bool, bool]:
         configured_scope = self._unique_names(
             self._convert_to_index_names(list(self.index_names))
         )
@@ -247,21 +249,27 @@ class KnowledgeBaseSearchTool(Tool):
         else:
             available_scope = configured_scope
 
-        if index_names is None:
-            return available_scope, available_scope, [], False
-        if len(index_names) == 0:
-            return [], [], [], False
+        configured_permission_scope = (
+            [name for name in configured_scope if name not in available_scope]
+            if self._allowed_index_names is not None
+            else []
+        )
+        if index_names is None or len(index_names) == 0:
+            return available_scope, [], [], False, False
 
         requested_scope = self._unique_names(
             self._convert_to_index_names(list(index_names))
         )
 
         used_scope = [name for name in requested_scope if name in available_scope]
-        ignored_scope = [name for name in requested_scope if name not in available_scope]
+        unavailable_scope = [name for name in requested_scope if name not in configured_scope]
+        permission_denied_scope = [
+            name for name in requested_scope if name in configured_permission_scope
+        ]
         fallback_to_all = bool(requested_scope and not used_scope and available_scope)
         if fallback_to_all:
             used_scope = available_scope
-        return requested_scope, used_scope, ignored_scope, fallback_to_all
+        return used_scope, permission_denied_scope, unavailable_scope, fallback_to_all, True
 
     def _filter_by_document_paths(self, results: List[dict]) -> List[dict]:
         """Filter search results by allowed document paths for access control.
@@ -295,10 +303,11 @@ class KnowledgeBaseSearchTool(Tool):
 
     def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
         (
-            requested_scope,
             search_index_names,
-            ignored_scope,
+            permission_denied_scope,
+            unavailable_scope,
             fallback_to_all,
+            scope_was_specified,
         ) = self._resolve_search_scope(index_names)
 
         # Guard: if no knowledge bases are accessible after permission filtering,
@@ -311,7 +320,12 @@ class KnowledgeBaseSearchTool(Tool):
                 query,
             )
             return self._build_scope_response(
-                [], requested_scope, search_index_names, ignored_scope, fallback_to_all
+                [],
+                search_index_names,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
 
         # Use the instance search_mode
@@ -352,7 +366,12 @@ class KnowledgeBaseSearchTool(Tool):
                 search_index_names,
             )
             return self._build_scope_response(
-                [], requested_scope, search_index_names, ignored_scope, fallback_to_all
+                [],
+                search_index_names,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
 
         if self.rerank and self.rerank_model and kb_search_results:
@@ -378,10 +397,11 @@ class KnowledgeBaseSearchTool(Tool):
 
         return self._build_scope_response(
             search_results_return,
-            requested_scope,
             search_index_names,
-            ignored_scope,
+            permission_denied_scope,
+            unavailable_scope,
             fallback_to_all,
+            scope_was_specified,
         )
 
     def _notify_search_start(self, query: str) -> None:
