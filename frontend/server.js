@@ -11,6 +11,7 @@ import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
 import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
+import { buildPublicFrontendConfig } from "./lib/frontendConfig.mjs";
 
 const { createProxyServer } = httpProxy;
 const __filename = fileURLToPath(import.meta.url);
@@ -47,8 +48,6 @@ const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
-const SHARE_BASE_URL =
-  process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 
 const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
 const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
@@ -614,7 +613,7 @@ function handleFrontendConfigApi(pathname, req, res) {
   if (pathname !== "/api/frontend-config") return false;
 
   res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify({ shareBaseUrl: SHARE_BASE_URL }));
+  res.end(JSON.stringify(buildPublicFrontendConfig(process.env)));
   return true;
 }
 
