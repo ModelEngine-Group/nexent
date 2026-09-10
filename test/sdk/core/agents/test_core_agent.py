@@ -2310,6 +2310,53 @@ class TestRunStreamRealExecution:
 
         assert agent._last_uncompressed_est == 5000
 
+    def test_step_stream_provider_overflow_callback_rebuilds_from_runtime(self):
+        """The model receives a callback that records and returns rebuilt context."""
+        module = self._load_core_agent_in_isolation()
+        agent = object.__new__(module.CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 2
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.memory.system_prompt = None
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        agent.context_runtime.chars_per_token = 1.0
+        initial_context = MagicMock(messages=[MagicMock()])
+        rebuilt_context = MagicMock(messages=[MagicMock()])
+        agent.context_runtime.prepare_step.return_value = initial_context
+        agent.context_runtime.recover_step.return_value = rebuilt_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._ephemeral_system_messages = None
+
+        response = MagicMock(content="ok", token_usage=None)
+
+        def invoke_rebuild(messages, **kwargs):
+            assert messages is initial_context.messages
+            assert kwargs["context_rebuild"]() is rebuilt_context
+            return response
+
+        agent.model = MagicMock(side_effect=invoke_rebuild)
+        action_step = MagicMock()
+
+        stream = agent._step_stream(action_step)
+        try:
+            list(stream)
+        except (ValueError, TypeError):
+            # Parsing the synthetic response is outside this callback contract test.
+            pass
+
+        agent.context_runtime.recover_step.assert_called_once_with(
+            model=agent.model,
+            memory=agent.memory,
+            current_run_start_idx=0,
+            tools=[],
+        )
+        assert module.get_monitoring_manager().record_final_context_evidence.call_count >= 2
+
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""
         module = self._load_core_agent_in_isolation()
