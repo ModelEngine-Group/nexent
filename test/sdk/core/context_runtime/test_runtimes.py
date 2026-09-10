@@ -105,7 +105,7 @@ class _ContextManager:
         context_window_tokens = 4096
 
     config = _Config()
-    hard_input_budget_tokens = 3584
+    effective_input_limit_tokens = 3584
     processing_mode = "adaptive_compact"
 
     def __init__(self):
@@ -184,7 +184,7 @@ def test_managed_runtime_is_thin_context_manager_adapter():
         assert runtime.finalize_evidence(status="error") is evidence
         assert runtime.token_threshold == 1024
         assert runtime.context_window_tokens == 4096
-        assert runtime.hard_input_budget_tokens == 3584
+        assert runtime.effective_input_limit_tokens == 3584
         assert runtime.processing_mode == "adaptive_compact"
         assert runtime.token_counts() == {"uncompressed": 1200, "compressed": 900}
         assert runtime.global_compression_stats() == {"calls": 1, "records": ["record"]}

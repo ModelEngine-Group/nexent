@@ -44,6 +44,9 @@ class ContextEvidence:
     compaction_trigger_threshold_tokens: int = 0
     compaction_target_tokens: int = 0
     compaction_attempts: int = 0
+    compressible_history_tokens: int = 0
+    non_history_tokens: int = 0
+    compaction_stop_reason: str = "not_triggered"
     raw_token_estimate: int = 0
     final_token_estimate: int = 0
     loaded_summary_unit_id: int | None = None

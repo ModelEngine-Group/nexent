@@ -511,6 +511,15 @@ class CoreAgent(CodeAgent):
         # The factory injects exactly one independent runtime.  CoreAgent has
         # no legacy/managed fallback branch and cannot assemble context itself.
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager is not None:
+            context_manager.config.history_summary_status_sink = lambda payload: (
+                self.observer.add_message(
+                    self.agent_name,
+                    ProcessType.HISTORY_SUMMARY,
+                    json.dumps(payload, ensure_ascii=False),
+                )
+            )
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.

@@ -1790,8 +1790,11 @@ def test_safe_input_budget_trace_attributes_are_prefixed():
     assert len(attrs["w2.budget_fingerprint"]) == 32
     assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
     assert attrs["w2.requested_output_tokens"] == 256
-    assert attrs["w2.soft_input_budget_tokens"] == 800
-    assert attrs["w2.hard_input_budget_tokens"] == 1000
+    assert attrs["context.effective_input_limit_tokens"] == 1000
+    assert attrs["context.compaction_trigger_threshold_tokens"] == 800
+    assert attrs["context.compaction_target_tokens"] == 600
+    assert "w2.soft_input_budget_tokens" not in attrs
+    assert "w2.hard_input_budget_tokens" not in attrs
 
 
 def test_call_without_tracker_creates_tracker(openai_model_instance):

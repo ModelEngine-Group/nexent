@@ -151,6 +151,9 @@ class ContextManager:
         history_triggered = False
         new_coverage = None
         persist_status = "not_attempted"
+        compressible_history_tokens = 0
+        non_history_tokens = raw_tokens
+        compaction_stop_reason = "not_triggered"
         self._step_local_log = []
 
         if (
@@ -167,16 +170,47 @@ class ContextManager:
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
             if turns or summary:
-                history_triggered = True
                 original_history_tokens = sum(
                     item.token_estimate for item in final_items
                     if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
                 )
+                compressible_history_tokens = original_history_tokens
+                non_history_tokens = max(0, raw_tokens - original_history_tokens)
+                if (
+                    self.config.effective_input_limit_tokens > 0
+                    and non_history_tokens >= self.config.effective_input_limit_tokens
+                ):
+                    # Even deleting all history cannot make the request fit.
+                    # Preserve the last accepted checkpoint for Provider-side
+                    # handling instead of degrading it without benefit.
+                    history_target = original_history_tokens
+                elif non_history_tokens < self._compaction_target_tokens():
+                    history_target = self._compaction_target_tokens() - non_history_tokens
+                else:
+                    # Fixed request content already makes the ideal Target
+                    # unreachable. In that case, only reclaim history needed
+                    # to stay within the Provider's Effective Input Limit.
+                    # Re-summarizing an accepted checkpoint after every small
+                    # new turn cannot reach Target and steadily degrades it.
+                    history_target = max(
+                        0,
+                        self.config.effective_input_limit_tokens - non_history_tokens,
+                    )
+                # A checkpoint with no uncovered turns is already canonical.
+                # If it is within the useful history target, fixed request
+                # content is the remaining excess and cannot be reclaimed by
+                # repeatedly summarizing the same checkpoint.
+                should_compress_history = original_history_tokens > history_target
+                if not should_compress_history:
+                    compaction_stop_reason = "history_target_reached"
+                else:
+                    history_triggered = True
+                    self._emit_history_summary_status("compacting")
                 current_summary, current_turns = summary, turns
                 last_valid = None
                 attempts = 0
                 remaining_attempts = 3 - self._run_compaction_attempts
-                for _ in range(remaining_attempts):
+                for _ in range(remaining_attempts if should_compress_history else 0):
                     self._run_compaction_attempts += 1
                     attempt = self._run_compaction_attempts
                     result = self._history_compressor.compress(current_summary, current_turns, model)
@@ -184,6 +218,7 @@ class ContextManager:
                     self._record_compression(result.records)
                     candidate = result.candidate
                     if candidate is None:
+                        compaction_stop_reason = "invalid_candidate"
                         if last_valid is None and result.fallback_turns:
                             fallback_by_id = {item.id: item for item in result.fallback_turns}
                             final_items = [fallback_by_id.get(item.id, item) for item in final_items]
@@ -191,7 +226,12 @@ class ContextManager:
                     candidate_item = candidate.as_item()
                     previous_tokens = sum(item.token_estimate for item in ([current_summary] if current_summary else []))
                     previous_tokens += sum(item.token_estimate for item in current_turns)
-                    if candidate_item.token_estimate >= previous_tokens:
+                    required_saving = max(
+                        self.config.minimum_history_reduction_tokens,
+                        math.ceil(previous_tokens * self.config.minimum_history_reduction_ratio),
+                    )
+                    if previous_tokens - candidate_item.token_estimate < required_saving:
+                        compaction_stop_reason = "insufficient_candidate_reduction"
                         break
                     last_valid = candidate
                     final_items = [
@@ -201,9 +241,16 @@ class ContextManager:
                     complete_tokens = self._estimate_items(
                         final_items, purpose_stable, purpose_dynamic, canonical_tools
                     )
+                    if candidate_item.token_estimate <= history_target:
+                        compaction_stop_reason = "history_target_reached"
+                        break
                     if complete_tokens <= self._compaction_target_tokens():
+                        compaction_stop_reason = "request_target_reached"
                         break
                     current_summary, current_turns = candidate_item, []
+                else:
+                    if should_compress_history:
+                        compaction_stop_reason = "compaction_attempts_exhausted"
                 if last_valid is not None:
                     final_history_tokens = last_valid.as_item().token_estimate
                     last_valid = replace(
@@ -223,7 +270,10 @@ class ContextManager:
                     self._pending_history_summary_event = {
                         **deepcopy(last_valid.as_item().content),
                         "persist_status": persist_status,
+                        "status": "accepted",
                     }
+                elif should_compress_history:
+                    self._emit_history_summary_status("idle")
 
             final_items = self._compact_to_compaction_target(
                 final_items,
@@ -284,6 +334,9 @@ class ContextManager:
                 compaction_trigger_threshold_tokens=self._compaction_trigger_threshold_tokens(),
                 compaction_target_tokens=self._compaction_target_tokens(),
                 compaction_attempts=self._run_compaction_attempts,
+                compressible_history_tokens=compressible_history_tokens,
+                non_history_tokens=non_history_tokens,
+                compaction_stop_reason=compaction_stop_reason,
                 raw_token_estimate=raw_tokens,
                 final_token_estimate=final_tokens,
                 loaded_summary_unit_id=(loaded.content.get("unit_id") if loaded else None),
@@ -324,6 +377,15 @@ class ContextManager:
         event = self._pending_history_summary_event
         self._pending_history_summary_event = None
         return deepcopy(event) if event is not None else None
+
+    def _emit_history_summary_status(self, status: str) -> None:
+        sink = self.config.history_summary_status_sink
+        if sink is None:
+            return
+        try:
+            sink({"status": status})
+        except Exception:
+            logger.exception("History summary status sink failed")
 
     def _compact_to_compaction_target(self, items, purpose_stable, purpose_dynamic, tools, *, model):
         result = list(items)
