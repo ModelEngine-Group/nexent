@@ -32,9 +32,7 @@ from data_process.utils import (
     get_all_task_ids_from_redis,
     get_task_info,
 )
-from data_process.utils import (
-    get_task_details as get_task_details_info,
-)
+from data_process.utils import get_task_details as get_task_details_info
 from database.attachment_db import (
     delete_file,
     file_exists,
@@ -454,8 +452,8 @@ class DataProcessService:
                         finally:
                             os.unlink(temp_file.name)
 
-        except Exception as e:
-            logger.info(f"Error loading {path}: {e!s}")
+        except Exception:
+            logger.exception("Error loading image")
             return None
 
     async def filter_important_image(self, image_url: str, positive_prompt: str = "an important image",
