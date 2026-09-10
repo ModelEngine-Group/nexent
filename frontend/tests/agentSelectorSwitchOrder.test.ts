@@ -7,17 +7,16 @@ const selectorPath = new URL(
   import.meta.url
 );
 
-test("changes the URL before initializing the selected agent", async () => {
+test("uses URL synchronization as the only selector loading path", async () => {
   const selector = await readFile(selectorPath, "utf8");
-  const initializeIndex = selector.indexOf("initialize(result.data);");
-  const replaceIndex = selector.indexOf(
-    "router.replace(`${pathname}?${nextSearchParams.toString()}`);"
-  );
+  const selectionStart = selector.indexOf("const handleSelectAgent = useCallback");
+  const selectionEnd = selector.indexOf("  useEffect(() =>", selectionStart);
+  const selectionHandler = selector.slice(selectionStart, selectionEnd);
 
-  assert.notEqual(initializeIndex, -1);
-  assert.notEqual(replaceIndex, -1);
-  assert.ok(
-    replaceIndex < initializeIndex,
-    "selector must update the URL before initializing the selected agent"
+  assert.doesNotMatch(selectionHandler, /searchAgentInfo\(/);
+  assert.doesNotMatch(selectionHandler, /initialize\(/);
+  assert.match(
+    selector,
+    /requestedAgentIdRef\.current\s*=\s*parsedAgentId;\s*if\s*\(currentAgentId\s*!==\s*parsedAgentId\)\s*\{\s*void loadAgent\(parsedAgentId\);\s*\}/
   );
 });
