@@ -538,6 +538,32 @@ class TestKnowledgeBaseSearchTool:
         assert result["scope"]["used"] == ["test_index1", "test_index2"]
         assert "No relevant information" in result["notice"]
 
+    def test_forward_reports_display_names_but_searches_internal_indices(
+        self, knowledge_base_search_tool
+    ):
+        knowledge_base_search_tool.display_name_to_index_map = {
+            "Product Docs": "test_index1",
+            "FAQ Docs": "test_index2",
+        }
+        knowledge_base_search_tool.vdb_core.hybrid_search.return_value = []
+
+        result = json.loads(knowledge_base_search_tool.forward("test query"))
+
+        knowledge_base_search_tool.vdb_core.hybrid_search.assert_called_once_with(
+            index_names=["test_index1", "test_index2"],
+            query_text="test query",
+            embedding_model=knowledge_base_search_tool.embedding_model,
+            top_k=5,
+        )
+        assert result["scope"] == {
+            "requested": ["Product Docs", "FAQ Docs"],
+            "used": ["Product Docs", "FAQ Docs"],
+            "ignored": [],
+            "adjusted": False,
+            "fallback_to_all": False,
+        }
+        assert "test_index1" not in result["notice"]
+
     def test_forward_with_custom_index_names(self, knowledge_base_search_tool):
         """Test forward method uses configured custom index names."""
         # Mock search results

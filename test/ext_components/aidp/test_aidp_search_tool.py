@@ -359,6 +359,30 @@ class TestAidpSearchToolForward:
         assert result["results"] == []
         assert result["scope"]["used"] == ["kb1", "kb2"]
 
+    def test_forward_reports_display_names_but_sends_kds_ids(self, aidp_tool):
+        aidp_tool.kds_name_to_id_map = {
+            "AIDP FAQ": "kb1",
+            "AIDP API Guide": "kb2",
+        }
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"result": []}
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        result = json.loads(
+            aidp_tool.forward("query", kds_list=["AIDP FAQ", "missing-kb"])
+        )
+
+        assert aidp_tool._mock_http_client.post.call_args.kwargs["json"]["kds_list"] == ["kb1"]
+        assert result["scope"] == {
+            "requested": ["AIDP FAQ", "missing-kb"],
+            "used": ["AIDP FAQ"],
+            "ignored": ["missing-kb"],
+            "adjusted": True,
+            "fallback_to_all": False,
+        }
+        assert "kb1" not in result["notice"]
+
     def test_forward_http_error_raises_wrapped_exception(self, aidp_tool):
         aidp_tool._mock_http_client.post.side_effect = httpx.HTTPError("boom")
 

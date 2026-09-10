@@ -577,6 +577,37 @@ class AidpSearchTool(Tool):
                 converted_names.append(name)
         return converted_names
 
+    def _convert_to_kds_names(self, kds_ids: List[str]) -> List[str]:
+        """Convert internal KDS IDs to display names for model-facing metadata."""
+        kds_map = self.kds_name_to_id_map
+        if isinstance(kds_map, FieldInfo):
+            if kds_map.default_factory is not None:
+                kds_map = kds_map.default_factory()
+            else:
+                kds_map = kds_map.default
+        if not isinstance(kds_map, dict) or not kds_map:
+            return list(kds_ids)
+
+        id_to_name = {str(kds_id): str(name) for name, kds_id in kds_map.items()}
+        return [id_to_name.get(str(kds_id), str(kds_id)) for kds_id in kds_ids]
+
+    def _build_scope_response(
+        self,
+        results: List[Dict[str, Any]],
+        requested_scope: List[str],
+        used_scope: List[str],
+        ignored_scope: List[str],
+        fallback_to_all: bool,
+    ) -> str:
+        """Serialize scope metadata with display names while searching by IDs."""
+        return build_knowledge_search_response(
+            results,
+            self._convert_to_kds_names(requested_scope),
+            self._convert_to_kds_names(used_scope),
+            self._convert_to_kds_names(ignored_scope),
+            fallback_to_all,
+        )
+
     def forward(
         self,
         query: str,
@@ -606,7 +637,7 @@ class AidpSearchTool(Tool):
             # Permission denial is a valid tool observation, not a transport
             # failure. Returning it lets the agent produce a complete answer
             # while still preventing any request to the AIDP endpoint.
-            return build_knowledge_search_response(
+            return self._build_scope_response(
                 [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
             )
 
@@ -625,14 +656,14 @@ class AidpSearchTool(Tool):
                 query,
                 search_kds_list,
             )
-            return build_knowledge_search_response(
+            return self._build_scope_response(
                 [], requested_scope, search_kds_list, ignored_scope, fallback_to_all
             )
 
         search_results_json, search_results_return, images_url = self._process_records(records)
         self.record_ops += len(search_results_return)
         self._emit_results(search_results_json, images_url)
-        return build_knowledge_search_response(
+        return self._build_scope_response(
             search_results_return,
             requested_scope,
             search_kds_list,

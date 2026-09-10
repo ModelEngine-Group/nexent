@@ -194,6 +194,38 @@ class KnowledgeBaseSearchTool(Tool):
                 converted_names.append(name)
         return converted_names
 
+    def _convert_to_display_names(self, index_names: List[str]) -> List[str]:
+        """Convert internal index names to display names for response metadata."""
+        display_map = unwrap_field_info(self.display_name_to_index_map)
+        if not isinstance(display_map, dict) or not display_map:
+            return list(index_names)
+
+        index_to_display = {
+            str(index_name): str(display_name)
+            for display_name, index_name in display_map.items()
+        }
+        return [
+            index_to_display.get(str(index_name), str(index_name))
+            for index_name in index_names
+        ]
+
+    def _build_scope_response(
+        self,
+        results: List[dict],
+        requested_scope: List[str],
+        used_scope: List[str],
+        ignored_scope: List[str],
+        fallback_to_all: bool,
+    ) -> str:
+        """Serialize scope metadata with display names while searching by indices."""
+        return build_knowledge_search_response(
+            results,
+            self._convert_to_display_names(requested_scope),
+            self._convert_to_display_names(used_scope),
+            self._convert_to_display_names(ignored_scope),
+            fallback_to_all,
+        )
+
     @staticmethod
     def _unique_names(names: List[str]) -> List[str]:
         return list(dict.fromkeys(str(name) for name in names))
@@ -272,7 +304,7 @@ class KnowledgeBaseSearchTool(Tool):
                 "knowledge bases after permission filtering",
                 query,
             )
-            return build_knowledge_search_response(
+            return self._build_scope_response(
                 [], requested_scope, search_index_names, ignored_scope, fallback_to_all
             )
 
@@ -297,7 +329,7 @@ class KnowledgeBaseSearchTool(Tool):
             effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 
         if len(search_index_names) == 0:
-            return build_knowledge_search_response(
+            return self._build_scope_response(
                 [], requested_scope, search_index_names, ignored_scope, fallback_to_all
             )
 
@@ -318,7 +350,7 @@ class KnowledgeBaseSearchTool(Tool):
                 query,
                 search_index_names,
             )
-            return build_knowledge_search_response(
+            return self._build_scope_response(
                 [], requested_scope, search_index_names, ignored_scope, fallback_to_all
             )
 
@@ -343,7 +375,7 @@ class KnowledgeBaseSearchTool(Tool):
             query=query,
         )
 
-        return build_knowledge_search_response(
+        return self._build_scope_response(
             search_results_return,
             requested_scope,
             search_index_names,
