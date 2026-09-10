@@ -20,8 +20,10 @@ import {
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import { ErrorCode } from "@/const/errorCode";
+import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
@@ -616,7 +618,11 @@ function DataConfig({ isActive }: DataConfigProps) {
       const files = Array.from(e.dataTransfer.files);
       const validFiles = files.filter(isKnowledgeBaseFileSizeValid);
       if (validFiles.length !== files.length) {
-        message.error(t("knowledgeBase.upload.fileTooLarge"));
+        message.error(
+          t("knowledgeBase.upload.fileTooLarge", {
+            limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+          })
+        );
       }
       if (validFiles.length > 0) {
         setUploadFiles(validFiles);
@@ -981,24 +987,28 @@ function DataConfig({ isActive }: DataConfigProps) {
             setNewlyCreatedKbId(null);
           });
       } catch (error) {
+        const resourceLimitMessage = getKnowledgeResourceLimitMessage(error, t);
         message.error(
-          isApiErrorCode(error, 409)
-            ? t("knowledgeBase.message.nameExists", {
-                name: newKbName.trim(),
-              })
-            : isApiErrorCode(
-                  error,
-                  ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
-                )
-              ? t("quota.personalKbUploadBlocked")
+          resourceLimitMessage ||
+            (isApiErrorCode(error, 409)
+              ? t("knowledgeBase.message.nameExists", {
+                  name: newKbName.trim(),
+                })
               : isApiErrorCode(
                     error,
-                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
                   )
-                ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
-              : isApiErrorCode(error, 413)
-                ? t("quota.uploadBlocked")
-                : t("knowledgeBase.message.createUploadError")
+                ? t("quota.personalKbUploadBlocked")
+                : isApiErrorCode(
+                      error,
+                      ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+                    )
+                  ? t(
+                      `errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`
+                    )
+                  : isApiErrorCode(error, 413)
+                    ? t("quota.uploadBlocked")
+                    : t("knowledgeBase.message.createUploadError"))
         );
         setHasClickedUpload(false);
         // Clear the waiting flag so a failed upload cannot leave the page
@@ -1040,17 +1050,19 @@ function DataConfig({ isActive }: DataConfigProps) {
         }
       );
     } catch (error) {
+      const resourceLimitMessage = getKnowledgeResourceLimitMessage(error, t);
       message.error(
-        isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
-          ? t("quota.personalKbUploadBlocked")
-          : isApiErrorCode(
-                error,
-                ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
-              )
-            ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
-          : isApiErrorCode(error, 413)
-            ? t("quota.uploadBlocked")
-            : t("document.message.uploadError")
+        resourceLimitMessage ||
+          (isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
+            ? t("quota.personalKbUploadBlocked")
+            : isApiErrorCode(
+                  error,
+                  ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
+                )
+              ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
+              : isApiErrorCode(error, 413)
+                ? t("quota.uploadBlocked")
+                : t("document.message.uploadError"))
       );
       throw error;
     }
