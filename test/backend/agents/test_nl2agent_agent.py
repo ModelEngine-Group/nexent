@@ -400,6 +400,19 @@ def test_nl2agent_prompt_resolves_batched_resource_gap_changes(language):
 
 
 @pytest.mark.parametrize(
+    ("language", "required_phrase"),
+    [("zh", "12306 购票"), ("en", "12306 ticket booking")],
+)
+def test_nl2agent_prompt_preserves_domain_actions_in_requirements(
+    language,
+    required_phrase,
+):
+    """UT-BE-NL2A-PROMPT-003: requirements cannot discard core actions."""
+
+    assert required_phrase in build_nl2agent_system_prompt(language)
+
+
+@pytest.mark.parametrize(
     (
         "language",
         "boundary_heading",

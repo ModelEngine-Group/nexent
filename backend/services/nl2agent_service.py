@@ -70,6 +70,23 @@ MAX_RECOMMENDATIONS = 5
 MAX_BINDING_CANDIDATES = 12
 STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
+GENERIC_INTERFACE_TOKENS = frozenset({
+    "body",
+    "cursor",
+    "format",
+    "input",
+    "language",
+    "limit",
+    "offset",
+    "page",
+    "prompt",
+    "query",
+    "request",
+    "response",
+    "search",
+    "string",
+    "text",
+})
 UNINSTALLED_SOURCE_PAGE_SIZE = 100
 MAX_INTERNAL_SOURCE_ITEMS = 300
 AGENT_DRAFT_FIELD_ORDER = (
@@ -778,6 +795,14 @@ def _resource_similarity(left: Any, right: Any) -> float:
     ) / 100
 
 
+def _is_generic_interface_text(value: Any) -> bool:
+    """Return whether an interface field lacks domain-specific evidence."""
+
+    normalized, _ = _resource_text_variants(value)
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    return bool(tokens) and tokens.issubset(GENERIC_INTERFACE_TOKENS)
+
+
 def _flatten_resource_text(value: Any, *, limit: int = 4000) -> list[str]:
     values: list[str] = []
 
@@ -954,13 +979,18 @@ def _score_resource_requirement(
             seen.add(normalized)
             terms.append(raw_term)
 
+    interface_values = [
+        value
+        for value in resource["interfaces"]
+        if not _is_generic_interface_text(value)
+    ]
     term_scores: list[float] = []
     for term in terms:
         term_scores.append(max(
             max((_resource_similarity(term, value) for value in resource["names"]), default=0) * 1.00,
             max((_resource_similarity(term, value) for value in resource["labels"]), default=0) * 0.95,
             max((_resource_similarity(term, value) for value in resource["descriptions"]), default=0) * 0.90,
-            max((_resource_similarity(term, value) for value in resource["interfaces"]), default=0) * 0.80,
+            max((_resource_similarity(term, value) for value in interface_values), default=0) * 0.80,
         ))
     top_scores = sorted(term_scores, reverse=True)[:3]
     capability_score = (

@@ -25,6 +25,7 @@ from services.nl2agent_service import (
     _recommended_resource,
     _rank_resource_catalog,
     _redact_installation_snapshot,
+    _score_resource_requirement,
     _resource_similarity,
     build_nl2agent_run_info,
     create_nl2agent_stream,
@@ -667,6 +668,34 @@ def test_rank_resource_catalog_preserves_weak_score_below_strong_boundary(mocker
             )
         ]
     }
+
+
+def test_generic_query_parameter_does_not_cover_train_ticket_lookup():
+    """UT-BE-NL2A-SCORE-004: input field names are not capability evidence."""
+
+    requirement = ResourceRequirement(
+        requirement_id="train_query",
+        query="查询列车车次和余票信息",
+        search_terms=[
+            "车次查询",
+            "余票查询",
+            "列车时刻",
+            "train query",
+            "ticket availability",
+        ],
+    )
+    generic_search = {
+        "names": ["tavily_search"],
+        "labels": [],
+        "descriptions": [
+            "Performs an internet search based on your query and returns results."
+        ],
+        "interfaces": ["query", "query string search query"],
+        "installed": True,
+        "quality": 1.0,
+    }
+
+    assert _score_resource_requirement(requirement, generic_search) < 0.65
 
 
 def test_initial_resolution_prefers_installed_strong_match(mocker):
