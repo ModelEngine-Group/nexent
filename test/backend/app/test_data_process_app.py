@@ -171,6 +171,12 @@ def stub_modules(monkeypatch):
     tasks_mod.process_sync = _PSync()
     sys.modules["data_process.tasks"] = tasks_mod
 
+    # The router imports this helper directly from data_process.parse_tasks.
+    # Stub that import as well so the synchronous endpoint never reaches Redis.
+    parse_tasks_mod = types.ModuleType("data_process.parse_tasks")
+    parse_tasks_mod.load_chunks_from_redis = lambda _key: [{"content": "hello"}]
+    sys.modules["data_process.parse_tasks"] = parse_tasks_mod
+
     # Keep this app-router test independent from the production Celery
     # bootstrap, which intentionally fails fast when Redis is not configured.
     app_mod = types.ModuleType("data_process.app")
@@ -208,7 +214,6 @@ def stub_modules(monkeypatch):
             return None
         return {"id": task_id, "ok": True}
     utils_mod.get_task_details = get_task_details
-    utils_mod.load_chunks_from_redis = lambda _key: [{"content": "hello"}]
     sys.modules["data_process.utils"] = utils_mod
 
     # yield to tests
