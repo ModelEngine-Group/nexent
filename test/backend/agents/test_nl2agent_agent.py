@@ -564,7 +564,7 @@ def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
 
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_prompt_uses_backend_owned_serial_resource_actions(language):
-    """UT-BE-NL2A-PROMPT-001 / UT-BE-NL2A-PROMPT-002."""
+    """UT-BE-NL2A-PROMPT-001 / 002 / 004."""
 
     prompt = build_nl2agent_system_prompt(language)
     assert "INSTALL -> suggested_resource_installation" in prompt
@@ -572,6 +572,9 @@ def test_prompt_uses_backend_owned_serial_resource_actions(language):
     assert "BIND -> installed_resource_binding" in prompt
     assert "POST_INSTALL" in prompt
     assert "POST_GAP" in prompt
+    assert "verification_required=True" in prompt
+    assert "capability_verifications" in prompt
+    assert "VERIFY" in prompt
     assert "parallel_executor" not in prompt
     assert "recommend_resources" not in prompt
     assert "installed_tool_name" not in prompt

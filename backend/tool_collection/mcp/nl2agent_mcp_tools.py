@@ -90,11 +90,13 @@ RECOMMEND_RESOURCES_DESCRIPTION = (
 )
 RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION = (
     "Resolve every structured capability requirement against installed and "
-    "installable resources. Returns backend-owned per-requirement states "
-    "(`covered`, `installable`, or `uncovered`), scored matches, safe resource "
-    "summaries, and exactly one `next_action`. Decode the JSON result and pass "
-    f"it unchanged to {NL2A_WRAPPER_NAME} using the subtype that matches "
-    "`next_action`."
+    "installable resources. With verification_required=true, first returns a "
+    "finite backend-ranked candidate set and next_action=VERIFY. Submit one "
+    "capability_verifications verdict for each strong candidate, then call this "
+    "tool again without verification_required. The final result contains "
+    "backend-owned per-requirement states (`covered`, `installable`, or "
+    "`uncovered`) and exactly one card next_action. Never invent candidate_ref "
+    "values or capabilities not present in the supplied resource summary."
 )
 NL2A_WRAPPER_DESCRIPTION = (
     "Build one NL2Agent output for the existing draft. Always pass the current "
@@ -242,13 +244,17 @@ class ResourceSearchOutput(BaseModel):
 
 ResourceResolutionPhase = Literal["INITIAL", "POST_INSTALL", "POST_GAP"]
 ResourceResolutionState = Literal["covered", "installable", "uncovered"]
-ResourceResolutionNextAction = Literal["INSTALL", "RESOLVE_GAP", "BIND"]
+ResourceResolutionNextAction = Literal[
+    "VERIFY", "INSTALL", "RESOLVE_GAP", "BIND"
+]
 
 
 class ResolveResourceRequirementsInput(SearchUninstalledResourcesInput):
     """Validated input for the unified backend-owned resource resolver."""
 
     phase: ResourceResolutionPhase
+    verification_required: bool = False
+    capability_verifications: list["CapabilityVerification"] | None = None
 
 
 class ResourceMatch(BaseModel):
@@ -267,6 +273,18 @@ class ResourceMatch(BaseModel):
         if self.strength == "weak" and not 0.50 <= self.score < 0.65:
             raise ValueError("weak matches require 0.50 <= score < 0.65")
         return self
+
+
+class CapabilityVerification(BaseModel):
+    """Model verdict for one backend-supplied requirement/candidate pair."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    requirement_id: str = Field(min_length=1)
+    candidate_ref: str = Field(min_length=1)
+    decision: Literal["accept", "reference", "reject"]
+    reason: str = Field(min_length=1, max_length=500)
+    missing_capabilities: list[str] = Field(default_factory=list, max_length=8)
 
 
 class ResourceCardSummary(BaseModel):
@@ -345,6 +363,7 @@ class ResourceResolutionOutput(BaseModel):
 
     status: Literal["success"] = "success"
     phase: ResourceResolutionPhase
+    verification_required: bool = False
     next_action: ResourceResolutionNextAction
     requirements: list[RequirementResolution]
     resources: list[ResourceCardSummary]
@@ -363,7 +382,9 @@ class ResourceResolutionOutput(BaseModel):
         if self.phase != "INITIAL" and "installable" in states:
             raise ValueError("post-install phases cannot contain installable state")
         expected_action = (
-            "INSTALL"
+            "VERIFY"
+            if self.verification_required
+            else "INSTALL"
             if self.phase == "INITIAL" and "installable" in states
             else "RESOLVE_GAP"
             if "uncovered" in states
@@ -1281,6 +1302,8 @@ async def resolve_resource_requirements(
     requirements: list[dict[str, Any]],
     phase: ResourceResolutionPhase,
     exclude_refs: list[str] | None = None,
+    verification_required: bool = False,
+    capability_verifications: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return one complete, backend-owned resource resolution decision."""
 
@@ -1289,6 +1312,8 @@ async def resolve_resource_requirements(
             requirements=requirements,
             phase=phase,
             exclude_refs=exclude_refs or [],
+            verification_required=verification_required,
+            capability_verifications=capability_verifications,
         )
     except ValidationError:
         return _dump_resource_tool_error("invalid_requirements", retryable=False)
@@ -1313,6 +1338,8 @@ async def resolve_resource_requirements(
             agent_id=resolved_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            verification_required=payload.verification_required,
+            capability_verifications=payload.capability_verifications,
         )
         result = await resolve_resource_requirements_impl(
             requirements=payload.requirements,

@@ -39,6 +39,7 @@ from services.agent_draft_permission_service import (
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
+    CapabilityVerification,
     INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
@@ -1493,8 +1494,24 @@ async def resolve_resource_requirements_impl(
     exclude_refs: list[str],
     tenant_id: str,
     user_id: str,
+    verification_required: bool = False,
+    capability_verifications: list[CapabilityVerification] | None = None,
 ) -> ResourceResolutionOutput:
     """Resolve every requirement into backend-owned coverage and next action."""
+
+    verifications = [
+        item
+        if isinstance(item, CapabilityVerification)
+        else CapabilityVerification.model_validate(item)
+        for item in capability_verifications or []
+    ]
+    verification_pairs = [
+        (item.requirement_id, item.candidate_ref) for item in verifications
+    ]
+    if len(verification_pairs) != len(set(verification_pairs)):
+        raise Nl2AgentResourceError("invalid_capability_verifications")
+    if verification_required and verifications:
+        raise Nl2AgentResourceError("invalid_capability_verifications")
 
     if phase == "INITIAL":
         installed, installable = await asyncio.gather(
@@ -1526,6 +1543,27 @@ async def resolve_resource_requirements_impl(
             },
         )
 
+    accepted_pairs = {
+        (item.requirement_id, item.candidate_ref)
+        for item in verifications
+        if item.decision == "accept"
+    }
+    available_pairs = {
+        (requirement.requirement_id, match.candidate_ref)
+        for requirement in requirements
+        for match in [
+            *installed.matches_by_requirement.get(requirement.requirement_id, []),
+            *installable.matches_by_requirement.get(requirement.requirement_id, []),
+        ]
+        if match.strength == "strong"
+    }
+    supplied_pairs = {
+        (item.requirement_id, item.candidate_ref)
+        for item in verifications
+    }
+    if verifications and not supplied_pairs <= available_pairs:
+        raise Nl2AgentResourceError("invalid_capability_verifications")
+
     resolutions: list[RequirementResolution] = []
     for requirement in requirements:
         requirement_id = requirement.requirement_id
@@ -1533,11 +1571,19 @@ async def resolve_resource_requirements_impl(
             match
             for match in installed.matches_by_requirement.get(requirement_id, [])
             if match.strength == "strong"
+            and (
+                capability_verifications is None
+                or (requirement_id, match.candidate_ref) in accepted_pairs
+            )
         ]
         installable_matches = [
             match
             for match in installable.matches_by_requirement.get(requirement_id, [])
             if match.strength == "strong"
+            and (
+                capability_verifications is None
+                or (requirement_id, match.candidate_ref) in accepted_pairs
+            )
         ]
         weak_by_ref: dict[str, ResourceMatch] = {}
         for match in [
@@ -1572,7 +1618,9 @@ async def resolve_resource_requirements_impl(
 
     states = {resolution.state for resolution in resolutions}
     next_action = (
-        "INSTALL"
+        "VERIFY"
+        if verification_required
+        else "INSTALL"
         if phase == "INITIAL" and "installable" in states
         else "RESOLVE_GAP"
         if "uncovered" in states
@@ -1594,6 +1642,7 @@ async def resolve_resource_requirements_impl(
     }
     return ResourceResolutionOutput(
         phase=phase,
+        verification_required=verification_required,
         next_action=next_action,
         requirements=resolutions,
         resources=_resource_resolution_summaries(

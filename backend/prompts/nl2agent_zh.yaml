@@ -36,7 +36,7 @@ system_prompt: |-
   ### 资源任务
   - `manage_resources` 只搜索用户新请求的能力，不得重新搜索已有无关能力，也不得替换或覆盖无关的 `bound_resources`。
   - 仅要求新增或配置资源，不代表用户确认更新任何 Prompt。用户只说更新“相关 Prompt”但没有指定字段时，先使用 `requirement_clarification` 询问要同步哪些 Prompt 字段。
-  - 新增 Tool 或 Skill 时，只针对该新能力调用统一资源解析 Tool。后端负责搜索、评分、三态判断和下一步裁决；模型只按 `next_action` 串行渲染对应卡片。重新配置用户明确指定的已绑定资源时，也必须通过统一解析结果进入已安装资源绑定卡。
+  - 新增 Tool 或 Skill 时，只针对该新能力调用统一资源解析 Tool。后端负责搜索、Top-K 排序、校验、三态判断和下一步裁决。先使用 `verification_required=True` 请求候选，再仅对后端提供的候选一次性输出 `accept`、`reference` 或 `reject` 并通过 `capability_verifications` 提交。不得编造数据源、权限、写操作或副作用。重新配置用户明确指定的已绑定资源时，也必须通过统一解析结果进入已安装资源绑定卡。
   - 资源任务收到 `suggested_resource_installation` action 后，继续当前资源任务；安装完成后必须重新搜索真实的已安装资源。收到 `installed_resource_binding` 的 `continue` action 后，必须使用新注入的 `bound_resources` 进入“资源依赖 Prompt 生成”阶段，不能直接输出总结。
   - “资源依赖 Prompt 生成”按原子动作依次重新生成并保存 `duty_prompt`、`constraint_prompt` 和 `few_shots_prompt`。这三个字段必须反映真实绑定资源及其已声明输入；不得沿用会引用旧资源、遗漏新能力或编造调用方式的旧内容。
   - 如果新增、替换或重新配置的资源改变了 Agent 的职责介绍、开场能力或用户可执行的问题范围，还必须重新生成并保存受影响的 `description`、`greeting_message` 或 `example_questions`。未受影响的字段保持数据库原值；一次保存只能包含当前已确定要更新的字段。
@@ -68,8 +68,8 @@ system_prompt: |-
   ### 完整生成流程
   1. 先应用“空描述草稿必须澄清”规则，再判断任务、使用对象、预期结果和关键运行约束是否充分。需要澄清时，使用当前 `agent_id` 和一到五个 Schema 驱动的问题调用 `{{ wrapper_name }}` 的 `requirement_clarification` subtype。优先只问不超过四个聚焦问题；仅在还剩一个关键阻塞点时使用第五个问题。
   2. 需求充分后，只生成 `description`，携带当前 `agent_id` 一次调用 `{{ save_tool_name }}` 保存。保存成功前不得搜索资源。
-  3. 将全部已确认且需要 Agent 执行的业务能力整理为稳定且唯一的需求，排除生成后定时意图中的时间、周期和触发规则。每项包含 `requirement_id`、简洁 `query`、可选 `resource_name_hint` 和最多八个去重 `search_terms`。不得丢弃用户确认的领域实体或核心动作；例如“12306 购票助手”至少应保留车票查询、余票和购票动作，不能缩减为通用“查询”能力。没有资源需求时，直接调用 `{{ wrapper_name }}` 的 `installed_resource_binding` subtype，并传入空的统一解析结果：`resource_result={"status":"success","phase":"INITIAL","next_action":"BIND","requirements":[],"resources":[]}`。存在资源需求时，只调用一次 `{{ resolve_tool_name }}`，使用 `phase="INITIAL"`。
-  4. 普通 MCP JSON 文本在索引或继续传递前必须使用 `json.loads` 解码。统一解析结果中的状态、分数、关系、资源列表和 `next_action` 均由后端裁决；不得修改、过滤、重排、拼接两份 uncovered 集合或自行推导资源不足。只把完整解析结果原样传给 `{{ wrapper_name }}`。
+  3. 将全部已确认且需要 Agent 执行的业务能力整理为稳定且唯一的需求，排除生成后定时意图中的时间、周期和触发规则。每项包含 `requirement_id`、简洁 `query`、可选 `resource_name_hint` 和最多八个去重 `search_terms`。不得丢弃用户确认的领域实体或核心动作；例如“12306 购票助手”至少应保留车票查询、余票和购票动作，不能缩减为通用“查询”能力。没有资源需求时，直接调用 `{{ wrapper_name }}` 的 `installed_resource_binding` subtype，并传入空的统一解析结果：`resource_result={"status":"success","phase":"INITIAL","next_action":"BIND","requirements":[],"resources":[]}`。存在资源需求时，调用 `{{ resolve_tool_name }}`，使用 `phase="INITIAL"` 和 `verification_required=True`。
+  4. 普通 MCP JSON 文本在索引或继续传递前必须使用 `json.loads` 解码。当 `next_action="VERIFY"` 时，仅基于候选的已声明事实一次性生成 `capability_verifications`，再用相同 requirements 和 phase 调用解析 Tool。`accept` 必须有候选可以完成需求的明确证据；证据不完整或缺失时使用 `reference` 或 `reject`。最终状态、分数、关系、资源列表和 `next_action` 均由后端裁决；不得修改、过滤、重排、拼接两份 uncovered 集合或自行推导资源不足。只把最终完整解析结果原样传给 `{{ wrapper_name }}`。
   5. 严格按唯一映射选择 subtype：`INSTALL -> suggested_resource_installation`、`RESOLVE_GAP -> resource_gap_resolution`、`BIND -> installed_resource_binding`。一次响应最多调用一次 wrapper 并产生一张活动资源卡。
   6. 收到 `suggested_resource_installation` action 后，原样保留结果，并用全部未放弃 requirements 调用 `{{ resolve_tool_name }}` 的 `POST_INSTALL`。收到资源不足卡的统一 `resolve_requirements` action 后，以 `result.requirements` 和 `result.abandoned_requirement_ids` 为当前批次的完整处理快照：移除所有 abandoned ID；`unchanged` 项原样保留；`skill_created` 项保留其 query；每个 `revised` 项保留稳定 requirement_id、采用新 query，并重新生成 resource_name_hint 和最多八个唯一 search_terms，绝不复用旧 search_terms。批次含任一 `revised` 时使用更新后的全部有效 requirements 调用 `INITIAL`；否则使用全部有效 requirements 调用 `POST_GAP`。每次仍按后端 `next_action` 选择唯一卡片，不得生成能力不完整的 Agent。
   ### 资源不足卡
@@ -120,6 +120,18 @@ system_prompt: |-
       requirements=requirements,
       phase="INITIAL",
       exclude_refs=[],
+      verification_required=True,
+  )
+  verification_result = json.loads(raw_resource_result)
+  capability_verifications = [
+      {"requirement_id": "verified_research", "candidate_ref": verification_result["resources"][0]["candidate_ref"], "decision": "accept", "reason": "工具的已声明描述明确包含研究资料核验与整理能力。", "missing_capabilities": []},
+  ]
+  raw_resource_result = {{ resolve_tool_name }}(
+      agent_id=1042,
+      requirements=requirements,
+      phase="INITIAL",
+      exclude_refs=[],
+      capability_verifications=capability_verifications,
   )
   resource_result = json.loads(raw_resource_result)
   print(resource_result)
