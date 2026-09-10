@@ -419,6 +419,7 @@ Configurable CAS values:
 | `nexent-common.config.cas.heartbeatUrl` | `CAS_HEARTBEAT_URL` | Activity-driven CAS Server heartbeat GET URL; empty disables heartbeat |
 | `nexent-common.config.cas.heartbeatIntervalSeconds` | `CAS_HEARTBEAT_INTERVAL_SECONDS` | Minimum heartbeat interval for active CAS users, default 300 seconds |
 | `nexent-common.config.cas.heartbeatCookieName` | `CAS_HEARTBEAT_COOKIE_NAME` | Readable browser Cookie copied to the `X-Auth-Token` heartbeat header |
+| `nexent-common.config.cas.renewEnabled` | `CAS_RENEW_ENABLED` | Enable automatic browser iframe renewal; default `"false"`, `"true"` enables it |
 | `nexent-common.config.cas.renewBeforeSeconds` | `CAS_RENEW_BEFORE_SECONDS` | Trigger silent renewal within this many seconds before expiry |
 | `nexent-common.config.cas.renewTimeoutSeconds` | `CAS_RENEW_TIMEOUT_SECONDS` | Silent renewal timeout |
 | `nexent-common.config.cas.syntheticEmailDomain` | `CAS_SYNTHETIC_EMAIL_DOMAIN` | Domain used when CAS does not return an email |
@@ -427,6 +428,8 @@ Configurable CAS values:
 | `nexent-common.config.cas.caBundle` | `CAS_CA_BUNDLE` | Custom CA bundle path |
 
 CAS heartbeat runs only for CAS users with a valid local session and visible-page activity. The first activity sends a GET immediately, then browser tabs share the configured minimum interval. A readable configured Cookie is sent as `X-Auth-Token: <cookie-name>=<cookie-value>`; if it cannot be read, the request is sent without the header. Because the browser calls the heartbeat URL directly, the endpoint must allow the Nexent origin, GET, OPTIONS, and `X-Auth-Token` through CORS. Heartbeat failures do not log the user out or refresh the local JWT.
+
+Automatic renewal is disabled by default. To enable it, set `nexent-common.config.cas.renewEnabled` to the string `"true"`; when using the deployment script, set `CAS_RENEW_ENABLED=true` in `deploy/env/.env`. After upgrading the frontend and backend, apply the Helm configuration, wait for the backend rollout, and reload open browser pages. Set `"false"` to disable renewal. CAS login, activity heartbeat, renewal endpoints, and session expiry handling remain unchanged; `force` mode still redirects to login and reloads the page at expiry.
 
 Common CAS URLs:
 
@@ -481,6 +484,7 @@ nexent-common:
       heartbeatUrl: "https://<ModelEngine IP>:5443/<heartbeat-path>"
       heartbeatIntervalSeconds: 300
       heartbeatCookieName: "<cookie-name>"
+      renewEnabled: "false"
       renewBeforeSeconds: 300
       renewTimeoutSeconds: 10
       syntheticEmailDomain: "cas.local"
