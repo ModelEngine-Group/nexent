@@ -105,13 +105,11 @@ delete from nexent.user_tenant_t where user_id = 'your_user_id';
 
 ### Offline Deployment
 
-When the target host cannot access public image registries, download a prebuilt offline deployment package from GitHub Actions:
+When the target host cannot access public image registries, download a prebuilt offline deployment package from Nexent Releases:
 
-1. Sign in to GitHub and open [Build Offline Deployment Package](https://github.com/ModelEngine-Group/nexent/actions/workflows/build-offline-package.yml).
-2. Select a successful run for the required version and download the artifact matching the server architecture from **Artifacts** at the bottom of the run page.
+1. Open [Nexent Releases](https://github.com/ModelEngine-Group/nexent/releases).
+2. Find the required version in the release list and download the archive matching the server architecture from that release's **Assets** (Versions v2.6.0 and later support this offline deployment method).
 3. Download `nexent-<version>-amd64.zip` for AMD64 or `nexent-<version>-arm64.zip` for ARM64.
-
-GitHub Actions artifacts are retained for 30 days. If the required artifact has expired, ask a maintainer to rerun the workflow.
 
 Copy the downloaded archive to the offline host and extract it. The downloaded artifact contains the package files directly, with no nested archive:
 
