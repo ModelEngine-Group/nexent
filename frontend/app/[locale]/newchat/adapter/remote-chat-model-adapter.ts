@@ -113,7 +113,7 @@ export interface Nl2AgentResourceGapResolutionAction {
         }
       | {
           requirement_id: string;
-          resolution: "revised" | "skill_created";
+          resolution: "revised" | "skill_created" | "tool_configured";
           query: string;
         }
     >;

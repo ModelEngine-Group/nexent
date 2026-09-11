@@ -9,6 +9,7 @@ import {
   PlusCircle,
   RotateCcw,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -21,7 +22,9 @@ import {
   canSubmitResourceGapResolution,
   cancelResourceGapRequirementEdit,
   createResourceGapRequirementStates,
+  getResourceGapRequirementActions,
   markResourceGapSkillCreated,
+  markResourceGapToolConfigured,
   restoreResourceGapRequirement,
   saveResourceGapRequirementEdit,
   startResourceGapRequirementEdit,
@@ -47,12 +50,16 @@ export const ResourceGapResolutionCard: FC<{
     {}
   );
   const completedRequestIds = useRef<Set<number>>(new Set());
+  const completedMcpRequestIds = useRef<Set<number>>(new Set());
   const {
     registerCard,
     submitCard,
     isCardInteractive,
     requestSkillCreation,
     skillCreationRequest,
+    requestMcpConfiguration,
+    mcpConfigurationRequest,
+    requestConfigFocus,
   } = useNl2AgentFlow();
 
   useEffect(() => {
@@ -103,10 +110,32 @@ export const ResourceGapResolutionCard: FC<{
     );
   }, [cardKey, payload.agent_id, skillCreationRequest]);
 
+  useEffect(() => {
+    if (
+      !mcpConfigurationRequest?.completed ||
+      mcpConfigurationRequest.agentId !== payload.agent_id ||
+      mcpConfigurationRequest.cardKey !== cardKey ||
+      completedMcpRequestIds.current.has(mcpConfigurationRequest.requestId)
+    ) {
+      return;
+    }
+    completedMcpRequestIds.current.add(mcpConfigurationRequest.requestId);
+    setStates((current) =>
+      markResourceGapToolConfigured(
+        current,
+        mcpConfigurationRequest.requirementId
+      )
+    );
+  }, [cardKey, mcpConfigurationRequest, payload.agent_id]);
+
   const isSkillCreationPending =
     skillCreationRequest?.agentId === payload.agent_id &&
     skillCreationRequest.cardKey === cardKey &&
     !skillCreationRequest.completed;
+  const isMcpConfigurationPending =
+    mcpConfigurationRequest?.agentId === payload.agent_id &&
+    mcpConfigurationRequest.cardKey === cardKey &&
+    !mcpConfigurationRequest.completed;
 
   return (
     <section className="my-4 overflow-hidden rounded-lg border border-amber-200 bg-amber-50/30 shadow-sm">
@@ -132,6 +161,10 @@ export const ResourceGapResolutionCard: FC<{
               const isAbandoned = state.status === "abandoned";
               const isEditing = state.status === "editing";
               const isSkillCreated = state.status === "skill_created";
+              const isToolConfigured = state.status === "tool_configured";
+              const availableActions = getResourceGapRequirementActions(
+                state.status
+              );
               return (
                 <li
                   key={requirement.requirement_id}
@@ -141,7 +174,7 @@ export const ResourceGapResolutionCard: FC<{
                       : "border-border"
                   }`}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       {isEditing ? (
                         <div className="flex flex-wrap items-center gap-2">
@@ -180,11 +213,9 @@ export const ResourceGapResolutionCard: FC<{
                                 )
                               );
                               setEditingValues((current) => {
-                                const {
-                                  [requirement.requirement_id]: _,
-                                  ...rest
-                                } = current;
-                                return rest;
+                                const next = { ...current };
+                                delete next[requirement.requirement_id];
+                                return next;
                               });
                             }}
                           >
@@ -202,11 +233,9 @@ export const ResourceGapResolutionCard: FC<{
                                 )
                               );
                               setEditingValues((current) => {
-                                const {
-                                  [requirement.requirement_id]: _,
-                                  ...rest
-                                } = current;
-                                return rest;
+                                const next = { ...current };
+                                delete next[requirement.requirement_id];
+                                return next;
                               });
                             }}
                           >
@@ -240,10 +269,19 @@ export const ResourceGapResolutionCard: FC<{
                           )}
                         </p>
                       )}
+                      {isToolConfigured && (
+                        <p className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
+                          <CheckCircle2 className="size-3.5" />
+                          {t(
+                            "nl2agent.resourceGap.toolConfigured",
+                            "Tool configured"
+                          )}
+                        </p>
+                      )}
                     </div>
                     {!isEditing && (
-                      <div className="flex flex-wrap gap-1">
-                        {isAbandoned ? (
+                      <div className="flex shrink-0 gap-1">
+                        {availableActions.requirement.includes("restore") ? (
                           <Button
                             type="button"
                             size="sm"
@@ -261,31 +299,18 @@ export const ResourceGapResolutionCard: FC<{
                             <RotateCcw className="mr-1 size-4" />
                             {t("nl2agent.resourceGap.restore", "Undo")}
                           </Button>
-                        ) : !isSkillCreated ? (
+                        ) : availableActions.requirement.length > 0 ? (
                           <>
                             <Button
                               type="button"
-                              size="sm"
-                              disabled={isLocked || isSkillCreationPending}
-                              onClick={() =>
-                                requestSkillCreation(
-                                  payload.agent_id,
-                                  cardKey,
-                                  requirement.requirement_id
-                                )
-                              }
-                            >
-                              <PlusCircle className="mr-1 size-4" />
-                              {t(
-                                "nl2agent.resourceGap.createSkill",
-                                "Create Skill"
-                              )}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
+                              size="icon"
                               variant="outline"
+                              className="size-8"
                               disabled={isLocked}
+                              title={t(
+                                "nl2agent.resourceGap.revise",
+                                "Revise requirement"
+                              )}
                               onClick={() => {
                                 setStates((current) =>
                                   startResourceGapRequirementEdit(
@@ -309,9 +334,14 @@ export const ResourceGapResolutionCard: FC<{
                             </Button>
                             <Button
                               type="button"
-                              size="sm"
+                              size="icon"
                               variant="ghost"
+                              className="size-8"
                               disabled={isLocked}
+                              title={t(
+                                "nl2agent.resourceGap.delete",
+                                "Delete requirement"
+                              )}
                               onClick={() =>
                                 setStates((current) =>
                                   abandonResourceGapRequirement(
@@ -334,6 +364,61 @@ export const ResourceGapResolutionCard: FC<{
                       </div>
                     )}
                   </div>
+                  {availableActions.solutions.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          isLocked ||
+                          isSkillCreationPending ||
+                          isMcpConfigurationPending
+                        }
+                        onClick={() => {
+                          requestConfigFocus(payload.agent_id, {
+                            section: "tools_skills",
+                            capabilityTab: "skills",
+                          });
+                          requestSkillCreation(
+                            payload.agent_id,
+                            cardKey,
+                            requirement.requirement_id
+                          );
+                        }}
+                      >
+                        <PlusCircle className="mr-1 size-4" />
+                        {t("nl2agent.resourceGap.createSkill", "Create Skill")}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          isLocked ||
+                          isSkillCreationPending ||
+                          isMcpConfigurationPending
+                        }
+                        onClick={() => {
+                          requestConfigFocus(payload.agent_id, {
+                            section: "tools_skills",
+                            capabilityTab: "tools",
+                          });
+                          requestMcpConfiguration(
+                            payload.agent_id,
+                            cardKey,
+                            requirement.requirement_id
+                          );
+                        }}
+                      >
+                        <Wrench className="mr-1 size-4" />
+                        {t(
+                          "nl2agent.resourceGap.configureTool",
+                          "Configure tool"
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </li>
               );
             })()

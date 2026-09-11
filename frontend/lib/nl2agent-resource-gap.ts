@@ -6,13 +6,38 @@ export interface ResourceGapRequirement {
 }
 
 export type ResourceGapRequirementStatus =
-  "unchanged" | "editing" | "revised" | "abandoned" | "skill_created";
+  | "unchanged"
+  | "editing"
+  | "revised"
+  | "abandoned"
+  | "skill_created"
+  | "tool_configured";
 
 export interface ResourceGapRequirementState {
   status: ResourceGapRequirementStatus;
   query: string;
   statusBeforeEditing?: "unchanged" | "revised";
   statusBeforeAbandoning?: "unchanged" | "revised";
+}
+
+export interface ResourceGapRequirementActions {
+  requirement: Array<"edit" | "delete" | "restore">;
+  solutions: Array<"create_skill" | "configure_tool">;
+}
+
+export function getResourceGapRequirementActions(
+  status: ResourceGapRequirementStatus
+): ResourceGapRequirementActions {
+  if (status === "abandoned") {
+    return { requirement: ["restore"], solutions: [] };
+  }
+  if (status === "unchanged" || status === "revised") {
+    return {
+      requirement: ["edit", "delete"],
+      solutions: ["create_skill", "configure_tool"],
+    };
+  }
+  return { requirement: [], solutions: [] };
 }
 
 export type ResourceGapRequirementStates = Record<
@@ -123,6 +148,17 @@ export function markResourceGapSkillCreated(
   });
 }
 
+export function markResourceGapToolConfigured(
+  states: ResourceGapRequirementStates,
+  requirementId: string
+): ResourceGapRequirementStates {
+  return updateRequirementState(states, requirementId, (state) => {
+    if (state.status !== "unchanged" && state.status !== "revised")
+      return state;
+    return { status: "tool_configured", query: state.query };
+  });
+}
+
 export function canSubmitResourceGapResolution(
   states: ResourceGapRequirementStates
 ): boolean {
@@ -147,6 +183,7 @@ export function buildResourceGapResolutionResult(
       }
     | { requirement_id: string; resolution: "revised"; query: string }
     | { requirement_id: string; resolution: "skill_created"; query: string }
+    | { requirement_id: string; resolution: "tool_configured"; query: string }
   >;
   abandoned_requirement_ids: string[];
 } {
@@ -161,6 +198,7 @@ export function buildResourceGapResolutionResult(
         }
       | { requirement_id: string; resolution: "revised"; query: string }
       | { requirement_id: string; resolution: "skill_created"; query: string }
+      | { requirement_id: string; resolution: "tool_configured"; query: string }
     >,
     abandoned_requirement_ids: [] as string[],
   };
@@ -172,7 +210,11 @@ export function buildResourceGapResolutionResult(
       result.abandoned_requirement_ids.push(requirement.requirement_id);
       continue;
     }
-    if (state.status === "revised" || state.status === "skill_created") {
+    if (
+      state.status === "revised" ||
+      state.status === "skill_created" ||
+      state.status === "tool_configured"
+    ) {
       result.requirements.push({
         requirement_id: requirement.requirement_id,
         resolution: state.status,

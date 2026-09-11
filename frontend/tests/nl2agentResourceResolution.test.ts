@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createRequire } from "node:module";
 
@@ -12,11 +13,21 @@ const {
   buildResourceGapResolutionResult,
   canSubmitResourceGapResolution,
   createResourceGapRequirementStates,
+  getResourceGapRequirementActions,
   markResourceGapSkillCreated,
+  markResourceGapToolConfigured,
   restoreResourceGapRequirement,
   saveResourceGapRequirementEdit,
   startResourceGapRequirementEdit,
 } = require("../lib/nl2agent-resource-gap.ts");
+const {
+  completeMcpConfigurationRequest,
+  createMcpConfigurationRequest,
+} = require("../lib/nl2agent-mcp-configuration.ts");
+const resourceGapCardPath = new URL(
+  "../app/[locale]/newchat/ui/resource-gap-resolution-card.tsx",
+  import.meta.url
+);
 
 test("v2 installation cards reject configuration and installation details", () => {
   assert.equal(
@@ -135,4 +146,67 @@ test("resource-gap resolution blocks unfinished edits and restores deleted chang
 
   assert.equal(states.inventory.status, "revised");
   assert.equal(states.inventory.query, "更新库存查询");
+});
+
+test("UT-FE-NL2A-GAP-009/010: configured tools wait for one safe batch action", () => {
+  let states = createResourceGapRequirementStates(gapRequirements);
+  states = markResourceGapToolConfigured(states, "inventory");
+
+  assert.equal(states.inventory.status, "tool_configured");
+  assert.equal(canSubmitResourceGapResolution(states), true);
+
+  const result = buildResourceGapResolutionResult(gapRequirements, states);
+  assert.deepEqual(result.requirements[0], {
+    requirement_id: "inventory",
+    resolution: "tool_configured",
+    query: "查询库存",
+  });
+  assert.equal("config" in result.requirements[0], false);
+});
+
+test("UT-FE-NL2A-GAP-008: MCP configuration completion is request-scoped", () => {
+  const first = createMcpConfigurationRequest(null, 42, "card-a", "inventory");
+  const second = createMcpConfigurationRequest(first, 42, "card-b", "email");
+
+  assert.deepEqual(second, {
+    agentId: 42,
+    cardKey: "card-b",
+    requirementId: "email",
+    requestId: 2,
+    completed: false,
+  });
+  assert.equal(completeMcpConfigurationRequest(second, 7, 2), second);
+  assert.equal(completeMcpConfigurationRequest(second, 42, 1), second);
+  assert.deepEqual(completeMcpConfigurationRequest(second, 42, 2), {
+    ...second,
+    completed: true,
+  });
+});
+
+test("UT-FE-NL2A-GAP-007: requirement and solution rows expose separate actions", () => {
+  assert.deepEqual(getResourceGapRequirementActions("unchanged"), {
+    requirement: ["edit", "delete"],
+    solutions: ["create_skill", "configure_tool"],
+  });
+  assert.deepEqual(getResourceGapRequirementActions("abandoned"), {
+    requirement: ["restore"],
+    solutions: [],
+  });
+  assert.deepEqual(getResourceGapRequirementActions("tool_configured"), {
+    requirement: [],
+    solutions: [],
+  });
+});
+
+test("UT-FE-NL2A-GAP-008: solution actions mount their modal owners before requesting", async () => {
+  const card = await readFile(resourceGapCardPath, "utf8");
+
+  assert.match(
+    card,
+    /requestConfigFocus\(payload\.agent_id,\s*\{\s*section: "tools_skills",\s*capabilityTab: "skills",?\s*\}\s*\);\s*requestSkillCreation\(/
+  );
+  assert.match(
+    card,
+    /requestConfigFocus\(payload\.agent_id,\s*\{\s*section: "tools_skills",\s*capabilityTab: "tools",?\s*\}\s*\);\s*requestMcpConfiguration\(/
+  );
 });

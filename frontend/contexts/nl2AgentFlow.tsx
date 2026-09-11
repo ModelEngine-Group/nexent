@@ -10,6 +10,12 @@ import {
   type PropsWithChildren,
 } from "react";
 
+import {
+  completeMcpConfigurationRequest,
+  createMcpConfigurationRequest,
+  type McpConfigurationRequest,
+} from "@/lib/nl2agent-mcp-configuration";
+
 export type Nl2AgentFlowPhase =
   | "idle"
   | "clarifying"
@@ -58,6 +64,7 @@ interface Nl2AgentFlowState {
   agentId: number | null;
   activeCard: ActiveNl2AgentCard | null;
   skillCreationRequest: SkillCreationRequest | null;
+  mcpConfigurationRequest: McpConfigurationRequest | null;
   submittedCardKeys: ReadonlySet<string>;
   failedPromptFields: readonly string[];
   configFocusRequest: Nl2AgentConfigFocusRequest | null;
@@ -72,8 +79,20 @@ type Nl2AgentFlowAction =
   | { type: "reset"; agentId: number | null }
   | { type: "register_card"; card: ActiveNl2AgentCard }
   | { type: "submit_card"; cardKey: string }
-  | { type: "request_skill_creation"; agentId: number; cardKey: string; requirementId: string }
+  | {
+      type: "request_skill_creation";
+      agentId: number;
+      cardKey: string;
+      requirementId: string;
+    }
   | { type: "complete_skill_creation"; agentId: number; requestId: number }
+  | {
+      type: "request_mcp_configuration";
+      agentId: number;
+      cardKey: string;
+      requirementId: string;
+    }
+  | { type: "complete_mcp_configuration"; agentId: number; requestId: number }
   | { type: "resources_bound"; agentId: number }
   | { type: "prompt_generation_failed"; agentId: number; fields: string[] }
   | { type: "generation_stopped"; agentId: number }
@@ -92,6 +111,7 @@ const INITIAL_STATE: Nl2AgentFlowState = {
   agentId: null,
   activeCard: null,
   skillCreationRequest: null,
+  mcpConfigurationRequest: null,
   submittedCardKeys: new Set(),
   failedPromptFields: [],
   configFocusRequest: null,
@@ -125,9 +145,9 @@ function reducer(
               ? "installing"
               : action.card.subtype === "resource_gap_resolution"
                 ? "resolving_gap"
-              : action.card.subtype === "installed_resource_binding"
-                ? "binding"
-                : state.phase,
+                : action.card.subtype === "installed_resource_binding"
+                  ? "binding"
+                  : state.phase,
         activeCard: action.card,
         isFormLocked: state.agentId !== null || state.isFormLocked,
       };
@@ -165,6 +185,25 @@ function reducer(
           ...state.skillCreationRequest,
           completed: true,
         },
+      };
+    case "request_mcp_configuration":
+      return {
+        ...state,
+        mcpConfigurationRequest: createMcpConfigurationRequest(
+          state.mcpConfigurationRequest,
+          action.agentId,
+          action.cardKey,
+          action.requirementId
+        ),
+      };
+    case "complete_mcp_configuration":
+      return {
+        ...state,
+        mcpConfigurationRequest: completeMcpConfigurationRequest(
+          state.mcpConfigurationRequest,
+          action.agentId,
+          action.requestId
+        ),
       };
     case "resources_bound":
       return {
@@ -253,8 +292,18 @@ interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   resetFlow: (agentId?: number | null) => void;
   registerCard: (key: string, subtype: string) => void;
   submitCard: (key: string) => void;
-  requestSkillCreation: (agentId: number, cardKey: string, requirementId: string) => void;
+  requestSkillCreation: (
+    agentId: number,
+    cardKey: string,
+    requirementId: string
+  ) => void;
   completeSkillCreation: (agentId: number, requestId: number) => void;
+  requestMcpConfiguration: (
+    agentId: number,
+    cardKey: string,
+    requirementId: string
+  ) => void;
+  completeMcpConfiguration: (agentId: number, requestId: number) => void;
   markResourcesBound: (agentId: number) => void;
   markPromptGenerationFailed: (agentId: number, fields: string[]) => void;
   markGenerationStopped: (agentId: number) => void;
@@ -290,12 +339,32 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
   );
   const requestSkillCreation = useCallback(
     (agentId: number, cardKey: string, requirementId: string) =>
-      dispatch({ type: "request_skill_creation", agentId, cardKey, requirementId }),
+      dispatch({
+        type: "request_skill_creation",
+        agentId,
+        cardKey,
+        requirementId,
+      }),
     []
   );
   const completeSkillCreation = useCallback(
     (agentId: number, requestId: number) =>
       dispatch({ type: "complete_skill_creation", agentId, requestId }),
+    []
+  );
+  const requestMcpConfiguration = useCallback(
+    (agentId: number, cardKey: string, requirementId: string) =>
+      dispatch({
+        type: "request_mcp_configuration",
+        agentId,
+        cardKey,
+        requirementId,
+      }),
+    []
+  );
+  const completeMcpConfiguration = useCallback(
+    (agentId: number, requestId: number) =>
+      dispatch({ type: "complete_mcp_configuration", agentId, requestId }),
     []
   );
   const markResourcesBound = useCallback(
@@ -345,6 +414,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       submitCard,
       requestSkillCreation,
       completeSkillCreation,
+      requestMcpConfiguration,
+      completeMcpConfiguration,
       markResourcesBound,
       markPromptGenerationFailed,
       markGenerationStopped,
@@ -369,6 +440,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       resetFlow,
       requestSkillCreation,
       completeSkillCreation,
+      requestMcpConfiguration,
+      completeMcpConfiguration,
       state,
       submitCard,
     ]

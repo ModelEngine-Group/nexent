@@ -399,6 +399,18 @@ def test_nl2agent_prompt_resolves_batched_resource_gap_changes(language):
     assert "POST_GAP" in prompt
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_nl2agent_prompt_researches_after_tool_configuration(language):
+    """UT-BE-NL2A-ACTION-003: tool configuration is not coverage proof."""
+
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert "tool_configured" in prompt
+    assert "POST_GAP" in prompt
+    assert "URL" in prompt
+    assert "Token" in prompt
+
+
 @pytest.mark.parametrize(
     ("language", "required_phrase"),
     [("zh", "12306 购票"), ("en", "12306 ticket booking")],

@@ -26,12 +26,43 @@ export function AgentToolCapability() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
+  const { mcpConfigurationRequest, completeMcpConfiguration } =
+    useNl2AgentFlow();
   const isReadOnly = useAgentReadOnly();
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
   const [labelModalOpen, setLabelModalOpen] = useState(false);
+  const openedMcpConfigurationRequestId = useRef<number | null>(null);
   const { invalidate, availableTools } = useToolList();
+
+  useEffect(() => {
+    if (
+      !mcpConfigurationRequest ||
+      mcpConfigurationRequest.completed ||
+      mcpConfigurationRequest.agentId !== currentAgentId ||
+      openedMcpConfigurationRequestId.current ===
+        mcpConfigurationRequest.requestId
+    ) {
+      return;
+    }
+    openedMcpConfigurationRequestId.current = mcpConfigurationRequest.requestId;
+    setIsMcpModalOpen(true);
+  }, [currentAgentId, mcpConfigurationRequest]);
+
+  const handleCloseMcpModal = useCallback(() => {
+    setIsMcpModalOpen(false);
+    if (
+      mcpConfigurationRequest &&
+      mcpConfigurationRequest.agentId === currentAgentId &&
+      !mcpConfigurationRequest.completed
+    ) {
+      completeMcpConfiguration(
+        mcpConfigurationRequest.agentId,
+        mcpConfigurationRequest.requestId
+      );
+    }
+  }, [completeMcpConfiguration, currentAgentId, mcpConfigurationRequest]);
 
   const handleRefreshTools = useCallback(async () => {
     setIsRefreshing(true);
@@ -90,10 +121,7 @@ export function AgentToolCapability() {
         </Col>
       </Row>
       <ToolManagement currentAgentId={currentAgentId ?? undefined} />
-      <McpConfigModal
-        visible={isMcpModalOpen}
-        onCancel={() => setIsMcpModalOpen(false)}
-      />
+      <McpConfigModal visible={isMcpModalOpen} onCancel={handleCloseMcpModal} />
       <SelectToolsDialog
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
