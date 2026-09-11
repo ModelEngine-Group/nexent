@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+import { A2UIRenderer, parseA2UIMessage, mightContainA2UI } from '@/lib/a2ui';
+
 import { ScrollArea } from "@/components/ui/scrollArea";
 import { Button } from "antd";
 import { Checkbox } from "antd";
@@ -181,6 +183,35 @@ export function ChatStreamMain({
       ? formatMessageDate(createTime, i18n.resolvedLanguage ?? i18n.language)
       : undefined;
 
+    const rawContent = message.finalAnswer || message.content || "";
+    const hasA2UI = mightContainA2UI(rawContent);
+    if (hasA2UI && message.role === MESSAGE_ROLES.ASSISTANT) {
+      return (
+        <>
+          {dateLabel && (
+            <div
+              role="separator"
+              aria-label={dateLabel}
+              className="my-4 flex w-full items-center gap-3 px-2 text-xs text-gray-500"
+            >
+              <span className="h-px flex-1 bg-gray-200" aria-hidden />
+              <time dateTime={createTime!.toISOString()}>{dateLabel}</time>
+              <span className="h-px flex-1 bg-gray-200" aria-hidden />
+            </div>
+          )}
+          <A2UIRenderer
+            content={rawContent}
+            className="a2ui-streaming-message"
+          />
+          {message.role === MESSAGE_ROLES.ASSISTANT &&
+            getHistorySummaryMessages(message).length > 0 && (
+              <div className="transition-all duration-500 opacity-0 translate-y-4 animate-task-window">
+                <TaskWindow messages={getHistorySummaryMessages(message)} isStreaming={false} />
+              </div>
+            )}
+        </>
+      );
+    }
     return (
       <>
         {dateLabel && (
@@ -216,6 +247,7 @@ export function ChatStreamMain({
                 messages={getHistorySummaryMessages(message)}
                 isStreaming={false}
               />
+
             </div>
           )}
         {message.role === MESSAGE_ROLES.USER &&
@@ -228,6 +260,7 @@ export function ChatStreamMain({
                 isStreaming={
                   isStreaming && lastUserMessageIdRef.current === message.id
                 }
+
               />
             </div>
           )}

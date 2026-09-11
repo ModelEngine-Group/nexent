@@ -27,6 +27,12 @@ from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
 from .core_agent import CoreAgent, convert_code_format
 
+from ..a2ui.integration import is_a2ui_enabled, get_a2ui_system_prompt
+from ..a2ui.parser import may_contain_a2ui_content, strip_tagged_a2ui_blocks
+from ..a2ui.finalizer import should_finalize_a2ui_content
+from ..a2ui.validator import validate_a2ui_response
+from ..a2ui.constants import A2UI_OPEN_TAG
+
 if TYPE_CHECKING:
     from .context import ContextItemInput
     from .subagent_wrapper import SubAgentToolWrapper
@@ -272,6 +278,7 @@ class NexentAgent:
         self._sandbox_skill_runners: List[Any] = []
 
         self.agent = None
+        self._last_query: str = ""
 
     def create_model(self, model_cite_name: str):
         """create a model instance"""
@@ -878,6 +885,36 @@ class NexentAgent:
                 self._sandbox_scope = self.sandbox_config.scope.value
 
             # Create the agent
+            # Inject A2UI system prompt as a high-priority SYSTEM context item
+            # so it reaches the model (instructions param is lost due to empty system_prompt template).
+            if is_a2ui_enabled():
+                a2ui_prompt = get_a2ui_system_prompt(self.observer.lang)
+                if a2ui_prompt:
+                    from .context import ContextItemInput, ContextItemType
+                    a2ui_item = ContextItemInput(
+                        id="system:a2ui-protocol",
+                        type=ContextItemType.SYSTEM,
+                        content={"text": a2ui_prompt},
+                        metadata={"layout_order": -10, "source": "a2ui"},
+                    )
+                    context_items = list(context_items) if context_items else []
+                    context_items.append(a2ui_item)
+                    logger.info(
+                        "[A2UI_INJECT] A2UI system prompt injected as context item: "
+                        "length=%d, context_items_count=%d",
+                        len(a2ui_prompt), len(context_items),
+                    )
+                else:
+                    logger.warning("[A2UI_INJECT] A2UI system prompt is empty, skipping injection")
+            else:
+                logger.info("[A2UI_INJECT] A2UI is disabled, skipping injection")
+
+            # Re-create context_runtime with updated context_items
+            context_runtime = ManagedContextRuntime(
+                context_manager,
+                items=context_items,
+            )
+
             agent = CoreAgent(
                 observer=self.observer,
                 tools=tool_list,
@@ -889,7 +926,6 @@ class NexentAgent:
                 provide_run_summary=agent_config.provide_run_summary,
                 managed_agents=managed_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
-                instructions=agent_config.instructions,
                 context_runtime=context_runtime,
                 enable_planning=agent_config.enable_planning,
                 redis_client=self.redis_client,
@@ -1005,6 +1041,7 @@ class NexentAgent:
         reset: bool = True,
         additional_args: Optional[Dict[str, Any]] = None,
     ):
+        self._last_query = query
         if not isinstance(self.agent, CoreAgent):
             raise TypeError(f"agent must be a CoreAgent object, not {type(self.agent)}")
 
@@ -1150,6 +1187,39 @@ class NexentAgent:
                         final_answer_str,
                         getattr(observer, "lang", "en"),
                     )
+
+                    # A2UI finalization: validate structured UI content and
+                    # convert to AG-UI ACTIVITY_SNAPSHOT wire format.
+                    if is_a2ui_enabled() and should_finalize_a2ui_content(final_answer_str):
+                        try:
+                            a2ui_validation = validate_a2ui_response(final_answer_str)
+                            if a2ui_validation.valid:
+                                # Wrap A2UI content as AG-UI ACTIVITY_SNAPSHOT for
+                                # assistant-ui's JSONGenerativeUI on the frontend.
+                                from nexent.core.a2ui.a2ui_to_agui import wrap_as_activity_snapshot
+                                snapshot = wrap_as_activity_snapshot(final_answer_str)
+                                import json as _json
+                                a2ui_payload = _json.dumps(
+                                    snapshot if snapshot is not None else final_answer_str,
+                                    ensure_ascii=False,
+                                )
+                                observer.add_message(
+                                    self.agent.agent_name,
+                                    ProcessType.A2UI,
+                                    a2ui_payload,
+                                )
+                            else:
+                                # Validation failed - degrade by stripping A2UI tags
+                                stripped = strip_tagged_a2ui_blocks(final_answer_str)
+                                if stripped:
+                                    final_answer_str = stripped
+                                else:
+                                    final_answer_str = "界面生成失败，请重试。"
+                                logger.warning(
+                                    "A2UI validation failed: %s", a2ui_validation.error
+                                )
+                        except Exception as a2ui_err:
+                            logger.warning("A2UI finalization error: %s", a2ui_err)
                     final_answer_for_trace = final_answer_str
                     monitoring_manager.set_openinference_output(final_answer_str)
                     observer.add_message(self.agent.agent_name,

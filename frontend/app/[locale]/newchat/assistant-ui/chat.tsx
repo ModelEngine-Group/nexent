@@ -7,6 +7,7 @@ import { Thread, type WelcomeSuggestion } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
+import { A2UIRenderer, mightContainA2UI } from '@/lib/a2ui';
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,

@@ -10,6 +10,8 @@ import {
   ThumbsUp,
 } from "lucide-react";
 
+import { A2UIRenderer, mightContainA2UI, type A2UIAction } from '@/lib/a2ui';
+
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 
 /**
@@ -358,29 +360,39 @@ function ChatStreamFinalMessageInner({
                   );
                 })()}
 
-              <MarkdownRenderer
-                content={convertToMarkdownCodeFences(
-                  message.finalAnswer || message.content || ""
-                )}
-                searchResults={message?.searchResults}
-                onCitationHover={onCitationHover}
-                onCitationClick={(citationKey, citationContext) => {
-                  if (message.id) {
-                    onCitationClick?.(
-                      message.id,
-                      citationKey,
-                      citationContext ||
-                        message.finalAnswer ||
-                        message.content ||
-                        ""
-                    );
-                  }
-                }}
-                // For historical messages, content already represents the final answer
-                // when finalAnswer is not present, so enable S3 resolution in both cases.
-                resolveS3Media={Boolean(message.finalAnswer || message.content)}
-                trustedImageUrls={message.images}
-              />
+              {(() => {
+                const rawContent = message.finalAnswer || message.content || "";
+                const hasA2UI = mightContainA2UI(rawContent);
+                if (hasA2UI) {
+                  return (
+                    <A2UIRenderer
+                      content={rawContent}
+                      className="a2ui-final-message"
+                    />
+                  );
+                }
+                return (
+                  <MarkdownRenderer
+                    content={convertToMarkdownCodeFences(rawContent)}
+                    searchResults={message?.searchResults}
+                    onCitationHover={onCitationHover}
+                    onCitationClick={(citationKey, citationContext) => {
+                      if (message.id) {
+                        onCitationClick?.(
+                          message.id,
+                          citationKey,
+                          citationContext ||
+                            message.finalAnswer ||
+                            message.content ||
+                            ""
+                        );
+                      }
+                    }}
+                    resolveS3Media={Boolean(message.finalAnswer || message.content)}
+                    trustedImageUrls={message.images}
+                  />
+                );
+              })()}
 
               {message.images && message.images.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-3">

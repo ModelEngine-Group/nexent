@@ -145,6 +145,8 @@ import {
   shouldShowDateSeparator,
 } from "@/lib/messageDate";
 import { VerificationPanel } from "../ui/verification-panel";
+import { A2UIRenderer as A2UITextRenderer, A2UIActionProvider, setGlobalA2UIActionHandler, mightContainA2UI, parseA2UIMessage, type A2UIAction, type A2UIParseResult } from "@/lib/a2ui";
+import { A2uiBridgeSurface } from "@/lib/assistant-ui/generative-config";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -164,6 +166,26 @@ export interface WelcomeSuggestion {
   description: string;
   prompt: string;
   icon: LucideIcon;
+}
+
+// ---------------------------------------------------------------------------
+// A2UI parse result LRU cache — avoids re-parsing the same textContent on
+// every React re-render during SSE streaming (which used to produce 20+
+// duplicate parse calls for a single message as it grew from empty to final).
+// ---------------------------------------------------------------------------
+const A2UI_PARSE_CACHE = new Map<string, A2UIParseResult>();
+const A2UI_PARSE_CACHE_MAX = 64;
+
+function cachedParseA2UI(text: string): A2UIParseResult {
+  const cached = A2UI_PARSE_CACHE.get(text);
+  if (cached) return cached;
+  const result = parseA2UIMessage(text);
+  if (A2UI_PARSE_CACHE.size >= A2UI_PARSE_CACHE_MAX) {
+    const firstKey = A2UI_PARSE_CACHE.keys().next().value;
+    if (firstKey !== undefined) A2UI_PARSE_CACHE.delete(firstKey);
+  }
+  A2UI_PARSE_CACHE.set(text, result);
+  return result;
 }
 
 export interface ThreadProps {
@@ -804,6 +826,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               selectedShareMessageIds={selectedShareMessageIds}
               backendMessageIdsByAuiId={backendMessageIdsByAuiId}
               onToggleShareMessage={onToggleShareMessage}
+              conversationId={conversationId}
             />
           ) : (
             <ThreadWelcomeContent
@@ -860,7 +883,8 @@ const ThreadView: FC<ThreadViewProps> = ({
 export const ReadOnlyConversation: FC<{
   agent: Agent | PublishedAgent;
   title: string;
-}> = ({ agent, title }) => {
+  conversationId?: number;
+}> = ({ agent, title, conversationId }) => {
   const { t } = useTranslation();
   const [selection, setSelection] = useState<SourcesPanelSelection | null>(
     null
@@ -895,7 +919,7 @@ export const ReadOnlyConversation: FC<{
             </p>
           </header>
           <ThreadPrimitive.Viewport className="mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-y-auto px-8 py-6">
-            <ThreadMessages agent={agent} readOnly />
+            <ThreadMessages agent={agent} readOnly conversationId={conversationId} />
           </ThreadPrimitive.Viewport>
         </main>
         <SourcesPanel
@@ -1012,6 +1036,7 @@ export const ThreadMessages: FC<{
   selectedShareMessageIds?: Set<number>;
   backendMessageIdsByAuiId?: Map<string, number>;
   onToggleShareMessage?: (messageId: number) => void;
+  conversationId?: number;
   enableSkillDirectives?: boolean;
   onSkillFileSelect?: (path: string) => void;
 }> = ({
@@ -1021,6 +1046,7 @@ export const ThreadMessages: FC<{
   selectedShareMessageIds,
   backendMessageIdsByAuiId,
   onToggleShareMessage,
+  conversationId,
   enableSkillDirectives = false,
   onSkillFileSelect,
 }) => {
@@ -1063,11 +1089,12 @@ export const ThreadMessages: FC<{
         <AssistantMessage
           agent={agent}
           readOnly={readOnly}
+          conversationId={conversationId}
           onSkillFileSelect={onSkillFileSelect}
         />
       ),
     }),
-    [agent, enableSkillDirectives, onSkillFileSelect, readOnly]
+    [agent, readOnly, conversationId, enableSkillDirectives, onSkillFileSelect]
   );
 
   if (shareMode) {
@@ -1134,6 +1161,7 @@ export const ThreadMessages: FC<{
           <AssistantMessage
             agent={agent}
             readOnly={readOnly}
+            conversationId={conversationId}
             onSkillFileSelect={onSkillFileSelect}
           />
         );
@@ -1274,9 +1302,61 @@ const MessageDateSeparator: FC = () => {
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
+  conversationId?: number;
   onSkillFileSelect?: (path: string) => void;
-}> = ({ agent, readOnly = false, onSkillFileSelect }) => {
+}> = ({ agent, readOnly = false, conversationId, onSkillFileSelect }) => {
   const { t } = useTranslation();
+  const aui = useAui();
+
+  const handleA2UIAction = useCallback((action: A2UIAction) => {
+    console.log('[A2UI_ACTION] handleA2UIAction called:', action.type, action.value);
+    if (action.type === 'submit' || action.type === 'click') {
+      const formData = action.path ? (() => {
+        try { return JSON.parse(action.path); } catch { return {}; }
+      })() : {};
+      console.log('[A2UI_ACTION] formData:', formData);
+      const formEntries = Object.entries(formData as Record<string, unknown>);
+      const actionLabel = action.label || '';
+      const actionValue = typeof action.value === 'string' ? action.value : '';
+
+      const lines = [`[用户操作: ${actionLabel}]`];
+      if (actionValue) {
+        lines.push(`操作名称: ${actionValue}`);
+      }
+      if (formEntries.length > 0) {
+        lines.push('表单数据:');
+        formEntries.forEach(([k, v]) => lines.push(`  ${k}: ${v}`));
+      }
+      const messageText = lines.join('\n');
+
+      try {
+        console.log('[A2UI_ACTION] messageText:', messageText);
+        const runConfig: Record<string, unknown> = {
+          custom: {
+            agentId: agent.id,
+          },
+        };
+        if (conversationId) {
+          (runConfig.custom as Record<string, unknown>).threadId = conversationId;
+        }
+        console.log('[A2UI_ACTION] appending message with runConfig:', runConfig);
+        aui.thread.append({
+          role: 'user',
+          content: [{ type: 'text', text: messageText }],
+          runConfig,
+        });
+      } catch (err) {
+        console.error('[A2UI] Failed to send action:', err);
+      }
+    }
+  }, [aui, agent, conversationId]);
+
+  // Set global A2UI action handler as fallback for any A2UIRenderer instance
+  useEffect(() => {
+    setGlobalA2UIActionHandler(handleA2UIAction);
+    return () => setGlobalA2UIActionHandler(null);
+  }, [handleA2UIAction]);
+
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
   // use `-mb-[n + 6]` and `min-h-[n + 6]` to preserve the compensation.
@@ -1490,6 +1570,30 @@ const AssistantMessage: FC<{
                       <span className="break-all">{textPart.text}</span>
                     </div>
                   );
+                }
+                const textContent = textPart.text || "";
+                if (mightContainA2UI(textContent)) {
+                  // Parse with LRU cache to avoid re-parsing identical content
+                  // on every React re-render during SSE streaming.
+                  const parsed = cachedParseA2UI(textContent);
+                  const legacyRenderer = (
+                    <A2UIActionProvider onAction={handleA2UIAction}>
+                      <A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} />
+                    </A2UIActionProvider>
+                  );
+                  // AG-UI ACTIVITY_SNAPSHOT → native generative-ui path with legacy fallback for custom components
+                  if (parsed.isAguiFormat && parsed.aguiSnapshot) {
+                    return (
+                      <A2uiBridgeSurface
+                        snapshot={parsed.aguiSnapshot}
+                        className="a2ui-chat-message"
+                      >
+                        {legacyRenderer}
+                      </A2uiBridgeSurface>
+                    );
+                  }
+                  // Legacy <a2ui-json>...</a2ui-json> format → legacy renderer
+                  return legacyRenderer;
                 }
                 return <MarkdownText />;
               }
