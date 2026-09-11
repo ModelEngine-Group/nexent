@@ -942,6 +942,9 @@ async def prepare_agent_run(
     if isinstance(runtime_knowledge_context, dict):
         create_run_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
     runtime_skill_snapshot = getattr(agent_request, "_runtime_skill_snapshot", None)
+    runtime_knowledge_tools = getattr(agent_request, "_runtime_knowledge_tools", None)
+    if runtime_knowledge_tools is not None:
+        create_run_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_skill_snapshot is not None:
         create_run_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
     runtime_generation_config = getattr(agent_request, "_runtime_generation_config", None)
@@ -1321,14 +1324,19 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
-        resolved_tree = attach_runtime_knowledge_tree(
-            resolved_tree,
-            snapshot_runtime_knowledge_tree(
-                int(resolved_tree.root.identity.agent_id),
-                resolved_tenant_id,
-                int(resolved_tree.root.identity.version_no),
-            ),
+        knowledge_tree = snapshot_runtime_knowledge_tree(
+            int(resolved_tree.root.identity.agent_id), resolved_tenant_id,
+            int(resolved_tree.root.identity.version_no),
         )
+        if canonical_workbench.knowledge_scope is not None:
+            from services.runtime_knowledge_mount import mount_knowledge_records
+
+            knowledge_tree = knowledge_tree[:1]
+            knowledge_tree[0]["tools"] = mount_knowledge_records(
+                knowledge_tree[0]["tools"], canonical_workbench.knowledge_scope, resolved_tenant_id,
+            )
+            agent_request.__dict__["_runtime_knowledge_tools"] = knowledge_tree[0]["tools"]
+        resolved_tree = attach_runtime_knowledge_tree(resolved_tree, knowledge_tree)
         root_identity = resolved_tree.root.identity
         agent_request.agent_id = root_identity.agent_id
         agent_request.version_no = root_identity.version_no

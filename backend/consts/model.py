@@ -783,6 +783,18 @@ class ConversationKnowledgeScopeRequest(BaseModel):
     """Persisted business policy for conversation-scoped knowledge retrieval."""
 
     schema_version: Literal[1] = 1
+    retrieval_config: Optional[Dict[str, Any]] = None
+
+    @field_validator("retrieval_config")
+    @classmethod
+    def validate_retrieval_config(cls, values):
+        if values is None:
+            return None
+        reserved = {"index_names", "kds_list", "display_names", "server_url", "api_key", "tenant_id",
+                    "observer", "kds_name_to_id_map", "allowed_kds_set", "allowed_index_names"}
+        if len(values) > 30 or reserved.intersection(values):
+            raise ValueError("Retrieval parameters cannot contain connection settings or resource ranges")
+        return values
     local: LocalKnowledgeScopeRequest = Field(default_factory=LocalKnowledgeScopeRequest)
     aidp: AidpKnowledgeScopeRequest = Field(default_factory=AidpKnowledgeScopeRequest)
 

@@ -165,7 +165,7 @@
   "chat.composer.stopGenerating": "Stop generating",
   "chat.composer.send": "Send",
   "chat.composer.addAttachment": "Add attachment",
-  "chat.knowledgeScope.title": "Knowledge bases for this conversation",
+  "chat.knowledgeScope.title": "Select knowledge bases",
   "chat.knowledgeScope.confirm": "Confirm",
   "chat.knowledgeScope.cancel": "Cancel",
   "chat.knowledgeScope.restoreDefault": "Restore defaults",

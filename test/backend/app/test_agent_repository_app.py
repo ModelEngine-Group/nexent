@@ -932,6 +932,20 @@ def test_import_agent_from_repository_api_passes_tenant_id(
     )
 
 
+def test_import_tool_parameter_error_returns_400(mocker, mock_auth_header):
+    from utils.agent_transfer_utils import AgentToolImportError
+
+    mocker.patch("apps.agent_repository_app.get_current_user_id", return_value=("user", "test_tenant_id"))
+    mocker.patch(
+        "apps.agent_repository_app.import_agent_from_repository_impl",
+        new_callable=AsyncMock,
+        side_effect=AgentToolImportError("Incompatible tool parameter"),
+    )
+    response = client.post("/repository/agent/42/import", headers=mock_auth_header)
+    assert response.status_code == 400
+    assert "Incompatible tool parameter" in response.json()["detail"]
+
+
 def test_import_agent_from_repository_api_with_skill_resolutions(
     mocker,
     mock_auth_header,

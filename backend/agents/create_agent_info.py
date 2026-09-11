@@ -1053,12 +1053,28 @@ async def create_agent_config(
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
     runtime_file_context: Optional[Dict[str, Any]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
+    runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
 
     # create sub agent
+    child_tool_params = normalized_tool_params
+    child_knowledge_context = runtime_knowledge_context
+    if runtime_knowledge_tools is not None:
+        child_tool_params = normalized_tool_params.model_copy(deep=True)
+        root_override = child_tool_params.agents.get(agent_info.get("name"))
+        if root_override is not None:
+            from services.runtime_knowledge_mount import MANAGED_CLASSES
+
+            managed_names = MANAGED_CLASSES | {
+                tool.get("name") for tool in runtime_knowledge_tools
+                if tool.get("class_name") in MANAGED_CLASSES
+            }
+            root_override.tools = {name: params for name, params in root_override.tools.items()
+                                   if name not in managed_names}
+        child_knowledge_context = None
     sub_agent_relations = query_sub_agent_relations(
         main_agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     managed_agents = []
@@ -1078,10 +1094,10 @@ async def create_agent_config(
             allow_memory_search=allow_memory_search,
             version_no=sub_agent_version_no,
             override_model_id=None,
-            tool_params=normalized_tool_params,
+            tool_params=child_tool_params,
             conversation_id=conversation_id,
             include_automation_tool=False,
-            runtime_knowledge_context=runtime_knowledge_context,
+            runtime_knowledge_context=child_knowledge_context,
             runtime_file_context=runtime_file_context,
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
@@ -1098,6 +1114,7 @@ async def create_agent_config(
         version_no=version_no,
         tool_params=normalized_tool_params,
         runtime_skill_snapshot=runtime_skill_snapshot,
+        runtime_knowledge_tools=runtime_knowledge_tools,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
@@ -1691,6 +1708,7 @@ async def create_tool_config_list(
     version_no: int = 0,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
+    runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -1704,6 +1722,14 @@ async def create_tool_config_list(
     )
 
     # Look up agent name for use in error messages.
+    if runtime_knowledge_tools is not None:
+        from services.runtime_knowledge_mount import MANAGED_CLASSES
+
+        tools_list = [tool for tool in tools_list if tool.get("class_name") not in MANAGED_CLASSES]
+        tools_list.extend(copy.deepcopy([
+            tool for tool in runtime_knowledge_tools if tool.get("class_name") in MANAGED_CLASSES
+        ]))
+
     # Agent name is optional for tool_params matching (matching uses tool identifiers only),
     # but we include it in error messages so callers can identify which agent/tool caused a failure.
     agent_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
@@ -2296,6 +2322,7 @@ async def create_agent_run_info(
     enable_automation_tool: bool = True,
     runtime_knowledge_context: Optional[Dict[str, str]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
+    runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_generation_config: Optional[Dict[str, Any]] = None,
 ):
     workspace_run_id = uuid.uuid4().hex
@@ -2365,6 +2392,8 @@ async def create_agent_run_info(
     if context_policy is not None:
         create_config_kwargs["request_context_policy"] = context_policy
 
+    if runtime_knowledge_tools is not None:
+        create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     # Static children keep their published aliases and never inherit this overlay.

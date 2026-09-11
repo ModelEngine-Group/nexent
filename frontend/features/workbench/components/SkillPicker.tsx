@@ -5,7 +5,10 @@ import { ResourceSelectionActions } from "@/features/workbench/components/Resour
 
 import { SelectedResourceTags } from "@/features/workbench/components/SelectedResourceTags";
 
-import { ResourceSelectionGrid } from "@/features/workbench/components/ResourceSelectionGrid";
+import {
+  ResourceSelectionGrid,
+  RESOURCE_SELECTION_AREA_CLASS,
+} from "@/features/workbench/components/ResourceSelectionGrid";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -27,7 +30,13 @@ import type { SkillRepositoryListingItem } from "@/types/skillRepository";
 import { fetchSkillsList, type SkillListItem } from "@/services/skillService";
 import type { WorkbenchSkillMount } from "../types";
 import { ResourceCard } from "./ResourceCard";
+import {
+  ResourcePagination,
+  RESOURCE_PAGE_SIZE,
+  resourcePage,
+} from "./ResourcePagination";
 import { validateSkillConfig } from "../skillConfig";
+import { RestoreDefaultsButton } from "./RestoreDefaultsButton";
 
 function missingRequiredConfig(
   skill: SkillListItem,
@@ -71,7 +80,8 @@ export function SkillPicker({
     []
   );
   const [repositoryPage, setRepositoryPage] = useState(1);
-  const [repositoryPages, setRepositoryPages] = useState(1);
+  const [repositoryTotal, setRepositoryTotal] = useState(0);
+  const [minePage, setMinePage] = useState(1);
   const [installing, setInstalling] = useState<number | null>(null);
   const [conflict, setConflict] = useState<SkillRepositoryListingItem | null>(
     null
@@ -86,6 +96,10 @@ export function SkillPicker({
     Record<number, Record<string, unknown>>
   >({});
   const installOperationRef = useRef(0);
+  useEffect(() => {
+    setMinePage(1);
+    setRepositoryPage(1);
+  }, [open, search, tab]);
 
   useEffect(() => {
     if (!open) {
@@ -137,13 +151,13 @@ export function SkillPicker({
     void fetchSkillRepositoryListings({
       search,
       page: repositoryPage,
-      page_size: 20,
+      page_size: RESOURCE_PAGE_SIZE,
       status: "shared",
     })
       .then((result) => {
         if (!cancelled) {
           setRepository(result.items);
-          setRepositoryPages(result.pagination?.total_pages ?? 1);
+          setRepositoryTotal(result.pagination?.total ?? result.items.length);
         }
       })
       .catch((error) => {
@@ -285,14 +299,14 @@ export function SkillPicker({
       onOk={() => void submit()}
       confirmLoading={saving}
       okButtonProps={{
+        "aria-label": "确定",
         disabled: loading || restoring || listError || installing !== null,
       }}
       footer={(_, { OkBtn, CancelBtn }) => (
         <div className="flex items-center justify-between">
           <div>
             {loadDefaults && (
-              <Button
-                type="link"
+              <RestoreDefaultsButton
                 loading={restoring}
                 disabled={loading || saving || installing !== null || listError}
                 onClick={async () => {
@@ -331,7 +345,7 @@ export function SkillPicker({
                 }}
               >
                 恢复默认
-              </Button>
+              </RestoreDefaultsButton>
             )}
           </div>
           <div className="flex gap-2">
@@ -340,9 +354,10 @@ export function SkillPicker({
           </div>
         </div>
       )}
-      okText="确认选择"
+      okText="确定"
       cancelText="取消"
       width={920}
+      centered
     >
       <Tabs
         activeKey={tab}
@@ -358,9 +373,6 @@ export function SkillPicker({
           { key: "repository", label: "仓库" },
         ]}
       />
-      <p className="mb-3 text-xs text-muted-foreground">
-        勾选本次对话要使用的 Skills，取消勾选则不使用。不会修改智能体的原配置。
-      </p>
       <Input.Search
         value={search}
         onChange={(event) => {
@@ -400,7 +412,7 @@ export function SkillPicker({
       {tab === "repository" ? (
         <>
           <Spin spinning={loading}>
-            <ResourceSelectionGrid className="mt-4">
+            <ResourceSelectionGrid className="mt-4 p-1">
               {repository.map((item) => (
                 <ResourceCard
                   resourceType="skill"
@@ -409,33 +421,29 @@ export function SkillPicker({
                   description={item.description ?? undefined}
                   tags={item.tags}
                   disabled={installing !== null}
-                  footer={
-                    installing === item.skill_repository_id
-                      ? "安装中"
-                      : "安装并选择"
+                  actions={
+                    <Button
+                      size="small"
+                      disabled={installing !== null}
+                      loading={installing === item.skill_repository_id}
+                      onClick={() => void install(item)}
+                    >
+                      {installing === item.skill_repository_id
+                        ? "安装中"
+                        : "安装并选择"}
+                    </Button>
                   }
                   onClick={() => void install(item)}
                 />
               ))}
             </ResourceSelectionGrid>
           </Spin>
-          <div className="mt-3 flex justify-between">
-            <button
-              disabled={repositoryPage <= 1}
-              onClick={() => setRepositoryPage((page) => page - 1)}
-            >
-              上一页
-            </button>
-            <span>
-              {repositoryPage} / {repositoryPages}
-            </span>
-            <button
-              disabled={repositoryPage >= repositoryPages}
-              onClick={() => setRepositoryPage((page) => page + 1)}
-            >
-              下一页
-            </button>
-          </div>
+          <ResourcePagination
+            current={repositoryPage}
+            total={repositoryTotal}
+            onChange={setRepositoryPage}
+            disabled={loading || installing !== null}
+          />
           <Modal
             title="Skill 名称已存在"
             open={!!conflict}
@@ -474,199 +482,225 @@ export function SkillPicker({
           </Modal>
         </>
       ) : loading ? (
-        <div className="flex h-48 items-center justify-center">
+        <div
+          className={`${RESOURCE_SELECTION_AREA_CLASS} mt-4 flex items-center justify-center`}
+        >
           <Spin />
         </div>
       ) : filtered.length === 0 ? (
-        <Empty className="my-12" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <div
+          className={`${RESOURCE_SELECTION_AREA_CLASS} mt-4 flex items-center justify-center`}
+        >
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        </div>
       ) : (
-        <ResourceSelectionGrid className="mt-4 max-h-96 overflow-y-auto p-1">
-          {filtered.map((skill) => {
-            const skillId = Number(skill.skill_id);
-            const selectedNow = selectedIds.has(skillId);
-            const invalid = missingRequiredConfig(skill, configs[skillId]);
-            return (
-              <div key={skillId}>
-                <ResourceCard
-                  resourceType="skill"
-                  key={skillId}
-                  title={skill.name}
-                  description={skill.description}
-                  tags={skill.tags || []}
-                  badges={[skill.source].filter(Boolean)}
-                  selected={selectedNow}
-                  actions={
-                    <Button
-                      size="small"
-                      aria-label="编辑"
-                      onClick={() =>
-                        router.push(
-                          `/skill-space?tab=mine&edit_skill_id=${skillId}`
-                        )
+        <ResourceSelectionGrid className="mt-4 p-1">
+          {skills
+            .filter(
+              (skill) =>
+                resourcePage(filtered, minePage).includes(skill) ||
+                Number(skill.skill_id) === editingId
+            )
+            .map((skill) => {
+              const skillId = Number(skill.skill_id);
+              const selectedNow = selectedIds.has(skillId);
+              const invalid = missingRequiredConfig(skill, configs[skillId]);
+              return (
+                <div key={skillId} className="contents">
+                  {resourcePage(filtered, minePage).includes(skill) && (
+                    <ResourceCard
+                      resourceType="skill"
+                      key={skillId}
+                      title={skill.name}
+                      description={skill.description}
+                      tags={skill.tags || []}
+                      badges={[skill.source].filter(Boolean)}
+                      selected={selectedNow}
+                      actions={
+                        <Button
+                          size="small"
+                          aria-label="编辑"
+                          onClick={() =>
+                            router.push(
+                              `/skill-space?tab=mine&edit_skill_id=${skillId}`
+                            )
+                          }
+                        >
+                          编辑
+                        </Button>
                       }
+                      onClick={() => {
+                        if (selectedNow) {
+                          setSelectedIds((current) => {
+                            const next = new Set(current);
+                            next.delete(skillId);
+                            return next;
+                          });
+                          return;
+                        }
+                        if ((skill.config_schemas || []).length > 0) {
+                          setDraftConfigs({
+                            [skillId]: { ...configs[skillId] },
+                          });
+                          setEditingId(skillId);
+                        } else
+                          setSelectedIds(
+                            (current) => new Set([...current, skillId])
+                          );
+                      }}
+                      footer={
+                        invalid
+                          ? "需要填写必填配置"
+                          : selectedNow
+                            ? "已选择"
+                            : "选择"
+                      }
+                    />
+                  )}
+                  {editingId === skillId && (
+                    <Modal
+                      title={`配置 ${skill.name}`}
+                      open
+                      onCancel={() => {
+                        setEditingId(null);
+                        setConfigQueue([]);
+                      }}
+                      okText="保存配置"
+                      cancelText="取消"
+                      onOk={() => {
+                        if (
+                          missingRequiredConfig(skill, draftConfigs[skillId])
+                        ) {
+                          message.warning("请先补全所选 Skill 的必填配置");
+                          return;
+                        }
+                        setConfigs((current) => ({
+                          ...current,
+                          [skillId]: { ...draftConfigs[skillId] },
+                        }));
+                        setSelectedIds(
+                          (current) => new Set([...current, skillId])
+                        );
+                        setEditingId(configQueue[0] ?? null);
+                        setConfigQueue((current) => current.slice(1));
+                      }}
                     >
-                      编辑
-                    </Button>
-                  }
-                  onClick={() => {
-                    if (selectedNow) {
-                      setSelectedIds((current) => {
-                        const next = new Set(current);
-                        next.delete(skillId);
-                        return next;
-                      });
-                      return;
-                    }
-                    if ((skill.config_schemas || []).length > 0) {
-                      setDraftConfigs({ [skillId]: { ...configs[skillId] } });
-                      setEditingId(skillId);
-                    } else
-                      setSelectedIds(
-                        (current) => new Set([...current, skillId])
-                      );
-                  }}
-                  footer={
-                    invalid
-                      ? "需要填写必填配置"
-                      : selectedNow
-                        ? "已选择"
-                        : "选择"
-                  }
-                />
-                {editingId === skillId && (
-                  <Modal
-                    title={`配置 ${skill.name}`}
-                    open
-                    onCancel={() => {
-                      setEditingId(null);
-                      setConfigQueue([]);
-                    }}
-                    okText="保存配置"
-                    cancelText="取消"
-                    onOk={() => {
-                      if (missingRequiredConfig(skill, draftConfigs[skillId])) {
-                        message.warning("请先补全所选 Skill 的必填配置");
-                        return;
-                      }
-                      setConfigs((current) => ({
-                        ...current,
-                        [skillId]: { ...draftConfigs[skillId] },
-                      }));
-                      setSelectedIds(
-                        (current) => new Set([...current, skillId])
-                      );
-                      setEditingId(configQueue[0] ?? null);
-                      setConfigQueue((current) => current.slice(1));
-                    }}
-                  >
-                    {(skill.config_schemas || []).map((item) => {
-                      const schema = item as {
-                        name?: string;
-                        type?: string;
-                        required?: boolean;
-                        enum?: unknown[];
-                      };
-                      if (!schema.name) return null;
-                      const name = schema.name;
-                      const value =
-                        draftConfigs[skillId]?.[name] ??
-                        skill.config_values?.[name] ??
-                        "";
-                      return (
-                        <label key={name} className="mt-2 block text-sm">
-                          {name}
-                          {schema.required ? " *" : ""}
-                          {schema.type === "boolean" ? (
-                            <Switch
-                              aria-label={`${skill.name} ${name}`}
-                              checked={value === true}
-                              onChange={(checked) =>
-                                setDraftConfigs((current) => ({
-                                  ...current,
-                                  [skillId]: {
-                                    ...current[skillId],
-                                    [name]: checked,
-                                  },
-                                }))
-                              }
-                            />
-                          ) : Array.isArray(schema.enum) ? (
-                            <Select
-                              aria-label={`${skill.name} ${name}`}
-                              value={value === "" ? undefined : value}
-                              options={schema.enum.map((option) => ({
-                                value: option,
-                                label: String(option),
-                              }))}
-                              onChange={(selectedValue) =>
-                                setDraftConfigs((current) => ({
-                                  ...current,
-                                  [skillId]: {
-                                    ...current[skillId],
-                                    [name]: selectedValue,
-                                  },
-                                }))
-                              }
-                            />
-                          ) : (
-                            <Input
-                              aria-label={`${skill.name} ${name}`}
-                              type={
-                                schema.type === "integer" ||
-                                schema.type === "number"
-                                  ? "number"
-                                  : "text"
-                              }
-                              value={
-                                typeof value === "object"
-                                  ? JSON.stringify(value)
-                                  : String(value)
-                              }
-                              onChange={(event) => {
-                                const raw = event.target.value;
-                                let parsed: unknown = raw;
-                                if (
-                                  raw &&
-                                  (schema.type === "integer" ||
-                                    schema.type === "number")
-                                )
-                                  parsed = Number(raw);
-                                if (schema.type === "boolean")
-                                  parsed =
-                                    raw === "true"
-                                      ? true
-                                      : raw === "false"
-                                        ? false
-                                        : raw;
-                                if (
-                                  schema.type === "object" ||
-                                  schema.type === "array"
-                                ) {
-                                  try {
-                                    parsed = JSON.parse(raw);
-                                  } catch {
-                                    parsed = raw;
-                                  }
+                      {(skill.config_schemas || []).map((item) => {
+                        const schema = item as {
+                          name?: string;
+                          type?: string;
+                          required?: boolean;
+                          enum?: unknown[];
+                        };
+                        if (!schema.name) return null;
+                        const name = schema.name;
+                        const value =
+                          draftConfigs[skillId]?.[name] ??
+                          skill.config_values?.[name] ??
+                          "";
+                        return (
+                          <label key={name} className="mt-2 block text-sm">
+                            {name}
+                            {schema.required ? " *" : ""}
+                            {schema.type === "boolean" ? (
+                              <Switch
+                                aria-label={`${skill.name} ${name}`}
+                                checked={value === true}
+                                onChange={(checked) =>
+                                  setDraftConfigs((current) => ({
+                                    ...current,
+                                    [skillId]: {
+                                      ...current[skillId],
+                                      [name]: checked,
+                                    },
+                                  }))
                                 }
-                                setDraftConfigs((current) => ({
-                                  ...current,
-                                  [skillId]: {
-                                    ...current[skillId],
-                                    [name]: parsed,
-                                  },
-                                }));
-                              }}
-                            />
-                          )}
-                        </label>
-                      );
-                    })}
-                  </Modal>
-                )}
-              </div>
-            );
-          })}
+                              />
+                            ) : Array.isArray(schema.enum) ? (
+                              <Select
+                                aria-label={`${skill.name} ${name}`}
+                                value={value === "" ? undefined : value}
+                                options={schema.enum.map((option) => ({
+                                  value: option,
+                                  label: String(option),
+                                }))}
+                                onChange={(selectedValue) =>
+                                  setDraftConfigs((current) => ({
+                                    ...current,
+                                    [skillId]: {
+                                      ...current[skillId],
+                                      [name]: selectedValue,
+                                    },
+                                  }))
+                                }
+                              />
+                            ) : (
+                              <Input
+                                aria-label={`${skill.name} ${name}`}
+                                type={
+                                  schema.type === "integer" ||
+                                  schema.type === "number"
+                                    ? "number"
+                                    : "text"
+                                }
+                                value={
+                                  typeof value === "object"
+                                    ? JSON.stringify(value)
+                                    : String(value)
+                                }
+                                onChange={(event) => {
+                                  const raw = event.target.value;
+                                  let parsed: unknown = raw;
+                                  if (
+                                    raw &&
+                                    (schema.type === "integer" ||
+                                      schema.type === "number")
+                                  )
+                                    parsed = Number(raw);
+                                  if (schema.type === "boolean")
+                                    parsed =
+                                      raw === "true"
+                                        ? true
+                                        : raw === "false"
+                                          ? false
+                                          : raw;
+                                  if (
+                                    schema.type === "object" ||
+                                    schema.type === "array"
+                                  ) {
+                                    try {
+                                      parsed = JSON.parse(raw);
+                                    } catch {
+                                      parsed = raw;
+                                    }
+                                  }
+                                  setDraftConfigs((current) => ({
+                                    ...current,
+                                    [skillId]: {
+                                      ...current[skillId],
+                                      [name]: parsed,
+                                    },
+                                  }));
+                                }}
+                              />
+                            )}
+                          </label>
+                        );
+                      })}
+                    </Modal>
+                  )}
+                </div>
+              );
+            })}
         </ResourceSelectionGrid>
+      )}
+      {tab === "mine" && (
+        <ResourcePagination
+          current={minePage}
+          total={filtered.length}
+          onChange={setMinePage}
+          disabled={loading || saving || editingId !== null}
+        />
       )}
     </Modal>
   );

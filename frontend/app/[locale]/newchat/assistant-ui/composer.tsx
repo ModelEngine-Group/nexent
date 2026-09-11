@@ -360,7 +360,7 @@ export const Composer: FC<ComposerProps> = ({
               className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary"
               aria-label="退出创建模式"
             >
-              {creationMode === "skill_create" ? "Skill 创建" : "应用创建"}
+              {creationMode === "skill_create" ? "Skill 创建" : "Agent创建"}
               <span aria-hidden>×</span>
             </button>
           </div>
@@ -494,7 +494,7 @@ export const Composer: FC<ComposerProps> = ({
                     onValueChange={onModelChange}
                     variant="ghost"
                     size="sm"
-                    className="shrink-0 text-xs"
+                    className="shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground"
                   />
                 )}
                 {!compact && workbenchResources && (
@@ -509,7 +509,6 @@ export const Composer: FC<ComposerProps> = ({
                     >
                       <Bot className="size-3.5" />
                       Agent
-                      <ChevronDown className="size-3" />
                     </Button>
                     <Button
                       type="button"
@@ -521,7 +520,6 @@ export const Composer: FC<ComposerProps> = ({
                     >
                       <Lightbulb className="size-3.5" />
                       Skills
-                      <ChevronDown className="size-3" />
                     </Button>
                   </>
                 )}
@@ -535,7 +533,7 @@ export const Composer: FC<ComposerProps> = ({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-muted-foreground"
+                      className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-foreground"
                       onClick={() => setKnowledgeModalOpen(true)}
                       disabled={isRunning}
                       title={

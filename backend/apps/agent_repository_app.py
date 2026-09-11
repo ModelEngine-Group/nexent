@@ -23,6 +23,7 @@ from services.agent_repository_service import (
     update_agent_repository_status_impl,
 )
 from utils.auth_utils import get_current_user_id
+from utils.agent_transfer_utils import AgentToolImportError
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
@@ -342,6 +343,9 @@ async def import_agent_from_repository_api(
                 "duplicate_skills": exc.duplicate_names,
             },
         )
+    except AgentToolImportError as e:
+        logger.warning("Agent repository tool validation failed (id=%s): %s", agent_repository_id, e)
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except ValueError as e:
         logger.warning(
             f"Agent repository listing not found for import "

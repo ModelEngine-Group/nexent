@@ -42,7 +42,7 @@ export function CreationExamples({
   if (!visible) return null;
   return (
     <section
-      aria-label={mode === "skill_create" ? "Skill 创建示例" : "应用创建示例"}
+      aria-label={mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
       className="mb-3 max-h-[40vh] overflow-y-auto rounded-2xl border border-border bg-card p-3 shadow-sm sm:max-h-none"
     >
       <div className="mb-3 flex items-center gap-2">
@@ -55,7 +55,7 @@ export function CreationExamples({
           <ChevronLeft className="size-4" />
         </button>
         <h2 className="text-sm font-semibold">
-          {mode === "skill_create" ? "Skill 创建示例" : "应用创建示例"}
+          {mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
         </h2>
       </div>
       <div className="grid gap-2 sm:grid-cols-3">

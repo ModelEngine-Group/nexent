@@ -52,6 +52,67 @@ beforeEach(() => {
   });
   vi.mocked(importAgentFromRepository).mockResolvedValue({ agent_id: 99 });
 });
+it("paginates four agents and resets the page on search", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AgentPicker
+        open
+        agents={Array.from({ length: 5 }, (_, index) => ({
+          ...agent,
+          id: String(index + 1),
+          name: `Paged Agent ${index + 1}`,
+          display_name: `Paged Agent ${index + 1}`,
+          is_available: true,
+        }))}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
+  expect(screen.getAllByRole("option")).toHaveLength(4);
+  await userEvent.click(screen.getByTitle("2"));
+  expect(screen.getAllByRole("option")).toHaveLength(1);
+  await userEvent.type(
+    screen.getByPlaceholderText("搜索智能体名称或描述"),
+    "Paged Agent 1"
+  );
+  expect(
+    screen.getByRole("option", { name: /Paged Agent 1/ })
+  ).toBeInTheDocument();
+});
+
+it("shows bulk actions and selects all available agents across pages", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AgentPicker
+        open
+        multiple
+        agents={Array.from({ length: 5 }, (_, index) => ({
+          ...agent,
+          id: String(index + 1),
+          name: `Bulk ${index + 1}`,
+          display_name: `Bulk ${index + 1}`,
+          is_available: index !== 4,
+        }))}
+        onSelect={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
+  await userEvent.click(screen.getByRole("button", { name: "全选" }));
+  expect(
+    screen
+      .getAllByRole("option")
+      .every((item) => item.getAttribute("aria-selected") === "true")
+  ).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: "清空" }));
+  expect(
+    screen
+      .getAllByRole("option")
+      .every((item) => item.getAttribute("aria-selected") === "false")
+  ).toBe(true);
+});
+
 function mount() {
   const onSelect = vi.fn();
   render(
@@ -96,7 +157,7 @@ it("UT-FE-WB-019 selecting a published Agent remains pending until confirmation"
   const select = mount();
   await userEvent.click(screen.getByRole("option", { name: /Agent A/ }));
   expect(select).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   expect(select).toHaveBeenCalledExactlyOnceWith(agent);
   expect(importAgentFromRepository).not.toHaveBeenCalled();
 });
@@ -144,7 +205,7 @@ it("UT-FE-WB-020 uses the returned root ID, never a name lookup", async () => {
   );
   await waitFor(() => expect(fetchPublishedAgentList).toHaveBeenCalledOnce());
   expect(select).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   await waitFor(() => expect(select).toHaveBeenCalledExactlyOnceWith(imported));
   expect(fetchRepositoryImportPrecheck).toHaveBeenCalledWith(20);
   expect(importAgentFromRepository).toHaveBeenCalledExactlyOnceWith(20);

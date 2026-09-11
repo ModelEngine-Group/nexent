@@ -36,7 +36,7 @@ export function CreationActions({
           onClick={() => onSelect("agent_create")}
         >
           <Bot className="size-3.5" />
-          应用创建
+          Agent创建
         </button>
       )}
     </div>

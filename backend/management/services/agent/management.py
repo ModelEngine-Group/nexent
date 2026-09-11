@@ -12,6 +12,7 @@ from fastapi import Header
 from fastapi.responses import JSONResponse
 
 from agents.create_agent_info import create_tool_config_list
+from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
 from services.agent_version_service import publish_version_impl
 from consts.const import TOOL_TYPE_MAPPING, \
     MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
@@ -478,6 +479,9 @@ async def export_agent_by_agent_id(
 
     # Check if any tool is KnowledgeBaseSearchTool and set its metadata to empty dict
     for tool in tool_list:
+        if tool.class_name == "AidpSearchTool":
+            tool.params = portable_tool_params(tool.class_name, tool.params)
+            tool.metadata = {}
         if tool.class_name in ["KnowledgeBaseSearchTool", "AnalyzeTextFileTool", "AnalyzeImageTool", "AnalyzeAudioTool", "AnalyzeVideoTool", "DataMateSearchTool"]:
             tool.metadata = {}
         if tool.class_name == "IndependentAidpSearchTool":
@@ -617,23 +621,14 @@ async def import_agent_by_agent_id(
         db_tool_info: dict | None = db_all_tool_info_dict.get(
             f"{tool.class_name}&{tool.source}", None)
 
-        if db_tool_info is None:
-            raise ValueError(
-                f"Cannot find tool {tool.class_name} in {tool.source}.")
-
-        db_tool_info_params = db_tool_info["params"]
-        db_tool_info_params_name_set = set(
-            [param_info["name"] for param_info in db_tool_info_params])
-
-        for tool_param_name in tool.params:
-            if tool_param_name not in db_tool_info_params_name_set:
-                raise ValueError(
-                    f"Parameter {tool_param_name} in tool {tool.class_name} from {tool.source} cannot be found.")
+        portable_params = validate_import_tool_params(
+            tool.class_name, tool.source, tool.params, db_tool_info,
+        )
 
         tool_list.append(ToolInstanceInfoRequest(tool_id=db_tool_info['tool_id'],
                                                  agent_id=-1,
                                                  enabled=True,
-                                                 params=tool.params))
+                                                 params=portable_params))
     # check the validity of the agent parameters
     if import_agent_info.max_steps <= 0:
         raise ValueError(
@@ -1140,6 +1135,18 @@ async def import_agent_with_skills_impl(
     skill names are resolved to tenant-local skill IDs before creating instances.
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
+
+    # Validate every agent before creating any dependency skills.
+    catalog = {
+        (tool["class_name"], tool["source"]): tool
+        for tool in query_all_tools(tenant_id=tenant_id)
+    }
+    for agent in agent_info.agent_info.values():
+        for tool in agent.tools:
+            validate_import_tool_params(
+                tool.class_name, tool.source, tool.params,
+                catalog.get((tool.class_name, tool.source)),
+            )
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}

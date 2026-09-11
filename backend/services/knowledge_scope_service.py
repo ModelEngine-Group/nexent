@@ -246,8 +246,16 @@ def get_agent_knowledge_capabilities(
         for node in agent_tree
         if node.get("has_static_scope_reference")
     ]
+    from services.runtime_knowledge_mount import RESERVED
+
+    def root_parameters(class_name):
+        return {param["name"]: deepcopy(param.get("default"))
+                for tool in agent_tree[0]["tools"] if tool.get("class_name") == class_name
+                for param in tool.get("params") or [] if param["name"] not in RESERVED} if agent_tree else {}
+
     sources = {
         "local": {
+            "default_retrieval_config": root_parameters(LOCAL_TOOL_CLASS),
             "enabled": local_enabled,
             "max_select": LOCAL_MAX_SELECT,
             "requires_same_embedding_model": True,
@@ -256,6 +264,7 @@ def get_agent_knowledge_capabilities(
             "default_range_values": local_default_indices,
         },
         "aidp": {
+            "default_retrieval_config": root_parameters(AIDP_TOOL_CLASS),
             "enabled": aidp_enabled,
             "max_select": AIDP_MAX_SELECT,
             "default_summary": "Follow each agent's default configuration",

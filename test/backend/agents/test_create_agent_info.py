@@ -6788,6 +6788,38 @@ class TestDispatchProfileHitMetric:
 # ============================================================================
 
 
+@pytest.mark.asyncio
+async def test_runtime_knowledge_records_reach_tool_constructor_without_mutation(mocker):
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    original = [{"name": "aidp_search", "class_name": "AidpSearchTool", "params": []}]
+    runtime = [{"name": "knowledge_base_search", "class_name": "KnowledgeBaseSearchTool",
+                "description": "Search", "inputs": "{}", "output_type": "string",
+                "params": [{"name": "top_k", "default": 8},
+                           {"name": "index_names", "default": ["old"]}]}]
+    before = deepcopy(runtime)
+    prefix = "backend.agents.create_agent_info."
+    mocker.patch(prefix + "_resolve_runtime_tool_records", return_value=original)
+    mocker.patch(prefix + "discover_langchain_tools", new_callable=AsyncMock, return_value=[])
+    mocker.patch(prefix + "search_agent_info_by_agent_id", return_value={"name": "root"})
+    mocker.patch(prefix + "get_vector_db_core", return_value=MagicMock())
+    mocker.patch(prefix + "get_embedding_model_by_index_name", return_value=(MagicMock(), None, None))
+    mocker.patch(prefix + "get_knowledge_name_map_by_index_names", return_value={"new": "Selected"})
+    mocker.patch(prefix + "ElasticSearchService.filter_accessible_indices", return_value=["new"])
+    mocker.patch(prefix + "ToolConfig", side_effect=lambda **kwargs: SimpleNamespace(metadata=None, **kwargs))
+    configs = await create_agent_info_module.create_tool_config_list(
+        1, "tenant", "user", runtime_knowledge_tools=runtime,
+        tool_params={"agents": {"root": {"tools": {"knowledge_base_search": {"index_names": ["new"]}}}}},
+    )
+    assert len(configs) == 1
+    assert configs[0].params["top_k"] == 8
+    assert configs[0].params["index_names"] == ["new"]
+    assert configs[0].metadata["allowed_index_names"] == ["new"]
+    assert runtime == before
+    assert original[0]["class_name"] == "AidpSearchTool"
+
+
 class TestKBPermissionFilteringInCreateToolConfigList:
     """Tests for knowledge base permission filtering in create_tool_config_list."""
 

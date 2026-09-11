@@ -3663,6 +3663,12 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
             usage="test_mcp_server"
         )
     ]
+    mock_tools.append(ToolConfig(
+        class_name="AidpSearchTool", name="aidp_search", source="local",
+        params={"api_key": "secret", "server_url": "private", "tenant_id": "old", "kds_list": ["kb"]},
+        metadata={"allowed_kds_set": ["kb"], "kds_name_to_id_map": {"KB": "kb"}},
+        description="AIDP search", inputs="query", output_type="string", usage=None,
+    ))
     mock_create_tool_config.return_value = mock_tools
 
     mock_sub_agent_ids = [456, 789]
@@ -3680,7 +3686,10 @@ async def test_export_agent_by_agent_id_success(mock_search_agent_info, mock_cre
     assert result.agent_id == 123
     assert result.tenant_id == "test_tenant"
     assert result.name == "Test Agent"
-    assert len(result.tools) == 5
+    assert len(result.tools) == 6
+    aidp_tool = next(tool for tool in result.tools if tool.class_name == "AidpSearchTool")
+    assert aidp_tool.params == {"kds_list": ["kb"]}
+    assert aidp_tool.metadata == {}
     assert result.managed_agents == mock_sub_agent_ids
 
     # Verify KnowledgeBaseSearchTool metadata is empty
@@ -10548,7 +10557,7 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -10592,7 +10601,7 @@ async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"]),
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -10631,8 +10640,8 @@ async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_a
     agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["ExistingSkill"]),
-            "2": types.SimpleNamespace(agent_id=2, skill_names=["RenamedSkill", "NewSkill", "MissingSkill"]),
+            "1": types.SimpleNamespace(agent_id=1, skill_names=["ExistingSkill"], tools=[]),
+            "2": types.SimpleNamespace(agent_id=2, skill_names=["RenamedSkill", "NewSkill", "MissingSkill"], tools=[]),
         },
     )
     skills = [
@@ -11225,7 +11234,7 @@ async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_
     mock_tool = MagicMock()
     mock_tool.class_name = "TestTool"
     mock_tool.source = "local"
-    mock_tool.params = ["param1", "param2"]
+    mock_tool.params = {"param1": "value1", "param2": "value2"}
     mock_tool.metadata = {}
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
@@ -18546,3 +18555,23 @@ def test_is_agent_running_returns_false_when_run_is_missing(mocker):
     mocker.patch.object(agent_run_service.agent_run_manager, "get_agent_run_info", return_value=None)
 
     assert agent_run_service.is_agent_running(44, "user-id") is False
+
+
+@pytest.mark.asyncio
+async def test_import_agent_with_skills_rejects_parameters_before_dependency_writes(mocker):
+    from management.services.agent import management
+    from utils.agent_transfer_utils import AgentToolImportError
+
+    mocker.patch.object(management, "get_current_user_info", return_value=("user", "tenant", "en"))
+    mocker.patch.object(management, "query_all_tools", return_value=[{
+        "class_name": "AidpSearchTool", "source": "local", "params": [{"name": "kds_list"}],
+    }])
+    skill_service = mocker.patch.object(management, "SkillService")
+    import_agents = mocker.patch.object(management, "import_agent_impl", new_callable=AsyncMock)
+    snapshot = types.SimpleNamespace(agent_info={"1": types.SimpleNamespace(tools=[
+        types.SimpleNamespace(class_name="AidpSearchTool", source="local", params={"unknown": 1}),
+    ])})
+    with pytest.raises(AgentToolImportError, match="unknown"):
+        await management.import_agent_with_skills_impl(snapshot, [], "Bearer token")
+    skill_service.assert_not_called()
+    import_agents.assert_not_called()

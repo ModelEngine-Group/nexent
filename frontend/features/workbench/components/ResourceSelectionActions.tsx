@@ -5,6 +5,7 @@ export function ResourceSelectionActions({
   hasSelection,
   disabled = false,
   empty = false,
+  toggleAllDisabled = false,
   onToggleAll,
   onClear,
 }: {
@@ -12,6 +13,7 @@ export function ResourceSelectionActions({
   hasSelection: boolean;
   disabled?: boolean;
   empty?: boolean;
+  toggleAllDisabled?: boolean;
   onToggleAll: () => void;
   onClear: () => void;
 }) {
@@ -22,7 +24,8 @@ export function ResourceSelectionActions({
         size="small"
         className="h-auto p-0 font-medium"
         aria-label={allSelected ? "取消全选" : "全选"}
-        disabled={disabled || empty}
+        disabled={disabled || empty || toggleAllDisabled}
+        title={toggleAllDisabled ? "当前环境未启用多智能体模式" : undefined}
         onClick={onToggleAll}
       >
         {allSelected ? "取消全选" : "全选"}

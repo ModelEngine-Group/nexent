@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Input, Modal, Pagination, Spin, Tabs, message } from "antd";
+import { Alert, Button, Input, Modal, Spin, Tabs, message } from "antd";
 import type {
   AgentRepositoryListingItem,
   RepositoryImportPrecheckResponse,
@@ -20,6 +20,11 @@ import {
 import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
 import { ResourceCard } from "./ResourceCard";
+import {
+  ResourcePagination,
+  RESOURCE_PAGE_SIZE,
+  resourcePage,
+} from "./ResourcePagination";
 import { useTranslation } from "react-i18next";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
@@ -96,7 +101,7 @@ export function AgentPicker({
       status: "shared",
       search,
       page,
-      page_size: 20,
+      page_size: RESOURCE_PAGE_SIZE,
     })
       .then((result) => {
         if (!cancelled) {
@@ -218,10 +223,10 @@ export function AgentPicker({
     <Modal
       open={open}
       title="选择智能体"
-      okText="确认选择"
+      okText="确定"
       cancelText="取消"
       confirmLoading={saving}
-      okButtonProps={{ disabled: loading || importing }}
+      okButtonProps={{ disabled: loading || importing, "aria-label": "确定" }}
       onOk={async () => {
         setSaving(true);
         try {
@@ -243,6 +248,7 @@ export function AgentPicker({
         onCancel();
       }}
       width={920}
+      centered
     >
       <Tabs
         activeKey={tab}
@@ -266,7 +272,7 @@ export function AgentPicker({
           setSearch(event.target.value);
           setPage(1);
         }}
-        placeholder="搜索智能体"
+        placeholder="搜索智能体名称或描述"
         allowClear
       />
       <Spin spinning={loading}>
@@ -283,53 +289,54 @@ export function AgentPicker({
                 )
               }
             />
-            {multiple && (
-              <ResourceSelectionActions
-                allSelected={
-                  visible.filter((agent) => agent.is_available !== false)
-                    .length > 0 &&
-                  visible
-                    .filter((agent) => agent.is_available !== false)
-                    .every((agent) =>
-                      draft.some((item) => item.id === agent.id)
-                    )
-                }
-                hasSelection={draft.length > 0}
-                disabled={loading || saving}
-                empty={!visible.some((agent) => agent.is_available !== false)}
-                onClear={() => setDraft([])}
-                onToggleAll={() => {
-                  const candidates = visible.filter(
-                    (agent) => agent.is_available !== false
-                  );
-                  setDraft((current) =>
-                    candidates.every((agent) =>
-                      current.some((item) => item.id === agent.id)
-                    )
-                      ? current.filter(
-                          (item) =>
-                            !candidates.some((agent) => agent.id === item.id)
-                        )
-                      : [
-                          ...current,
-                          ...candidates.filter(
-                            (agent) =>
-                              !current.some((item) => item.id === agent.id)
-                          ),
-                        ]
-                  );
-                }}
-              />
-            )}
+            <ResourceSelectionActions
+              toggleAllDisabled={
+                !multiple &&
+                visible.filter((agent) => agent.is_available !== false).length >
+                  1
+              }
+              allSelected={
+                visible.filter((agent) => agent.is_available !== false).length >
+                  0 &&
+                visible
+                  .filter((agent) => agent.is_available !== false)
+                  .every((agent) => draft.some((item) => item.id === agent.id))
+              }
+              hasSelection={draft.length > 0}
+              disabled={loading || saving}
+              empty={!visible.some((agent) => agent.is_available !== false)}
+              onClear={() => setDraft([])}
+              onToggleAll={() => {
+                const candidates = visible.filter(
+                  (agent) => agent.is_available !== false
+                );
+                setDraft((current) =>
+                  candidates.every((agent) =>
+                    current.some((item) => item.id === agent.id)
+                  )
+                    ? current.filter(
+                        (item) =>
+                          !candidates.some((agent) => agent.id === item.id)
+                      )
+                    : [
+                        ...current,
+                        ...candidates.filter(
+                          (agent) =>
+                            !current.some((item) => item.id === agent.id)
+                        ),
+                      ]
+                );
+              }}
+            />
           </div>
         )}
         <ResourceSelectionGrid
           role="listbox"
           aria-label="智能体资源"
-          className="mt-4 max-h-[65vh] overflow-auto"
+          className="mt-4 p-1"
         >
           {tab === "mine"
-            ? visible.map((agent) => (
+            ? resourcePage(visible, page).map((agent) => (
                 <ResourceCard
                   key={agent.id}
                   title={agent.display_name || agent.name}
@@ -368,21 +375,26 @@ export function AgentPicker({
                   tags={item.tags}
                   badges={[item.version_label ?? "仓库"]}
                   disabled={loading || importing}
-                  footer="预检并导入"
+                  actions={
+                    <Button
+                      size="small"
+                      disabled={loading || importing}
+                      onClick={() => void check(item)}
+                    >
+                      预检并导入
+                    </Button>
+                  }
                   onClick={() => void check(item)}
                 />
               ))}
         </ResourceSelectionGrid>
       </Spin>
-      {tab === "repository" && (
-        <Pagination
-          current={page}
-          pageSize={20}
-          total={total}
-          onChange={setPage}
-          showSizeChanger={false}
-        />
-      )}
+      <ResourcePagination
+        current={page}
+        total={tab === "repository" ? total : visible.length}
+        onChange={setPage}
+        disabled={loading || importing}
+      />
       <Modal
         open={!!precheck}
         title="导入预检"

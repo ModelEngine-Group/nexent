@@ -55,7 +55,7 @@ export function ResourceCard({
       icon={
         <span
           aria-hidden
-          className="flex size-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"
+          className="flex size-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600"
         >
           {icon ?? <Icon size={24} />}
         </span>
@@ -65,10 +65,14 @@ export function ResourceCard({
       selectionRole="option"
       describedBy={disabledReason ? reasonId : undefined}
       onClick={onClick ?? (() => {})}
-      className="h-full min-h-[220px] rounded-xl [&_h2]:text-lg [&_h2]:leading-6"
+      className="h-[220px] min-h-0 rounded-xl p-4 [&_h2]:text-lg [&_h2]:leading-6 [&_.line-clamp-3]:line-clamp-2 [&_.line-clamp-3]:mt-2 [&_.mt-3]:mt-2 [&_.border-t]:pt-3"
       badge={
         badges.length > 0 ? (
-          <span className="flex flex-wrap gap-1" aria-label="资源状态">
+          <span
+            className="flex gap-1 overflow-hidden whitespace-nowrap"
+            aria-label="资源状态"
+            title={badges.join("、")}
+          >
             {badges.map((badge) => (
               <span
                 className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
@@ -82,7 +86,11 @@ export function ResourceCard({
       }
       tags={
         uniqueTags.length > 0 ? (
-          <span className="flex flex-wrap gap-1" aria-label="标签">
+          <span
+            className="flex max-w-full gap-1 overflow-hidden whitespace-nowrap"
+            aria-label="标签"
+            title={uniqueTags.join("、")}
+          >
             {uniqueTags.slice(0, 3).map((tag) => (
               <span
                 key={tag}

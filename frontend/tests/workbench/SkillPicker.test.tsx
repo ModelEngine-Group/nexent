@@ -56,7 +56,7 @@ it.each([false, true])(
       )
     );
     expect(confirm).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+    await userEvent.click(screen.getByRole("button", { name: "确定" }));
     expect(confirm.mock.calls[0][0]).toEqual(defaults);
   }
 );
@@ -118,7 +118,7 @@ it("UT-FE-WB-022 a no-config selection remains pending until confirmation", asyn
   );
   expect(confirm).not.toHaveBeenCalled();
   expect(screen.getByRole("dialog")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 2, config_values: {} },
   ]);
@@ -146,7 +146,7 @@ it("selects and deselects search results without losing hidden selections", asyn
   );
   await userEvent.click(screen.getByRole("button", { name: "取消全选" }));
   await userEvent.click(
-    await screen.findByRole("button", { name: "确认选择" })
+    await screen.findByRole("button", { name: "确定" })
   );
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 1, config_values: {} },
@@ -163,7 +163,8 @@ it("bulk selection respects the twenty-skill limit", async () => {
   render(
     <SkillPicker open selected={[]} onCancel={vi.fn()} onConfirm={vi.fn()} />
   );
-  await screen.findByRole("option", { name: /Skill 21/ });
+  await screen.findByRole("option", { name: /Skill 1/ });
+  expect(screen.getAllByRole("option")).toHaveLength(4);
   await userEvent.click(screen.getByRole("button", { name: /^全选$/ }));
   expect(
     screen
@@ -174,6 +175,21 @@ it("bulk selection respects the twenty-skill limit", async () => {
     await screen.findByText("最多选择 20 个 Skills，请缩小搜索范围后重试")
   ).toBeInTheDocument();
 });
+it("paginates four skills and preserves selections across pages", async () => {
+  vi.mocked(fetchSkillsList).mockResolvedValue(Array.from({ length: 5 }, (_, index) => ({
+    ...base, skill_id: String(index + 1), name: `Paged Skill ${index + 1}`,
+  })));
+  render(<SkillPicker open selected={[]} onCancel={vi.fn()} onConfirm={vi.fn()} />);
+  await screen.findByRole("option", { name: /Paged Skill 1/ });
+  expect(screen.getAllByRole("option")).toHaveLength(4);
+  await userEvent.click(screen.getByRole("option", { name: /Paged Skill 1/ }));
+  await userEvent.click(screen.getByTitle("2"));
+  expect(screen.getAllByRole("option")).toHaveLength(1);
+  expect(screen.getByRole("option", { name: /Paged Skill 5/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByTitle("1"));
+  expect(screen.getByRole("option", { name: /Paged Skill 1/ })).toHaveAttribute("aria-selected", "true");
+});
+
 it("UT-FE-WB-023 required configuration blocks confirmation until complete", async () => {
   vi.mocked(fetchSkillsList).mockResolvedValue([
     {
@@ -192,7 +208,7 @@ it("UT-FE-WB-023 required configuration blocks confirmation until complete", asy
   expect(confirm).not.toHaveBeenCalled();
   await userEvent.type(screen.getByLabelText("Default Skill region"), "CN");
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
-  await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 1, config_values: { region: "CN" } },
   ]);
@@ -254,12 +270,12 @@ it("UT-FE-WB-036 confirming a new set excludes cancelled defaults and supports e
     await screen.findByRole("option", { name: /Default Skill/ })
   );
   await userEvent.click(screen.getByRole("option", { name: /New Skill/ }));
-  await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 2, config_values: {} },
   ]);
   await userEvent.click(screen.getByRole("option", { name: /New Skill/ }));
-  await userEvent.click(screen.getByText("确认选择"));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   expect(confirm.mock.calls[1][0]).toEqual([]);
 });
 it("UT-FE-WB-024 install selects the returned Skill ID even when renamed", async () => {
@@ -285,7 +301,7 @@ it("UT-FE-WB-024 install selects the returned Skill ID even when renamed", async
     ).toHaveAttribute("aria-selected", "true")
   );
   expect(confirm).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 99, config_values: {} },
   ]);
@@ -349,7 +365,7 @@ it("UT-FE-WB-023 renders boolean and enum controls with typed values", async () 
     screen.getByRole("combobox", { name: "Default Skill region" })
   ).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
-  await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
+  await userEvent.click(screen.getByRole("button", { name: "确定" }));
   expect(confirm.mock.calls[0][0]).toEqual([
     { skill_id: 1, config_values: { enabled: true } },
   ]);
