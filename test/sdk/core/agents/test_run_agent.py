@@ -364,7 +364,7 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
 def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_info, monkeypatch):
     captured = {}
     basic_agent_run_info.capacity_snapshot = {"capacity_fingerprint": "w1"}
-    basic_agent_run_info.safe_input_budget_snapshot = {"fingerprint": "w2"}
+    basic_agent_run_info.context_budget_snapshot = MagicMock(fingerprint="w2")
 
     monkeypatch.setattr(
         run_agent,
@@ -373,7 +373,7 @@ def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_in
     )
     monkeypatch.setattr(
         run_agent,
-        "set_monitoring_safe_input_budget_snapshot",
+        "set_monitoring_context_budget_snapshot",
         lambda snapshot: captured.setdefault("budget", snapshot),
     )
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
@@ -382,17 +382,17 @@ def test_agent_run_thread_binds_capacity_and_budget_snapshots(basic_agent_run_in
     run_agent.agent_run_thread(basic_agent_run_info)
 
     assert captured["capacity"] == {"capacity_fingerprint": "w1"}
-    assert captured["budget"] == {"fingerprint": "w2"}
+    assert captured["budget"].fingerprint == "w2"
 
 
 def test_emit_uncertainty_reserve_warning(basic_agent_run_info):
-    basic_agent_run_info.safe_input_budget_snapshot = {
-        "warnings": ["uncertainty_reserve_active"],
-        "fingerprint": "w2",
-        "w1_fingerprint": "w1",
-        "uncertainty_reserve_tokens": 12800,
-        "hard_input_budget_tokens": 114200,
-    }
+    basic_agent_run_info.context_budget_snapshot = MagicMock(
+        warnings=["uncertainty_reserve_active"],
+        fingerprint="w2",
+        w1_fingerprint="w1",
+        uncertainty_reserve_tokens=12800,
+        effective_input_limit_tokens=127000,
+    )
 
     run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
 
@@ -406,10 +406,9 @@ def test_emit_uncertainty_reserve_warning(basic_agent_run_info):
 
 
 def test_emit_uncertainty_reserve_warning_noops_without_warning(basic_agent_run_info):
-    basic_agent_run_info.safe_input_budget_snapshot = {
-        "warnings": [],
-        "fingerprint": "w2",
-    }
+    basic_agent_run_info.context_budget_snapshot = MagicMock(
+        warnings=[], fingerprint="w2"
+    )
 
     run_agent._emit_uncertainty_reserve_warning(basic_agent_run_info)
 
