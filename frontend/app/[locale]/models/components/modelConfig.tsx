@@ -63,9 +63,6 @@ import { Can } from "@/components/permission/Can";
 import { ModelError } from "@/services/modelService";
 import { useModelList } from "@/hooks/model/useModelList";
 
-// ModelConnectStatus type definition
-type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
-
 // Model data structure
 const getModelData = (t: any) => ({
   llm: {
@@ -886,7 +883,36 @@ export const ModelConfigSection = forwardRef<
 
   const verifyModels = async () => {
     if (isVerifying || models.length === 0) return;
-    await verifyModelsInternal(models, selectedModels);
+    // Verify ALL models in the list (not just the default-model selection):
+    // mark every row as checking, probe in parallel, update rows as they land.
+    setIsVerifying(true);
+    try {
+      await Promise.all(
+        models.map(async (m) => {
+          if (!m.displayName) return;
+          updateModelStatus(m.displayName, m.type, MODEL_STATUS.CHECKING);
+          try {
+            const isConnected = await modelService.verifyCustomModel(
+              m.displayName,
+              m.type
+            );
+            updateModelStatus(
+              m.displayName,
+              m.type,
+              isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
+            );
+          } catch (error: any) {
+            log.error(
+              t("modelConfig.error.verifyCustomModel", { model: m.displayName }),
+              error
+            );
+            updateModelStatus(m.displayName, m.type, MODEL_STATUS.UNAVAILABLE);
+          }
+        })
+      );
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   /* ------------------ Sync ModelEngine ------------------ */
@@ -1433,6 +1459,18 @@ export const ModelConfigSection = forwardRef<
           isOpen={!!editingCardModel}
           model={editingCardModel}
           onClose={() => setEditingCardModel(null)}
+          onConnectivityChange={(displayName, modelType, status) => {
+            // Refresh the list row's connect_status in place when the edit
+            // dialog's connectivity probe finishes, so the list doesn't show
+            // a stale status from the last loadModelLists.
+            setModels((prev) =>
+              prev.map((m) =>
+                m.displayName === displayName && m.type === modelType
+                  ? { ...m, connect_status: status }
+                  : m
+              )
+            );
+          }}
           onSuccess={async () => {
             setEditingCardModel(null);
             await loadModelLists(true);

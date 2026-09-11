@@ -597,7 +597,7 @@ class ModelCapacitySuggestionRequest(BaseModel):
 
 class ModelCapacitySuggestionResponse(BaseModel):
     suggestions: Optional[CapacitySuggestionFields] = None
-    match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "none"]
+    match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "litellm_lookup", "none"]
     match_confidence: Optional[Literal["high", "medium", "low"]] = None
     match_explanation: str
     suggested_provider: Optional[str] = None
@@ -2472,6 +2472,11 @@ def _infer_model_type_from_name(model_name: str) -> str:
     via OpenAI-compatible /v1/models). Preset providers do not need this because
     their types come from the catalog.
 
+    Matching runs against BOTH the full name and its final path segment so that
+    repo-prefixed ids from aggregators (SiliconFlow "BAAI/bge-m3", OpenRouter
+    "deepseek/deepseek-v4-flash", "Pro/..." tiers) classify the same as their
+    bare names.
+
     Mapping rules (see design doc Phase 2.6):
     - gpt-* / o1-* / o3-* / o4-* / claude-* / glm-* / qwen-* (non-vl) /
       deepseek-* / llama-* / mistral-* / yi-* / moonshot-* / gemini-* → llm
@@ -2485,28 +2490,69 @@ def _infer_model_type_from_name(model_name: str) -> str:
     if not model_name:
         return "llm"
     name = model_name.lower()
+    # Final path segment (after the last "/"): "BAAI/bge-m3" -> "bge-m3",
+    # "Pro/deepseek-ai/DeepSeek-V3" -> "deepseek-v3". Checked alongside the
+    # full name so repo prefixes on aggregators don't break prefix rules.
+    final_segment = name.rsplit("/", 1)[-1]
 
-    # Embedding (check before generic patterns)
-    if name.startswith(("text-embedding-", "embedding-", "bge-")) and "reranker" not in name:
+    def _matches(*prefixes: str) -> bool:
+        return name.startswith(prefixes) or final_segment.startswith(prefixes)
+
+    def _contains(token: str) -> bool:
+        return token in name or token in final_segment
+
+    def _contains_any(*tokens: str) -> bool:
+        return any(tok in name or tok in final_segment for tok in tokens)
+
+    # Embedding (check before generic patterns). Besides prefix rules, also
+    # match names that merely CONTAIN "embedding" — covers Qwen3-Embedding-*,
+    # text-embedding-* variants and similar mid-name conventions on
+    # aggregators. "reranker" wins over "embedding" when both appear
+    # (bge-reranker-v2-m3 style names).
+    if not _contains("reranker") and (
+        _matches("text-embedding-", "embedding-", "bge-") or _contains("embedding")
+    ):
         return "embedding"
-    # Rerank
-    if name.startswith(("rerank-", "bge-reranker-", "jina-reranker-")) or "reranker" in name:
+    # Rerank. Also catch names containing "rerank" (Qwen3-Reranker-0.6B style).
+    if _matches("rerank-", "bge-reranker-", "jina-reranker-") or _contains("reranker") or _contains("rerank"):
         return "rerank"
-    # STT
-    if name.startswith(("whisper-", "paraformer-", "sensevoice-")):
+    # STT. Also catch "sensevoice" mid-name (FunAudioLLM/SenseVoiceSmall).
+    if _matches("whisper-", "paraformer-", "sensevoice-") or _contains("sensevoice"):
         return "stt"
-    # TTS
-    if name.startswith(("tts-", "cosyvoice-", "speech-")):
+    # TTS. Also catch "tts" / "cosyvoice" mid-name (IndexTeam/IndexTTS-2,
+    # FunAudioLLM/CosyVoice2-0.5B style aggregator names).
+    if _matches("tts-", "cosyvoice-", "speech-") or _contains("cosyvoice"):
         return "tts"
-    # VLM (check before LLM because qwen-vl-* starts with qwen-)
-    if name.startswith(("qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")):
+    # Video understanding (vlm3) — keywords aligned with develop's TokenPony
+    # provider classification (TOKENPONY_VIDEO_UNDERSTANDING_KEYWORDS).
+    if _contains_any("omni", "video"):
+        return "vlm3"
+    # Image generation (vlm2) — keywords aligned with develop's TokenPony
+    # provider classification (TOKENPONY_IMAGE_GENERATION_KEYWORDS): catches
+    # Tongyi-MAI/Z-Image-Turbo, baidu/ERNIE-Image-Turbo, flux/sdxl/wanx/
+    # seedream/ideogram/recraft families. Checked BEFORE image understanding
+    # because develop's classifier gives generation keywords priority.
+    if _contains_any(
+        "image", "dall", "flux", "stable-diffusion", "sdxl",
+        "midjourney", "wanx", "kolors", "seedream", "ideogram", "recraft",
+    ):
+        return "vlm2"
+    # Image understanding (vlm) — keywords aligned with develop's TokenPony
+    # provider (TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS) plus the legacy
+    # prefix rules: qwen-vl-*, glm-v*, internvl-*, llava-*, gpt-4o-*.
+    # "vl" as a standalone dash-segment covers Qwen/Qwen3-VL-* naming.
+    if (
+        _matches("qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
+        or "vl" in final_segment.split("-")
+        or _contains_any("vision", "visual", "ocr")
+    ):
         return "vlm"
     # LLM
-    if name.startswith((
+    if _matches(
         "gpt-", "o1-", "o3-", "o4-", "claude-", "glm-", "qwen-",
         "deepseek-", "llama-", "mistral-", "yi-", "moonshot-", "gemini-",
         "kimi-", "doubao-", "ernie-", "spark-",
-    )):
+    ):
         return "llm"
     # Default fallback
     return "llm"

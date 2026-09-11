@@ -1,11 +1,19 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Button, Col, Form, Input, Row, Select, Tooltip } from "antd";
-import { Maximize2 } from "lucide-react";
+import { Button, Col, Form, Input, Modal, Row, Select, Tooltip } from "antd";
+import { Maximize2, Settings2 } from "lucide-react";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import {
+  ModelAdvancedSettings,
+  ModelAdvancedSettingsValue,
+  advancedSettingsValueFromRecord,
+  buildModelOverrideEntry,
+} from "../../models/components/model/ModelAdvancedSettings";
+import type { ModelOverrideMap } from "../../models/components/model/ModelOverrideModal";
 import { canManageModels } from "@/lib/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -64,6 +72,55 @@ export default function AgentPrompt() {
       displayName: m.displayName ?? m.name,
     }));
   }, [llmModels]);
+
+  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
+  const [configuringModelId, setConfiguringModelId] = useState<number | null>(null);
+  const [editingOverrideValue, setEditingOverrideValue] = useState<ModelAdvancedSettingsValue | null>(null);
+  const modelParamsOverride = (editedAgent.model_params_override ?? {}) as ModelOverrideMap;
+  const configuringModel = useMemo(
+    () => (llmModels ?? []).find((m) => m.id === configuringModelId) ?? null,
+    [llmModels, configuringModelId]
+  );
+  useEffect(() => {
+    if (!configuringModel) {
+      setEditingOverrideValue(null);
+      return;
+    }
+    const modelDefaults: Record<string, unknown> = {
+      temperature: (configuringModel as any).temperature,
+      top_p: (configuringModel as any).topP,
+      extra_params: (configuringModel as any).extraParams,
+    };
+    const overrideEntry = modelParamsOverride[String(configuringModel.id)] ?? {};
+    const formRecord: Record<string, unknown> = { ...modelDefaults, ...overrideEntry };
+    if (overrideEntry.extra_params && modelDefaults.extra_params) {
+      formRecord.extra_params = {
+        ...(modelDefaults.extra_params as Record<string, unknown>),
+        ...(overrideEntry.extra_params as Record<string, unknown>),
+      };
+    }
+    setEditingOverrideValue(
+      advancedSettingsValueFromRecord(formRecord as any, inferenceSpecs, (configuringModel as any).type ?? "llm")
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configuringModelId]);
+
+  const handleModelParamsOverrideChange = (modelId: number, next: ModelAdvancedSettingsValue) => {
+    const entry = buildModelOverrideEntry(next);
+    const updated: ModelOverrideMap = { ...modelParamsOverride };
+    if (Object.keys(entry).length === 0) {
+      delete updated[String(modelId)];
+    } else {
+      updated[String(modelId)] = entry;
+    }
+    updateAgent({ model_params_override: Object.keys(updated).length > 0 ? updated : null });
+  };
+
+  const handleClearModelParamsOverride = (modelId: number) => {
+    const updated: ModelOverrideMap = { ...modelParamsOverride };
+    delete updated[String(modelId)];
+    updateAgent({ model_params_override: Object.keys(updated).length > 0 ? updated : null });
+  };
 
   const canManage = canManageModels(user?.role ?? "");
 
@@ -148,6 +205,15 @@ export default function AgentPrompt() {
               }
               disabled={!canManage && !isSpeedMode}
             />
+            <Tooltip title={t("agent.modelParamsOverride.button", { defaultValue: "模型参数覆盖" })}>
+              <Button
+                type="text"
+                size="small"
+                icon={<Settings2 size={14} />}
+                disabled={(!canManage && !isSpeedMode) || !editedAgent.model_ids?.length}
+                onClick={() => setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)}
+              />
+            </Tooltip>
           </Form.Item>
         </Col>
       </Row>
@@ -251,6 +317,80 @@ export default function AgentPrompt() {
           }
         />
       )}
+
+      {/* v2.6.0: per-model parameter override popup */}
+      <Modal
+        open={configuringModelId !== null}
+        onCancel={() => setConfiguringModelId(null)}
+        onOk={() => {
+          if (editingOverrideValue && configuringModel) {
+            const modelDefaults = advancedSettingsValueFromRecord(
+              {
+                temperature: (configuringModel as any).temperature,
+                top_p: (configuringModel as any).topP,
+                extra_params: (configuringModel as any).extraParams,
+              },
+              inferenceSpecs,
+              (configuringModel as any).type ?? "llm"
+            );
+            const diffValue: ModelAdvancedSettingsValue = {};
+            for (const [key, val] of Object.entries(editingOverrideValue)) {
+              const modelVal = modelDefaults[key];
+              if (JSON.stringify(modelVal) !== JSON.stringify(val)) {
+                diffValue[key] = val;
+              }
+            }
+            handleModelParamsOverrideChange(configuringModel.id, diffValue);
+          }
+          setConfiguringModelId(null);
+        }}
+        title={configuringModel ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}` : t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}
+        okText={t("common.confirm", { defaultValue: "确定" })}
+        cancelText={t("common.cancel", { defaultValue: "取消" })}
+        okButtonProps={{ disabled: !canManage && !isSpeedMode }}
+        width={600}
+        centered
+        destroyOnClose={false}
+        styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
+      >
+        {configuringModel && (
+          <div className="space-y-3">
+            <Select
+              className="mb-2 w-full"
+              value={configuringModelId}
+              options={modelOptions}
+              onChange={(v: number) => setConfiguringModelId(v)}
+              disabled={!canManage && !isSpeedMode}
+            />
+            <div className="text-xs text-gray-500 pb-2 border-b border-gray-100">
+              {t("model.advanced.overrideHint", { defaultValue: "留空表示继承模型默认值。" })}
+            </div>
+            <ModelAdvancedSettings
+              modelType={(configuringModel as any).type ?? "llm"}
+              specs={inferenceSpecs}
+              value={editingOverrideValue ?? advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm")}
+              onChange={(next) => setEditingOverrideValue(next)}
+              mode="override"
+              disabled={!canManage && !isSpeedMode}
+            />
+            {Object.keys(modelParamsOverride[String(configuringModel.id)] ?? {}).length > 0 && (
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleClearModelParamsOverride(configuringModel.id);
+                    setEditingOverrideValue(advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm"));
+                  }}
+                  disabled={!canManage && !isSpeedMode}
+                  className="text-xs text-red-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {t("model.advanced.clearOverride", { defaultValue: "清空该模型的覆盖" })}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

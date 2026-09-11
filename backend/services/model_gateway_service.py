@@ -81,6 +81,20 @@ def _coalesce(*vals: Any) -> Any:
     return None
 
 
+def _custom_extra_body(extra_params: Optional[dict]) -> Optional[dict]:
+    """Extract the operator's __custom__ KV pairs as the OpenAI extra_body.
+
+    ``extra_params`` is the nexent field ({"__custom__": {...}, ...}); the
+    ``__custom__`` sub-dict holds user-entered provider-specific params that
+    must reach the chat request's ``extra_body``. Returns None when absent so
+    default behaviour is unchanged.
+    """
+    if not extra_params:
+        return None
+    custom = extra_params.get("__custom__")
+    return custom if isinstance(custom, dict) and custom else None
+
+
 def _config_to_context(
     cfg: Optional[dict],
     modality: str,
@@ -126,7 +140,7 @@ def _config_to_context(
             stream=construct_extras.pop("stream", None),
             max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
             frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body"),
+            extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
         )
     elif modality == "llm_long_context":
         return LongContextLLMContext(
@@ -136,7 +150,7 @@ def _config_to_context(
             stream=construct_extras.pop("stream", None),
             max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
             frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body"),
+            extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
             max_tokens=cfg.get("max_tokens"),
             truncation_strategy=cfg.get("truncation_strategy"),
         )
@@ -151,7 +165,7 @@ def _config_to_context(
             stream=construct_extras.pop("stream", None),
             max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
             frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body"),
+            extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
             max_tokens=cfg.get("max_tokens"),
             capabilities=caps,
         )

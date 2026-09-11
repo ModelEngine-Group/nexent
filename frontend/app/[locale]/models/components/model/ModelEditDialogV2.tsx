@@ -594,6 +594,7 @@ export const ModelEditDialogV2 = ({
         vlm: MODEL_TYPES.VLM,
         vlm2: MODEL_TYPES.VLM2,
         vlm3: MODEL_TYPES.VLM3,
+        vlm4: MODEL_TYPES.VLM4,
         rerank: MODEL_TYPES.RERANK,
         tts: MODEL_TYPES.TTS,
         stt: MODEL_TYPES.STT,

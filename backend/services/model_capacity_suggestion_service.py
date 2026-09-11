@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -83,6 +85,7 @@ class CapacitySuggestionMatchKind(str, Enum):
     CATALOG_EXACT = "catalog_exact"
     CATALOG_FUZZY = "catalog_fuzzy"
     PROVIDER_DISCOVERY = "provider_discovery"
+    LITELLM_LOOKUP = "litellm_lookup"
     NONE = "none"
 
 
@@ -333,8 +336,6 @@ def _suggest_capacity_inner(
     catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]],
     enabled: bool,
 ) -> CapacitySuggestionResult:
-    del api_key
-
     if not enabled:
         return _none_result("Capacity suggestion is disabled")
 
@@ -352,6 +353,13 @@ def _suggest_capacity_inner(
 
     provider = pick_provider(provider_hint, base_url, clean_model_name, active_catalog)
     if not provider:
+        # Provider can't be inferred (e.g. base_url still empty while the user
+        # is typing). The catalog needs a provider, but the bundled LiteLLM
+        # JSON can still be matched by bare model name — give that a try
+        # before giving up.
+        litellm_result = _litellm_lookup(clean_model_name, None)
+        if litellm_result is not None:
+            return litellm_result
         return _none_result("No provider candidate could be inferred")
 
     exact_key = (provider, clean_model_name)
@@ -388,4 +396,122 @@ def _suggest_capacity_inner(
             CapacitySuggestionMatchKind.CATALOG_FUZZY,
         )
 
+    litellm_result = _litellm_lookup(clean_model_name, provider)
+    if litellm_result is not None:
+        return litellm_result
+
     return _none_result(f"No approved catalog profile matched provider={provider}, model={clean_model_name}")
+
+
+# =============================================================================
+# LiteLLM lookup (match_kind=LITELLM_LOOKUP)
+# =============================================================================
+# When the catalog has no entry for a model, look it up in the bundled
+# LiteLLM model_prices_and_context_window.json (3818 models, fetched at
+# image build time so it works offline / without VPN). We map
+# max_input_tokens -> context_window and max_output_tokens -> max_output;
+# max_input / reserve stay None (SDK derives them from the combined window).
+
+_LITELLM_JSON_PATH = os.environ.get(
+    "NEXENT_LITELLM_JSON",
+    "/opt/nexent/litellm_models.json",
+)
+_LITELLM_CACHE: Optional[dict] = None
+
+
+def _litellm_cache() -> Optional[dict]:
+    """Load the bundled LiteLLM JSON once and cache it in memory."""
+    global _LITELLM_CACHE
+    if _LITELLM_CACHE is not None:
+        return _LITELLM_CACHE
+    try:
+        with open(_LITELLM_JSON_PATH, "r", encoding="utf-8") as f:
+            _LITELLM_CACHE = json.load(f)
+    except Exception as exc:
+        logger.debug("LiteLLM JSON load failed (%s): %s", _LITELLM_JSON_PATH, exc)
+        _LITELLM_CACHE = {}
+    return _LITELLM_CACHE
+
+
+def _litellm_lookup(
+    model_name: str,
+    provider: Optional[str],
+) -> Optional[CapacitySuggestionResult]:
+    """Look up model_name in the bundled LiteLLM JSON.
+
+    Tries exact key match first (preferring the LiteLLM provider that maps to
+    nexent's provider), then falls back to matching by the final path segment
+    (e.g. deepseek-ai/DeepSeek-V4-Flash -> DeepSeek-V4-Flash) across all
+    providers. Returns None if nothing usable is found.
+    """
+    cache = _litellm_cache()
+    if not cache:
+        return None
+
+    target = model_name.strip()
+    if not target:
+        return None
+
+    # Candidate keys to try, in priority order.
+    candidates = []
+    if provider:
+        candidates.append(f"{provider}/{target}")
+    candidates.append(target)
+    # try matching by final segment (handles "org/model" naming)
+    final_segment = target.split("/")[-1]
+    if final_segment != target:
+        candidates.append(final_segment)
+
+    entry = None
+    for cand in candidates:
+        if cand in cache:
+            entry = cache[cand]
+            break
+    if entry is None:
+        # cross-provider match by final segment, case-insensitive. Collect all
+        # matches and prefer one that has BOTH context and max_output (some
+        # providers leave max_output as null).
+        lowered = final_segment.lower()
+        matches = [
+            v for k, v in cache.items()
+            if k.split("/")[-1].lower() == lowered
+        ]
+        entry = next(
+            (m for m in matches if m.get("max_input_tokens") and m.get("max_output_tokens")),
+            matches[0] if matches else None,
+        )
+    if not entry or not isinstance(entry, dict):
+        return None
+
+    def _pos_int(v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        try:
+            n = int(v)
+        except (ValueError, TypeError):
+            return None
+        return n if n > 0 else None
+
+    # LiteLLM's max_input_tokens is the total context window (input+output);
+    # max_output_tokens is the output cap. Map accordingly.
+    context = _pos_int(entry.get("max_input_tokens"))
+    max_output = _pos_int(entry.get("max_output_tokens"))
+    if context is None and max_output is None:
+        return None
+
+    fields = CapacitySuggestionFields(
+        context_window_tokens=context,
+        max_input_tokens=None,
+        max_output_tokens=max_output,
+        default_output_reserve_tokens=None,
+        tokenizer_family=None,
+    )
+    return CapacitySuggestionResult(
+        suggestions=fields,
+        match_kind=CapacitySuggestionMatchKind.LITELLM_LOOKUP,
+        match_confidence=CapacitySuggestionConfidence.MEDIUM,
+        match_explanation=f"Matched LiteLLM bundled catalog (3818 models) for {target}",
+        suggested_provider=provider,
+        canonical_model_name=target,
+        capacity_source_on_accept="operator",
+    )

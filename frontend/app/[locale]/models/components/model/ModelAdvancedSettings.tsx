@@ -170,10 +170,14 @@ export const buildInferenceParamsPayload = (
       // which may contain empty/duplicate keys. Convert to a clean dict for the
       // wire payload: empty keys dropped, duplicates collapse (last-wins).
       const entries = Array.isArray(raw) ? (raw as [string, string][]) : [];
-      const dict: Record<string, string> = {};
+      const dict: Record<string, unknown> = {};
       for (const [k, v] of entries) {
         if (k === "") continue;
-        dict[k] = v;
+        // Coerce numeric strings to numbers so provider params like top_k /
+        // seed that expect ints/floats receive a real number, not a string.
+        const trimmed = String(v ?? "").trim();
+        if (trimmed === "") continue;
+        dict[k] = !isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
       }
       if (Object.keys(dict).length > 0) {
         extraParams["__custom__"] = dict;

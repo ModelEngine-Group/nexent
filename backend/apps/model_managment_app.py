@@ -12,6 +12,7 @@ parsed with `utils.auth_utils.get_current_user_id`, then propagated as `user_id`
 and `tenant_id` to services/database helpers.
 """
 
+import asyncio
 import logging
 
 from consts.model import (
@@ -541,11 +542,15 @@ async def check_temporary_model_health(
     try:
         get_current_user_id(authorization)
         result = await verify_model_config_connectivity(request.model_dump())
-        result["capacity_suggestion"] = (
-            _capacity_suggestion_for_model_request(request)
-            if result.get("connectivity") is True
-            else None
-        )
+        if result.get("connectivity") is True:
+            # suggest_capacity may now issue an LLM self-report HTTP call
+            # (catalog miss → _llm_infer_capacity). Run it off the event loop
+            # so the 15s probe budget does not block other requests.
+            result["capacity_suggestion"] = await asyncio.to_thread(
+                _capacity_suggestion_for_model_request, request
+            )
+        else:
+            result["capacity_suggestion"] = None
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully verified model connectivity",
             "data": result

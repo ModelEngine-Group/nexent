@@ -24,8 +24,6 @@ import { modelService } from "@/services/modelService";
 import {
   InferenceFieldSpecsByType,
   ModelCatalogFullPayload,
-  ModelCatalogModelEntry,
-  ModelCatalogProfile,
   ModelCatalogProviderInfo,
   ModelOption,
   ModelType,
@@ -48,8 +46,6 @@ import {
 import {
   buildCapacityPayload,
   capacityFormFromModel,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
-  DEFAULT_MAX_OUTPUT_TOKENS,
   emptyCapacityForm,
   ModelCapacityFields,
   ModelCapacityFormState,
@@ -84,6 +80,13 @@ interface ModelAddDialogV2Props {
       selected by default and the custom form is prefilled from this model.
       On submit the update endpoints are used instead of the create ones. */
   model?: ModelOption | null;
+  /** Edit mode only: called after a connectivity probe finishes so the parent
+      can refresh the model list row's connect_status in place. */
+  onConnectivityChange?: (
+    displayName: string,
+    modelType: ModelType,
+    status: "available" | "unavailable"
+  ) => void;
 }
 
 // =============================================================================
@@ -206,6 +209,7 @@ export const ModelAddDialogV2 = ({
   onSuccess,
   tenantId,
   model,
+  onConnectivityChange,
 }: ModelAddDialogV2Props) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -223,6 +227,8 @@ export const ModelAddDialogV2 = ({
   const [baseUrl, setBaseUrl] = useState("");
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchedModels, setFetchedModels] = useState<any[]>([]);
+  // Client-side filter for the fetched model table (model name substring).
+  const [modelSearchTerm, setModelSearchTerm] = useState("");
   const [rowStates, setRowStates] = useState<Record<string, BatchRowState>>({});
   const [settingsModalRowId, setSettingsModalRowId] = useState<string | null>(null);
 
@@ -252,6 +258,9 @@ export const ModelAddDialogV2 = ({
     message: string;
   }>({ status: null, message: "" });
   const [verifyingCustom, setVerifyingCustom] = useState(false);
+  // Whether the debounced capacity lookup found a suggestion for the current
+  // model name. Drives the "已配置" tag next to the advanced settings button.
+  const [capacityAutoFilled, setCapacityAutoFilled] = useState(false);
 
   // ---------- load inference specs + catalog on open ----------
   useEffect(() => {
@@ -315,7 +324,65 @@ export const ModelAddDialogV2 = ({
     if (model.accessToken) advancedValue.access_token = model.accessToken;
     setCustomAdvanced(advancedValue);
     setCustomConnectivity({ status: null, message: "" });
+    // Edit mode: if the existing model already carries capacity values, show
+    // the "已配置" tag right away (the debounce lookup will also re-check and
+    // fill any EMPTY field from catalog/LiteLLM when the name settles).
+    const prefilled = capacityFormFromModel(model);
+    setCapacityAutoFilled(
+      Object.values(prefilled).some((v) => v !== "")
+    );
   }, [isOpen, model, inferenceSpecs]);
+
+  // ---------- Tab B: debounced capacity auto-lookup on model name ----------
+  // When the operator types a model name in the custom-access form, wait for a
+  // pause (500ms) then query suggest_capacity (catalog → bundled LiteLLM).
+  // Only fills EMPTY capacity fields — values the user already typed (or that
+  // came from an edit-mode prefill) are never overwritten. Sets the
+  // "已配置" tag when a suggestion was found.
+  useEffect(() => {
+    if (!isOpen) return;
+    const name = customForm.name.trim();
+    if (!name || !supportsCapacityFields(customForm.type)) {
+      setCapacityAutoFilled(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const suggestion = await modelService.suggestCapacity({
+          modelName: name,
+          baseUrl: customForm.url || undefined,
+          modelType: customForm.type,
+        });
+        const s = suggestion?.suggestions;
+        if (!s) {
+          setCapacityAutoFilled(false);
+          return;
+        }
+        setCapacityAutoFilled(true);
+        setCustomCapacity((prev) => ({
+          ...prev,
+          ...(s.contextWindowTokens && !prev.contextWindowTokens
+            ? { contextWindowTokens: String(s.contextWindowTokens) }
+            : {}),
+          ...(s.maxInputTokens && !prev.maxInputTokens
+            ? { maxInputTokens: String(s.maxInputTokens) }
+            : {}),
+          ...(s.maxOutputTokens && !prev.maxOutputTokens
+            ? { maxOutputTokens: String(s.maxOutputTokens) }
+            : {}),
+          ...(s.defaultOutputReserveTokens && !prev.defaultOutputReserveTokens
+            ? { defaultOutputReserveTokens: String(s.defaultOutputReserveTokens) }
+            : {}),
+          ...(s.tokenizerFamily && !prev.tokenizerFamily
+            ? { tokenizerFamily: s.tokenizerFamily }
+            : {}),
+        }));
+      } catch {
+        setCapacityAutoFilled(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [isOpen, customForm.name, customForm.url, customForm.type]);
 
   // ---------- derived: model type options (aligned with original ModelAddDialog) ----------
   const modelTypeOptions = useMemo(() => [
@@ -335,7 +402,7 @@ export const ModelAddDialogV2 = ({
     const preset =
       catalog?.providers.map((p) => ({
         value: p.models?.[0]?.provider_key,
-        label: `${p.provider_info.display_name} (${p.models.length})`,
+        label: p.provider_info.display_name,
         info: p.provider_info,
       })) || [];
     return [
@@ -366,35 +433,48 @@ export const ModelAddDialogV2 = ({
   // ---------- Tab A: fetch models ----------
   // All models are fetched from the live provider API via the OpenAI-compatible
   // GET /models endpoint. No catalog fallback.
-  // For each fetched model, try to match it against the catalog (by model name)
-  // to pre-fill advanced settings and capacity defaults.
-  const catalogModelMap = useMemo(() => {
-    const map = new Map<string, ModelCatalogProfile>();
-    if (!catalog) return map;
-    for (const p of catalog.providers) {
-      for (const m of p.models || []) {
-        // Key by model_name (lowercase for case-insensitive match)
-        if (m.model_name) {
-          map.set(m.model_name.toLowerCase(), m.profile);
-        }
-      }
-    }
-    return map;
-  }, [catalog]);
+  // For each fetched model, capacity is queried via suggest_capacity (see
+  // applyRows) — model_catalog.json is no longer the capacity source.
 
-  const applyRows = useCallback((rows: any[]) => {
+  const applyRows = useCallback(async (rows: any[]) => {
     setFetchedModels(rows);
     const initStates: Record<string, BatchRowState> = {};
-    for (const row of rows) {
-      const modelName = (row.id || row.model_name || "").toLowerCase();
-      const catalogProfile = catalogModelMap.get(modelName);
-      const initialState = makeInitialRowState(row.model_type, catalogProfile);
-      // Default display_name to model name + 5-char random suffix
-      initialState.advanced.display_name = defaultDisplayName(row.model_name);
-      initStates[row.id] = initialState;
-    }
+    await Promise.all(
+      rows.map(async (row) => {
+        const initialState = makeInitialRowState(row.model_type);
+        // Default display_name to model name + 5-char random suffix
+        initialState.advanced.display_name = defaultDisplayName(row.model_name);
+        // Unified capacity source: query capability_profiles.py / bundled
+        // LiteLLM JSON via suggest_capacity. Pure local lookups, no HTTP
+        // probes, so batching one call per fetched model is cheap.
+        try {
+          const suggestion = await modelService.suggestCapacity({
+            modelName: row.model_name,
+            baseUrl,
+            providerHint: providerKey,
+            modelType: row.model_type,
+          });
+          const s = suggestion?.suggestions;
+          if (s) {
+            if (s.contextWindowTokens)
+              initialState.capacity.contextWindowTokens = String(s.contextWindowTokens);
+            if (s.maxInputTokens)
+              initialState.capacity.maxInputTokens = String(s.maxInputTokens);
+            if (s.maxOutputTokens)
+              initialState.capacity.maxOutputTokens = String(s.maxOutputTokens);
+            if (s.defaultOutputReserveTokens)
+              initialState.capacity.defaultOutputReserveTokens = String(s.defaultOutputReserveTokens);
+            if (s.tokenizerFamily)
+              initialState.capacity.tokenizerFamily = s.tokenizerFamily;
+          }
+        } catch {
+          // catalog miss + LLM disabled → leave empty; connectivity will fill
+        }
+        initStates[row.id] = initialState;
+      })
+    );
     setRowStates(initStates);
-  }, [catalogModelMap]);
+  }, [baseUrl, providerKey]);
 
   const handleFetchModels = useCallback(async () => {
     if (!apiKey.trim()) {
@@ -423,7 +503,7 @@ export const ModelAddDialogV2 = ({
         model_type: (m.model_type || MODEL_TYPES.LLM) as ModelType,
         max_tokens: m.max_tokens,
       }));
-      applyRows(rows);
+      await applyRows(rows);
     } catch (error: any) {
       message.error(
         t("model.dialog.v2.fetchFailed", {
@@ -475,15 +555,31 @@ export const ModelAddDialogV2 = ({
           ...inferencePayload,
           ...embeddingPayload,
         });
-        setRowStates((prev) => ({
-          ...prev,
-          [rowId]: {
+        setRowStates((prev) => {
+          const next: BatchRowState = {
             ...prev[rowId],
             checking: false,
             connectivityStatus: response.connectivity ? "available" : "unavailable",
             connectivityMessage: response.error || "",
-          },
-        }));
+          };
+          // Connectivity runs the full suggest_capacity flow (catalog + LLM
+          // fallback), unlike the catalog-only fetch-time prefill. Fill only
+          // verified non-empty fields so we don't wipe gear-popup edits.
+          if (response.connectivity && response.capacitySuggestion?.suggestions) {
+            const s = response.capacitySuggestion.suggestions;
+            if (s.contextWindowTokens)
+              next.capacity = { ...next.capacity, contextWindowTokens: String(s.contextWindowTokens) };
+            if (s.maxInputTokens)
+              next.capacity = { ...next.capacity, maxInputTokens: String(s.maxInputTokens) };
+            if (s.maxOutputTokens)
+              next.capacity = { ...next.capacity, maxOutputTokens: String(s.maxOutputTokens) };
+            if (s.defaultOutputReserveTokens)
+              next.capacity = { ...next.capacity, defaultOutputReserveTokens: String(s.defaultOutputReserveTokens) };
+            if (s.tokenizerFamily)
+              next.capacity = { ...next.capacity, tokenizerFamily: s.tokenizerFamily };
+          }
+          return { ...prev, [rowId]: next };
+        });
       } catch (error: any) {
         setRowStates((prev) => ({
           ...prev,
@@ -701,15 +797,37 @@ export const ModelAddDialogV2 = ({
         status: response.connectivity ? "available" : "unavailable",
         message: response.error || "",
       });
+      // Edit mode: push the probe result back to the parent so the model list
+      // row's connect_status refreshes in place (list state otherwise keeps
+      // the stale status from the last loadModelLists).
+      if (model && onConnectivityChange) {
+        onConnectivityChange(
+          model.displayName || model.name,
+          resolvedModelType,
+          response.connectivity ? "available" : "unavailable"
+        );
+      }
+      // Capacity auto-fill moved to the model-name onChange debounce effect:
+      // connectivity check only probes liveness with the CURRENT form config
+      // and never mutates capacity fields the user may have already set.
     } catch (error: any) {
       setCustomConnectivity({
         status: "unavailable",
         message: error?.message || "",
       });
+      if (model && onConnectivityChange) {
+        onConnectivityChange(
+          model.displayName || model.name,
+          customForm.type === MODEL_TYPES.EMBEDDING && customForm.isMultimodal
+            ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+            : customForm.type,
+          "unavailable"
+        );
+      }
     } finally {
       setVerifyingCustom(false);
     }
-  }, [customForm, customAdvanced, customCapacity, message, t, validateCustomForm]);
+  }, [customForm, customAdvanced, customCapacity, model, onConnectivityChange, message, t, validateCustomForm]);
 
   const handleCustomSubmit = useCallback(async () => {
     if (!validateCustomForm()) return;
@@ -875,6 +993,7 @@ export const ModelAddDialogV2 = ({
     setCustomCapacity(emptyCapacityForm);
     setCustomAdvanced({});
     setCustomConnectivity({ status: null, message: "" });
+    setCapacityAutoFilled(false);
     // Regenerate suffix so the next custom-access form gets a fresh one
     customNameSuffixRef.current = generateRandomSuffix(5);
   }, []);
@@ -1096,14 +1215,33 @@ export const ModelAddDialogV2 = ({
                 </Space>
 
                 {fetchedModels.length > 0 && (
-                  <Table
-                    size="small"
-                    rowKey="id"
-                    columns={batchColumns}
-                    dataSource={fetchedModels}
-                    pagination={{ pageSize: 10, showSizeChanger: false }}
-                    scroll={{ x: 700 }}
-                  />
+                  <>
+                    <Input
+                      allowClear
+                      value={modelSearchTerm}
+                      onChange={(e) => setModelSearchTerm(e.target.value)}
+                      placeholder={t("model.dialog.v2.searchModels", {
+                        defaultValue: "搜索模型名称过滤列表",
+                      })}
+                      style={{ maxWidth: 320 }}
+                    />
+                    <Table
+                      size="small"
+                      rowKey="id"
+                      columns={batchColumns}
+                      dataSource={
+                        modelSearchTerm.trim()
+                          ? fetchedModels.filter((m) =>
+                              String(m.model_name || m.id || "")
+                                .toLowerCase()
+                                .includes(modelSearchTerm.trim().toLowerCase())
+                            )
+                          : fetchedModels
+                      }
+                      pagination={{ pageSize: 10, showSizeChanger: false }}
+                      scroll={{ x: 700 }}
+                    />
+                  </>
                 )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t">
@@ -1167,6 +1305,9 @@ export const ModelAddDialogV2 = ({
                       onChange={(e) => {
                         const name = e.target.value;
                         setCustomForm((prev) => ({ ...prev, name }));
+                        // Name changed — the previous capacity lookup result no
+                        // longer applies; the debounce effect will re-query.
+                        setCapacityAutoFilled(false);
                         // Auto-populate display_name in advanced settings to
                         // align with batch-access behavior (defaultDisplayName).
                         // Uses the stable suffix from customNameSuffixRef so
@@ -1244,7 +1385,12 @@ export const ModelAddDialogV2 = ({
                     >
                       {t("model.advanced.title", { defaultValue: "高级设置" })}
                     </Button>
-                    {Object.keys(customAdvanced).length > 0 && (
+                    {(capacityAutoFilled ||
+                      Object.entries(customAdvanced).some(([k, v]) => {
+                        if (k === "display_name") return false;
+                        if (Array.isArray(v)) return v.length > 0;
+                        return v != null && v !== "";
+                      })) && (
                       <Tag color="blue">
                         {t("model.advanced.configured", { defaultValue: "已配置" })}
                       </Tag>
