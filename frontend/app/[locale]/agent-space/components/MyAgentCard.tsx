@@ -32,6 +32,7 @@ interface MyAgentCardProps {
   onDelete: () => void;
   onEvaluate: () => void;
   onUsageGuide: () => void;
+  highlighted?: boolean;
   isApplying?: boolean;
   isDeleting?: boolean;
 }
@@ -59,6 +60,7 @@ export function MyAgentCard({
   onDelete,
   onEvaluate,
   onUsageGuide,
+  highlighted = false,
   isApplying = false,
   isDeleting = false,
 }: MyAgentCardProps) {
@@ -129,7 +131,9 @@ export function MyAgentCard({
 
   return (
     <Card
-      className="h-full rounded-2xl border border-slate-200 shadow-sm dark:border-slate-700"
+      className={`h-full rounded-2xl border border-slate-200 shadow-sm dark:border-slate-700 ${
+        highlighted ? "ring-2 ring-primary ring-offset-2" : ""
+      }`}
       styles={{
         body: {
           height: "100%",

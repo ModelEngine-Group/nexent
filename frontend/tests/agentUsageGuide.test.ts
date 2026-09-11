@@ -9,7 +9,9 @@ import {
   buildNorthboundRunUrl,
   buildUserApiKeyPath,
   clearAgentUsageGuidePath,
+  getAgentUsageGuideOpenAction,
   getA2AGuideState,
+  resolveAgentUsageGuideTarget,
   parseAgentUsageGuideParams,
   isAgentSharePath,
   isAnonymousConversationSharePath,
@@ -53,6 +55,68 @@ test("parses and clears one-time Agent usage guide URL state", () => {
   assert.equal(
     clearAgentUsageGuidePath("zh", 41),
     "/zh/agent-space?tab=mine&agent_id=41"
+  );
+});
+
+test("resolves a published Agent outside the current repository page", () => {
+  const currentPageAgents = [{ agent_id: 7, name: "current" }];
+  const targetedAgent = { agent_id: 41, name: "target" };
+
+  assert.deepEqual(
+    resolveAgentUsageGuideTarget({
+      agentId: 41,
+      agents: currentPageAgents,
+      fallbackAgent: targetedAgent,
+      isListLoading: false,
+      isFallbackLoading: false,
+      getAgentId: (agent) => agent.agent_id,
+    }),
+    { state: "found", agent: targetedAgent }
+  );
+});
+
+test("waits for guide target queries and rejects a mismatched fallback", () => {
+  assert.deepEqual(
+    resolveAgentUsageGuideTarget({
+      agentId: 41,
+      agents: [] as Array<{ agent_id: number }>,
+      fallbackAgent: null,
+      isListLoading: true,
+      isFallbackLoading: true,
+      getAgentId: (agent) => agent.agent_id,
+    }),
+    { state: "loading" }
+  );
+  assert.deepEqual(
+    resolveAgentUsageGuideTarget({
+      agentId: 41,
+      agents: [],
+      fallbackAgent: { agent_id: 42 },
+      isListLoading: false,
+      isFallbackLoading: false,
+      getAgentId: (agent) => agent.agent_id,
+    }),
+    { state: "missing" }
+  );
+});
+
+test("opens a repository guide target only once", () => {
+  const target = { agent_id: 41, name: "target" };
+  assert.deepEqual(
+    getAgentUsageGuideOpenAction({
+      agentId: 41,
+      consumedAgentId: null,
+      target: { state: "found", agent: target },
+    }),
+    { action: "open", agent: target }
+  );
+  assert.deepEqual(
+    getAgentUsageGuideOpenAction({
+      agentId: 41,
+      consumedAgentId: 41,
+      target: { state: "found", agent: target },
+    }),
+    { action: "ignore" }
   );
 });
 

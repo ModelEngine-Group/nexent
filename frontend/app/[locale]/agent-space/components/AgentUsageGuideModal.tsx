@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Modal, Spin, Tabs, Typography } from "antd";
 import { Copy, ExternalLink, RefreshCw, SquareX } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import A2AServerSettingsPanel from "@/app/[locale]/agents/components/a2a/A2AServerSettingsPanel";
+import A2AServerSettingsPanel from "../../agents/components/a2a/A2AServerSettingsPanel";
 import {
   buildAgentShareUrl,
   buildNorthboundDocsUrl,

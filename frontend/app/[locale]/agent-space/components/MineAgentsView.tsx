@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Popover, Spin } from "antd";
@@ -30,6 +30,10 @@ import {
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
+import {
+  getAgentUsageGuideOpenAction,
+  resolveAgentUsageGuideTarget,
+} from "@/lib/agentUsageGuide";
 import {
   isCancelableRepositoryStatus,
   isTakeDownableRepositoryStatus,
@@ -160,6 +164,49 @@ export function MineAgentsView({
   });
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
+  const usageGuideTarget = useMemo(
+    () =>
+      usageGuideDeepLink
+        ? resolveAgentUsageGuideTarget({
+            agentId: usageGuideDeepLink.agentId,
+            agents,
+            fallbackAgent: deepLinkFallbackAgent,
+            isListLoading: isLoading,
+            isFallbackLoading: deepLinkFallbackLoading,
+            getAgentId: (agent) =>
+              isNewAgentPaddingItem(agent) ? null : agent.agent_id,
+          })
+        : null,
+    [
+      agents,
+      deepLinkFallbackAgent,
+      deepLinkFallbackLoading,
+      isLoading,
+      usageGuideDeepLink,
+    ]
+  );
+  const displayedAgents = useMemo(() => {
+    if (usageGuideTarget?.state !== "found") {
+      return agents;
+    }
+    const targetAgent = usageGuideTarget.agent;
+    if (
+      isNewAgentPaddingItem(targetAgent) ||
+      agents.some(
+        (agent) =>
+          !isNewAgentPaddingItem(agent) &&
+          agent.agent_id === targetAgent.agent_id
+      )
+    ) {
+      return agents;
+    }
+    return [targetAgent, ...agents];
+  }, [agents, usageGuideTarget]);
+  const highlightedAgentId =
+    usageGuideTarget?.state === "found" &&
+    !isNewAgentPaddingItem(usageGuideTarget.agent)
+      ? usageGuideTarget.agent.agent_id
+      : null;
 
   const handleCreateAgent = () => {
     setCreateAgentModalVisible(true);
@@ -374,44 +421,30 @@ export function MineAgentsView({
       return;
     }
 
-    if (consumedUsageGuideRef.current === usageGuideDeepLink.agentId) {
+    if (!usageGuideTarget) {
       return;
     }
-
-    const listStillLoading = isLoading;
-    const fallbackStillLoading = deepLinkFallbackLoading;
-    if (listStillLoading && fallbackStillLoading) {
+    const openAction = getAgentUsageGuideOpenAction({
+      agentId: usageGuideDeepLink.agentId,
+      consumedAgentId: consumedUsageGuideRef.current,
+      target: usageGuideTarget,
+    });
+    if (openAction.action === "ignore" || openAction.action === "wait") {
       return;
     }
-
-    const agentFromList = agents.find(
-      (item): item is MyEditableAgentItem =>
-        !isNewAgentPaddingItem(item) &&
-        item.agent_id === usageGuideDeepLink.agentId
-    );
-    const agent = agentFromList ?? deepLinkFallbackAgent;
-
-    if (!agent) {
-      if (listStillLoading || fallbackStillLoading) {
-        return;
-      }
+    if (openAction.action === "missing") {
       message.error(t("notifications.deepLink.agentNotFound"));
       consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
       onUsageGuideDeepLinkConsumed?.();
       return;
     }
 
-    setUsageGuideAgent(agent);
+    if (isNewAgentPaddingItem(openAction.agent)) {
+      return;
+    }
+    setUsageGuideAgent(openAction.agent);
     consumedUsageGuideRef.current = usageGuideDeepLink.agentId;
-  }, [
-    agents,
-    deepLinkFallbackAgent,
-    deepLinkFallbackLoading,
-    isLoading,
-    onUsageGuideDeepLinkConsumed,
-    t,
-    usageGuideDeepLink,
-  ]);
+  }, [onUsageGuideDeepLinkConsumed, t, usageGuideDeepLink, usageGuideTarget]);
 
   const closeUsageGuide = () => {
     const wasOpenedByDeepLink =
@@ -589,7 +622,7 @@ export function MineAgentsView({
       ) : (
         <>
           <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {agents.map((agent) =>
+            {displayedAgents.map((agent) =>
               isNewAgentPaddingItem(agent) ? (
                 <div key="new-agent-padding" className="h-full">
                   <CreateNewAgentCard onClick={handleCreateAgent} />
@@ -610,6 +643,7 @@ export function MineAgentsView({
                     onDelete={() => handleDeleteAgent(agent)}
                     onEvaluate={() => handleEvaluate(agent)}
                     onUsageGuide={() => setUsageGuideAgent(agent)}
+                    highlighted={highlightedAgentId === agent.agent_id}
                     isApplying={
                       applyingAgentId === agent.agent_id &&
                       createListingMutation.isPending

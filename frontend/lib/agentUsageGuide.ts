@@ -23,6 +23,64 @@ export function parseAgentUsageGuideParams(
   return Number.isSafeInteger(agentId) && agentId > 0 ? { agentId } : null;
 }
 
+export type AgentUsageGuideTargetState<T> =
+  | { state: "loading" }
+  | { state: "missing" }
+  | { state: "found"; agent: T };
+
+export function resolveAgentUsageGuideTarget<T>({
+  agentId,
+  agents,
+  fallbackAgent,
+  isListLoading,
+  isFallbackLoading,
+  getAgentId,
+}: {
+  agentId: number;
+  agents: readonly T[];
+  fallbackAgent: T | null;
+  isListLoading: boolean;
+  isFallbackLoading: boolean;
+  getAgentId: (agent: T) => number | null;
+}): AgentUsageGuideTargetState<T> {
+  const agentFromList = agents.find((agent) => getAgentId(agent) === agentId);
+  if (agentFromList) {
+    return { state: "found", agent: agentFromList };
+  }
+  if (fallbackAgent && getAgentId(fallbackAgent) === agentId) {
+    return { state: "found", agent: fallbackAgent };
+  }
+  if (isListLoading || isFallbackLoading) {
+    return { state: "loading" };
+  }
+  return { state: "missing" };
+}
+
+export function getAgentUsageGuideOpenAction<T>({
+  agentId,
+  consumedAgentId,
+  target,
+}: {
+  agentId: number;
+  consumedAgentId: number | null;
+  target: AgentUsageGuideTargetState<T>;
+}):
+  | { action: "ignore" }
+  | { action: "wait" }
+  | { action: "missing" }
+  | { action: "open"; agent: T } {
+  if (consumedAgentId === agentId) {
+    return { action: "ignore" };
+  }
+  if (target.state === "loading") {
+    return { action: "wait" };
+  }
+  if (target.state === "missing") {
+    return { action: "missing" };
+  }
+  return { action: "open", agent: target.agent };
+}
+
 export function buildAgentShareUrl(
   origin: string,
   locale: string,
