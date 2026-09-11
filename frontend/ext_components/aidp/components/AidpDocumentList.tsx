@@ -1,9 +1,9 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Pagination, Upload, message, Tooltip } from "antd";
 import {
-  UploadOutlined,
+  FileTextOutlined,
   InboxOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
@@ -20,8 +20,7 @@ interface AidpDocumentListProps {
   activeKb: AidpKnowledgeBaseItem | null;
   documents: AidpDocumentItem[];
   totalDocs: number;
-  /** True when `totalDocs` came from the AIDP Count API; when false the
-   *  total is a fallback estimate and "共 N 条" should be suppressed. */
+  /** True when `totalDocs` came from the AIDP Count API. */
   totalReliable: boolean;
   hasMore: boolean;
   isLoading: boolean;
@@ -47,19 +46,12 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const [uploading, setUploading] = useState(false);
-  // Antd <Dragger> fires beforeUpload once per file in a multi-select batch.
-  // The `fileList` array may-or-may-not be the same reference across the N
-  // calls (behavior differs between <Upload> and <Dragger> and antd versions),
-  // so we cannot rely on reference-equality for dedup. Instead, we collect
-  // each file in beforeUpload and schedule a single requestAnimationFrame
-  // flush: validation + upload run exactly ONCE per user selection.
   const pendingFilesRef = useRef<File[]>([]);
   const rafIdRef = useRef<number | null>(null);
 
   const handleUpload = useCallback(
     async (fileList: File[]) => {
-      if (!activeKb) return;
-      if (fileList.length === 0) return;
+      if (!activeKb || fileList.length === 0) return;
 
       setUploading(true);
       try {
@@ -118,7 +110,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
     [activeKb, i18n.language, onDocsUploaded, t]
   );
 
-  // Format file size for display
   const formatSize = (bytes?: number): string => {
     if (!bytes || bytes === 0) return "-";
     if (bytes < 1024) return `${bytes} B`;
@@ -128,81 +119,156 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   };
 
+  const effectiveTotal = totalReliable
+    ? totalDocs
+    : hasMore
+      ? currentPage * pageSize + 1
+      : currentPage * pageSize;
+
+  const isUnavailable =
+    activeKb?.resource_status === "UNAVAILABLE" ||
+    activeKb?.resource_status === "ORPHANED";
+  const canUpload =
+    !!activeKb && !isUnavailable && activeKb.permission === "EDIT";
+
+  const renderUploadArea = () => {
+    if (!canUpload) {
+      const reasonKey = !activeKb
+        ? "aidpKnowledge.uploadNoKb"
+        : isUnavailable
+          ? "aidpKnowledge.uploadKbUnavailable"
+          : "aidpKnowledge.uploadReadOnly";
+      return (
+        <div className="flex min-h-[150px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/60 px-6 text-center">
+          <p className="text-sm text-gray-500">{t(reasonKey)}</p>
+        </div>
+      );
+    }
+
+    return (
+      <Dragger
+        accept={AIDP_ACCEPT_STRING}
+        multiple
+        showUploadList={false}
+        beforeUpload={(_file) => {
+          pendingFilesRef.current.push(_file);
+          if (rafIdRef.current === null) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              const batch = pendingFilesRef.current;
+              pendingFilesRef.current = [];
+              rafIdRef.current = null;
+
+              const { valid } = partitionAidpFiles(batch, t, message);
+              if (valid.length > 0) void handleUpload(valid);
+            });
+          }
+          return false;
+        }}
+        disabled={uploading}
+        className="!rounded-xl !border-blue-200 !bg-blue-50/30"
+      >
+        <p className="ant-upload-drag-icon">
+          <InboxOutlined className="!text-blue-500" />
+        </p>
+        <p className="ant-upload-text !text-sm !text-gray-700">
+          {uploading
+            ? t("aidpKnowledge.uploading")
+            : t("aidpKnowledge.uploadHint")}
+        </p>
+        <div className="ant-upload-hint mt-2 space-y-1 px-4 text-xs leading-5 text-gray-400">
+          <div>{t("aidpKnowledge.uploadHintCount")}</div>
+          <div>{t("aidpKnowledge.uploadHintSize")}</div>
+          <div className="break-all">
+            {t("aidpKnowledge.uploadHintFormats")}
+          </div>
+        </div>
+      </Dragger>
+    );
+  };
+
   return (
-    <div className="w-full bg-white border border-gray-200 rounded-md overflow-hidden">
-      {/* Header */}
-      <div className="p-4 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-blue-500 truncate">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-6 pb-5 pt-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+            <FileTextOutlined />
+          </div>
+          <div className="min-w-0">
+            <h2 className="truncate text-xl font-semibold tracking-tight text-blue-600">
               {activeKb?.kds_name || ""}
-            </h3>
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 border border-gray-200">
+            </h2>
+            <span className="mt-1 block text-sm text-gray-500">
               {t("aidpKnowledge.tagDocs", { count: totalDocs })}
             </span>
           </div>
-          <Tooltip title={t("aidpKnowledge.refresh")}>
-            <Button
-              icon={<ReloadOutlined spin={isLoading} />}
-              onClick={onRefresh}
-              size="small"
-              disabled={!activeKb}
-            />
-          </Tooltip>
         </div>
+        <Tooltip title={t("aidpKnowledge.refresh")}>
+          <Button
+            aria-label={t("aidpKnowledge.refresh")}
+            className="!h-10 !w-10 !rounded-lg !p-0"
+            icon={<ReloadOutlined spin={isLoading || uploading} />}
+            onClick={onRefresh}
+            disabled={!activeKb || uploading}
+          />
+        </Tooltip>
       </div>
 
-      {/* Document table */}
-      <div className="p-2 border-b border-gray-200">
+      <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
+          <div className="flex items-center justify-center py-12">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2" />
-              <p className="text-sm text-gray-600">
+              <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-blue-100 border-b-blue-500" />
+              <p className="text-sm text-gray-500">
                 {t("aidpKnowledge.loadingDocs")}
               </p>
             </div>
           </div>
         ) : documents.length > 0 ? (
-          <div className="overflow-hidden border border-gray-200 rounded-md">
+          <div className="overflow-hidden rounded-xl border border-gray-200">
             <table className="min-w-full bg-white">
-              <thead className="bg-gray-50 sticky top-0 z-10">
+              <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
                     {t("aidpKnowledge.docFileName")}
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
                     {t("aidpKnowledge.docType")}
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
                     {t("aidpKnowledge.docSize")}
                   </th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
                     {t("aidpKnowledge.docCreatedAt")}
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-gray-100">
                 {documents.map((doc) => (
-                  <tr key={doc.file_ino_no} className="hover:bg-gray-50">
-                    <td className="px-4 py-2">
+                  <tr
+                    key={doc.file_ino_no}
+                    className="transition-colors hover:bg-gray-50"
+                  >
+                    <td className="max-w-[280px] px-4 py-3">
                       <div
-                        className="text-sm font-medium text-gray-800 truncate max-w-[250px]"
+                        className="truncate text-sm font-medium text-gray-800"
                         title={doc.file_name}
                       >
                         {doc.file_name}
                       </div>
-                      <div className="text-xs text-gray-400">
+                      <div
+                        className="mt-1 truncate text-xs text-gray-400"
+                        title={doc.file_ino_no}
+                      >
                         {doc.file_ino_no}
                       </div>
                     </td>
-                    <td className="px-4 py-2 text-sm text-gray-600">
+                    <td className="px-4 py-3 text-sm text-gray-600">
                       {doc.file_type || "-"}
                     </td>
-                    <td className="px-4 py-2 text-sm text-gray-600">
+                    <td className="px-4 py-3 text-sm text-gray-600">
                       {formatSize(doc.file_size)}
                     </td>
-                    <td className="px-4 py-2 text-sm text-gray-600">
+                    <td className="px-4 py-3 text-sm text-gray-600">
                       {doc.created_at
                         ? new Date(doc.created_at).toLocaleString()
                         : "-"}
@@ -213,121 +279,33 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             </table>
           </div>
         ) : (
-          <div className="flex items-center justify-center py-8 text-gray-500 text-sm">
+          <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-dashed border-gray-200 text-sm text-gray-400">
             {t("aidpKnowledge.noDocuments")}
           </div>
         )}
       </div>
 
-      {/* Server-side pagination.
-          AIDP exposes a dedicated Count API for documents which the backend
-          now calls alongside the list request. When Count succeeds,
-          `totalReliable` is true and we display the full pagination (page
-          numbers + "共 N 条"). When Count fails (e.g. the endpoint is not
-          available on a particular AIDP instance), `totalReliable` is false
-          and we fall back to simple prev/next mode without a total, using
-          `has_more` to decide whether the next-page button should enable. */}
-      {documents.length > 0 &&
-        (() => {
-          // When total is unreliable we still need antd to know when to
-          // enable "next": set total just past the current page if there is
-          // a next page, otherwise clamp to the current page end.
-          const effectiveTotal = totalReliable
-            ? totalDocs
-            : hasMore
-              ? currentPage * pageSize + 1
-              : currentPage * pageSize;
-          return (
-            <div className="px-4 py-2 border-b border-gray-200 flex justify-center">
-              <Pagination
-                current={currentPage}
-                pageSize={pageSize}
-                total={effectiveTotal || 1}
-                onChange={onPageChange}
-                showSizeChanger={false}
-                simple={!totalReliable}
-                showTotal={
-                  totalReliable
-                    ? (total) => t("aidpKnowledge.showTotal", { count: total })
-                    : undefined
-                }
-                size="small"
-              />
-            </div>
-          );
-        })()}
+      {documents.length > 0 && (
+        <div className="flex shrink-0 justify-center border-t border-gray-100 px-6 py-4">
+          <Pagination
+            current={currentPage}
+            pageSize={pageSize}
+            total={effectiveTotal || 1}
+            onChange={onPageChange}
+            showSizeChanger={false}
+            simple={!totalReliable}
+            showTotal={
+              totalReliable
+                ? (count) => t("aidpKnowledge.showTotal", { count })
+                : undefined
+            }
+            size="small"
+          />
+        </div>
+      )}
 
-      {/* Upload area — gated by ``activeKb.permission`` and ``resource_status``.
-
-          Per v7.1 §7.1, READ_ONLY callers may view existing documents but
-          must not be able to upload. UNAVAILABLE / ORPHANED KBs are
-          read-only regardless of permission because the AIDP backend cannot
-          service the request. The container is replaced with a hint instead
-          of disabling the Dragger so the visual structure stays consistent
-          and screen-reader users get an explicit reason. */}
-      <div className="p-3">
-        {(() => {
-          const isUnavailable =
-            activeKb?.resource_status === "UNAVAILABLE" ||
-            activeKb?.resource_status === "ORPHANED";
-          const canUpload =
-            !!activeKb && !isUnavailable && activeKb.permission === "EDIT";
-          if (!canUpload) {
-            const reasonKey = !activeKb
-              ? "aidpKnowledge.uploadNoKb"
-              : isUnavailable
-                ? "aidpKnowledge.uploadKbUnavailable"
-                : "aidpKnowledge.uploadReadOnly";
-            return (
-              <div className="ant-upload ant-upload-drag p-6 text-center border border-dashed border-gray-200 rounded">
-                <p className="ant-upload-text text-gray-500">{t(reasonKey)}</p>
-              </div>
-            );
-          }
-          return (
-            <Dragger
-              accept={AIDP_ACCEPT_STRING}
-              multiple
-              showUploadList={false}
-              beforeUpload={(_file) => {
-                // Queue the file and defer validation + upload until the
-                // synchronous batch of beforeUpload calls finishes. Each batch
-                // flushes in a single frame so toasts and handleUpload run once.
-                pendingFilesRef.current.push(_file);
-                if (rafIdRef.current === null) {
-                  rafIdRef.current = requestAnimationFrame(() => {
-                    const batch = pendingFilesRef.current;
-                    pendingFilesRef.current = [];
-                    rafIdRef.current = null;
-
-                    const { valid } = partitionAidpFiles(batch, t, message);
-                    if (valid.length > 0) {
-                      handleUpload(valid);
-                    }
-                  });
-                }
-                return false;
-              }}
-              disabled={uploading}
-            >
-              <p className="ant-upload-drag-icon">
-                <InboxOutlined />
-              </p>
-              <p className="ant-upload-text">
-                {uploading
-                  ? t("aidpKnowledge.uploading")
-                  : t("aidpKnowledge.uploadHint")}
-              </p>
-              <div className="ant-upload-hint mt-2 w-full min-w-0 max-w-full space-y-1 overflow-hidden px-4 whitespace-normal">
-                <div>{t("aidpKnowledge.uploadHintCount")}</div>
-                <div>{t("aidpKnowledge.uploadHintSize")}</div>
-                <div className="w-full min-w-0 break-all leading-5 whitespace-normal">
-                  {t("aidpKnowledge.uploadHintFormats")}
-                </div>
-              </div>
-            </Dragger>
-          );
-        })()}
+      <div className="shrink-0 border-t border-gray-100 px-6 py-5">
+        {renderUploadArea()}
       </div>
     </div>
   );

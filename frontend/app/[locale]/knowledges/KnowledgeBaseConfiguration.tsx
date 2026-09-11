@@ -11,11 +11,11 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { App, Modal, Row, Col, theme, Button, Input } from "antd";
+import { App, Modal, theme, Button, Input } from "antd";
 import {
+  ArrowLeftOutlined,
   ExclamationCircleFilled,
   WarningFilled,
-  InfoCircleFilled,
 } from "@ant-design/icons";
 import {
   DOCUMENT_ACTION_TYPES,
@@ -32,11 +32,11 @@ import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
-import {
-  SETUP_PAGE_CONTAINER,
-  TWO_COLUMN_LAYOUT,
-  STANDARD_CARD,
-} from "@/const/layoutConstants";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { SETUP_PAGE_CONTAINER, STANDARD_CARD } from "@/const/layoutConstants";
+import { QUOTA_USAGE_CHANGED_EVENT } from "@/lib/quotaEvents";
+import quotaService from "@/services/quotaService";
+import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
@@ -85,43 +85,6 @@ const parseEmbeddingModelOptionValue = (value: string) => {
     type: "",
     isMultimodal: false,
   };
-};
-
-// EmptyState component defined directly in this file
-interface EmptyStateProps {
-  icon?: React.ReactNode | string;
-  title: string;
-  description?: string;
-  action?: React.ReactNode;
-  containerHeight?: string;
-}
-
-const EmptyState: React.FC<EmptyStateProps> = ({
-  icon = "馃搵",
-  title,
-  description,
-  action,
-  containerHeight = "100%",
-}) => {
-  return (
-    <div
-      className="flex items-center justify-center p-4"
-      style={{ height: containerHeight }}
-    >
-      <div className="text-center">
-        {typeof icon === "string" ? (
-          <div className="text-gray-400 text-3xl mb-2">{icon}</div>
-        ) : (
-          <div className="text-gray-400 mb-2">{icon}</div>
-        )}
-        <h3 className="text-base font-medium text-gray-700 mb-1">{title}</h3>
-        {description && (
-          <p className="text-gray-500 max-w-md text-xs mb-4">{description}</p>
-        )}
-        {action && <div className="mt-2">{action}</div>}
-      </div>
-    </div>
-  );
 };
 
 // Combined AppProvider implementation
@@ -176,6 +139,43 @@ function DataConfig({ isActive }: DataConfigProps) {
     saveConfig,
   } = useConfig();
   const { token } = theme.useToken();
+  const { user } = useAuthorizationContext();
+
+  const [quotaUsage, setQuotaUsage] = useState<QuotaUsageResponse | null>(null);
+
+  const loadQuotaUsage = useCallback(
+    async (forceRefresh = false) => {
+      if (!user?.tenantId) {
+        setQuotaUsage(null);
+        return;
+      }
+
+      try {
+        const usage = await quotaService.getQuotaUsage(
+          user.tenantId,
+          forceRefresh,
+          true
+        );
+        setQuotaUsage(usage);
+      } catch (error) {
+        log.warn("Failed to load knowledge base quota usage:", error);
+      }
+    },
+    [user?.tenantId]
+  );
+
+  useEffect(() => {
+    void loadQuotaUsage();
+    const handleQuotaUsageChanged = () => {
+      void loadQuotaUsage(true);
+    };
+    window.addEventListener(QUOTA_USAGE_CHANGED_EVENT, handleQuotaUsageChanged);
+    return () =>
+      window.removeEventListener(
+        QUOTA_USAGE_CHANGED_EVENT,
+        handleQuotaUsageChanged
+      );
+  }, [loadQuotaUsage]);
 
   // Get available embedding models for knowledge base creation
   const { models } = useModelList({ enabled: true });
@@ -216,7 +216,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     deleteKnowledgeBase,
     setActiveKnowledgeBase,
     updateKnowledgeBase,
-    hasKnowledgeBaseModelMismatch,
     refreshKnowledgeBaseData,
     refreshKnowledgeBaseDataWithDataMate,
     dispatch: kbDispatch,
@@ -238,6 +237,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
+  const [newKbDescription, setNewKbDescription] = useState("");
   const [newKbIngroupPermission, setNewKbIngroupPermission] =
     useState<string>("READ_ONLY");
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
@@ -354,26 +354,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   }, [models]);
 
-  const hasKnowledgeBaseDetailModelMismatch = useCallback(
-    (knowledgeBase: KnowledgeBase) => {
-      if (hasKnowledgeBaseModelMismatch(knowledgeBase)) {
-        return true;
-      }
-      if (
-        knowledgeBase.embeddingModel === "unknown" ||
-        knowledgeBase.source === "datamate"
-      ) {
-        return false;
-      }
-
-      const knowledgeBaseModel = knowledgeBase.embeddingModel.trim();
-      return !availableEmbeddingModels.some(
-        (model) => model.displayName.trim() === knowledgeBaseModel
-      );
-    },
-    [availableEmbeddingModels, hasKnowledgeBaseModelMismatch]
-  );
-
   const resolveEmbeddingModelId = useCallback(
     ({
       displayName,
@@ -441,65 +421,12 @@ function DataConfig({ isActive }: DataConfigProps) {
   ]);
 
   // User configuration loading and saving logic based on isActive state
-  const prevIsActiveRef = useRef<boolean | null>(null); // Initialize as null to distinguish first render
-  const hasLoadedRef = useRef(false); // Track whether configuration has been loaded
-  const hasCleanedRef = useRef(false); // Ensure auto-deselect runs only once per entry
-
   // Listen for isActive state changes
   useLayoutEffect(() => {
     // Clear cache that might affect state
     localStorage.removeItem("preloaded_kb_data");
     localStorage.removeItem("kb_cache");
-
-    const prevIsActive = prevIsActiveRef.current;
-
-    // Mark ready to load when entering second page
-    if ((prevIsActive === null || !prevIsActive) && isActive) {
-      hasLoadedRef.current = false; // Reset loading state
-      hasCleanedRef.current = false; // Reset auto-clean flag on entering
-    }
-
-    // Update ref
-    prevIsActiveRef.current = isActive;
   }, [isActive]);
-
-  // Separately listen for knowledge base loading state, load user configuration when knowledge base loading is complete and in active state
-  useEffect(() => {
-    // Only execute when second page is active, knowledge base is loaded, and user configuration hasn't been loaded yet
-    if (
-      isActive &&
-      kbState.knowledgeBases.length > 0 &&
-      !kbState.isLoading &&
-      !hasLoadedRef.current
-    ) {
-      hasLoadedRef.current = true;
-    }
-  }, [isActive, kbState.knowledgeBases.length, kbState.isLoading]);
-
-  // Auto-deselect incompatible knowledge bases once after selections are loaded and page is active
-  useEffect(() => {
-    if (!isActive) return;
-    if (!hasLoadedRef.current) return; // ensure user selections loaded
-    if (kbState.isLoading) return; // avoid running during list loading
-    if (hasCleanedRef.current) return; // run once per entry
-
-    const embeddingName = modelConfig?.embedding?.displayName?.trim() || "";
-    const multiEmbeddingName =
-      modelConfig?.multiEmbedding?.displayName?.trim() || "";
-
-    const allowedModels = new Set<string>();
-    if (embeddingName) allowedModels.add(embeddingName);
-    if (multiEmbeddingName) allowedModels.add(multiEmbeddingName);
-
-    hasCleanedRef.current = true;
-  }, [
-    isActive,
-    kbState.isLoading,
-    kbState.knowledgeBases,
-    modelConfig?.embedding?.displayName,
-    modelConfig?.multiEmbedding?.displayName,
-    kbDispatch,
-  ]);
 
   // Generate the default name from knowledge bases visible to the current user.
   const generateVisibleKbName = (existingKbs: KnowledgeBase[]): string => {
@@ -620,7 +547,9 @@ function DataConfig({ isActive }: DataConfigProps) {
       }
       if (validFiles.length > 0) {
         setUploadFiles(validFiles);
-        handleFileUpload();
+        if (!isCreatingMode) {
+          void handleFileUpload(validFiles);
+        }
       }
     } else {
       message.warning(t("knowledgeBase.message.selectFirst"));
@@ -831,6 +760,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Generate the default name without probing hidden tenant knowledge bases.
     const defaultName = generateVisibleKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
+    setNewKbDescription("");
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
     setNewKbPreserveSourceFile(true);
@@ -895,7 +825,7 @@ function DataConfig({ isActive }: DataConfigProps) {
     });
   };
 
-  // Handle file upload - in creation mode create knowledge base first then upload, in normal mode upload directly
+  // Create the knowledge base from the modal, then upload the selected files if any.
   const handleFileUpload = async (selectedFiles: File[] = uploadFiles) => {
     if (
       !isCreatingMode &&
@@ -904,7 +834,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       message.error(t("errorCode.000202", "Access forbidden."));
       return;
     }
-    if (!selectedFiles.length) {
+    if (!isCreatingMode && !selectedFiles.length) {
       message.warning(t("document.message.noFiles"));
       return;
     }
@@ -913,6 +843,14 @@ function DataConfig({ isActive }: DataConfigProps) {
     if (isCreatingMode) {
       if (!newKbName || newKbName.trim() === "") {
         message.warning(t("knowledgeBase.message.nameRequired"));
+        return;
+      }
+      if (!newKbEmbeddingModel) {
+        message.warning(t("knowledgeBase.message.embeddingModelRequired"));
+        return;
+      }
+      if (!selectedFiles.length) {
+        message.warning(t("knowledgeBase.message.noFiles"));
         return;
       }
 
@@ -944,7 +882,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
-          t("knowledgeBase.description.default"),
+          newKbDescription.trim() || t("knowledgeBase.description.default"),
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
@@ -957,7 +895,13 @@ function DataConfig({ isActive }: DataConfigProps) {
         setActiveKnowledgeBase(newKB);
         knowledgeBasePollingService.setActiveKnowledgeBase(newKB.id);
         setHasClickedUpload(false);
-        setNewlyCreatedKbId(newKB.id); // Mark this KB as newly created
+        setNewlyCreatedKbId(filesToUpload.length > 0 ? newKB.id : null); // Mark this KB as newly created when files need processing
+
+        if (!filesToUpload.length) {
+          setUploadFiles([]);
+          knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(true);
+          return;
+        }
 
         await uploadDocuments(newKB.id, filesToUpload);
         setUploadFiles([]);
@@ -986,19 +930,18 @@ function DataConfig({ isActive }: DataConfigProps) {
             ? t("knowledgeBase.message.nameExists", {
                 name: newKbName.trim(),
               })
-            : isApiErrorCode(
-                  error,
-                  ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED
-                )
+            : isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
               ? t("quota.personalKbUploadBlocked")
               : isApiErrorCode(
                     error,
                     ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
                   )
-                ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
-              : isApiErrorCode(error, 413)
-                ? t("quota.uploadBlocked")
-                : t("knowledgeBase.message.createUploadError")
+                ? t(
+                    `errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`
+                  )
+                : isApiErrorCode(error, 413)
+                  ? t("quota.uploadBlocked")
+                  : t("knowledgeBase.message.createUploadError")
         );
         setHasClickedUpload(false);
         // Clear the waiting flag so a failed upload cannot leave the page
@@ -1048,9 +991,9 @@ function DataConfig({ isActive }: DataConfigProps) {
                 ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
               )
             ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
-          : isApiErrorCode(error, 413)
-            ? t("quota.uploadBlocked")
-            : t("document.message.uploadError")
+            : isApiErrorCode(error, 413)
+              ? t("quota.uploadBlocked")
+              : t("document.message.uploadError")
       );
       throw error;
     }
@@ -1079,6 +1022,16 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Get current knowledge base name
   const viewingKbName =
     kbState.activeKnowledgeBase?.name || (isCreatingMode ? newKbName : "");
+
+  const activeKnowledgeBaseQuota: KBQuotaStatus | undefined = useMemo(() => {
+    const activeKnowledgeBase = kbState.activeKnowledgeBase;
+    if (!activeKnowledgeBase) return undefined;
+
+    const indexName = activeKnowledgeBase.index_name || activeKnowledgeBase.id;
+    return quotaUsage?.breakdown?.find(
+      (quota) => quota.index_name === indexName
+    );
+  }, [kbState.activeKnowledgeBase, quotaUsage]);
 
   // Check if current knowledge base is newly created and waiting for documents
   const isNewlyCreatedAndWaiting =
@@ -1122,6 +1075,12 @@ function DataConfig({ isActive }: DataConfigProps) {
   // In creation mode, reset "name already exists" state when knowledge base name changes
   const handleNameChange = (name: string) => {
     setNewKbName(name);
+  };
+
+  const handleCloseCreateModal = () => {
+    setIsCreatingMode(false);
+    setHasClickedUpload(false);
+    setUploadFiles([]);
   };
 
   // If Embedding model is not configured, show warning container instead of content
@@ -1172,15 +1131,8 @@ function DataConfig({ isActive }: DataConfigProps) {
         onDrop={handleDrop}
       >
         <div className="w-full h-full">
-          <Row className="h-full w-full" gutter={TWO_COLUMN_LAYOUT.GUTTER}>
-            <Col
-              className="h-full"
-              xs={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xs}
-              md={TWO_COLUMN_LAYOUT.LEFT_COLUMN.md}
-              lg={TWO_COLUMN_LAYOUT.LEFT_COLUMN.lg}
-              xl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xl}
-              xxl={TWO_COLUMN_LAYOUT.LEFT_COLUMN.xxl}
-            >
+          {!kbState.activeKnowledgeBase ? (
+            <>
               <KnowledgeBaseList
                 knowledgeBases={kbState.knowledgeBases}
                 activeKnowledgeBase={kbState.activeKnowledgeBase}
@@ -1193,6 +1145,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 estimatedItemHeights={listPagination.estimatedItemHeights}
                 availableSources={listPagination.facets.sources}
                 availableModels={listPagination.facets.models}
+                quotaUsage={quotaUsage}
                 onLoadMore={loadMoreKnowledgeBases}
                 serverFiltered
                 initialLoadPending={initialListPending}
@@ -1232,51 +1185,107 @@ function DataConfig({ isActive }: DataConfigProps) {
                   )
                 }
               />
-            </Col>
-
-            <Col
-              className="h-full"
-              xs={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xs}
-              md={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.md}
-              lg={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.lg}
-              xl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xl}
-              xxl={TWO_COLUMN_LAYOUT.RIGHT_COLUMN.xxl}
-            >
-              {isCreatingMode ? (
-                <DocumentList
-                  key="create-mode"
-                  documents={[]}
-                  onDelete={() => {}}
-                  knowledgeBaseSource={""}
-                  isCreatingMode={true}
-                  knowledgeBaseId={""}
-                  knowledgeBaseName={newKbName}
-                  onNameChange={handleNameChange}
-                  containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
-                  hasDocuments={hasClickedUpload || docState.isUploading}
-                  // Group permission and user groups for create mode
-                  ingroupPermission={newKbIngroupPermission}
-                  onIngroupPermissionChange={setNewKbIngroupPermission}
-                  selectedGroupIds={newKbGroupIds}
-                  onSelectedGroupIdsChange={setNewKbGroupIds}
-                  preserveSourceFile={newKbPreserveSourceFile}
-                  onPreserveSourceFileChange={setNewKbPreserveSourceFile}
-                  quotaLimitBytes={newKbQuotaBytes}
-                  onQuotaLimitBytesChange={setNewKbQuotaBytes}
-                  // Embedding model for create mode
-                  availableEmbeddingModels={availableEmbeddingModels}
-                  selectedEmbeddingModel={newKbEmbeddingModel}
-                  onEmbeddingModelChange={setNewKbEmbeddingModel}
-                  // Upload related props
-                  isDragging={uiState.isDragging}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onFileSelect={handleFileSelect}
-                  onUpload={handleFileUpload}
-                  isUploading={docState.isUploading}
-                />
-              ) : kbState.activeKnowledgeBase ? (
+              <Modal
+                open={isCreatingMode}
+                title={null}
+                footer={
+                  <div className="flex justify-end gap-3">
+                    <Button
+                      onClick={handleCloseCreateModal}
+                      disabled={hasClickedUpload || docState.isUploading}
+                    >
+                      {t("common.cancel")}
+                    </Button>
+                    <Button
+                      type="primary"
+                      loading={hasClickedUpload || docState.isUploading}
+                      disabled={
+                        !newKbName.trim() ||
+                        !newKbEmbeddingModel ||
+                        !uploadFiles.length ||
+                        hasClickedUpload ||
+                        docState.isUploading
+                      }
+                      onClick={() => void handleFileUpload(uploadFiles)}
+                    >
+                      {t("knowledgeBase.create.submit")}
+                    </Button>
+                  </div>
+                }
+                width={640}
+                centered
+                maskClosable={false}
+                destroyOnHidden
+                onCancel={handleCloseCreateModal}
+                styles={{
+                  container: { padding: 0 },
+                  body: { padding: 0 },
+                  footer: {
+                    margin: 0,
+                    padding: "12px 20px 16px",
+                    borderTop: "1px solid #f0f0f0",
+                  },
+                }}
+                getContainer={() => contentRef.current || document.body}
+              >
+                <div className="overflow-visible">
+                  <DocumentList
+                    key="create-mode"
+                    documents={[]}
+                    onDelete={() => {}}
+                    knowledgeBaseSource=""
+                    isCreatingMode={true}
+                    knowledgeBaseId=""
+                    knowledgeBaseName={newKbName}
+                    onNameChange={handleNameChange}
+                    knowledgeBaseDescription={newKbDescription}
+                    onDescriptionChange={setNewKbDescription}
+                    selectedFiles={uploadFiles}
+                    containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
+                    hasDocuments={hasClickedUpload || docState.isUploading}
+                    // Group permission and user groups for create mode
+                    ingroupPermission={newKbIngroupPermission}
+                    onIngroupPermissionChange={setNewKbIngroupPermission}
+                    selectedGroupIds={newKbGroupIds}
+                    onSelectedGroupIdsChange={setNewKbGroupIds}
+                    preserveSourceFile={newKbPreserveSourceFile}
+                    onPreserveSourceFileChange={setNewKbPreserveSourceFile}
+                    quotaLimitBytes={newKbQuotaBytes}
+                    onQuotaLimitBytesChange={setNewKbQuotaBytes}
+                    // Embedding model for create mode
+                    availableEmbeddingModels={availableEmbeddingModels}
+                    selectedEmbeddingModel={newKbEmbeddingModel}
+                    onEmbeddingModelChange={setNewKbEmbeddingModel}
+                    // Upload related props
+                    isDragging={uiState.isDragging}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onFileSelect={handleFileSelect}
+                    onUpload={handleFileUpload}
+                    isUploading={docState.isUploading}
+                  />
+                </div>
+              </Modal>
+            </>
+          ) : (
+            <div className="flex h-full min-h-0 flex-col gap-3">
+              <div className="flex shrink-0 items-center">
+                <Button
+                  type="text"
+                  className="!px-1 text-gray-500 hover:!text-blue-600"
+                  icon={<ArrowLeftOutlined />}
+                  onClick={() => {
+                    setActiveKnowledgeBase(null);
+                    setIsCreatingMode(false);
+                    setHasClickedUpload(false);
+                    setUploadFiles([]);
+                  }}
+                >
+                  {t("knowledgeBase.page.back")}
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1">
                 <DocumentList
                   key={`kb-${kbState.activeKnowledgeBase.id}`}
                   documents={viewingDocuments}
@@ -1284,23 +1293,9 @@ function DataConfig({ isActive }: DataConfigProps) {
                   knowledgeBaseSource={kbState.activeKnowledgeBase?.source}
                   knowledgeBaseId={kbState.activeKnowledgeBase.id}
                   knowledgeBaseName={viewingKbName}
-                  modelMismatch={hasKnowledgeBaseDetailModelMismatch(
-                    kbState.activeKnowledgeBase
-                  )}
-                  currentModel={
-                    kbState.activeKnowledgeBase?.is_multimodal
-                      ? modelConfig?.multiEmbedding?.displayName?.trim() || ""
-                      : modelConfig?.embedding?.displayName?.trim() || ""
-                  }
+                  quotaStatus={activeKnowledgeBaseQuota}
                   knowledgeBaseModel={
                     kbState.activeKnowledgeBase.embeddingModel
-                  }
-                  embeddingModelInfo={
-                    hasKnowledgeBaseDetailModelMismatch(
-                      kbState.activeKnowledgeBase
-                    )
-                      ? `\u5f53\u524d\u6a21\u578b${kbState.activeKnowledgeBase.embeddingModel || "unknown"}\u672a\u914d\u7f6e`
-                      : undefined
                   }
                   containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                   hasDocuments={viewingDocuments.length > 0}
@@ -1310,6 +1305,15 @@ function DataConfig({ isActive }: DataConfigProps) {
                     knowledgeBasePollingService.triggerKnowledgeBaseListUpdate(
                       true
                     );
+                  }}
+                  onRefresh={() => {
+                    if (kbState.activeKnowledgeBase) {
+                      void fetchDocuments(
+                        kbState.activeKnowledgeBase.id,
+                        true,
+                        kbState.activeKnowledgeBase.source
+                      );
+                    }
                   }}
                   permission={kbState.activeKnowledgeBase?.permission}
                   summaryFrequency={
@@ -1347,27 +1351,9 @@ function DataConfig({ isActive }: DataConfigProps) {
                   onUpload={handleFileUpload}
                   isUploading={docState.isUploading}
                 />
-              ) : (
-                <div
-                  className={`${STANDARD_CARD.BASE_CLASSES} flex flex-col h-full w-full`}
-                  style={{
-                    padding: STANDARD_CARD.PADDING,
-                  }}
-                >
-                  <EmptyState
-                    title={t("knowledgeBase.empty.title")}
-                    description={t("knowledgeBase.empty.description")}
-                    icon={
-                      <InfoCircleFilled
-                        style={{ fontSize: 36, color: "#1677ff" }}
-                      />
-                    }
-                    containerHeight="100%"
-                  />
-                </div>
-              )}
-            </Col>
-          </Row>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

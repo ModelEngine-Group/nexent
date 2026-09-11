@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 
 import log from "@/lib/logger";
 
-import { Button, Input, Popover, Select, Tooltip } from "antd";
+import { Button, Input, Popover, Progress, Select, Tooltip } from "antd";
 import {
   SyncOutlined,
   PlusOutlined,
@@ -26,6 +26,8 @@ import {
   Trash2,
   SquarePen,
   CircleOff,
+  BookOpen,
+  FolderOpen,
 } from "lucide-react";
 import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -41,11 +43,13 @@ import { tagManagementApi } from "@/services/tagManagementService";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import { KnowledgeBase } from "@/types/knowledgeBase";
-import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
+import { KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { formatDateOrFallback } from "@/lib/date";
+import { formatFileSize } from "@/lib/utils";
 import { USER_ROLES } from "@/const/auth";
 import { calculateKnowledgeBaseInitialLimit } from "@/lib/knowledgeBaseViewport";
+import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
 interface KnowledgeBaseListProps {
   knowledgeBases: KnowledgeBase[];
@@ -59,6 +63,7 @@ interface KnowledgeBaseListProps {
   estimatedItemHeights?: Record<string, number> | null;
   availableSources?: string[];
   availableModels?: string[];
+  quotaUsage?: QuotaUsageResponse | null;
   onLoadMore?: () => void;
   serverFiltered?: boolean;
   initialLoadPending?: boolean;
@@ -97,6 +102,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   estimatedItemHeights,
   availableSources: availableSourceOptions,
   availableModels: availableModelOptions,
+  quotaUsage = null,
   onLoadMore,
   serverFiltered = false,
   initialLoadPending = false,
@@ -124,11 +130,19 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const showPersonalCapacity = user?.role === USER_ROLES.USER;
+  const quotaMap = useMemo(() => {
+    const map = new Map<string, KBQuotaStatus>();
+    quotaUsage?.breakdown?.forEach((quota) => {
+      map.set(quota.index_name, quota);
+    });
+    return map;
+  }, [quotaUsage]);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previousScrollTopRef = useRef(0);
   const [measuredRowHeight, setMeasuredRowHeight] =
     useState(estimatedRowHeight);
   const [hasMeasuredRows, setHasMeasuredRows] = useState(false);
+  const [gridColumnCount, setGridColumnCount] = useState(1);
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(tenantId);
@@ -283,6 +297,14 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
     else setSelectedModels(values);
   };
 
+  const handleKnowledgeBaseSelect = useCallback(
+    (kb: KnowledgeBase) => {
+      onClick(kb);
+      onKnowledgeBaseChange?.();
+    },
+    [onClick, onKnowledgeBaseChange]
+  );
+
   // Helper to safely extract timestamp for sorting
   const getTimestamp = (value: any): number => {
     if (!value) return 0;
@@ -410,11 +432,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
     const reportCapacity = () => {
       if (container.clientHeight <= 0 || measuredRowHeight <= 0) return;
+      const columns = container.clientWidth >= 768 ? 2 : 1;
+      setGridColumnCount((current) =>
+        current === columns ? current : columns
+      );
       onViewportCapacityChange(
         calculateKnowledgeBaseInitialLimit(
           container.clientHeight,
           measuredRowHeight
-        ),
+        ) * columns,
         hasMeasuredRows
       );
     };
@@ -436,12 +462,15 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         (sum, [id, height]) => sum + (loadedIds.has(id) ? 0 : height),
         0
       );
-      if (reservedHeight > 0) return reservedHeight;
+      if (reservedHeight > 0) {
+        return Math.ceil(reservedHeight / gridColumnCount);
+      }
     }
-    return unloadedCount * measuredRowHeight;
+    return Math.ceil(unloadedCount / gridColumnCount) * measuredRowHeight;
   }, [
     estimatedItemHeights,
     filteredKnowledgeBases.length,
+    gridColumnCount,
     measuredRowHeight,
     totalCount,
   ]);
@@ -455,460 +484,506 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
       if (!hasDownwardIntent || !hasMore || isLoadingMore || !onLoadMore)
         return;
 
-      const loadedHeight = filteredKnowledgeBases.length * measuredRowHeight;
-      if (container.scrollTop + container.clientHeight >= loadedHeight - 80) {
+      if (
+        container.scrollTop + container.clientHeight >=
+        container.scrollHeight - 160
+      ) {
         onLoadMore();
       }
     },
-    [
-      filteredKnowledgeBases.length,
-      hasMore,
-      isLoadingMore,
-      measuredRowHeight,
-      onLoadMore,
-    ]
+    [hasMore, isLoadingMore, onLoadMore]
   );
 
   return (
-    <div className="w-full h-full bg-white border border-gray-200 rounded-md flex flex-col overflow-hidden">
-      {/* Fixed header area */}
-      <div
-        className={`${KB_LAYOUT.HEADER_PADDING} border-b border-gray-200 shrink-0`}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <div className="shrink-0">
-            <h3
-              className={`${KB_LAYOUT.TITLE_MARGIN} ${KB_LAYOUT.TITLE_TEXT} text-gray-800`}
-            >
-              {t("knowledgeBase.list.title")}
-            </h3>
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl bg-white">
+      <div className="shrink-0 px-6 pb-4 pt-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+              <BookOpen className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-semibold tracking-tight text-gray-900">
+                {t("knowledgeBase.page.title")}
+              </h1>
+              <p className="mt-1 text-sm text-gray-500">
+                {t("knowledgeBase.page.description")}
+              </p>
+            </div>
           </div>
-          <div
-            className="flex items-center min-w-0 overflow-x-auto"
-            style={{ gap: "6px" }}
-          >
+
+          <div className="flex flex-wrap items-center gap-2">
             <Button
-              style={{
-                padding: "4px 15px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                backgroundColor: "#1677ff",
-                color: "white",
-                border: "none",
-                flexShrink: 0,
-              }}
-              className="hover:!bg-blue-600"
               type="primary"
+              className="!h-10 !rounded-lg !px-4"
               onClick={onCreateNew}
               icon={<PlusOutlined />}
             >
               {t("knowledgeBase.button.create")}
             </Button>
-            <Button
-              style={{
-                padding: "4px 15px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                backgroundColor: "#1677ff",
-                color: "white",
-                border: "none",
-                flexShrink: 0,
-              }}
-              className="hover:!bg-blue-600"
-              type="primary"
-              onClick={onSync}
-            >
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "14px",
-                  height: "14px",
-                }}
-              >
-                <SyncOutlined spin={syncLoading} style={{ color: "white" }} />
-              </span>
-              <span>{t("knowledgeBase.button.sync")}</span>
-            </Button>
-            <Button
-              style={{
-                padding: "4px 15px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "8px",
-                flexShrink: 0,
-              }}
-              onClick={() => setTagManagementOpen(true)}
-              icon={<Tag className="h-4 w-4" />}
-            >
-              {t("knowledgeBase.button.tagManagement")}
-            </Button>
-            {showDataMateConfig && (
+            <Tooltip title={t("knowledgeBase.button.sync")}>
               <Button
-                style={{
-                  padding: "4px 15px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  backgroundColor: "#1677ff",
-                  color: "white",
-                  border: "none",
-                  flexShrink: 0,
-                }}
-                className="hover:!bg-blue-600"
-                type="primary"
-                onClick={onDataMateConfig}
-                icon={<SettingOutlined />}
-              >
-                <span className="truncate max-w-[120px]">
-                  {t("knowledgeBase.button.dataMateConfig")}
-                </span>
-              </Button>
+                aria-label={t("knowledgeBase.button.sync")}
+                className="!h-10 !w-10 !rounded-lg !p-0"
+                onClick={onSync}
+                icon={<SyncOutlined spin={syncLoading} />}
+              />
+            </Tooltip>
+            <Tooltip title={t("knowledgeBase.button.tagManagement")}>
+              <Button
+                aria-label={t("knowledgeBase.button.tagManagement")}
+                className="!h-10 !w-10 !rounded-lg !p-0"
+                onClick={() => setTagManagementOpen(true)}
+                icon={<Tag className="h-4 w-4" />}
+              />
+            </Tooltip>
+            {showDataMateConfig && (
+              <Tooltip title={t("knowledgeBase.button.dataMateConfig")}>
+                <Button
+                  aria-label={t("knowledgeBase.button.dataMateConfig")}
+                  className="!h-10 !w-10 !rounded-lg !p-0"
+                  onClick={onDataMateConfig}
+                  icon={<SettingOutlined />}
+                />
+              </Tooltip>
             )}
           </div>
         </div>
 
-        {/* Search and filter area */}
-        <div className="mt-3 flex items-start gap-3 flex-wrap">
-          <Input
-            placeholder={t("knowledgeBase.search.placeholder")}
-            prefix={<SearchOutlined />}
-            value={effectiveSearchKeyword}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="flex-1 min-w-0"
-            allowClear
-          />
-
-          {availableSources.length > 0 && (
-            <Select
-              mode="multiple"
-              placeholder={t("knowledgeBase.filter.source.placeholder")}
-              value={effectiveSelectedSources}
-              onChange={handleSourcesChange}
-              className="flex-1 min-w-0"
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-gray-900">
+            {t("knowledgeBase.page.all")}
+            <span className="ml-2 text-sm font-normal text-gray-400">
+              {t("knowledgeBase.page.count", { count: totalCount })}
+            </span>
+          </h2>
+          <div className="flex min-w-0 flex-1 justify-end gap-3 sm:min-w-[360px]">
+            <Input
+              size="large"
+              placeholder={t("knowledgeBase.search.placeholder")}
+              prefix={<SearchOutlined className="text-gray-400" />}
+              value={effectiveSearchKeyword}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="h-10 max-w-[560px] flex-1 !rounded-lg"
               allowClear
-              maxTagCount={2}
-            >
-              {availableSources.map((source) => (
-                <Select.Option key={source} value={source}>
-                  {t("knowledgeBase.source." + source, {
-                    defaultValue: source,
-                  })}
-                </Select.Option>
-              ))}
-            </Select>
-          )}
-
-          {availableModels.length > 0 && (
-            <Select
-              mode="multiple"
-              placeholder={t("knowledgeBase.filter.model.placeholder")}
-              value={effectiveSelectedModels}
-              onChange={handleModelsChange}
-              className="flex-1 min-w-0"
-              allowClear
-              maxTagCount={2}
-            >
-              {availableModels.map((model) => (
-                <Select.Option key={model} value={model}>
-                  {getModelDisplayName(model)}
-                </Select.Option>
-              ))}
-            </Select>
-          )}
-
-          {defaultLibrary && assignDefinitions && (
+            />
             <Popover
               trigger="click"
               placement="bottomRight"
-              title={t("knowledgeBase.tagFilter.placeholder")}
+              title={t("knowledgeBase.filter.title")}
               content={
-                <div className="w-64">
-                  <TagFilterControls
-                    definitions={assignDefinitions}
-                    value={tagPredicates}
-                    onChange={setTagPredicates}
-                  />
-                  {tagPredicates.length > 0 && (
-                    <Button
-                      size="small"
-                      block
-                      className="mt-2"
-                      onClick={() => setTagPredicates([])}
-                    >
-                      {t("knowledgeBase.tagFilter.clear")}
-                    </Button>
+                <div className="w-[300px] space-y-3">
+                  {availableSources.length > 0 && (
+                    <div>
+                      <div className="mb-1 text-xs text-gray-500">
+                        {t("knowledgeBase.filter.source")}
+                      </div>
+                      <Select
+                        mode="multiple"
+                        placeholder={t(
+                          "knowledgeBase.filter.source.placeholder"
+                        )}
+                        value={effectiveSelectedSources}
+                        onChange={handleSourcesChange}
+                        className="w-full"
+                        allowClear
+                        maxTagCount={2}
+                        options={availableSources.map((source) => ({
+                          value: source,
+                          label: t("knowledgeBase.source." + source, {
+                            defaultValue: source,
+                          }),
+                        }))}
+                      />
+                    </div>
                   )}
+                  {availableModels.length > 0 && (
+                    <div>
+                      <div className="mb-1 text-xs text-gray-500">
+                        {t("knowledgeBase.filter.model")}
+                      </div>
+                      <Select
+                        mode="multiple"
+                        placeholder={t(
+                          "knowledgeBase.filter.model.placeholder"
+                        )}
+                        value={effectiveSelectedModels}
+                        onChange={handleModelsChange}
+                        className="w-full"
+                        allowClear
+                        maxTagCount={2}
+                        options={availableModels.map((model) => ({
+                          value: model,
+                          label: getModelDisplayName(model),
+                        }))}
+                      />
+                    </div>
+                  )}
+                  {defaultLibrary && assignDefinitions && (
+                    <div>
+                      <div className="mb-1 text-xs text-gray-500">
+                        {t("knowledgeBase.tagFilter.placeholder")}
+                      </div>
+                      <TagFilterControls
+                        definitions={assignDefinitions}
+                        value={tagPredicates}
+                        onChange={setTagPredicates}
+                      />
+                    </div>
+                  )}
+                  <Button
+                    size="small"
+                    block
+                    onClick={() => {
+                      handleSearchChange("");
+                      handleSourcesChange([]);
+                      handleModelsChange([]);
+                      setTagPredicates([]);
+                    }}
+                  >
+                    {t("knowledgeBase.filter.clear")}
+                  </Button>
                 </div>
               }
             >
               <Button
+                className="!h-10 !rounded-lg"
                 icon={<FilterOutlined />}
-                type={tagPredicates.length > 0 ? "primary" : "default"}
-                aria-label={t("knowledgeBase.tagFilter.placeholder")}
+                type={
+                  effectiveSelectedSources.length > 0 ||
+                  effectiveSelectedModels.length > 0 ||
+                  tagPredicates.length > 0
+                    ? "primary"
+                    : "default"
+                }
               >
-                {t("knowledgeBase.tagFilter.button")}
+                {t("knowledgeBase.filter.button")}
+                {(effectiveSelectedSources.length > 0 ||
+                  effectiveSelectedModels.length > 0 ||
+                  tagPredicates.length > 0) && (
+                  <span className="ml-1">
+                    {effectiveSelectedSources.length +
+                      effectiveSelectedModels.length +
+                      tagPredicates.length}
+                  </span>
+                )}
               </Button>
             </Popover>
-          )}
+          </div>
         </div>
       </div>
 
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden"
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6"
         onScroll={handleScroll}
       >
-        {filteredKnowledgeBases.length > 0 ? (
-          <div className="divide-y-0">
-            {filteredKnowledgeBases.map((kb, index) => {
-              const isActive = activeKnowledgeBase?.id === kb.id;
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <button
+            type="button"
+            data-knowledge-base-row
+            className="group flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-blue-300 bg-blue-50/40 p-6 text-center transition hover:border-blue-500 hover:bg-blue-50"
+            onClick={onCreateNew}
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-2xl font-light text-blue-600 transition group-hover:scale-105">
+              +
+            </span>
+            <span className="mt-4 text-base font-semibold text-blue-700">
+              {t("knowledgeBase.card.create")}
+            </span>
+            <span className="mt-1 text-sm text-blue-500">
+              {t("knowledgeBase.card.createDescription")}
+            </span>
+          </button>
 
-              return (
-                <div
-                  key={kb.id}
-                  data-knowledge-base-row
-                  className={`${
-                    KB_LAYOUT.ROW_PADDING
-                  } px-2 hover:bg-gray-50 cursor-pointer transition-colors ${
-                    index > 0 ? "border-t border-gray-200" : ""
-                  }`}
-                  style={{
-                    borderLeftWidth: "4px",
-                    borderLeftStyle: "solid",
-                    borderLeftColor: isActive ? "#3b82f6" : "transparent",
-                    backgroundColor: isActive
-                      ? "rgb(226, 240, 253)"
-                      : "inherit",
-                  }}
-                  onClick={() => {
-                    onClick(kb);
-                    if (onKnowledgeBaseChange) onKnowledgeBaseChange();
-                  }}
-                >
-                  <div className="flex items-start">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center flex-1 min-w-0">
-                          <p
-                            className="text-base font-medium text-gray-800 truncate"
-                            style={{
-                              maxWidth: KB_LAYOUT.KB_NAME_MAX_WIDTH,
-                              ...KB_LAYOUT.KB_NAME_OVERFLOW,
-                            }}
-                            title={kb.name}
-                          >
-                            {kb.name}
-                          </p>
-                          {/* Permission icon with tooltip */}
-                          <Can permission="kb.groups:read">
-                            <Tooltip
-                              title={t(
-                                getPermissionTooltipKey(
-                                  kb.ingroup_permission || ""
-                                )
-                              )}
-                              placement="top"
-                            >
-                              <div className="ml-3 flex-shrink-0 cursor-pointer">
-                                <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 hover:bg-gray-300 transition-all duration-200 hover:shadow-sm">
-                                  {getPermissionIcon(
-                                    kb.ingroup_permission || ""
-                                  )}
-                                </div>
-                              </div>
-                            </Tooltip>
-                          </Can>
-                        </div>
-                        <div className="flex items-center ml-2">
-                          <Can permission="kb:update">
-                            <Tooltip
-                              title={t("knowledgeBase.action.assignTags")}
-                            >
-                              <Button
-                                type="text"
-                                icon={<Tag className="h-4 w-4" />}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setAssignTarget({
-                                    indexName: kb.id,
-                                    canEdit: kb.permission !== "READ_ONLY",
-                                  });
-                                }}
-                                size="small"
-                              />
-                            </Tooltip>
-                            {/* Edit button - only show for Nexent (local) sources and when user has edit permission */}
-                            {(!kb.source ||
-                              kb.source === "nexent" ||
-                              kb.source === "elasticsearch") &&
-                              kb.permission !== "READ_ONLY" && (
-                                <Tooltip title={t("common.edit")}>
-                                  <Button
-                                    type="text"
-                                    icon={<SquarePen className="h-4 w-4" />}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEditModal(kb);
-                                    }}
-                                    size="small"
-                                  />
-                                </Tooltip>
-                              )}
-                          </Can>
-                          <Can permission="kb:delete">
-                            {/* Delete button - hide when user has READ_ONLY permission */}
-                            {kb.permission !== "READ_ONLY" && (
-                              <Tooltip title={t("common.delete")}>
-                                <Button
-                                  type="text"
-                                  danger
-                                  icon={<Trash2 className="h-4 w-4" />}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDelete(kb.id);
-                                  }}
-                                  size="small"
-                                />
-                              </Tooltip>
-                            )}
-                          </Can>
-                        </div>
-                      </div>
-                      <div
-                        className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
+          {filteredKnowledgeBases.map((kb) => {
+            const isActive = activeKnowledgeBase?.id === kb.id;
+            const description =
+              kb.description?.trim() && kb.description !== "Elasticsearch index"
+                ? kb.description
+                : t("knowledgeBase.description.default");
+            const source = kb.source || "nexent";
+            const updatedDate = formatDateOrFallback(
+              kb.updatedAt ?? kb.createdAt
+            );
+            const groupNames = getGroupNames(kb.group_ids);
+            const quotaData = quotaMap.get(kb.index_name || kb.id);
+            const hasQuota = quotaData?.soft_quota_bytes != null;
+            const availableCapacity = quotaData
+              ? hasQuota
+                ? formatFileSize(
+                    Math.max(
+                      quotaData.soft_quota_bytes! - quotaData.actual_bytes,
+                      0
+                    )
+                  )
+                : t("knowledgeBase.capacity.unlimited")
+              : "-";
+            const totalCapacity = quotaData
+              ? hasQuota
+                ? quotaData.soft_quota_readable ||
+                  formatFileSize(quotaData.soft_quota_bytes!)
+                : t("knowledgeBase.capacity.unlimited")
+              : "-";
+            const quotaUsagePercent = quotaData
+              ? Math.min(
+                  100,
+                  Math.max(
+                    0,
+                    quotaData.usage_pct ??
+                      (hasQuota && quotaData.soft_quota_bytes! > 0
+                        ? (quotaData.actual_bytes /
+                            quotaData.soft_quota_bytes!) *
+                          100
+                        : quotaData.actual_bytes > 0
+                          ? 100
+                          : 0)
+                  )
+                )
+              : 0;
+
+            return (
+              <article
+                key={kb.id}
+                data-knowledge-base-row
+                role="button"
+                tabIndex={0}
+                className={`group flex min-h-[220px] cursor-pointer flex-col rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                  isActive
+                    ? "border-blue-500 ring-2 ring-blue-100"
+                    : "border-gray-200 hover:border-blue-200"
+                }`}
+                onClick={() => handleKnowledgeBaseSelect(kb)}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleKnowledgeBaseSelect(kb);
+                  }
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                      <FolderOpen className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3
+                        className="truncate text-base font-semibold text-gray-900"
+                        title={kb.name}
                       >
-                        {/* Document count tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.documents", {
-                            count: kb.documentCount || 0,
-                          })}
-                        </span>
-
-                        {/* Chunk count tag */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.chunks", {
-                            count: kb.chunkCount || 0,
-                          })}
-                        </span>
-
-                        <span className="inline-flex items-center mr-1">
-                          <ResourceTagChips
-                            resourceType="knowledge_base"
-                            resourceId={kb.id}
-                            max={3}
-                          />
-                        </span>
-
-                        {/* Always show source tag regardless of document/chunk count */}
-                        <span
-                          className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
-                        >
-                          {t("knowledgeBase.tag.source", {
-                            source: kb.source,
-                          })}
-                        </span>
-
-                        {/* Only show creation date, model tags when there are valid documents or chunks */}
-                        {((kb.documentCount || 0) > 0 ||
-                          (kb.chunkCount || 0) > 0) && (
-                          <>
-                            {/* Creation date tag - only show date */}
-                            <span
-                              className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.light} mr-1`}
-                            >
-                              {t("knowledgeBase.tag.createdAt", {
-                                date: formatDateOrFallback(kb.createdAt),
-                              })}
-                            </span>
-
-                            {/* Force line break */}
-                            <div
-                              className={`w-full ${KB_LAYOUT.TAG_BREAK_HEIGHT}`}
-                            ></div>
-
-                            {/* Model tag - only show when model is not "unknown" */}
-                            {kb.embeddingModel !== "unknown" && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.model} mr-1`}
-                              >
-                                {t("knowledgeBase.tag.model", {
-                                  model: getModelDisplayName(kb.embeddingModel),
-                                })}
-                              </span>
-                            )}
-                            {kb.is_multimodal &&
-                              hasIndexedDocumentsAndChunks(kb) && (
-                                <span
-                                  className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} ${KB_TAG_VARIANTS.red} mr-1`}
-                                >
-                                  multimodal
-                                </span>
-                              )}
-
-                            {/* Model mismatch is shown in the knowledge-base detail header only. */}
-
-                            {/* User group tags - only show when not PRIVATE */}
-                            <Can permission="group:read">
-                              {kb.ingroup_permission !== "PRIVATE" &&
-                                getGroupNames(kb.group_ids).map(
-                                  (groupName, idx) => (
-                                    <span
-                                      key={idx}
-                                      className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                                    >
-                                      {groupName}
-                                    </span>
-                                  )
-                                )}
-                            </Can>
-                            {kb.preserve_source_file === false && (
-                              <span
-                                className={`inline-flex items-center ${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_LAYOUT.SECOND_ROW_TAG_MARGIN} bg-blue-100 text-blue-800 border border-blue-200 mr-1`}
-                              >
-                                {t("knowledgeBase.tag.noPreserveSourceFile")}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
+                        {kb.name}
+                      </h3>
+                      <span className="mt-1 block truncate text-xs text-gray-400">
+                        {t("knowledgeBase.tag.source", { source })}
+                      </span>
                     </div>
                   </div>
+
+                  <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition group-hover:opacity-100">
+                    <Can permission="kb:update">
+                      <Tooltip title={t("knowledgeBase.action.assignTags")}>
+                        <Button
+                          type="text"
+                          size="small"
+                          aria-label={t("knowledgeBase.action.assignTags")}
+                          icon={<Tag className="h-4 w-4" />}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setAssignTarget({
+                              indexName: kb.id,
+                              canEdit: kb.permission !== "READ_ONLY",
+                            });
+                          }}
+                        />
+                      </Tooltip>
+                      {(!kb.source ||
+                        kb.source === "nexent" ||
+                        kb.source === "elasticsearch") &&
+                        kb.permission !== "READ_ONLY" && (
+                          <Tooltip title={t("common.edit")}>
+                            <Button
+                              type="text"
+                              size="small"
+                              aria-label={t("common.edit")}
+                              icon={<SquarePen className="h-4 w-4" />}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openEditModal(kb);
+                              }}
+                            />
+                          </Tooltip>
+                        )}
+                    </Can>
+                    <Can permission="kb:delete">
+                      {kb.permission !== "READ_ONLY" && (
+                        <Tooltip title={t("common.delete")}>
+                          <Button
+                            type="text"
+                            danger
+                            size="small"
+                            aria-label={t("common.delete")}
+                            icon={<Trash2 className="h-4 w-4" />}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDelete(kb.id);
+                            }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Can>
+                  </div>
                 </div>
-              );
-            })}
-            {placeholderHeight > 0 && (
-              <div aria-hidden="true" style={{ height: placeholderHeight }} />
-            )}
-            {isLoadingMore && (
-              <div className="py-2 text-center text-xs text-gray-400">
-                Loading...
-              </div>
-            )}
-          </div>
-        ) : isLoading || initialLoadPending ? (
-          <div className="py-6 text-center text-sm text-gray-400">
+
+                <p className="mt-4 line-clamp-2 min-h-10 text-sm leading-5 text-gray-500">
+                  {description}
+                </p>
+
+                <div className="mt-4 flex flex-wrap content-start gap-2">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${KB_TAG_VARIANTS.light}`}
+                  >
+                    {t("knowledgeBase.tag.documents", {
+                      count: kb.documentCount || 0,
+                    })}
+                  </span>
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${KB_TAG_VARIANTS.light}`}
+                  >
+                    {t("knowledgeBase.tag.chunks", {
+                      count: kb.chunkCount || 0,
+                    })}
+                  </span>
+                  {kb.embeddingModel !== "unknown" && (
+                    <span
+                      className={`inline-flex max-w-full items-center truncate rounded-full px-2.5 py-1 text-xs font-medium ${KB_TAG_VARIANTS.model}`}
+                      title={getModelDisplayName(kb.embeddingModel)}
+                    >
+                      {getModelDisplayName(kb.embeddingModel)}
+                    </span>
+                  )}
+                  {kb.is_multimodal && hasIndexedDocumentsAndChunks(kb) && (
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${KB_TAG_VARIANTS.red}`}
+                    >
+                      multimodal
+                    </span>
+                  )}
+                  <ResourceTagChips
+                    resourceType="knowledge_base"
+                    resourceId={kb.id}
+                    max={3}
+                  />
+                  <Can permission="group:read">
+                    {kb.ingroup_permission !== "PRIVATE" &&
+                      groupNames.slice(0, 2).map((groupName) => (
+                        <span
+                          key={groupName}
+                          className="inline-flex max-w-full items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                          title={groupName}
+                        >
+                          {groupName}
+                        </span>
+                      ))}
+                  </Can>
+                  {kb.preserve_source_file === false && (
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${KB_TAG_VARIANTS.warning}`}
+                    >
+                      {t("knowledgeBase.tag.noPreserveSourceFile")}
+                    </span>
+                  )}
+                  <Tooltip
+                    title={t(
+                      getPermissionTooltipKey(kb.ingroup_permission || "")
+                    )}
+                  >
+                    <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">
+                      {getPermissionIcon(kb.ingroup_permission || "")}
+                      {t(getPermissionTooltipKey(kb.ingroup_permission || ""))}
+                    </span>
+                  </Tooltip>
+                </div>
+
+                {quotaData && (
+                  <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-2.5">
+                    <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                      <span className="font-medium text-gray-600">
+                        {t("knowledgeBase.capacity.title")}
+                      </span>
+                      {hasQuota && (
+                        <span className="text-gray-400">
+                          {Math.round(quotaUsagePercent)}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="text-gray-400">
+                          {t("knowledgeBase.capacity.available")}
+                        </div>
+                        <div className="truncate font-medium text-gray-800">
+                          {availableCapacity}
+                        </div>
+                      </div>
+                      <div className="min-w-0 text-right">
+                        <div className="text-gray-400">
+                          {t("knowledgeBase.capacity.total")}
+                        </div>
+                        <div className="truncate font-medium text-gray-800">
+                          {totalCapacity}
+                        </div>
+                      </div>
+                    </div>
+                    {hasQuota && (
+                      <Progress
+                        className="!mb-0 !mt-2"
+                        percent={quotaUsagePercent}
+                        showInfo={false}
+                        size="small"
+                        status={
+                          quotaData.kb_warning_level === "exceeded"
+                            ? "exception"
+                            : "normal"
+                        }
+                      />
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-auto flex items-center justify-between border-t border-gray-100 pt-4 text-xs text-gray-400">
+                  <span>
+                    {t("knowledgeBase.tag.updatedAt", { date: updatedDate })}
+                  </span>
+                  <span className="font-medium text-gray-500">{source}</span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        {filteredKnowledgeBases.length === 0 &&
+          (isLoading || initialLoadPending ? (
+            <div className="py-10 text-center text-sm text-gray-400">
+              Loading...
+            </div>
+          ) : (
+            <div className="py-10 text-center text-sm text-gray-400">
+              {effectiveSearchKeyword ||
+              effectiveSelectedSources.length > 0 ||
+              effectiveSelectedModels.length > 0 ||
+              tagPredicates.length > 0
+                ? t("knowledgeBase.list.noResults")
+                : t("knowledgeBase.list.empty")}
+            </div>
+          ))}
+
+        {placeholderHeight > 0 && (
+          <div aria-hidden="true" style={{ height: placeholderHeight }} />
+        )}
+        {isLoadingMore && (
+          <div className="py-3 text-center text-xs text-gray-400">
             Loading...
-          </div>
-        ) : (
-          <div
-            className={`${KB_LAYOUT.EMPTY_STATE_PADDING} text-center text-gray-500`}
-          >
-            {searchKeyword ||
-            selectedSources.length > 0 ||
-            selectedModels.length > 0
-              ? t("knowledgeBase.list.noResults")
-              : t("knowledgeBase.list.empty")}
           </div>
         )}
       </div>
