@@ -574,6 +574,9 @@ def test_prompt_uses_backend_owned_serial_resource_actions(language):
     assert "POST_GAP" in prompt
     assert "verification_required=True" in prompt
     assert "capability_verifications" in prompt
+    assert "accepted_candidate_refs" in prompt
+    assert '"decision": "accept"' not in prompt
+    assert '"missing_capabilities"' not in prompt
     assert "VERIFY" in prompt
     assert "parallel_executor" not in prompt
     assert "recommend_resources" not in prompt

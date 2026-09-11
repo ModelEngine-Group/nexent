@@ -1505,10 +1505,8 @@ async def resolve_resource_requirements_impl(
         else CapabilityVerification.model_validate(item)
         for item in capability_verifications or []
     ]
-    verification_pairs = [
-        (item.requirement_id, item.candidate_ref) for item in verifications
-    ]
-    if len(verification_pairs) != len(set(verification_pairs)):
+    verification_requirement_ids = [item.requirement_id for item in verifications]
+    if len(verification_requirement_ids) != len(set(verification_requirement_ids)):
         raise Nl2AgentResourceError("invalid_capability_verifications")
     if verification_required and verifications:
         raise Nl2AgentResourceError("invalid_capability_verifications")
@@ -1544,23 +1542,26 @@ async def resolve_resource_requirements_impl(
         )
 
     accepted_pairs = {
-        (item.requirement_id, item.candidate_ref)
+        (item.requirement_id, candidate_ref)
         for item in verifications
-        if item.decision == "accept"
+        for candidate_ref in item.accepted_candidate_refs
     }
-    available_pairs = {
+    strong_candidate_pairs = {
         (requirement.requirement_id, match.candidate_ref)
         for requirement in requirements
         for match in [
             *installed.matches_by_requirement.get(requirement.requirement_id, []),
             *installable.matches_by_requirement.get(requirement.requirement_id, []),
         ]
+        if match.strength == "strong"
     }
-    supplied_pairs = {
-        (item.requirement_id, item.candidate_ref)
-        for item in verifications
+    expected_requirement_ids = {
+        requirement.requirement_id for requirement in requirements
     }
-    if verifications and not supplied_pairs <= available_pairs:
+    if capability_verifications is not None and (
+        set(verification_requirement_ids) != expected_requirement_ids
+        or not accepted_pairs <= strong_candidate_pairs
+    ):
         raise Nl2AgentResourceError("invalid_capability_verifications")
 
     resolutions: list[RequirementResolution] = []

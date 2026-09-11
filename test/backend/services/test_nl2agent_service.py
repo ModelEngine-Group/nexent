@@ -799,7 +799,7 @@ def test_initial_resolution_prefers_installed_strong_match(mocker):
     assert [resource.candidate_ref for resource in result.resources] == ["tool:1"]
 
 
-def test_capability_rejection_keeps_strong_generic_search_uncovered(mocker):
+def test_empty_capability_allowlist_keeps_strong_generic_search_uncovered(mocker):
     """UT-BE-NL2A-VERIFY-001 / 005."""
 
     requirement = ResourceRequirement(
@@ -852,10 +852,7 @@ def test_capability_rejection_keeps_strong_generic_search_uncovered(mocker):
             capability_verifications=[
                 {
                     "requirement_id": "train_ticket",
-                    "candidate_ref": "tool:search",
-                    "decision": "reject",
-                    "reason": "No declared 12306 availability or booking capability.",
-                    "missing_capabilities": ["12306", "ticket booking"],
+                    "accepted_candidate_refs": [],
                 }
             ],
         )
@@ -865,8 +862,8 @@ def test_capability_rejection_keeps_strong_generic_search_uncovered(mocker):
     assert result.next_action == "RESOLVE_GAP"
 
 
-def test_capability_reference_allows_displayed_weak_candidate(mocker):
-    """UT-BE-NL2A-VERIFY-004: weak references are valid verification input."""
+def test_empty_capability_allowlist_allows_displayed_weak_candidate(mocker):
+    """UT-BE-NL2A-VERIFY-004: weak references remain backend-owned."""
 
     requirement = ResourceRequirement(
         requirement_id="train_ticket",
@@ -916,10 +913,7 @@ def test_capability_reference_allows_displayed_weak_candidate(mocker):
             capability_verifications=[
                 {
                     "requirement_id": "train_ticket",
-                    "candidate_ref": "tool:search",
-                    "decision": "reference",
-                    "reason": "Only a generic search capability is declared.",
-                    "missing_capabilities": ["12306 realtime availability"],
+                    "accepted_candidate_refs": [],
                 }
             ],
         )
@@ -927,6 +921,164 @@ def test_capability_reference_allows_displayed_weak_candidate(mocker):
 
     assert result.requirements[0].state == "uncovered"
     assert result.next_action == "RESOLVE_GAP"
+
+
+def test_capability_allowlist_accepts_installed_strong_candidate(mocker):
+    """UT-BE-NL2A-VERIFY-003: accepted installed candidates cover requirements."""
+
+    requirement = ResourceRequirement(requirement_id="weather", query="Weather")
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:1",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Weather Tool",
+                requirement_ids=["weather"],
+                score=0.70,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "weather": [
+                ResourceMatch(
+                    candidate_ref="tool:1", score=0.70, strength="strong"
+                )
+            ]
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(
+            return_value=ResourceSearchOutput(
+                candidates=[],
+                uncovered_requirement_ids=["weather"],
+                matches_by_requirement={"weather": []},
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+            capability_verifications=[
+                {
+                    "requirement_id": "weather",
+                    "accepted_candidate_refs": ["tool:1"],
+                }
+            ],
+        )
+    )
+
+    assert result.requirements[0].state == "covered"
+    assert result.next_action == "BIND"
+
+
+@pytest.mark.parametrize(
+    "capability_verifications",
+    [
+        [
+            {
+                "requirement_id": "unknown",
+                "accepted_candidate_refs": [],
+            }
+        ],
+        [
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": ["tool:unknown"],
+            }
+        ],
+        [
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": ["tool:1", "tool:1"],
+            }
+        ],
+        [
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": [],
+            },
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": [],
+            },
+        ],
+        [],
+    ],
+    ids=(
+        "unknown-requirement",
+        "unknown-candidate",
+        "duplicate-candidate",
+        "duplicate-requirement",
+        "missing-requirement",
+    ),
+)
+def test_capability_allowlist_rejects_invalid_requirement_results(
+    mocker,
+    capability_verifications,
+):
+    """UT-BE-NL2A-VERIFY-002: allowlists are complete and reference-safe."""
+
+    requirement = ResourceRequirement(requirement_id="weather", query="Weather")
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:1",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Weather Tool",
+                requirement_ids=["weather"],
+                score=0.70,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "weather": [
+                ResourceMatch(
+                    candidate_ref="tool:1", score=0.70, strength="strong"
+                )
+            ]
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(
+            return_value=ResourceSearchOutput(
+                candidates=[],
+                uncovered_requirement_ids=["weather"],
+                matches_by_requirement={"weather": []},
+            )
+        ),
+    )
+
+    with pytest.raises(
+        (Nl2AgentResourceError, ValidationError),
+        match="invalid_capability_verifications|accepted_candidate_refs",
+    ):
+        asyncio.run(
+            resolve_resource_requirements_impl(
+                requirements=[requirement],
+                phase="INITIAL",
+                exclude_refs=[],
+                tenant_id="tenant-a",
+                user_id="user-a",
+                capability_verifications=capability_verifications,
+            )
+        )
 
 
 def test_initial_resolution_marks_installable_only_for_strong_repository_match(
@@ -982,6 +1134,16 @@ def test_initial_resolution_marks_installable_only_for_strong_repository_match(
             exclude_refs=[],
             tenant_id="tenant-a",
             user_id="user-a",
+            capability_verifications=[
+                {
+                    "requirement_id": "mail",
+                    "accepted_candidate_refs": ["tenant_mcp_repository:7"],
+                },
+                {
+                    "requirement_id": "inventory",
+                    "accepted_candidate_refs": [],
+                },
+            ],
         )
     )
 

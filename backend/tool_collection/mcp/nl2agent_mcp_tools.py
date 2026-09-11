@@ -92,8 +92,10 @@ RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION = (
     "Resolve every structured capability requirement against installed and "
     "installable resources. With verification_required=true, first returns a "
     "finite backend-ranked candidate set and next_action=VERIFY. Submit one "
-    "capability_verifications verdict for each strong candidate, then call this "
-    "tool again without verification_required. The final result contains "
+    "capability_verifications item per requirement containing only the "
+    "accepted_candidate_refs that can fully satisfy it, then call this tool "
+    "again without verification_required. Omit rejected or uncertain candidates "
+    "instead of explaining them. The final result contains "
     "backend-owned per-requirement states (`covered`, `installable`, or "
     "`uncovered`) and exactly one card next_action. Never invent candidate_ref "
     "values or capabilities not present in the supplied resource summary."
@@ -276,15 +278,18 @@ class ResourceMatch(BaseModel):
 
 
 class CapabilityVerification(BaseModel):
-    """Model verdict for one backend-supplied requirement/candidate pair."""
+    """Model-selected candidate allowlist for one backend requirement."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     requirement_id: str = Field(min_length=1)
-    candidate_ref: str = Field(min_length=1)
-    decision: Literal["accept", "reference", "reject"]
-    reason: str = Field(min_length=1, max_length=500)
-    missing_capabilities: list[str] = Field(default_factory=list, max_length=8)
+    accepted_candidate_refs: list[str] = Field(max_length=12)
+
+    @model_validator(mode="after")
+    def validate_accepted_candidate_refs(self) -> "CapabilityVerification":
+        if len(self.accepted_candidate_refs) != len(set(self.accepted_candidate_refs)):
+            raise ValueError("accepted_candidate_refs must be unique")
+        return self
 
 
 class ResourceCardSummary(BaseModel):
