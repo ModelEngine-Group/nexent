@@ -121,8 +121,8 @@ export default function AgentPrompt() {
   const [editingOverrideValue, setEditingOverrideValue] = useState<ModelAdvancedSettingsValue | null>(null);
   const modelParamsOverride = (editedAgent.model_params_override ?? {}) as ModelOverrideMap;
   const configuringModel = useMemo(
-    () => (llmModels ?? []).find((m) => m.id === configuringModelId) ?? null,
-    [llmModels, configuringModelId]
+    () => (availableLlmModels ?? []).find((m) => m.id === configuringModelId) ?? null,
+    [availableLlmModels, configuringModelId]
   );
   useEffect(() => {
     if (!configuringModel) {
