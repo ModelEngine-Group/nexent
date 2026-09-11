@@ -44,6 +44,14 @@ export function buildNorthboundRunUrl(northboundBaseUrl?: string): string {
   return `${baseUrl || "<NEXENT_BASE_URL>"}/nb/v1/chat/run`;
 }
 
+export function buildUserApiKeyPath(locale: string): string {
+  return `/${locale}/users`;
+}
+
+export function buildNorthboundDocsUrl(locale: string): string {
+  return `https://modelengine-group.github.io/nexent/${locale}/integration/integration-out/northbound-api.html`;
+}
+
 export function buildNorthboundCurl(agentName: string, runUrl: string): string {
   const payload = JSON.stringify({
     agent_name: agentName,

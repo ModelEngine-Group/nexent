@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   buildAgentShareUrl,
   buildAgentUsageGuidePath,
+  buildNorthboundDocsUrl,
   buildNorthboundCurl,
   buildNorthboundRunUrl,
+  buildUserApiKeyPath,
   clearAgentUsageGuidePath,
   parseAgentUsageGuideParams,
   isAgentSharePath,
@@ -42,7 +44,9 @@ test("parses and clears one-time Agent usage guide URL state", () => {
     null
   );
   assert.equal(
-    parseAgentUsageGuideParams(new URLSearchParams("agent_id=nope&guide=usage")),
+    parseAgentUsageGuideParams(
+      new URLSearchParams("agent_id=nope&guide=usage")
+    ),
     null
   );
   assert.equal(
@@ -71,5 +75,10 @@ test("builds safe share and northbound API examples", () => {
   assert.match(
     buildNorthboundCurl("demo-agent", "https://api.example.com/nb/v1/chat/run"),
     /demo-agent/
+  );
+  assert.equal(buildUserApiKeyPath("zh"), "/zh/users");
+  assert.equal(
+    buildNorthboundDocsUrl("en"),
+    "https://modelengine-group.github.io/nexent/en/integration/integration-out/northbound-api.html"
   );
 });

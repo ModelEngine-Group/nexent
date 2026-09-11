@@ -8,8 +8,10 @@ import { useTranslation } from "react-i18next";
 import A2AServerSettingsPanel from "@/app/[locale]/agents/components/a2a/A2AServerSettingsPanel";
 import {
   buildAgentShareUrl,
+  buildNorthboundDocsUrl,
   buildNorthboundCurl,
   buildNorthboundRunUrl,
+  buildUserApiKeyPath,
 } from "@/lib/agentUsageGuide";
 import { a2aClientService } from "@/services/a2aService";
 import { agentShareService } from "@/services/agentShareService";
@@ -218,7 +220,14 @@ export function AgentUsageGuideModal({
             children: (
               <div className="space-y-4">
                 <ol className="list-decimal space-y-1 pl-5 text-sm">
-                  <li>{t("agentUsageGuide.northbound.stepKey")}</li>
+                  <li>
+                    <a
+                      className="text-primary hover:underline"
+                      href={buildUserApiKeyPath(locale)}
+                    >
+                      {t("agentUsageGuide.northbound.stepKey")}
+                    </a>
+                  </li>
                   <li>{t("agentUsageGuide.northbound.stepCall")}</li>
                   <li>{t("agentUsageGuide.northbound.stepResult")}</li>
                 </ol>
@@ -238,7 +247,7 @@ export function AgentUsageGuideModal({
                   message={t("agentUsageGuide.northbound.keyNotice")}
                 />
                 <a
-                  href={`https://modelengine-group.github.io/nexent/${locale}/integration/integration-out/northbound-api.html`}
+                  href={buildNorthboundDocsUrl(locale)}
                   target="_blank"
                   rel="noreferrer"
                 >
