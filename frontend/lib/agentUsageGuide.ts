@@ -31,6 +31,14 @@ export function buildAgentShareUrl(
   return `${origin.replace(/\/+$/, "")}/${locale}/share/agent/${encodeURIComponent(shareToken)}`;
 }
 
+export function isAgentSharePath(pathname: string): boolean {
+  return /^\/share\/agent\/[^/]+\/?$/.test(pathname);
+}
+
+export function isAnonymousConversationSharePath(pathname: string): boolean {
+  return pathname.startsWith("/share/") && !isAgentSharePath(pathname);
+}
+
 export function buildNorthboundRunUrl(northboundBaseUrl?: string): string {
   const baseUrl = northboundBaseUrl?.trim().replace(/\/+$/, "");
   return `${baseUrl || "<NEXENT_BASE_URL>"}/nb/v1/chat/run`;

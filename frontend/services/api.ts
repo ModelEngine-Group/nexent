@@ -80,6 +80,18 @@ export const API_ENDPOINTS = {
       return `${API_BASE_URL}/share/${shareId}/assets/${assetId}/download${suffix}`;
     },
   },
+  agentShare: {
+    metadata: (shareToken: string) =>
+      `${API_BASE_URL}/agent-share/${encodeURIComponent(shareToken)}`,
+    session: (shareToken: string) =>
+      `${API_BASE_URL}/agent-share/${encodeURIComponent(shareToken)}/session`,
+    history: (shareToken: string) =>
+      `${API_BASE_URL}/agent-share/${encodeURIComponent(shareToken)}/history`,
+    run: (shareToken: string) =>
+      `${API_BASE_URL}/agent-share/${encodeURIComponent(shareToken)}/run`,
+    stop: (shareToken: string) =>
+      `${API_BASE_URL}/agent-share/${encodeURIComponent(shareToken)}/stop`,
+  },
   agent: {
     run: `${API_BASE_URL}/agent/run`,
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,

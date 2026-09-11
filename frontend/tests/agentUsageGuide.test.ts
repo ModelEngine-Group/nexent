@@ -8,6 +8,8 @@ import {
   buildNorthboundRunUrl,
   clearAgentUsageGuidePath,
   parseAgentUsageGuideParams,
+  isAgentSharePath,
+  isAnonymousConversationSharePath,
   // @ts-ignore -- Node's built-in TypeScript runner needs the extension.
 } from "../lib/agentUsageGuide.ts";
 
@@ -15,6 +17,16 @@ test("builds the published Agent repository guide URL", () => {
   assert.equal(
     buildAgentUsageGuidePath("zh", 41),
     "/zh/agent-space?tab=mine&agent_id=41&guide=usage"
+  );
+});
+
+test("requires login only for interactive Agent share links", () => {
+  assert.equal(isAgentSharePath("/share/agent/signed-token"), true);
+  assert.equal(isAgentSharePath("/share/agent/"), false);
+  assert.equal(isAnonymousConversationSharePath("/share/snapshot-id"), true);
+  assert.equal(
+    isAnonymousConversationSharePath("/share/agent/signed-token"),
+    false
   );
 });
 
