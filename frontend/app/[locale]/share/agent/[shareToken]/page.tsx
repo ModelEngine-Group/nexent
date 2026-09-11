@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { Textarea } from "@/components/ui/textarea";
+import { ApiError } from "@/services/api";
 import {
   extractAgentShareHistory,
   getAgentShareFinalAnswerChunk,
@@ -20,8 +21,6 @@ import {
   type AgentShareMetadata,
 } from "@/services/agentShareRuntimeService";
 
-const unavailableMessage = "This Agent share is unavailable.";
-
 function createMessageId(role: AgentShareChatMessage["role"]): string {
   return `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -31,6 +30,10 @@ export default function AgentSharePage() {
   const shareToken = params?.shareToken;
   const { isAuthenticated, isAuthChecking } = useAuthenticationContext();
   const { t } = useTranslation("common");
+  const unavailableMessage = t(
+    "agentSharePage.unavailable",
+    "This Agent share is unavailable."
+  );
   const streamControllerRef = useRef<AbortController | null>(null);
   const stoppedByUserRef = useRef(false);
   const [metadata, setMetadata] = useState<AgentShareMetadata | null>(null);
@@ -63,7 +66,7 @@ export default function AgentSharePage() {
       });
 
     return () => controller.abort();
-  }, [isAuthenticated, isAuthChecking, shareToken]);
+  }, [isAuthenticated, isAuthChecking, shareToken, unavailableMessage]);
 
   useEffect(
     () => () => {
@@ -151,14 +154,25 @@ export default function AgentSharePage() {
       }
 
       if (!receivedAnswer && !stoppedByUserRef.current) {
-        setError("The Agent did not return an answer. Please try again.");
+        setError(
+          t(
+            "agentSharePage.noAnswer",
+            "The Agent did not return an answer. Please try again."
+          )
+        );
       }
     } catch (streamError) {
       if (!stoppedByUserRef.current && !controller.signal.aborted) {
         setError(
-          streamError instanceof Error
-            ? streamError.message
-            : "Unable to run this Agent. Please try again."
+          streamError instanceof ApiError && Number(streamError.code) === 429
+            ? t(
+                "agentSharePage.rateLimited",
+                "This Agent is receiving too many requests. Please try again shortly."
+              )
+            : t(
+                "agentSharePage.runFailed",
+                "Unable to run this Agent. Please try again."
+              )
         );
       }
     } finally {
@@ -167,7 +181,7 @@ export default function AgentSharePage() {
       }
       setIsStreaming(false);
     }
-  }, [appendToAssistant, input, isStreaming, shareToken]);
+  }, [appendToAssistant, input, isStreaming, shareToken, t]);
 
   const stop = useCallback(async () => {
     if (!shareToken || !isStreaming) return;
@@ -175,11 +189,13 @@ export default function AgentSharePage() {
     try {
       await agentShareRuntimeService.stop(shareToken);
     } catch {
-      setError("Unable to stop this Agent response.");
+      setError(
+        t("agentSharePage.stopFailed", "Unable to stop this Agent response.")
+      );
     } finally {
       streamControllerRef.current?.abort();
     }
-  }, [isStreaming, shareToken]);
+  }, [isStreaming, shareToken, t]);
 
   if (isAuthChecking || isLoading) {
     return (
@@ -267,7 +283,7 @@ export default function AgentSharePage() {
               type="primary"
               danger
               shape="circle"
-              aria-label="Stop response"
+              aria-label={t("agentSharePage.stopResponse", "Stop response")}
               icon={<Square className="size-4" />}
               onClick={() => void stop()}
             />
@@ -275,7 +291,7 @@ export default function AgentSharePage() {
             <Button
               type="primary"
               shape="circle"
-              aria-label="Send message"
+              aria-label={t("agentSharePage.sendMessage", "Send message")}
               disabled={!input.trim()}
               icon={<Send className="size-4" />}
               onClick={() => void send()}
