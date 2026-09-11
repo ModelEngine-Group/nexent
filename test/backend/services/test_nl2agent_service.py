@@ -701,32 +701,29 @@ def test_rank_resource_catalog_preserves_weak_score_below_strong_boundary(mocker
     }
 
 
-def test_generic_query_parameter_does_not_cover_train_ticket_lookup():
-    """UT-BE-NL2A-SCORE-004: input field names are not capability evidence."""
+def test_generic_interface_fields_participate_in_retrieval_scoring():
+    """UT-BE-NL2A-SCORE-004: retrieval does not blacklist interface fields."""
 
     requirement = ResourceRequirement(
-        requirement_id="train_query",
-        query="查询列车车次和余票信息",
-        search_terms=[
-            "车次查询",
-            "余票查询",
-            "列车时刻",
-            "train query",
-            "ticket availability",
-        ],
+        requirement_id="generic_input",
+        query="query",
     )
-    generic_search = {
-        "names": ["tavily_search"],
+    resource = {
+        "names": ["unrelated_utility"],
         "labels": [],
-        "descriptions": [
-            "Performs an internet search based on your query and returns results."
-        ],
-        "interfaces": ["query", "query string search query"],
-        "installed": True,
-        "quality": 1.0,
+        "descriptions": ["unrelated utility"],
+        "interfaces": ["query"],
+        "installed": False,
+        "quality": 0.0,
     }
 
-    assert _score_resource_requirement(requirement, generic_search) < 0.65
+    score_with_interface = _score_resource_requirement(requirement, resource)
+    score_without_interface = _score_resource_requirement(
+        requirement,
+        {**resource, "interfaces": []},
+    )
+
+    assert score_with_interface > score_without_interface
 
 
 def test_initial_resolution_prefers_installed_strong_match(mocker):
