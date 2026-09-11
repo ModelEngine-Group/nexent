@@ -97,6 +97,7 @@ function SortableModelItem({
 
 export default function AgentPrompt() {
   const { t } = useTranslation("common");
+  const form = Form.useFormInstance();
   const { user } = useAuthorizationContext();
   const { llmModels } = useModelList();
   const { isSpeedMode } = useDeployment();
@@ -163,9 +164,11 @@ export default function AgentPrompt() {
   }, [selectedModels.length]);
 
   const updateModelSelection = useCallback(
-    (modelIds: number[]) =>
-      updateAgent(resolveModelSelection(modelIds, modelOptions)),
-    [modelOptions, updateAgent]
+    (modelIds: number[]) => {
+      form.setFieldValue("model_ids", modelIds);
+      updateAgent(resolveModelSelection(modelIds, modelOptions));
+    },
+    [form, modelOptions, updateAgent]
   );
 
   const handleModelPriorityChange = useCallback(

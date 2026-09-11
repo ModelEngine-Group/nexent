@@ -40,3 +40,10 @@ test("shows model priority sorting only from a popover trigger", async () => {
   assert.match(prompt, /icon=\{<ListOrdered/);
   assert.match(prompt, /content=\{modelPriorityContent\}/);
 });
+
+test("synchronizes reordered model IDs with the form-controlled select", async () => {
+  const prompt = await readFile(agentPromptPath, "utf8");
+
+  assert.match(prompt, /const form = Form\.useFormInstance\(\)/);
+  assert.match(prompt, /form\.setFieldValue\("model_ids", modelIds\)/);
+});
