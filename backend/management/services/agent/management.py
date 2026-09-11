@@ -809,6 +809,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
             # Filter out deleted models (delete_flag='Y' in model_record_t)
             model_projection = project_agent_models(agent, tenant_id, model_cache)
             agent.update(model_projection.fields)
+            agent["model_ids"] = model_projection.availability_model_ids
 
             # Use shared availability check function
             _, unavailable_reasons = check_agent_availability(
@@ -817,6 +818,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 agent_info=agent,
                 model_cache=model_cache
             )
+            agent["model_ids"] = model_projection.fields["model_ids"]
             _, unavailable_reasons = apply_deleted_model_reason(
                 not unavailable_reasons,
                 unavailable_reasons,

@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   RotateCcw,
   ShieldCheck,
+  LoaderCircle,
 } from "lucide-react";
 
 import { ScrollArea } from "@/components/ui/scrollArea";
@@ -328,6 +329,7 @@ type HistorySummaryPayload = {
   summary?: string | Record<string, unknown>;
   covered_through_message_id?: number;
   trigger?: string;
+  status?: "compacting" | "accepted" | "idle";
 };
 
 type TranslationFunction = Parameters<MessageHandler["render"]>[1];
@@ -361,6 +363,14 @@ const HistorySummaryEvent = ({
   }
 
   const summary = formatHistorySummary(payload.summary);
+  if (payload.status === "compacting") {
+    return (
+      <div className="flex w-full items-center gap-2 text-sm text-gray-600">
+        <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
+        {t("taskWindow.historySummary.compacting")}
+      </div>
+    );
+  }
   const trigger = payload.trigger
     ? t(`taskWindow.historySummary.triggers.${payload.trigger}`, {
         defaultValue: payload.trigger,

@@ -2033,6 +2033,11 @@ def save_history_summary(
     summary: Dict[str, Any], covered_through_message_id: int,
     previous_summary_unit_id: Optional[int] = None,
     trigger: Optional[str] = None,
+    history_tokens_before: Optional[int] = None,
+    history_tokens_after: Optional[int] = None,
+    compaction_attempts: Optional[int] = None,
+    compaction_trigger_threshold_tokens: Optional[int] = None,
+    compaction_target_tokens: Optional[int] = None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
     if not user_id or not tenant_id or not isinstance(summary, dict):
@@ -2106,6 +2111,15 @@ def save_history_summary(
             payload["previous_summary_unit_id"] = int(previous_summary_unit_id)
         if trigger:
             payload["trigger"] = trigger
+        for key, value in {
+            "history_tokens_before": history_tokens_before,
+            "history_tokens_after": history_tokens_after,
+            "compaction_attempts": compaction_attempts,
+            "compaction_trigger_threshold_tokens": compaction_trigger_threshold_tokens,
+            "compaction_target_tokens": compaction_target_tokens,
+        }.items():
+            if value is not None:
+                payload[key] = int(value)
         row = add_creation_tracking({
             "message_id": covered_through_message_id,
             "conversation_id": conversation_id,

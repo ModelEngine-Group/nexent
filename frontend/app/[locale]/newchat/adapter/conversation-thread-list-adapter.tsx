@@ -898,6 +898,23 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (part.type === "history_summary") {
+            flushReasoning();
+            try {
+              const payload = JSON.parse(part.content || "{}");
+              if (payload && typeof payload === "object") {
+                content.push({
+                  type: "data",
+                  name: "history-summary",
+                  data: { ...payload, status: "accepted" },
+                });
+              }
+            } catch {
+              log.warn("[history-adapter] Failed to parse history summary");
+            }
+            continue;
+          }
+
           if (part.type === "final_answer") {
             flushReasoning(part.invocation_id);
             if (part.content) {

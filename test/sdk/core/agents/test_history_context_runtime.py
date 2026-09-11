@@ -1,12 +1,20 @@
 import json
 import logging
 
+import pytest
+
 from smolagents.memory import ActionStep, TaskStep, ToolCall
 from smolagents.monitoring import Timing
+from nexent.core.utils.observer import MessageObserver
 
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
 from nexent.core.agents.context.evidence import ContextEvidenceCollector
 from nexent.core.context_runtime.contracts import ContextEvidence
+from nexent.core.agents.context.history_compression import (
+    HistorySummaryInput,
+    _validate_summary_contract,
+)
+from nexent.core.agents.context.llm_summary import LLMSummary
 
 
 def _rendered_text(messages):
@@ -44,7 +52,7 @@ class _Response:
         "## Unresolved Issues\n\nunresolved\n\n"
         "## Pending Items\n\npending\n\n"
         "## Next Steps\n\nnext\n\n"
-        "## Context to Preserve\n\ncontext"
+        "## Context To Preserve\n\ncontext"
     )
     token_usage = None
 
@@ -74,8 +82,8 @@ def _summary_and_turns():
             "covered_through_message_id": 20,
         }),
         ContextItemInput(id="turn:21:22", type="conversation_turn", content={
-            "user_message": "new question " * 20,
-            "assistant_final_answer": "new answer " * 20,
+            "user_message": "new question " * 100,
+            "assistant_final_answer": "new answer " * 100,
             "attachments": [], "user_message_id": 21, "assistant_message_id": 22,
         }),
     ]
@@ -131,6 +139,51 @@ def test_adaptive_incrementally_compresses_only_summary_and_completed_turns(monk
         representation == "raw"
         for _, representation in result.evidence.item_representations
     )
+
+
+def test_proactive_compaction_uses_previous_result_and_persists_only_final(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+
+    class ShrinkingModel:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, messages, stop_sequences=None):
+            self.calls += 1
+            sizes = (12000, 10000, 1000)
+            content = _Response.content.replace(
+                "## Task Overview\n\ntask",
+                "## Task Overview\n\n" + "x" * sizes[self.calls - 1],
+            )
+            return type("Response", (), {"content": content, "token_usage": None})()
+
+    persisted = []
+    manager = ContextManager(ContextManagerConfig(
+        effective_input_limit_tokens=10000,
+        policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+        history_summary_sink=persisted.append,
+    ))
+    large_turns = [
+        ContextItemInput(id="turn:21:22", type="conversation_turn", content={
+            "user_message": "question " * 6000,
+            "assistant_final_answer": "answer " * 6000,
+            "attachments": [], "user_message_id": 21, "assistant_message_id": 22,
+        })
+    ]
+    model = ShrinkingModel()
+    run = manager.prepare_run_context(_Memory([]), "", large_turns)
+    result = manager.assemble_final_context(
+        model=model, memory=_Memory([]), current_run_start_idx=0, run_context=run,
+    )
+
+    assert model.calls == 3
+    assert len(persisted) == 1
+    snapshot = persisted[0]
+    assert snapshot.compaction_attempts == 3
+    assert snapshot.history_tokens_before > snapshot.history_tokens_after
+    assert snapshot.compaction_trigger_threshold_tokens == 8000
+    assert snapshot.compaction_target_tokens == 6000
+    assert result.evidence.compaction_attempts == 3
 
 
 def test_summary_two_uses_summary_one_and_only_turns_after_its_coverage(monkeypatch):
@@ -272,10 +325,12 @@ def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):
         def __call__(self, messages, stop_sequences=None):
             return type("Response", (), {"content": "lossy fallback", "token_usage": None})()
     persisted = []
+    statuses = []
     manager = ContextManager(ContextManagerConfig(
         soft_input_budget_tokens=20, max_summary_reduce_tokens=20,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
         history_summary_sink=persisted.append,
+        history_summary_status_sink=statuses.append,
     ))
     memory = _Memory([TaskStep(task="current")])
     run = manager.prepare_run_context(memory, "", _summary_and_turns())
@@ -283,11 +338,12 @@ def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):
         model=PlainModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
     assert persisted == []
+    assert statuses == [{"status": "compacting"}, {"status": "idle"}]
     assert result.evidence.summary_persist_status == "not_attempted"
     assert result.evidence.new_summary_coverage is None
     rendered = str(result.messages)
     assert "history limited" in rendered
-    assert _summary_and_turns()[1].content["user_message"] == "new question " * 20
+    assert _summary_and_turns()[1].content["user_message"] == "new question " * 100
 
 
 def test_current_action_compaction_does_not_mutate_agent_memory(monkeypatch):
@@ -400,7 +456,7 @@ def test_persistence_failure_does_not_block_current_context(monkeypatch):
     assert result.evidence.new_summary_coverage == 22
 
 
-def test_no_drop_over_hard_budget_is_explicit_in_evidence(monkeypatch):
+def test_input_limit_excess_is_evidence_and_does_not_drop_required_content(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
     manager = ContextManager(ContextManagerConfig(
         soft_input_budget_tokens=5, hard_input_budget_tokens=6,
@@ -412,16 +468,17 @@ def test_no_drop_over_hard_budget_is_explicit_in_evidence(monkeypatch):
         model=_SummaryModel(), memory=memory, current_run_start_idx=0, run_context=run,
     )
     assert "required current task" in str(result.messages)
-    assert result.evidence.over_hard_budget is True
-    assert result.evidence.compact_exhausted is True
-    assert result.evidence.final_token_estimate > result.evidence.hard_budget
+    assert result.evidence.exceeds_effective_input_limit is True
+    assert result.evidence.final_token_estimate > result.evidence.effective_input_limit_tokens
 
 
 def test_new_history_summary_event_is_consumed_once(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+    statuses = []
     manager = ContextManager(ContextManagerConfig(
         soft_input_budget_tokens=20, hard_input_budget_tokens=100,
         policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+        history_summary_status_sink=statuses.append,
     ))
     memory = _Memory([TaskStep(task="current")])
     run = manager.prepare_run_context(memory, "", _summary_and_turns())
@@ -434,7 +491,174 @@ def test_new_history_summary_event_is_consumed_once(monkeypatch):
     assert event is not None
     assert event["covered_through_message_id"] == 22
     assert event["summary"]
+    assert event["status"] == "accepted"
+    assert statuses == [{"status": "compacting"}]
     assert manager.consume_history_summary_event() is None
+
+
+def test_target_sized_checkpoint_is_not_recompressed_for_fixed_context(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+    manager = ContextManager(ContextManagerConfig(
+        effective_input_limit_tokens=1000,
+        policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+    ))
+    inputs = [ContextItemInput(id="summary:10", type="history_summary", content={
+        "unit_id": 10,
+        "summary": {"markdown": _Response.content},
+        "covered_through_message_id": 20,
+    })]
+    memory = _Memory([TaskStep(task="fixed request context " * 1000)])
+    run = manager.prepare_run_context(memory, "", inputs)
+    model = _SummaryModel()
+
+    result = manager.assemble_final_context(
+        model=model, memory=memory, current_run_start_idx=0, run_context=run,
+    )
+
+    assert model.calls == []
+    assert result.evidence.compaction_stop_reason == "history_target_reached"
+    assert result.evidence.history_compression_triggered is False
+
+
+def test_small_increment_is_not_recompressed_when_fixed_context_makes_target_unreachable(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+    manager = ContextManager(ContextManagerConfig(
+        effective_input_limit_tokens=1000,
+        policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+    ))
+    inputs = [
+        ContextItemInput(id="summary:10", type="history_summary", content={
+            "unit_id": 10,
+            "summary": {"markdown": "accepted checkpoint"},
+            "covered_through_message_id": 20,
+        }),
+        ContextItemInput(id="turn:21:22", type="conversation_turn", content={
+            "user_message": "small increment",
+            "assistant_final_answer": "small answer",
+            "user_message_id": 21,
+            "assistant_message_id": 22,
+        }),
+    ]
+    memory = _Memory([TaskStep(task="fixed request context " * 55)])
+    run = manager.prepare_run_context(memory, "", inputs)
+    model = _SummaryModel()
+
+    result = manager.assemble_final_context(
+        model=model, memory=memory, current_run_start_idx=0, run_context=run,
+    )
+
+    assert result.evidence.raw_token_estimate >= 800
+    assert result.evidence.non_history_tokens >= 600
+    assert model.calls == []
+    assert result.evidence.compaction_stop_reason == "history_target_reached"
+    assert result.evidence.history_compression_triggered is False
+
+
+def test_history_summary_input_ignores_runtime_fields():
+    turn = ContextItemInput(id="turn:21:22", type="conversation_turn", content={
+        "user_message": "question",
+        "assistant_final_answer": "answer",
+        "user_message_id": 21,
+        "assistant_message_id": 22,
+        "reasoning": "MUST NOT APPEAR",
+        "deep_thinking": "MUST NOT APPEAR",
+        "tool": "MUST NOT APPEAR",
+        "token_count": "MUST NOT APPEAR",
+        "ui_event": "MUST NOT APPEAR",
+    })
+    rendered = HistorySummaryInput.from_items(None, [turn]).render()
+    assert "question" in rendered and "answer" in rendered
+    assert "MUST NOT APPEAR" not in rendered
+
+
+def test_summary_call_uses_isolated_dynamic_output_budget(monkeypatch):
+    monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
+
+    class BudgetAwareModel:
+        def __init__(self):
+            self.observer = MessageObserver()
+            self.context_budget_snapshot = {"requested_output_tokens": 512}
+            self.extra_body = {"existing": True}
+            self.max_tokens_seen = []
+
+        def __call__(self, messages, stop_sequences=None, **kwargs):
+            assert self.context_budget_snapshot is None
+            assert self.extra_body == {
+                "existing": True,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            self.max_tokens_seen.append(kwargs["max_tokens"])
+            self.observer.add_model_new_token("MUST NOT STREAM")
+            return _Response()
+
+    manager = ContextManager(ContextManagerConfig(
+        effective_input_limit_tokens=1000,
+        policy_layers={"request": {"processing_mode": "adaptive_compact"}},
+    ))
+    model = BudgetAwareModel()
+    original_observer = model.observer
+    run = manager.prepare_run_context(_Memory([]), "", _summary_and_turns())
+
+    manager.assemble_final_context(
+        model=model, memory=_Memory([]), current_run_start_idx=0, run_context=run,
+    )
+
+    assert model.max_tokens_seen
+    assert all(limit > 0 for limit in model.max_tokens_seen)
+    assert model.context_budget_snapshot == {"requested_output_tokens": 512}
+    assert model.extra_body == {"existing": True}
+    assert model.observer is original_observer
+    assert original_observer.message_query == []
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda text: text.replace("## Task Overview", "## Completed Work", 1),
+    lambda text: text.replace("## Pending Items\n\npending\n\n", ""),
+    lambda text: text + "\n\n## Extra Section\n\nextra",
+    lambda text: text.rsplit("## Context To Preserve", 1)[0],
+    lambda text: text + "\n\nWord count: 42",
+    lambda text: text.replace("context", "As an AI: I thought about this"),
+])
+def test_summary_contract_rejects_noncanonical_output(mutate):
+    keys = tuple(ContextManagerConfig().summary_json_schema)
+    assert _validate_summary_contract(mutate(_Response.content), keys) is None
+
+
+def test_summary_contract_rejects_omitted_protected_fact_literal():
+    keys = tuple(ContextManagerConfig().summary_json_schema)
+    source = (
+        "验证事实 E2E-3-063：巡检码为星河-324。\n"
+        "验证事实 E2E-3-064：巡检码为星河-377。"
+    )
+    lossy = _Response.content.replace(
+        "context",
+        "E2E-3-063 through E2E-3-064 use 星河 codes; for example E2E-3-063=星河-324",
+    )
+    assert _validate_summary_contract(lossy, keys, source_text=source) is None
+
+
+def test_summary_contract_accepts_compact_protected_fact_ledger():
+    keys = tuple(ContextManagerConfig().summary_json_schema)
+    source = (
+        "验证事实 E2E-3-063：巡检码为星河-324。\n"
+        "验证事实 E2E-3-064：巡检码为星河-377。"
+    )
+    lossless = _Response.content.replace(
+        "context",
+        "- E2E-3-063 = 星河-324\n- E2E-3-064 = 星河-377",
+    )
+    assert _validate_summary_contract(lossless, keys, source_text=source) == lossless
+
+
+def test_summary_prompt_forbids_range_example_and_formula_substitution():
+    model = _SummaryModel()
+    LLMSummary(ContextManagerConfig(), renderer=None).generate_summary(
+        "验证事实 E2E-3-064：巡检码为星河-377。",
+        model,
+    )
+    prompt = _rendered_text(model.calls[0])
+    assert "Preserve every explicit fact identifier" in prompt
+    assert "ranges, selected examples, inferred patterns, or formulas" in prompt
 
 
 def test_context_evidence_log_is_pretty_printed(caplog):

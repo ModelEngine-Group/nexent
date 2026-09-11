@@ -99,7 +99,7 @@ export default function AgentPrompt() {
   const { t } = useTranslation("common");
   const form = Form.useFormInstance();
   const { user } = useAuthorizationContext();
-  const { llmModels } = useModelList();
+  const { availableLlmModels, isSuccess: modelListLoaded } = useModelList();
   const { isSpeedMode } = useDeployment();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
@@ -137,12 +137,55 @@ export default function AgentPrompt() {
   );
 
   const modelOptions = useMemo(() => {
-    return (llmModels ?? []).map((m) => ({
+    return (availableLlmModels ?? []).map((m) => ({
       value: m.id,
       label: m.displayName ?? m.name,
       displayName: m.displayName ?? m.name,
     }));
-  }, [llmModels]);
+  }, [availableLlmModels]);
+
+  const availableModelIds = useMemo(
+    () => new Set(modelOptions.map((option) => option.value)),
+    [modelOptions]
+  );
+
+  const selectedModelIds = useMemo(() => {
+    const configuredModelIds = editedAgent.model_ids ?? [];
+    if (configuredModelIds.length > 0) {
+      return configuredModelIds.filter((id) => availableModelIds.has(id));
+    }
+    return defaultLlmConfig?.id && availableModelIds.has(defaultLlmConfig.id)
+      ? [defaultLlmConfig.id]
+      : [];
+  }, [availableModelIds, defaultLlmConfig?.id, editedAgent.model_ids]);
+
+  useEffect(() => {
+    if (!modelListLoaded || !editedAgent.model_ids?.length) return;
+
+    const nextModelIds = editedAgent.model_ids.filter((id) =>
+      availableModelIds.has(id)
+    );
+    if (nextModelIds.length === editedAgent.model_ids.length) return;
+
+    const modelNames = nextModelIds.map((id) => {
+      const option = modelOptions.find((model) => model.value === id);
+      return option?.displayName ?? "";
+    });
+    const primaryModel = modelOptions.find(
+      (option) => option.value === nextModelIds[0]
+    );
+    updateAgent({
+      model_ids: nextModelIds,
+      model: primaryModel?.displayName ?? "",
+      model_names: modelNames,
+    });
+  }, [
+    availableModelIds,
+    editedAgent.model_ids,
+    modelListLoaded,
+    modelOptions,
+    updateAgent,
+  ]);
 
   const canManage = canManageModels(user?.role ?? "");
   const isModelSelectionDisabled = !canManage && !isSpeedMode;
