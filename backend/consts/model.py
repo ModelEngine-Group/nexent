@@ -835,6 +835,15 @@ class AgentRequest(BaseModel):
     )
 
 
+class AgentShareRunRequest(BaseModel):
+    """Minimal, server-scoped request body for an authenticated Agent share run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1)
+    timezone: Optional[str] = Field(default=None, max_length=64)
+
+
 class NL2AgentRunRequest(BaseModel):
     """Request payload for one ephemeral NL2Agent turn."""
 

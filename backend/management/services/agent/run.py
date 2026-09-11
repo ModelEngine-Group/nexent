@@ -100,6 +100,7 @@ from nexent.monitor import agent_monitoring_context
 
 # Import monitoring utilities
 from management.services.agent.run_context import build_agent_run_context
+from management.services.agent.run_identity import AgentRunIdentityContext
 
 logger = logging.getLogger(__name__)
 AGENT_ICON_MAX_BYTES = 2 * 1024 * 1024
@@ -907,13 +908,20 @@ async def prepare_agent_run(
     language: str = LANGUAGE["ZH"],
     allow_memory_search: bool = True,
     reservation_token: Optional[str] = None,
+    conversation_owner_user_id: Optional[str] = None,
+    conversation_owner_tenant_id: Optional[str] = None,
+    disable_personal_memory: bool = False,
 ):
     """
     Prepare for an agent run by creating context and run info, and registering the run.
     """
 
-    memory_context = build_memory_context(
-        user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
+    conversation_owner_user_id = conversation_owner_user_id or user_id
+    conversation_owner_tenant_id = conversation_owner_tenant_id or tenant_id
+    memory_context = None
+    if not disable_personal_memory:
+        memory_context = build_memory_context(
+            user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search)
 
     create_run_kwargs = {
         "agent_id": agent_request.agent_id,
@@ -933,6 +941,8 @@ async def prepare_agent_run(
         "context_policy": agent_request.context_policy,
         "enable_planning": agent_request.enable_plan,
     }
+    if disable_personal_memory:
+        create_run_kwargs["disable_personal_memory"] = True
     runtime_knowledge_context = getattr(agent_request, "_runtime_knowledge_context", None)
     if isinstance(runtime_knowledge_context, dict):
         create_run_kwargs["runtime_knowledge_context"] = runtime_knowledge_context
@@ -953,20 +963,23 @@ async def prepare_agent_run(
     historical_context = None
     if not agent_request.is_debug and agent_request.conversation_id is not None:
         current_message_id = get_current_run_user_message_id(
-            agent_request.conversation_id, user_id
+            agent_request.conversation_id, conversation_owner_user_id
         )
         if not isinstance(current_message_id, int) or isinstance(current_message_id, bool):
             current_message_id = None
             logger.warning("Current user message boundary is unavailable; historical checkpoint loading skipped")
         if current_message_id is not None:
             historical_context = load_historical_context(
-                agent_request.conversation_id, current_message_id, user_id, tenant_id
+                agent_request.conversation_id,
+                current_message_id,
+                conversation_owner_user_id,
+                conversation_owner_tenant_id,
             )
     agent_run_info.context_input = build_authorized_context_input(
         agent_run_info, historical_context
     )
     agent_run_info.conversation_id = agent_request.conversation_id
-    agent_run_info.user_id = user_id
+    agent_run_info.user_id = conversation_owner_user_id
 
     # ContextManager is created exactly once by the SDK Agent creation entry.
     # The application boundary only injects the persistence callback into its
@@ -976,7 +989,10 @@ async def prepare_agent_run(
     if cm_config:
         cm_config.history_summary_sink = (
             (lambda candidate: persist_history_summary_candidate(
-                agent_request.conversation_id, candidate, user_id, tenant_id
+                agent_request.conversation_id,
+                candidate,
+                conversation_owner_user_id,
+                conversation_owner_tenant_id,
             )) if historical_context is not None else None
         )
     register_kwargs = {}
@@ -985,7 +1001,7 @@ async def prepare_agent_run(
     agent_run_manager.register_agent_run(
         _agent_run_identifier(agent_request),
         agent_run_info,
-        user_id,
+        conversation_owner_user_id,
         **register_kwargs,
     )
     return agent_run_info, memory_context
@@ -1021,6 +1037,9 @@ async def generate_stream(
     enable_memory: bool = False,
     channel: Optional[Any] = None,
     reservation_token: Optional[str] = None,
+    conversation_owner_user_id: Optional[str] = None,
+    conversation_owner_tenant_id: Optional[str] = None,
+    disable_personal_memory: bool = False,
 ):
     """Unified streaming entry point.
 
@@ -1036,13 +1055,21 @@ async def generate_stream(
         channel: Optional streaming channel; when ``None`` a fresh channel
             is created lazily when memory is enabled.
     """
+    conversation_owner_user_id = conversation_owner_user_id or user_id
+    conversation_owner_tenant_id = conversation_owner_tenant_id or tenant_id
+    has_separate_conversation_identity = (
+        conversation_owner_user_id != user_id
+        or conversation_owner_tenant_id != tenant_id
+        or disable_personal_memory
+    )
+
     # Poll for cross-pod cancel signal so the outer generator task can be
     # cancelled when another Pod writes the runtime cancel flag.
     _outer_task = asyncio.current_task()
     cancel_poll_task = (
         asyncio.create_task(
             _cancel_task_on_runtime_signal(
-                agent_request.conversation_id, user_id, _outer_task
+                agent_request.conversation_id, conversation_owner_user_id, _outer_task
             )
         )
         if _outer_task
@@ -1054,12 +1081,12 @@ async def generate_stream(
     if channel is None and enable_memory:
         channel = await streaming_channel_manager.get_or_create_channel(
             conversation_id=agent_request.conversation_id,
-            user_id=user_id,
+            user_id=conversation_owner_user_id,
         )
 
     memory_enabled_runtime = False
     try:
-        if enable_memory:
+        if enable_memory and not disable_personal_memory:
             # Resolve the user-level switch for tool loading only.
             memory_context_preview = build_memory_context(
                 user_id, tenant_id, agent_request.agent_id
@@ -1074,12 +1101,20 @@ async def generate_stream(
             prepare_kwargs = {}
             if reservation_token is not None:
                 prepare_kwargs["reservation_token"] = reservation_token
+            prepare_kwargs.update({
+                "agent_request": agent_request,
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "language": language,
+                "allow_memory_search": memory_enabled_runtime,
+            })
+            if has_separate_conversation_identity:
+                prepare_kwargs.update({
+                    "conversation_owner_user_id": conversation_owner_user_id,
+                    "conversation_owner_tenant_id": conversation_owner_tenant_id,
+                    "disable_personal_memory": disable_personal_memory,
+                })
             agent_run_info, memory_context = await prepare_agent_run(
-                agent_request=agent_request,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                language=language,
-                allow_memory_search=memory_enabled_runtime,
                 **prepare_kwargs,
             )
         except AgentRunAlreadyActiveError:
@@ -1092,8 +1127,8 @@ async def generate_stream(
 
         async for data_chunk in _stream_agent_chunks(
             agent_request=agent_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
+            user_id=conversation_owner_user_id,
+            tenant_id=conversation_owner_tenant_id,
             agent_run_info=agent_run_info,
             memory_ctx=memory_context,
             channel=channel,
@@ -1113,15 +1148,21 @@ async def generate_stream(
         try:
             # Single fallback: re-issue this generator with memory turned off
             # so the actual ``_stream_agent_chunks`` still runs.
-            async for data_chunk in generate_stream(
-                agent_request,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                language=language,
-                enable_memory=False,
-                channel=channel,
-                reservation_token=reservation_token,
-            ):
+            fallback_kwargs = {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "language": language,
+                "enable_memory": False,
+                "channel": channel,
+                "reservation_token": reservation_token,
+            }
+            if has_separate_conversation_identity:
+                fallback_kwargs.update({
+                    "conversation_owner_user_id": conversation_owner_user_id,
+                    "conversation_owner_tenant_id": conversation_owner_tenant_id,
+                    "disable_personal_memory": disable_personal_memory,
+                })
+            async for data_chunk in generate_stream(agent_request, **fallback_kwargs):
                 yield data_chunk
         except Exception as run_exc:
             logger.error(
@@ -1147,7 +1188,7 @@ async def generate_stream(
         if reservation_token is not None:
             agent_run_manager.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
-                user_id,
+                conversation_owner_user_id,
                 reservation_token,
             )
 
@@ -1234,6 +1275,8 @@ async def run_agent_stream(
     tenant_id: str = None,
     skip_user_save: bool = False,
     resume: bool = False,
+    identity_context: Optional[AgentRunIdentityContext] = None,
+    timezone: Optional[str] = None,
 ):
     """
     Start an agent run and stream responses.
@@ -1248,6 +1291,20 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if identity_context is None:
+        resource_user_id = resolved_user_id
+        resource_tenant_id = resolved_tenant_id
+        conversation_owner_user_id = resolved_user_id
+        conversation_owner_tenant_id = resolved_tenant_id
+        disable_personal_memory = False
+    else:
+        resource_user_id = identity_context.resource_actor_user_id
+        resource_tenant_id = identity_context.resource_tenant_id
+        conversation_owner_user_id = identity_context.conversation_owner_user_id
+        conversation_owner_tenant_id = identity_context.conversation_owner_tenant_id
+        disable_personal_memory = identity_context.disable_personal_memory
+    resolved_user_id = conversation_owner_user_id
+    resolved_tenant_id = conversation_owner_tenant_id
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -1259,7 +1316,7 @@ async def run_agent_stream(
     # does not show the time marker.
     agent_request.query = prepend_current_time(
         agent_request.query,
-        http_request.headers.get("x-user-timezone") if http_request else None,
+        timezone or (http_request.headers.get("x-user-timezone") if http_request else None),
     )  # pragma: no cover
 
     conversation = None
@@ -1291,7 +1348,7 @@ async def run_agent_stream(
     if metadata_update_requested and metadata_entrypoint in {"native", "debug"}:
         agent_record = search_agent_info_by_agent_id(
             agent_id=agent_request.agent_id,
-            tenant_id=resolved_tenant_id,
+            tenant_id=resource_tenant_id,
             version_no=agent_request.version_no or 0,
         )
         if not bool(agent_record.get("allow_chat_metadata", False)):
@@ -1318,8 +1375,8 @@ async def run_agent_stream(
         resolved_scope = resolve_knowledge_scope(
             scope=source_scope,
             agent_id=agent_request.agent_id,
-            tenant_id=resolved_tenant_id,
-            user_id=resolved_user_id,
+            tenant_id=resource_tenant_id,
+            user_id=resource_user_id,
             version_no=agent_request.version_no,
             is_debug=bool(agent_request.is_debug),
             request_tool_params=agent_request.tool_params,
@@ -1449,7 +1506,7 @@ async def run_agent_stream(
             conversation_id=agent_request.conversation_id,
             knowledge_scope=resolved_scope.desired_scope,
             user_id=resolved_user_id,
-            tenant_id=resolved_tenant_id,
+            tenant_id=resource_tenant_id,
         )
 
     if (
@@ -1681,13 +1738,17 @@ async def run_agent_stream(
                 tenant_id=resolved_tenant_id,
             )
 
-        run_context = build_agent_run_context(
-            agent_request, resolved_user_id, resolved_tenant_id, language,
-            extra_metadata={
+        run_context_kwargs = {
+            "extra_metadata": {
                 "skip_user_save": skip_user_save,
                 "has_override_user_id": user_id is not None,
                 "has_override_tenant_id": tenant_id is not None,
             },
+        }
+        if disable_personal_memory:
+            run_context_kwargs["disable_personal_memory"] = True
+        run_context = build_agent_run_context(
+            agent_request, resource_user_id, resource_tenant_id, language, **run_context_kwargs
         )
         agent_metadata = run_context.metadata
         use_memory_stream = run_context.enable_memory
@@ -1707,12 +1768,18 @@ async def run_agent_stream(
         raise
 
     stream_kwargs = {
-        "user_id": resolved_user_id,
-        "tenant_id": resolved_tenant_id,
+        "user_id": resource_user_id,
+        "tenant_id": resource_tenant_id,
         "language": language,
         "enable_memory": use_memory_stream,
         "reservation_token": reservation_token,
     }
+    if identity_context is not None:
+        stream_kwargs.update({
+            "conversation_owner_user_id": conversation_owner_user_id,
+            "conversation_owner_tenant_id": conversation_owner_tenant_id,
+            "disable_personal_memory": disable_personal_memory,
+        })
     if channel is not None:
         stream_kwargs["channel"] = channel
     stream_gen = generate_stream(agent_request, **stream_kwargs)

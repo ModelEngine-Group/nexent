@@ -1959,6 +1959,70 @@ def test_agent_share_session_is_created_only_by_the_explicit_session_endpoint(mo
     assert response.json() == {"agent_version_no": 4, "session_recoverable": True}
 
 
+def test_agent_share_run_rejects_client_controlled_agent_fields(mocker, mock_auth_header):
+    auth = mocker.patch("apps.agent_app.get_current_user_id")
+    resolved = mocker.patch("apps.agent_app.resolve_agent_share_run_context")
+    run_stream = mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+
+    response = agent_share_client.post(
+        "/agent-share/opaque-token/run",
+        headers=mock_auth_header,
+        json={"query": "hello", "agent_id": 999, "conversation_id": 777},
+    )
+
+    assert response.status_code == 422
+    auth.assert_not_called()
+    resolved.assert_not_called()
+    run_stream.assert_not_called()
+
+
+def test_agent_share_run_uses_server_resolved_identity_and_session(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "visitor-tenant"))
+    mocker.patch(
+        "apps.agent_app.resolve_agent_share_run_context",
+        return_value={
+            "agent_id": 123,
+            "agent_version_no": 4,
+            "conversation_id": 88,
+            "tenant_id": "owner-tenant",
+            "owner_user_id": "owner-a",
+        },
+    )
+    run_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        return_value="stream-response",
+    )
+
+    response = agent_share_client.post(
+        "/agent-share/opaque-token/run",
+        headers=mock_auth_header,
+        json={"query": "hello", "timezone": "Asia/Shanghai"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == "stream-response"
+    call = run_stream.await_args.kwargs
+    request = call["agent_request"]
+    identity = call["identity_context"]
+    assert request.query == "hello"
+    assert request.agent_id == 123
+    assert request.conversation_id == 88
+    assert request.version_no == 4
+    assert request.minio_files is None
+    assert request.tool_params is None
+    assert request.knowledge_scope is None
+    assert request.metadata is None
+    assert request.enable_automation_tool is False
+    assert identity.resource_actor_user_id == "owner-a"
+    assert identity.resource_tenant_id == "owner-tenant"
+    assert identity.conversation_owner_user_id == "visitor-a"
+    assert identity.conversation_owner_tenant_id == "visitor-tenant"
+    assert identity.entrypoint == "agent-share"
+    assert identity.disable_personal_memory is True
+    assert call["timezone"] == "Asia/Shanghai"
+
+
 def test_publish_version_api_success(mocker, mock_auth_header):
     """Test publish_version_api success case."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")

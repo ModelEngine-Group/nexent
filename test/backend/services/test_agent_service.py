@@ -4320,6 +4320,43 @@ async def test_prepare_agent_run_can_disable_automation_tool(
     )
 
 
+@pytest.mark.asyncio
+@patch('management.services.agent.run.build_memory_context')
+@patch('management.services.agent.run.create_agent_run_info', new_callable=AsyncMock)
+@patch('management.services.agent.run.agent_run_manager')
+async def test_prepare_agent_run_disables_personal_memory_for_share_context(
+    mock_agent_run_manager,
+    mock_create_run_info,
+    mock_build_memory_context,
+    mock_agent_request,
+):
+    mock_run_info = MagicMock()
+    mock_run_info.agent_config.context_items = []
+    mock_run_info.agent_config.context_manager_config.policy_layers = {
+        "platform": {"processing_mode": "passthrough"}
+    }
+    mock_run_info.history = []
+    mock_create_run_info.return_value = mock_run_info
+
+    _, memory_context = await prepare_agent_run(
+        mock_agent_request,
+        user_id="owner-a",
+        tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-tenant",
+        disable_personal_memory=True,
+    )
+
+    assert memory_context is None
+    mock_build_memory_context.assert_not_called()
+    assert mock_create_run_info.await_args.kwargs["disable_personal_memory"] is True
+    mock_agent_run_manager.register_agent_run.assert_called_once_with(
+        123,
+        mock_run_info,
+        "visitor-a",
+    )
+
+
 @patch('management.services.agent.run.save_conversation_user')
 def test_save_messages(mock_save_user, mock_agent_request):
     """Test save_messages function."""
@@ -4379,6 +4416,92 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
     update_agent.assert_not_called()
     save_user_message.assert_not_called()
     reset_stream.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_separates_share_resource_and_conversation_identities(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    from management.services.agent.run_identity import AgentRunIdentityContext
+
+    identity = AgentRunIdentityContext(
+        resource_actor_user_id="owner-a",
+        resource_tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-tenant",
+        entrypoint="agent-share",
+        disable_personal_memory=True,
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "_resolve_user_tenant_language",
+        lambda **kwargs: ("visitor-a", "visitor-tenant", "en"),
+    )
+    conversation_lookup = MagicMock(return_value={"runtime_metadata": {}, "runtime_metadata_version": 0})
+    save_user_message = MagicMock()
+    build_context = MagicMock(return_value=MagicMock(enable_memory=False, metadata=MagicMock()))
+    reset_stream = AsyncMock()
+    channel = MagicMock()
+    get_channel = AsyncMock(return_value=channel)
+    generate_stream = MagicMock()
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    generate_stream.return_value = stream_chunks()
+    monkeypatch.setattr(agent_run_service, "get_conversation_service", conversation_lookup)
+    monkeypatch.setattr(agent_run_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_run_service, "build_agent_run_context", build_context)
+    monkeypatch.setattr(agent_run_service.runtime_state_service, "reset_stream_async", reset_stream)
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "get_or_create_channel", get_channel)
+    monkeypatch.setattr(agent_run_service, "generate_stream", generate_stream)
+
+    response = await run_agent_stream(
+        mock_agent_request,
+        mock_http_request,
+        "Bearer token",
+        identity_context=identity,
+        timezone="Asia/Shanghai",
+    )
+
+    assert isinstance(response, StreamingResponse)
+    conversation_lookup.assert_called_once_with(
+        conversation_id=123,
+        user_id="visitor-a",
+        tenant_id="visitor-tenant",
+    )
+    save_user_message.assert_called_once_with(
+        mock_agent_request,
+        target="user",
+        user_id="visitor-a",
+        tenant_id="visitor-tenant",
+    )
+    build_context.assert_called_once_with(
+        mock_agent_request,
+        "owner-a",
+        "owner-tenant",
+        "en",
+        extra_metadata={
+            "skip_user_save": False,
+            "has_override_user_id": False,
+            "has_override_tenant_id": False,
+        },
+        disable_personal_memory=True,
+    )
+    generate_stream.assert_called_once_with(
+        mock_agent_request,
+        user_id="owner-a",
+        tenant_id="owner-tenant",
+        language="en",
+        enable_memory=False,
+        reservation_token=ANY,
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-tenant",
+        disable_personal_memory=True,
+        channel=channel,
+    )
 
 
 @pytest.mark.asyncio

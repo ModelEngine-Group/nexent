@@ -15,8 +15,33 @@ class AgentRunContext:
     enable_memory: bool
 
 
-def build_agent_run_context(request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict):
+
+
+def build_agent_run_context(
+    request,
+    user_id: str,
+    tenant_id: str,
+    language: str,
+    *,
+    extra_metadata: dict,
+    disable_personal_memory: bool = False,
+):
     """Preview memory once and bind the metadata shared by both consumers."""
+    if disable_personal_memory:
+        metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(
+            agent_id=request.agent_id,
+            conversation_id=request.conversation_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            query=request.query,
+            is_debug=request.is_debug,
+            language=language,
+            memory_enabled=False,
+            history_count=0,
+            minio_files_count=0,
+            extra_metadata=extra_metadata,
+        ))
+        return AgentRunContext(metadata, False)
     memory = build_memory_context(user_id, tenant_id, request.agent_id, skip_query=request.is_debug)
     enabled = memory.user_config.memory_switch
     metadata = monitoring_manager.bind_agent_context(AgentRunMetadata(

@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import (
     AgentRequest,
+    AgentShareRunRequest,
     AgentInfoRequest,
     AgentIDRequest,
     ConversationResponse,
@@ -68,6 +69,7 @@ from services.agent_share_service import (
     get_agent_share_metadata,
     revoke_agent_share_link,
     resolve_agent_share_session,
+    resolve_agent_share_run_context,
     rotate_agent_share_link,
 )
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
@@ -90,6 +92,7 @@ from utils.auth_utils import (
     get_current_user_id,
     verify_internal_runtime_jwt,
 )
+from management.services.agent.run_identity import AgentRunIdentityContext
 
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
@@ -800,6 +803,47 @@ async def get_agent_share_history_api(
         raise _agent_share_authentication_error(exc) from exc
     except AgentShareError as exc:
         raise _agent_share_unavailable_error(exc) from exc
+
+
+@agent_share_router.post("/{share_token}/run")
+async def run_agent_share_api(
+    share_token: str,
+    share_request: AgentShareRunRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Run only the Agent and session resolved from the authenticated share link."""
+    try:
+        visitor_user_id, visitor_tenant_id = get_current_user_id(authorization)
+        share_context = resolve_agent_share_run_context(share_token, visitor_user_id=visitor_user_id)
+        agent_request = AgentRequest(
+            query=share_request.query,
+            agent_id=share_context["agent_id"],
+            conversation_id=share_context["conversation_id"],
+            version_no=share_context["agent_version_no"],
+            enable_automation_tool=False,
+        )
+        identity_context = AgentRunIdentityContext(
+            resource_actor_user_id=share_context["owner_user_id"],
+            resource_tenant_id=share_context["tenant_id"],
+            conversation_owner_user_id=visitor_user_id,
+            conversation_owner_tenant_id=visitor_tenant_id,
+            entrypoint="agent-share",
+            disable_personal_memory=True,
+        )
+        return await run_agent_stream(
+            agent_request=agent_request,
+            http_request=http_request,
+            authorization=authorization,
+            identity_context=identity_context,
+            timezone=share_request.timezone,
+        )
+    except UnauthorizedError as exc:
+        raise _agent_share_authentication_error(exc) from exc
+    except AgentShareError as exc:
+        raise _agent_share_unavailable_error(exc) from exc
+    except ForbiddenError as exc:
+        raise _agent_share_unavailable_error(AgentShareError("agent_share_unavailable")) from exc
 
 
 @agent_config_router.post("/{agent_id}/publish")

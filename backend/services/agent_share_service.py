@@ -188,6 +188,16 @@ def get_agent_share_history(token: str, *, visitor_user_id: str) -> Dict[str, An
 
 def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str, int]:
     """Create or recover the visitor's isolated, hidden conversation on demand."""
+    context = resolve_agent_share_run_context(token, visitor_user_id=visitor_user_id)
+    return {
+        "agent_id": context["agent_id"],
+        "conversation_id": context["conversation_id"],
+        "agent_version_no": context["agent_version_no"],
+    }
+
+
+def resolve_agent_share_run_context(token: str, *, visitor_user_id: str) -> Dict[str, Any]:
+    """Resolve the share resource and one visitor-owned conversation for a run."""
     context = resolve_agent_share_context(token)
     session = get_or_create_agent_share_session(
         agent_share_id=context["agent_share_id"],
@@ -196,7 +206,7 @@ def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str
         agent_version_no=context["agent_version_no"],
     )
     return {
-        "agent_id": context["agent_id"],
+        **context,
         "conversation_id": int(session["conversation_id"]),
         "agent_version_no": int(session["agent_version_no"]),
     }
