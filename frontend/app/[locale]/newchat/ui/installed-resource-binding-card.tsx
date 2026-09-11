@@ -29,7 +29,7 @@ import { useToolList } from "@/hooks/agent/useToolList";
 import { isManagedKnowledgeTool } from "@/lib/managedKnowledgeTools";
 import {
   searchAgentInfo,
-  searchToolConfig,
+  fetchNl2AgentResourceConfig,
   updateToolConfig,
   saveSkillInstance,
 } from "@/services/agentConfigService";
@@ -352,6 +352,7 @@ export const InstalledResourceBindingCard: FC<{
   const isLocked = disabled || isSubmitted || !isCardInteractive(cardKey);
   const isInteractionLocked = isLocked || loadingConfigRef !== null;
   const selectedItems = items.filter((item) => item.selected);
+  const requirements = payload.requirements ?? [];
   const isBinding = items.some((item) => item.bindingStatus === "binding");
   const canContinue =
     selectedItems.length === 0 ||
@@ -406,11 +407,7 @@ export const InstalledResourceBindingCard: FC<{
     canonicalTool?: Tool
   ) => {
     const ref = candidateRef(item);
-    if (item.resource.candidate.resource_type === "skill") {
-      setConfiguringRef(ref);
-      return;
-    }
-    if (!canonicalTool) return;
+    if (item.resource.candidate.resource_type === "tool" && !canonicalTool) return;
     setLoadingConfigRef(ref);
     setSummaryError(null);
     try {
@@ -424,26 +421,17 @@ export const InstalledResourceBindingCard: FC<{
         );
         return;
       }
-      const result = await searchToolConfig(
-        parseResourceId(ref, "tool"),
-        payload.agent_id
-      );
-      if (!result.success || !result.data) {
-        setSummaryError(
-          t(
-            "nl2agent.resourceBinding.loadExistingConfigFailed",
-            "Failed to load the current resource configuration."
-          )
-        );
-        return;
-      }
+      const result = await fetchNl2AgentResourceConfig(payload.agent_id, ref);
       dispatch({
         type: "save_config",
         ref,
-        params: mergeToolParamValues(
-          item.resource.config as ToolParam[],
-          result.data.params
-        ),
+        params: result.schema.map((field) => ({
+          ...field,
+          name: String(field.name),
+          type: String(field.type ?? "string"),
+          required: Boolean(field.required),
+          value: result.values[String(field.name)] ?? field.default,
+        })) as Nl2AgentResourceParam[],
       });
       setConfiguringRef(ref);
     } finally {
@@ -629,6 +617,39 @@ export const InstalledResourceBindingCard: FC<{
           text: t(
             "nl2agent.resourceBinding.submittedSummary",
             "Resource selection completed"
+          ),
+        },
+      ],
+      metadata: { custom: { nl2agentCardAction: action } },
+      startRun: true,
+    });
+  };
+
+  const rejectResources = () => {
+    if (
+      isInteractionLocked ||
+      selectedItems.length !== 0 ||
+      !requirements.length
+    ) {
+      return;
+    }
+    const action: Nl2AgentCardAction = {
+      type: "nl2agent_card_action",
+      subtype: payload.subtype,
+      agent_id: payload.agent_id,
+      action: "no_matching_resources",
+      result: { requirements },
+    };
+    setIsSubmitted(true);
+    submitCard(cardKey);
+    aui.thread().append({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: t(
+            "nl2agent.resourceBinding.noMatchesSummary",
+            "None of these resources fit my needs"
           ),
         },
       ],
@@ -868,13 +889,19 @@ export const InstalledResourceBindingCard: FC<{
               isSynchronizing ||
               loadingConfigRef !== null
             }
-            onClick={continueFlow}
+            onClick={
+              selectedItems.length === 0 && requirements.length
+                ? rejectResources
+                : continueFlow
+            }
           >
             {isSynchronizing ? (
               <Loader2 className="mr-2 size-4 animate-spin" />
             ) : null}
             {selectedItems.length === 0
-              ? t("nl2agent.resourceBinding.skip", "Skip")
+              ? requirements.length
+                ? t("nl2agent.resourceBinding.noMatches", "None of these fit")
+                : t("nl2agent.resourceBinding.skip", "Skip")
               : t("nl2agent.resourceBinding.continue", "Continue")}
           </Button>
         </div>

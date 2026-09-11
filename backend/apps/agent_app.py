@@ -26,6 +26,9 @@ from consts.model import (
     VersionCompareRequest,
     VersionUpdateRequest,
     NL2AgentRunRequest,
+    NL2AgentResourceInstallationRequest,
+    NL2AgentResourceInstallationResponse,
+    NL2AgentResourceConfigResponse,
 )
 from consts.exceptions import (
     ForbiddenError,
@@ -60,7 +63,13 @@ from management.services.agent.service import (
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
 from services.agent_draft_permission_service import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from services.nl2agent_service import (
+    Nl2AgentDraftSaveError,
+    Nl2AgentResourceError,
+    create_nl2agent_stream,
+    get_resource_config_detail_impl,
+    install_nl2agent_resource_impl,
+)
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -243,6 +252,101 @@ async def nl2agent_run_api(
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="NL2Agent run error.",
+        ) from exc
+
+
+@agent_config_router.post(
+    "/nl2agent/resource-installations",
+    response_model=NL2AgentResourceInstallationResponse,
+)
+async def install_nl2agent_resource_api(
+    payload: NL2AgentResourceInstallationRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Install one repository resource using only its trusted candidate ref."""
+
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        return await install_nl2agent_resource_impl(
+            agent_id=payload.agent_id,
+            candidate_ref=payload.candidate_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except AgentDraftEditError as exc:
+        status_code = (
+            HTTPStatus.NOT_FOUND
+            if exc.code == "agent_not_found"
+            else HTTPStatus.FORBIDDEN
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code},
+        ) from exc
+    except Nl2AgentResourceError as exc:
+        status_code = (
+            HTTPStatus.BAD_REQUEST
+            if exc.code == "invalid_candidate_ref"
+            else HTTPStatus.NOT_FOUND
+            if exc.code == "resource_not_visible"
+            else HTTPStatus.SERVICE_UNAVAILABLE
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "retryable": exc.retryable},
+        ) from exc
+    except (PermissionError, UnauthorizedError) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail={"code": "unauthorized"},
+        ) from exc
+    except Exception as exc:
+        logger.exception("NL2Agent resource installation failed")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail={"code": "resource_install_failed", "retryable": True},
+        ) from exc
+
+
+@agent_config_router.get(
+    "/nl2agent/resource-config",
+    response_model=NL2AgentResourceConfigResponse,
+)
+async def get_nl2agent_resource_config_api(
+    agent_id: int,
+    candidate_ref: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Get safe configuration metadata for one visible draft resource."""
+
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        return await get_resource_config_detail_impl(
+            agent_id=agent_id,
+            candidate_ref=candidate_ref,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except AgentDraftEditError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail={"code": exc.code},
+        ) from exc
+    except Nl2AgentResourceError as exc:
+        status_code = (
+            HTTPStatus.BAD_REQUEST
+            if exc.code == "invalid_candidate_ref"
+            else HTTPStatus.NOT_FOUND
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code},
+        ) from exc
+    except Exception as exc:
+        logger.exception("NL2Agent resource config lookup failed")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail={"code": "resource_config_failed", "retryable": True},
         ) from exc
 
 

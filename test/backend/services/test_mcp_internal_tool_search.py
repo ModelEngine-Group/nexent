@@ -33,6 +33,14 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     RECOMMEND_RESOURCES_DESCRIPTION,
     RECOMMEND_RESOURCES_LOCAL_NAME,
     RECOMMEND_RESOURCES_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION,
+    RESOLVE_RESOURCE_REQUIREMENTS_LOCAL_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_NAME,
+    ResourceCardSummary,
+    ResourceMatch,
+    ResourceResolutionOutput,
+    RequirementResolution,
+    ResourceSearchOutput,
     RequirementClarificationQuestion,
     SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION,
     SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME,
@@ -51,6 +59,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     build_nl2a_wrapper,
     nl2a_wrapper,
     recommend_resources,
+    resolve_resource_requirements,
     save_agent_draft_fields,
     search_installed_mcp_tools,
     search_installed_resources,
@@ -257,6 +266,154 @@ async def test_nl2agent_mcp_service_owns_only_nl2agent_tools():
     )
 
 
+@pytest.mark.anyio
+async def test_registered_uninstalled_search_returns_structured_gap_result(
+    mocker,
+):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
+    no_matches = ResourceSearchOutput(
+        candidates=[],
+        uncovered_requirement_ids=["train_ticket_query"],
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=no_matches),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "search_installed_resources_impl",
+        new=AsyncMock(return_value=no_matches),
+    )
+    tools = await nl2agent_mcp_service.get_tools()
+    tool = tools[SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME]
+
+    result = await tool.run({
+        "agent_id": 42,
+        "requirements": [{
+            "requirement_id": "train_ticket_query",
+            "query": "Query train ticket availability",
+        }],
+    })
+
+    assert result.structured_content == no_matches.model_dump(mode="json")
+    assert "<nl2a>" not in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_unified_resolver_validates_context_tenant_and_edit_permission(
+    mocker,
+):
+    """UT-BE-NL2A-TOOL-001."""
+
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={
+            "Authorization": "Bearer token",
+            NL2AGENT_AGENT_ID_HEADER: "42",
+        }),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    require_edit = mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
+    resolution = ResourceResolutionOutput(
+        phase="INITIAL",
+        next_action="RESOLVE_GAP",
+        requirements=[RequirementResolution(
+            requirement={"requirement_id": "lookup", "query": "Search data"},
+            state="uncovered",
+        )],
+        resources=[],
+    )
+    resolve_impl = mocker.patch.object(
+        nl2agent_service,
+        "resolve_resource_requirements_impl",
+        new=AsyncMock(return_value=resolution),
+    )
+
+    result = await resolve_resource_requirements(
+        agent_id=42,
+        requirements=[{"requirement_id": "lookup", "query": "Search data"}],
+        phase="INITIAL",
+        verification_required=True,
+    )
+
+    assert result == resolution.model_dump(mode="json")
+    require_edit.assert_called_once_with(
+        agent_id=42, tenant_id="tenant-a", user_id="user-a"
+    )
+    assert resolve_impl.await_args.kwargs["tenant_id"] == "tenant-a"
+    assert resolve_impl.await_args.kwargs["verification_required"] is True
+    assert resolve_impl.await_args.kwargs["capability_verifications"] is None
+    mismatch = await resolve_resource_requirements(
+        agent_id=41,
+        requirements=[{"requirement_id": "lookup", "query": "Search data"}],
+        phase="INITIAL",
+    )
+    assert mismatch["code"] == "agent_context_mismatch"
+    assert resolve_impl.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_unified_resolver_returns_json_without_early_gap_wrapper(mocker):
+    """UT-BE-NL2A-TOOL-002."""
+
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
+    resolution = ResourceResolutionOutput(
+        phase="INITIAL",
+        next_action="RESOLVE_GAP",
+        requirements=[RequirementResolution(
+            requirement={"requirement_id": "lookup", "query": "Search data"},
+            state="uncovered",
+        )],
+        resources=[],
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "resolve_resource_requirements_impl",
+        new=AsyncMock(return_value=resolution),
+    )
+
+    result = await resolve_resource_requirements(
+        agent_id=42,
+        requirements=[{"requirement_id": "lookup", "query": "Search data"}],
+        phase="INITIAL",
+    )
+
+    assert result["next_action"] == "RESOLVE_GAP"
+    assert "<nl2a>" not in json.dumps(result)
+
+
 @pytest.mark.asyncio
 async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     local_tools = await local_mcp_service.get_tools()
@@ -271,6 +428,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     resource_search_tool = mounted_tools[SEARCH_INSTALLED_RESOURCES_NAME]
     uninstalled_search_tool = mounted_tools[SEARCH_UNINSTALLED_RESOURCES_NAME]
     recommend_tool = mounted_tools[RECOMMEND_RESOURCES_NAME]
+    resolve_tool = mounted_tools[RESOLVE_RESOURCE_REQUIREMENTS_NAME]
     wrapper_tool = mounted_tools[NL2A_WRAPPER_NAME]
     save_tool = mounted_tools[SAVE_AGENT_DRAFT_FIELDS_NAME]
 
@@ -331,6 +489,14 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "candidates",
         "recommended_refs",
     ]
+    assert resolve_tool.description == RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION
+    assert resolve_tool.name == RESOLVE_RESOURCE_REQUIREMENTS_LOCAL_NAME
+    assert set(resolve_tool.parameters["properties"]) == {
+        "agent_id",
+        "requirements",
+        "phase",
+        "exclude_refs",
+    }
     assert wrapper_tool.name == NL2A_WRAPPER_LOCAL_NAME
     assert wrapper_tool.description == NL2A_WRAPPER_DESCRIPTION
     assert wrapper_tool.meta == NL2AGENT_MCP_TOOL_META
@@ -344,11 +510,13 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "agent_id",
         "resource_result",
         "questions",
+        "requirements",
     }
     assert wrapper_tool.parameters["properties"]["subtype"]["enum"] == [
         "requirement_clarification",
         "suggested_resource_installation",
         "installed_resource_binding",
+        "resource_gap_resolution",
     ]
     assert wrapper_tool.meta["nexent_internal"] is True
 
@@ -1105,6 +1273,137 @@ async def test_installation_wrapper_rechecks_agent_and_candidates(mocker):
     assert recommend_impl.await_args.kwargs["recommended_refs"] == [
         "nexent_official_skill:daily-report"
     ]
+
+
+def test_unified_wrapper_rejects_subtype_that_disagrees_with_next_action():
+    """UT-BE-NL2A-WRAPPER-001."""
+
+    resolution = ResourceResolutionOutput(
+        phase="INITIAL",
+        next_action="RESOLVE_GAP",
+        requirements=[RequirementResolution(
+            requirement={"requirement_id": "lookup", "query": "Search data"},
+            state="uncovered",
+        )],
+        resources=[],
+    )
+
+    with pytest.raises(ValueError, match="does not match next_action"):
+        build_nl2a_wrapper(
+            subtype="installed_resource_binding",
+            agent_id=42,
+            resource_result=resolution,
+        )
+
+
+def test_unified_gap_wrapper_preserves_requirement_search_terms():
+    """UT-BE-NL2A-WRAPPER-003."""
+
+    wrapped = build_nl2a_wrapper(
+        subtype="resource_gap_resolution",
+        agent_id=42,
+        resource_result=ResourceResolutionOutput(
+            phase="POST_GAP",
+            next_action="RESOLVE_GAP",
+            requirements=[RequirementResolution(
+                requirement={
+                    "requirement_id": "train_ticket_query",
+                    "query": "Query 12306 train ticket availability",
+                    "search_terms": ["12306", "train ticket"],
+                },
+                state="uncovered",
+            )],
+            resources=[],
+        ),
+    )
+
+    payload = _unwrap_nl2a(wrapped)
+
+    assert payload["requirements"] == [{
+        "requirement_id": "train_ticket_query",
+        "query": "Query 12306 train ticket availability",
+        "search_terms": ["12306", "train ticket"],
+        "weak_references": [],
+    }]
+
+
+@pytest.mark.anyio
+async def test_unified_wrapper_reresolves_model_supplied_resource_details(mocker):
+    """UT-BE-NL2A-WRAPPER-002."""
+
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.require_agent_draft_edit"
+    )
+    supplied = ResourceResolutionOutput(
+        phase="INITIAL",
+        next_action="INSTALL",
+        requirements=[RequirementResolution(
+            requirement={"requirement_id": "lookup", "query": "Search data"},
+            state="installable",
+            installable_matches=[ResourceMatch(
+                candidate_ref="tenant_skill_repository:1",
+                score=0.99,
+                strength="strong",
+            )],
+        )],
+        resources=[ResourceCardSummary(
+            candidate_ref="tenant_skill_repository:1",
+            resource_type="skill",
+            source="TENANT_SKILL_REPOSITORY",
+            name="model-controlled-name",
+            requirement_ids=["lookup"],
+            recommendation="recommended",
+        )],
+    )
+    verified = supplied.model_copy(update={
+        "resources": [supplied.resources[0].model_copy(update={
+            "name": "verified-name",
+            "source": "NEXENT_OFFICIAL_SKILL",
+        })],
+    })
+    resolve_impl = mocker.patch.object(
+        nl2agent_service,
+        "resolve_resource_requirements_impl",
+        new=AsyncMock(return_value=verified),
+    )
+
+    wrapped = await nl2a_wrapper(
+        subtype="suggested_resource_installation",
+        agent_id=42,
+        resource_result=supplied.model_dump(mode="json"),
+    )
+
+    payload = _unwrap_nl2a(wrapped)
+    assert payload["schema_version"] == 2
+    assert payload["resources"][0]["name"] == "verified-name"
+    assert payload["resources"][0]["source"] == "NEXENT_OFFICIAL_SKILL"
+    assert resolve_impl.await_args.kwargs["phase"] == "INITIAL"
+
+    resolve_impl.return_value = ResourceResolutionOutput(
+        phase="INITIAL",
+        next_action="RESOLVE_GAP",
+        requirements=[RequirementResolution(
+            requirement={"requirement_id": "lookup", "query": "Search data"},
+            state="uncovered",
+        )],
+        resources=[],
+    )
+    with pytest.raises(ValueError, match="does not match next_action"):
+        await nl2a_wrapper(
+            subtype="suggested_resource_installation",
+            agent_id=42,
+            resource_result=supplied.model_dump(mode="json"),
+        )
 
 
 @pytest.mark.asyncio

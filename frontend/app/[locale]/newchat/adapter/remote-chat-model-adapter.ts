@@ -12,6 +12,7 @@ import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
+import { isSafeNl2AgentResourceCard } from "@/lib/nl2agent-resource-resolution";
 
 // Backend SSE chunk format
 interface ImageMetadata {
@@ -93,15 +94,42 @@ export interface Nl2aToolRecommendation {
 export type Nl2AgentCardActionSubtype =
   | "requirement_clarification"
   | "suggested_resource_installation"
-  | "installed_resource_binding";
+  | "installed_resource_binding"
+  | "resource_gap_resolution";
 
-export interface Nl2AgentCardAction {
+export interface Nl2AgentResourceGapResolutionAction {
   type: "nl2agent_card_action";
-  subtype: Nl2AgentCardActionSubtype;
+  subtype: "resource_gap_resolution";
   agent_id: number;
-  action: string;
-  result: Record<string, unknown>;
+  action: "resolve_requirements";
+  result: {
+    requirements: Array<
+      | {
+          requirement_id: string;
+          resolution: "unchanged";
+          query: string;
+          resource_name_hint: string | null;
+          search_terms: string[];
+        }
+      | {
+          requirement_id: string;
+          resolution: "revised" | "skill_created" | "tool_configured";
+          query: string;
+        }
+    >;
+    abandoned_requirement_ids: string[];
+  };
 }
+
+export type Nl2AgentCardAction =
+  | Nl2AgentResourceGapResolutionAction
+  | {
+      type: "nl2agent_card_action";
+      subtype: Nl2AgentCardActionSubtype;
+      agent_id: number;
+      action: string;
+      result: Record<string, unknown>;
+    };
 
 export type Nl2AgentDraftField = "description" | Nl2aPromptField;
 
@@ -178,6 +206,20 @@ export interface Nl2aInstalledResourceBindingPayload {
   subtype: "installed_resource_binding";
   agent_id: number;
   resources: Nl2aRecommendedResource[];
+  requirements?: Nl2aResourceRequirement[];
+}
+
+export interface Nl2aResourceRequirement {
+  requirement_id: string;
+  query: string;
+  resource_name_hint: string | null;
+  search_terms: string[];
+}
+
+export interface Nl2aResourceGapResolutionPayload {
+  subtype: "resource_gap_resolution";
+  agent_id: number;
+  requirements: Nl2aResourceRequirement[];
 }
 
 export interface Nl2aResourceCandidate {
@@ -245,7 +287,8 @@ export type Nl2aPayload =
   | Nl2aLocalMcpRecommendationPayload
   | Nl2aAgentDraftPayload
   | Nl2aSuggestedResourceInstallationPayload
-  | Nl2aInstalledResourceBindingPayload;
+  | Nl2aInstalledResourceBindingPayload
+  | Nl2aResourceGapResolutionPayload;
 
 export interface Nl2aMessage {
   type: "nl2a";
@@ -819,10 +862,33 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
     }
     if (content.subtype === "installed_resource_binding") {
       if (
+        (content as any).schema_version === 2 &&
+        Array.isArray(content.resources)
+      ) {
+        if (!isSafeNl2AgentResourceCard(content)) {
+          log.warn("[ChatModelAdapter] Ignored unsafe v2 binding-card payload");
+          return null;
+        }
+        content.resources = content.resources.map((resource: any) => ({
+          candidate: resource,
+          recommendation: resource.recommendation,
+          is_bound: resource.is_bound,
+          form_kind:
+            resource.resource_type === "tool" ? "TOOL_CONFIG" : "SKILL_CONFIG",
+          config: [],
+        }));
+      }
+      if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
         !Array.isArray(content.resources) ||
         content.resources.length > 12 ||
+        (content.requirements !== undefined &&
+          (!Array.isArray(content.requirements) ||
+            content.requirements.some(
+              (requirement) =>
+                !requirement?.requirement_id || !requirement?.query
+            ))) ||
         content.resources.some(
           (resource) =>
             !resource?.candidate?.candidate_ref ||
@@ -837,6 +903,32 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
       }
     }
     if (content.subtype === "suggested_resource_installation") {
+      if (
+        (content as any).schema_version === 2 &&
+        Array.isArray(content.resources)
+      ) {
+        if (!isSafeNl2AgentResourceCard(content)) {
+          log.warn(
+            "[ChatModelAdapter] Ignored unsafe v2 installation-card payload"
+          );
+          return null;
+        }
+        content.resources = content.resources.map((resource: any) => ({
+          candidate: resource,
+          recommendation: resource.recommendation,
+          form_kind: "SKILL_CONFIG",
+          config: [],
+          installation_options: [
+            {
+              option_id: "repository",
+              label: "Install",
+              form_kind: "SKILL_CONFIG",
+              config: [],
+            },
+          ],
+          default_option_id: "repository",
+        }));
+      }
       if (
         !Number.isInteger(content.agent_id) ||
         content.agent_id <= 0 ||
@@ -860,6 +952,24 @@ function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
         log.warn(
           "[ChatModelAdapter] Ignored invalid installation-card payload"
         );
+        return null;
+      }
+    }
+    if (content.subtype === "resource_gap_resolution") {
+      if (
+        !Number.isInteger(content.agent_id) ||
+        content.agent_id <= 0 ||
+        !Array.isArray(content.requirements) ||
+        content.requirements.length === 0 ||
+        content.requirements.length > 8 ||
+        content.requirements.some(
+          (requirement) =>
+            !requirement?.requirement_id ||
+            !requirement.query ||
+            !Array.isArray(requirement.search_terms)
+        )
+      ) {
+        log.warn("[ChatModelAdapter] Ignored invalid resource-gap payload");
         return null;
       }
     }
@@ -2435,7 +2545,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   result.score_details?.chunk_type === "image" ||
                   Boolean(imageMetadata);
                 const retrievalHighlightTerms = getRetrievalHighlightTerms(
-                  result.score_details,
+                  result.score_details
                 );
                 const title =
                   result.title ||
@@ -2694,7 +2804,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     result.score_details?.chunk_type === "image" ||
                     Boolean(imageMetadata);
                   const retrievalHighlightTerms = getRetrievalHighlightTerms(
-                    result.score_details,
+                    result.score_details
                   );
                   const title =
                     result.title ||

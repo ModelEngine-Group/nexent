@@ -312,6 +312,30 @@ export const getCreatingSubAgentId = async () => {
  * @param enable whether enable tool
  * @returns update result
  */
+export interface Nl2AgentResourceConfigDetail {
+  candidate_ref: string;
+  resource_type: "tool" | "skill";
+  schema: Array<Record<string, unknown>>;
+  values: Record<string, unknown>;
+  enabled: boolean;
+  bound: boolean;
+}
+
+export const fetchNl2AgentResourceConfig = async (
+  agentId: number,
+  candidateRef: string
+): Promise<Nl2AgentResourceConfigDetail> => {
+  const query = new URLSearchParams({
+    agent_id: String(agentId),
+    candidate_ref: candidateRef,
+  });
+  const response = await fetchWithErrorHandling(
+    `${API_ENDPOINTS.agent.nl2agentResourceConfig}?${query}`,
+    { method: "GET", headers: getAuthHeaders() }
+  );
+  return response.json();
+};
+
 export const updateToolConfig = async (
   toolId: number,
   agentId: number,

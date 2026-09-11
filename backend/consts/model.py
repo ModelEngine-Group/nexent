@@ -844,6 +844,63 @@ class NL2AgentRunRequest(BaseModel):
     agent_id: int = Field(gt=0)
 
 
+class NL2AgentResourceInstallationRequest(BaseModel):
+    """Candidate-reference-only request for an NL2Agent resource installation."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    agent_id: int = Field(gt=0)
+    candidate_ref: str = Field(
+        min_length=1,
+        pattern=(
+            r"^(?:nexent_official_skill:[^\s:]+|"
+            r"tenant_skill_repository:[1-9]\d*|"
+            r"tenant_mcp_repository:[1-9]\d*)$"
+        ),
+    )
+
+
+class NL2AgentResourceInstallationResponse(BaseModel):
+    """Stable result for one idempotent NL2Agent resource installation."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    status: Literal["installed", "already_installed"]
+    candidate_ref: str = Field(min_length=1)
+    resource_type: Literal["skill", "mcp_server"]
+    resource_id: int = Field(gt=0)
+
+
+class NL2AgentResourceConfigField(BaseModel):
+    """One frontend-renderable resource configuration field."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    required: bool = False
+    description: str = ""
+    default: Any = None
+    secret: bool = False
+    constraints: Dict[str, Any] = Field(default_factory=dict)
+
+
+class NL2AgentResourceConfigResponse(BaseModel):
+    """On-demand schema and persisted values for one installed resource."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(
+        min_length=1,
+        pattern=r"^(?:tool|skill):[1-9]\d*$",
+    )
+    resource_type: Literal["tool", "skill"]
+    schema: List[NL2AgentResourceConfigField] = Field(default_factory=list)
+    values: Dict[str, Any] = Field(default_factory=dict)
+    enabled: bool
+    bound: bool
+
+
 class NL2SkillRunRequest(BaseModel):
     """Request payload for one ephemeral NL2Skill conversation turn."""
 

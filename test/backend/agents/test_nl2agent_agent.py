@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import pytest
 from jinja2 import UndefinedError
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
-from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from pydantic import ValidationError
 from smolagents import CodeAgent
 from smolagents.memory import TaskStep
@@ -15,21 +14,238 @@ from agents.nl2agent_agent import (
     build_nl2agent_system_prompt,
     create_nl2agent_agent_config,
 )
+from consts.model import (
+    NL2AgentResourceConfigField,
+    NL2AgentResourceConfigResponse,
+    NL2AgentResourceInstallationRequest,
+    NL2AgentResourceInstallationResponse,
+)
 from tool_collection.mcp.local_mcp_service import local_mcp_service
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     NL2A_WRAPPER_NAME,
-    RECOMMEND_RESOURCES_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_NAME,
     RecommendResourcesInput,
     RequirementClarificationPayload,
     ResourceCandidate,
+    ResourceCardSummary,
+    ResourceGapRequirement,
+    ResourceGapResolutionPayloadV2,
+    ResourceMatch,
+    ResourceResolutionOutput,
+    RequirementResolution,
+    ResourceGapResolutionPayload,
     ResourceRequirement,
+    ResourceSearchOutput,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
-    SEARCH_INSTALLED_RESOURCES_NAME,
-    SEARCH_UNINSTALLED_RESOURCES_NAME,
     SearchInstalledResourcesInput,
     build_nl2a_wrapper,
+    get_resource_gap_requirements,
 )
+
+
+def test_resource_match_enforces_score_bounds_and_strength_contract():
+    """UT-BE-NL2A-DTO-001."""
+
+    assert ResourceMatch(
+        candidate_ref="tool:1", score=0.65, strength="strong"
+    ).strength == "strong"
+    assert ResourceMatch(
+        candidate_ref="tool:2", score=0.5, strength="weak"
+    ).strength == "weak"
+
+    with pytest.raises(ValidationError):
+        ResourceMatch(candidate_ref="tool:1", score=1.01, strength="strong")
+    with pytest.raises(ValidationError):
+        ResourceMatch(candidate_ref="tool:1", score=0.64, strength="strong")
+    with pytest.raises(ValidationError):
+        ResourceMatch(candidate_ref="tool:1", score=0.65, strength="weak")
+
+
+def test_resource_resolution_output_enforces_unique_requirements_and_next_action():
+    """UT-BE-NL2A-DTO-002 / UT-BE-NL2A-DTO-003."""
+
+    requirement = ResourceRequirement(requirement_id="weather", query="Weather")
+    covered = RequirementResolution(
+        requirement=requirement,
+        state="covered",
+        installed_matches=[
+            ResourceMatch(
+                candidate_ref="tool:1", score=0.8, strength="strong"
+            )
+        ],
+    )
+    output = ResourceResolutionOutput(
+        phase="INITIAL",
+        next_action="BIND",
+        requirements=[covered],
+        resources=[],
+    )
+    assert output.next_action == "BIND"
+
+    with pytest.raises(ValidationError):
+        ResourceResolutionOutput(
+            phase="INITIAL",
+            next_action="INSTALL",
+            requirements=[covered],
+            resources=[],
+        )
+    with pytest.raises(ValidationError):
+        RequirementResolution(
+            requirement=requirement,
+            state="covered",
+        )
+    with pytest.raises(ValidationError):
+        RequirementResolution(
+            requirement=requirement,
+            state="installable",
+            installed_matches=[
+                ResourceMatch(
+                    candidate_ref="tool:1", score=0.8, strength="strong"
+                )
+            ],
+            installable_matches=[
+                ResourceMatch(
+                    candidate_ref="tenant_mcp_repository:2",
+                    score=0.9,
+                    strength="strong",
+                )
+            ],
+        )
+    with pytest.raises(ValidationError):
+        ResourceResolutionOutput(
+            phase="INITIAL",
+            next_action="BIND",
+            requirements=[covered, covered],
+            resources=[],
+        )
+
+
+def test_v2_resource_cards_reject_configuration_fields():
+    """UT-BE-NL2A-CARD-001 / UT-BE-NL2A-CARD-002."""
+
+    safe_resource = {
+        "candidate_ref": "tool:1",
+        "resource_type": "tool",
+        "source": "MCP_TOOL",
+        "name": "weather",
+        "description": "Query weather",
+        "requirement_ids": ["weather"],
+        "recommendation": "recommended",
+        "is_bound": False,
+    }
+    assert ResourceCardSummary.model_validate(safe_resource).candidate_ref == "tool:1"
+
+    for forbidden in (
+        "config",
+        "installation_options",
+        "form_kind",
+        "url",
+        "token",
+        "headers",
+        "container_config",
+        "port",
+    ):
+        with pytest.raises(ValidationError):
+            ResourceCardSummary.model_validate({**safe_resource, forbidden: {}})
+
+
+def test_v2_gap_card_accepts_only_uncovered_requirements_and_weak_references():
+    """UT-BE-NL2A-CARD-003."""
+
+    payload = ResourceGapResolutionPayloadV2(
+        agent_id=42,
+        requirements=[
+            ResourceGapRequirement(
+                requirement_id="inventory",
+                query="Query ERP inventory",
+                weak_references=[
+                    {
+                        "candidate_ref": "tenant_skill_repository:15",
+                        "name": "Generic ERP Skill",
+                        "description": "Generic ERP lookup",
+                        "source": "TENANT_SKILL_REPOSITORY",
+                        "score": 0.61,
+                    }
+                ],
+            )
+        ],
+    )
+    assert payload.schema_version == 2
+
+    with pytest.raises(ValidationError):
+        ResourceGapResolutionPayloadV2(
+            agent_id=42,
+            requirements=[
+                ResourceGapRequirement(
+                    requirement_id="inventory",
+                    query="Query ERP inventory",
+                    weak_references=[
+                        {
+                            "candidate_ref": "tenant_skill_repository:15",
+                            "name": "Generic ERP Skill",
+                            "description": "Generic ERP lookup",
+                            "source": "TENANT_SKILL_REPOSITORY",
+                            "score": 0.65,
+                        }
+                    ],
+                )
+            ],
+        )
+
+
+def test_resource_installation_http_dto_accepts_only_candidate_reference():
+    """UT-BE-NL2A-DTO-004."""
+
+    request = NL2AgentResourceInstallationRequest(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:87",
+    )
+    response = NL2AgentResourceInstallationResponse(
+        status="installed",
+        candidate_ref=request.candidate_ref,
+        resource_type="mcp_server",
+        resource_id=321,
+    )
+    assert response.resource_id == 321
+
+    for forbidden in ("url", "authorization", "headers", "container_config"):
+        with pytest.raises(ValidationError):
+            NL2AgentResourceInstallationRequest.model_validate({
+                "agent_id": 42,
+                "candidate_ref": "tenant_mcp_repository:87",
+                forbidden: "secret",
+            })
+    with pytest.raises(ValidationError):
+        NL2AgentResourceInstallationRequest(
+            agent_id=42,
+            candidate_ref="tool:1",
+        )
+
+
+def test_resource_config_http_dto_separates_schema_defaults_from_values():
+    """UT-BE-NL2A-DTO-005."""
+
+    response = NL2AgentResourceConfigResponse(
+        candidate_ref="tool:123",
+        resource_type="tool",
+        schema=[
+            NL2AgentResourceConfigField(
+                name="city",
+                type="string",
+                required=True,
+                description="Query city",
+                default=None,
+                secret=False,
+                constraints={},
+            )
+        ],
+        values={"city": "Shanghai"},
+        enabled=False,
+        bound=False,
+    )
+    assert response.schema[0].default is None
+    assert response.values == {"city": "Shanghai"}
 
 
 @pytest.mark.parametrize(
@@ -57,8 +273,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
 ):
     prompt = build_nl2agent_system_prompt(
         language,
-        tool_name="runtime_search",
-        recommend_tool_name="runtime_recommend",
+        resolve_tool_name="runtime_resolve",
         wrapper_name="runtime_wrapper",
         save_tool_name="runtime_save",
         max_results=3,
@@ -67,15 +282,14 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert heading in prompt
     assert immutable_rule in prompt
     assert description_rule in prompt
-    assert "runtime_search" in prompt
-    assert "runtime_recommend" in prompt
+    assert "runtime_resolve" in prompt
     assert "runtime_wrapper" in prompt
     assert "runtime_save" in prompt
     assert "json.loads" in prompt
     assert "bound_resources" in prompt
     assert "business_description" not in prompt
     assert 'subtype="requirement_clarification"' in prompt
-    assert 'subtype="installed_resource_binding"' in prompt
+    assert '"BIND": "installed_resource_binding"' in prompt
     assert 'subtype="final_confirmation"' not in prompt
     assert "agent_generation_completed" in prompt
     assert "agent_id=None" not in prompt
@@ -123,11 +337,11 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert '"question_id": "expected_output"' in prompt
 
     description_save = prompt.index('"description":')
-    resource_search = prompt.index("raw_results = parallel_executor")
+    resource_search = prompt.index("raw_resource_result = runtime_resolve")
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 7
+    assert len(code_blocks) == 6
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -159,6 +373,57 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
     assert build_nl2agent_system_prompt("fr") == build_nl2agent_system_prompt("zh")
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_nl2agent_prompt_routes_uncovered_resources_to_skill_creation(language):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert '"RESOLVE_GAP": "resource_gap_resolution"' in prompt
+    assert "resource_gap_resolution" in prompt
+    assert "skill_created" in prompt
+    if language == "en":
+        assert "States, scores, relationships, resources, and `next_action`" in prompt
+        assert "bypass resolution" in prompt
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_nl2agent_prompt_resolves_batched_resource_gap_changes(language):
+    """UT-BE-NL2A-ACTION-002: revised requirements restart discovery."""
+
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert "resolve_requirements" in prompt
+    assert "abandoned_requirement_ids" in prompt
+    assert "resource_name_hint" in prompt
+    assert "search_terms" in prompt
+    assert "INITIAL" in prompt
+    assert "POST_GAP" in prompt
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_nl2agent_prompt_researches_after_tool_configuration(language):
+    """UT-BE-NL2A-ACTION-003: tool configuration is not coverage proof."""
+
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert "tool_configured" in prompt
+    assert "POST_GAP" in prompt
+    assert "URL" in prompt
+    assert "Token" in prompt
+
+
+@pytest.mark.parametrize(
+    ("language", "required_phrase"),
+    [("zh", "12306 购票"), ("en", "12306 ticket booking")],
+)
+def test_nl2agent_prompt_preserves_domain_actions_in_requirements(
+    language,
+    required_phrase,
+):
+    """UT-BE-NL2A-PROMPT-003: requirements cannot discard core actions."""
+
+    assert required_phrase in build_nl2agent_system_prompt(language)
+
+
 @pytest.mark.parametrize(
     (
         "language",
@@ -175,7 +440,8 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
             "### Scheduled-task Boundary",
             "this workflow does not create the scheduled task",
             "Never search for a scheduled-task resource",
-            'resource_result={"status": "success", "resources": []}',
+            'resource_result={"status":"success","phase":"INITIAL",'
+            '"next_action":"BIND","requirements":[],"resources":[]}',
             "Every Prompt field describes one invocation",
             "open [Scheduled tasks](/agent-tasks)",
         ),
@@ -184,7 +450,8 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
             "### 定时任务边界",
             "本流程不创建定时任务",
             "不得搜索定时任务资源",
-            'resource_result={"status": "success", "resources": []}',
+            'resource_result={"status":"success","phase":"INITIAL",'
+            '"next_action":"BIND","requirements":[],"resources":[]}',
             "所有 Prompt 字段只描述 Agent 单次被调用时的行为",
             "前往[定时任务](/agent-tasks)",
         ),
@@ -236,7 +503,7 @@ def test_build_nl2agent_system_prompt_defers_scheduled_tasks_until_agent_chat(
             "Omit every unspecified field so its persisted value remains unchanged",
             "listing only the potentially affected fields",
             "searches only for the newly requested capability",
-            "reconfigure a specifically requested bound resource",
+            "Reconfiguring a specifically requested bound resource",
             "Never start at `duty_prompt` or enter the full Prompt generation chain",
             'Start with "Updated:"',
             "Conversational removal is unsupported",
@@ -300,13 +567,35 @@ def test_build_nl2agent_system_prompt_prioritizes_completed_draft_revisions(
 def test_build_nl2agent_system_prompt_uses_mounted_tool_names(language):
     prompt = build_nl2agent_system_prompt(language)
 
-    assert f"({SEARCH_INSTALLED_RESOURCES_NAME}," in prompt
-    assert f"({SEARCH_UNINSTALLED_RESOURCES_NAME}," in prompt
-    assert f"raw_resource_result = {RECOMMEND_RESOURCES_NAME}(" in prompt
+    assert f"raw_resource_result = {RESOLVE_RESOURCE_REQUIREMENTS_NAME}(" in prompt
     assert f"saved = {SAVE_AGENT_DRAFT_FIELDS_NAME}(" in prompt
     assert f"wrapped = {NL2A_WRAPPER_NAME}(" in prompt
     assert "external_registry" not in prompt
     assert "MCP_OFFICIAL_REGISTRY" not in prompt
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_prompt_uses_backend_owned_serial_resource_actions(language):
+    """UT-BE-NL2A-PROMPT-001 / 002 / 004."""
+
+    prompt = build_nl2agent_system_prompt(language)
+    assert "INSTALL -> suggested_resource_installation" in prompt
+    assert "RESOLVE_GAP -> resource_gap_resolution" in prompt
+    assert "BIND -> installed_resource_binding" in prompt
+    assert "POST_INSTALL" in prompt
+    assert "POST_GAP" in prompt
+    assert "verification_required=True" in prompt
+    assert "capability_verifications" in prompt
+    assert "accepted_candidate_refs" in prompt
+    assert '"decision": "accept"' not in prompt
+    assert '"missing_capabilities"' not in prompt
+    assert "VERIFY" in prompt
+    assert "parallel_executor" not in prompt
+    assert "recommend_resources" not in prompt
+    assert "installed_tool_name" not in prompt
+    assert "uninstalled_tool_name" not in prompt
+    assert 'subtype="resource_gap_resolution"' not in prompt
+    assert "combine two uncovered sets" in prompt or "拼接两份 uncovered 集合" in prompt
 
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
@@ -410,7 +699,70 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
         "subtype": "installed_resource_binding",
         "agent_id": 42,
         "resources": [],
+        "requirements": [],
     }
+
+
+def test_resource_gap_resolution_wrapper_preserves_original_requirements():
+    requirement = ResourceRequirement(
+        requirement_id="calendar_summary",
+        query="Summarize calendar events",
+        search_terms=["calendar", "summary"],
+    )
+
+    wrapped = build_nl2a_wrapper(
+        subtype="resource_gap_resolution",
+        agent_id=42,
+        requirements=[requirement],
+    )
+
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    resolution = ResourceGapResolutionPayload.model_validate(payload)
+    assert resolution.agent_id == 42
+    assert resolution.requirements == [requirement]
+
+
+def test_installed_resource_binding_wrapper_preserves_requirements_for_rejection():
+    requirement = ResourceRequirement(
+        requirement_id="ticket_query",
+        query="Query train tickets",
+        search_terms=["train", "tickets"],
+    )
+
+    wrapped = build_nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={"status": "success", "resources": []},
+        requirements=[requirement],
+    )
+
+    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    assert payload["requirements"] == [requirement.model_dump(mode="json")]
+
+
+def test_resource_gap_requires_a_requirement_uncovered_by_both_searches():
+    train_ticket = ResourceRequirement(
+        requirement_id="train_ticket",
+        query="Query 12306 train tickets",
+    )
+    weather = ResourceRequirement(
+        requirement_id="weather",
+        query="Query weather",
+    )
+
+    gaps = get_resource_gap_requirements(
+        requirements=[train_ticket, weather],
+        installed=ResourceSearchOutput(
+            candidates=[],
+            uncovered_requirement_ids=["train_ticket"],
+        ),
+        installable=ResourceSearchOutput(
+            candidates=[],
+            uncovered_requirement_ids=["train_ticket", "weather"],
+        ),
+    )
+
+    assert gaps == [train_ticket]
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():
@@ -445,25 +797,19 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     registered_tools = await local_mcp_service.get_tools()
 
     assert [tool.name for tool in config.tools] == [
-        SEARCH_INSTALLED_RESOURCES_NAME,
-        SEARCH_UNINSTALLED_RESOURCES_NAME,
-        RECOMMEND_RESOURCES_NAME,
+        RESOLVE_RESOURCE_REQUIREMENTS_NAME,
         SAVE_AGENT_DRAFT_FIELDS_NAME,
         NL2A_WRAPPER_NAME,
-        ParallelExecutorTool.name,
     ]
     assert [tool.description for tool in config.tools] == [
-        registered_tools[SEARCH_INSTALLED_RESOURCES_NAME].description,
-        registered_tools[SEARCH_UNINSTALLED_RESOURCES_NAME].description,
-        registered_tools[RECOMMEND_RESOURCES_NAME].description,
+        registered_tools[RESOLVE_RESOURCE_REQUIREMENTS_NAME].description,
         registered_tools[SAVE_AGENT_DRAFT_FIELDS_NAME].description,
         registered_tools[NL2A_WRAPPER_NAME].description,
-        ParallelExecutorTool.description,
     ]
     assert json.loads(config.tools[0].inputs)["agent_id"] == "int"
     assert json.loads(config.tools[1].inputs)["agent_id"] == "int"
     assert json.loads(config.tools[2].inputs)["agent_id"] == "int"
-    save_inputs = json.loads(config.tools[3].inputs)
+    save_inputs = json.loads(config.tools[1].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
         "description",
@@ -473,7 +819,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
         "greeting_message",
         "example_questions",
     }
-    assert set(json.loads(config.tools[4].inputs)) == {
+    assert set(json.loads(config.tools[2].inputs)) == {
         "subtype",
         "agent_id",
         "resource_result",

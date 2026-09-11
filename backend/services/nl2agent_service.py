@@ -9,7 +9,7 @@ import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, unquote, urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import (
@@ -39,6 +39,7 @@ from services.agent_draft_permission_service import (
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
+    CapabilityVerification,
     INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
@@ -47,8 +48,13 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     RecommendResourcesOutput,
     RecommendedResource,
     ResourceCandidate,
+    ResourceCardSummary,
     ResourceInstallationOption,
+    ResourceMatch,
     ResourceRequirement,
+    RequirementResolution,
+    ResourceResolutionOutput,
+    ResourceResolutionPhase,
     ResourceSearchOutput,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
@@ -65,6 +71,23 @@ MAX_RECOMMENDATIONS = 5
 MAX_BINDING_CANDIDATES = 12
 STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
+GENERIC_INTERFACE_TOKENS = frozenset({
+    "body",
+    "cursor",
+    "format",
+    "input",
+    "language",
+    "limit",
+    "offset",
+    "page",
+    "prompt",
+    "query",
+    "request",
+    "response",
+    "search",
+    "string",
+    "text",
+})
 UNINSTALLED_SOURCE_PAGE_SIZE = 100
 MAX_INTERNAL_SOURCE_ITEMS = 300
 AGENT_DRAFT_FIELD_ORDER = (
@@ -321,6 +344,439 @@ class Nl2AgentResourceError(Exception):
         self.retryable = retryable
 
 
+async def install_nl2agent_resource_impl(
+    *,
+    agent_id: int,
+    candidate_ref: str,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Install one trusted repository resource for an editable NL2Agent draft."""
+
+    require_agent_draft_edit(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    prefix, separator, raw_identifier = candidate_ref.partition(":")
+    if not separator or not raw_identifier:
+        raise Nl2AgentResourceError("invalid_candidate_ref")
+    if prefix == "tenant_skill_repository":
+        if not raw_identifier.isdecimal() or int(raw_identifier) <= 0:
+            raise Nl2AgentResourceError("invalid_candidate_ref")
+        from database.skill_repository_db import (
+            get_skill_repository_by_id_and_publisher,
+        )
+        from management.services.skill.service import SkillService
+        from services.skill_repository_service import (
+            install_skill_from_repository_impl,
+        )
+
+        repository_id = int(raw_identifier)
+        repository = get_skill_repository_by_id_and_publisher(
+            repository_id,
+            tenant_id,
+        )
+        if not repository or repository.get("status") != "shared":
+            raise Nl2AgentResourceError("resource_not_visible")
+        source_marker = f"repository:{repository_id}"
+        for skill in SkillService(tenant_id=tenant_id).list_visible_skills(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        ):
+            if skill.get("source") != source_marker:
+                continue
+            skill_id = skill.get("skill_id")
+            if isinstance(skill_id, int) and skill_id > 0:
+                return {
+                    "status": "already_installed",
+                    "candidate_ref": candidate_ref,
+                    "resource_type": "skill",
+                    "resource_id": skill_id,
+                }
+        installed = install_skill_from_repository_impl(
+            skill_repository_id=repository_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            source=source_marker,
+        )
+        skill_id = (
+            installed.get("skill_id") if isinstance(installed, dict) else None
+        )
+        if not isinstance(skill_id, int) or skill_id <= 0:
+            raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+        return {
+            "status": "installed",
+            "candidate_ref": candidate_ref,
+            "resource_type": "skill",
+            "resource_id": skill_id,
+        }
+    if prefix == "tenant_mcp_repository":
+        if not raw_identifier.isdecimal() or int(raw_identifier) <= 0:
+            raise Nl2AgentResourceError("invalid_candidate_ref")
+
+        from consts.exceptions import McpPortConflictError
+        from consts.model import MCPConfigRequest
+        from database.remote_mcp_db import get_mcp_records_by_tenant
+        from services.mcp_management_service import list_community_mcp_services
+        from services.remote_mcp_service import (
+            add_container_mcp_service,
+            add_mcp_service,
+            suggest_container_port,
+        )
+
+        market_id = int(raw_identifier)
+
+        def installed_mcp_id() -> int | None:
+            for record in get_mcp_records_by_tenant(tenant_id):
+                if record.get("market_id") != market_id:
+                    continue
+                mcp_id = record.get("mcp_id")
+                if isinstance(mcp_id, int) and mcp_id > 0:
+                    return mcp_id
+            return None
+
+        existing_mcp_id = installed_mcp_id()
+        if existing_mcp_id is not None:
+            return {
+                "status": "already_installed",
+                "candidate_ref": candidate_ref,
+                "resource_type": "mcp_server",
+                "resource_id": existing_mcp_id,
+            }
+
+        visible_mcp: dict[str, Any] | None = None
+        cursor: str | None = None
+        scanned = 0
+        while scanned < MAX_INTERNAL_SOURCE_ITEMS:
+            visible_result = await list_community_mcp_services(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                cursor=cursor,
+                limit=UNINSTALLED_SOURCE_PAGE_SIZE,
+            )
+            items = visible_result.get("items", [])
+            if not isinstance(items, list) or not items:
+                break
+            scanned += len(items)
+            visible_mcp = next(
+                (
+                    item for item in items
+                    if isinstance(item, dict) and item.get("marketId") == market_id
+                ),
+                None,
+            )
+            if visible_mcp is not None:
+                break
+            next_cursor = visible_result.get("nextCursor")
+            if not isinstance(next_cursor, str) or not next_cursor:
+                break
+            cursor = next_cursor
+        if visible_mcp is None:
+            raise Nl2AgentResourceError("resource_not_visible")
+
+        name = str(visible_mcp.get("name") or "").strip()
+        if not name:
+            raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+        description = str(visible_mcp.get("description") or "").strip() or None
+        tags = (
+            visible_mcp.get("tags")
+            if isinstance(visible_mcp.get("tags"), list)
+            else []
+        )
+        registry_json = (
+            visible_mcp.get("registryJson")
+            if isinstance(visible_mcp.get("registryJson"), dict)
+            else {}
+        )
+        authorization_token = visible_mcp.get("authorizationToken")
+        custom_headers = visible_mcp.get("customHeaders")
+        transport_type = str(visible_mcp.get("transportType") or "").lower()
+        if transport_type == "container":
+            config_json = visible_mcp.get("configJson")
+            if not isinstance(config_json, dict):
+                raise Nl2AgentResourceError("resource_not_visible")
+            try:
+                mcp_config = MCPConfigRequest.model_validate(config_json)
+            except ValueError as exc:
+                logger.warning(
+                    "Visible MCP repository entry has invalid container config "
+                    "(market_id=%s)",
+                    market_id,
+                )
+                raise Nl2AgentResourceError("resource_not_visible") from exc
+            for attempt in range(2):
+                try:
+                    await add_container_mcp_service(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        name=name,
+                        description=description,
+                        source="community",
+                        tags=tags,
+                        authorization_token=(
+                            authorization_token
+                            if isinstance(authorization_token, str)
+                            else None
+                        ),
+                        registry_json=registry_json,
+                        market_id=market_id,
+                        port=suggest_container_port(),
+                        mcp_config=mcp_config,
+                    )
+                    break
+                except McpPortConflictError:
+                    if attempt:
+                        raise Nl2AgentResourceError(
+                            "resource_install_failed", retryable=True
+                        )
+        else:
+            server_url = str(visible_mcp.get("serverUrl") or "").strip()
+            if not server_url.startswith(("https://", "http://")):
+                raise Nl2AgentResourceError("resource_not_visible")
+            await add_mcp_service(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                name=name,
+                description=description,
+                source="community",
+                server_url=server_url,
+                tags=tags,
+                authorization_token=(
+                    authorization_token
+                    if isinstance(authorization_token, str)
+                    else None
+                ),
+                custom_headers=(
+                    custom_headers if isinstance(custom_headers, dict) else None
+                ),
+                container_config=None,
+                registry_json=registry_json,
+                config_json=(
+                    visible_mcp.get("configJson")
+                    if isinstance(visible_mcp.get("configJson"), dict)
+                    else None
+                ),
+                market_id=market_id,
+                enabled=True,
+            )
+
+        created_mcp_id = installed_mcp_id()
+        if created_mcp_id is None:
+            raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+        return {
+            "status": "installed",
+            "candidate_ref": candidate_ref,
+            "resource_type": "mcp_server",
+            "resource_id": created_mcp_id,
+        }
+
+    if prefix != "nexent_official_skill":
+        raise Nl2AgentResourceError("resource_not_visible")
+
+    from management.services.skill.service import (
+        SkillService,
+        get_official_skills_with_status,
+        install_skills_from_zip_for_tenant,
+    )
+
+    skill_name = unquote(raw_identifier)
+    official_skills = get_official_skills_with_status(tenant_id=tenant_id)
+    if not any(
+        str(item.get("name") or "") == skill_name
+        for item in official_skills
+        if isinstance(item, dict)
+    ):
+        raise Nl2AgentResourceError("resource_not_visible")
+
+    visible_skills = SkillService(tenant_id=tenant_id).list_visible_skills(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    for skill in visible_skills:
+        if str(skill.get("name") or "") == skill_name:
+            skill_id = skill.get("skill_id")
+            if isinstance(skill_id, int) and skill_id > 0:
+                return {
+                    "status": "already_installed",
+                    "candidate_ref": candidate_ref,
+                    "resource_type": "skill",
+                    "resource_id": skill_id,
+                }
+
+    installed_names = install_skills_from_zip_for_tenant(
+        [skill_name],
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    if skill_name not in installed_names:
+        raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+
+    visible_skills = SkillService(tenant_id=tenant_id).list_visible_skills(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    for skill in visible_skills:
+        if str(skill.get("name") or "") == skill_name:
+            skill_id = skill.get("skill_id")
+            if isinstance(skill_id, int) and skill_id > 0:
+                return {
+                    "status": "installed",
+                    "candidate_ref": candidate_ref,
+                    "resource_type": "skill",
+                    "resource_id": skill_id,
+                }
+    raise Nl2AgentResourceError("resource_install_failed", retryable=True)
+
+
+def _build_resource_config_schema(
+    fields: Any,
+    defaults: Any,
+) -> list[dict[str, Any]]:
+    """Normalize resource schemas without merging persisted instance values."""
+
+    if not isinstance(fields, list):
+        return []
+    default_values = defaults if isinstance(defaults, dict) else {}
+    schema: list[dict[str, Any]] = []
+    excluded_keys = {
+        "name",
+        "type",
+        "required",
+        "optional",
+        "description",
+        "description_zh",
+        "default",
+        "value",
+        "secret",
+        "constraints",
+    }
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        constraints = (
+            dict(field.get("constraints"))
+            if isinstance(field.get("constraints"), dict)
+            else {}
+        )
+        constraints.update(
+            {
+                key: value
+                for key, value in field.items()
+                if key not in excluded_keys and value is not None
+            }
+        )
+        schema.append(
+            {
+                "name": name,
+                "type": _normalize_frontend_param_type(field.get("type")),
+                "required": bool(
+                    field.get("required", not bool(field.get("optional")))
+                ),
+                "description": str(field.get("description") or ""),
+                "default": field.get("default", default_values.get(name)),
+                "secret": bool(field.get("secret")),
+                "constraints": constraints,
+            }
+        )
+    return schema
+
+
+async def get_resource_config_detail_impl(
+    *,
+    agent_id: int,
+    candidate_ref: str,
+    tenant_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    """Return a visible resource's schema and draft-instance values on demand."""
+
+    require_agent_draft_edit(
+        agent_id=agent_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    prefix, separator, raw_identifier = candidate_ref.partition(":")
+    if (
+        not separator
+        or prefix not in {"tool", "skill"}
+        or not raw_identifier.isdecimal()
+        or int(raw_identifier) <= 0
+    ):
+        raise Nl2AgentResourceError("invalid_candidate_ref")
+    resource_id = int(raw_identifier)
+
+    if prefix == "tool":
+        from database.tool_db import query_tool_instances_by_id
+        from services.tool_configuration_service import list_all_tools
+
+        tools = await list_all_tools(tenant_id=tenant_id)
+        tool = next(
+            (
+                item
+                for item in tools
+                if isinstance(item, dict)
+                and item.get("tool_id") == resource_id
+                and item.get("source")
+                in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
+                and item.get("is_available") is True
+            ),
+            None,
+        )
+        if tool is None:
+            raise Nl2AgentResourceError("resource_not_visible")
+        instance = query_tool_instances_by_id(
+            agent_id,
+            resource_id,
+            tenant_id,
+        )
+        values = instance.get("params") if isinstance(instance, dict) else {}
+        return {
+            "candidate_ref": candidate_ref,
+            "resource_type": "tool",
+            "schema": _build_resource_config_schema(
+                tool.get("params"),
+                {},
+            ),
+            "values": values if isinstance(values, dict) else {},
+            "enabled": bool(instance and instance.get("enabled")),
+            "bound": instance is not None,
+        }
+
+    from database.skill_db import query_skill_instance_by_id
+    from management.services.skill.service import SkillService
+
+    skill = next(
+        (
+            item
+            for item in SkillService(tenant_id=tenant_id).list_visible_skills(
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            if item.get("skill_id") == resource_id
+        ),
+        None,
+    )
+    if skill is None:
+        raise Nl2AgentResourceError("resource_not_visible")
+    instance = query_skill_instance_by_id(agent_id, resource_id, tenant_id)
+    values = instance.get("config_values") if isinstance(instance, dict) else {}
+    return {
+        "candidate_ref": candidate_ref,
+        "resource_type": "skill",
+        "schema": _build_resource_config_schema(
+            skill.get("config_schemas"),
+            skill.get("config_values"),
+        ),
+        "values": values if isinstance(values, dict) else {},
+        "enabled": bool(instance and instance.get("enabled")),
+        "bound": instance is not None,
+    }
+
+
 def _resource_text_variants(value: Any) -> tuple[str, str]:
     normalized = _normalize_search_text(value)
     normalized = re.sub(r"[_\-/\.:]+", " ", normalized)
@@ -338,6 +794,14 @@ def _resource_similarity(left: Any, right: Any) -> float:
         fuzz.WRatio(left_normalized, right_normalized),
         fuzz.token_set_ratio(left_normalized, right_normalized),
     ) / 100
+
+
+def _is_generic_interface_text(value: Any) -> bool:
+    """Return whether an interface field lacks domain-specific evidence."""
+
+    normalized, _ = _resource_text_variants(value)
+    tokens = set(re.findall(r"[a-z0-9]+", normalized))
+    return bool(tokens) and tokens.issubset(GENERIC_INTERFACE_TOKENS)
 
 
 def _flatten_resource_text(value: Any, *, limit: int = 4000) -> list[str]:
@@ -516,13 +980,18 @@ def _score_resource_requirement(
             seen.add(normalized)
             terms.append(raw_term)
 
+    interface_values = [
+        value
+        for value in resource["interfaces"]
+        if not _is_generic_interface_text(value)
+    ]
     term_scores: list[float] = []
     for term in terms:
         term_scores.append(max(
             max((_resource_similarity(term, value) for value in resource["names"]), default=0) * 1.00,
             max((_resource_similarity(term, value) for value in resource["labels"]), default=0) * 0.95,
             max((_resource_similarity(term, value) for value in resource["descriptions"]), default=0) * 0.90,
-            max((_resource_similarity(term, value) for value in resource["interfaces"]), default=0) * 0.80,
+            max((_resource_similarity(term, value) for value in interface_values), default=0) * 0.80,
         ))
     top_scores = sorted(term_scores, reverse=True)[:3]
     capability_score = (
@@ -654,12 +1123,34 @@ def _rank_resource_catalog(
         for requirement in requirements
         if requirement.requirement_id not in strong_requirement_ids
     ]
+    matches_by_requirement = {
+        requirement.requirement_id: sorted(
+            (
+                ResourceMatch(
+                    candidate_ref=item["candidate"].candidate_ref,
+                    score=item["relationships"][requirement.requirement_id],
+                    strength=(
+                        "strong"
+                        if item["relationships"][requirement.requirement_id]
+                        >= STRONG_RESOURCE_SCORE
+                        else "weak"
+                    ),
+                )
+                for item in scored
+                if item["relationships"][requirement.requirement_id]
+                >= MINIMUM_RESOURCE_SCORE
+            ),
+            key=lambda match: (-match.score, match.candidate_ref),
+        )
+        for requirement in requirements
+    }
     return ResourceSearchOutput(
         candidates=[
             item["candidate"]
             for item in selected[:MAX_BINDING_CANDIDATES]
         ],
         uncovered_requirement_ids=uncovered,
+        matches_by_requirement=matches_by_requirement,
     )
 
 
@@ -963,6 +1454,204 @@ async def search_uninstalled_resources_impl(
     )
 
 
+def _resource_resolution_summaries(
+    *search_results: ResourceSearchOutput,
+    included_refs: set[str],
+) -> list[ResourceCardSummary]:
+    """Deduplicate safe card metadata across installed and repository searches."""
+
+    summaries: list[ResourceCardSummary] = []
+    seen: set[str] = set()
+    for result in search_results:
+        for candidate in result.candidates:
+            if (
+                candidate.candidate_ref not in included_refs
+                or candidate.candidate_ref in seen
+            ):
+                continue
+            seen.add(candidate.candidate_ref)
+            summaries.append(ResourceCardSummary(
+                candidate_ref=candidate.candidate_ref,
+                resource_type=candidate.resource_type,
+                source=candidate.source,
+                name=candidate.name,
+                description=candidate.description,
+                requirement_ids=candidate.requirement_ids,
+                recommendation=(
+                    "recommended"
+                    if candidate.score >= STRONG_RESOURCE_SCORE
+                    else "optional"
+                ),
+                is_bound=False,
+            ))
+    return summaries
+
+
+async def resolve_resource_requirements_impl(
+    *,
+    requirements: list[ResourceRequirement],
+    phase: ResourceResolutionPhase,
+    exclude_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+    verification_required: bool = False,
+    capability_verifications: list[CapabilityVerification] | None = None,
+) -> ResourceResolutionOutput:
+    """Resolve every requirement into backend-owned coverage and next action."""
+
+    verifications = [
+        item
+        if isinstance(item, CapabilityVerification)
+        else CapabilityVerification.model_validate(item)
+        for item in capability_verifications or []
+    ]
+    verification_requirement_ids = [item.requirement_id for item in verifications]
+    if len(verification_requirement_ids) != len(set(verification_requirement_ids)):
+        raise Nl2AgentResourceError("invalid_capability_verifications")
+    if verification_required and verifications:
+        raise Nl2AgentResourceError("invalid_capability_verifications")
+
+    if phase == "INITIAL":
+        installed, installable = await asyncio.gather(
+            search_installed_resources_impl(
+                requirements=requirements,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
+            search_uninstalled_resources_impl(
+                requirements=requirements,
+                exclude_refs=exclude_refs,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
+        )
+    else:
+        installed = await search_installed_resources_impl(
+            requirements=requirements,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        installable = ResourceSearchOutput(
+            candidates=[],
+            uncovered_requirement_ids=[
+                requirement.requirement_id for requirement in requirements
+            ],
+            matches_by_requirement={
+                requirement.requirement_id: [] for requirement in requirements
+            },
+        )
+
+    accepted_pairs = {
+        (item.requirement_id, candidate_ref)
+        for item in verifications
+        for candidate_ref in item.accepted_candidate_refs
+    }
+    strong_candidate_pairs = {
+        (requirement.requirement_id, match.candidate_ref)
+        for requirement in requirements
+        for match in [
+            *installed.matches_by_requirement.get(requirement.requirement_id, []),
+            *installable.matches_by_requirement.get(requirement.requirement_id, []),
+        ]
+        if match.strength == "strong"
+    }
+    expected_requirement_ids = {
+        requirement.requirement_id for requirement in requirements
+    }
+    if capability_verifications is not None and (
+        set(verification_requirement_ids) != expected_requirement_ids
+        or not accepted_pairs <= strong_candidate_pairs
+    ):
+        raise Nl2AgentResourceError("invalid_capability_verifications")
+
+    resolutions: list[RequirementResolution] = []
+    for requirement in requirements:
+        requirement_id = requirement.requirement_id
+        installed_matches = [
+            match
+            for match in installed.matches_by_requirement.get(requirement_id, [])
+            if match.strength == "strong"
+            and (
+                capability_verifications is None
+                or (requirement_id, match.candidate_ref) in accepted_pairs
+            )
+        ]
+        installable_matches = [
+            match
+            for match in installable.matches_by_requirement.get(requirement_id, [])
+            if match.strength == "strong"
+            and (
+                capability_verifications is None
+                or (requirement_id, match.candidate_ref) in accepted_pairs
+            )
+        ]
+        weak_by_ref: dict[str, ResourceMatch] = {}
+        for match in [
+            *installed.matches_by_requirement.get(requirement_id, []),
+            *installable.matches_by_requirement.get(requirement_id, []),
+        ]:
+            if match.strength != "weak":
+                continue
+            previous = weak_by_ref.get(match.candidate_ref)
+            if previous is None or match.score > previous.score:
+                weak_by_ref[match.candidate_ref] = match
+        weak_references = sorted(
+            weak_by_ref.values(),
+            key=lambda match: (-match.score, match.candidate_ref),
+        )[:2]
+        state = (
+            "covered"
+            if installed_matches
+            else "installable"
+            if phase == "INITIAL" and installable_matches
+            else "uncovered"
+        )
+        resolutions.append(RequirementResolution(
+            requirement=requirement,
+            state=state,
+            installed_matches=installed_matches,
+            installable_matches=(
+                installable_matches if phase == "INITIAL" else []
+            ),
+            weak_references=weak_references,
+        ))
+
+    states = {resolution.state for resolution in resolutions}
+    next_action = (
+        "VERIFY"
+        if verification_required
+        else "INSTALL"
+        if phase == "INITIAL" and "installable" in states
+        else "RESOLVE_GAP"
+        if "uncovered" in states
+        else "BIND"
+    )
+    search_results = (
+        (installed, installable) if phase == "INITIAL" else (installed,)
+    )
+    included_refs = {
+        match.candidate_ref
+        for resolution in resolutions
+        for match in (
+            resolution.installed_matches
+            if resolution.state == "covered"
+            else resolution.installable_matches
+            if resolution.state == "installable"
+            else resolution.weak_references
+        )
+    }
+    return ResourceResolutionOutput(
+        phase=phase,
+        verification_required=verification_required,
+        next_action=next_action,
+        requirements=resolutions,
+        resources=_resource_resolution_summaries(
+            *search_results,
+            included_refs=included_refs,
+        ),
+    )
+
+
 def _verified_resource_candidate(
     actual: dict[str, Any],
     supplied: ResourceCandidate,
@@ -987,14 +1676,13 @@ def _recommended_resource(
     *,
     actual: dict[str, Any],
     supplied: ResourceCandidate,
-    recommended_refs: set[str],
     is_bound: bool = False,
 ) -> RecommendedResource:
     return RecommendedResource(
         candidate=_verified_resource_candidate(actual, supplied),
         recommendation=(
             "recommended"
-            if supplied.candidate_ref in recommended_refs
+            if supplied.score >= STRONG_RESOURCE_SCORE
             else "optional"
         ),
         is_bound=is_bound,
@@ -1023,7 +1711,7 @@ async def recommend_uninstalled_resources_impl(
         user_id=user_id,
     )
     by_ref = {item["candidate_ref"]: item for item in internal_catalog}
-    recommended = set(recommended_refs)
+    del recommended_refs
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
@@ -1032,7 +1720,6 @@ async def recommend_uninstalled_resources_impl(
         resources.append(_recommended_resource(
             actual=actual,
             supplied=supplied,
-            recommended_refs=recommended,
         ))
     return RecommendResourcesOutput(resources=resources)
 
@@ -1061,7 +1748,7 @@ async def recommend_installed_resources_impl(
         )
         if isinstance(instance.get("tool_id"), int)
     }
-    recommended = set(recommended_refs)
+    del recommended_refs
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
@@ -1070,7 +1757,6 @@ async def recommend_installed_resources_impl(
         resources.append(_recommended_resource(
             actual=actual,
             supplied=supplied,
-            recommended_refs=recommended,
             is_bound=supplied.candidate_ref in bound_tool_refs,
         ))
     return RecommendResourcesOutput(resources=resources)
@@ -1146,14 +1832,30 @@ async def _load_verified_nl2agent_state(
         resource = by_ref.get(f"tool:{tool_id}")
         if resource is None:
             continue
-        params = instance.get("params")
+        runtime_inputs = [
+            {
+                "name": name,
+                "type": _normalize_frontend_param_type(
+                    definition.get("type") if isinstance(definition, dict) else None
+                ),
+                "required": not bool(
+                    definition.get("optional") if isinstance(definition, dict) else False
+                ),
+                "description": str(
+                    (definition.get("description") or "")
+                    if isinstance(definition, dict)
+                    else ""
+                ),
+            }
+            for name, definition in resource["inputs"].items()
+            if isinstance(name, str) and name
+        ]
         facts.append({
             "resource_type": "tool",
             "resource_id": tool_id,
             "name": resource["name"],
             "description": resource["description"],
-            "input_fields": sorted(resource["inputs"]),
-            "configured_fields": sorted(params) if isinstance(params, dict) else [],
+            "runtime_inputs": sorted(runtime_inputs, key=lambda item: item["name"]),
         })
     for instance in query_enabled_skill_instances(
         agent_id=agent_id,
@@ -1164,20 +1866,12 @@ async def _load_verified_nl2agent_state(
         resource = by_ref.get(f"skill:{skill_id}")
         if resource is None:
             continue
-        config_values = instance.get("config_values")
         facts.append({
             "resource_type": "skill",
             "resource_id": skill_id,
             "name": resource["name"],
             "description": resource["description"],
-            "config_fields": sorted(
-                item["name"]
-                for item in resource["config"]
-                if isinstance(item, dict) and isinstance(item.get("name"), str)
-            ),
-            "configured_fields": (
-                sorted(config_values) if isinstance(config_values, dict) else []
-            ),
+            "runtime_inputs": [],
         })
     facts.sort(key=lambda item: (item["resource_type"], item["resource_id"]))
     return draft, facts

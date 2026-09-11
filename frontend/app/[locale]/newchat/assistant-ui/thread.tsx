@@ -85,6 +85,7 @@ import { AgentDraftCard } from "../ui/agent-draft-card";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
+import { ResourceGapResolutionCard } from "../ui/resource-gap-resolution-card";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -1604,6 +1605,11 @@ const AssistantMessage: FC<{
           />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
           <InstalledResourceBindingCard
+            payload={nl2a.content}
+            disabled={readOnly}
+          />
+        ) : nl2a?.content.subtype === "resource_gap_resolution" ? (
+          <ResourceGapResolutionCard
             payload={nl2a.content}
             disabled={readOnly}
           />

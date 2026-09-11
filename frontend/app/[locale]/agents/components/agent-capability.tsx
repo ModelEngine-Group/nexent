@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Button, Col, Flex, Row } from "antd";
 import { BlocksIcon, Plug, RefreshCw, Wrench } from "lucide-react";
@@ -8,6 +8,7 @@ import { BlocksIcon, Plug, RefreshCw, Wrench } from "lucide-react";
 import { updateToolList } from "@/services/mcpService";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
+import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";
@@ -25,12 +26,43 @@ export function AgentToolCapability() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
+  const { mcpConfigurationRequest, completeMcpConfiguration } =
+    useNl2AgentFlow();
   const isReadOnly = useAgentReadOnly();
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
   const [labelModalOpen, setLabelModalOpen] = useState(false);
+  const openedMcpConfigurationRequestId = useRef<number | null>(null);
   const { invalidate, availableTools } = useToolList();
+
+  useEffect(() => {
+    if (
+      !mcpConfigurationRequest ||
+      mcpConfigurationRequest.completed ||
+      mcpConfigurationRequest.agentId !== currentAgentId ||
+      openedMcpConfigurationRequestId.current ===
+        mcpConfigurationRequest.requestId
+    ) {
+      return;
+    }
+    openedMcpConfigurationRequestId.current = mcpConfigurationRequest.requestId;
+    setIsMcpModalOpen(true);
+  }, [currentAgentId, mcpConfigurationRequest]);
+
+  const handleCloseMcpModal = useCallback(() => {
+    setIsMcpModalOpen(false);
+    if (
+      mcpConfigurationRequest &&
+      mcpConfigurationRequest.agentId === currentAgentId &&
+      !mcpConfigurationRequest.completed
+    ) {
+      completeMcpConfiguration(
+        mcpConfigurationRequest.agentId,
+        mcpConfigurationRequest.requestId
+      );
+    }
+  }, [completeMcpConfiguration, currentAgentId, mcpConfigurationRequest]);
 
   const handleRefreshTools = useCallback(async () => {
     setIsRefreshing(true);
@@ -89,10 +121,7 @@ export function AgentToolCapability() {
         </Col>
       </Row>
       <ToolManagement currentAgentId={currentAgentId ?? undefined} />
-      <McpConfigModal
-        visible={isMcpModalOpen}
-        onCancel={() => setIsMcpModalOpen(false)}
-      />
+      <McpConfigModal visible={isMcpModalOpen} onCancel={handleCloseMcpModal} />
       <SelectToolsDialog
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
@@ -112,6 +141,7 @@ export function AgentSkillCapability() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
+  const { skillCreationRequest, completeSkillCreation } = useNl2AgentFlow();
   const isReadOnly = useAgentReadOnly();
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
@@ -120,6 +150,7 @@ export function AgentSkillCapability() {
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
+  const openedSkillCreationRequestId = useRef<number | null>(null);
   const { invalidate: invalidateSkills } = useSkillList();
 
   const handleRefreshSkills = useCallback(async () => {
@@ -134,10 +165,38 @@ export function AgentSkillCapability() {
     }
   }, [invalidateSkills, message, t]);
 
-  const handleSkillBuildSuccess = useCallback(
-    () => invalidateSkills(),
-    [invalidateSkills]
-  );
+  const handleSkillBuildSuccess = useCallback(() => {
+    invalidateSkills();
+    if (
+      skillCreationRequest &&
+      skillCreationRequest.agentId === currentAgentId &&
+      !skillCreationRequest.completed
+    ) {
+      completeSkillCreation(
+        skillCreationRequest.agentId,
+        skillCreationRequest.requestId
+      );
+    }
+  }, [
+    completeSkillCreation,
+    currentAgentId,
+    invalidateSkills,
+    skillCreationRequest,
+  ]);
+
+  useEffect(() => {
+    if (
+      !skillCreationRequest ||
+      skillCreationRequest.completed ||
+      skillCreationRequest.agentId !== currentAgentId ||
+      openedSkillCreationRequestId.current === skillCreationRequest.requestId
+    ) {
+      return;
+    }
+    openedSkillCreationRequestId.current = skillCreationRequest.requestId;
+    setEditingSkill(null);
+    setIsSkillModalOpen(true);
+  }, [currentAgentId, skillCreationRequest]);
   const handleOpenSkillEditor = useCallback((skill: Skill) => {
     setEditingSkill({
       skill_id: Number(skill.skill_id),

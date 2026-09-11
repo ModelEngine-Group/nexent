@@ -6,6 +6,7 @@ from threading import Event
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import services.nl2agent_service as nl2agent_service
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.models.capacity_budget import (
     ContextBudgetSnapshot,
@@ -25,13 +26,18 @@ from services.nl2agent_service import (
     _load_installed_resource_catalog,
     _normalize_skill_config,
     _normalize_tool_config,
+    _recommended_resource,
+    _rank_resource_catalog,
     _redact_installation_snapshot,
+    _score_resource_requirement,
     _resource_similarity,
     build_nl2agent_run_info,
     create_nl2agent_stream,
+    get_resource_config_detail_impl,
     recommend_installed_resources_impl,
     recommend_resources_impl,
     recommend_uninstalled_resources_impl,
+    resolve_resource_requirements_impl,
     save_agent_draft_fields_impl,
     search_installed_resources_impl,
     search_uninstalled_resources_impl,
@@ -44,7 +50,9 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     ResourceCandidate,
+    ResourceMatch,
     ResourceRequirement,
+    ResourceSearchOutput,
 )
 from utils.http_client_utils import create_httpx_client
 
@@ -94,6 +102,1240 @@ def _basic_draft_fields(**overrides):
     }
     values.update(overrides)
     return AgentDraftFields(**values)
+
+
+def test_resource_search_keeps_relevant_generic_query_tool_as_a_candidate():
+    result = _rank_resource_catalog(
+        requirements=[
+            ResourceRequirement(
+                requirement_id="ticket_query",
+                query="Query 12306 train tickets",
+                search_terms=["query", "12306", "train tickets"],
+            )
+        ],
+        catalog=[
+            {
+                "candidate_ref": "tool:127",
+                "resource_type": "tool",
+                "source": "LOCAL_TOOL",
+                "name": "terminal",
+                "description": "Run generic query commands through an SSH terminal.",
+                "names": ["terminal"],
+                "labels": ["query", "shell"],
+                "descriptions": ["Run generic query commands through an SSH terminal."],
+                "interfaces": ["command", "host"],
+                "installed": True,
+                "quality": 1.0,
+            }
+        ],
+    )
+
+    assert result.uncovered_requirement_ids == []
+    assert result.candidates[0].candidate_ref == "tool:127"
+
+
+@pytest.mark.asyncio
+async def test_tool_resource_config_returns_schema_instance_values_and_binding(
+    mocker,
+):
+    """UT-BE-NL2A-CONFIG-001."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(return_value=[{
+            "tool_id": 7,
+            "name": "weather",
+            "source": "local",
+            "is_available": True,
+            "params": [{
+                "name": "top_k",
+                "type": "integer",
+                "optional": False,
+                "default": 5,
+                "description": "Maximum results",
+                "minimum": 1,
+            }],
+        }]),
+    )
+    mocker.patch(
+        "database.tool_db.query_tool_instances_by_id",
+        return_value={"params": {"top_k": 9}, "enabled": True},
+    )
+
+    result = await get_resource_config_detail_impl(
+        agent_id=42,
+        candidate_ref="tool:7",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["schema"] == [{
+        "name": "top_k",
+        "type": "number",
+        "required": True,
+        "description": "Maximum results",
+        "default": 5,
+        "secret": False,
+        "constraints": {"minimum": 1},
+    }]
+    assert result["values"] == {"top_k": 9}
+    assert result["enabled"] is True
+    assert result["bound"] is True
+
+
+@pytest.mark.asyncio
+async def test_tool_resource_config_without_instance_returns_empty_values(mocker):
+    """UT-BE-NL2A-CONFIG-002."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(return_value=[{
+            "tool_id": 7,
+            "name": "weather",
+            "source": "local",
+            "is_available": True,
+            "params": [],
+        }]),
+    )
+    mocker.patch("database.tool_db.query_tool_instances_by_id", return_value=None)
+
+    result = await get_resource_config_detail_impl(
+        agent_id=42,
+        candidate_ref="tool:7",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["values"] == {}
+    assert result["enabled"] is False
+    assert result["bound"] is False
+
+
+@pytest.mark.asyncio
+async def test_skill_resource_config_keeps_defaults_separate_from_overrides(mocker):
+    """UT-BE-NL2A-CONFIG-003."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[{
+            "skill_id": 11,
+            "name": "daily_report",
+            "config_schemas": [{
+                "name": "region",
+                "type": "string",
+                "required": True,
+                "description": "Target region",
+                "default": "cn",
+            }],
+            "config_values": {"region": "cn"},
+        }],
+    )
+    mocker.patch(
+        "database.skill_db.query_skill_instance_by_id",
+        return_value={"config_values": {"region": "us"}, "enabled": True},
+    )
+
+    result = await get_resource_config_detail_impl(
+        agent_id=42,
+        candidate_ref="skill:11",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["schema"][0]["default"] == "cn"
+    assert result["values"] == {"region": "us"}
+
+
+@pytest.mark.asyncio
+async def test_resource_config_rejects_invisible_resource_without_reading_values(
+    mocker,
+):
+    """UT-BE-NL2A-CONFIG-004."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(return_value=[]),
+    )
+    read_instance = mocker.patch("database.tool_db.query_tool_instances_by_id")
+
+    with pytest.raises(Nl2AgentResourceError) as exc_info:
+        await get_resource_config_detail_impl(
+            agent_id=42,
+            candidate_ref="tool:7",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "resource_not_visible"
+    read_instance.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_official_skill_installation_returns_the_real_skill_id(mocker):
+    """UT-BE-NL2A-INSTALL-001."""
+
+    installer = getattr(
+        nl2agent_service,
+        "install_nl2agent_resource_impl",
+        None,
+    )
+    assert callable(installer)
+
+    mocker.patch(
+        "management.services.skill.service.get_official_skills_with_status",
+        return_value=[{"name": "daily-report", "status": "installable"}],
+    )
+    install = mocker.patch(
+        "management.services.skill.service.install_skills_from_zip_for_tenant",
+        return_value=["daily-report"],
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        side_effect=[[], [{"skill_id": 91, "name": "daily-report"}]],
+    )
+    require_edit = mocker.patch(
+        "services.nl2agent_service.require_agent_draft_edit"
+    )
+
+    result = await installer(
+        agent_id=42,
+        candidate_ref="nexent_official_skill:daily-report",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "installed",
+        "candidate_ref": "nexent_official_skill:daily-report",
+        "resource_type": "skill",
+        "resource_id": 91,
+    }
+    require_edit.assert_called_once_with(
+        agent_id=42, tenant_id="tenant-a", user_id="user-a"
+    )
+    install.assert_called_once_with(
+        ["daily-report"], tenant_id="tenant-a", user_id="user-a"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_skill_installation_does_not_accept_a_client_target_name(mocker):
+    """UT-BE-NL2A-INSTALL-002."""
+
+    install = mocker.patch(
+        "services.skill_repository_service.install_skill_from_repository_impl",
+        return_value={"skill_id": 92},
+    )
+    mocker.patch(
+        "database.skill_repository_db.get_skill_repository_by_id_and_publisher",
+        return_value={"skill_repository_id": 12, "status": "shared"},
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[],
+    )
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_skill_repository:12",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "installed",
+        "candidate_ref": "tenant_skill_repository:12",
+        "resource_type": "skill",
+        "resource_id": 92,
+    }
+    install.assert_called_once_with(
+        skill_repository_id=12,
+        tenant_id="tenant-a",
+        user_id="user-a",
+        source="repository:12",
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_skill_installation_is_idempotent_by_repository_id(
+    mocker,
+):
+    """UT-BE-NL2A-INSTALL-005."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "database.skill_repository_db.get_skill_repository_by_id_and_publisher",
+        return_value={"skill_repository_id": 12, "status": "shared"},
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[{"skill_id": 92, "source": "repository:12"}],
+    )
+    install = mocker.patch(
+        "services.skill_repository_service.install_skill_from_repository_impl",
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_skill_repository:12",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "already_installed",
+        "candidate_ref": "tenant_skill_repository:12",
+        "resource_type": "skill",
+        "resource_id": 92,
+    }
+    install.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_repository_installation_uses_only_visible_server_snapshot(
+    mocker,
+):
+    """UT-BE-NL2A-INSTALL-003."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(return_value={"items": [{
+            "marketId": 87,
+            "name": "weather",
+            "description": "Weather lookup",
+            "transportType": "url",
+            "serverUrl": "https://weather.example/mcp",
+            "tags": ["weather"],
+            "registryJson": {},
+        }]}),
+    )
+    add_mcp = mocker.patch(
+        "services.remote_mcp_service.add_mcp_service",
+        new=AsyncMock(),
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        side_effect=[[], [{"mcp_id": 321, "market_id": 87}]],
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:87",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result == {
+        "status": "installed",
+        "candidate_ref": "tenant_mcp_repository:87",
+        "resource_type": "mcp_server",
+        "resource_id": 321,
+    }
+    assert add_mcp.await_args.kwargs["server_url"] == "https://weather.example/mcp"
+    assert "authorization_token" in add_mcp.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_mcp_repository_installation_is_idempotent(mocker):
+    """UT-BE-NL2A-INSTALL-005."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    list_visible = mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(),
+    )
+    add_mcp = mocker.patch(
+        "services.remote_mcp_service.add_mcp_service",
+        new=AsyncMock(),
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        return_value=[{"mcp_id": 321, "market_id": 87}],
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:87",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["status"] == "already_installed"
+    assert result["resource_id"] == 321
+    list_visible.assert_not_awaited()
+    add_mcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_container_mcp_installation_retries_a_backend_selected_port(mocker):
+    """UT-BE-NL2A-INSTALL-004."""
+
+    from consts.exceptions import McpPortConflictError
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(return_value={"items": [{
+            "marketId": 88,
+            "name": "filesystem",
+            "transportType": "container",
+            "configJson": {
+                "mcpServers": {"filesystem": {"command": "npx"}},
+            },
+            "tags": [],
+            "registryJson": {},
+        }]}),
+    )
+    add_container = mocker.patch(
+        "services.remote_mcp_service.add_container_mcp_service",
+        new=AsyncMock(side_effect=[McpPortConflictError("busy"), None]),
+    )
+    mocker.patch(
+        "services.remote_mcp_service.suggest_container_port",
+        side_effect=[5021, 5022],
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        side_effect=[[], [{"mcp_id": 322, "market_id": 88}]],
+    )
+
+    result = await nl2agent_service.install_nl2agent_resource_impl(
+        agent_id=42,
+        candidate_ref="tenant_mcp_repository:88",
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["resource_id"] == 322
+    assert add_container.await_count == 2
+    assert add_container.await_args_list[0].kwargs["port"] == 5021
+    assert add_container.await_args_list[1].kwargs["port"] == 5022
+
+
+@pytest.mark.asyncio
+async def test_invisible_or_incomplete_mcp_repository_is_rejected_without_install(
+    mocker,
+):
+    """UT-BE-NL2A-INSTALL-006 / UT-BE-NL2A-INSTALL-007."""
+
+    mocker.patch("services.nl2agent_service.require_agent_draft_edit")
+    mocker.patch(
+        "services.mcp_management_service.list_community_mcp_services",
+        new=AsyncMock(return_value={"items": [{
+            "marketId": 88,
+            "name": "private-service",
+            "transportType": "url",
+            "serverUrl": "not-a-url",
+            "registryJson": {"internalToken": "must-not-leak"},
+        }]}),
+    )
+    add_mcp = mocker.patch(
+        "services.remote_mcp_service.add_mcp_service",
+        new=AsyncMock(),
+    )
+    mocker.patch(
+        "database.remote_mcp_db.get_mcp_records_by_tenant",
+        return_value=[],
+    )
+
+    with pytest.raises(Nl2AgentResourceError) as exc_info:
+        await nl2agent_service.install_nl2agent_resource_impl(
+            agent_id=42,
+            candidate_ref="tenant_mcp_repository:88",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "resource_not_visible"
+    assert "internalToken" not in str(exc_info.value)
+    add_mcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("draft_error", ["agent_not_draft", "agent_read_only"])
+async def test_non_editable_agent_cannot_start_resource_installation(
+    mocker,
+    draft_error,
+):
+    """UT-BE-NL2A-INSTALL-006."""
+
+    from services.agent_draft_permission_service import AgentDraftEditError
+
+    mocker.patch(
+        "services.nl2agent_service.require_agent_draft_edit",
+        side_effect=AgentDraftEditError(draft_error),
+    )
+    install = mocker.patch(
+        "management.services.skill.service.install_skills_from_zip_for_tenant",
+    )
+
+    with pytest.raises(AgentDraftEditError, match=draft_error):
+        await nl2agent_service.install_nl2agent_resource_impl(
+            agent_id=42,
+            candidate_ref="nexent_official_skill:daily-report",
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    install.assert_not_called()
+
+
+def test_recommendation_is_derived_from_backend_score_not_model_refs():
+    candidate = ResourceCandidate(
+        candidate_ref="tool:7",
+        resource_type="tool",
+        source="LOCAL_TOOL",
+        name="train_query",
+        description="Query train schedules",
+        requirement_ids=["train_query"],
+        score=0.8,
+    )
+
+    result = _recommended_resource(
+        actual={
+            "candidate_ref": "tool:7",
+            "resource_type": "tool",
+            "source": "LOCAL_TOOL",
+            "name": "train_query",
+            "description": "Query train schedules",
+            "config": [],
+        },
+        supplied=candidate,
+    )
+
+    assert result.recommendation == "recommended"
+
+
+def test_rank_resource_catalog_preserves_requirement_relationship_boundaries(mocker):
+    """UT-BE-NL2A-SCORE-001 / 002 / 003."""
+
+    scores = {
+        "below_threshold": 0.49,
+        "weak_match": 0.50,
+        "strong_match": 0.65,
+    }
+    mocker.patch(
+        "services.nl2agent_service._score_resource_requirement",
+        side_effect=lambda _requirement, resource: scores[resource["name"]],
+    )
+    catalog = [
+        {
+            "candidate_ref": f"tool:{index}",
+            "resource_type": "tool",
+            "source": "MCP_TOOL",
+            "name": name,
+            "description": name,
+            "names": [name],
+            "labels": [],
+            "descriptions": [name],
+            "interfaces": [],
+            "installed": True,
+            "quality": 1.0,
+        }
+        for index, name in enumerate(scores, start=1)
+    ]
+
+    result = _rank_resource_catalog(
+        requirements=[
+            ResourceRequirement(requirement_id="weather", query="Weather")
+        ],
+        catalog=catalog,
+    )
+
+    assert [candidate.candidate_ref for candidate in result.candidates] == [
+        "tool:3",
+        "tool:2",
+    ]
+    assert result.matches_by_requirement == {
+        "weather": [
+            ResourceMatch(
+                candidate_ref="tool:3", score=0.65, strength="strong"
+            ),
+            ResourceMatch(
+                candidate_ref="tool:2", score=0.50, strength="weak"
+            ),
+        ]
+    }
+
+
+def test_rank_resource_catalog_preserves_weak_score_below_strong_boundary(mocker):
+    """A score below 0.65 remains a weak match without round-trip distortion."""
+
+    mocker.patch(
+        "services.nl2agent_service._score_resource_requirement",
+        return_value=0.64999,
+    )
+    catalog = [{
+        "candidate_ref": "tool:1",
+        "resource_type": "tool",
+        "source": "MCP_TOOL",
+        "name": "Weather Tool",
+        "description": "Weather Tool",
+        "names": ["Weather Tool"],
+        "labels": [],
+        "descriptions": ["Weather Tool"],
+        "interfaces": [],
+        "installed": True,
+        "quality": 1.0,
+    }]
+
+    result = _rank_resource_catalog(
+        requirements=[
+            ResourceRequirement(requirement_id="weather", query="Weather")
+        ],
+        catalog=catalog,
+    )
+
+    assert result.matches_by_requirement == {
+        "weather": [
+            ResourceMatch(
+                candidate_ref="tool:1", score=0.64999, strength="weak"
+            )
+        ]
+    }
+
+
+def test_generic_query_parameter_does_not_cover_train_ticket_lookup():
+    """UT-BE-NL2A-SCORE-004: input field names are not capability evidence."""
+
+    requirement = ResourceRequirement(
+        requirement_id="train_query",
+        query="查询列车车次和余票信息",
+        search_terms=[
+            "车次查询",
+            "余票查询",
+            "列车时刻",
+            "train query",
+            "ticket availability",
+        ],
+    )
+    generic_search = {
+        "names": ["tavily_search"],
+        "labels": [],
+        "descriptions": [
+            "Performs an internet search based on your query and returns results."
+        ],
+        "interfaces": ["query", "query string search query"],
+        "installed": True,
+        "quality": 1.0,
+    }
+
+    assert _score_resource_requirement(requirement, generic_search) < 0.65
+
+
+def test_initial_resolution_prefers_installed_strong_match(mocker):
+    """UT-BE-NL2A-RESOLVE-001."""
+
+    requirement = ResourceRequirement(requirement_id="weather", query="Weather")
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:1",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Weather Tool",
+                requirement_ids=["weather"],
+                score=0.70,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "weather": [
+                ResourceMatch(
+                    candidate_ref="tool:1", score=0.70, strength="strong"
+                )
+            ]
+        },
+    )
+    installable = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tenant_mcp_repository:2",
+                resource_type="mcp_server",
+                source="TENANT_MCP_REPOSITORY",
+                name="Weather Pro",
+                requirement_ids=["weather"],
+                score=0.90,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "weather": [
+                ResourceMatch(
+                    candidate_ref="tenant_mcp_repository:2",
+                    score=0.90,
+                    strength="strong",
+                )
+            ]
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=installable),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+    )
+
+    assert result.requirements[0].state == "covered"
+    assert result.next_action == "BIND"
+    assert [resource.candidate_ref for resource in result.resources] == ["tool:1"]
+
+
+def test_empty_capability_allowlist_keeps_strong_generic_search_uncovered(mocker):
+    """UT-BE-NL2A-VERIFY-001 / 005."""
+
+    requirement = ResourceRequirement(
+        requirement_id="train_ticket",
+        query="查询 12306 实时余票并购票",
+    )
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:search",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Web Search",
+                description="Search the public web",
+                requirement_ids=["train_ticket"],
+                score=0.91,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "train_ticket": [
+                ResourceMatch(
+                    candidate_ref="tool:search", score=0.91, strength="strong"
+                )
+            ]
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(
+            return_value=ResourceSearchOutput(
+                candidates=[],
+                uncovered_requirement_ids=["train_ticket"],
+                matches_by_requirement={"train_ticket": []},
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+            capability_verifications=[
+                {
+                    "requirement_id": "train_ticket",
+                    "accepted_candidate_refs": [],
+                }
+            ],
+        )
+    )
+
+    assert result.requirements[0].state == "uncovered"
+    assert result.next_action == "RESOLVE_GAP"
+
+
+def test_empty_capability_allowlist_allows_displayed_weak_candidate(mocker):
+    """UT-BE-NL2A-VERIFY-004: weak references remain backend-owned."""
+
+    requirement = ResourceRequirement(
+        requirement_id="train_ticket",
+        query="查询 12306 实时余票",
+    )
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:search",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Web Search",
+                requirement_ids=["train_ticket"],
+                score=0.61,
+            )
+        ],
+        uncovered_requirement_ids=["train_ticket"],
+        matches_by_requirement={
+            "train_ticket": [
+                ResourceMatch(
+                    candidate_ref="tool:search", score=0.61, strength="weak"
+                )
+            ]
+        },
+    )
+    empty = ResourceSearchOutput(
+        candidates=[],
+        uncovered_requirement_ids=["train_ticket"],
+        matches_by_requirement={"train_ticket": []},
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=empty),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+            capability_verifications=[
+                {
+                    "requirement_id": "train_ticket",
+                    "accepted_candidate_refs": [],
+                }
+            ],
+        )
+    )
+
+    assert result.requirements[0].state == "uncovered"
+    assert result.next_action == "RESOLVE_GAP"
+
+
+def test_capability_allowlist_accepts_installed_strong_candidate(mocker):
+    """UT-BE-NL2A-VERIFY-003: accepted installed candidates cover requirements."""
+
+    requirement = ResourceRequirement(requirement_id="weather", query="Weather")
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:1",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Weather Tool",
+                requirement_ids=["weather"],
+                score=0.70,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "weather": [
+                ResourceMatch(
+                    candidate_ref="tool:1", score=0.70, strength="strong"
+                )
+            ]
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(
+            return_value=ResourceSearchOutput(
+                candidates=[],
+                uncovered_requirement_ids=["weather"],
+                matches_by_requirement={"weather": []},
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+            capability_verifications=[
+                {
+                    "requirement_id": "weather",
+                    "accepted_candidate_refs": ["tool:1"],
+                }
+            ],
+        )
+    )
+
+    assert result.requirements[0].state == "covered"
+    assert result.next_action == "BIND"
+
+
+@pytest.mark.parametrize(
+    "capability_verifications",
+    [
+        [
+            {
+                "requirement_id": "unknown",
+                "accepted_candidate_refs": [],
+            }
+        ],
+        [
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": ["tool:unknown"],
+            }
+        ],
+        [
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": ["tool:1", "tool:1"],
+            }
+        ],
+        [
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": [],
+            },
+            {
+                "requirement_id": "weather",
+                "accepted_candidate_refs": [],
+            },
+        ],
+        [],
+    ],
+    ids=(
+        "unknown-requirement",
+        "unknown-candidate",
+        "duplicate-candidate",
+        "duplicate-requirement",
+        "missing-requirement",
+    ),
+)
+def test_capability_allowlist_rejects_invalid_requirement_results(
+    mocker,
+    capability_verifications,
+):
+    """UT-BE-NL2A-VERIFY-002: allowlists are complete and reference-safe."""
+
+    requirement = ResourceRequirement(requirement_id="weather", query="Weather")
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:1",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Weather Tool",
+                requirement_ids=["weather"],
+                score=0.70,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "weather": [
+                ResourceMatch(
+                    candidate_ref="tool:1", score=0.70, strength="strong"
+                )
+            ]
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(
+            return_value=ResourceSearchOutput(
+                candidates=[],
+                uncovered_requirement_ids=["weather"],
+                matches_by_requirement={"weather": []},
+            )
+        ),
+    )
+
+    with pytest.raises(
+        (Nl2AgentResourceError, ValidationError),
+        match="invalid_capability_verifications|accepted_candidate_refs",
+    ):
+        asyncio.run(
+            resolve_resource_requirements_impl(
+                requirements=[requirement],
+                phase="INITIAL",
+                exclude_refs=[],
+                tenant_id="tenant-a",
+                user_id="user-a",
+                capability_verifications=capability_verifications,
+            )
+        )
+
+
+def test_initial_resolution_marks_installable_only_for_strong_repository_match(
+    mocker,
+):
+    """UT-BE-NL2A-RESOLVE-002 / 004."""
+
+    requirement = ResourceRequirement(requirement_id="mail", query="Send mail")
+    uncovered_requirement = ResourceRequirement(
+        requirement_id="inventory", query="ERP inventory"
+    )
+    installed = ResourceSearchOutput(
+        candidates=[],
+        uncovered_requirement_ids=["mail", "inventory"],
+        matches_by_requirement={"mail": [], "inventory": []},
+    )
+    installable = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tenant_mcp_repository:7",
+                resource_type="mcp_server",
+                source="TENANT_MCP_REPOSITORY",
+                name="Mail Sender",
+                requirement_ids=["mail"],
+                score=0.83,
+            )
+        ],
+        uncovered_requirement_ids=["inventory"],
+        matches_by_requirement={
+            "mail": [
+                ResourceMatch(
+                    candidate_ref="tenant_mcp_repository:7",
+                    score=0.83,
+                    strength="strong",
+                )
+            ],
+            "inventory": [],
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=installable),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement, uncovered_requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+            capability_verifications=[
+                {
+                    "requirement_id": "mail",
+                    "accepted_candidate_refs": ["tenant_mcp_repository:7"],
+                },
+                {
+                    "requirement_id": "inventory",
+                    "accepted_candidate_refs": [],
+                },
+            ],
+        )
+    )
+
+    assert [item.state for item in result.requirements] == [
+        "installable",
+        "uncovered",
+    ]
+    assert result.next_action == "INSTALL"
+    assert [resource.candidate_ref for resource in result.resources] == [
+        "tenant_mcp_repository:7"
+    ]
+
+
+def test_initial_resolution_keeps_weak_matches_as_gap_references(mocker):
+    """UT-BE-NL2A-RESOLVE-003."""
+
+    requirement = ResourceRequirement(
+        requirement_id="inventory", query="ERP inventory"
+    )
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:3",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Database Query",
+                requirement_ids=["inventory"],
+                score=0.59,
+            )
+        ],
+        uncovered_requirement_ids=["inventory"],
+        matches_by_requirement={
+            "inventory": [
+                ResourceMatch(
+                    candidate_ref="tool:3", score=0.59, strength="weak"
+                )
+            ]
+        },
+    )
+    installable = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tenant_skill_repository:4",
+                resource_type="skill",
+                source="TENANT_SKILL_REPOSITORY",
+                name="Generic ERP",
+                requirement_ids=["inventory"],
+                score=0.61,
+            )
+        ],
+        uncovered_requirement_ids=["inventory"],
+        matches_by_requirement={
+            "inventory": [
+                ResourceMatch(
+                    candidate_ref="tenant_skill_repository:4",
+                    score=0.61,
+                    strength="weak",
+                )
+            ]
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=installable),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+    )
+
+    resolution = result.requirements[0]
+    assert resolution.state == "uncovered"
+    assert result.next_action == "RESOLVE_GAP"
+    assert [match.candidate_ref for match in resolution.weak_references] == [
+        "tenant_skill_repository:4",
+        "tool:3",
+    ]
+    assert {resource.candidate_ref for resource in result.resources} == {
+        "tool:3",
+        "tenant_skill_repository:4",
+    }
+    assert all(
+        resource.recommendation == "optional" for resource in result.resources
+    )
+
+
+@pytest.mark.parametrize("phase", ["POST_INSTALL", "POST_GAP"])
+def test_post_resolution_uses_only_installed_catalog(mocker, phase):
+    """UT-BE-NL2A-RESOLVE-005."""
+
+    requirement = ResourceRequirement(requirement_id="mail", query="Send mail")
+    installed_search = mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(
+            return_value=ResourceSearchOutput(
+                candidates=[],
+                uncovered_requirement_ids=["mail"],
+                matches_by_requirement={"mail": []},
+            )
+        ),
+    )
+    installable_search = mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase=phase,
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+    )
+
+    assert result.requirements[0].state == "uncovered"
+    assert result.next_action == "RESOLVE_GAP"
+    installed_search.assert_awaited_once()
+    installable_search.assert_not_awaited()
+
+
+def test_resolution_deduplicates_resource_covering_multiple_requirements(mocker):
+    """UT-BE-NL2A-RESOLVE-006."""
+
+    requirements = [
+        ResourceRequirement(requirement_id="weather", query="Weather"),
+        ResourceRequirement(requirement_id="forecast", query="Forecast"),
+    ]
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:9",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Weather Suite",
+                requirement_ids=["weather", "forecast"],
+                score=0.82,
+            )
+        ],
+        uncovered_requirement_ids=[],
+        matches_by_requirement={
+            "weather": [
+                ResourceMatch(
+                    candidate_ref="tool:9", score=0.82, strength="strong"
+                )
+            ],
+            "forecast": [
+                ResourceMatch(
+                    candidate_ref="tool:9", score=0.71, strength="strong"
+                )
+            ],
+        },
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(
+            return_value=ResourceSearchOutput(
+                candidates=[],
+                uncovered_requirement_ids=["weather", "forecast"],
+                matches_by_requirement={"weather": [], "forecast": []},
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=requirements,
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+    )
+
+    assert [resource.candidate_ref for resource in result.resources] == ["tool:9"]
+    assert result.requirements[0].installed_matches[0].score == 0.82
+    assert result.requirements[1].installed_matches[0].score == 0.71
 
 
 def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
@@ -1275,7 +2517,8 @@ async def test_verified_binding_context_rereads_database_without_secret_values(m
     assert "Current authoritative description" in context.content["text"]
     assert "Legacy workflow description" not in context.content["text"]
     assert "weather_forecast" in context.content["text"]
-    assert "api_key" in context.content["text"]
+    assert "api_key" not in context.content["text"]
+    assert "runtime_inputs" in context.content["text"]
     assert "private-secret" not in context.content["text"]
     assert "catalog-secret" not in context.content["text"]
     assert "daily_report" in context.content["text"]

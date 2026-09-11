@@ -20,6 +20,7 @@ SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME = "search_installed_mcp_tools"
 SEARCH_INSTALLED_RESOURCES_LOCAL_NAME = "search_installed_resources"
 SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME = "search_uninstalled_resources"
 RECOMMEND_RESOURCES_LOCAL_NAME = "recommend_resources"
+RESOLVE_RESOURCE_REQUIREMENTS_LOCAL_NAME = "resolve_resource_requirements"
 SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME = "save_agent_draft_fields"
 NL2A_WRAPPER_LOCAL_NAME = "wrapper"
 NL2A_MCP_LOCAL_TOOL_NAMES = (
@@ -27,6 +28,7 @@ NL2A_MCP_LOCAL_TOOL_NAMES = (
     SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
     SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME,
     RECOMMEND_RESOURCES_LOCAL_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_LOCAL_NAME,
     SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
     NL2A_WRAPPER_LOCAL_NAME,
 )
@@ -35,6 +37,7 @@ NL2A_MCP_LOCAL_TOOL_NAMES = (
     SEARCH_INSTALLED_RESOURCES_NAME,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     RECOMMEND_RESOURCES_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_NAME,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     NL2A_WRAPPER_NAME,
 ) = tuple(
@@ -46,6 +49,7 @@ NL2A_MCP_TOOL_NAMES = (
     SEARCH_INSTALLED_RESOURCES_NAME,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     RECOMMEND_RESOURCES_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_NAME,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
     NL2A_WRAPPER_NAME,
 )
@@ -54,6 +58,7 @@ NL2A_MCP_LEGACY_TOOL_NAMES = (
     SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
     SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME,
     RECOMMEND_RESOURCES_LOCAL_NAME,
+    RESOLVE_RESOURCE_REQUIREMENTS_LOCAL_NAME,
     SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
     NL2A_WRAPPER_NAME,
 )
@@ -83,11 +88,24 @@ RECOMMEND_RESOURCES_DESCRIPTION = (
     "unique recommended_refs subset. Decode the JSON result, then pass it "
     f"unchanged to {NL2A_WRAPPER_NAME} with the matching installation or binding subtype."
 )
+RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION = (
+    "Resolve every structured capability requirement against installed and "
+    "installable resources. With verification_required=true, first returns a "
+    "finite backend-ranked candidate set and next_action=VERIFY. Submit one "
+    "capability_verifications item per requirement containing only the "
+    "accepted_candidate_refs that can fully satisfy it, then call this tool "
+    "again without verification_required. Omit rejected or uncertain candidates "
+    "instead of explaining them. The final result contains "
+    "backend-owned per-requirement states (`covered`, `installable`, or "
+    "`uncovered`) and exactly one card next_action. Never invent candidate_ref "
+    "values or capabilities not present in the supplied resource summary."
+)
 NL2A_WRAPPER_DESCRIPTION = (
     "Build one NL2Agent output for the existing draft. Always pass the current "
     "`agent_id` and `subtype`. For `requirement_clarification`, pass structured "
     "`questions`. For resource installation or binding, pass `agent_id` and the "
-    "verified `resource_result`. JSON parameters must be decoded dictionaries, "
+    "verified `resource_result` returned by the unified resolver. JSON parameters "
+    "must be decoded dictionaries, "
     f"never raw JSON strings. Call the tool as `result = {NL2A_WRAPPER_NAME}(...)`, "
     "then use `print(result)`."
 )
@@ -117,6 +135,7 @@ NL2A_SUBTYPES = Literal[
     "requirement_clarification",
     "suggested_resource_installation",
     "installed_resource_binding",
+    "resource_gap_resolution",
 ]
 
 INSTALLED_RESOURCE_SOURCES = frozenset(
@@ -220,6 +239,283 @@ class ResourceSearchOutput(BaseModel):
     status: Literal["success"] = "success"
     candidates: list[ResourceCandidate]
     uncovered_requirement_ids: list[str]
+    matches_by_requirement: dict[str, list["ResourceMatch"]] = Field(
+        default_factory=dict
+    )
+
+
+ResourceResolutionPhase = Literal["INITIAL", "POST_INSTALL", "POST_GAP"]
+ResourceResolutionState = Literal["covered", "installable", "uncovered"]
+ResourceResolutionNextAction = Literal[
+    "VERIFY", "INSTALL", "RESOLVE_GAP", "BIND"
+]
+
+
+class ResolveResourceRequirementsInput(SearchUninstalledResourcesInput):
+    """Validated input for the unified backend-owned resource resolver."""
+
+    phase: ResourceResolutionPhase
+    verification_required: bool = False
+    capability_verifications: list["CapabilityVerification"] | None = None
+
+
+class ResourceMatch(BaseModel):
+    """One backend-computed requirement-to-resource relationship."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(min_length=1)
+    score: float = Field(ge=0, le=1)
+    strength: Literal["strong", "weak"]
+
+    @model_validator(mode="after")
+    def validate_strength(self) -> "ResourceMatch":
+        if self.strength == "strong" and self.score < 0.65:
+            raise ValueError("strong matches require score >= 0.65")
+        if self.strength == "weak" and not 0.50 <= self.score < 0.65:
+            raise ValueError("weak matches require 0.50 <= score < 0.65")
+        return self
+
+
+class CapabilityVerification(BaseModel):
+    """Model-selected candidate allowlist for one backend requirement."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    requirement_id: str = Field(min_length=1)
+    accepted_candidate_refs: list[str] = Field(max_length=12)
+
+    @model_validator(mode="after")
+    def validate_accepted_candidate_refs(self) -> "CapabilityVerification":
+        if len(self.accepted_candidate_refs) != len(set(self.accepted_candidate_refs)):
+            raise ValueError("accepted_candidate_refs must be unique")
+        return self
+
+
+class ResourceCardSummary(BaseModel):
+    """Configuration-free resource metadata safe for NL2Agent cards."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(min_length=1)
+    resource_type: Literal["tool", "skill", "mcp_server"]
+    source: Literal[
+        "LOCAL_TOOL",
+        "MCP_TOOL",
+        "INSTALLED_SKILL",
+        "NEXENT_OFFICIAL_SKILL",
+        "TENANT_SKILL_REPOSITORY",
+        "TENANT_MCP_REPOSITORY",
+    ]
+    name: str = Field(min_length=1)
+    description: str = ""
+    requirement_ids: list[str] = Field(min_length=1, max_length=8)
+    recommendation: Literal["recommended", "optional"]
+    is_bound: bool = False
+
+    @model_validator(mode="after")
+    def validate_requirement_ids(self) -> "ResourceCardSummary":
+        if len(self.requirement_ids) != len(set(self.requirement_ids)):
+            raise ValueError("requirement_ids must be unique")
+        return self
+
+
+class RequirementResolution(BaseModel):
+    """Backend-owned state for one resource requirement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requirement: ResourceRequirement
+    state: ResourceResolutionState
+    installed_matches: list[ResourceMatch] = Field(default_factory=list)
+    installable_matches: list[ResourceMatch] = Field(default_factory=list)
+    weak_references: list[ResourceMatch] = Field(default_factory=list, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_matches(self) -> "RequirementResolution":
+        if any(match.strength != "strong" for match in self.installed_matches):
+            raise ValueError("installed_matches must contain strong matches")
+        if any(match.strength != "strong" for match in self.installable_matches):
+            raise ValueError("installable_matches must contain strong matches")
+        if any(match.strength != "weak" for match in self.weak_references):
+            raise ValueError("weak_references must contain weak matches")
+        for matches in (
+            self.installed_matches,
+            self.installable_matches,
+            self.weak_references,
+        ):
+            refs = [match.candidate_ref for match in matches]
+            if len(refs) != len(set(refs)):
+                raise ValueError("match candidate_ref values must be unique")
+        expected_state = (
+            "covered"
+            if self.installed_matches
+            else "installable"
+            if self.installable_matches
+            else "uncovered"
+        )
+        if self.state != expected_state:
+            raise ValueError(
+                f"state must be {expected_state} for the available strong matches"
+            )
+        return self
+
+
+class ResourceResolutionOutput(BaseModel):
+    """Complete backend resolution for one NL2Agent resource phase."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["success"] = "success"
+    phase: ResourceResolutionPhase
+    verification_required: bool = False
+    next_action: ResourceResolutionNextAction
+    requirements: list[RequirementResolution]
+    resources: list[ResourceCardSummary]
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> "ResourceResolutionOutput":
+        requirement_ids = [
+            item.requirement.requirement_id for item in self.requirements
+        ]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        resource_refs = [item.candidate_ref for item in self.resources]
+        if len(resource_refs) != len(set(resource_refs)):
+            raise ValueError("resource candidate_ref values must be unique")
+        states = {item.state for item in self.requirements}
+        if self.phase != "INITIAL" and "installable" in states:
+            raise ValueError("post-install phases cannot contain installable state")
+        expected_action = (
+            "VERIFY"
+            if self.verification_required
+            else "INSTALL"
+            if self.phase == "INITIAL" and "installable" in states
+            else "RESOLVE_GAP"
+            if "uncovered" in states
+            else "BIND"
+        )
+        if self.next_action != expected_action:
+            raise ValueError(
+                f"next_action must be {expected_action} for the resolved states"
+            )
+        return self
+
+
+class WeakResourceReference(BaseModel):
+    """Display-only weak candidate shown on a resource-gap card."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    candidate_ref: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    description: str = ""
+    source: Literal[
+        "LOCAL_TOOL",
+        "MCP_TOOL",
+        "INSTALLED_SKILL",
+        "NEXENT_OFFICIAL_SKILL",
+        "TENANT_SKILL_REPOSITORY",
+        "TENANT_MCP_REPOSITORY",
+    ]
+    score: float = Field(ge=0.50, lt=0.65)
+
+
+class ResourceGapRequirement(BaseModel):
+    """One uncovered requirement and its optional weak references."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    requirement_id: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=500)
+    search_terms: list[str] = Field(default_factory=list, max_length=8)
+    weak_references: list[WeakResourceReference] = Field(
+        default_factory=list, max_length=2
+    )
+
+
+class SuggestedResourceInstallationPayloadV2(BaseModel):
+    """Configuration-free resource installation card payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    subtype: Literal["suggested_resource_installation"] = (
+        "suggested_resource_installation"
+    )
+    agent_id: int = Field(gt=0)
+    resources: list[ResourceCardSummary] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_installable_sources(
+        self,
+    ) -> "SuggestedResourceInstallationPayloadV2":
+        if any(
+            resource.source not in UNINSTALLED_RESOURCE_SOURCES
+            for resource in self.resources
+        ):
+            raise ValueError("installation resources must be installable")
+        return self
+
+
+class InstalledResourceBindingPayloadV2(BaseModel):
+    """Configuration-free installed resource binding card payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    subtype: Literal["installed_resource_binding"] = "installed_resource_binding"
+    agent_id: int = Field(gt=0)
+    resources: list[ResourceCardSummary] = Field(max_length=12)
+    requirements: list[ResourceRequirement] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_installed_sources(self) -> "InstalledResourceBindingPayloadV2":
+        if any(
+            resource.source not in INSTALLED_RESOURCE_SOURCES
+            for resource in self.resources
+        ):
+            raise ValueError("binding resources must already be installed")
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        return self
+
+
+class ResourceGapResolutionPayloadV2(BaseModel):
+    """Configuration-free resource gap card payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    subtype: Literal["resource_gap_resolution"] = "resource_gap_resolution"
+    agent_id: int = Field(gt=0)
+    requirements: list[ResourceGapRequirement] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_requirement_ids(self) -> "ResourceGapResolutionPayloadV2":
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        return self
+
+
+def get_resource_gap_requirements(
+    *,
+    requirements: list[ResourceRequirement],
+    installed: ResourceSearchOutput,
+    installable: ResourceSearchOutput,
+) -> list[ResourceRequirement]:
+    """Return requirements not covered by installed or installable resources."""
+
+    uncovered_by_both = set(installed.uncovered_requirement_ids) & set(
+        installable.uncovered_requirement_ids
+    )
+    return [
+        requirement
+        for requirement in requirements
+        if requirement.requirement_id in uncovered_by_both
+    ]
 
 
 class RecommendResourcesInput(BaseModel):
@@ -327,6 +623,7 @@ class InstalledResourceBindingPayload(BaseModel):
     subtype: Literal["installed_resource_binding"] = "installed_resource_binding"
     agent_id: int = Field(gt=0)
     resources: list[RecommendedResource] = Field(max_length=12)
+    requirements: list[ResourceRequirement] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_installed_sources(self) -> "InstalledResourceBindingPayload":
@@ -504,6 +801,23 @@ class RequirementClarificationPayload(BaseModel):
     )
 
 
+class ResourceGapResolutionPayload(BaseModel):
+    """NL2Agent payload for resolving requirements without matching resources."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subtype: Literal["resource_gap_resolution"] = "resource_gap_resolution"
+    agent_id: int = Field(gt=0)
+    requirements: list[ResourceRequirement] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_requirement_ids(self) -> "ResourceGapResolutionPayload":
+        requirement_ids = [item.requirement_id for item in self.requirements]
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise ValueError("requirement_id values must be unique")
+        return self
+
+
 class InstalledMcpToolRecommendation(BaseModel):
     """Safe display metadata for one installed MCP tool recommendation."""
 
@@ -536,11 +850,101 @@ class SearchInstalledMcpToolsErrorObservation(BaseModel):
     retryable: Literal[True] = True
 
 
+_NEXT_ACTION_SUBTYPE = {
+    "INSTALL": "suggested_resource_installation",
+    "RESOLVE_GAP": "resource_gap_resolution",
+    "BIND": "installed_resource_binding",
+}
+
+
+def _build_v2_resource_payload(
+    *,
+    subtype: NL2A_SUBTYPES,
+    agent_id: int,
+    resolution: ResourceResolutionOutput,
+) -> BaseModel:
+    """Build the card selected by a verified unified resolution result."""
+
+    expected_subtype = _NEXT_ACTION_SUBTYPE[resolution.next_action]
+    if subtype != expected_subtype:
+        raise ValueError(
+            f"{subtype} does not match next_action {resolution.next_action}"
+        )
+
+    resources_by_ref = {
+        resource.candidate_ref: resource for resource in resolution.resources
+    }
+    if subtype == "suggested_resource_installation":
+        selected_refs = {
+            match.candidate_ref
+            for item in resolution.requirements
+            if item.state == "installable"
+            for match in item.installable_matches
+        }
+        return SuggestedResourceInstallationPayloadV2(
+            agent_id=agent_id,
+            resources=[
+                resource
+                for ref, resource in resources_by_ref.items()
+                if ref in selected_refs
+            ],
+        )
+    if subtype == "resource_gap_resolution":
+        gap_requirements: list[ResourceGapRequirement] = []
+        for item in resolution.requirements:
+            if item.state != "uncovered":
+                continue
+            weak_references = []
+            for match in item.weak_references:
+                resource = resources_by_ref.get(match.candidate_ref)
+                if resource is None:
+                    continue
+                weak_references.append(WeakResourceReference(
+                    candidate_ref=resource.candidate_ref,
+                    name=resource.name,
+                    description=resource.description,
+                    source=resource.source,
+                    score=match.score,
+                ))
+            gap_requirements.append(ResourceGapRequirement(
+                requirement_id=item.requirement.requirement_id,
+                query=item.requirement.query,
+                search_terms=item.requirement.search_terms,
+                weak_references=weak_references,
+            ))
+        return ResourceGapResolutionPayloadV2(
+            agent_id=agent_id,
+            requirements=gap_requirements,
+        )
+
+    selected_refs = {
+        match.candidate_ref
+        for item in resolution.requirements
+        if item.state == "covered"
+        for match in item.installed_matches
+    }
+    return InstalledResourceBindingPayloadV2(
+        agent_id=agent_id,
+        resources=[
+            resource
+            for ref, resource in resources_by_ref.items()
+            if ref in selected_refs
+        ],
+        requirements=[item.requirement for item in resolution.requirements],
+    )
+
+
 def build_nl2a_wrapper(
     subtype: NL2A_SUBTYPES,
     agent_id: int,
-    resource_result: dict[str, Any] | RecommendResourcesOutput | None = None,
+    resource_result: (
+        dict[str, Any]
+        | RecommendResourcesOutput
+        | ResourceResolutionOutput
+        | None
+    ) = None,
     questions: list[RequirementClarificationQuestion] | None = None,
+    requirements: list[ResourceRequirement] | None = None,
 ) -> str:
     """Fill the JSON template selected by subtype and return its wrapper."""
 
@@ -550,6 +954,26 @@ def build_nl2a_wrapper(
         output = RequirementClarificationPayload(
             agent_id=agent_id,
             questions=questions,
+        ).model_dump(mode="json")
+    elif resource_result is not None and (
+        isinstance(resource_result, ResourceResolutionOutput)
+        or (
+            isinstance(resource_result, dict)
+            and "next_action" in resource_result
+        )
+    ):
+        resolution = ResourceResolutionOutput.model_validate(resource_result)
+        output = _build_v2_resource_payload(
+            subtype=subtype,
+            agent_id=agent_id,
+            resolution=resolution,
+        ).model_dump(mode="json")
+    elif subtype == "resource_gap_resolution":
+        if requirements is None:
+            raise ValueError("resource_gap_resolution requires requirements")
+        output = ResourceGapResolutionPayload(
+            agent_id=agent_id,
+            requirements=requirements,
         ).model_dump(mode="json")
     elif subtype in {
         "suggested_resource_installation",
@@ -565,9 +989,10 @@ def build_nl2a_wrapper(
             if subtype == "suggested_resource_installation"
             else InstalledResourceBindingPayload
         )
-        output = payload_model(
-            agent_id=agent_id, resources=verified.resources
-        ).model_dump(mode="json")
+        payload_kwargs = {"agent_id": agent_id, "resources": verified.resources}
+        if subtype == "installed_resource_binding":
+            payload_kwargs["requirements"] = requirements or []
+        output = payload_model(**payload_kwargs).model_dump(mode="json")
     else:
         raise ValueError(f"unsupported nl2a subtype: {subtype}")
 
@@ -588,40 +1013,14 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
     """Create fresh SDK configs for the NL2Agent business tools."""
     return [
         ToolConfig(
-            class_name=SEARCH_INSTALLED_RESOURCES_NAME,
-            name=SEARCH_INSTALLED_RESOURCES_NAME,
-            description=SEARCH_INSTALLED_RESOURCES_DESCRIPTION,
-            inputs=(
-                '{"agent_id":"int",'
-                '"requirements":"list[ResourceRequirement]"}'
-            ),
-            output_type="object",
-            params={},
-            source="mcp",
-            usage="outer-apis",
-        ),
-        ToolConfig(
-            class_name=SEARCH_UNINSTALLED_RESOURCES_NAME,
-            name=SEARCH_UNINSTALLED_RESOURCES_NAME,
-            description=SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION,
+            class_name=RESOLVE_RESOURCE_REQUIREMENTS_NAME,
+            name=RESOLVE_RESOURCE_REQUIREMENTS_NAME,
+            description=RESOLVE_RESOURCE_REQUIREMENTS_DESCRIPTION,
             inputs=(
                 '{"agent_id":"int",'
                 '"requirements":"list[ResourceRequirement]",'
+                '"phase":"INITIAL | POST_INSTALL | POST_GAP",'
                 '"exclude_refs":"list[str]"}'
-            ),
-            output_type="object",
-            params={},
-            source="mcp",
-            usage="outer-apis",
-        ),
-        ToolConfig(
-            class_name=RECOMMEND_RESOURCES_NAME,
-            name=RECOMMEND_RESOURCES_NAME,
-            description=RECOMMEND_RESOURCES_DESCRIPTION,
-            inputs=(
-                '{"agent_id":"int",'
-                '"candidates":"list[ResourceCandidate]",'
-                '"recommended_refs":"list[str]"}'
             ),
             output_type="object",
             params={},
@@ -662,7 +1061,7 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                 {
                     "subtype": "str",
                     "agent_id": "int",
-                    "resource_result": "RecommendResourcesOutput | None",
+                    "resource_result": "ResourceResolutionOutput | None",
                     "questions": "list[RequirementClarificationQuestion] | None",
                 },
                 separators=(",", ":"),
@@ -903,6 +1302,69 @@ async def search_uninstalled_resources(
         )
 
 
+async def resolve_resource_requirements(
+    agent_id: int,
+    requirements: list[dict[str, Any]],
+    phase: ResourceResolutionPhase,
+    exclude_refs: list[str] | None = None,
+    verification_required: bool = False,
+    capability_verifications: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return one complete, backend-owned resource resolution decision."""
+
+    try:
+        payload = ResolveResourceRequirementsInput(
+            requirements=requirements,
+            phase=phase,
+            exclude_refs=exclude_refs or [],
+            verification_required=verification_required,
+            capability_verifications=capability_verifications,
+        )
+    except ValidationError:
+        return _dump_resource_tool_error("invalid_requirements", retryable=False)
+
+    try:
+        resolved_agent_id = _resolve_agent_context_id(agent_id)
+    except AgentContextMismatchError:
+        return _dump_resource_tool_error(
+            "agent_context_mismatch", retryable=False
+        )
+
+    try:
+        from services.agent_draft_permission_service import (
+            AgentDraftEditError,
+            require_agent_draft_edit,
+        )
+        from services.nl2agent_service import resolve_resource_requirements_impl
+
+        authorization = get_http_request().headers.get("Authorization")
+        user_id, tenant_id = get_current_user_id(authorization)
+        require_agent_draft_edit(
+            agent_id=resolved_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        result = await resolve_resource_requirements_impl(
+            requirements=payload.requirements,
+            phase=payload.phase,
+            exclude_refs=payload.exclude_refs,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            verification_required=payload.verification_required,
+            capability_verifications=payload.capability_verifications,
+        )
+        return result.model_dump(mode="json")
+    except AgentDraftEditError as exc:
+        return _dump_resource_tool_error(exc.code, retryable=False)
+    except (PermissionError, UnauthorizedError):
+        return _dump_resource_tool_error("unauthorized", retryable=False)
+    except Exception:
+        logger.exception("Failed to resolve NL2Agent resource requirements")
+        return _dump_resource_tool_error(
+            "resource_resolution_failed", retryable=True
+        )
+
+
 async def recommend_resources(
     agent_id: int,
     candidates: list[dict[str, Any]],
@@ -973,10 +1435,12 @@ async def nl2a_wrapper(
         "requirement_clarification",
         "suggested_resource_installation",
         "installed_resource_binding",
+        "resource_gap_resolution",
     ],
     agent_id: int,
     resource_result: dict[str, Any] | None = None,
     questions: list[RequirementClarificationQuestion] | None = None,
+    requirements: list[ResourceRequirement] | None = None,
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
@@ -1000,6 +1464,28 @@ async def nl2a_wrapper(
         return _agent_context_error(exc.code)
     except (PermissionError, UnauthorizedError):
         return _agent_context_error("unauthorized")
+
+    if resource_result is not None and "next_action" in resource_result:
+        supplied = ResourceResolutionOutput.model_validate(resource_result)
+        if not supplied.requirements:
+            if supplied.resources or supplied.next_action != "BIND":
+                raise ValueError("empty resource resolution must bind no resources")
+            verified = supplied
+        else:
+            from services.nl2agent_service import resolve_resource_requirements_impl
+
+            verified = await resolve_resource_requirements_impl(
+                requirements=[item.requirement for item in supplied.requirements],
+                phase=supplied.phase,
+                exclude_refs=[],
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+        return build_nl2a_wrapper(
+            subtype=subtype,
+            agent_id=resolved_agent_id,
+            resource_result=verified,
+        )
 
     if subtype in {
         "suggested_resource_installation",
@@ -1033,6 +1519,7 @@ async def nl2a_wrapper(
             subtype=subtype,
             agent_id=resolved_agent_id,
             resource_result=verified,
+            requirements=requirements,
         )
 
     return build_nl2a_wrapper(
@@ -1040,6 +1527,7 @@ async def nl2a_wrapper(
         agent_id=resolved_agent_id,
         resource_result=resource_result,
         questions=questions,
+        requirements=requirements,
     )
 
 
