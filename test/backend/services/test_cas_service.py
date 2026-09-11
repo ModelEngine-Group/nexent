@@ -32,6 +32,7 @@ consts_mock.const.CAS_ENABLED = True
 consts_mock.const.CAS_HEARTBEAT_COOKIE_NAME = "AUTH_TOKEN"
 consts_mock.const.CAS_HEARTBEAT_INTERVAL_SECONDS = 300
 consts_mock.const.CAS_HEARTBEAT_URL = ""
+consts_mock.const.CAS_INTERNAL_SERVER_URL = ""
 consts_mock.const.CAS_LOGIN_MODE = "button"
 consts_mock.const.CAS_LOGOUT_URL = ""
 consts_mock.const.CAS_RENEW_BEFORE_SECONDS = 300

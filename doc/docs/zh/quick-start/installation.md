@@ -395,6 +395,8 @@ Docker 部署在 `deploy/env/.env` 中配置 CAS：
 ```bash
 CAS_ENABLED=true
 CAS_SERVER_URL=http://localhost:8080/cas
+# 可选：后端容器访问 CAS 的内部地址；为空时复用 CAS_SERVER_URL。
+CAS_INTERNAL_SERVER_URL=
 CAS_VALIDATE_PATH=/p3/serviceValidate
 CAS_CALLBACK_BASE_URL=http://localhost:3000
 

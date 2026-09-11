@@ -12,7 +12,9 @@
 
 ## 启动
 
-```powershell
+使用 Docker Compose 启动：
+
+```bash
 docker compose -f deploy/cas-mock/docker-compose.yml up -d --build
 ```
 
@@ -20,11 +22,12 @@ docker compose -f deploy/cas-mock/docker-compose.yml up -d --build
 
 ## Nexent 配置
 
-Docker Desktop 下，Nexent 后端容器访问宿主机发布的 CAS 服务使用 `host.docker.internal`：
+浏览器使用 `CAS_SERVER_URL`，后端容器使用 `CAS_INTERNAL_SERVER_URL`。如果 CAS 服务与 Nexent 部署在同一个 Docker 网络内，可以将后者配置为容器服务名，例如 `http://cas-server:8080/cas`：
 
 ```env
 CAS_ENABLED=true
-CAS_SERVER_URL=http://host.docker.internal:3001/cas
+CAS_SERVER_URL=http://localhost:3001/cas
+CAS_INTERNAL_SERVER_URL=http://host.docker.internal:3001/cas
 CAS_VALIDATE_PATH=/p3/serviceValidate
 CAS_CALLBACK_BASE_URL=http://localhost:30000
 CAS_LOGIN_MODE=button
