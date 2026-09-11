@@ -21,6 +21,50 @@ export interface AgentShareStreamEvent {
   content?: unknown;
 }
 
+export function getAgentShareLoadAction({
+  shareToken,
+  isAuthChecking,
+  isAuthenticated,
+}: {
+  shareToken?: string;
+  isAuthChecking: boolean;
+  isAuthenticated: boolean;
+}): "wait" | "load" {
+  return shareToken && !isAuthChecking && isAuthenticated ? "load" : "wait";
+}
+
+export function getAgentSharePageState({
+  isAuthChecking,
+  isAuthenticated,
+  isLoading,
+  hasMetadata,
+  hasUnavailableError,
+}: {
+  isAuthChecking: boolean;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  hasMetadata: boolean;
+  hasUnavailableError: boolean;
+}): "loading" | "unavailable" | "ready" {
+  if (isAuthChecking || !isAuthenticated || isLoading) {
+    return "loading";
+  }
+  if (hasUnavailableError || !hasMetadata) {
+    return "unavailable";
+  }
+  return "ready";
+}
+
+export function buildAgentShareRunPayload(
+  query: string,
+  timezone?: string
+): { query: string; timezone: string } {
+  return {
+    query: query.trim(),
+    timezone: timezone || "UTC",
+  };
+}
+
 export function extractAgentShareHistory(
   history: unknown
 ): AgentShareChatMessage[] {

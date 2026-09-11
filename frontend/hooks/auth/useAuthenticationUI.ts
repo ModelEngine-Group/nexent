@@ -8,7 +8,10 @@ import { useTranslation } from "react-i18next";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
-import { isAnonymousConversationSharePath } from "@/lib/agentUsageGuide";
+import {
+  buildAuthenticationReturnPath,
+  isAnonymousConversationSharePath,
+} from "@/lib/agentUsageGuide";
 import { authEvents, authEventUtils } from "@/lib/authEvents";
 import { forcedLoginService } from "@/services/forcedLoginService";
 import { AuthenticationUIReturn, RegisterModalOptions } from "@/types/auth";
@@ -39,6 +42,10 @@ export function useAuthenticationUI({
   // same navigation-free shell, but require a signed-in visitor.
   const isAnonymousConversationSharePage =
     isAnonymousConversationSharePath(effectivePath);
+  const authenticationReturnPath = buildAuthenticationReturnPath(
+    pathname || "/",
+    searchParams.toString()
+  );
 
   // UI state for modals - managed locally within the hook
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -83,10 +90,14 @@ export function useAuthenticationUI({
       return;
     }
 
-    redirectToForcedLogin(effectivePath).then((redirected) => {
+    redirectToForcedLogin(authenticationReturnPath).then((redirected) => {
       if (!redirected) setIsLoginModalOpen(true);
     });
-  }, [effectivePath, isAnonymousConversationSharePage, redirectToForcedLogin]);
+  }, [
+    authenticationReturnPath,
+    isAnonymousConversationSharePage,
+    redirectToForcedLogin,
+  ]);
 
   const closeLoginModal = useCallback(() => {
     setIsLoginModalOpen(false);
@@ -107,11 +118,17 @@ export function useAuthenticationUI({
   const openAuthPromptModal = useCallback(
     (redirect?: string) => {
       if (isAnonymousConversationSharePage) return;
-      redirectToForcedLogin(redirect || effectivePath).then((redirected) => {
-        if (!redirected) setIsAuthPromptModalOpen(true);
-      });
+      redirectToForcedLogin(redirect || authenticationReturnPath).then(
+        (redirected) => {
+          if (!redirected) setIsAuthPromptModalOpen(true);
+        }
+      );
     },
-    [effectivePath, isAnonymousConversationSharePage, redirectToForcedLogin]
+    [
+      authenticationReturnPath,
+      isAnonymousConversationSharePage,
+      redirectToForcedLogin,
+    ]
   );
 
   const closeAuthPromptModal = useCallback(() => {
@@ -121,10 +138,14 @@ export function useAuthenticationUI({
 
   const openSessionExpiredModal = useCallback(() => {
     if (isAnonymousConversationSharePage) return;
-    redirectToForcedLogin(effectivePath).then((redirected) => {
+    redirectToForcedLogin(authenticationReturnPath).then((redirected) => {
       if (!redirected) setIsSessionExpiredModalOpen(true);
     });
-  }, [effectivePath, isAnonymousConversationSharePage, redirectToForcedLogin]);
+  }, [
+    authenticationReturnPath,
+    isAnonymousConversationSharePage,
+    redirectToForcedLogin,
+  ]);
 
   const closeSessionExpiredModal = useCallback(() => {
     clearLocalSession();
@@ -139,14 +160,14 @@ export function useAuthenticationUI({
     setIsRegisterModalOpen(false);
     clearLocalSession();
 
-    redirectToForcedLogin(effectivePath)
+    redirectToForcedLogin(authenticationReturnPath)
       .then((redirected) => {
         if (!redirected) setIsLoginModalOpen(true);
       })
       .finally(() => {
         setIsSessionExpiredLoginInProgress(false);
       });
-  }, [clearLocalSession, effectivePath, redirectToForcedLogin]);
+  }, [clearLocalSession, authenticationReturnPath, redirectToForcedLogin]);
 
   const getOAuthErrorMessage = useCallback(
     (error: string) => {
@@ -258,7 +279,7 @@ export function useAuthenticationUI({
     if (isRegisterModalOpen) return;
     let cancelled = false;
 
-    redirectToForcedLogin(effectivePath).then((redirected) => {
+    redirectToForcedLogin(authenticationReturnPath).then((redirected) => {
       if (!cancelled && !redirected) {
         setIsAuthPromptModalOpen(true);
       }
@@ -269,6 +290,7 @@ export function useAuthenticationUI({
     };
   }, [
     effectivePath,
+    authenticationReturnPath,
     isAuthenticated,
     isSpeedMode,
     isAuthChecking,

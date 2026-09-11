@@ -121,6 +121,14 @@ export function buildAgentShareUrl(
   return `${origin.replace(/\/+$/, "")}/${locale}/share/agent/${encodeURIComponent(shareToken)}`;
 }
 
+export function buildAuthenticationReturnPath(
+  pathname: string,
+  search: string
+): string {
+  const query = search.replace(/^\?/, "");
+  return query ? `${pathname}?${query}` : pathname;
+}
+
 export function isAgentSharePath(pathname: string): boolean {
   return /^\/share\/agent\/[^/]+\/?$/.test(pathname);
 }

@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildAgentShareRunPayload,
   extractAgentShareHistory,
   getAgentShareFinalAnswerChunk,
+  getAgentShareLoadAction,
+  getAgentSharePageState,
   getAgentShareStreamError,
   parseAgentShareSseLine,
   // @ts-ignore -- Node's built-in TypeScript runner needs the extension.
@@ -48,4 +51,57 @@ test("accepts only explicit final-answer and error SSE events", () => {
     getAgentShareFinalAnswerChunk({ type: "model_output", content: "hidden" }),
     null
   );
+});
+
+test("does not load Agent share data before authentication completes", () => {
+  assert.equal(
+    getAgentShareLoadAction({
+      shareToken: "signed-token",
+      isAuthChecking: true,
+      isAuthenticated: false,
+    }),
+    "wait"
+  );
+  assert.equal(
+    getAgentShareLoadAction({
+      shareToken: "signed-token",
+      isAuthChecking: false,
+      isAuthenticated: false,
+    }),
+    "wait"
+  );
+  assert.equal(
+    getAgentShareLoadAction({
+      shareToken: "signed-token",
+      isAuthChecking: false,
+      isAuthenticated: true,
+    }),
+    "load"
+  );
+});
+
+test("maps all unavailable Agent share failures to one page state", () => {
+  for (const failure of ["invalid-token", "revoked", "agent-unavailable"]) {
+    assert.equal(
+      getAgentSharePageState({
+        isAuthChecking: false,
+        isAuthenticated: true,
+        isLoading: false,
+        hasMetadata: false,
+        hasUnavailableError: Boolean(failure),
+      }),
+      "unavailable"
+    );
+  }
+});
+
+test("builds the fixed Agent share run request without client scope fields", () => {
+  const payload = buildAgentShareRunPayload("  hello  ", "Asia/Shanghai");
+  assert.deepEqual(payload, {
+    query: "hello",
+    timezone: "Asia/Shanghai",
+  });
+  assert.equal("agent_id" in payload, false);
+  assert.equal("conversation_id" in payload, false);
+  assert.equal("tenant_id" in payload, false);
 });

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildAgentShareUrl,
+  buildAuthenticationReturnPath,
   buildAgentUsageGuidePath,
   buildNorthboundDocsUrl,
   buildNorthboundCurl,
@@ -47,6 +48,20 @@ test("requires login only for interactive Agent share links", () => {
   assert.equal(
     isAnonymousConversationSharePath("/share/agent/signed-token"),
     false
+  );
+});
+
+test("preserves the complete localized Agent share return path", () => {
+  assert.equal(
+    buildAuthenticationReturnPath(
+      "/zh/share/agent/signed-token",
+      "source=invite"
+    ),
+    "/zh/share/agent/signed-token?source=invite"
+  );
+  assert.equal(
+    buildAuthenticationReturnPath("/en/share/agent/signed-token", ""),
+    "/en/share/agent/signed-token"
   );
 });
 

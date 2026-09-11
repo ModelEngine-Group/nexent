@@ -10,8 +10,11 @@ import { useAuthenticationContext } from "@/components/providers/AuthenticationP
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/services/api";
 import {
+  buildAgentShareRunPayload,
   extractAgentShareHistory,
   getAgentShareFinalAnswerChunk,
+  getAgentShareLoadAction,
+  getAgentSharePageState,
   getAgentShareStreamError,
   parseAgentShareSseLine,
   type AgentShareChatMessage,
@@ -44,7 +47,15 @@ export default function AgentSharePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!shareToken || isAuthChecking || !isAuthenticated) return;
+    if (
+      getAgentShareLoadAction({
+        shareToken,
+        isAuthChecking,
+        isAuthenticated,
+      }) !== "load"
+    ) {
+      return;
+    }
 
     const controller = new AbortController();
     setIsLoading(true);
@@ -125,10 +136,10 @@ export default function AgentSharePage() {
     try {
       const reader = await agentShareRuntimeService.run(
         shareToken,
-        {
+        buildAgentShareRunPayload(
           query,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-        },
+          Intl.DateTimeFormat().resolvedOptions().timeZone
+        ),
         controller.signal
       );
       const decoder = new TextDecoder();
@@ -197,7 +208,15 @@ export default function AgentSharePage() {
     }
   }, [isStreaming, shareToken, t]);
 
-  if (isAuthChecking || isLoading) {
+  const pageState = getAgentSharePageState({
+    isAuthChecking,
+    isAuthenticated,
+    isLoading,
+    hasMetadata: metadata !== null,
+    hasUnavailableError: error === unavailableMessage,
+  });
+
+  if (pageState === "loading") {
     return (
       <div className="flex h-full w-full items-center justify-center bg-white">
         <Spin />
@@ -205,7 +224,7 @@ export default function AgentSharePage() {
     );
   }
 
-  if (!isAuthenticated || error === unavailableMessage || !metadata) {
+  if (pageState === "unavailable" || !metadata) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-white px-6">
         <p className="text-sm text-slate-600">{unavailableMessage}</p>
@@ -284,7 +303,7 @@ export default function AgentSharePage() {
               danger
               shape="circle"
               aria-label={t("agentSharePage.stopResponse", "Stop response")}
-              icon={<Square className="size-4" />}
+              icon={<Square className="size-4" aria-hidden />}
               onClick={() => void stop()}
             />
           ) : (
@@ -293,7 +312,7 @@ export default function AgentSharePage() {
               shape="circle"
               aria-label={t("agentSharePage.sendMessage", "Send message")}
               disabled={!input.trim()}
-              icon={<Send className="size-4" />}
+              icon={<Send className="size-4" aria-hidden />}
               onClick={() => void send()}
             />
           )}
