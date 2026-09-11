@@ -1,10 +1,15 @@
 """Authenticated management operations for login-gated Agent share links."""
 
+import hashlib
 import secrets
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from consts.const import SUPABASE_JWT_SECRET
+from consts.const import (
+    NORTHBOUND_RATE_LIMIT_ENABLED,
+    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+    SUPABASE_JWT_SECRET,
+)
 from database.agent_share_db import (
     create_agent_share,
     get_active_agent_share,
@@ -19,10 +24,49 @@ from database.agent_version_db import query_current_version_no
 from services.agent_draft_permission_service import AgentDraftEditError, require_agent_draft_edit
 from services.conversation_management_service import get_conversation_history_service
 from services.agent_share_token_service import AgentShareTokenPayload, build_agent_share_token, parse_agent_share_token
+from services.runtime_state_service import runtime_state_service
 
 
 class AgentShareError(ValueError):
     """Stable validation and authorization error for share-link management."""
+
+
+class AgentShareRateLimitExceededError(AgentShareError):
+    """The share or one authenticated visitor has exceeded its request budget."""
+
+
+class AgentShareRateLimitUnavailableError(AgentShareError):
+    """Redis-backed rate limiting is unavailable, so execution must fail closed."""
+
+
+def _agent_share_rate_digest(*parts: object) -> str:
+    return hashlib.sha256(":".join(str(part) for part in parts).encode("utf-8")).hexdigest()
+
+
+async def consume_agent_share_rate_limits(*, agent_share_id: int, visitor_user_id: str) -> None:
+    """Apply global-share and per-visitor limits without exposing credentials in keys."""
+    if not NORTHBOUND_RATE_LIMIT_ENABLED:
+        return
+    if not runtime_state_service.enabled:
+        raise AgentShareRateLimitUnavailableError("agent_share_rate_limit_unavailable")
+
+    try:
+        await runtime_state_service.consume_scoped_rate_limit_async(
+            "agent-share-total",
+            _agent_share_rate_digest("agent-share", agent_share_id),
+            NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+        )
+        await runtime_state_service.consume_scoped_rate_limit_async(
+            "agent-share-visitor",
+            _agent_share_rate_digest("agent-share", agent_share_id, "visitor", visitor_user_id),
+            NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+        )
+    except ValueError as exc:
+        raise AgentShareRateLimitExceededError("agent_share_rate_limit_exceeded") from exc
+    except AgentShareRateLimitExceededError:
+        raise
+    except Exception as exc:
+        raise AgentShareRateLimitUnavailableError("agent_share_rate_limit_unavailable") from exc
 
 
 def _require_share_signing_secret() -> str:

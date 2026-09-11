@@ -1,6 +1,8 @@
 """Unit tests for authenticated Agent share-link management."""
 
 from uuid import uuid4
+from hashlib import sha256
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -198,3 +200,48 @@ def test_share_is_unavailable_only_when_the_existing_auth_secret_is_missing(mock
 
     with pytest.raises(agent_share_service.AgentShareError, match="agent_share_unavailable"):
         agent_share_service.enable_agent_share(agent_id=9, tenant_id="tenant-a", user_id="owner-a")
+
+
+@pytest.mark.asyncio
+async def test_agent_share_rate_limits_use_only_share_and_visitor_digests(mocker):
+    from services import agent_share_service
+
+    mocker.patch.object(agent_share_service, "NORTHBOUND_RATE_LIMIT_ENABLED", True)
+    runtime_state = mocker.patch.object(agent_share_service, "runtime_state_service")
+    runtime_state.enabled = True
+    runtime_state.consume_scoped_rate_limit_async = AsyncMock(return_value=1)
+
+    await agent_share_service.consume_agent_share_rate_limits(
+        agent_share_id=7,
+        visitor_user_id="visitor-a",
+    )
+
+    total_digest = sha256(b"agent-share:7").hexdigest()
+    visitor_digest = sha256(b"agent-share:7:visitor:visitor-a").hexdigest()
+    assert runtime_state.consume_scoped_rate_limit_async.await_args_list[0].args == (
+        "agent-share-total",
+        total_digest,
+        agent_share_service.NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+    )
+    assert runtime_state.consume_scoped_rate_limit_async.await_args_list[1].args == (
+        "agent-share-visitor",
+        visitor_digest,
+        agent_share_service.NORTHBOUND_RATE_LIMIT_PER_MINUTE,
+    )
+    assert "visitor-a" not in total_digest
+    assert "visitor-a" not in visitor_digest
+
+
+@pytest.mark.asyncio
+async def test_agent_share_rate_limit_fails_closed_when_redis_is_unavailable(mocker):
+    from services import agent_share_service
+
+    mocker.patch.object(agent_share_service, "NORTHBOUND_RATE_LIMIT_ENABLED", True)
+    runtime_state = mocker.patch.object(agent_share_service, "runtime_state_service")
+    runtime_state.enabled = False
+
+    with pytest.raises(agent_share_service.AgentShareRateLimitUnavailableError):
+        await agent_share_service.consume_agent_share_rate_limits(
+            agent_share_id=7,
+            visitor_user_id="visitor-a",
+        )

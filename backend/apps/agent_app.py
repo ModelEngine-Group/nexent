@@ -65,12 +65,16 @@ from services.knowledge_scope_service import get_agent_knowledge_capabilities
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.agent_share_service import (
     AgentShareError,
+    AgentShareRateLimitExceededError,
+    AgentShareRateLimitUnavailableError,
+    consume_agent_share_rate_limits,
     enable_agent_share,
     get_agent_share_history,
     get_agent_share_link,
     get_agent_share_metadata,
     revoke_agent_share_link,
     resolve_agent_share_session,
+    resolve_agent_share_context,
     resolve_existing_agent_share_session,
     resolve_agent_share_run_context,
     rotate_agent_share_link,
@@ -873,6 +877,11 @@ async def run_agent_share_api(
     """Run only the Agent and session resolved from the authenticated share link."""
     try:
         visitor_user_id, visitor_tenant_id = get_current_user_id(authorization)
+        share_resource = resolve_agent_share_context(share_token)
+        await consume_agent_share_rate_limits(
+            agent_share_id=share_resource["agent_share_id"],
+            visitor_user_id=visitor_user_id,
+        )
         share_context = resolve_agent_share_run_context(share_token, visitor_user_id=visitor_user_id)
         agent_request = AgentRequest(
             query=share_request.query,
@@ -903,6 +912,16 @@ async def run_agent_share_api(
         return response
     except UnauthorizedError as exc:
         raise _agent_share_authentication_error(exc) from exc
+    except AgentShareRateLimitExceededError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            detail="Too Many Requests: rate limit exceeded",
+        ) from exc
+    except AgentShareRateLimitUnavailableError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Agent share rate limit is unavailable.",
+        ) from exc
     except AgentShareError as exc:
         raise _agent_share_unavailable_error(exc) from exc
     except ForbiddenError as exc:

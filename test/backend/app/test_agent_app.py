@@ -2004,8 +2004,75 @@ def test_agent_share_run_rejects_client_controlled_agent_fields(mocker, mock_aut
     run_stream.assert_not_called()
 
 
+def test_agent_share_run_rate_limit_rejects_before_session_or_agent_execution(mocker, mock_auth_header):
+    from services.agent_share_service import AgentShareRateLimitExceededError
+
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "visitor-tenant"))
+    mocker.patch(
+        "apps.agent_app.resolve_agent_share_context",
+        return_value={"agent_share_id": 7},
+    )
+    rate_limit = mocker.patch(
+        "apps.agent_app.consume_agent_share_rate_limits",
+        new_callable=AsyncMock,
+        side_effect=AgentShareRateLimitExceededError("agent_share_rate_limit_exceeded"),
+    )
+    resolve_run = mocker.patch("apps.agent_app.resolve_agent_share_run_context")
+    run_stream = mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+
+    response = agent_share_client.post(
+        "/agent-share/opaque-token/run",
+        headers=mock_auth_header,
+        json={"query": "hello"},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "Too Many Requests: rate limit exceeded"
+    assert_agent_share_security_headers(response)
+    rate_limit.assert_awaited_once_with(agent_share_id=7, visitor_user_id="visitor-a")
+    resolve_run.assert_not_called()
+    run_stream.assert_not_called()
+
+
+def test_agent_share_run_rate_limit_unavailable_fails_closed(mocker, mock_auth_header):
+    from services.agent_share_service import AgentShareRateLimitUnavailableError
+
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "visitor-tenant"))
+    mocker.patch(
+        "apps.agent_app.resolve_agent_share_context",
+        return_value={"agent_share_id": 7},
+    )
+    mocker.patch(
+        "apps.agent_app.consume_agent_share_rate_limits",
+        new_callable=AsyncMock,
+        side_effect=AgentShareRateLimitUnavailableError("agent_share_rate_limit_unavailable"),
+    )
+    resolve_run = mocker.patch("apps.agent_app.resolve_agent_share_run_context")
+    run_stream = mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+
+    response = agent_share_client.post(
+        "/agent-share/opaque-token/run",
+        headers=mock_auth_header,
+        json={"query": "hello"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Agent share rate limit is unavailable."
+    assert_agent_share_security_headers(response)
+    resolve_run.assert_not_called()
+    run_stream.assert_not_called()
+
+
 def test_agent_share_run_uses_server_resolved_identity_and_session(mocker, mock_auth_header):
     mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "visitor-tenant"))
+    mocker.patch(
+        "apps.agent_app.resolve_agent_share_context",
+        return_value={"agent_share_id": 7},
+    )
+    mocker.patch(
+        "apps.agent_app.consume_agent_share_rate_limits",
+        new_callable=AsyncMock,
+    )
     mocker.patch(
         "apps.agent_app.resolve_agent_share_run_context",
         return_value={
@@ -2084,6 +2151,14 @@ def test_agent_share_stop_hides_missing_or_invalid_sessions(mocker, mock_auth_he
 
 def test_agent_share_run_maps_existing_conversation_conflicts_to_409(mocker, mock_auth_header):
     mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "visitor-tenant"))
+    mocker.patch(
+        "apps.agent_app.resolve_agent_share_context",
+        return_value={"agent_share_id": 7},
+    )
+    mocker.patch(
+        "apps.agent_app.consume_agent_share_rate_limits",
+        new_callable=AsyncMock,
+    )
     mocker.patch(
         "apps.agent_app.resolve_agent_share_run_context",
         return_value={
