@@ -104,8 +104,16 @@ def test_request_override_recomputes_effective_limit():
     assert snapshot.output_reserve_source == "request"
 
 def test_no_effective_capacity_is_rejected():
+    calculator = budget.ContextBudgetCalculator()
+    capacity_snapshot = _capacity(
+        context_window_tokens=4_096,
+        max_input_tokens=None,
+        requested_output_tokens=4_096,
+        unknown_capabilities=[],
+    )
+    reserve_policy = budget.CapacityReservePolicy()
     with pytest.raises(budget.NoSafeInputCapacity):
-        budget.ContextBudgetCalculator().calculate_context_budget(
-            capacity_snapshot=_capacity(context_window_tokens=4_096, max_input_tokens=None, requested_output_tokens=4_096, unknown_capabilities=[]),
-            reserve_policy=budget.CapacityReservePolicy(),
+        calculator.calculate_context_budget(
+            capacity_snapshot=capacity_snapshot,
+            reserve_policy=reserve_policy,
         )

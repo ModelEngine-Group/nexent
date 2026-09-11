@@ -5,6 +5,8 @@ BEGIN;
 DO $$
 DECLARE
     table_exists BOOLEAN;
+    schema_name CONSTANT TEXT := 'nexent';
+    monitoring_table_name CONSTANT TEXT := 'model_monitoring_record_t';
 BEGIN
     SELECT to_regclass('nexent.model_monitoring_record_t') IS NOT NULL
       INTO table_exists;
@@ -14,13 +16,13 @@ BEGIN
 
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'provider_input_limit_tokens'
     ) AND NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'effective_input_limit_tokens'
     ) THEN
         ALTER TABLE nexent.model_monitoring_record_t
@@ -29,13 +31,13 @@ BEGIN
 
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'budget_provider_input_limit_tokens'
     ) AND NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'budget_effective_input_limit_tokens'
     ) THEN
         ALTER TABLE nexent.model_monitoring_record_t
@@ -45,13 +47,13 @@ BEGIN
 
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'budget_soft_limit_ratio'
     ) AND NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'budget_compaction_trigger_ratio'
     ) THEN
         ALTER TABLE nexent.model_monitoring_record_t
@@ -61,13 +63,13 @@ BEGIN
 
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'budget_soft_input_budget_tokens'
     ) AND NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'nexent'
-           AND table_name = 'model_monitoring_record_t'
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
            AND column_name = 'budget_compaction_trigger_threshold_tokens'
     ) THEN
         ALTER TABLE nexent.model_monitoring_record_t
@@ -80,29 +82,40 @@ END $$;
 -- migrations may subsequently add the legacy columns. Merge and remove those
 -- duplicate legacy columns before backfilling the V2 metadata.
 DO $$
+DECLARE
+    schema_name CONSTANT TEXT := 'nexent';
+    monitoring_table_name CONSTANT TEXT := 'model_monitoring_record_t';
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='provider_input_limit_tokens')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='effective_input_limit_tokens') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='provider_input_limit_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='effective_input_limit_tokens') THEN
         UPDATE nexent.model_monitoring_record_t
-           SET effective_input_limit_tokens = COALESCE(effective_input_limit_tokens, provider_input_limit_tokens);
+           SET effective_input_limit_tokens = provider_input_limit_tokens
+         WHERE effective_input_limit_tokens IS NULL
+           AND provider_input_limit_tokens IS NOT NULL;
         ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN provider_input_limit_tokens;
     END IF;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='budget_provider_input_limit_tokens')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='budget_effective_input_limit_tokens') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_provider_input_limit_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_effective_input_limit_tokens') THEN
         UPDATE nexent.model_monitoring_record_t
-           SET budget_effective_input_limit_tokens = COALESCE(budget_effective_input_limit_tokens, budget_provider_input_limit_tokens);
+           SET budget_effective_input_limit_tokens = budget_provider_input_limit_tokens
+         WHERE budget_effective_input_limit_tokens IS NULL
+           AND budget_provider_input_limit_tokens IS NOT NULL;
         ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_provider_input_limit_tokens;
     END IF;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='budget_soft_limit_ratio')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='budget_compaction_trigger_ratio') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_soft_limit_ratio')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_compaction_trigger_ratio') THEN
         UPDATE nexent.model_monitoring_record_t
-           SET budget_compaction_trigger_ratio = COALESCE(budget_compaction_trigger_ratio, budget_soft_limit_ratio);
+           SET budget_compaction_trigger_ratio = budget_soft_limit_ratio
+         WHERE budget_compaction_trigger_ratio IS NULL
+           AND budget_soft_limit_ratio IS NOT NULL;
         ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_soft_limit_ratio;
     END IF;
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='budget_soft_input_budget_tokens')
-       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='model_monitoring_record_t' AND column_name='budget_compaction_trigger_threshold_tokens') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_soft_input_budget_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_compaction_trigger_threshold_tokens') THEN
         UPDATE nexent.model_monitoring_record_t
-           SET budget_compaction_trigger_threshold_tokens = COALESCE(budget_compaction_trigger_threshold_tokens, budget_soft_input_budget_tokens);
+           SET budget_compaction_trigger_threshold_tokens = budget_soft_input_budget_tokens
+         WHERE budget_compaction_trigger_threshold_tokens IS NULL
+           AND budget_soft_input_budget_tokens IS NOT NULL;
         ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_soft_input_budget_tokens;
     END IF;
 END $$;
