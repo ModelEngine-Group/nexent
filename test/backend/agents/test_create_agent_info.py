@@ -7313,6 +7313,17 @@ class TestCreateToolConfigListAidpSearch:
                 "Not selected": "kb_not_selected",
             },
         )
+        aidp_permission_db_module = types.ModuleType(
+            "ext_components.aidp.database.aidp_permission_db"
+        )
+        aidp_permission_db_module.list_kds_name_to_id_map = MagicMock(
+            return_value={
+                "Allowed 2": "kb_allowed_2",
+                "Denied configured": "kb_not_accessible",
+                "Outside scope": "kb_other",
+                "": "kb_empty_name",
+            }
+        )
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
              patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
@@ -7324,6 +7335,7 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
                  "ext_components.aidp.services.aidp_access_service": access_module,
+                 "ext_components.aidp.database.aidp_permission_db": aidp_permission_db_module,
              }):
 
             mock_tools.return_value = [{
@@ -7358,10 +7370,14 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert mock_tc_instance.params["kds_list"] == ["kb_allowed_2"]
+            assert mock_tc_instance.params["kds_list"] == [
+                "kb_allowed_2",
+                "kb_not_accessible",
+            ]
             assert mock_tc_instance.metadata["allowed_kds_set"] == ["kb_allowed_2"]
             assert mock_tc_instance.metadata["kds_name_to_id_map"] == {
                 "Allowed 2": "kb_allowed_2",
+                "Denied configured": "kb_not_accessible",
             }
 
     @pytest.mark.asyncio
