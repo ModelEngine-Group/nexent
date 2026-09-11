@@ -612,6 +612,10 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
             }
         ],
     )
+    mocker.patch(
+        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        False,
+    )
 
     catalog = await _load_installed_resource_catalog(
         tenant_id="tenant-a",
@@ -620,7 +624,7 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
     catalog_by_name = {item["name"]: item for item in catalog}
     assert "wrapper" in catalog_by_name
     assert "knowledge_base_search" in catalog_by_name
-    assert "aidp_search" in catalog_by_name
+    assert "aidp_search" not in catalog_by_name
     assert catalog_by_name["knowledge_base_search"]["config"] == [
         {
             "name": "top_k",
@@ -631,8 +635,6 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
             "description_zh": "",
         }
     ]
-    assert catalog_by_name["aidp_search"]["config"] == []
-
     result = await search_installed_resources_impl(
         requirements=[
             ResourceRequirement(
@@ -670,6 +672,58 @@ async def test_search_installed_resources_covers_visible_tools_and_skills(mocker
     )
     assert knowledge_result.candidates[0].candidate_ref == "tool:12"
     assert knowledge_result.uncovered_requirement_ids == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enable_aidp_knowledge", "expected_knowledge_tools"),
+    [
+        (True, {"aidp_search"}),
+        (False, {"knowledge_base_search", "ind_aidp_search"}),
+    ],
+)
+async def test_installed_resource_catalog_filters_knowledge_tools_by_deployment(
+    mocker,
+    enable_aidp_knowledge,
+    expected_knowledge_tools,
+):
+    mocker.patch(
+        "services.tool_configuration_service.list_all_tools",
+        new=AsyncMock(
+            return_value=[
+                {
+                    "tool_id": tool_id,
+                    "name": name,
+                    "description": "Knowledge search",
+                    "source": "local",
+                    "is_available": True,
+                }
+                for tool_id, name in enumerate(
+                    (
+                        "knowledge_base_search",
+                        "ind_aidp_search",
+                        "aidp_search",
+                    ),
+                    start=1,
+                )
+            ]
+        ),
+    )
+    mocker.patch(
+        "management.services.skill.service.SkillService.list_visible_skills",
+        return_value=[],
+    )
+    mocker.patch(
+        "services.nl2agent_service.ENABLE_AIDP_KNOWLEDGE",
+        enable_aidp_knowledge,
+    )
+
+    catalog = await _load_installed_resource_catalog(
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert {item["name"] for item in catalog} == expected_knowledge_tools
 
 
 def test_resource_config_normalization_is_frontend_safe():
