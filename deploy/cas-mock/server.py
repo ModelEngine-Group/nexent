@@ -12,10 +12,9 @@ from dataclasses import dataclass
 from http import HTTPStatus
 
 
-CAS_NAMESPACE = "http://www.yale.edu/tp/cas"
+CAS_NAMESPACE = "http://www.yale.edu/tp/cas"  # NOSONAR: CAS 2.0 defines this XML namespace.
 DEFAULT_CONTEXT_PATH = "/cas"
 DEFAULT_USERNAME = "casuser"
-DEFAULT_PASSWORD = "casuser"
 TICKET_TTL_SECONDS = 300
 
 
@@ -218,7 +217,12 @@ class CasMockHandler(http.server.BaseHTTPRequestHandler):
 
     def _cookie(self, name: str) -> str:
         raw = self.headers.get("Cookie", "")
-        cookies = dict(item.strip().split("=", 1) for item in raw.split(";") if "=" in item)
+        cookies = {
+            key_value[0]: key_value[1]
+            for item in raw.split(";")
+            if "=" in item
+            for key_value in [item.strip().split("=", 1)]
+        }
         return cookies.get(name, "")
 
     @staticmethod
@@ -267,9 +271,13 @@ class CasMockHandler(http.server.BaseHTTPRequestHandler):
 
 
 def load_user() -> CasUser:
+    password = os.getenv("CAS_MOCK_PASSWORD")
+    if not password:
+        raise RuntimeError("CAS_MOCK_PASSWORD must be set")
+
     return CasUser(
         username=os.getenv("CAS_MOCK_USERNAME", DEFAULT_USERNAME),
-        password=os.getenv("CAS_MOCK_PASSWORD", DEFAULT_PASSWORD),
+        password=password,
         display_name=os.getenv("CAS_MOCK_DISPLAY_NAME", DEFAULT_USERNAME),
         email=os.getenv("CAS_MOCK_EMAIL", "casuser@example.com"),
         role=os.getenv("CAS_MOCK_ROLE", "USER"),
@@ -282,7 +290,7 @@ def main() -> None:
     port = int(os.getenv("CAS_MOCK_PORT", "8080"))
     context_path = "/" + os.getenv("CAS_MOCK_CONTEXT_PATH", DEFAULT_CONTEXT_PATH).strip("/")
     server = CasMockServer((host, port), CasMockHandler, CasState(load_user()), context_path)
-    print(f"CAS mock listening on http://{host}:{port}{context_path}")
+    print(f"CAS mock listening on {host}:{port}{context_path}")
     server.serve_forever()
 
 
