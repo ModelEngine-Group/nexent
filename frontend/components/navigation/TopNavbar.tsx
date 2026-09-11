@@ -39,7 +39,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
     useState<MonitoringStatus | null>(null);
   const { config } = useGlobalConfigStore();
   const canViewMonitoringDashboard =
-    isSpeedMode || user?.role === USER_ROLES.SU;
+    isSpeedMode || user?.role === USER_ROLES.SU || ;
 
   const showNotificationBell = !isSpeedMode && !!user;
   const {

@@ -461,6 +461,10 @@ export default defineConfig({
                   },
                 ],
               },
+              {
+                text: "备份、升级与回滚",
+                link: "/zh/quick-start/backup-upgrade-rollback",
+              },
               { text: "常见问题", link: "/zh/quick-start/faq" },
             ],
           },

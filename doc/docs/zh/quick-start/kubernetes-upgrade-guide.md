@@ -1,5 +1,7 @@
 # Nexent Kubernetes 升级指导
 
+生产环境升级前，请先完成 [备份、升级与回滚指导](./backup-upgrade-rollback.md) 中的 Kubernetes 备份与恢复演练。`helm rollback` 只回退资源配置，不会恢复数据库和 PVC 数据。
+
 ## 🚀 升级流程概览
 
 在 Kubernetes 上升级 Nexent 时，建议依次完成以下步骤：
@@ -71,8 +73,9 @@ SQL 增量不再手动执行。Kubernetes 中只有 `nexent-config` 启动时会
 > - 执行前建议先备份数据库：
 
    ```bash
-   POSTGRES_POD=$(kubectl get pods -n nexent -l app=nexent-postgresql -o jsonpath='{.items[0].metadata.name}')
-   kubectl exec nexent/$POSTGRES_POD -n nexent -- pg_dump -U root nexent > backup_$(date +%F).sql
+   kubectl exec -n nexent deployment/nexent-postgresql -- sh -c \
+     'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+     > "nexent-backup-$(date +%F).dump"
    ```
 
 > - Supabase 初始化 SQL 由部署脚本从 `deploy/sql/supabase/` 渲染到 Helm values，不需要手动复制执行。
