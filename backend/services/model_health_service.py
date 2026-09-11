@@ -203,8 +203,26 @@ async def _perform_connectivity_check(
             display_name=display_name,
         ).health_check()
     elif model_type == "rerank":
+        # Normalize the probe URL to the rerank endpoint — the form/base_url
+        # passed in at verify time is usually the bare provider root (e.g.
+        # https://api.siliconflow.cn/v1/), while the rerank adapter POSTs the
+        # URL as-is, so a bare root would 404. Mirrors the URL munging that
+        # prepare_model_dict applies when the model is SAVED, so probe-time
+        # and save-time URLs agree:
+        #   dashscope: compatible-mode/v1 -> api/v1 .../services/rerank/text-rerank/text-rerank
+        #   others:    {root}/rerank
+        # Already-normalized URLs (ending in /rerank or the dashscope path)
+        # pass through untouched.
+        rerank_url = (model_base_url or "").rstrip("/")
+        if "dashscope" in rerank_url.lower() and "text-rerank" not in rerank_url:
+            rerank_url = (
+                rerank_url.replace("compatible-mode/v1", "api/v1").rstrip("/")
+                + "/services/rerank/text-rerank/text-rerank"
+            )
+        elif not rerank_url.lower().endswith("/rerank") and "text-rerank" not in rerank_url:
+            rerank_url = f"{rerank_url}/rerank"
         connectivity = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key,
+            {"base_url": rerank_url, "api_key": model_api_key,
              "ssl_verify": ssl_verify},
             "rerank", "rerank", None, model_name=model_name,
         ).health_check()
