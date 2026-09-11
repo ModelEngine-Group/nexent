@@ -17,7 +17,8 @@ from database.tenant_config_db import (
 logger = logging.getLogger("config_utils")
 
 
-CONTEXT_SOFT_LIMIT_RATIO_KEY = "context.soft_limit_ratio"
+CONTEXT_COMPACTION_TRIGGER_RATIO_KEY = "context.compaction_trigger_ratio"
+LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY = "context.soft_limit_ratio"
 CONTEXT_POLICY_KEY = "context.policy"
 
 
@@ -120,7 +121,8 @@ class TenantConfigManager:
     def get_capacity_reserve_policy(self, tenant_id: str | None = None):
         """Resolve W2 reserve policy from tenant config.
 
-        Missing `context.soft_limit_ratio` uses the code default. Invalid
+        Missing Trigger ratio uses the code default. The legacy key is accepted
+        only when the canonical key is absent. Invalid
         configured values fail closed so production requests do not silently use
         a different compaction envelope than operators configured.
         """
@@ -134,19 +136,24 @@ class TenantConfigManager:
             return CapacityReservePolicy()
 
         tenant_config = self.load_config(tenant_id)
-        raw_ratio = tenant_config.get(CONTEXT_SOFT_LIMIT_RATIO_KEY)
+        raw_ratio = tenant_config.get(CONTEXT_COMPACTION_TRIGGER_RATIO_KEY)
+        ratio_source = "tenant_config"
+        if raw_ratio in (None, ""):
+            raw_ratio = tenant_config.get(LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY)
+            if raw_ratio not in (None, ""):
+                ratio_source = "legacy_payload"
         if raw_ratio in (None, ""):
             return CapacityReservePolicy()
 
         try:
             ratio = float(str(raw_ratio).strip())
             return CapacityReservePolicy(
-                soft_limit_ratio=ratio,
-                soft_limit_ratio_source="tenant_config",
+                compaction_trigger_ratio=ratio,
+                compaction_trigger_ratio_source=ratio_source,
             )
         except (TypeError, ValueError, ValidationError) as exc:
             raise InvalidReservePolicy(
-                f"{CONTEXT_SOFT_LIMIT_RATIO_KEY} must be a decimal in (0, 1], "
+                f"{CONTEXT_COMPACTION_TRIGGER_RATIO_KEY} must be a decimal in (0, 1], "
                 f"got {raw_ratio!r}"
             ) from exc
 

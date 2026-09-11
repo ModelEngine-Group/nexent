@@ -23,7 +23,7 @@ from rapidfuzz import fuzz
 
 from agents.create_agent_info import (
     _resolve_input_budget,
-    _resolve_safe_input_budget,
+    _resolve_context_budget,
     create_model_config_list,
     join_minio_file_description_to_query,
 )
@@ -1328,18 +1328,18 @@ async def build_nl2agent_run_info(
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
         _resolve_input_budget(default_model)
     )
-    safe_input_budget_snapshot = _resolve_safe_input_budget(
+    context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
         agent_requested_output_tokens=None,
         request_requested_output_tokens=None,
     )
-    if safe_input_budget_snapshot is not None:
-        effective_input_limit_tokens = safe_input_budget_snapshot["effective_input_limit_tokens"]
-        compaction_trigger_threshold_tokens = safe_input_budget_snapshot[
-            "compaction_trigger_threshold_tokens"
-        ]
-        compaction_target_tokens = safe_input_budget_snapshot["compaction_target_tokens"]
+    if context_budget_snapshot is not None:
+        effective_input_limit_tokens = context_budget_snapshot.effective_input_limit_tokens
+        compaction_trigger_threshold_tokens = (
+            context_budget_snapshot.compaction_trigger_threshold_tokens
+        )
+        compaction_target_tokens = context_budget_snapshot.compaction_target_tokens
         token_threshold = compaction_trigger_threshold_tokens
     else:
         effective_input_limit_tokens = 0
@@ -1361,7 +1361,7 @@ async def build_nl2agent_run_info(
         compaction_target_tokens=compaction_target_tokens,
     )
     agent_config.capacity_snapshot = capacity_snapshot
-    agent_config.safe_input_budget_snapshot = safe_input_budget_snapshot
+    agent_config.context_budget_snapshot = context_budget_snapshot
     mcp_config: dict[str, Any] = {
         "url": urljoin(LOCAL_MCP_SERVER, "sse"),
         "transport": "sse",
@@ -1388,7 +1388,7 @@ async def build_nl2agent_run_info(
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,
-        safe_input_budget_snapshot=safe_input_budget_snapshot,
+        context_budget_snapshot=context_budget_snapshot,
         enable_planning=False,
         sandbox_config=None,
         redis_client=None,
