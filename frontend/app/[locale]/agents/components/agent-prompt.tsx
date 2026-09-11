@@ -193,11 +193,6 @@ export default function AgentPrompt() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
-  const selectedModelIds = editedAgent.model_ids?.length
-    ? editedAgent.model_ids
-    : defaultLlmConfig?.id
-      ? [defaultLlmConfig.id]
-      : [];
   const selectedModels = selectedModelIds.map((id) =>
     modelOptions.find((option) => option.value === id)
   );
