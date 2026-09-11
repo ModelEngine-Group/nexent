@@ -719,9 +719,12 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
 
 
 def _agent_share_management_error(exc: AgentShareError) -> HTTPException:
-    if str(exc) in {"agent_not_found", "agent_not_draft", "agent_deleted", "agent_read_only"}:
-        return HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
-    return HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    error_code = str(exc)
+    if error_code in {"agent_not_found", "agent_not_draft", "agent_deleted", "agent_read_only"}:
+        return HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=error_code)
+    if error_code in {"agent_not_published", "agent_share_not_found", "agent_share_unavailable"}:
+        return HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=error_code)
+    return HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="agent_share_unavailable")
 
 
 @agent_config_router.get("/{agent_id}/share")

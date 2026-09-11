@@ -1881,6 +1881,21 @@ def test_agent_share_management_api_returns_bad_request_for_share_errors(mocker,
     assert response.json()["detail"] == "agent_not_published"
 
 
+def test_agent_share_management_errors_do_not_echo_sensitive_details(mocker, mock_auth_header, caplog):
+    from services.agent_share_service import AgentShareError
+
+    secret_detail = "northbound-key=secret-value prompt=internal-instructions"
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("owner-a", "tenant-a"))
+    mocker.patch("apps.agent_app.enable_agent_share", side_effect=AgentShareError(secret_detail))
+
+    response = config_client.post("/agent/123/share", headers=mock_auth_header)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "agent_share_unavailable"
+    assert secret_detail not in response.text
+    assert secret_detail not in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_agent_share_run_uses_the_resolved_visitor_session(mocker, mock_auth_header):
     from apps import agent_app
