@@ -6,6 +6,7 @@ export type UserRole = USER_ROLES;
 export interface User {
   id: string;
   email: string;
+  username?: string | null;
   role: UserRole;
   avatarUrl?: string;
   tenantId?: string;

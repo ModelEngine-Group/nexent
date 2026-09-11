@@ -793,18 +793,21 @@ class TestCurrentUserInfo:
         mock_get_user_info.assert_called_once_with("user123")
 
     @patch('apps.user_management_app.extract_session_id_from_authorization')
+    @patch('apps.user_management_app.get_provider_username')
     @patch('apps.user_management_app.validate_token')
     @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
     def test_current_user_info_marks_cas_user(
         self,
         mock_get_user_info,
         mock_validate_token,
+        mock_get_provider_username,
         mock_extract_session_id,
     ):
         """Test CAS-authenticated current user info includes auth provider"""
         mock_user = MockUser("user123", "test@example.com")
         mock_validate_token.return_value = (True, mock_user)
         mock_extract_session_id.return_value = "cas-session-123"
+        mock_get_provider_username.return_value = "CAS User"
         mock_get_user_info.return_value = {
             "user": {
                 "user_id": "user123",
@@ -825,7 +828,9 @@ class TestCurrentUserInfo:
         assert response.status_code == HTTPStatus.OK
         data = response.json()
         assert data["data"]["user"]["auth_provider"] == "cas"
+        assert data["data"]["user"]["username"] == "CAS User"
         mock_extract_session_id.assert_called_once_with("Bearer cas-token")
+        mock_get_provider_username.assert_called_once_with("user123", "cas")
 
     def test_current_user_info_no_authorization(self):
         """Test current user info retrieval without authorization header"""

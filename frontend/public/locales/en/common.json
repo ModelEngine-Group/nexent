@@ -3559,6 +3559,7 @@
   "profile.title": "Profile",
   "profile.subtitle": "Manage your account settings and preferences",
   "profile.profileInfo": "Basic Info",
+  "profile.username": "Username",
   "profile.securitySettings": "Security",
   "profile.role": "Role",
   "profile.changePassword": "Change Password",
