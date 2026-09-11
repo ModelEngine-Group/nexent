@@ -1559,6 +1559,7 @@ def test_get_message_units_empty(monkeypatch, mock_session_ctx):
 def test_get_conversation_list(monkeypatch, mock_session_ctx):
     """get_conversation_list returns all conversations ordered by create_time desc."""
     session, ctx = mock_session_ctx
+    ConversationRecord.is_agent_share.is_.reset_mock()
     mock_records = [
         MagicMock(
             conversation_id=2, conversation_title="Second", agent_id=22, create_time=2000.0, update_time=2000.0
@@ -1586,6 +1587,7 @@ def test_get_conversation_list(monkeypatch, mock_session_ctx):
     assert len(result) == 2
     assert result[0]["conversation_id"] == 2
     assert result[0]["agent_id"] == 22
+    ConversationRecord.is_agent_share.is_.assert_called_once_with(False)
 
 
 def test_get_conversation_list_filtered_by_user(monkeypatch, mock_session_ctx):
