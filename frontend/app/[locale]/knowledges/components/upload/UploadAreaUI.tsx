@@ -40,11 +40,23 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   modelMismatch = false,
 }) => {
   const { t } = useTranslation("common");
+  const resolvedComponentHeight = isCreatingMode ? "146px" : componentHeight;
+  const componentHeightStyle = {
+    height: resolvedComponentHeight,
+    minHeight: resolvedComponentHeight,
+  };
 
   // Loading state UI
   if (isLoading) {
     return (
-      <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%]">
+      <div
+        className={`${
+          isCreatingMode
+            ? "border-0 bg-transparent px-0 pb-0 pt-0"
+            : "border-0 bg-transparent p-0"
+        } ${isCreatingMode ? "h-[146px] min-h-[146px]" : "min-h-[150px]"}`}
+        style={componentHeightStyle}
+      >
         <div className="flex justify-center items-center h-full">
           <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500 mx-auto mb-2"></div>
           <p className="text-sm text-blue-600 font-medium ml-2">
@@ -66,7 +78,10 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   // Knowledge base not ready UI
   if (!isKnowledgeBaseReady && !isCreatingMode) {
     return (
-      <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%]">
+      <div
+        className="min-h-[150px] border-0 bg-transparent p-0"
+        style={componentHeightStyle}
+      >
         <div className="h-full border-2 border-dashed border-gray-200 rounded-md flex flex-col items-center justify-center bg-white">
           <WarningFilled className="text-[32px] text-yellow-500 mb-4" />
           <p className="text-gray-600 text-base mb-2">
@@ -82,7 +97,8 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   if (disabled) {
     return (
       <div
-        className={`p-3 bg-gray-50 border-t border-gray-200 opacity-50 cursor-not-allowed h-[${componentHeight}]`}
+        className="min-h-[150px] border-0 bg-transparent p-0 opacity-50 cursor-not-allowed"
+        style={componentHeightStyle}
       >
         <div className="border-2 border-dashed border-gray-300 bg-white rounded-md p-4 text-center flex flex-col items-center justify-center h-full">
           <div className="mb-0.5 text-blue-500 text-lg">📄</div>
@@ -106,8 +122,15 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
         : "knowledgeBase.error.nameExistsInOtherTenant";
 
     return (
-      <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%]">
-        <div className="border-2 border-dashed border-red-200 bg-white rounded-md p-4 text-center flex flex-col items-center justify-center h-full">
+      <div
+        className={
+          isCreatingMode
+            ? "border-0 bg-transparent h-[146px] min-h-[146px] px-0 pb-0 pt-0"
+            : "border-0 bg-transparent min-h-[150px] p-0"
+        }
+        style={componentHeightStyle}
+      >
+        <div className="flex h-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-red-200 bg-red-50/30 p-4 text-center">
           <div className="mb-4 text-red-500 text-lg">
             <WarningFilled style={{ fontSize: 36, color: "#ff4d4f" }} />
           </div>
@@ -125,7 +148,10 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
   // Model mismatch status UI
   if (modelMismatch) {
     return (
-      <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center min-h-[120px]">
+      <div
+        className="flex min-h-[150px] items-center justify-center border-0 bg-transparent p-0"
+        style={componentHeightStyle}
+      >
         <span className="text-base font-medium text-center leading-[1.7] text-gray-500">
           {t("knowledgeBase.upload.modelMismatch.description")}
         </span>
@@ -135,7 +161,14 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
 
   // Default UI state
   return (
-    <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%]">
+    <div
+      className={`${
+        isCreatingMode
+          ? "border-0 bg-transparent px-0 pb-0 pt-0"
+          : "border-0 bg-transparent p-0"
+      } ${isCreatingMode ? "h-[146px] min-h-[146px]" : "min-h-[150px]"}`}
+      style={componentHeightStyle}
+    >
       <div className="h-full flex transition-all duration-300 ease-in-out">
         {/* Upload area container */}
         <div
@@ -167,21 +200,47 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
               <div className="h-full">
                 <Dragger
                   {...uploadProps}
-                  className="!h-full flex flex-col justify-center !bg-transparent !border-gray-200"
+                  className={`!h-full flex flex-col justify-center !rounded-2xl !border-2 !border-dashed ${
+                    isCreatingMode
+                      ? "!border-blue-300 !bg-white shadow-sm"
+                      : "!border-blue-200 !bg-blue-50/30"
+                  }`}
                   showUploadList={false}
-                  style={{ height: "100%", overflow: "auto" }}
+                  style={{
+                    height: "100%",
+                    overflow: isCreatingMode ? "hidden" : "auto",
+                  }}
                 >
                   <div className="flex flex-col items-center justify-center">
-                    <p className="ant-upload-drag-icon !mb-4">
-                      <Inbox size={48} className="text-blue-600" />
+                    <p
+                      className={`ant-upload-drag-icon ${
+                        isCreatingMode ? "!mb-2" : "!mb-4"
+                      }`}
+                    >
+                      <Inbox
+                        size={isCreatingMode ? 32 : 48}
+                        className="text-blue-600"
+                      />
                     </p>
-                    <p className="ant-upload-text !mb-2 text-base">
+                    <p
+                      className={`ant-upload-text ${
+                        isCreatingMode ? "!mb-1 text-sm" : "!mb-2 text-base"
+                      }`}
+                    >
                       {t("knowledgeBase.upload.dragHint")}
                     </p>
-                    <p className="ant-upload-hint text-gray-500">
+                    <p
+                      className={`ant-upload-hint text-gray-500 ${
+                        isCreatingMode ? "text-xs" : ""
+                      }`}
+                    >
                       {t("knowledgeBase.upload.supportedFormats")}
                     </p>
-                    <p className="ant-upload-hint !mt-1 text-gray-500">
+                    <p
+                      className={`ant-upload-hint text-gray-500 ${
+                        isCreatingMode ? "!mt-0 text-xs" : "!mt-1"
+                      }`}
+                    >
                       {t("knowledgeBase.upload.fileSizeLimit")}
                     </p>
                   </div>

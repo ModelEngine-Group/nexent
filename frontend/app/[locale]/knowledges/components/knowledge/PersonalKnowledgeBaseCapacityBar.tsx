@@ -72,6 +72,14 @@ export default function PersonalKnowledgeBaseCapacityBar() {
     : 0;
   const used = capacity.used_readable || formatBytes(capacity.used_bytes);
   const quota = capacity.quota_readable || formatBytes(capacity.quota_bytes);
+  const available = hasQuota
+    ? formatBytes(
+        Math.max((capacity.quota_bytes ?? 0) - capacity.used_bytes, 0)
+      )
+    : t("knowledgeBase.personalCapacity.unlimitedValue");
+  const total = hasQuota
+    ? quota
+    : t("knowledgeBase.personalCapacity.unlimitedValue");
 
   return (
     <div className="shrink-0 border-t border-gray-200 px-4 py-3">
@@ -82,6 +90,24 @@ export default function PersonalKnowledgeBaseCapacityBar() {
             ? t("knowledgeBase.personalCapacity.withQuota", { used, quota })
             : t("knowledgeBase.personalCapacity.unlimited", { used })}
         </span>
+      </div>
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <div className="min-w-0 rounded-md bg-gray-50 px-2.5 py-1.5">
+          <div className="text-[11px] text-gray-500">
+            {t("knowledgeBase.personalCapacity.available")}
+          </div>
+          <div className="truncate text-xs font-medium text-gray-800">
+            {available}
+          </div>
+        </div>
+        <div className="min-w-0 rounded-md bg-gray-50 px-2.5 py-1.5">
+          <div className="text-[11px] text-gray-500">
+            {t("knowledgeBase.personalCapacity.total")}
+          </div>
+          <div className="truncate text-xs font-medium text-gray-800">
+            {total}
+          </div>
+        </div>
       </div>
       <Progress
         percent={progress}

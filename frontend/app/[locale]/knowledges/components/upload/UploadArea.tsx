@@ -1,19 +1,26 @@
-import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallback, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
+import React, {
+  useState,
+  forwardRef,
+  useImperativeHandle,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
+import { useTranslation } from "react-i18next";
 
-import type { UploadFile, UploadProps, RcFile } from 'antd/es/upload/interface';
-import { App, Upload } from 'antd';
+import type { UploadFile, UploadProps, RcFile } from "antd/es/upload/interface";
+import { App, Upload } from "antd";
 
-import { NAME_CHECK_STATUS } from '@/const/agentConfig';
+import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import log from "@/lib/logger";
-import { 
+import {
   checkKnowledgeBaseName,
   fetchKnowledgeBaseInfo,
   validateKnowledgeBaseFileSize,
   validateFileType,
-} from '@/services/uploadService';
+} from "@/services/uploadService";
 
-import UploadAreaUI from './UploadAreaUI';
+import UploadAreaUI from "./UploadAreaUI";
 
 interface UploadAreaProps {
   isDragging?: boolean;
@@ -23,6 +30,7 @@ interface UploadAreaProps {
   onFileSelect: (files: File[]) => void;
   selectedFiles?: File[];
   onUpload?: (files: File[]) => Promise<void>;
+  autoUpload?: boolean;
   isUploading?: boolean;
   disabled?: boolean;
   disabledMessage?: string;
@@ -43,6 +51,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     {
       onFileSelect,
       onUpload,
+      autoUpload = true,
       isUploading = false,
       disabled = false,
       disabledMessage,
@@ -69,10 +78,13 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const pendingUploadRequestsRef = useRef<any[]>([]);
     const uploadScheduledRef = useRef(false);
 
-    const updateNameStatus = useCallback((status: string) => {
-      setNameStatus(status);
-      onNameStatusChange?.(status);
-    }, [onNameStatusChange]);
+    const updateNameStatus = useCallback(
+      (status: string) => {
+        setNameStatus(status);
+        onNameStatusChange?.(status);
+      },
+      [onNameStatusChange]
+    );
 
     // Function to reset all states
     const resetAllStates = useCallback(() => {
@@ -177,7 +189,9 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     const handleChange = useCallback(
       ({ fileList: newFileList }: { fileList: UploadFile[] }) => {
         // Ensure only updating current knowledge base's file list
-        if (!(isCreatingMode || indexName === currentKnowledgeBaseRef.current)) {
+        if (!(
+          isCreatingMode || indexName === currentKnowledgeBaseRef.current
+        )) {
           return;
         }
 
@@ -207,7 +221,6 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
         if (pendingFiles.length > 0) {
           onFileSelect(pendingFiles as unknown as File[]);
         }
-
       },
       [indexName, onFileSelect, isCreatingMode]
     );
@@ -215,6 +228,11 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
     // Handle custom upload request
     const handleCustomRequest = useCallback(
       (options: any) => {
+        if (!autoUpload) {
+          options.onSuccess?.({}, options.file);
+          return;
+        }
+
         pendingUploadRequestsRef.current.push(options);
         if (uploadScheduledRef.current) {
           return;
@@ -244,7 +262,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
           }
         }, 0);
       },
-      [onUpload]
+      [autoUpload, onUpload]
     );
 
     // Upload component properties
@@ -254,7 +272,8 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       fileList,
       onChange: handleChange,
       customRequest: handleCustomRequest,
-      accept: ".pdf,.doc,.docx,.pptx,.xlsx,.md,.txt,.csv,.json,.epub,.xml,.html",
+      accept:
+        ".pdf,.doc,.docx,.pptx,.xlsx,.md,.txt,.csv,.json,.epub,.xml,.html",
       showUploadList: true,
       disabled: disabled,
       progress: {
