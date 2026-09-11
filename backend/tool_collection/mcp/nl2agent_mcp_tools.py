@@ -369,6 +369,7 @@ class ResourceResolutionOutput(BaseModel):
     status: Literal["success"] = "success"
     phase: ResourceResolutionPhase
     verification_required: bool = False
+    capability_verifications: list[CapabilityVerification] | None = None
     next_action: ResourceResolutionNextAction
     requirements: list[RequirementResolution]
     resources: list[ResourceCardSummary]
@@ -1472,6 +1473,10 @@ async def nl2a_wrapper(
                 raise ValueError("empty resource resolution must bind no resources")
             verified = supplied
         else:
+            if supplied.capability_verifications is None:
+                raise ValueError(
+                    "final resource resolution requires capability_verifications"
+                )
             from services.nl2agent_service import resolve_resource_requirements_impl
 
             verified = await resolve_resource_requirements_impl(
@@ -1480,6 +1485,7 @@ async def nl2a_wrapper(
                 exclude_refs=[],
                 tenant_id=tenant_id,
                 user_id=user_id,
+                capability_verifications=supplied.capability_verifications,
             )
         return build_nl2a_wrapper(
             subtype=subtype,

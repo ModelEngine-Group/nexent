@@ -1620,6 +1620,9 @@ async def resolve_resource_requirements_impl(
     return ResourceResolutionOutput(
         phase=phase,
         verification_required=verification_required,
+        capability_verifications=(
+            verifications if capability_verifications is not None else None
+        ),
         next_action=next_action,
         requirements=resolutions,
         resources=_resource_resolution_summaries(

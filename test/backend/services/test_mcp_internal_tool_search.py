@@ -20,6 +20,7 @@ from tool_collection.mcp.nl2agent_mcp_service import (
     nl2agent_mcp_service,
 )
 from tool_collection.mcp.nl2agent_mcp_tools import (
+    CapabilityVerification,
     NL2AGENT_AGENT_ID_HEADER,
     NL2AGENT_MCP_TOOL_META,
     NL2A_MCP_LOCAL_TOOL_NAMES,
@@ -1346,6 +1347,10 @@ async def test_unified_wrapper_reresolves_model_supplied_resource_details(mocker
     )
     supplied = ResourceResolutionOutput(
         phase="INITIAL",
+        capability_verifications=[CapabilityVerification(
+            requirement_id="lookup",
+            accepted_candidate_refs=["tenant_skill_repository:1"],
+        )],
         next_action="INSTALL",
         requirements=[RequirementResolution(
             requirement={"requirement_id": "lookup", "query": "Search data"},
@@ -1388,6 +1393,30 @@ async def test_unified_wrapper_reresolves_model_supplied_resource_details(mocker
     assert payload["resources"][0]["name"] == "verified-name"
     assert payload["resources"][0]["source"] == "NEXENT_OFFICIAL_SKILL"
     assert resolve_impl.await_args.kwargs["phase"] == "INITIAL"
+
+    rejected = ResourceResolutionOutput(
+        phase="INITIAL",
+        capability_verifications=[CapabilityVerification(
+            requirement_id="lookup",
+            accepted_candidate_refs=[],
+        )],
+        next_action="RESOLVE_GAP",
+        requirements=[RequirementResolution(
+            requirement={"requirement_id": "lookup", "query": "Search data"},
+            state="uncovered",
+        )],
+        resources=[],
+    )
+    resolve_impl.return_value = rejected
+    wrapped = await nl2a_wrapper(
+        subtype="resource_gap_resolution",
+        agent_id=42,
+        resource_result=rejected.model_dump(mode="json"),
+    )
+    assert _unwrap_nl2a(wrapped)["requirements"][0]["requirement_id"] == "lookup"
+    assert resolve_impl.await_args.kwargs["capability_verifications"] == (
+        rejected.capability_verifications
+    )
 
     resolve_impl.return_value = ResourceResolutionOutput(
         phase="INITIAL",
