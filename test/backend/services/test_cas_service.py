@@ -67,6 +67,7 @@ from services.cas_service import (  # noqa: E402
     parse_logout_request,
     parse_service_validate_response,
     revoke_from_logout_request,
+    validate_service_ticket,
 )
 
 for _name, _module in _ORIGINAL_MODULES.items():
@@ -78,6 +79,33 @@ sys.modules.pop("services.cas_service", None)
 
 
 class TestCasServiceParsing(unittest.TestCase):
+    def test_validate_service_ticket_uses_internal_server_url(self):
+        """Use the internal CAS URL when validating a ticket from the backend."""
+        validate_globals = validate_service_ticket.__globals__
+        original_internal_url = validate_globals["CAS_INTERNAL_SERVER_URL"]
+        original_http_get_text = validate_globals["_http_get_text"]
+        http_get_text = MagicMock(
+            return_value="""
+            <cas:serviceResponse xmlns:cas="http://www.yale.edu/tp/cas">
+              <cas:authenticationSuccess>
+                <cas:user>cas-user-1</cas:user>
+              </cas:authenticationSuccess>
+            </cas:serviceResponse>
+            """
+        )
+        validate_globals["CAS_INTERNAL_SERVER_URL"] = "http://cas-mock:3001/cas"
+        validate_globals["_http_get_text"] = http_get_text
+        try:
+            principal = validate_service_ticket("ST-123", "http://app/callback")
+        finally:
+            validate_globals["CAS_INTERNAL_SERVER_URL"] = original_internal_url
+            validate_globals["_http_get_text"] = original_http_get_text
+
+        self.assertEqual(principal.cas_user_id, "cas-user-1")
+        http_get_text.assert_called_once_with(
+            "http://cas-mock:3001/cas/p3/serviceValidate?service=http://app/callback&ticket=ST-123"
+        )
+
     def test_get_cas_config_returns_heartbeat_settings(self):
         config = get_cas_config()
 
