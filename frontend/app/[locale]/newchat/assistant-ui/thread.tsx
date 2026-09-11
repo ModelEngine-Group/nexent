@@ -723,7 +723,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                   </span>
                   {hasMessages && variant !== "embedded" && (
                     <span className="text-xs text-muted-foreground">
-                      {t("chat.thread.conversation")}
+                      {displayName}
                     </span>
                   )}
                 </div>
