@@ -2149,6 +2149,78 @@ def test_agent_share_stop_hides_missing_or_invalid_sessions(mocker, mock_auth_he
     assert response.json()["detail"] == "Agent share is unavailable."
 
 
+@pytest.mark.asyncio
+async def test_agent_share_revocation_allows_active_stream_to_finish_but_blocks_later_session_and_run(
+    mocker,
+    mock_auth_header,
+):
+    from apps import agent_app
+    from consts.model import AgentShareRunRequest
+    from services.agent_share_service import AgentShareError
+
+    share_is_active = True
+
+    def resolve_share_resource(_share_token):
+        if not share_is_active:
+            raise AgentShareError("agent_share_not_found")
+        return {"agent_share_id": 7}
+
+    def resolve_share_session(share_token, *, visitor_user_id):
+        resolve_share_resource(share_token)
+        return {"agent_id": 123, "conversation_id": 88, "agent_version_no": 4}
+
+    def resolve_share_run(share_token, *, visitor_user_id):
+        resolve_share_resource(share_token)
+        return {
+            "agent_id": 123,
+            "agent_version_no": 4,
+            "conversation_id": 88,
+            "tenant_id": "owner-tenant",
+            "owner_user_id": "owner-a",
+        }
+
+    async def completed_stream():
+        yield b'data: {"type":"final_answer","content":"done"}\n\n'
+
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "visitor-tenant"))
+    mocker.patch("apps.agent_app.resolve_agent_share_context", side_effect=resolve_share_resource)
+    mocker.patch("apps.agent_app.resolve_agent_share_session", side_effect=resolve_share_session)
+    mocker.patch("apps.agent_app.resolve_agent_share_run_context", side_effect=resolve_share_run)
+    mocker.patch("apps.agent_app.consume_agent_share_rate_limits", new_callable=AsyncMock)
+    run_stream = mocker.patch(
+        "apps.agent_app.run_agent_stream",
+        new_callable=AsyncMock,
+        return_value=StreamingResponse(completed_stream(), media_type="text/event-stream"),
+    )
+
+    active_response = await agent_app.run_agent_share_api(
+        "opaque-token",
+        AgentShareRunRequest(query="hello"),
+        MagicMock(),
+        "Bearer token",
+    )
+    share_is_active = False
+    active_chunks = [chunk async for chunk in active_response.body_iterator]
+
+    assert active_chunks == [b'data: {"type":"final_answer","content":"done"}\n\n']
+    run_stream.assert_awaited_once()
+
+    session_response = agent_share_client.post("/agent-share/opaque-token/session", headers=mock_auth_header)
+    next_run_response = agent_share_client.post(
+        "/agent-share/opaque-token/run",
+        headers=mock_auth_header,
+        json={"query": "another question"},
+    )
+
+    assert session_response.status_code == 404
+    assert next_run_response.status_code == 404
+    assert session_response.json()["detail"] == "Agent share is unavailable."
+    assert next_run_response.json()["detail"] == "Agent share is unavailable."
+    assert_agent_share_security_headers(session_response)
+    assert_agent_share_security_headers(next_run_response)
+    run_stream.assert_awaited_once()
+
+
 def test_agent_share_run_maps_existing_conversation_conflicts_to_409(mocker, mock_auth_header):
     mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "visitor-tenant"))
     mocker.patch(
