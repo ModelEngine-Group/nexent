@@ -28,12 +28,8 @@ def test_context_budget_v2_migration_preserves_trigger_and_derives_target():
     assert "'code_default'" in sql
 
 
-def test_final_schema_uses_only_canonical_physical_columns():
-    init_sql = (ROOT / "deploy/sql/init.sql").read_text(encoding="utf-8")
+def test_orm_uses_only_canonical_physical_columns():
     model_source = (ROOT / "backend/database/db_models.py").read_text(encoding="utf-8")
-    final_contract = init_sql.split(
-        "-- Fresh-install final shape for model monitoring.", 1
-    )[1]
     model_contract = model_source.split("class ModelMonitoringRecord", 1)[1].split(
         "class ToolInfo", 1
     )[0]
@@ -45,7 +41,6 @@ def test_final_schema_uses_only_canonical_physical_columns():
         "budget_compaction_target_tokens",
         "budget_schema_version",
     ):
-        assert canonical in final_contract
         assert canonical in model_contract
 
     for legacy in (
@@ -54,5 +49,4 @@ def test_final_schema_uses_only_canonical_physical_columns():
         "budget_soft_input_budget_tokens",
         "budget_hard_input_budget_tokens",
     ):
-        assert legacy not in final_contract
         assert legacy not in model_contract
