@@ -657,6 +657,10 @@ export const ModelAddDialogV2 = ({
           maxTokens: row.max_tokens || (isEmbeddingType(resolvedModelType) ? 0 : 4096),
           displayName: (state.advanced.display_name as string) || defaultDisplayName(row.model_name),
           modelFactory: providerKey === "__custom__" ? "OpenAI-API-Compatible" : providerKey,
+          // Batch submit requires every enabled row to have passed the probe
+          // (hasUnchecked gate above), so the verified result is carried into
+          // the created record instead of resetting to not_detected.
+          connectStatus: state.connectivityStatus === "available" ? "available" : undefined,
           contextWindowTokens: capacityPayload.contextWindowTokens,
           maxInputTokens: capacityPayload.maxInputTokens,
           maxOutputTokens: capacityPayload.maxOutputTokens,

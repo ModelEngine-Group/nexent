@@ -286,6 +286,10 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // Connectivity status verified by the add-dialog probe. Sent so the newly
+    // created record reflects the just-verified result instead of resetting
+    // to not_detected (backend: connect_status = payload or NOT_DETECTED).
+    connectStatus?: ModelConnectStatus;
     // v2.6.0 inference params
     temperature?: number;
     topP?: number;
@@ -300,6 +304,7 @@ export const modelService = {
         api_key: model.apiKey,
         max_tokens: model.maxTokens,
         display_name: model.displayName,
+        connect_status: model.connectStatus,
         expected_chunk_size: model.expectedChunkSize,
         maximum_chunk_size: model.maximumChunkSize,
         chunk_batch: model.chunkingBatchSize,
@@ -1087,6 +1092,9 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // Connectivity status verified by the add-dialog probe (same purpose as
+    // addCustomModel.connectStatus).
+    connectStatus?: ModelConnectStatus;
     // v2.6.0 inference params
     temperature?: number;
     topP?: number;
@@ -1105,6 +1113,7 @@ export const modelService = {
           : {}),
         display_name: params.displayName || params.name,
         model_factory: params.modelFactory || "OpenAI-API-Compatible",
+        connect_status: params.connectStatus,
         expected_chunk_size: params.expectedChunkSize,
         maximum_chunk_size: params.maximumChunkSize,
         chunk_batch: params.chunkingBatchSize,
