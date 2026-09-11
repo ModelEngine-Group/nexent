@@ -4505,6 +4505,123 @@ async def test_run_agent_stream_separates_share_resource_and_conversation_identi
 
 
 @pytest.mark.asyncio
+async def test_run_agent_stream_isolates_share_conversation_locks_and_channels(
+    monkeypatch,
+    mock_http_request,
+):
+    """Share visitors must keep independent run, channel, and persistence scopes."""
+    from management.services.agent.run_identity import AgentRunIdentityContext
+
+    visitor_a_request = AgentRequest(
+        agent_id=1,
+        conversation_id=123,
+        query="visitor A question",
+        history=[],
+        minio_files=[],
+        requested_output_tokens=4096,
+        is_debug=False,
+    )
+    visitor_b_request = AgentRequest(
+        agent_id=1,
+        conversation_id=456,
+        query="visitor B question",
+        history=[],
+        minio_files=[],
+        requested_output_tokens=4096,
+        is_debug=False,
+    )
+    visitor_a_identity = AgentRunIdentityContext(
+        resource_actor_user_id="owner-a",
+        resource_tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-a",
+        conversation_owner_tenant_id="visitor-a-tenant",
+        entrypoint="agent-share",
+        disable_personal_memory=True,
+    )
+    visitor_b_identity = AgentRunIdentityContext(
+        resource_actor_user_id="owner-a",
+        resource_tenant_id="owner-tenant",
+        conversation_owner_user_id="visitor-b",
+        conversation_owner_tenant_id="visitor-b-tenant",
+        entrypoint="agent-share",
+        disable_personal_memory=True,
+    )
+    channel_a = MagicMock()
+    channel_b = MagicMock()
+    reserve_run = MagicMock(side_effect=["reservation-a", "reservation-b"])
+    get_channel = AsyncMock(side_effect=[channel_a, channel_b])
+    reset_stream = AsyncMock()
+    save_user_message = MagicMock()
+    build_context = MagicMock(return_value=MagicMock(enable_memory=False, metadata=MagicMock()))
+
+    async def stream_chunks():
+        yield "data: done\n\n"
+
+    monkeypatch.setattr(
+        agent_run_service,
+        "_resolve_user_tenant_language",
+        lambda **_kwargs: ("unexpected-user", "unexpected-tenant", "en"),
+    )
+    monkeypatch.setattr(
+        agent_run_service,
+        "get_conversation_service",
+        MagicMock(return_value={"runtime_metadata": {}, "runtime_metadata_version": 0}),
+    )
+    monkeypatch.setattr(agent_run_service.agent_run_manager, "reserve_agent_run", reserve_run)
+    monkeypatch.setattr(agent_run_service, "save_messages", save_user_message)
+    monkeypatch.setattr(agent_run_service, "build_agent_run_context", build_context)
+    monkeypatch.setattr(agent_run_service.runtime_state_service, "reset_stream_async", reset_stream)
+    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "get_or_create_channel", get_channel)
+    monkeypatch.setattr(
+        agent_run_service,
+        "generate_stream",
+        MagicMock(side_effect=[stream_chunks(), stream_chunks()]),
+    )
+
+    responses = await asyncio.gather(
+        run_agent_stream(
+            visitor_a_request,
+            mock_http_request,
+            "Bearer token",
+            identity_context=visitor_a_identity,
+        ),
+        run_agent_stream(
+            visitor_b_request,
+            mock_http_request,
+            "Bearer token",
+            identity_context=visitor_b_identity,
+        ),
+    )
+
+    assert all(isinstance(response, StreamingResponse) for response in responses)
+    reserve_run.assert_has_calls(
+        [call(123, "visitor-a"), call(456, "visitor-b")],
+        any_order=True,
+    )
+    reset_stream.assert_has_awaits(
+        [
+            call(user_id="visitor-a", conversation_id=123),
+            call(user_id="visitor-b", conversation_id=456),
+        ],
+        any_order=True,
+    )
+    get_channel.assert_has_awaits(
+        [
+            call(conversation_id=123, user_id="visitor-a"),
+            call(conversation_id=456, user_id="visitor-b"),
+        ],
+        any_order=True,
+    )
+    save_user_message.assert_has_calls(
+        [
+            call(visitor_a_request, target="user", user_id="visitor-a", tenant_id="visitor-a-tenant"),
+            call(visitor_b_request, target="user", user_id="visitor-b", tenant_id="visitor-b-tenant"),
+        ],
+        any_order=True,
+    )
+
+
+@pytest.mark.asyncio
 @patch(
     "management.services.agent.run._resolve_user_tenant_language",
     return_value=(None, None, "en"),
