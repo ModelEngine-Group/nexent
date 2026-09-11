@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 
 
-CAS_NAMESPACE = "http://www.yale.edu/tp/cas"  # NOSONAR: CAS 2.0 defines this XML namespace.
+# CAS 2.0 defines this XML namespace; it is not a network endpoint.
+CAS_NAMESPACE = "http://www.yale.edu/tp/cas"  # NOSONAR
 DEFAULT_CONTEXT_PATH = "/cas"
 DEFAULT_USERNAME = "casuser"
 TICKET_TTL_SECONDS = 300
@@ -291,7 +292,8 @@ def main() -> None:
     context_path = "/" + os.getenv("CAS_MOCK_CONTEXT_PATH", DEFAULT_CONTEXT_PATH).strip("/")
     server = CasMockServer((host, port), CasMockHandler, CasState(load_user()), context_path)
     print(f"CAS mock listening on {host}:{port}{context_path}")
-    server.serve_forever()
+    # This mock server intentionally uses plain HTTP for local integration tests.
+    server.serve_forever()  # NOSONAR
 
 
 if __name__ == "__main__":
