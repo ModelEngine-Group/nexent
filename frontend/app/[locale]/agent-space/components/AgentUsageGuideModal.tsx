@@ -292,7 +292,7 @@ export function AgentUsageGuideModal({
                 <a
                   href={buildNorthboundDocsUrl(locale)}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                 >
                   {t("agentUsageGuide.northbound.docs")}{" "}
                   <ExternalLink className="inline size-3" aria-hidden />

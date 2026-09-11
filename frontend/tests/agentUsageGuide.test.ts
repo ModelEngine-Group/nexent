@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildAgentShareUrl,
   buildAuthenticationReturnPath,
+  buildCopyAriaLabel,
   buildAgentUsageGuidePath,
   buildNorthboundDocsUrl,
   buildNorthboundCurl,
@@ -200,6 +201,13 @@ test("builds safe share and northbound API examples", () => {
   assert.equal(
     buildNorthboundDocsUrl("en"),
     "https://modelengine-group.github.io/nexent/en/integration/integration-out/northbound-api.html"
+  );
+});
+
+test("builds a descriptive accessible name for icon-only copy actions", () => {
+  assert.equal(
+    buildCopyAriaLabel("Copy", "Agent Card URL"),
+    "Copy Agent Card URL"
   );
 });
 

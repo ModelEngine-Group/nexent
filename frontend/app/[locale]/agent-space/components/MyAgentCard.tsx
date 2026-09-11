@@ -138,6 +138,7 @@ export function MyAgentCard({
       className={`h-full rounded-2xl border border-slate-200 shadow-sm dark:border-slate-700 ${
         highlighted ? "ring-2 ring-primary ring-offset-2" : ""
       }`}
+      aria-current={highlighted ? "true" : undefined}
       styles={{
         body: {
           height: "100%",
@@ -196,6 +197,7 @@ export function MyAgentCard({
               className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
               icon={<MoreHorizontal className="size-4" aria-hidden />}
               aria-label={t("agentRepository.mine.menu.more")}
+              aria-haspopup="menu"
             />
           </Dropdown>
         ) : null}

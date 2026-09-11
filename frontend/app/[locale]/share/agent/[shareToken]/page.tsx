@@ -260,7 +260,12 @@ export default function AgentSharePage() {
       </header>
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-y-auto px-5 py-6">
-        <div className="space-y-4">
+        <div
+          className="space-y-4"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
           {displayMessages.map((message) => (
             <div
               key={message.id}

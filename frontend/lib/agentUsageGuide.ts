@@ -129,6 +129,13 @@ export function buildAuthenticationReturnPath(
   return query ? `${pathname}?${query}` : pathname;
 }
 
+export function buildCopyAriaLabel(
+  copyLabel: string,
+  fieldLabel: string
+): string {
+  return `${copyLabel} ${fieldLabel}`;
+}
+
 export function isAgentSharePath(pathname: string): boolean {
   return /^\/share\/agent\/[^/]+\/?$/.test(pathname);
 }
