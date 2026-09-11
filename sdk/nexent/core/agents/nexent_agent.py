@@ -694,9 +694,9 @@ class NexentAgent:
 
         try:
             model = self.create_model(agent_config.model_name)
-            model.safe_input_budget_snapshot = getattr(
+            model.context_budget_snapshot = getattr(
                 agent_config,
-                "safe_input_budget_snapshot",
+                "context_budget_snapshot",
                 None,
             )
             model.capacity_snapshot = getattr(

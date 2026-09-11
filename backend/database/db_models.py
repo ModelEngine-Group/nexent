@@ -529,7 +529,7 @@ class ModelMonitoringRecord(SimpleTableBase):
     requested_output_tokens = Column(
         Integer, doc="Output tokens requested or reserved during capacity resolution"
     )
-    provider_input_limit_tokens = Column(
+    effective_input_limit_tokens = Column(
         Integer, doc="Resolved provider input-token limit used by context management"
     )
     tokenizer_family = Column(
@@ -556,8 +556,11 @@ class ModelMonitoringRecord(SimpleTableBase):
     budget_output_reserve_source = Column(
         String(32), doc="Source of the W2 requested output token reserve"
     )
-    budget_provider_input_limit_tokens = Column(
-        Integer, doc="Provider input limit after applying the W2 output reserve"
+    budget_schema_version = Column(
+        Integer, doc="Version of the persisted context-budget contract"
+    )
+    budget_effective_input_limit_tokens = Column(
+        Integer, doc="Effective input limit after applying the output reserve"
     )
     budget_uncertainty_reserve_tokens = Column(
         Integer, doc="Additional W2 uncertainty reserve deducted from input budget"
@@ -565,14 +568,23 @@ class ModelMonitoringRecord(SimpleTableBase):
     budget_uncertainty_reserve_basis = Column(
         String(64), doc="Basis used for the W2 uncertainty reserve"
     )
-    budget_soft_limit_ratio = Column(
-        Float, doc="W2 soft input budget ratio"
+    budget_compaction_trigger_ratio = Column(
+        Float, doc="Compaction Trigger Threshold ratio"
     )
-    budget_soft_input_budget_tokens = Column(
-        Integer, doc="W2 soft input budget where proactive compression begins"
+    budget_compaction_trigger_ratio_source = Column(
+        String(32), doc="Source of the Compaction Trigger Threshold ratio"
     )
-    budget_hard_input_budget_tokens = Column(
-        Integer, doc="W2 hard input budget consumed by W3 final fit"
+    budget_compaction_trigger_threshold_tokens = Column(
+        Integer, doc="Effective input token threshold that triggers compaction"
+    )
+    budget_compaction_target_ratio = Column(
+        Float, doc="Compaction Target ratio"
+    )
+    budget_compaction_target_ratio_source = Column(
+        String(32), doc="Source of the Compaction Target ratio"
+    )
+    budget_compaction_target_tokens = Column(
+        Integer, doc="Desired effective input token count after compaction"
     )
     budget_warnings = Column(
         JSONB, doc="Structured W2 budget warnings active for this request"
