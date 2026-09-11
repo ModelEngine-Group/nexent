@@ -9,6 +9,7 @@ import {
   buildNorthboundRunUrl,
   buildUserApiKeyPath,
   clearAgentUsageGuidePath,
+  getA2AGuideState,
   parseAgentUsageGuideParams,
   isAgentSharePath,
   isAnonymousConversationSharePath,
@@ -80,5 +81,24 @@ test("builds safe share and northbound API examples", () => {
   assert.equal(
     buildNorthboundDocsUrl("en"),
     "https://modelengine-group.github.io/nexent/en/integration/integration-out/northbound-api.html"
+  );
+});
+
+test("keeps A2A loading, error, disabled, and enabled states distinct", () => {
+  assert.equal(
+    getA2AGuideState({ isLoading: true, isError: false, isEnabled: false }),
+    "loading"
+  );
+  assert.equal(
+    getA2AGuideState({ isLoading: false, isError: true, isEnabled: false }),
+    "error"
+  );
+  assert.equal(
+    getA2AGuideState({ isLoading: false, isError: false, isEnabled: false }),
+    "disabled"
+  );
+  assert.equal(
+    getA2AGuideState({ isLoading: false, isError: false, isEnabled: true }),
+    "enabled"
   );
 });

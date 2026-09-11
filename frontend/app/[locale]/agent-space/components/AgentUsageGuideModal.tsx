@@ -12,6 +12,7 @@ import {
   buildNorthboundCurl,
   buildNorthboundRunUrl,
   buildUserApiKeyPath,
+  getA2AGuideState,
 } from "@/lib/agentUsageGuide";
 import { a2aClientService } from "@/services/a2aService";
 import { agentShareService } from "@/services/agentShareService";
@@ -94,6 +95,13 @@ export function AgentUsageGuideModal({
     frontendConfigQuery.data?.northboundBaseUrl
   );
   const northboundCurl = buildNorthboundCurl(agentName, northboundUrl);
+  const a2aGuideState = getA2AGuideState({
+    isLoading: a2aQuery.isLoading,
+    isError: a2aQuery.isError,
+    isEnabled: Boolean(
+      a2aQuery.data?.success && a2aQuery.data.data?.is_enabled
+    ),
+  });
   const copy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -260,20 +268,27 @@ export function AgentUsageGuideModal({
           {
             key: "a2a",
             label: t("agentUsageGuide.tabs.a2a"),
-            children: a2aQuery.isLoading ? (
-              <Spin />
-            ) : a2aQuery.data?.success && a2aQuery.data.data?.is_enabled ? (
-              <A2AServerSettingsPanel
-                endpointId={a2aQuery.data.data.endpoint_id}
-                supportedInterfaces={a2aQuery.data.data.supported_interfaces}
-              />
-            ) : (
-              <Alert
-                type="info"
-                showIcon
-                message={t("agentUsageGuide.a2a.notEnabled")}
-              />
-            ),
+            children:
+              a2aGuideState === "loading" ? (
+                <Spin />
+              ) : a2aGuideState === "error" ? (
+                <Button onClick={() => a2aQuery.refetch()}>
+                  {t("common.retry")}
+                </Button>
+              ) : a2aGuideState === "enabled" ? (
+                <A2AServerSettingsPanel
+                  endpointId={a2aQuery.data!.data!.endpoint_id}
+                  supportedInterfaces={
+                    a2aQuery.data!.data!.supported_interfaces
+                  }
+                />
+              ) : (
+                <Alert
+                  type="info"
+                  showIcon
+                  message={t("agentUsageGuide.a2a.notEnabled")}
+                />
+              ),
           },
         ]}
       />

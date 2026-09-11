@@ -52,6 +52,20 @@ export function buildNorthboundDocsUrl(locale: string): string {
   return `https://modelengine-group.github.io/nexent/${locale}/integration/integration-out/northbound-api.html`;
 }
 
+export function getA2AGuideState({
+  isLoading,
+  isError,
+  isEnabled,
+}: {
+  isLoading: boolean;
+  isError: boolean;
+  isEnabled: boolean;
+}): "loading" | "error" | "enabled" | "disabled" {
+  if (isLoading) return "loading";
+  if (isError) return "error";
+  return isEnabled ? "enabled" : "disabled";
+}
+
 export function buildNorthboundCurl(agentName: string, runUrl: string): string {
   const payload = JSON.stringify({
     agent_name: agentName,
