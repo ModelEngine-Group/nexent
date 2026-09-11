@@ -29,7 +29,6 @@ import {
   Plus,
   ShieldCheck,
   RefreshCw,
-  PenLine,
   SlidersHorizontal,
   Trash2,
   Edit3,
@@ -56,7 +55,6 @@ import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import log from "@/lib/logger";
 
 import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
-import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
 import { DefaultModelDialog } from "./model/DefaultModelDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
@@ -152,9 +150,6 @@ export const ModelConfigSection = forwardRef<
   /* ------------------ State ------------------ */
   const [models, setModels] = useState<ModelOption[]>([]);
   const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
-  const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] =
-    useState<boolean>(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [capacityCoverage, setCapacityCoverage] =
     useState<CapacityCoverage | null>(null);
@@ -917,7 +912,6 @@ export const ModelConfigSection = forwardRef<
 
   /* ------------------ Sync ModelEngine ------------------ */
   const handleSyncModels = () => {
-    setAddModalDefaultIsBatch(true);
     setIsAddModalV2Open(true);
   };
 
@@ -1256,18 +1250,6 @@ export const ModelConfigSection = forwardRef<
               </span>
             </Button>
           </Can>
-          <Can permission="model:update">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<PenLine size={16} />}
-              onClick={() => setIsDeleteModalOpen(true)}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.editCustomModel")}
-              </span>
-            </Button>
-          </Can>
           <Button
             type="primary"
             size="middle"
@@ -1295,11 +1277,6 @@ export const ModelConfigSection = forwardRef<
                 (m) => m.suggestionAvailable
               ).length,
             })}
-            action={
-              <Button size="small" onClick={() => setIsDeleteModalOpen(true)}>
-                {t("modelConfig.capacityCoverage.manage")}
-              </Button>
-            }
           />
         )}
 
@@ -1442,17 +1419,6 @@ export const ModelConfigSection = forwardRef<
               }, 100);
             }
           }}
-        />
-
-        <ModelDeleteDialog
-          isOpen={isDeleteModalOpen}
-          onClose={() => setIsDeleteModalOpen(false)}
-          onSuccess={async () => {
-            await loadModelLists(true, true);
-            return;
-          }}
-          models={models}
-          capacityCoverage={capacityCoverage}
         />
 
         <ModelAddDialogV2
