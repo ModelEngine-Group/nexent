@@ -1,4 +1,4 @@
-import { Button, Dropdown, type MenuProps } from "antd";
+import { Button, Dropdown, Tooltip, type MenuProps } from "antd";
 import { ArrowDownFromLine, Clock, Edit3, MoreHorizontal, Power, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus, McpDeploymentType } from "@/const/mcpTools";
@@ -136,16 +136,6 @@ export default function MineMcpServiceCard({
       });
     }
 
-    if (onHealthCheck) {
-      items.push({
-        key: "health-check",
-        label: t("mcpConfig.serverList.button.healthCheck"),
-        icon: <RefreshCw className="h-3.5 w-3.5" />,
-        disabled: healthChecking,
-        onClick: () => onHealthCheck(item),
-      });
-    }
-
     items.push({
       key: "delete",
       label: t("common.delete"),
@@ -201,6 +191,22 @@ export default function MineMcpServiceCard({
           </div>
         </div>
         <div className="flex shrink-0 items-start gap-1.5">
+          {onHealthCheck ? (
+            <Tooltip
+              title={t("mcpConfig.serverList.button.healthCheck")}
+              placement="top"
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<RefreshCw className="h-4 w-4" />}
+                loading={healthChecking}
+                aria-label={t("mcpConfig.serverList.button.healthCheck")}
+                className="-mt-1 text-slate-500 hover:!text-slate-700"
+                onClick={() => onHealthCheck(item)}
+              />
+            </Tooltip>
+          ) : null}
           <Dropdown
             menu={{ items: actionItems }}
             trigger={["click"]}
