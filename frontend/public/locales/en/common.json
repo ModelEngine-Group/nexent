@@ -433,6 +433,7 @@
   "chatStreamHandler.maxStepsNotification": "Max steps limit reached ({{completedSteps}} steps). Below is a summary of work done. To get complete results, try increasing the step limit.",
   "chatStreamHandler.parseMaxStepsDataFailed": "Failed to parse max steps data:",
   "taskWindow.historySummary.title": "Context compressed",
+  "taskWindow.historySummary.compacting": "Compressing context…",
   "taskWindow.historySummary.coveredThrough": "Covered through message {{id}}",
   "taskWindow.historySummary.trigger": "Trigger: {{trigger}}",
   "taskWindow.historySummary.triggerUnknown": "Not specified",

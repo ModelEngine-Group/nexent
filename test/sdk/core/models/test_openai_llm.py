@@ -697,6 +697,82 @@ def test_call_context_length_exceeded_error(openai_model_instance):
             openai_model_instance.__call__(messages)
 
 
+def test_provider_context_overflow_rebuilds_and_retries(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    rebuilt_messages = [{"role": "user", "content": [{"text": "smaller"}]}]
+    success_chunk = make_chunk("recovered", role="assistant")
+    success_chunk.usage = None
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        Exception("context_length_exceeded: maximum context length"),
+        [success_chunk],
+    ]
+    rebuild = MagicMock(return_value=rebuilt_messages)
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=MagicMock()):
+        openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_called_once_with()
+    assert openai_model_instance.client.chat.completions.create.call_count == 2
+
+
+def test_provider_context_overflow_rejects_non_list_rebuild(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(TypeError, match="must return FinalContext or a message list"):
+            openai_model_instance.__call__(messages, context_rebuild=lambda: object())
+
+
+def test_provider_context_overflow_stops_after_two_recovery_dispatches(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "still too large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryExhausted,
+            match="persisted after two recovery dispatches",
+        ):
+            openai_model_instance.__call__(
+                messages,
+                context_rebuild=lambda: messages,
+                _overflow_recovery_ordinal=2,
+            )
+
+
+def test_provider_context_overflow_without_rebuild_is_retry_unsafe(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryUnsafe,
+            match="cannot be safely rebuilt",
+        ):
+            openai_model_instance.__call__(messages, context_rebuild=None)
+
+
+def test_provider_context_overflow_does_not_recover_unrelated_error(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "hello"}]}]
+    rebuild = MagicMock()
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "authentication failed"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(Exception, match="authentication failed"):
+            openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_not_called()
+
+
 def test_call_general_exception(openai_model_instance):
     """Test __call__ method re-raises general exceptions"""
 
@@ -1757,8 +1833,11 @@ def test_safe_input_budget_trace_attributes_are_prefixed():
     assert len(attrs["w2.budget_fingerprint"]) == 32
     assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
     assert attrs["w2.requested_output_tokens"] == 256
-    assert attrs["w2.soft_input_budget_tokens"] == 800
-    assert attrs["w2.hard_input_budget_tokens"] == 1000
+    assert attrs["context.effective_input_limit_tokens"] == 1000
+    assert attrs["context.compaction_trigger_threshold_tokens"] == 800
+    assert attrs["context.compaction_target_tokens"] == 600
+    assert "w2.soft_input_budget_tokens" not in attrs
+    assert "w2.hard_input_budget_tokens" not in attrs
 
 
 def test_call_without_tracker_creates_tracker(openai_model_instance):
@@ -1819,8 +1898,8 @@ def test_call_token_estimation_with_list_content(openai_model_instance):
         assert openai_model_instance.last_output_token_count >= 0
 
 
-def test_call_context_length_exceeded_during_iteration(openai_model_instance):
-    """Test __call__ method raises ValueError when context_length_exceeded occurs during iteration (line 264)."""
+def test_call_context_length_exceeded_during_iteration_is_not_replayed(openai_model_instance):
+    """An iteration-time overflow is unsafe because a response may have started."""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
@@ -1832,8 +1911,7 @@ def test_call_context_length_exceeded_during_iteration(openai_model_instance):
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
         openai_model_instance.client.chat.completions.create.return_value = iter_that_raises()
 
-        # Should raise ValueError wrapping the context_length_exceeded error
-        with pytest.raises(ValueError, match="Token limit exceeded"):
+        with pytest.raises(Exception, match="cannot be safely rebuilt"):
             openai_model_instance.__call__(messages)
 
 
