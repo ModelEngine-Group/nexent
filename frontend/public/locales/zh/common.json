@@ -4970,6 +4970,7 @@
   "agent.field.modelPlaceholder": "请选择模型",
   "agent.field.modelPriority": "模型优先级",
   "agent.field.modelPriorityHint": "拖动以设置主模型和备用模型顺序",
+  "agent.field.adjustModelPriority": "调整模型优先级",
   "agent.field.primaryModel": "主模型",
   "agent.field.reorderModel": "拖动以调整模型优先级",
   "agent.field.dutyPrompt": "智能体角色",

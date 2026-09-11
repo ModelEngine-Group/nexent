@@ -1,8 +1,8 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Button, Col, Form, Input, Row, Select, Tooltip } from "antd";
-import { GripVertical, Maximize2 } from "lucide-react";
+import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
+import { GripVertical, ListOrdered, Maximize2 } from "lucide-react";
 import {
   DndContext,
   KeyboardSensor,
@@ -110,6 +110,7 @@ export default function AgentPrompt() {
 
   const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
   const [activePromptTab, setActivePromptTab] = useState<PromptTab>("duty");
+  const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const requestedPromptTab =
     configFocusRequest?.agentId === agentId &&
     configFocusRequest.target.section === "role_model"
@@ -156,6 +157,10 @@ export default function AgentPrompt() {
   const selectedModels = selectedModelIds.map((id) =>
     modelOptions.find((option) => option.value === id)
   );
+
+  useEffect(() => {
+    if (selectedModels.length < 2) setIsModelPriorityOpen(false);
+  }, [selectedModels.length]);
 
   const updateModelSelection = useCallback(
     (modelIds: number[]) =>
@@ -207,6 +212,56 @@ export default function AgentPrompt() {
     </Tooltip>
   );
 
+  const modelPriorityContent = (
+    <div className="w-72 space-y-2">
+      <div>
+        <p className="text-sm font-medium">{t("agent.field.modelPriority")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("agent.field.modelPriorityHint")}
+        </p>
+      </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleModelPriorityChange}
+      >
+        <SortableContext
+          items={selectedModelIds}
+          strategy={verticalListSortingStrategy}
+        >
+          <ul className="space-y-2">
+            {selectedModels.map((model, index) =>
+              model ? (
+                <SortableModelItem
+                  key={model.value}
+                  modelId={model.value}
+                  displayName={model.displayName}
+                  isPrimary={index === 0}
+                  disabled={isModelSelectionDisabled}
+                  primaryLabel={t("agent.field.primaryModel")}
+                  reorderLabel={t("agent.field.reorderModel")}
+                />
+              ) : null
+            )}
+          </ul>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+
+  const modelPriorityTrigger = (
+    <Tooltip title={t("agent.field.adjustModelPriority")}>
+      <span className="inline-flex">
+        <Button
+          type="default"
+          icon={<ListOrdered size={16} />}
+          aria-label={t("agent.field.adjustModelPriority")}
+          disabled={selectedModels.length < 2 || isModelSelectionDisabled}
+        />
+      </span>
+    </Tooltip>
+  );
+
   return (
     <div className="w-full">
       {/* Model Selection */}
@@ -216,68 +271,50 @@ export default function AgentPrompt() {
             label={t("agent.field.model")}
             className="mb-3"
             layout="horizontal"
-            name="model_ids"
-            rules={[
-              {
-                required: true,
-                message: t("agent.validation.modelRequired"),
-              },
-            ]}
           >
-            <Select
-              mode="multiple"
-              placeholder={t("agent.field.modelPlaceholder")}
-              options={modelOptions}
-              value={selectedModelIds}
-              onChange={updateModelSelection}
-              maxTagCount={3}
-              showSearch={{
-                filterOption: (input, option) =>
-                  (option?.label ?? "")
-                    .toLowerCase()
-                    .includes(input.toLowerCase()),
-              }}
-              disabled={isModelSelectionDisabled}
-            />
-          </Form.Item>
-          {selectedModels.length > 1 && (
-            <div className="mb-3 space-y-2">
-              <div>
-                <p className="text-sm font-medium">
-                  {t("agent.field.modelPriority")}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {t("agent.field.modelPriorityHint")}
-                </p>
-              </div>
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleModelPriorityChange}
+            <div className="flex w-full items-start gap-2">
+              <Form.Item
+                noStyle
+                name="model_ids"
+                rules={[
+                  {
+                    required: true,
+                    message: t("agent.validation.modelRequired"),
+                  },
+                ]}
               >
-                <SortableContext
-                  items={selectedModelIds}
-                  strategy={verticalListSortingStrategy}
+                <Select
+                  className="min-w-0 flex-1"
+                  mode="multiple"
+                  placeholder={t("agent.field.modelPlaceholder")}
+                  options={modelOptions}
+                  value={selectedModelIds}
+                  onChange={updateModelSelection}
+                  maxTagCount={3}
+                  showSearch={{
+                    filterOption: (input, option) =>
+                      (option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase()),
+                  }}
+                  disabled={isModelSelectionDisabled}
+                />
+              </Form.Item>
+              {selectedModels.length > 1 && !isModelSelectionDisabled ? (
+                <Popover
+                  content={modelPriorityContent}
+                  trigger="click"
+                  placement="bottomRight"
+                  open={isModelPriorityOpen}
+                  onOpenChange={setIsModelPriorityOpen}
                 >
-                  <ul className="space-y-2">
-                    {selectedModels.map((model, index) =>
-                      model ? (
-                        <SortableModelItem
-                          key={model.value}
-                          modelId={model.value}
-                          displayName={model.displayName}
-                          isPrimary={index === 0}
-                          disabled={isModelSelectionDisabled}
-                          primaryLabel={t("agent.field.primaryModel")}
-                          reorderLabel={t("agent.field.reorderModel")}
-                        />
-                      ) : null
-                    )}
-                  </ul>
-                </SortableContext>
-              </DndContext>
+                  {modelPriorityTrigger}
+                </Popover>
+              ) : (
+                modelPriorityTrigger
+              )}
             </div>
-          )}
+          </Form.Item>
         </Col>
       </Row>
 

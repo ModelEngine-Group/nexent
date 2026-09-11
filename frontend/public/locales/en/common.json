@@ -4956,6 +4956,7 @@
   "agent.field.modelPlaceholder": "Select a model",
   "agent.field.modelPriority": "Model priority",
   "agent.field.modelPriorityHint": "Drag to set the primary model and fallback order",
+  "agent.field.adjustModelPriority": "Adjust model priority",
   "agent.field.primaryModel": "Primary",
   "agent.field.reorderModel": "Drag to reorder model priority",
   "agent.field.dutyPrompt": "Agent Role",
