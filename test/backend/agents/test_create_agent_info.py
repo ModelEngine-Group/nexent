@@ -373,12 +373,13 @@ class MockRequestBudgetOverrides:
         self.requested_output_tokens = requested_output_tokens
 
 
-class MockSafeInputBudgetSnapshot:
+class MockContextBudgetSnapshot:
     def __init__(self, capacity_snapshot, requested_output_tokens=None):
         self.model_name = capacity_snapshot.model_name
         self.requested_output_tokens = requested_output_tokens or 4096
-        self.soft_input_budget_tokens = 24576
-        self.hard_input_budget_tokens = 28672
+        self.effective_input_limit_tokens = 28672
+        self.compaction_trigger_threshold_tokens = 24576
+        self.compaction_target_tokens = 17203
         self.fingerprint = "safe-budget-fingerprint"
         self.warnings = []
 
@@ -386,8 +387,8 @@ class MockSafeInputBudgetSnapshot:
         return self.__dict__.copy()
 
 
-class MockSafeInputBudgetCalculator:
-    def calculate_safe_input_budget(
+class MockContextBudgetCalculator:
+    def calculate_context_budget(
         self,
         capacity_snapshot,
         reserve_policy=None,
@@ -396,7 +397,7 @@ class MockSafeInputBudgetCalculator:
         output_reserve_source="model_default",
     ):
         override_tokens = getattr(request_overrides, "requested_output_tokens", None)
-        return MockSafeInputBudgetSnapshot(
+        return MockContextBudgetSnapshot(
             capacity_snapshot,
             requested_output_tokens=override_tokens or requested_output_tokens,
         )
@@ -416,7 +417,8 @@ sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
 sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
     "nexent.core.models.capacity_budget",
     RequestBudgetOverrides=MockRequestBudgetOverrides,
-    SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
+    ContextBudgetCalculator=MockContextBudgetCalculator,
+    ContextBudgetSnapshot=MockContextBudgetSnapshot,
     UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
 )
 
@@ -543,7 +545,7 @@ from backend.agents.create_agent_info import (
     _merge_tool_params,
     _resolve_runtime_tool_records,
     _resolve_input_budget,
-    _resolve_safe_input_budget,
+    _resolve_context_budget,
     _get_external_provider_service_for_search,
 )
 
@@ -602,7 +604,7 @@ class TestResolveInputBudget:
         }
 
         input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
-        safe_budget_snapshot = _resolve_safe_input_budget(
+        context_budget_snapshot = _resolve_context_budget(
             capacity_snapshot=resolved_capacity_snapshot,
             tenant_id="tenant_1",
             agent_requested_output_tokens=None,
@@ -613,7 +615,7 @@ class TestResolveInputBudget:
         assert isinstance(capacity_snapshot, dict)
         assert capacity_snapshot["capacity_fingerprint"] == resolved_capacity_snapshot.fingerprint
         assert isinstance(resolved_capacity_snapshot, MockModelCapacitySnapshot)
-        assert safe_budget_snapshot["model_name"] == resolved_capacity_snapshot.model_name
+        assert context_budget_snapshot.model_name == resolved_capacity_snapshot.model_name
 
 
 class TestGetSkillsForTemplate:
@@ -2379,7 +2381,7 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=ANY,
-                safe_input_budget_snapshot=ANY,
+                context_budget_snapshot=ANY,
                 verification_config=ANY,
                 enable_planning=ANY
             )
@@ -2464,7 +2466,7 @@ class TestCreateAgentConfig:
                     context_items=ANY,
                     pre_run_tool_events=ANY,
                     capacity_snapshot=ANY,
-                    safe_input_budget_snapshot=ANY,
+                    context_budget_snapshot=ANY,
                     verification_config=ANY,
                     enable_planning=ANY
                 )
@@ -2750,7 +2752,7 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None,
+                context_budget_snapshot=None,
                 verification_config=ANY,
                 enable_planning=ANY
             )
@@ -4095,7 +4097,7 @@ class TestCreateAgentRunInfo:
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None,
+                context_budget_snapshot=None,
                 redis_client=ANY,
                 sandbox_config=None,
                 minio_client=None,
@@ -5180,15 +5182,15 @@ class TestAdditionalAgentInfoCoverage:
         assert result == (32768, None, None)
         mock_logger.warning.assert_called_once()
 
-    def test_resolve_safe_input_budget_returns_none_for_uncertain_basis(self):
+    def test_resolve_context_budget_returns_none_for_uncertain_basis(self):
         capacity = MockModelCapacitySnapshot(model_name="legacy-model")
         calculator = MagicMock()
-        calculator.calculate_safe_input_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
+        calculator.calculate_context_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
         with patch(
-            "backend.agents.create_agent_info.SafeInputBudgetCalculator",
+            "backend.agents.create_agent_info.ContextBudgetCalculator",
             return_value=calculator,
         ):
-            result = _resolve_safe_input_budget(
+            result = _resolve_context_budget(
                 capacity_snapshot=capacity,
                 tenant_id="tenant-1",
                 agent_requested_output_tokens=None,
@@ -7621,3 +7623,20 @@ class TestBuildSecurityHeaders:
             "security_credentials": {"k": "v"},
         }
         assert _build_security_headers(agent) == {}
+
+    def test_select_agent_model_id_prefers_first_available_model(self):
+        """Runtime model selection skips unavailable configured models."""
+        from backend.agents.create_agent_info import _select_agent_model_id
+        records = {
+            7: {"connect_status": "unavailable"},
+            8: {"connect_status": "available"},
+        }
+        with patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            side_effect=lambda model_id, **kwargs: records[model_id],
+        ), patch(
+            "backend.agents.create_agent_info.is_model_available",
+            side_effect=lambda record: bool(record) and record.get("connect_status") == "available",
+        ):
+            assert _select_agent_model_id([7, 8], None, "tenant") == 8
+            assert _select_agent_model_id([7, 8], 9, "tenant") == 9

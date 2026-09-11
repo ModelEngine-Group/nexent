@@ -694,9 +694,9 @@ class NexentAgent:
 
         try:
             model = self.create_model(agent_config.model_name)
-            model.safe_input_budget_snapshot = getattr(
+            model.context_budget_snapshot = getattr(
                 agent_config,
-                "safe_input_budget_snapshot",
+                "context_budget_snapshot",
                 None,
             )
             model.capacity_snapshot = getattr(
@@ -1067,13 +1067,13 @@ class NexentAgent:
 
                         token_threshold = None
                         context_window_tokens = None
-                        hard_input_budget_tokens = None
+                        effective_input_limit_tokens = None
                         context_processing_mode = None
                         context_runtime = getattr(self.agent, "context_runtime", None)
                         if context_runtime is not None:
                             token_threshold = context_runtime.token_threshold
                             context_window_tokens = context_runtime.context_window_tokens
-                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            effective_input_limit_tokens = context_runtime.effective_input_limit_tokens
                             context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
@@ -1085,7 +1085,7 @@ class NexentAgent:
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
                             "context_window_tokens": context_window_tokens,
-                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "effective_input_limit_tokens": effective_input_limit_tokens,
                             "context_processing_mode": context_processing_mode,
                             "output_finish_reason": getattr(
                                 getattr(self.agent, "model", None),

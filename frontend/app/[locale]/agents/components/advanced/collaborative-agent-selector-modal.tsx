@@ -6,15 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
-import {
-  Button,
-  Empty,
-  Input,
-  Modal,
-  Pagination,
-  Spin,
-  Tabs,
-} from "antd";
+import { Button, Empty, Input, Modal, Pagination, Spin, Tabs } from "antd";
 import { Bot, Check, Globe, Search } from "lucide-react";
 
 import type { A2AExternalAgent } from "@/services/a2aService";
@@ -82,7 +74,9 @@ function SelectCard({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
-          <strong className="min-w-0 truncate text-sm text-gray-800">{name}</strong>
+          <strong className="min-w-0 truncate text-sm text-gray-800">
+            {name}
+          </strong>
           {version && (
             <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-500">
               {version}
@@ -185,8 +179,13 @@ export default function CollaborativeAgentSelectorModal({
     const agentName = isInternal
       ? (agent as Agent).display_name || agent.name
       : agent.name;
+    const internalAgent = agent as Agent;
     const version = isInternal
-      ? (agent as Agent).version_name
+      ? internalAgent.current_version_no != null
+        ? `V${internalAgent.current_version_no}${
+            internalAgent.version_name ? ` · ${internalAgent.version_name}` : ""
+          }`
+        : internalAgent.version_name
       : (agent as A2AExternalAgent).version;
     const isSelected = selectedIds.includes(agentId);
     const AgentIcon = isInternal ? Bot : Globe;
@@ -198,7 +197,9 @@ export default function CollaborativeAgentSelectorModal({
         onToggle={() => toggleSelection(activeSource, agentId, !isSelected)}
         icon={<AgentIcon size={16} />}
         name={agentName}
-        description={agent.description || t("agent.collaborative.selector.noDescription")}
+        description={
+          agent.description || t("agent.collaborative.selector.noDescription")
+        }
         version={version}
       />
     );
@@ -230,8 +231,14 @@ export default function CollaborativeAgentSelectorModal({
         activeKey={activeSource}
         onChange={changeSource}
         items={[
-          { key: "internal", label: t("agent.collaborative.selector.tab.internal") },
-          { key: "external", label: t("agent.collaborative.selector.tab.external") },
+          {
+            key: "internal",
+            label: t("agent.collaborative.selector.tab.internal"),
+          },
+          {
+            key: "external",
+            label: t("agent.collaborative.selector.tab.external"),
+          },
         ]}
       />
       <Input
@@ -260,7 +267,9 @@ export default function CollaborativeAgentSelectorModal({
       {filteredAgents.length > PAGE_SIZE && (
         <div className="mt-5 flex items-center justify-between border-t border-gray-100 pt-4">
           <span className="text-xs text-gray-400">
-            {t("agent.collaborative.selector.totalAgents", { count: filteredAgents.length })}
+            {t("agent.collaborative.selector.totalAgents", {
+              count: filteredAgents.length,
+            })}
           </span>
           <Pagination
             current={page}

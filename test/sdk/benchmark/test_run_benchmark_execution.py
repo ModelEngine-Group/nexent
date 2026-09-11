@@ -603,8 +603,9 @@ sub_agents: []
 
     cm_config = task_configuration["context_manager_config"]
     assert cm_config.policy_layers.platform["processing_mode"] == "adaptive_compact"
-    assert cm_config.soft_input_budget_tokens == 100
-    assert cm_config.hard_input_budget_tokens == 200
+    assert cm_config.compaction_trigger_threshold_tokens == 100
+    assert cm_config.effective_input_limit_tokens == 125
+    assert cm_config.compaction_target_tokens == 75
     assert task_configuration["tools"] == [configured_tool, injected_tool]
     assert task_configuration["max_steps"] == 5
     assert dispatched["dataset_name"] == "dataset"

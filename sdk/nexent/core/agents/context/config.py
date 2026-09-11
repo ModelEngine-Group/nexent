@@ -1,6 +1,7 @@
 """Configuration for context management and compression."""
 
-from dataclasses import dataclass, field
+import logging
+from dataclasses import InitVar, dataclass, field
 from typing import Any, Callable, Dict, Mapping
 
 from .policy import PolicyLayers
@@ -14,8 +15,17 @@ class ContextManagerConfig:
     # compression threshold and request budgets, this value is intended for
     # user-facing context-window usage displays.
     context_window_tokens: int = 10000
-    soft_input_budget_tokens: int = 0
-    hard_input_budget_tokens: int = 0
+    effective_input_limit_tokens: int = 0
+    compaction_trigger_threshold_tokens: int = 0
+    compaction_target_tokens: int = 0
+    compaction_trigger_ratio: float = 0.8
+    compaction_target_ratio: float = 0.6
+    minimum_history_reduction_ratio: float = 0.05
+    minimum_history_reduction_tokens: int = 32
+    # Compatibility-only constructor inputs. They are normalized immediately
+    # and are intentionally not retained as runtime attributes.
+    soft_input_budget_tokens: InitVar[int | None] = None
+    hard_input_budget_tokens: InitVar[int | None] = None
     keep_recent_steps: int = 4
     enable_long_term_memory_selection: bool = True
 
@@ -60,3 +70,36 @@ class ContextManagerConfig:
     policy_layers: PolicyLayers | Mapping[str, Any] = field(default_factory=PolicyLayers)
     # Narrow callback injected by Backend; SDK never imports database services.
     history_summary_sink: Callable[[Any], Any] | None = None
+    # Runtime-only notification used by the Agent stream. Candidate content is
+    # never sent through this callback.
+    history_summary_status_sink: Callable[[dict[str, Any]], Any] | None = None
+
+    def __post_init__(
+        self,
+        soft_input_budget_tokens: int | None,
+        hard_input_budget_tokens: int | None,
+    ) -> None:
+        if soft_input_budget_tokens:
+            logging.getLogger("agent_context").warning(
+                "legacy context threshold normalized to Compaction Trigger Threshold"
+            )
+            if not self.compaction_trigger_threshold_tokens:
+                self.compaction_trigger_threshold_tokens = soft_input_budget_tokens
+            if not self.effective_input_limit_tokens:
+                self.effective_input_limit_tokens = max(
+                    soft_input_budget_tokens,
+                    int(soft_input_budget_tokens / self.compaction_trigger_ratio),
+                )
+        if hard_input_budget_tokens:
+            logging.getLogger("agent_context").warning(
+                "legacy context rejection limit is deprecated and ignored"
+            )
+        if self.effective_input_limit_tokens > 0:
+            if not self.compaction_trigger_threshold_tokens:
+                self.compaction_trigger_threshold_tokens = max(
+                    1, int(self.effective_input_limit_tokens * self.compaction_trigger_ratio)
+                )
+            if not self.compaction_target_tokens:
+                self.compaction_target_tokens = max(
+                    1, int(self.effective_input_limit_tokens * self.compaction_target_ratio)
+                )
