@@ -81,6 +81,29 @@ export function getAgentUsageGuideOpenAction<T>({
   return { action: "open", agent: target.agent };
 }
 
+export function getAgentUsageGuideAccess({
+  currentVersionNo,
+  permission,
+}: {
+  currentVersionNo?: number | null;
+  permission?: string | null;
+}): { canOpen: boolean; canManageShare: boolean } {
+  return {
+    canOpen: (currentVersionNo ?? 0) > 0,
+    canManageShare: permission !== "READ_ONLY",
+  };
+}
+
+export function reduceAgentShareGuideState<T>(
+  currentShare: T | null,
+  event: { type: "saved"; share: T } | { type: "revoked" }
+): T | null {
+  if (event.type === "saved") {
+    return event.share;
+  }
+  return null;
+}
+
 export function buildAgentShareUrl(
   origin: string,
   locale: string,

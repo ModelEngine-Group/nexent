@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { getAgentUsageGuideAccess } from "@/lib/agentUsageGuide";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import {
   formatMineDate,
@@ -70,7 +71,10 @@ export function MyAgentCard({
   const description =
     agent.description?.trim() || t("agentRepository.card.noDescription");
   const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
-  const published = (agent.current_version_no ?? 0) > 0;
+  const { canOpen: published } = getAgentUsageGuideAccess({
+    currentVersionNo: agent.current_version_no,
+    permission: agent.permission,
+  });
   const repositoryInfo = agent.repository_info ?? [];
   const hasRepositoryInfo = repositoryInfo.length > 0;
   const repositoryStatusBadge =

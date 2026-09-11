@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Modal, Spin, Tabs, Typography } from "antd";
 import { Copy, ExternalLink, RefreshCw, SquareX } from "lucide-react";
@@ -12,7 +12,9 @@ import {
   buildNorthboundCurl,
   buildNorthboundRunUrl,
   buildUserApiKeyPath,
+  getAgentUsageGuideAccess,
   getA2AGuideState,
+  reduceAgentShareGuideState,
 } from "@/lib/agentUsageGuide";
 import { a2aClientService } from "@/services/a2aService";
 import { agentShareService } from "@/services/agentShareService";
@@ -36,9 +38,18 @@ export function AgentUsageGuideModal({
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("share");
-  const canManageShare = agent?.permission !== "READ_ONLY";
   const agentId = agent?.agent_id;
   const agentName = agent?.name?.trim() || "agent";
+  const { canManageShare } = getAgentUsageGuideAccess({
+    currentVersionNo: agent?.current_version_no,
+    permission: agent?.permission,
+  });
+
+  useEffect(() => {
+    if (open) {
+      setActiveTab("share");
+    }
+  }, [agentId, open]);
 
   const shareQuery = useQuery({
     queryKey: ["agent-share", agentId],
@@ -60,16 +71,30 @@ export function AgentUsageGuideModal({
     queryClient.invalidateQueries({ queryKey: ["agent-share", agentId] });
   const enableShare = useMutation({
     mutationFn: () => agentShareService.enable(agentId!),
-    onSuccess: () => {
-      refreshShare();
+    onSuccess: (share) => {
+      queryClient.setQueryData(
+        ["agent-share", agentId],
+        reduceAgentShareGuideState(shareQuery.data ?? null, {
+          type: "saved",
+          share,
+        })
+      );
+      void refreshShare();
       message.success(t("agentUsageGuide.share.enabled"));
     },
     onError: () => message.error(t("agentUsageGuide.share.error")),
   });
   const rotateShare = useMutation({
     mutationFn: () => agentShareService.rotate(agentId!),
-    onSuccess: () => {
-      refreshShare();
+    onSuccess: (share) => {
+      queryClient.setQueryData(
+        ["agent-share", agentId],
+        reduceAgentShareGuideState(shareQuery.data ?? null, {
+          type: "saved",
+          share,
+        })
+      );
+      void refreshShare();
       message.success(t("agentUsageGuide.share.rotated"));
     },
     onError: () => message.error(t("agentUsageGuide.share.error")),
@@ -77,7 +102,13 @@ export function AgentUsageGuideModal({
   const revokeShare = useMutation({
     mutationFn: () => agentShareService.revoke(agentId!),
     onSuccess: () => {
-      refreshShare();
+      queryClient.setQueryData(
+        ["agent-share", agentId],
+        reduceAgentShareGuideState(shareQuery.data ?? null, {
+          type: "revoked",
+        })
+      );
+      void refreshShare();
       message.success(t("agentUsageGuide.share.revoked"));
     },
     onError: () => message.error(t("agentUsageGuide.share.error")),
@@ -158,13 +189,13 @@ export function AgentUsageGuideModal({
                     </Typography.Paragraph>
                     <div className="flex flex-wrap gap-2">
                       <Button
-                        icon={<Copy className="size-4" />}
+                        icon={<Copy className="size-4" aria-hidden />}
                         onClick={() => copy(shareUrl)}
                       >
                         {t("common.copy")}
                       </Button>
                       <Button
-                        icon={<ExternalLink className="size-4" />}
+                        icon={<ExternalLink className="size-4" aria-hidden />}
                         onClick={() =>
                           window.open(shareUrl, "_blank", "noopener,noreferrer")
                         }
@@ -172,7 +203,7 @@ export function AgentUsageGuideModal({
                         {t("agentUsageGuide.share.open")}
                       </Button>
                       <Button
-                        icon={<RefreshCw className="size-4" />}
+                        icon={<RefreshCw className="size-4" aria-hidden />}
                         onClick={() =>
                           confirm(
                             t("agentUsageGuide.share.rotateTitle"),
@@ -185,7 +216,7 @@ export function AgentUsageGuideModal({
                       </Button>
                       <Button
                         danger
-                        icon={<SquareX className="size-4" />}
+                        icon={<SquareX className="size-4" aria-hidden />}
                         onClick={() =>
                           confirm(
                             t("agentUsageGuide.share.revokeTitle"),
@@ -241,6 +272,10 @@ export function AgentUsageGuideModal({
                 </ol>
                 {frontendConfigQuery.isLoading ? (
                   <Spin />
+                ) : frontendConfigQuery.isError ? (
+                  <Button onClick={() => frontendConfigQuery.refetch()}>
+                    {t("common.retry")}
+                  </Button>
                 ) : (
                   <Typography.Paragraph
                     copyable={{ text: northboundCurl }}
@@ -260,7 +295,7 @@ export function AgentUsageGuideModal({
                   rel="noreferrer"
                 >
                   {t("agentUsageGuide.northbound.docs")}{" "}
-                  <ExternalLink className="inline size-3" />
+                  <ExternalLink className="inline size-3" aria-hidden />
                 </a>
               </div>
             ),

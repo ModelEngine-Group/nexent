@@ -10,7 +10,9 @@ import {
   buildUserApiKeyPath,
   clearAgentUsageGuidePath,
   getAgentUsageGuideOpenAction,
+  getAgentUsageGuideAccess,
   getA2AGuideState,
+  reduceAgentShareGuideState,
   resolveAgentUsageGuideTarget,
   parseAgentUsageGuideParams,
   isAgentSharePath,
@@ -118,6 +120,31 @@ test("opens a repository guide target only once", () => {
     }),
     { action: "ignore" }
   );
+});
+
+test("shows usage guidance only for published Agents and protects share management", () => {
+  assert.deepEqual(
+    getAgentUsageGuideAccess({ currentVersionNo: null, permission: "OWNER" }),
+    { canOpen: false, canManageShare: true }
+  );
+  assert.deepEqual(
+    getAgentUsageGuideAccess({
+      currentVersionNo: 3,
+      permission: "READ_ONLY",
+    }),
+    { canOpen: true, canManageShare: false }
+  );
+});
+
+test("replaces rotated share links and removes revoked links immediately", () => {
+  const original = { share_token: "old-token" };
+  const rotated = { share_token: "new-token" };
+
+  assert.equal(
+    reduceAgentShareGuideState(original, { type: "saved", share: rotated }),
+    rotated
+  );
+  assert.equal(reduceAgentShareGuideState(rotated, { type: "revoked" }), null);
 });
 
 test("builds safe share and northbound API examples", () => {
