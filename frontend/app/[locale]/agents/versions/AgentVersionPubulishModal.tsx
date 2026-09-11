@@ -9,6 +9,7 @@ const { TextArea } = Input;
 
 import { publishVersion, updateVersion } from "@/services/agentVersionService";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
+import { getAgentPublishCompletion } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
 
 export interface AgentVersionPubulishModalProps {
@@ -100,7 +101,7 @@ export default function AgentVersionPubulishModal({
     try {
       setIsLoading(true);
       const result = await publishVersion(agentId, values);
-      if (result.success) {
+      if (getAgentPublishCompletion(result) === "complete") {
         message.success(t("agent.version.publishSuccess"));
         onClose();
         publishForm.resetFields();

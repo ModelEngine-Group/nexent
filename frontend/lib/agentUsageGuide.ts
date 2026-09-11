@@ -5,6 +5,15 @@ export function buildAgentUsageGuidePath(
   return `/${locale}/agent-space?tab=mine&agent_id=${agentId}&guide=usage`;
 }
 
+export function getAgentPublishCompletion({
+  success,
+}: {
+  success: boolean;
+  data?: unknown;
+}): "complete" | "stay" {
+  return success ? "complete" : "stay";
+}
+
 export function clearAgentUsageGuidePath(
   locale: string,
   agentId: number

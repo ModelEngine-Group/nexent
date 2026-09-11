@@ -11,6 +11,7 @@ import {
   clearAgentUsageGuidePath,
   getAgentUsageGuideOpenAction,
   getAgentUsageGuideAccess,
+  getAgentPublishCompletion,
   getA2AGuideState,
   reduceAgentShareGuideState,
   resolveAgentUsageGuideTarget,
@@ -25,6 +26,18 @@ test("builds the published Agent repository guide URL", () => {
     buildAgentUsageGuidePath("zh", 41),
     "/zh/agent-space?tab=mine&agent_id=41&guide=usage"
   );
+});
+
+test("completes ordinary and A2A publishes but keeps failed publishes in the editor", () => {
+  assert.equal(getAgentPublishCompletion({ success: true }), "complete");
+  assert.equal(
+    getAgentPublishCompletion({
+      success: true,
+      data: { a2a_agent: { endpoint_id: "a2a-42" } },
+    }),
+    "complete"
+  );
+  assert.equal(getAgentPublishCompletion({ success: false }), "stay");
 });
 
 test("requires login only for interactive Agent share links", () => {
