@@ -5,6 +5,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID
@@ -95,15 +97,47 @@ from utils.auth_utils import (
 )
 from management.services.agent.run_identity import AgentRunIdentityContext
 
-agent_runtime_router = APIRouter(prefix="/agent")
-agent_config_router = APIRouter(prefix="/agent")
-agent_share_router = APIRouter(prefix="/agent-share")
-logger = logging.getLogger("agent_app")
-
 AGENT_SHARE_SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
 }
+logger = logging.getLogger("agent_app")
+
+
+class AgentShareRoute(APIRoute):
+    """Apply privacy headers even when request validation rejects a share call."""
+
+    def get_route_handler(self):
+        original_handler = super().get_route_handler()
+
+        async def agent_share_route_handler(request: Request) -> Response:
+            try:
+                response = await original_handler(request)
+            except HTTPException as exc:
+                exc.headers = {**(exc.headers or {}), **AGENT_SHARE_SECURITY_HEADERS}
+                raise
+            except RequestValidationError as exc:
+                return JSONResponse(
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    content={"detail": jsonable_encoder(exc.errors())},
+                    headers=AGENT_SHARE_SECURITY_HEADERS,
+                )
+            except Exception:
+                logger.error("Agent share request failed")
+                return JSONResponse(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    content={"detail": "Agent share is unavailable."},
+                    headers=AGENT_SHARE_SECURITY_HEADERS,
+                )
+            response.headers.update(AGENT_SHARE_SECURITY_HEADERS)
+            return response
+
+        return agent_share_route_handler
+
+
+agent_runtime_router = APIRouter(prefix="/agent")
+agent_config_router = APIRouter(prefix="/agent")
+agent_share_router = APIRouter(prefix="/agent-share", route_class=AgentShareRoute)
 
 
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")

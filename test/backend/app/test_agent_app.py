@@ -4,6 +4,7 @@ Unit tests for backend.apps.agent_app module.
 Tests all agent management API endpoints including runtime and configuration operations.
 """
 import atexit
+import logging
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
 import importlib.machinery
@@ -1953,6 +1954,25 @@ def test_agent_share_metadata_exposes_only_the_whitelisted_fields(mocker, mock_a
     assert_agent_share_security_headers(response)
 
 
+def test_agent_share_hides_unexpected_errors_and_keeps_security_headers(
+    mocker, mock_auth_header, caplog
+):
+    caplog.set_level(logging.ERROR, logger="agent_app")
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "tenant-a"))
+    mocker.patch(
+        "apps.agent_app.get_agent_share_metadata",
+        side_effect=RuntimeError("internal token detail"),
+    )
+
+    response = agent_share_client.get("/agent-share/opaque-token", headers=mock_auth_header)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Agent share is unavailable."
+    assert "internal token detail" not in response.text
+    assert "internal token detail" not in caplog.text
+    assert_agent_share_security_headers(response)
+
+
 def test_agent_share_session_is_created_only_by_the_explicit_session_endpoint(mocker, mock_auth_header):
     mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "tenant-a"))
     mocker.patch(
@@ -1978,6 +1998,7 @@ def test_agent_share_run_rejects_client_controlled_agent_fields(mocker, mock_aut
     )
 
     assert response.status_code == 422
+    assert_agent_share_security_headers(response)
     auth.assert_not_called()
     resolved.assert_not_called()
     run_stream.assert_not_called()
