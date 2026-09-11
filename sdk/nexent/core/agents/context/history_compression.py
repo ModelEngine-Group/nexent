@@ -15,6 +15,14 @@ from .models import ContextItem, ContextItemInput, ContextItemType
 logger = logging.getLogger("agent_context.history_compression")
 
 
+_FACT_MARKER_RE = re.compile(
+    r"\b(?=[A-Za-z0-9-]*\d)[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){2,}\b"
+)
+_ASSOCIATED_LITERAL_RE = re.compile(
+    r"(?<![\w-])[A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff]*-\d+(?![\w-])"
+)
+
+
 @dataclass(frozen=True)
 class HistorySummaryCandidate:
     summary: dict[str, Any]
@@ -102,7 +110,31 @@ class HistorySummaryInput:
         return "\n\n".join(sections)
 
 
-def _validate_summary_contract(text: str, section_keys: Sequence[str]) -> str | None:
+def _protected_fact_literals(source_text: str) -> dict[str, tuple[str, ...]]:
+    """Collect explicit fact identifiers and code-like literals on the same line."""
+    protected: dict[str, set[str]] = {}
+    for line in source_text.splitlines():
+        markers = _FACT_MARKER_RE.findall(line)
+        if not markers:
+            continue
+        literals = {
+            re.sub(r"^.*[为是：:]", "", literal)
+            for literal in _ASSOCIATED_LITERAL_RE.findall(line)
+        }
+        for marker in markers:
+            protected.setdefault(marker, set()).update(literals)
+    return {
+        marker: tuple(sorted(literals))
+        for marker, literals in protected.items()
+    }
+
+
+def _validate_summary_contract(
+    text: str,
+    section_keys: Sequence[str],
+    *,
+    source_text: str = "",
+) -> str | None:
     """Return canonical Markdown only for the exact seven-section contract."""
     cleaned = text.strip()
     top = "# Compact Result of History"
@@ -125,6 +157,14 @@ def _validate_summary_contract(text: str, section_keys: Sequence[str]) -> str | 
     parts = re.split(r"(?m)^##\s+.+?\s*$", cleaned)[1:]
     if len(parts) != len(expected) or any(not part.strip() for part in parts):
         return None
+    for marker, literals in _protected_fact_literals(source_text).items():
+        if marker not in cleaned or any(literal not in cleaned for literal in literals):
+            logger.warning(
+                "Rejected history summary candidate: protected fact omitted marker=%s literals=%s",
+                marker,
+                literals,
+            )
+            return None
     return cleaned
 
 
@@ -170,7 +210,9 @@ class HistoryCompressor:
         )
         validated = (
             _validate_summary_contract(
-                generated.summary_text, tuple(self._llm.config.summary_json_schema)
+                generated.summary_text,
+                tuple(self._llm.config.summary_json_schema),
+                source_text=summary_input.render(),
             )
             if generated.summary_text else None
         )

@@ -25,8 +25,9 @@ from nexent.core.models.capacity_resolver import (
     resolve_capacity,
 )
 from nexent.core.models.capacity_budget import (
+    ContextBudgetCalculator,
+    ContextBudgetSnapshot,
     RequestBudgetOverrides,
-    SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
@@ -285,37 +286,14 @@ def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
     }
 
 
-def _safe_input_budget_for_monitoring(snapshot: Any) -> dict:
-    """Translate the legacy W2 snapshot into the canonical runtime vocabulary."""
-    data = snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
-    effective_input_limit_tokens = data.get("provider_input_limit_tokens", 0)
-    compaction_trigger_threshold_tokens = data.get("soft_input_budget_tokens")
-    if compaction_trigger_threshold_tokens is None and effective_input_limit_tokens:
-        compaction_trigger_threshold_tokens = int(effective_input_limit_tokens * 0.8)
-    return {
-        "provider": data.get("provider"),
-        "model_name": data.get("model_name"),
-        "effective_input_limit_tokens": effective_input_limit_tokens,
-        "compaction_trigger_threshold_tokens": compaction_trigger_threshold_tokens or 0,
-        "compaction_target_tokens": (
-            int(effective_input_limit_tokens * 0.6)
-            if effective_input_limit_tokens
-            else 0
-        ),
-        "requested_output_tokens": data.get("requested_output_tokens"),
-        "fingerprint": data.get("fingerprint"),
-        "warnings": data.get("warnings") or [],
-    }
-
-
-def _resolve_safe_input_budget(
+def _resolve_context_budget(
     *,
     capacity_snapshot: Optional[ModelCapacitySnapshot],
     tenant_id: str,
     agent_requested_output_tokens: Optional[int],
     request_requested_output_tokens: Optional[int],
-) -> Optional[dict]:
-    """Resolve the W2 budget snapshot before context assembly begins."""
+) -> Optional[ContextBudgetSnapshot]:
+    """Resolve the complete canonical W2 snapshot before context assembly."""
     if capacity_snapshot is None:
         return None
 
@@ -329,7 +307,7 @@ def _resolve_safe_input_budget(
         "agent" if agent_requested_output_tokens is not None else "model_default"
     )
     try:
-        snapshot = SafeInputBudgetCalculator().calculate_safe_input_budget(
+        snapshot = ContextBudgetCalculator().calculate_context_budget(
             capacity_snapshot=capacity_snapshot,
             reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
             request_overrides=request_overrides,
@@ -344,7 +322,7 @@ def _resolve_safe_input_budget(
         # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
         # caller already handles (falls back to W1 input_budget).
         logger.warning(
-            "W2 safe input budget unavailable (tenant_id=%s model=%s): %s - "
+            "W2 context budget unavailable (tenant_id=%s model=%s): %s - "
             "falling back to W1 input_budget. Fill context_window_tokens on the "
             "model record to enable W2 enforcement.",
             tenant_id,
@@ -353,17 +331,18 @@ def _resolve_safe_input_budget(
         )
         return None
     logger.debug(
-        "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
-        "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
+        "W2 context budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
+        "compaction_trigger_threshold_tokens=%s compaction_target_tokens=%s "
+        "fingerprint=%s warnings=%s",
         tenant_id,
         snapshot.model_name,
         snapshot.requested_output_tokens,
-        snapshot.soft_input_budget_tokens,
-        snapshot.hard_input_budget_tokens,
+        snapshot.compaction_trigger_threshold_tokens,
+        snapshot.compaction_target_tokens,
         snapshot.fingerprint,
         list(snapshot.warnings),
     )
-    return _safe_input_budget_for_monitoring(snapshot)
+    return snapshot
 
 
 def _resolve_input_budget(
@@ -1432,18 +1411,18 @@ async def create_agent_config(
         resolved_capacity_snapshot = None
 
     requested_output_tokens = agent_info.get("requested_output_tokens")
-    safe_input_budget_snapshot = _resolve_safe_input_budget(
+    context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
         agent_requested_output_tokens=requested_output_tokens,
         request_requested_output_tokens=request_requested_output_tokens,
     )
-    if safe_input_budget_snapshot is not None:
-        effective_input_limit_tokens = safe_input_budget_snapshot["effective_input_limit_tokens"]
-        compaction_trigger_threshold_tokens = safe_input_budget_snapshot[
-            "compaction_trigger_threshold_tokens"
-        ]
-        compaction_target_tokens = safe_input_budget_snapshot["compaction_target_tokens"]
+    if context_budget_snapshot is not None:
+        effective_input_limit_tokens = context_budget_snapshot.effective_input_limit_tokens
+        compaction_trigger_threshold_tokens = (
+            context_budget_snapshot.compaction_trigger_threshold_tokens
+        )
+        compaction_target_tokens = context_budget_snapshot.compaction_target_tokens
         context_token_threshold = compaction_trigger_threshold_tokens
     else:
         effective_input_limit_tokens = 0
@@ -1552,7 +1531,7 @@ async def create_agent_config(
         context_items=context_items,
         pre_run_tool_events=pre_run_tool_events,
         capacity_snapshot=capacity_snapshot,
-        safe_input_budget_snapshot=safe_input_budget_snapshot,
+        context_budget_snapshot=context_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
     )
@@ -2353,9 +2332,9 @@ async def create_agent_run_info(
         history=converted_history,
         stop_event=threading.Event(),
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
-        safe_input_budget_snapshot=getattr(
+        context_budget_snapshot=getattr(
             agent_config,
-            "safe_input_budget_snapshot",
+            "context_budget_snapshot",
             None,
         ),
         sandbox_config=sandbox_config,

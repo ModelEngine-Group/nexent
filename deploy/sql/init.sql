@@ -471,3 +471,73 @@ EXECUTE FUNCTION update_ag_tool_instance_update_time();
 
 -- Add comment to the trigger
 COMMENT ON TRIGGER update_ag_tool_instance_update_time_trigger ON nexent.ag_tool_instance_t IS 'Trigger to call update_ag_tool_instance_update_time function before each update on ag_tool_instance_t table';
+
+-- Fresh-install final shape for model monitoring. Incremental migrations remain
+-- responsible for upgrading installations created by earlier releases.
+CREATE TABLE IF NOT EXISTS nexent.model_monitoring_record_t (
+    monitoring_id SERIAL PRIMARY KEY,
+    model_id INT4,
+    model_name VARCHAR(100) NOT NULL,
+    model_type VARCHAR(20) DEFAULT 'llm',
+    agent_id INT4,
+    agent_name VARCHAR(100),
+    conversation_id INT4,
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100),
+    display_name VARCHAR(200),
+    request_duration_ms INT4,
+    ttft_ms INT4,
+    input_tokens INT4,
+    output_tokens INT4,
+    total_tokens INT4,
+    context_window_tokens INT4,
+    default_output_reserve_tokens INT4,
+    capability_profile_version VARCHAR(100),
+    capacity_source VARCHAR(100),
+    requested_output_tokens INT4,
+    effective_input_limit_tokens INT4,
+    tokenizer_family VARCHAR(100),
+    counting_mode VARCHAR(20),
+    unknown_capabilities JSONB,
+    capacity_fingerprint VARCHAR(64),
+    budget_fingerprint VARCHAR(64),
+    budget_w1_fingerprint VARCHAR(64),
+    budget_requested_output_tokens INT4,
+    budget_output_reserve_source VARCHAR(32),
+    budget_schema_version INT4,
+    budget_effective_input_limit_tokens INT4,
+    budget_uncertainty_reserve_tokens INT4,
+    budget_uncertainty_reserve_basis VARCHAR(64),
+    budget_compaction_trigger_ratio FLOAT,
+    budget_compaction_trigger_ratio_source VARCHAR(32),
+    budget_compaction_trigger_threshold_tokens INT4,
+    budget_compaction_target_ratio FLOAT,
+    budget_compaction_target_ratio_source VARCHAR(32),
+    budget_compaction_target_tokens INT4,
+    budget_warnings JSONB,
+    generation_rate FLOAT,
+    is_streaming BOOLEAN DEFAULT FALSE,
+    is_success BOOLEAN DEFAULT TRUE,
+    is_error BOOLEAN DEFAULT FALSE,
+    error_type VARCHAR(50),
+    error_message TEXT,
+    retry_count INT4 DEFAULT 0,
+    operation VARCHAR(50),
+    create_time TIMESTAMP DEFAULT NOW(),
+    delete_flag VARCHAR(1) DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS ix_monitoring_model_id
+    ON nexent.model_monitoring_record_t (model_id);
+CREATE INDEX IF NOT EXISTS ix_monitoring_tenant_id
+    ON nexent.model_monitoring_record_t (tenant_id);
+CREATE INDEX IF NOT EXISTS ix_monitoring_agent_id
+    ON nexent.model_monitoring_record_t (agent_id);
+CREATE INDEX IF NOT EXISTS ix_monitoring_create_time
+    ON nexent.model_monitoring_record_t (create_time);
+CREATE INDEX IF NOT EXISTS ix_monitoring_is_error
+    ON nexent.model_monitoring_record_t (is_error);
+CREATE INDEX IF NOT EXISTS ix_monitoring_model_type
+    ON nexent.model_monitoring_record_t (model_type);
+CREATE INDEX IF NOT EXISTS ix_monitoring_model_time
+    ON nexent.model_monitoring_record_t (model_id, create_time);

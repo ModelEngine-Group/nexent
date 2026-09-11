@@ -14,6 +14,7 @@ from nexent.core.agents.context.history_compression import (
     HistorySummaryInput,
     _validate_summary_contract,
 )
+from nexent.core.agents.context.llm_summary import LLMSummary
 
 
 def _rendered_text(messages):
@@ -576,12 +577,12 @@ def test_summary_call_uses_isolated_dynamic_output_budget(monkeypatch):
     class BudgetAwareModel:
         def __init__(self):
             self.observer = MessageObserver()
-            self.safe_input_budget_snapshot = {"requested_output_tokens": 512}
+            self.context_budget_snapshot = {"requested_output_tokens": 512}
             self.extra_body = {"existing": True}
             self.max_tokens_seen = []
 
         def __call__(self, messages, stop_sequences=None, **kwargs):
-            assert self.safe_input_budget_snapshot is None
+            assert self.context_budget_snapshot is None
             assert self.extra_body == {
                 "existing": True,
                 "chat_template_kwargs": {"enable_thinking": False},
@@ -604,7 +605,7 @@ def test_summary_call_uses_isolated_dynamic_output_budget(monkeypatch):
 
     assert model.max_tokens_seen
     assert all(limit > 0 for limit in model.max_tokens_seen)
-    assert model.safe_input_budget_snapshot == {"requested_output_tokens": 512}
+    assert model.context_budget_snapshot == {"requested_output_tokens": 512}
     assert model.extra_body == {"existing": True}
     assert model.observer is original_observer
     assert original_observer.message_query == []
@@ -621,6 +622,43 @@ def test_summary_call_uses_isolated_dynamic_output_budget(monkeypatch):
 def test_summary_contract_rejects_noncanonical_output(mutate):
     keys = tuple(ContextManagerConfig().summary_json_schema)
     assert _validate_summary_contract(mutate(_Response.content), keys) is None
+
+
+def test_summary_contract_rejects_omitted_protected_fact_literal():
+    keys = tuple(ContextManagerConfig().summary_json_schema)
+    source = (
+        "验证事实 E2E-3-063：巡检码为星河-324。\n"
+        "验证事实 E2E-3-064：巡检码为星河-377。"
+    )
+    lossy = _Response.content.replace(
+        "context",
+        "E2E-3-063 through E2E-3-064 use 星河 codes; for example E2E-3-063=星河-324",
+    )
+    assert _validate_summary_contract(lossy, keys, source_text=source) is None
+
+
+def test_summary_contract_accepts_compact_protected_fact_ledger():
+    keys = tuple(ContextManagerConfig().summary_json_schema)
+    source = (
+        "验证事实 E2E-3-063：巡检码为星河-324。\n"
+        "验证事实 E2E-3-064：巡检码为星河-377。"
+    )
+    lossless = _Response.content.replace(
+        "context",
+        "- E2E-3-063 = 星河-324\n- E2E-3-064 = 星河-377",
+    )
+    assert _validate_summary_contract(lossless, keys, source_text=source) == lossless
+
+
+def test_summary_prompt_forbids_range_example_and_formula_substitution():
+    model = _SummaryModel()
+    LLMSummary(ContextManagerConfig(), renderer=None).generate_summary(
+        "验证事实 E2E-3-064：巡检码为星河-377。",
+        model,
+    )
+    prompt = _rendered_text(model.calls[0])
+    assert "Preserve every explicit fact identifier" in prompt
+    assert "ranges, selected examples, inferred patterns, or formulas" in prompt
 
 
 def test_context_evidence_log_is_pretty_printed(caplog):
