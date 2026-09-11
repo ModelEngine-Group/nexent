@@ -1338,8 +1338,6 @@ async def resolve_resource_requirements(
             agent_id=resolved_agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            verification_required=payload.verification_required,
-            capability_verifications=payload.capability_verifications,
         )
         result = await resolve_resource_requirements_impl(
             requirements=payload.requirements,
@@ -1347,6 +1345,8 @@ async def resolve_resource_requirements(
             exclude_refs=payload.exclude_refs,
             tenant_id=tenant_id,
             user_id=user_id,
+            verification_required=payload.verification_required,
+            capability_verifications=payload.capability_verifications,
         )
         return result.model_dump(mode="json")
     except AgentDraftEditError as exc:

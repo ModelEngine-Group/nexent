@@ -353,6 +353,7 @@ async def test_unified_resolver_validates_context_tenant_and_edit_permission(
         agent_id=42,
         requirements=[{"requirement_id": "lookup", "query": "Search data"}],
         phase="INITIAL",
+        verification_required=True,
     )
 
     assert result == resolution.model_dump(mode="json")
@@ -360,6 +361,8 @@ async def test_unified_resolver_validates_context_tenant_and_edit_permission(
         agent_id=42, tenant_id="tenant-a", user_id="user-a"
     )
     assert resolve_impl.await_args.kwargs["tenant_id"] == "tenant-a"
+    assert resolve_impl.await_args.kwargs["verification_required"] is True
+    assert resolve_impl.await_args.kwargs["capability_verifications"] is None
     mismatch = await resolve_resource_requirements(
         agent_id=41,
         requirements=[{"requirement_id": "lookup", "query": "Search data"}],
