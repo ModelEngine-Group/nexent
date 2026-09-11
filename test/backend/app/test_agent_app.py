@@ -2001,6 +2001,40 @@ def test_agent_share_session_is_created_only_by_the_explicit_session_endpoint(mo
     assert response.json() == {"agent_version_no": 4, "session_recoverable": True}
 
 
+def test_agent_share_history_uses_the_authenticated_visitor_identity(mocker, mock_auth_header):
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "tenant-a"))
+    get_history = mocker.patch(
+        "apps.agent_app.get_agent_share_history",
+        return_value={"history": [{"role": "user", "content": "private to visitor A"}], "session_recoverable": True},
+    )
+
+    response = agent_share_client.get("/agent-share/opaque-token/history", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "history": [{"role": "user", "content": "private to visitor A"}],
+        "session_recoverable": True,
+    }
+    get_history.assert_called_once_with("opaque-token", visitor_user_id="visitor-a")
+    assert_agent_share_security_headers(response)
+
+
+def test_agent_share_history_hides_invalid_share_without_leaking_its_state(mocker, mock_auth_header):
+    from services.agent_share_service import AgentShareError
+
+    mocker.patch("apps.agent_app.get_current_user_id", return_value=("visitor-a", "tenant-a"))
+    mocker.patch(
+        "apps.agent_app.get_agent_share_history",
+        side_effect=AgentShareError("agent_share_invalid_token"),
+    )
+
+    response = agent_share_client.get("/agent-share/opaque-token/history", headers=mock_auth_header)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Agent share is unavailable."
+    assert_agent_share_security_headers(response)
+
+
 def test_agent_share_run_rejects_client_controlled_agent_fields(mocker, mock_auth_header):
     auth = mocker.patch("apps.agent_app.get_current_user_id")
     resolved = mocker.patch("apps.agent_app.resolve_agent_share_run_context")
