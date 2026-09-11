@@ -209,7 +209,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
             </span>
           ) : user ? (
             <span className="text-xs font-medium text-slate-600 max-w-[150px] truncate">
-              {user.email}
+              {user.username?.trim() || user.email?.trim() || "-"}
             </span>
           ) : null}
           <AvatarDropdown />

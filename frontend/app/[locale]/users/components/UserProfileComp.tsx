@@ -287,10 +287,14 @@ export default function UserProfileComp() {
               <div className="divide-y divide-gray-50 dark:divide-gray-700/50">
                 <div className="px-6 py-3 flex items-center justify-between">
                   <span className="text-gray-500 dark:text-gray-400 text-sm">
-                    {t("common.email") || "Email"}
+                    {isCasUser
+                      ? t("profile.username") || "Username"
+                      : t("common.email") || "Email"}
                   </span>
                   <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">
-                    {user?.email || "-"}
+                    {isCasUser
+                      ? user?.username?.trim() || user?.email?.trim() || "-"
+                      : user?.email?.trim() || "-"}
                   </span>
                 </div>
                 <div className="px-6 py-3 flex items-center justify-between">

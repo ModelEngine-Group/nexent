@@ -3456,6 +3456,7 @@
   "profile.title": "个人信息",
   "profile.subtitle": "管理您的账户设置和偏好",
   "profile.profileInfo": "基础信息",
+  "profile.username": "用户名",
   "profile.securitySettings": "安全设置",
   "profile.role": "角色",
   "profile.changePassword": "修改密码",
