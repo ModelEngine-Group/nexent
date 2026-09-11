@@ -965,7 +965,10 @@ class TestAgentObservability:
                 purpose="final_answer", selected_item_types=("system", "conversation_turn"),
                 stable_message_count=1, dynamic_message_count=2,
                 stable_prefix_fingerprint="stable-fp", prefix_change_reasons=("initial_request",),
-                soft_budget=100, hard_budget=120, raw_token_estimate=110, final_token_estimate=80,
+                effective_input_limit_tokens=120,
+                compaction_trigger_threshold_tokens=100,
+                compaction_target_tokens=72,
+                raw_token_estimate=110, final_token_estimate=80,
                 messages_fingerprint="messages-fp", tools_fingerprint="tools-fp",
                 message_roles=("system", "user", "assistant"),
                 history_message_roles=("user", "assistant"), compression_attempted=True,
@@ -975,7 +978,9 @@ class TestAgentObservability:
             assert event_name == "agent.final_context"
             assert event_attrs["agent.step.number"] == 3
             assert event_attrs["context.messages.fingerprint"] == "messages-fp"
-            assert event_attrs["context.budget.soft"] == 100
+            assert event_attrs["context.compaction_trigger_threshold_tokens"] == 100
+            assert event_attrs["context.effective_input_limit_tokens"] == 120
+            assert event_attrs["context.compaction_target_tokens"] == 72
             assert event_attrs["context.tokens.pre_compression"] == 110
             assert event_attrs["context.tokens.post_compression"] == 80
             assert event_attrs["context.compression.attempted"] is True

@@ -37,6 +37,7 @@ import {
   attachExecutionLogsToTool,
   collapseSubAgentParts,
   attachSearchContentToTool,
+  buildExecutionCodePart,
   buildToolCallPart,
   conversationSourcesRegistry,
   extractAidpImageKeys,
@@ -140,6 +141,15 @@ const parseImageMetadata = (value: unknown) => {
   }
 };
 
+const getRetrievalHighlightTerms = (scoreDetails: unknown): string[] => {
+  if (!scoreDetails || typeof scoreDetails !== "object") return [];
+  const terms = (scoreDetails as { retrieval_highlight_terms?: unknown })
+    .retrieval_highlight_terms;
+  return Array.isArray(terms)
+    ? terms.filter((term): term is string => typeof term === "string")
+    : [];
+};
+
 const toToolSearchItem = (value: unknown) => {
   if (typeof value !== "object" || value === null) return null;
 
@@ -175,6 +185,7 @@ const toToolSearchItem = (value: unknown) => {
         citeIndex,
         toolSign,
         isImage: Boolean(imageMetadata),
+        retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
       }
     : null;
 };
@@ -395,6 +406,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 url,
                 title,
                 text: item.text as string | undefined,
+                publishedDate: item.published_date as string | undefined,
                 sourceType: item.source_type as string | undefined,
                 searchType: item.search_type as string | undefined,
                 toolSign: item.tool_sign as string | undefined,
@@ -405,6 +417,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 imageKey:
                   (item.image_key as string | undefined) ||
                   (isImage ? derivedImageKey : undefined),
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details,
+                ),
               });
             }
           }
@@ -832,6 +847,21 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (part.type === "parse") {
+            flushReasoning(part.invocation_id);
+            if (part.content.trim()) {
+              const executionCodePart = buildExecutionCodePart({
+                type: "parse",
+                content: part.content,
+                unit_index: part.unit_index ?? partIndex,
+              });
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) executionCodePart.metadata = meta;
+              content.push(executionCodePart);
+            }
+            continue;
+          }
+
           if (part.type === "execution_logs") {
             flushReasoning(part.invocation_id);
             attachExecutionLogsToTool(content, part);
@@ -864,6 +894,23 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               });
             } else {
               log.warn("[history-adapter] Failed to parse automation proposal");
+            }
+            continue;
+          }
+
+          if (part.type === "history_summary") {
+            flushReasoning();
+            try {
+              const payload = JSON.parse(part.content || "{}");
+              if (payload && typeof payload === "object") {
+                content.push({
+                  type: "data",
+                  name: "history-summary",
+                  data: { ...payload, status: "accepted" },
+                });
+              }
+            } catch {
+              log.warn("[history-adapter] Failed to parse history summary");
             }
             continue;
           }
@@ -952,6 +999,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
                 citeIndex,
+                toolSign: item.tool_sign as string | undefined,
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details,
+                ),
                 messageId,
               });
             }
@@ -1357,6 +1408,16 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       remoteId: "",
       externalId: "",
     };
+  },
+
+  // New conversations do not have a backend ID until their first agent run.
+  // Accept metadata updates so assistant-ui can retain the selected agent in
+  // its local thread state while users switch between conversations.
+  async updateCustom(
+    _remoteId: string,
+    _custom: Record<string, unknown> | undefined
+  ): Promise<void> {
+    return;
   },
 
   async rename(remoteId: string, newTitle: string): Promise<void> {

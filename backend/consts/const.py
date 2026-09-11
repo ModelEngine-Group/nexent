@@ -51,6 +51,16 @@ ROOT_DIR = os.getenv("ROOT_DIR")
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
 
+# Document deletion coordination.  The Redis deletion fence itself never
+# expires; these values only bound one drain attempt and background retry
+# cadence while workers finish an in-flight request.
+DOCUMENT_DELETE_DRAIN_TIMEOUT_S = float(
+    os.getenv("DOCUMENT_DELETE_DRAIN_TIMEOUT_S", "30")
+)
+DOCUMENT_DELETE_RETRY_INTERVAL_S = float(
+    os.getenv("DOCUMENT_DELETE_RETRY_INTERVAL_S", "2")
+)
+
 # Agent automation runtime configuration
 AGENT_AUTOMATION_ENABLED = os.getenv(
     "AGENT_AUTOMATION_ENABLED", "true"
@@ -300,6 +310,16 @@ RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
 RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
+# Logging Configuration
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# When IS_DEBUG=true, force DEBUG level for all loggers (overrides LOG_LEVEL).
+IS_DEBUG = os.getenv("IS_DEBUG", "false").lower() == "true"
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "1"))  # days
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
+
+
 # Service Control Flags
 DISABLE_RAY_DASHBOARD = os.getenv(
     "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
@@ -359,9 +379,11 @@ DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
 DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
 DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
+EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
 DEFAULT_MEMORY_SWITCH_KEY = "Y"
 DEFAULT_DREAMING_SWITCH_KEY = "Y"
 DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
+DEFAULT_EXTERNAL_PROVIDER_TOP_K = 20
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
@@ -414,9 +436,10 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
     os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
 )
 
-# External provider toggles (configured per provider elsewhere; these constants
-# describe protocol-level defaults)
+# External provider protocol defaults. Provider records control whether each
+# configured integration participates in search and ingest.
 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "agent",
     "model_output",
     "model_output_thinking",
     "model_output_deep_thinking",
@@ -781,3 +804,6 @@ MODEL_CATALOG_JSON_PATH = os.getenv(
     os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
 )
 """Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
+
+# External Memory Provider Configuration
+MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

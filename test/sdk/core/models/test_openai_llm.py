@@ -697,6 +697,82 @@ def test_call_context_length_exceeded_error(openai_model_instance):
             openai_model_instance.__call__(messages)
 
 
+def test_provider_context_overflow_rebuilds_and_retries(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    rebuilt_messages = [{"role": "user", "content": [{"text": "smaller"}]}]
+    success_chunk = make_chunk("recovered", role="assistant")
+    success_chunk.usage = None
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        Exception("context_length_exceeded: maximum context length"),
+        [success_chunk],
+    ]
+    rebuild = MagicMock(return_value=rebuilt_messages)
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=MagicMock()):
+        openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_called_once_with()
+    assert openai_model_instance.client.chat.completions.create.call_count == 2
+
+
+def test_provider_context_overflow_rejects_non_list_rebuild(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(TypeError, match="must return FinalContext or a message list"):
+            openai_model_instance.__call__(messages, context_rebuild=lambda: object())
+
+
+def test_provider_context_overflow_stops_after_two_recovery_dispatches(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "still too large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryExhausted,
+            match="persisted after two recovery dispatches",
+        ):
+            openai_model_instance.__call__(
+                messages,
+                context_rebuild=lambda: messages,
+                _overflow_recovery_ordinal=2,
+            )
+
+
+def test_provider_context_overflow_without_rebuild_is_retry_unsafe(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryUnsafe,
+            match="cannot be safely rebuilt",
+        ):
+            openai_model_instance.__call__(messages, context_rebuild=None)
+
+
+def test_provider_context_overflow_does_not_recover_unrelated_error(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "hello"}]}]
+    rebuild = MagicMock()
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "authentication failed"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(Exception, match="authentication failed"):
+            openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_not_called()
+
+
 def test_call_general_exception(openai_model_instance):
     """Test __call__ method re-raises general exceptions"""
 
@@ -790,12 +866,14 @@ def test_call_with_reasoning_content(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = "Let me think about this"
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "This is a reasoning step"
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = "Response"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
     mock_chunk2.usage = MagicMock()
     mock_chunk2.usage.prompt_tokens = 5
@@ -828,6 +906,36 @@ def test_call_with_reasoning_content(openai_model_instance):
             "Response")
 
 
+def test_call_with_reasoning_field(openai_model_instance):
+    """Test __call__ handles providers that stream reasoning in the reasoning field."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = "Alternate reasoning field"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 5
+    mock_chunk.usage.total_tokens = 8
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+
+        result = openai_model_instance.__call__(messages)
+
+        assert result == mock_result_message
+        openai_model_instance.observer.add_model_reasoning_content.assert_called_once_with(
+            "Alternate reasoning field"
+        )
+        openai_model_instance.observer.add_model_new_token.assert_called_once_with("Response")
+
+
 def test_call_with_multiple_reasoning_content_chunks(openai_model_instance):
     """Test __call__ method handles multiple chunks with reasoning_content"""
 
@@ -838,18 +946,21 @@ def test_call_with_multiple_reasoning_content_chunks(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = "Let me"
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "First reasoning step"
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = " think"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = "Second reasoning step"
 
     mock_chunk3 = MagicMock()
     mock_chunk3.choices = [MagicMock()]
     mock_chunk3.choices[0].delta.content = " about this"
     mock_chunk3.choices[0].delta.role = None
+    mock_chunk3.choices[0].delta.reasoning = None
     mock_chunk3.choices[0].delta.reasoning_content = None
     mock_chunk3.usage = MagicMock()
     mock_chunk3.usage.prompt_tokens = 5
@@ -896,12 +1007,14 @@ def test_call_with_reasoning_content_only(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = None
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "Pure reasoning content"
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = "Final response"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
     mock_chunk2.usage = MagicMock()
     mock_chunk2.usage.prompt_tokens = 5
@@ -942,6 +1055,7 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     reasoning_chunk.choices = [MagicMock()]
     reasoning_chunk.choices[0].delta.content = None
     reasoning_chunk.choices[0].delta.role = "assistant"
+    reasoning_chunk.choices[0].delta.reasoning = None
     reasoning_chunk.choices[0].delta.reasoning_content = "Internal reasoning"
     reasoning_chunk.choices[0].finish_reason = None
     reasoning_chunk.usage = None
@@ -950,6 +1064,7 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     final_chunk.choices = [MagicMock()]
     final_chunk.choices[0].delta.content = None
     final_chunk.choices[0].delta.role = None
+    final_chunk.choices[0].delta.reasoning = None
     final_chunk.choices[0].delta.reasoning_content = None
     final_chunk.choices[0].finish_reason = "length"
     final_chunk.usage = MagicMock(prompt_tokens=10, completion_tokens=20)
@@ -985,6 +1100,7 @@ def test_call_with_reasoning_content_and_content_together(openai_model_instance)
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response text"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = "Reasoning alongside content"
     mock_chunk.usage = MagicMock()
     mock_chunk.usage.prompt_tokens = 5
@@ -1067,18 +1183,21 @@ def test_call_with_monitoring_and_token_tracker(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = "Hello"
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = None
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = " world"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
 
     mock_chunk3 = MagicMock()
     mock_chunk3.choices = [MagicMock()]
     mock_chunk3.choices[0].delta.content = None
     mock_chunk3.choices[0].delta.role = None
+    mock_chunk3.choices[0].delta.reasoning = None
     mock_chunk3.choices[0].delta.reasoning_content = None
     mock_chunk3.usage = MagicMock()
     mock_chunk3.usage.prompt_tokens = 10
@@ -1126,12 +1245,14 @@ def test_call_with_token_tracker_on_reasoning_content(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = None
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "Thinking..."
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = "Response"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
     mock_chunk2.usage = MagicMock()
     mock_chunk2.usage.prompt_tokens = 5
@@ -1170,6 +1291,7 @@ def test_call_with_stop_event_and_token_tracker(openai_model_instance):
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
@@ -1711,8 +1833,11 @@ def test_safe_input_budget_trace_attributes_are_prefixed():
     assert len(attrs["w2.budget_fingerprint"]) == 32
     assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
     assert attrs["w2.requested_output_tokens"] == 256
-    assert attrs["w2.soft_input_budget_tokens"] == 800
-    assert attrs["w2.hard_input_budget_tokens"] == 1000
+    assert attrs["context.effective_input_limit_tokens"] == 1000
+    assert attrs["context.compaction_trigger_threshold_tokens"] == 800
+    assert attrs["context.compaction_target_tokens"] == 600
+    assert "w2.soft_input_budget_tokens" not in attrs
+    assert "w2.hard_input_budget_tokens" not in attrs
 
 
 def test_call_without_tracker_creates_tracker(openai_model_instance):
@@ -1753,6 +1878,7 @@ def test_call_token_estimation_with_list_content(openai_model_instance):
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.usage = None  # No usage info to trigger token estimation
 
@@ -1772,8 +1898,8 @@ def test_call_token_estimation_with_list_content(openai_model_instance):
         assert openai_model_instance.last_output_token_count >= 0
 
 
-def test_call_context_length_exceeded_during_iteration(openai_model_instance):
-    """Test __call__ method raises ValueError when context_length_exceeded occurs during iteration (line 264)."""
+def test_call_context_length_exceeded_during_iteration_is_not_replayed(openai_model_instance):
+    """An iteration-time overflow is unsafe because a response may have started."""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
@@ -1785,8 +1911,7 @@ def test_call_context_length_exceeded_during_iteration(openai_model_instance):
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
         openai_model_instance.client.chat.completions.create.return_value = iter_that_raises()
 
-        # Should raise ValueError wrapping the context_length_exceeded error
-        with pytest.raises(ValueError, match="Token limit exceeded"):
+        with pytest.raises(Exception, match="cannot be safely rebuilt"):
             openai_model_instance.__call__(messages)
 
 
@@ -1801,6 +1926,7 @@ def test_prompt_cache_plan_records_unknown_capability_without_payload_directive(
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.usage = MagicMock()
     mock_chunk.usage.prompt_tokens = 10
@@ -1827,6 +1953,7 @@ def test_prompt_cache_usage_extracts_openai_cached_tokens(openai_model_instance)
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.usage = MagicMock()
     mock_chunk.usage.prompt_tokens = 100
@@ -1856,6 +1983,7 @@ def test_provider_adapter_preserves_context_manager_tool_order(openai_model_inst
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "ok"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.choices[0].finish_reason = "stop"
     mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
@@ -1891,6 +2019,7 @@ def _make_content_chunk(content: str = "hi"):
     chunk.choices = [MagicMock()]
     chunk.choices[0].delta.content = content
     chunk.choices[0].delta.role = "assistant"
+    chunk.choices[0].delta.reasoning = None
     chunk.choices[0].delta.reasoning_content = None
     chunk.usage = MagicMock()
     chunk.usage.prompt_tokens = 1
@@ -2274,6 +2403,7 @@ def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance)
     clean_delta = types.SimpleNamespace()
     clean_delta.content = "ok"
     clean_delta.role = "assistant"
+    clean_delta.reasoning = None
     clean_delta.reasoning_content = None
     clean_choice.delta = clean_delta
     clean_chunk.choices = [clean_choice]

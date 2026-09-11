@@ -335,9 +335,13 @@ class ConversationSourceSearch(TableBase):
         String(400), doc="URL link or file path of the search source")
     source_content = Column(String, doc="Original text of the search source")
     score_overall = Column(Numeric(
-        7, 6), doc="Overall similarity score between the source and the user query, calculated by weighted average of details")
+        14, 6), doc="Overall retrieval score between the source and the user query")
     score_accuracy = Column(Numeric(7, 6), doc="Accuracy score")
     score_semantic = Column(Numeric(7, 6), doc="Semantic similarity score")
+    retrieval_highlight_terms = Column(
+        JSONB,
+        doc="Exact lexical terms returned by the retrieval engine for source highlighting",
+    )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")
     cite_index = Column(
@@ -1324,6 +1328,70 @@ class MemoryDreamingSchedule(TableBase):
     source_limit = Column(Integer, nullable=True)
     long_term_max_chars = Column(Integer, nullable=True)
     summarization_max_attempts = Column(Integer, nullable=True)
+
+
+class MemoryProviderConfig(TableBase):
+    """External memory provider configuration."""
+
+    __tablename__ = "memory_provider_config_t"
+    __table_args__ = (
+        Index("uq_memory_provider_config_tenant_name", "tenant_id", "provider_name",
+              unique=True, postgresql_where=text("delete_flag = 'N'")),
+        Index("idx_memory_provider_config_enabled", "tenant_id", "enabled",
+              postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    provider_config_id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(100), nullable=False)
+    provider_name = Column(String(100), nullable=False)
+    connection_type = Column(String(20), nullable=False, default="plugin")
+    enabled = Column(Boolean, nullable=False, default=False)
+    timeout_seconds = Column(Integer, nullable=False, default=30)
+    last_error_code = Column(String(50))
+
+
+class MemoryProviderConfigParam(TableBase):
+    """EAV parameters for external memory provider configuration."""
+
+    __tablename__ = "memory_provider_config_param_t"
+    __table_args__ = (
+        Index("idx_provider_config_param_provider", "provider_config_id",
+              postgresql_where=text("delete_flag = 'N'")),
+        Index("uq_provider_config_param_name", "provider_config_id", "param_name",
+              unique=True, postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    param_id = Column(Integer, primary_key=True, autoincrement=True)
+    provider_config_id = Column(Integer, nullable=False)
+    param_name = Column(String(200), nullable=False)
+    param_value = Column(Text)
+
+
+class MemoryExternalIngestEventLog(TableBase):
+    """Audit log for external memory ingest events."""
+
+    __tablename__ = "memory_external_ingest_event_log_t"
+    __table_args__ = (
+        Index("idx_external_ingest_log_tenant", "tenant_id", "user_id", "agent_id", "sent_at"),
+        Index("idx_external_ingest_log_idem", "idempotency_key",
+              unique=True, postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    log_id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(100))
+    tenant_id = Column(String(100))
+    user_id = Column(String(100))
+    agent_id = Column(String(100))
+    conversation_id = Column(String(100))
+    event_id = Column(String(255))
+    idempotency_key = Column(Text)
+    unit_ids = Column(Text)
+    response_status = Column(String(30))
+    response_summary = Column(Text)
+    sent_at = Column(TIMESTAMP(timezone=False), server_default=func.now())
 
 
 class McpRecord(TableBase):

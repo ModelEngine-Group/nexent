@@ -20,7 +20,10 @@ export interface SourcesPanelSelection {
   groupId: string;
   sources: PanelSourceItem[];
   images: PanelSourceItem[];
-  selectedCiteIndex?: number;
+  /** Stable key built from tool_sign + cite_index, for example "a1". */
+  selectedCitationKey?: string;
+  /** The cited answer section used to identify the relevant text in a Chunk. */
+  citationContext?: string;
 }
 
 export interface SourcesPanelContextValue {

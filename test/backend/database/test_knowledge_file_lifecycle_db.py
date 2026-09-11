@@ -375,6 +375,22 @@ def test_delete_file_record_is_idempotent_when_row_is_missing(monkeypatch):
     assert lifecycle_db.delete_file_record("fid-missing") is False
 
 
+def test_delete_file_records_for_knowledge_base_only_removes_eligible_statuses(monkeypatch):
+    session = MagicMock()
+    query = session.query.return_value
+    query.filter.return_value = query
+    query.delete.return_value = 3
+    monkeypatch.setattr(lifecycle_db, "get_db_session", _session_context(session))
+
+    assert lifecycle_db.delete_file_records_for_knowledge_base(
+        index_name="kb-1",
+        tenant_id="tenant-1",
+        knowledge_id=10,
+    ) == 3
+    assert query.filter.call_count == 3
+    query.delete.assert_called_once_with(synchronize_session=False)
+
+
 def test_delete_tombstone_creates_and_finalizes_missing_row(monkeypatch):
     monkeypatch.setattr(lifecycle_db, "get_file_record", MagicMock(return_value=None))
     created = {"file_id": "fid-6", "status": "DELETE_REQUESTED"}

@@ -40,6 +40,9 @@ def temp_workspace():
 # ======================================================================
 
 class TestDownloadFromS3ToolInit:
+    def test_not_user_selectable(self):
+        assert DownloadFromS3Tool.is_user_selectable is False
+
     def test_init_defaults(self):
         tool = DownloadFromS3Tool()
         assert tool.workspace_path == os.path.abspath("/mnt/nexent")
@@ -254,6 +257,9 @@ class TestDownloadFromS3ToolForward:
 # ======================================================================
 
 class TestUploadToS3ToolInit:
+    def test_not_user_selectable(self):
+        assert UploadToS3Tool.is_user_selectable is False
+
     def test_init_defaults(self):
         tool = UploadToS3Tool()
         assert tool.workspace_path == os.path.abspath("/mnt/nexent")

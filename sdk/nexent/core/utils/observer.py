@@ -91,17 +91,9 @@ class StepCountTransformer(MessageTransformer):
 
 
 class ParseTransformer(MessageTransformer):
-    # parse template
-    TEMPLATES = {"zh": "\n🛠️ 使用Python解释器执行代码\n",
-                 "en": "\n🛠️ Used tool python_interpreter\n"}
-
     def transform(self, **kwargs: Any) -> str:
         """convert the message of parse result"""
-        content = kwargs.get("content", "")
-        lang = kwargs.get("lang", "en")
-
-        template = self.TEMPLATES.get(lang, self.TEMPLATES["en"])
-        return template + f"```python\n{content}\n```\n"
+        return kwargs.get("content", "")
 
 
 class ExecutionLogsTransformer(MessageTransformer):

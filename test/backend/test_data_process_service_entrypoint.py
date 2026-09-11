@@ -38,6 +38,10 @@ def service_module(monkeypatch):
     ray_config.RayConfig = types.SimpleNamespace(init_ray_for_service=MagicMock(return_value=True))
     logging_utils = types.ModuleType("utils.logging_utils")
     logging_utils.configure_logging = MagicMock()
+    logging_utils.configure_elasticsearch_logging = MagicMock()
+    logging_utils.get_uvicorn_logging_config = MagicMock(
+        return_value={"version": 1, "disable_existing_loggers": False, "formatters": {}, "handlers": {}, "root": {"level": "INFO", "handlers": []}}
+    )
     constants = types.ModuleType("consts.const")
     constants.REDIS_URL = "redis://test:6379/0"
     constants.REDIS_PORT = 6379

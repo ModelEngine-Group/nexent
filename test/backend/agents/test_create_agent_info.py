@@ -76,11 +76,22 @@ consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
 sys.modules["consts.exceptions"] = consts_exceptions_module
 
+consts_tool_labels_module = types.ModuleType("consts.tool_labels")
+consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
+    "store_memory",
+    "search_memory",
+    "download_from_s3",
+    "upload_to_s3",
+    "parallel_executor",
+})
+sys.modules["consts.tool_labels"] = consts_tool_labels_module
+
 # Also add model and exceptions to consts module attributes
 consts_module = sys.modules.get("consts")
 if consts_module:
     setattr(consts_module, "model", consts_model_module)
     setattr(consts_module, "exceptions", consts_exceptions_module)
+    setattr(consts_module, "tool_labels", consts_tool_labels_module)
     setattr(
         consts_module,
         "capability_profiles",
@@ -262,6 +273,10 @@ sys.modules['services.model_gateway_service'] = _create_stub_module(
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
 )
 sys.modules['services.memory_config_service'] = MagicMock()
+sys.modules['services.memory_external_provider_service'] = _create_stub_module(
+    "services.memory_external_provider_service",
+    get_memory_external_provider_service=MagicMock(return_value=None),
+)
 # Extend services hierarchy with additional stubs
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
@@ -282,6 +297,9 @@ sys.modules['nexent.memory.memory_service'] = MagicMock()
 # Build top-level nexent module to avoid importing the real package
 nexent_module = _create_stub_module("nexent", MessageObserver=mock_message_observer)
 sys.modules['nexent'] = nexent_module
+sys.modules['nexent.memory'] = _create_stub_module("nexent.memory")
+sys.modules['nexent.memory.models'] = _create_stub_module("nexent.memory.models")
+sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
@@ -526,7 +544,17 @@ from backend.agents.create_agent_info import (
     _resolve_runtime_tool_records,
     _resolve_input_budget,
     _resolve_safe_input_budget,
+    _get_external_provider_service_for_search,
 )
+
+
+def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
+    service = object()
+    factory = MagicMock(return_value=service)
+    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
+
+    assert _get_external_provider_service_for_search() is service
+    factory.assert_called_once_with()
 
 
 @pytest.fixture(autouse=True)
@@ -1082,6 +1110,30 @@ class TestCreateToolConfigList:
                 source="local",
                 usage=None
             )
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_ignores_legacy_system_managed_bindings(self):
+        """Legacy S3 bindings are replaced by the run-scoped built-in tools."""
+        with patch(
+            "backend.agents.create_agent_info.discover_langchain_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[
+                {"tool_id": 1, "class_name": "DownloadFromS3Tool", "name": "download_from_s3"},
+                {"tool_id": 2, "class_name": "UploadToS3Tool", "name": "upload_to_s3"},
+            ],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={"name": "legacy-agent"},
+        ), patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+        assert result == []
+        mock_tool_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool(self):
@@ -7553,3 +7605,20 @@ class TestBuildSecurityHeaders:
             "security_credentials": {"k": "v"},
         }
         assert _build_security_headers(agent) == {}
+
+    def test_select_agent_model_id_prefers_first_available_model(self):
+        """Runtime model selection skips unavailable configured models."""
+        from backend.agents.create_agent_info import _select_agent_model_id
+        records = {
+            7: {"connect_status": "unavailable"},
+            8: {"connect_status": "available"},
+        }
+        with patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            side_effect=lambda model_id, **kwargs: records[model_id],
+        ), patch(
+            "backend.agents.create_agent_info.is_model_available",
+            side_effect=lambda record: bool(record) and record.get("connect_status") == "available",
+        ):
+            assert _select_agent_model_id([7, 8], None, "tenant") == 8
+            assert _select_agent_model_id([7, 8], 9, "tenant") == 9

@@ -47,6 +47,7 @@ class SearchRecord(TypedDict):
     score_overall: Optional[float]
     score_accuracy: Optional[float]
     score_semantic: Optional[float]
+    retrieval_highlight_terms: Optional[List[str]]
     published_date: Optional[datetime]
     cite_index: Optional[int]
     search_type: Optional[str]
@@ -776,6 +777,43 @@ def get_message_units(message_id: int) -> List[Dict[str, Any]]:
 
         # Convert SQLAlchemy model instances to dictionaries
         return list(map(as_dict, records))
+
+
+def get_units_by_message(message_id: int) -> List[Dict[str, Any]]:
+    """Query all completed units for a given assistant message.
+
+    Returns a list of dicts with keys: unit_id, unit_type, unit_content,
+    unit_index, message_id.  Used by the per-turn external memory supplement.
+    """
+    with get_db_session() as session:
+        message_id = int(message_id)
+
+        stmt = (
+            select(
+                ConversationMessageUnit.unit_id,
+                ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.unit_content,
+                ConversationMessageUnit.unit_index,
+                ConversationMessageUnit.message_id,
+            )
+            .where(
+                ConversationMessageUnit.message_id == message_id,
+                ConversationMessageUnit.unit_status == "completed",
+                ConversationMessageUnit.delete_flag == "N",
+            )
+            .order_by(ConversationMessageUnit.unit_index.asc())
+        )
+        results = session.execute(stmt).all()
+        return [
+            {
+                "unit_id": r.unit_id,
+                "unit_type": r.unit_type,
+                "unit_content": r.unit_content,
+                "unit_index": r.unit_index,
+                "message_id": r.message_id,
+            }
+            for r in results
+        ]
 
 
 def get_conversation_list(
@@ -1597,6 +1635,7 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             - score_overall: Overall relevance score
             - score_accuracy: Accuracy score
             - score_semantic: Semantic relevance score
+            - retrieval_highlight_terms: Exact lexical terms returned by retrieval
             - published_date: Publication date
         user_id: Reserved parameter for created_by and updated_by fields
 
@@ -1634,6 +1673,10 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             data["score_accuracy"] = search_data['score_accuracy']
         if 'score_semantic' in search_data:
             data["score_semantic"] = search_data['score_semantic']
+        if 'retrieval_highlight_terms' in search_data:
+            data["retrieval_highlight_terms"] = search_data[
+                'retrieval_highlight_terms'
+            ]
         if 'published_date' in search_data:
             data["published_date"] = search_data['published_date']
         if user_id:
@@ -1990,6 +2033,11 @@ def save_history_summary(
     summary: Dict[str, Any], covered_through_message_id: int,
     previous_summary_unit_id: Optional[int] = None,
     trigger: Optional[str] = None,
+    history_tokens_before: Optional[int] = None,
+    history_tokens_after: Optional[int] = None,
+    compaction_attempts: Optional[int] = None,
+    compaction_trigger_threshold_tokens: Optional[int] = None,
+    compaction_target_tokens: Optional[int] = None,
 ) -> int:
     """Persist a validated checkpoint on its last covered assistant message."""
     if not user_id or not tenant_id or not isinstance(summary, dict):
@@ -2063,6 +2111,15 @@ def save_history_summary(
             payload["previous_summary_unit_id"] = int(previous_summary_unit_id)
         if trigger:
             payload["trigger"] = trigger
+        for key, value in {
+            "history_tokens_before": history_tokens_before,
+            "history_tokens_after": history_tokens_after,
+            "compaction_attempts": compaction_attempts,
+            "compaction_trigger_threshold_tokens": compaction_trigger_threshold_tokens,
+            "compaction_target_tokens": compaction_target_tokens,
+        }.items():
+            if value is not None:
+                payload[key] = int(value)
         row = add_creation_tracking({
             "message_id": covered_through_message_id,
             "conversation_id": conversation_id,

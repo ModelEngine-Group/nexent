@@ -24,7 +24,8 @@ from consts.const import (
     IS_SPEED_MODE,
     PERMISSION_PRIVATE,
 )
-from consts.exceptions import DuplicateError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, DuplicateError
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.knowledge_db import (
     create_knowledge_record,
@@ -38,6 +39,7 @@ from database.knowledge_db import (
 )
 from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.knowledge_file_lifecycle_db import (
+    delete_file_records_for_knowledge_base,
     list_file_records,
 )
 from services.knowledge_storage_service import (
@@ -84,6 +86,17 @@ from management.services.knowledge_base.permission import (
     resolve_knowledge_base_permission,
 )
 
+
+# A knowledge base deletion is rejected while any file is still owned by the
+# ingestion pipeline. DELETE_REQUESTED/DELETED rows are already owned by a
+# file-deletion operation and therefore do not block the broader deletion.
+KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES = frozenset({
+    "UPLOADING",
+    "UPLOADED",
+    "PROCESSING",
+    "FORWARDING",
+})
+
 class KnowledgeBaseManagementService:
     CREATOR_PERMISSION = CREATOR_PERMISSION
     resolve_knowledge_base_permission = staticmethod(resolve_knowledge_base_permission)
@@ -99,6 +112,13 @@ class KnowledgeBaseManagementService:
         """
         logger.debug(
             f"Starting full deletion process for knowledge base (index): {index_name}")
+
+        # Check the durable lifecycle table before mutating any external
+        # system.  This closes the race where a processing task can recreate
+        # data after the index/source cleanup has started.
+        lifecycle_rows = KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed(index_name)
+
+        lifecycle_fence_cleanup = {"cleared_count": 0, "failed_count": 0}
         try:
             minio_cleanup = await KnowledgeBaseManagementService._delete_kb_source_objects(
                 index_name=index_name,
@@ -112,7 +132,6 @@ class KnowledgeBaseManagementService:
                 f"Step 3/5: Marking all tasks as cancelled and cleaning up Redis records for index '{index_name}'.")
             redis_cleanup_result = {}
             try:
-                from services.redis_service import get_redis_service
                 redis_service = get_redis_service()
                 redis_cleanup_result = redis_service.delete_knowledgebase_records(
                     index_name)
@@ -135,6 +154,53 @@ class KnowledgeBaseManagementService:
             finally:
                 _SKIP_INDEX_SOURCE_CLEANUP.reset(cleanup_token)
 
+            lifecycle_cleanup = {"deleted_count": 0}
+            if lifecycle_rows:
+                try:
+                    lifecycle_cleanup["deleted_count"] = delete_file_records_for_knowledge_base(
+                        index_name=index_name,
+                    )
+                    logger.info(
+                        "Deleted %d lifecycle records for knowledge base '%s'",
+                        lifecycle_cleanup["deleted_count"],
+                        index_name,
+                    )
+                except Exception as lifecycle_error:
+                    logger.error(
+                        "Failed to delete lifecycle records for knowledge base '%s': %s",
+                        index_name,
+                        lifecycle_error,
+                        exc_info=True,
+                    )
+                    lifecycle_cleanup["error"] = str(lifecycle_error)
+
+            # A file deletion request may already have scheduled a local
+            # retry task and installed a Redis fence.  The knowledge-base
+            # index has now been removed, so those per-file coordinators must
+            # not keep retrying against a deleted index or leave stale fences.
+            for lifecycle_row in lifecycle_rows:
+                file_id = lifecycle_row.get("file_id")
+                if not file_id:
+                    continue
+                # A per-file deletion retry task is in-memory and can only
+                # exist in this process. A knowledge-base deletion supersedes
+                # it after the index and lifecycle rows have been removed.
+                from management.services.knowledge_base.deletion import _document_delete_tasks
+
+                pending_delete_task = _document_delete_tasks.pop(str(file_id), None)
+                if pending_delete_task and not pending_delete_task.done():
+                    pending_delete_task.cancel()
+                try:
+                    if get_redis_service().clear_document_delete_fence(file_id=file_id):
+                        lifecycle_fence_cleanup["cleared_count"] += 1
+                except Exception as fence_error:
+                    lifecycle_fence_cleanup["failed_count"] += 1
+                    logger.warning(
+                        "Failed to clear deletion fence for file %s after knowledge-base deletion: %s",
+                        file_id,
+                        fence_error,
+                    )
+
             # Construct final result
             result = {
                 "status": "success",
@@ -146,7 +212,9 @@ class KnowledgeBaseManagementService:
                 ),
                 "es_delete_result": delete_index_result,
                 "minio_cleanup": minio_cleanup,
-                "redis_cleanup": redis_cleanup_result
+                "redis_cleanup": redis_cleanup_result,
+                "lifecycle_cleanup": lifecycle_cleanup,
+                "lifecycle_fence_cleanup": lifecycle_fence_cleanup,
             }
 
             if "errors" in redis_cleanup_result:
@@ -160,6 +228,66 @@ class KnowledgeBaseManagementService:
             logger.error(
                 f"Error during full deletion of index '{index_name}': {str(e)}", exc_info=True)
             raise e
+
+    @staticmethod
+    def _assert_knowledge_base_delete_allowed(index_name: str) -> List[Dict[str, Any]]:
+        """Raise an EDS conflict when files are still being ingested.
+
+        Lifecycle rows are the durable source of truth for this precondition.
+        ``DELETE_REQUESTED`` and ``DELETED`` rows are deliberately ignored:
+        they are already owned by the deletion path and must not block a
+        broader knowledge-base deletion. The rows are returned so the caller
+        can clean up lifecycle records after external deletion succeeds.
+        """
+        try:
+            lifecycle_rows = list_file_records(
+                index_name=index_name,
+                include_hidden=True,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to read lifecycle records before deleting knowledge base '%s'",
+                index_name,
+            )
+            raise AppException(
+                ErrorCode.SYSTEM_DATABASE_ERROR,
+                details={
+                    "operation": "knowledge_base_delete_guard",
+                    "index_name": index_name,
+                },
+            ) from exc
+
+        blocking_files = []
+        for row in lifecycle_rows:
+            status = str(row.get("status") or "").upper()
+            if status not in KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES:
+                continue
+            blocking_files.append({
+                "file_id": row.get("file_id"),
+                "file_name": (
+                    row.get("original_filename")
+                    or row.get("object_name")
+                    or row.get("file_id")
+                    or "unknown"
+                ),
+                "status": status,
+            })
+
+        if blocking_files:
+            logger.info(
+                "Blocking deletion of knowledge base '%s': %d file(s) are still being processed",
+                index_name,
+                len(blocking_files),
+            )
+            raise AppException(
+                ErrorCode.KNOWLEDGE_DELETE_BLOCKED,
+                details={
+                    "index_name": index_name,
+                    "blocking_files": blocking_files,
+                },
+            )
+
+        return lifecycle_rows
 
     @staticmethod
     async def _delete_kb_source_objects(

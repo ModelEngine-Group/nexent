@@ -18,9 +18,11 @@ WITH legacy_source AS (
     SELECT 'agent_repository.tags', repository.agent_repository_id::TEXT,
            repository.publisher_tenant_id, 'agent', repository.agent_id::TEXT,
            to_jsonb(repository.tags), 'text_array',
-           (SELECT count(*) FROM nexent.ag_tenant_agent_t AS agent
-            WHERE agent.agent_id = repository.agent_id
-              AND agent.tenant_id = repository.publisher_tenant_id)
+           CASE WHEN EXISTS (
+               SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+               WHERE agent.agent_id = repository.agent_id
+                 AND agent.tenant_id = repository.publisher_tenant_id
+           ) THEN 1 ELSE 0 END
     FROM nexent.ag_agent_repository_t AS repository
     WHERE COALESCE(cardinality(repository.tags), 0) > 0
     UNION ALL
@@ -52,7 +54,10 @@ WITH legacy_source AS (
 ), issues AS (
     SELECT source_name, source_row_id, tenant_id,
            resource_type || '/' || COALESCE(resource_id::TEXT, '?') AS resource,
-           'null_or_empty_tenant'::TEXT AS reason, 1::BIGINT AS issue_count, payload AS sample
+           CASE WHEN source_name = 'skill.skill_tags'
+                THEN 'skipped_skill_tags_without_tenant'
+                ELSE 'null_or_empty_tenant' END::TEXT AS reason,
+           1::BIGINT AS issue_count, payload AS sample
     FROM legacy_source WHERE tenant_id IS NULL OR btrim(tenant_id) = ''
     UNION ALL
     SELECT source.source_name, source.source_row_id, source.tenant_id,
@@ -84,7 +89,9 @@ WITH legacy_source AS (
     UNION ALL
     SELECT source_name, source_row_id, tenant_id,
            resource_type || '/' || COALESCE(resource_id::TEXT, '?'),
-           CASE WHEN source_name = 'mcp_community.tags'
+           CASE WHEN source_name = 'agent_repository.tags'
+                THEN 'skipped_agent_tags_without_canonical_source'
+                WHEN source_name = 'mcp_community.tags'
                 THEN 'community_canonical_source_unprovable'
                 ELSE 'canonical_source_missing_or_tenant_mismatch' END,
            canonical_match_count, payload
@@ -219,10 +226,11 @@ WITH category_alias_groups (category_key, accepted_aliases) AS (
       ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
     WHERE COALESCE(repository.delete_flag, 'N') <> 'Y'
       AND NULLIF(btrim(expanded.raw_value), '') IS NOT NULL
-      AND (SELECT count(*)
-           FROM nexent.ag_tenant_agent_t AS agent
-           WHERE agent.agent_id = repository.agent_id
-             AND agent.tenant_id = repository.publisher_tenant_id) = 1
+      AND EXISTS (
+          SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+          WHERE agent.agent_id = repository.agent_id
+            AND agent.tenant_id = repository.publisher_tenant_id
+      )
 ), projected AS (
     SELECT tenant_id, resource_id,
            count(DISTINCT normalized_value) AS keyword_count,
@@ -447,10 +455,11 @@ WITH category_alias_groups (category_key, accepted_aliases) AS (
     JOIN category_aliases AS aliases
       ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
     WHERE COALESCE(repository.delete_flag, 'N') <> 'Y'
-      AND (SELECT count(*)
-           FROM nexent.ag_tenant_agent_t AS agent
-           WHERE agent.agent_id = repository.agent_id
-             AND agent.tenant_id = repository.publisher_tenant_id) = 1
+      AND EXISTS (
+          SELECT 1 FROM nexent.ag_tenant_agent_t AS agent
+          WHERE agent.agent_id = repository.agent_id
+            AND agent.tenant_id = repository.publisher_tenant_id
+      )
 ), projected_counts AS (
     SELECT projected.tenant_id,
            projected.resource_id,
@@ -513,7 +522,10 @@ WITH legacy_normalized AS (
     CROSS JOIN LATERAL jsonb_array_elements(
         CASE WHEN jsonb_typeof(skill.skill_tags::JSONB) = 'array' THEN skill.skill_tags::JSONB ELSE '[]'::JSONB END
     ) AS element(value)
-    WHERE jsonb_typeof(element.value) = 'string' AND NULLIF(btrim(element.value #>> '{}'), '') IS NOT NULL
+    WHERE skill.tenant_id IS NOT NULL
+      AND btrim(skill.tenant_id) <> ''
+      AND jsonb_typeof(element.value) = 'string'
+      AND NULLIF(btrim(element.value #>> '{}'), '') IS NOT NULL
     UNION
     SELECT repository.publisher_tenant_id, 'agent', repository.agent_id::TEXT,
            lower(btrim(tag) COLLATE "C")

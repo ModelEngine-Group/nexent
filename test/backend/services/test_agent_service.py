@@ -81,6 +81,21 @@ sys.modules['nexent.core.agents.context'] = context_items_mock
 # Mock other nexent submodules
 sys.modules['nexent.memory'] = MagicMock()
 sys.modules['nexent.memory.memory_service'] = MagicMock()
+memory_models_module = types.ModuleType("nexent.memory.models")
+memory_models_module.MemoryIngestUnit = MagicMock
+sys.modules['nexent.memory.models'] = memory_models_module
+knowledge_scope_service_module = types.ModuleType("services.knowledge_scope_service")
+knowledge_scope_service_module.build_runtime_knowledge_policy = MagicMock
+knowledge_scope_service_module.build_runtime_knowledge_resources = MagicMock
+knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
+sys.modules['services.knowledge_scope_service'] = knowledge_scope_service_module
+fa_memory_extractor_module = types.ModuleType("services.fa_memory_extractor")
+fa_memory_extractor_module.FaMemoryExtractor = MagicMock
+sys.modules['services.fa_memory_extractor'] = fa_memory_extractor_module
+memory_backend_adapter_module = types.ModuleType("services.memory_backend_adapter")
+memory_backend_adapter_module._build_ingestion_event_service = MagicMock
+memory_backend_adapter_module.build_memory_service_for_fa_extraction = MagicMock
+sys.modules['services.memory_backend_adapter'] = memory_backend_adapter_module
 sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()
@@ -1836,7 +1851,8 @@ async def test_get_agent_info_impl_with_model_id_success(mock_search_agent_info,
     mock_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
     mock_get_model_by_model_id.return_value = mock_model_info
 
@@ -1943,7 +1959,8 @@ async def test_get_agent_info_impl_with_model_id_no_display_name(mock_search_age
     # Mock model info without display_name
     mock_model_info = {
         "model_id": 456,
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
         # No display_name field
     }
     mock_get_model_by_model_id.return_value = mock_model_info
@@ -2035,7 +2052,7 @@ async def test_get_agent_info_impl_with_model_id_none_model_info(mock_search_age
     # Assert
     expected_result = {
         "agent_id": 123,
-        "model_ids": [456],
+        "model_ids": [],
         "business_description": "Test agent",
         "tools": mock_tools,
         "sub_agent_id_list": mock_sub_agent_ids,
@@ -2093,14 +2110,16 @@ async def test_get_agent_info_impl_with_business_logic_model(mock_search_agent_i
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
 
     # Mock model info for business logic model
     mock_business_logic_model_info = {
         "model_id": 789,
         "display_name": "Claude-3.5",
-        "provider": "anthropic"
+        "provider": "anthropic",
+        "connect_status": "available"
     }
 
     # Mock get_model_by_model_id to return different values based on input
@@ -2192,7 +2211,8 @@ async def test_get_agent_info_impl_with_business_logic_model_none(mock_search_ag
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
 
     # Mock get_model_by_model_id to return None for business_logic_model_id
@@ -2284,13 +2304,15 @@ async def test_get_agent_info_impl_with_business_logic_model_no_display_name(moc
     mock_main_model_info = {
         "model_id": 456,
         "display_name": "GPT-4",
-        "provider": "openai"
+        "provider": "openai",
+        "connect_status": "available"
     }
 
     # Mock model info for business logic model without display_name
     mock_business_logic_model_info = {
         "model_id": 789,
-        "provider": "anthropic"
+        "provider": "anthropic",
+        "connect_status": "available"
         # No display_name field
     }
 
@@ -2931,7 +2953,7 @@ async def test_list_all_agent_info_impl_model_cache_miss_fetches_model(
     mock_convert_list.return_value = []
     # Do not mutate model_cache here so that the "model_id not in model_cache" branch runs.
     mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
-    mock_get_model.return_value = {"model_name": "m", "display_name": "M"}
+    mock_get_model.return_value = {"model_name": "m", "display_name": "M", "connect_status": "available"}
 
     result = await list_all_agent_info_impl(tenant_id="test_tenant", user_id="admin_user")
 
@@ -12945,7 +12967,16 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
         yield json.dumps({
             "type": "search_content",
             "content": json.dumps([
-                {"title": "Result 1", "url": "http://example.com/1", "text": "Content 1", "score": 0.9},
+                {
+                    "title": "Result 1",
+                    "url": "http://example.com/1",
+                    "text": "Content 1",
+                    "score": 0.9,
+                    "score_details": {
+                        "semantic": 0.8,
+                        "retrieval_highlight_terms": ["Content", "1"],
+                    },
+                },
                 {"title": "Result 2", "url": "http://example.com/2", "text": "Content 2", "score": 0.8}
             ])
         })
@@ -12996,6 +13027,13 @@ async def test_stream_agent_chunks_search_content_chunk(monkeypatch):
     assert batch["message_units"][0]["unit_index"] == 0
     assert len(batch["search_records"]) == 2
     assert {record["unit_index"] for record in batch["search_records"]} == {0}
+
+    # source_search rows keep retrieval highlight terms for later rendering
+    search_records = batch["search_records"]
+    assert len(search_records) == 2
+    assert search_records[0]["retrieval_highlight_terms"] == ["Content", "1"]
+    assert search_records[0]["score_semantic"] == 0.8
+    assert search_records[1]["retrieval_highlight_terms"] == []
 
 
 @pytest.mark.asyncio
@@ -17112,9 +17150,9 @@ async def test_list_all_agent_info_impl_filters_deleted_models(
     # Mock model info for valid models (get_model_by_model_id takes 2 args: model_id and tenant_id)
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {"display_name": "Model 1", "model_id": 1, "connect_status": "available"}
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {"display_name": "Model 3", "model_id": 3, "connect_status": "available"}
         return None
     mock_get_model.side_effect = get_model_side_effect
 
@@ -17281,9 +17319,9 @@ async def test_get_agent_info_impl_filters_deleted_models(
     # Mock get_model_by_model_id for valid models
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {"display_name": "Model 1", "model_id": 1, "connect_status": "available"}
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {"display_name": "Model 3", "model_id": 3, "connect_status": "available"}
         return None
     mock_get_model_by_model_id.side_effect = get_model_side_effect
 
@@ -17727,18 +17765,17 @@ async def test_run_agent_stream_resolves_dict_knowledge_scope(
     mocker, mock_agent_request, mock_http_request,
 ):
     """A dict knowledge_scope resolves the per-run pool and wires runtime context."""
-    from backend.consts.model import ConversationKnowledgeScopeRequest
-
-    import sys as _sys
-    import types as _types
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
-    mocker.patch.object(kss_module, "build_runtime_knowledge_policy", return_value="scope policy", create=True)
-    mocker.patch.object(kss_module, "build_runtime_knowledge_resources", return_value="scope resources", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
+    mocker.patch.object(
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
+    )
+    mocker.patch.object(
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
+    )
 
 
     mock_create_conversation = mocker.patch.object(
@@ -17814,23 +17851,16 @@ async def test_run_agent_stream_persists_request_scope_on_existing_conversation(
     mocker, mock_agent_request, mock_http_request,
 ):
     """A request scope on an existing conversation is re-persisted after resolution."""
-    from backend.consts.model import ConversationKnowledgeScopeRequest
-
-    import sys as _sys
-    import types as _types
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_policy",
-        return_value="scope policy", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
     )
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_resources",
-        return_value="scope resources", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
     )
     mocker.patch.object(
         agent_run_service, "get_conversation_service",
@@ -17897,23 +17927,16 @@ async def test_run_agent_stream_uses_stored_scope_when_request_has_none(
     mocker, mock_agent_request, mock_http_request,
 ):
     """When the request carries no scope, the stored conversation scope wins."""
-    from backend.consts.model import ConversationKnowledgeScopeRequest
-
-    import sys as _sys
-    import types as _types
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_policy",
-        return_value="scope policy", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
     )
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_resources",
-        return_value="scope resources", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
     )
     mock_get_conversation = mocker.patch.object(
         agent_run_service, "get_conversation_service",
@@ -17972,22 +17995,16 @@ async def test_run_agent_stream_emits_knowledge_scope_resolved_event(
     mocker, mock_agent_request, mock_http_request,
 ):
     """The stream emits a knowledge_scope_resolved SSE event carrying the effective scope."""
-    import sys as _sys
-    import types as _types
-
-    kss_module = _types.ModuleType("services.knowledge_scope_service")
-    _services_pkg = _types.ModuleType("services")
-    _services_pkg.__path__ = []
-    _sys.modules["services"] = _services_pkg
-    _sys.modules["services.knowledge_scope_service"] = kss_module
-    mock_resolve = mocker.patch.object(kss_module, "resolve_knowledge_scope", create=True)
+    mock_resolve = mocker.patch.object(agent_run_service, "resolve_knowledge_scope")
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_policy",
-        return_value="scope policy", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_policy",
+        return_value="scope policy",
     )
     mocker.patch.object(
-        kss_module, "build_runtime_knowledge_resources",
-        return_value="scope resources", create=True,
+        agent_run_service,
+        "build_runtime_knowledge_resources",
+        return_value="scope resources",
     )
     mocker.patch.object(
         agent_run_service, "get_conversation_service",

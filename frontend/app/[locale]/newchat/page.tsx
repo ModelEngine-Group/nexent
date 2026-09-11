@@ -700,6 +700,11 @@ const HomeContent: FC<{
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
       await runtime.threads.switchToNewThread();
+      const thread = runtime.threads.getItemById(
+        runtime.threads.getState().mainThreadId
+      );
+      await thread.initialize();
+      await thread.updateCustom({ agentId: agent.id });
       onAgentSelected(agent);
     },
     [runtime, onAgentSelected]

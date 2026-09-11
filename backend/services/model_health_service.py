@@ -79,9 +79,6 @@ async def _embedding_dimension_check(
     model_factory: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
 ):
-    if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
-
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
 
     if model_type == "embedding":
@@ -165,10 +162,6 @@ async def _perform_connectivity_check(
         model_base_url = model_base_url.replace(
             LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
 
-    # Normalize embedding URLs by appending /embeddings if not present
-    if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
-
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
     connectivity: bool
 
@@ -183,18 +176,16 @@ async def _perform_connectivity_check(
         if is_multimodal:
             adapter_config["model_factory"] = model_factory
         # Try the normalized /embeddings endpoint first, then the URL as the
-        # user gave it — mirrors develop so aggregator URL quirks don't fail
-        # the probe on the first candidate.
+        # user gave it — aggregator URL quirks don't fail the probe on the
+        # first candidate.
         for candidate_url in _embedding_url_candidates(model_base_url):
             emb = await build_adapter_fresh(
                 {**adapter_config, "base_url": candidate_url},
                 model_type, slot, None, model_name=model_name,
             ).dimension_check(timeout=effective_timeout)
             if len(emb) > 0 and len(emb[0]) > 0:
-                connectivity = True
-                break
-        else:
-            connectivity = False
+                return True
+        return False
     elif model_type == "llm":
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",

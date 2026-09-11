@@ -417,6 +417,7 @@ local_volume_paths() {
     printf '%s\n' \
       "/var/lib/nexent" \
       "/var/lib/nexent-data/skills" \
+      "/var/lib/nexent-data/logs" \
       "/var/lib/nexent-data/nexent-supabase-db" \
       "/var/lib/nexent-data/nexent-phoenix" \
       "/var/lib/nexent-data/nexent-grafana" \
@@ -470,7 +471,7 @@ delete_local_volume_data() {
   local path
   while IFS= read -r path; do
     case "$path" in
-      /var/lib/nexent|/var/lib/nexent-data/skills|/var/lib/nexent-data/nexent-*)
+      /var/lib/nexent|/var/lib/nexent-data/skills|/var/lib/nexent-data/logs|/var/lib/nexent-data/nexent-*)
         if [ -e "$path" ]; then
           if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
             echo "正在删除 $path"

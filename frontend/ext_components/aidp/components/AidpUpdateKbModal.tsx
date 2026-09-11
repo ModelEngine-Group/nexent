@@ -7,6 +7,7 @@ import { Modal, Form, Input, Select, message } from "antd";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/const/knowledgeBase";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -163,6 +164,10 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           label={t("aidpKnowledge.kbName")}
           rules={[
             { required: true, message: t("aidpKnowledge.kbNameRequired") },
+            {
+              pattern: AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
+              message: t("aidpKnowledge.kbNameInvalid"),
+            },
           ]}
         >
           <Input placeholder={t("aidpKnowledge.kbNamePlaceholder")} />
