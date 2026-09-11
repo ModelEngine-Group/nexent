@@ -865,6 +865,70 @@ def test_capability_rejection_keeps_strong_generic_search_uncovered(mocker):
     assert result.next_action == "RESOLVE_GAP"
 
 
+def test_capability_reference_allows_displayed_weak_candidate(mocker):
+    """UT-BE-NL2A-VERIFY-004: weak references are valid verification input."""
+
+    requirement = ResourceRequirement(
+        requirement_id="train_ticket",
+        query="查询 12306 实时余票",
+    )
+    installed = ResourceSearchOutput(
+        candidates=[
+            ResourceCandidate(
+                candidate_ref="tool:search",
+                resource_type="tool",
+                source="MCP_TOOL",
+                name="Web Search",
+                requirement_ids=["train_ticket"],
+                score=0.61,
+            )
+        ],
+        uncovered_requirement_ids=["train_ticket"],
+        matches_by_requirement={
+            "train_ticket": [
+                ResourceMatch(
+                    candidate_ref="tool:search", score=0.61, strength="weak"
+                )
+            ]
+        },
+    )
+    empty = ResourceSearchOutput(
+        candidates=[],
+        uncovered_requirement_ids=["train_ticket"],
+        matches_by_requirement={"train_ticket": []},
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_installed_resources_impl",
+        new=AsyncMock(return_value=installed),
+    )
+    mocker.patch(
+        "services.nl2agent_service.search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=empty),
+    )
+
+    result = asyncio.run(
+        resolve_resource_requirements_impl(
+            requirements=[requirement],
+            phase="INITIAL",
+            exclude_refs=[],
+            tenant_id="tenant-a",
+            user_id="user-a",
+            capability_verifications=[
+                {
+                    "requirement_id": "train_ticket",
+                    "candidate_ref": "tool:search",
+                    "decision": "reference",
+                    "reason": "Only a generic search capability is declared.",
+                    "missing_capabilities": ["12306 realtime availability"],
+                }
+            ],
+        )
+    )
+
+    assert result.requirements[0].state == "uncovered"
+    assert result.next_action == "RESOLVE_GAP"
+
+
 def test_initial_resolution_marks_installable_only_for_strong_repository_match(
     mocker,
 ):

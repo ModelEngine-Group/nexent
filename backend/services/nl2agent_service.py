@@ -1555,7 +1555,6 @@ async def resolve_resource_requirements_impl(
             *installed.matches_by_requirement.get(requirement.requirement_id, []),
             *installable.matches_by_requirement.get(requirement.requirement_id, []),
         ]
-        if match.strength == "strong"
     }
     supplied_pairs = {
         (item.requirement_id, item.candidate_ref)
