@@ -69,6 +69,7 @@ from services.agent_share_service import (
     get_agent_share_metadata,
     revoke_agent_share_link,
     resolve_agent_share_session,
+    resolve_existing_agent_share_session,
     resolve_agent_share_run_context,
     rotate_agent_share_link,
 )
@@ -831,19 +832,38 @@ async def run_agent_share_api(
             entrypoint="agent-share",
             disable_personal_memory=True,
         )
-        return await run_agent_stream(
+        response = await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
             authorization=authorization,
             identity_context=identity_context,
             timezone=share_request.timezone,
         )
+        if isinstance(response, StreamingResponse) and response.headers.get("X-Stream-Status") == "conflict":
+            response.status_code = HTTPStatus.CONFLICT
+        return response
     except UnauthorizedError as exc:
         raise _agent_share_authentication_error(exc) from exc
     except AgentShareError as exc:
         raise _agent_share_unavailable_error(exc) from exc
     except ForbiddenError as exc:
         raise _agent_share_unavailable_error(AgentShareError("agent_share_unavailable")) from exc
+
+
+@agent_share_router.post("/{share_token}/stop")
+async def stop_agent_share_api(
+    share_token: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Stop only the current visitor's active run for this share link."""
+    try:
+        visitor_user_id, _ = get_current_user_id(authorization)
+        session = resolve_existing_agent_share_session(share_token, visitor_user_id=visitor_user_id)
+        return stop_agent_tasks(session["conversation_id"], visitor_user_id)
+    except UnauthorizedError as exc:
+        raise _agent_share_authentication_error(exc) from exc
+    except AgentShareError as exc:
+        raise _agent_share_unavailable_error(exc) from exc
 
 
 @agent_config_router.post("/{agent_id}/publish")

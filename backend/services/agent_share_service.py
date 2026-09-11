@@ -186,6 +186,21 @@ def get_agent_share_history(token: str, *, visitor_user_id: str) -> Dict[str, An
     }
 
 
+def resolve_existing_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str, int]:
+    """Resolve an existing visitor-owned session without creating a conversation."""
+    context = resolve_agent_share_context(token)
+    session = get_agent_share_session(
+        agent_share_id=context["agent_share_id"],
+        visitor_user_id=visitor_user_id,
+    )
+    if session is None:
+        raise AgentShareError("agent_share_not_found")
+    return {
+        "conversation_id": int(session["conversation_id"]),
+        "agent_version_no": int(session["agent_version_no"]),
+    }
+
+
 def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str, int]:
     """Create or recover the visitor's isolated, hidden conversation on demand."""
     context = resolve_agent_share_run_context(token, visitor_user_id=visitor_user_id)

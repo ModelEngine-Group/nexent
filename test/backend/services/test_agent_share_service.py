@@ -168,6 +168,29 @@ def test_share_metadata_whitelists_agent_display_fields(mocker):
     }
 
 
+def test_existing_share_session_never_creates_a_conversation(mocker):
+    from services import agent_share_service
+
+    mocker.patch.object(
+        agent_share_service,
+        "resolve_agent_share_context",
+        return_value={"agent_share_id": 7},
+    )
+    mocker.patch.object(
+        agent_share_service,
+        "get_agent_share_session",
+        return_value={"conversation_id": 88, "agent_version_no": 4},
+    )
+    create_session = mocker.patch.object(agent_share_service, "get_or_create_agent_share_session")
+
+    result = agent_share_service.resolve_existing_agent_share_session(
+        "opaque-token", visitor_user_id="visitor-a"
+    )
+
+    assert result == {"conversation_id": 88, "agent_version_no": 4}
+    create_session.assert_not_called()
+
+
 def test_share_is_unavailable_only_when_the_existing_auth_secret_is_missing(mocker):
     from services import agent_share_service
 
