@@ -157,6 +157,11 @@ agent_share_app.include_router(agent_share_router)
 agent_share_client = TestClient(agent_share_app)
 
 
+def assert_agent_share_security_headers(response):
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
 @pytest.fixture
 def mock_auth_header():
     return {"Authorization": "Bearer test_token"}
@@ -1918,6 +1923,7 @@ def test_agent_share_metadata_authenticates_before_resolving_token(mocker):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Authentication is required."
+    assert_agent_share_security_headers(response)
     metadata.assert_not_called()
 
 
@@ -1944,6 +1950,7 @@ def test_agent_share_metadata_exposes_only_the_whitelisted_fields(mocker, mock_a
         "greeting_message": "Hello",
         "session_recoverable": False,
     }
+    assert_agent_share_security_headers(response)
 
 
 def test_agent_share_session_is_created_only_by_the_explicit_session_endpoint(mocker, mock_auth_header):
@@ -2087,6 +2094,7 @@ def test_agent_share_run_maps_existing_conversation_conflicts_to_409(mocker, moc
     )
 
     assert response.status_code == 409
+    assert_agent_share_security_headers(response)
 
 
 def test_publish_version_api_success(mocker, mock_auth_header):

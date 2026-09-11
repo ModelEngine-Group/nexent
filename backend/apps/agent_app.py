@@ -100,6 +100,11 @@ agent_config_router = APIRouter(prefix="/agent")
 agent_share_router = APIRouter(prefix="/agent-share")
 logger = logging.getLogger("agent_app")
 
+AGENT_SHARE_SECURITY_HEADERS = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+}
+
 
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")
 async def get_agent_knowledge_capabilities_api(
@@ -750,21 +755,35 @@ async def share_agent_run_api(
 
 
 def _agent_share_authentication_error(exc: UnauthorizedError) -> HTTPException:
-    return HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Authentication is required.")
+    return HTTPException(
+        status_code=HTTPStatus.UNAUTHORIZED,
+        detail="Authentication is required.",
+        headers=AGENT_SHARE_SECURITY_HEADERS,
+    )
 
 
 def _agent_share_unavailable_error(exc: AgentShareError) -> HTTPException:
-    return HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent share is unavailable.")
+    return HTTPException(
+        status_code=HTTPStatus.NOT_FOUND,
+        detail="Agent share is unavailable.",
+        headers=AGENT_SHARE_SECURITY_HEADERS,
+    )
+
+
+def _set_agent_share_security_headers(response: Response) -> None:
+    response.headers.update(AGENT_SHARE_SECURITY_HEADERS)
 
 
 @agent_share_router.get("/{share_token}")
 async def get_agent_share_metadata_api(
     share_token: str,
+    response: Response,
     authorization: Optional[str] = Header(None),
 ):
     """Return safe Agent display metadata only after visitor authentication."""
     try:
         visitor_user_id, _ = get_current_user_id(authorization)
+        _set_agent_share_security_headers(response)
         return get_agent_share_metadata(share_token, visitor_user_id=visitor_user_id)
     except UnauthorizedError as exc:
         raise _agent_share_authentication_error(exc) from exc
@@ -775,12 +794,14 @@ async def get_agent_share_metadata_api(
 @agent_share_router.post("/{share_token}/session")
 async def create_or_restore_agent_share_session_api(
     share_token: str,
+    response: Response,
     authorization: Optional[str] = Header(None),
 ):
     """Create or restore one hidden conversation after an explicit visitor action."""
     try:
         visitor_user_id, _ = get_current_user_id(authorization)
         session = resolve_agent_share_session(share_token, visitor_user_id=visitor_user_id)
+        _set_agent_share_security_headers(response)
         return {
             "agent_version_no": session["agent_version_no"],
             "session_recoverable": True,
@@ -794,11 +815,13 @@ async def create_or_restore_agent_share_session_api(
 @agent_share_router.get("/{share_token}/history")
 async def get_agent_share_history_api(
     share_token: str,
+    response: Response,
     authorization: Optional[str] = Header(None),
 ):
     """Read only the authenticated visitor's history for this share link."""
     try:
         visitor_user_id, _ = get_current_user_id(authorization)
+        _set_agent_share_security_headers(response)
         return get_agent_share_history(share_token, visitor_user_id=visitor_user_id)
     except UnauthorizedError as exc:
         raise _agent_share_authentication_error(exc) from exc
@@ -841,6 +864,8 @@ async def run_agent_share_api(
         )
         if isinstance(response, StreamingResponse) and response.headers.get("X-Stream-Status") == "conflict":
             response.status_code = HTTPStatus.CONFLICT
+        if isinstance(response, Response):
+            _set_agent_share_security_headers(response)
         return response
     except UnauthorizedError as exc:
         raise _agent_share_authentication_error(exc) from exc
@@ -853,12 +878,14 @@ async def run_agent_share_api(
 @agent_share_router.post("/{share_token}/stop")
 async def stop_agent_share_api(
     share_token: str,
+    response: Response,
     authorization: Optional[str] = Header(None),
 ):
     """Stop only the current visitor's active run for this share link."""
     try:
         visitor_user_id, _ = get_current_user_id(authorization)
         session = resolve_existing_agent_share_session(share_token, visitor_user_id=visitor_user_id)
+        _set_agent_share_security_headers(response)
         return stop_agent_tasks(session["conversation_id"], visitor_user_id)
     except UnauthorizedError as exc:
         raise _agent_share_authentication_error(exc) from exc
