@@ -236,6 +236,11 @@ class CasMockHandler(http.server.BaseHTTPRequestHandler):
 
     def _redirect(self, location: str, extra_headers: list[tuple[str, str]] | None = None) -> None:
         headers = [("Location", location), *(extra_headers or [])]
+        for key, value in headers:
+            if "\r" in value or "\n" in value:
+                self._write_text("Invalid response header", HTTPStatus.BAD_REQUEST)
+                return
+
         self.send_response(HTTPStatus.FOUND)
         for key, value in headers:
             self.send_header(key, value)
