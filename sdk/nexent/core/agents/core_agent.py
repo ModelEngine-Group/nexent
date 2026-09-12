@@ -28,6 +28,7 @@ from ...monitor import get_monitoring_manager
 
 from ..utils.observer import MessageObserver, ProcessType
 from jinja2 import Template, StrictUndefined
+from json_repair import repair_json
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -103,7 +104,16 @@ def parse_native_tool_call(chat_message: ChatMessage, available_tool_names: set[
         try:
             arguments = json.loads(arguments)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Native tool arguments are not valid JSON: {exc}") from exc
+            try:
+                arguments = repair_json(
+                    arguments,
+                    return_objects=True,
+                    skip_json_loads=True,
+                )
+            except Exception as repair_exc:
+                raise ValueError(
+                    f"Native tool arguments are not valid JSON: {exc}"
+                ) from repair_exc
     if arguments is None:
         arguments = {}
     if not isinstance(arguments, dict):
@@ -123,6 +133,17 @@ def parse_native_tool_call(chat_message: ChatMessage, available_tool_names: set[
     )))
     call_id = str(tool_call.id or f"call_{uuid.uuid4().hex}")
     return code, arguments, call_id
+
+
+def _native_tool_call_key(name: str, arguments: Dict[str, Any]) -> str:
+    """Build an exact identity key; equal tool names with different inputs remain distinct."""
+    return json.dumps(
+        [name, arguments],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def parse_code_blobs(text: str) -> str:
@@ -533,7 +554,12 @@ def _wrap_tool_for_observer(
     tool_name = str(getattr(tool, "name", "") or "")
 
     def observed_forward(*args, **kwargs):
-        tool_call_id = str(uuid.uuid4())
+        active_tool_call_id = getattr(observer, "current_tool_call_id", None)
+        tool_call_id = (
+            active_tool_call_id
+            if isinstance(active_tool_call_id, str) and active_tool_call_id
+            else str(uuid.uuid4())
+        )
         observer.add_message(
             agent_name or "",
             ProcessType.TOOL,
@@ -563,10 +589,10 @@ class CoreAgent(CodeAgent):
     ):
         # Pop SDK-specific kwargs before passing the rest to smolagents' CodeAgent.
         self.enable_planning: bool = kwargs.pop("enable_planning", False)
-        self.action_protocol: str = kwargs.pop("action_protocol", "code")
+        self.action_protocol: str = kwargs.pop("action_protocol", "native")
         if self.action_protocol not in {"code", "native"}:
             raise ValueError(f"Unsupported action protocol: {self.action_protocol!r}")
-        self.native_tool_choice: str = kwargs.pop("native_tool_choice", "required")
+        self.native_tool_choice: str = kwargs.pop("native_tool_choice", "auto")
         if self.native_tool_choice not in {"required", "auto"}:
             raise ValueError(f"Unsupported native tool choice: {self.native_tool_choice!r}")
         redis_client = kwargs.pop("redis_client", None)
@@ -593,6 +619,9 @@ class CoreAgent(CodeAgent):
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         self._native_executed_call_keys: set[str] = set()
+        self._native_call_results: Dict[str, Dict[str, Any]] = {}
+        self._consecutive_duplicate_native_calls = 0
+        self._active_action_protocol = self.action_protocol
         self._native_python_interpreter_tool = NativePythonInterpreterTool()
         # Override smolagent default to prevent extracting ```python blocks from KB content.
         # code_block_tags[0] and [1] are used by the system prompt template for opening/closing
@@ -629,7 +658,11 @@ class CoreAgent(CodeAgent):
                 names.update(str(name) for name in container.keys())
             except AttributeError:
                 continue
-        if getattr(self, "action_protocol", "code") == "native":
+        if getattr(
+            self,
+            "_active_action_protocol",
+            getattr(self, "action_protocol", "code"),
+        ) == "native":
             names.add("python_interpreter")
         return names
 
@@ -694,7 +727,11 @@ class CoreAgent(CodeAgent):
             except AttributeError:
                 iterable = container
             tools.extend(list(iterable or ()))
-        if getattr(self, "action_protocol", "code") == "native":
+        if getattr(
+            self,
+            "_active_action_protocol",
+            getattr(self, "action_protocol", "code"),
+        ) == "native":
             tools.append(self._native_python_interpreter_tool)
         return tools
 
@@ -912,7 +949,11 @@ Additional Args:
             self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
         # Add new step in logs
         memory_step.model_input_messages = input_messages
-        action_protocol = getattr(self, "action_protocol", "code")
+        action_protocol = getattr(
+            self,
+            "_active_action_protocol",
+            getattr(self, "action_protocol", "code"),
+        )
         stop_sequences = [] if action_protocol == "native" else ["Observation:", "Calling tools:"]
 
         # Prepare additional arguments
@@ -946,9 +987,14 @@ Additional Args:
         try:
             if action_protocol == "native":
                 additional_args["tools_to_call_from"] = self._context_tools()
-                additional_args["tool_choice"] = getattr(self, "native_tool_choice", "required")
+                additional_args["tool_choice"] = getattr(self, "native_tool_choice", "auto")
             chat_message: ChatMessage = self.model(input_messages,
                                                    stop_sequences=stop_sequences, **additional_args)
+            if action_protocol == "native" and getattr(
+                self.model, "last_native_tool_call_unsupported", False
+            ):
+                self._active_action_protocol = "code"
+                action_protocol = "code"
             memory_step.model_output_message = chat_message
             model_output = chat_message.content or ""
             memory_step.token_usage = chat_message.token_usage
@@ -969,6 +1015,13 @@ Additional Args:
             native_call_id: str | None = None
             native_tool_name: str | None = None
             native_call_key: str | None = None
+            duplicate_native_result: Dict[str, Any] | None = None
+            if action_protocol == "native" and not (chat_message.tool_calls or []):
+                # Some OpenAI-compatible gateways accept the tools fields but
+                # silently ignore them. Parse this response with the legacy
+                # protocol and keep the rest of the run on that protocol.
+                self._active_action_protocol = "code"
+                action_protocol = "code"
             if action_protocol == "native":
                 code_action, native_arguments, native_call_id = parse_native_tool_call(
                     chat_message,
@@ -979,19 +1032,24 @@ Additional Args:
                     if set(native_arguments) != {"code"} or not isinstance(native_arguments["code"], str):
                         raise ValueError("python_interpreter requires exactly one string argument named 'code'.")
                     code_action = native_arguments["code"]
-                native_call_key = json.dumps(
-                    [native_tool_name, native_arguments],
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
+                native_call_key = _native_tool_call_key(
+                    native_tool_name,
+                    native_arguments,
                 )
                 if native_call_key in self._native_executed_call_keys:
-                    raise InvalidActionFormatError(
-                        "The same native tool call and arguments were already executed in this run. "
-                        "Use the previous observation, choose a different action, or call final_answer.",
-                        self.logger,
+                    duplicate_native_result = self._native_call_results.get(
+                        native_call_key,
+                        {},
                     )
+                    self._consecutive_duplicate_native_calls += 1
+                    # Smaller OpenAI-compatible models can get trapped in
+                    # native-call repetition even when the previous result is
+                    # present. One exact replay is enough evidence to lock
+                    # subsequent turns to the code protocol; never execute the
+                    # duplicate side effect again.
+                    self._active_action_protocol = "code"
+                else:
+                    self._consecutive_duplicate_native_calls = 0
             elif self._use_structured_outputs_internally:
                 code_action = json.loads(model_output)["code"]
                 code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
@@ -1001,8 +1059,13 @@ Additional Args:
             code_action = _remove_parallel_executor_import(code_action)
             memory_step.code_action = code_action
             # Record parsing results
-            self.observer.add_message(
-                self.agent_name, ProcessType.PARSE, code_action)
+            if action_protocol == "code" or native_tool_name != "final_answer":
+                self.observer.add_message(
+                    self.agent_name,
+                    ProcessType.PARSE,
+                    code_action,
+                    tool_call_id=native_call_id,
+                )
             verification_controller = getattr(self, "verification_controller", None)
             if verification_controller:
                 precheck = verification_controller.verify_before_tool_call(
@@ -1055,6 +1118,40 @@ Additional Args:
             id=native_call_id or f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]
+        if duplicate_native_result is not None:
+            previous_observation = str(
+                duplicate_native_result.get("observation")
+                or "The earlier call completed without textual output."
+            )
+            protocol_note = (
+                " Native tool mode has been disabled for the next step because the model repeated this exact call."
+            )
+            memory_step.observations = (
+                "Duplicate call skipped; the tool was not executed again. "
+                "Reuse this previous result and choose a different action or finish the task."
+                f"{protocol_note}\n{previous_observation}"
+            )
+            memory_step.action_output = duplicate_native_result.get("output")
+            if native_tool_name != "python_interpreter":
+                self.observer.add_message(
+                    self.agent_name,
+                    ProcessType.TOOL,
+                    "",
+                    tool_name=native_tool_name,
+                    tool_arguments=native_arguments,
+                    tool_call_id=native_call_id,
+                )
+            self.observer.add_message(
+                self.agent_name,
+                ProcessType.EXECUTION_LOGS,
+                memory_step.observations,
+                tool_call_id=native_call_id,
+            )
+            yield ActionOutput(
+                output=memory_step.action_output,
+                is_final_answer=False,
+            )
+            return
         if native_call_key is not None:
             self._native_executed_call_keys.add(native_call_key)
 
@@ -1069,7 +1166,11 @@ Additional Args:
                 self.name,
                 {"code": code_action, "step_number": memory_step.step_number},
             ):
-                code_output = self.python_executor(code_action)
+                if native_call_id:
+                    with self.observer.tool_call_context(native_call_id):
+                        code_output = self.python_executor(code_action)
+                else:
+                    code_output = self.python_executor(code_action)
                 monitoring_manager.set_tool_output({
                     "output": getattr(code_output, "output", None),
                     "is_final_answer": getattr(code_output, "is_final_answer", False),
@@ -1117,6 +1218,13 @@ Additional Args:
                     self.logger.log(
                         Group(*execution_outputs_console), level=LogLevel.INFO)
             error_msg = str(e)
+            if not getattr(memory_step, "observations", None):
+                memory_step.observations = f"Tool execution failed:\n{error_msg}"
+            if native_call_key is not None:
+                self._native_call_results[native_call_key] = {
+                    "observation": memory_step.observations,
+                    "output": None,
+                }
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,
@@ -1179,6 +1287,11 @@ Additional Args:
             ]
         self.logger.log(Group(*execution_outputs_console), level=LogLevel.INFO)
         memory_step.action_output = code_output.output
+        if native_call_key is not None:
+            self._native_call_results[native_call_key] = {
+                "observation": memory_step.observations,
+                "output": code_output.output,
+            }
 
         # v1.4: Plan step state advances entirely via the update_plan_step
         # tool. _implicit_advance_step is the only fallback we still run here:
@@ -1253,6 +1366,9 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             self.memory.reset()
             self.monitor.reset()
             getattr(self, "_native_executed_call_keys", set()).clear()
+            getattr(self, "_native_call_results", {}).clear()
+            self._consecutive_duplicate_native_calls = 0
+            self._active_action_protocol = getattr(self, "action_protocol", "code")
         self.context_runtime.prepare_run(
             memory=self.memory,
             fallback_system_prompt=self.system_prompt,

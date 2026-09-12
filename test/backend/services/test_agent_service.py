@@ -5168,8 +5168,26 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
 
     # Mock agent_run to yield chunks
     async def fake_agent_run(*_, **__):
+        yield json.dumps({
+            "type": "tool_call_start",
+            "content": "",
+            "tool_name": "python_interpreter",
+            "tool_call_id": "call-1",
+        })
+        yield json.dumps({
+            "type": "tool_call_argument_delta",
+            "content": "def f(): pass",
+            "tool_name": "python_interpreter",
+            "tool_call_id": "call-1",
+        })
         yield json.dumps({"type": "model_output_code", "content": "def f(): "})
         yield json.dumps({"type": "model_output_code", "content": "pass"})
+        yield json.dumps({
+            "type": "final_answer_delta",
+            "content": "All ",
+            "tool_name": "final_answer",
+            "tool_call_id": "call-2",
+        })
         yield json.dumps({"type": "final_answer", "content": "All done."})
 
     monkeypatch.setitem(
@@ -5222,13 +5240,16 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         collected.append(out)
 
     # Verify chunks were streamed - unit_index is added by the code
-    assert len(collected) == 3
-    assert 'model_output_code' in collected[0]
-    assert 'def f(): ' in collected[0]
-    assert 'pass' in collected[1]
-    assert 'final_answer' in collected[2]
-    assert 'All done.' in collected[2]
-    assert channel.publish.await_count == 3
+    assert len(collected) == 6
+    assert 'tool_call_start' in collected[0]
+    assert 'tool_call_argument_delta' in collected[1]
+    assert 'model_output_code' in collected[2]
+    assert 'def f(): ' in collected[2]
+    assert 'pass' in collected[3]
+    assert 'final_answer_delta' in collected[4]
+    assert 'final_answer' in collected[5]
+    assert 'All done.' in collected[5]
+    assert channel.publish.await_count == 6
 
     # Verify save_message was called to create the streaming message row
     assert len(save_message_calls) == 1

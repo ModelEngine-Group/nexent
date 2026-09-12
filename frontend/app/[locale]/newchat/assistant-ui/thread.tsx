@@ -1458,13 +1458,18 @@ const AssistantMessage: FC<{
                 ) {
                   const data = (
                     part as typeof part & {
-                      data?: { code?: unknown; language?: string };
+                      data?: {
+                        code?: unknown;
+                        language?: string;
+                        isStreaming?: boolean;
+                      };
                     }
                   ).data;
                   return (
                     <ExecutionCodeBlock
                       code={data?.code}
                       language={data?.language}
+                      isStreaming={data?.isStreaming}
                     />
                   );
                 }

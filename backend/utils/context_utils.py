@@ -144,6 +144,7 @@ def _build_execution_flow_text(
             lines.extend([
                 "final_answer 中不得编造检索引用；使用检索事实时，原样使用结果提供的 [[a1]] 形式 reference_mark。",
                 "已上传或生成的文件必须使用工具结果中的永久 S3 URL，不得输出预签名 URL 或本地路径。",
+                "协议协商回退：仅当当前请求没有提供原生工具定义时，改用兼容代码协议：每轮只输出一个 <code>...</code>，通过 Python 函数调用工具；任务完成时直接输出完整最终回答。",
             ])
         else:
             lines = [
@@ -161,6 +162,7 @@ def _build_execution_flow_text(
             lines.extend([
                 "Do not invent retrieval citations in final_answer; copy the [[a1]]-style reference_mark supplied by retrieval results.",
                 "For uploaded or generated files, use the permanent S3 URL from the tool result, never a presigned URL or local path.",
+                "Protocol-negotiation fallback: only when this request exposes no native tool definitions, use the compatible code protocol: emit one <code>...</code> block per turn, call tools as Python functions, and emit the complete answer directly when done.",
             ])
         return "\n".join(lines)
 
@@ -350,14 +352,14 @@ def _build_code_norms_text(
                 "1. 每轮恰好调用一个工具，并使用 schema 中定义的参数名和类型；\n"
                 "2. 不要输出可执行代码块；需要代码执行时，将代码作为 python_interpreter 的 code 参数；\n"
                 "3. 不重复已执行的相同工具和参数；\n"
-                "4. 完成任务必须调用 final_answer。"
+                "4. 完成任务必须调用 final_answer；当前请求没有原生工具定义时，按兼容代码协议执行。"
             )
         return (
             "### Native Tool Argument Rules\n"
             "1. Call exactly one tool per turn using parameter names and types from its schema;\n"
             "2. Do not emit executable code blocks; pass code through the python_interpreter code argument;\n"
             "3. Do not repeat an executed tool call with identical arguments;\n"
-            "4. Complete the task by calling final_answer."
+            "4. Complete the task by calling final_answer; use the compatible code protocol when no native tools are exposed."
         )
 
     if language == "zh":

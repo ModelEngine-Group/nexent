@@ -83,6 +83,8 @@ interface JsonData {
   last_unit_index?: number;
   replay_chunk_count?: number;
   conversation_id?: number;
+  tool_name?: string;
+  tool_call_id?: string;
 }
 
 // Reconstruct streaming state from persisted units (for tab-switch recovery)
@@ -423,6 +425,9 @@ export const handleStreamResponse = async (
   let searchResultsContent: any[] = [];
   let allSearchResults: any[] = [];
   let finalAnswer = "";
+  let hasNativeFinalAnswerDelta = false;
+  let nativeFinalAnswerCallId: string | undefined;
+  const nativeCodeBlockIds = new Map<string, string>();
   let lastModelOutputIndex = -1;
   let lastContentType: string | null = null;
 
@@ -514,7 +519,11 @@ export const handleStreamResponse = async (
               }
             }
 
-            if (jsonData.type && jsonData.content) {
+            if (
+              jsonData.type &&
+              (jsonData.content ||
+                jsonData.type === chatConfig.messageTypes.TOOL_CALL_START)
+            ) {
               const messageType = jsonData.type;
 
               // Handle conversation_created event - notify frontend of new conversation ID
@@ -526,7 +535,7 @@ export const handleStreamResponse = async (
                 continue;
               }
 
-              const messageContent = jsonData.content;
+              const messageContent = jsonData.content ?? "";
 
               // In resume mode, skip metadata messages to prevent creating duplicate steps or indicators.
               // Steps are already reconstructed from the persisted streaming message.
@@ -551,6 +560,63 @@ export const handleStreamResponse = async (
 
               // Process different types of messages
               switch (messageType) {
+                case chatConfig.messageTypes.TOOL_CALL_START:
+                  if (jsonData.tool_name !== "python_interpreter") {
+                    currentStep.contents.push({
+                      id: `native-tool-${jsonData.tool_call_id || Date.now()}`,
+                      type: chatConfig.messageTypes.EXECUTING,
+                      content:
+                        jsonData.tool_name ||
+                        t("chatStreamHandler.callingTool"),
+                      expanded: true,
+                      timestamp: Date.now(),
+                      isLoading: true,
+                    });
+                    lastContentType = chatConfig.contentTypes.EXECUTION;
+                    break;
+                  }
+                  {
+                    const callKey = jsonData.tool_call_id || `${Date.now()}`;
+                    const blockId = `native-code-${callKey}`;
+                    nativeCodeBlockIds.set(callKey, blockId);
+                    currentStep.contents.push({
+                      id: blockId,
+                      type: chatConfig.messageTypes.GENERATING_CODE,
+                      content: t("chatStreamHandler.callingTool"),
+                      expanded: true,
+                      timestamp: Date.now(),
+                      isLoading: true,
+                    });
+                  }
+                  break;
+
+                case chatConfig.messageTypes.TOOL_CALL_ARGUMENT_DELTA:
+                  if (jsonData.tool_name !== "python_interpreter") break;
+                  {
+                    const callKey = jsonData.tool_call_id || "native-code";
+                    let blockId = nativeCodeBlockIds.get(callKey);
+                    let codeBlock = blockId
+                      ? currentStep.contents.find((item) => item.id === blockId)
+                      : undefined;
+                    if (!codeBlock) {
+                      blockId = `native-code-${callKey}`;
+                      codeBlock = {
+                        id: blockId,
+                        type: chatConfig.messageTypes.MODEL_OUTPUT_CODE,
+                        content: "",
+                        expanded: true,
+                        timestamp: Date.now(),
+                        isLoading: true,
+                      };
+                      nativeCodeBlockIds.set(callKey, blockId);
+                      currentStep.contents.push(codeBlock);
+                    }
+                    codeBlock.type = chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+                    codeBlock.content += messageContent;
+                    codeBlock.isLoading = true;
+                  }
+                  break;
+
                 case chatConfig.messageTypes.HISTORY_SUMMARY:
                   // The canonical checkpoint is persisted on the assistant
                   // message it covers. This display-only stream event updates
@@ -921,13 +987,42 @@ export const handleStreamResponse = async (
                   }
                   break;
 
-                case chatConfig.messageTypes.FINAL_ANSWER:
-                  // Accumulate final answer content and process user break tag
+                case chatConfig.messageTypes.FINAL_ANSWER_DELTA:
+                  if (
+                    nativeFinalAnswerCallId &&
+                    nativeFinalAnswerCallId !== jsonData.tool_call_id
+                  ) {
+                    finalAnswer = "";
+                  }
+                  nativeFinalAnswerCallId = jsonData.tool_call_id;
+                  hasNativeFinalAnswerDelta = true;
                   finalAnswer += processUserBreakTag(messageContent, t);
                   break;
 
+                case chatConfig.messageTypes.FINAL_ANSWER:
+                  // Accumulate final answer content and process user break tag
+                  if (hasNativeFinalAnswerDelta) {
+                    finalAnswer = processUserBreakTag(messageContent, t);
+                  } else {
+                    finalAnswer += processUserBreakTag(messageContent, t);
+                  }
+                  break;
+
                 case chatConfig.messageTypes.PARSE:
-                  // Code display message, skip
+                  if (jsonData.tool_call_id) {
+                    const blockId = nativeCodeBlockIds.get(
+                      jsonData.tool_call_id
+                    );
+                    const codeBlock = blockId
+                      ? currentStep.contents.find((item) => item.id === blockId)
+                      : undefined;
+                    if (codeBlock) {
+                      codeBlock.type =
+                        chatConfig.messageTypes.MODEL_OUTPUT_CODE;
+                      codeBlock.content = messageContent;
+                      codeBlock.isLoading = false;
+                    }
+                  }
                   break;
 
                 case chatConfig.messageTypes.TOOL:
@@ -1349,8 +1444,20 @@ export const handleStreamResponse = async (
           const messageContent = jsonData.content;
 
           // Process the last message, focusing on final_answer and card
-          if (messageType === chatConfig.messageTypes.FINAL_ANSWER) {
+          if (messageType === chatConfig.messageTypes.FINAL_ANSWER_DELTA) {
+            if (
+              nativeFinalAnswerCallId &&
+              nativeFinalAnswerCallId !== jsonData.tool_call_id
+            ) {
+              finalAnswer = "";
+            }
+            nativeFinalAnswerCallId = jsonData.tool_call_id;
+            hasNativeFinalAnswerDelta = true;
             finalAnswer += messageContent;
+          } else if (messageType === chatConfig.messageTypes.FINAL_ANSWER) {
+            finalAnswer = hasNativeFinalAnswerDelta
+              ? messageContent
+              : finalAnswer + messageContent;
           }
         }
       } catch (error) {

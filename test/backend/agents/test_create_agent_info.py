@@ -555,13 +555,15 @@ def test_resolve_action_protocol_enables_validated_native_models(model_name):
     assert resolve_action_protocol({"model_name": model_name}) == "native"
 
 
-def test_resolve_action_protocol_keeps_unvalidated_models_on_code_mode():
-    assert resolve_action_protocol({"model_name": "gpt-compatible-unknown"}) == "code"
+def test_resolve_action_protocol_prefers_native_for_unknown_models():
+    assert resolve_action_protocol({"model_name": "gpt-compatible-unknown"}) == "native"
+    assert resolve_action_protocol(None) == "native"
 
 
-def test_resolve_native_tool_choice_uses_auto_for_qwen_thinking_mode():
+def test_resolve_native_tool_choice_defaults_to_auto_for_every_model():
     assert resolve_native_tool_choice({"model_name": "qwen3.8-max"}) == "auto"
-    assert resolve_native_tool_choice({"model_name": "deepseek-v4-flash"}) == "required"
+    assert resolve_native_tool_choice({"model_name": "deepseek-v4-flash"}) == "auto"
+    assert resolve_native_tool_choice(None) == "auto"
 
 
 def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):

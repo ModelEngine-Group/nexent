@@ -8,6 +8,7 @@ from ...monitor.monitoring import (
 )
 from ..utils.token_estimation import estimate_tokens_text
 import logging
+import re
 import threading
 import asyncio
 import time
@@ -50,6 +51,103 @@ STOP_EVENT_INTERRUPTED_MESSAGE = "Model is interrupted by stop event"
 
 class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
+
+
+_NATIVE_TOOL_PARAMETER_PATTERN = re.compile(
+    r"(?:^|[^a-z_])(tools?|tool_choice|functions?|function_call)(?:[^a-z_]|$)",
+    re.IGNORECASE,
+)
+_NATIVE_TOOL_UNSUPPORTED_PATTERN = re.compile(
+    r"not supported|unsupported|unknown (?:field|parameter)|unrecognized|"
+    r"unexpected (?:field|parameter)|invalid (?:field|parameter)|does not support",
+    re.IGNORECASE,
+)
+
+
+def is_native_tool_calling_unsupported(error: Exception) -> bool:
+    """Return true only for an explicit provider rejection of tool parameters."""
+    status = getattr(error, "status_code", None)
+    if status is None:
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+    if status is not None and status not in {400, 404, 422}:
+        return False
+    message = str(error)
+    return bool(
+        (
+            _NATIVE_TOOL_PARAMETER_PATTERN.search(message)
+            and _NATIVE_TOOL_UNSUPPORTED_PATTERN.search(message)
+        )
+        or re.search(
+            r"(?:tool_choice.{0,80}invalid value|invalid value.{0,80}tool_choice)",
+            message,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _decode_partial_json_string(arguments: str, field_name: str) -> str:
+    """Decode the complete prefix of one JSON string while its object is streaming."""
+    match = re.search(rf'"{re.escape(field_name)}"\s*:\s*"', arguments)
+    if match is None:
+        return ""
+    value = arguments[match.end():]
+    decoded: list[str] = []
+    index = 0
+    escapes = {
+        '"': '"',
+        "\\": "\\",
+        "/": "/",
+        "b": "\b",
+        "f": "\f",
+        "n": "\n",
+        "r": "\r",
+        "t": "\t",
+    }
+    while index < len(value):
+        character = value[index]
+        if character == '"':
+            break
+        if character != "\\":
+            decoded.append(character)
+            index += 1
+            continue
+        if index + 1 >= len(value):
+            break
+        escape = value[index + 1]
+        if escape == "u":
+            if index + 6 > len(value):
+                break
+            digits = value[index + 2:index + 6]
+            try:
+                codepoint = int(digits, 16)
+            except ValueError:
+                break
+            if 0xD800 <= codepoint <= 0xDBFF:
+                if index + 12 > len(value) or value[index + 6:index + 8] != "\\u":
+                    break
+                low_digits = value[index + 8:index + 12]
+                try:
+                    low = int(low_digits, 16)
+                except ValueError:
+                    break
+                if not 0xDC00 <= low <= 0xDFFF:
+                    break
+                decoded.append(
+                    chr(0x10000 + ((codepoint - 0xD800) << 10) + low - 0xDC00)
+                )
+                index += 12
+                continue
+            if 0xDC00 <= codepoint <= 0xDFFF:
+                break
+            decoded.append(chr(codepoint))
+            index += 6
+            continue
+        if escape not in escapes:
+            break
+        decoded.append(escapes[escape])
+        index += 2
+    return "".join(decoded)
 
 
 class OpenAIModel(OpenAIServerModel):
@@ -165,10 +263,12 @@ class OpenAIModel(OpenAIServerModel):
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
                  _token_tracker=None, safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+                 _allow_native_tool_fallback: bool = True,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
         if _token_tracker is None:
+            self.last_native_tool_call_unsupported = False
             trusted_budget_snapshot = (
                 safe_input_budget_snapshot or self.safe_input_budget_snapshot
             )
@@ -205,6 +305,7 @@ class OpenAIModel(OpenAIServerModel):
                     tools_to_call_from=tools_to_call_from,
                     _token_tracker=token_tracker,
                     safe_input_budget_snapshot=safe_input_budget_snapshot,
+                    _allow_native_tool_fallback=_allow_native_tool_fallback,
                     **kwargs,
                 )
 
@@ -366,7 +467,7 @@ class OpenAIModel(OpenAIServerModel):
                 reasoning_char_count = 0
                 empty_choices_chunk_count = 0
                 nonstandard_chunk_count = 0
-                tool_call_parts: Dict[int, Dict[str, str]] = {}
+                tool_call_parts: Dict[int, Dict[str, Any]] = {}
 
                 # Reset output mode
                 self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
@@ -406,25 +507,6 @@ class OpenAIModel(OpenAIServerModel):
                         if reasoning_content is None:
                             reasoning_content = getattr(delta, "reasoning_content", None)
 
-                        for position, delta_tool_call in enumerate(getattr(delta, "tool_calls", None) or []):
-                            index = getattr(delta_tool_call, "index", None)
-                            index = position if index is None else int(index)
-                            part = tool_call_parts.setdefault(
-                                index,
-                                {"id": "", "name": "", "arguments": ""},
-                            )
-                            call_id = getattr(delta_tool_call, "id", None)
-                            if call_id:
-                                part["id"] = str(call_id)
-                            function = getattr(delta_tool_call, "function", None)
-                            if function is not None:
-                                name_fragment = getattr(function, "name", None)
-                                if name_fragment:
-                                    part["name"] += str(name_fragment)
-                                arguments_fragment = getattr(function, "arguments", None)
-                                if arguments_fragment:
-                                    part["arguments"] += str(arguments_fragment)
-
                         # Handle reasoning_content if it exists and is not null
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
@@ -449,6 +531,73 @@ class OpenAIModel(OpenAIServerModel):
                             self.observer.add_model_new_token(new_token)
                             token_join.append(new_token)
 
+                        # Preserve the provider's semantic order when one
+                        # delta contains both trailing reasoning/content and a
+                        # tool call. Emitting the tool boundary first would
+                        # split the final words of the thought into the next
+                        # reasoning card.
+                        for position, delta_tool_call in enumerate(getattr(delta, "tool_calls", None) or []):
+                            index = getattr(delta_tool_call, "index", None)
+                            index = position if index is None else int(index)
+                            part = tool_call_parts.setdefault(
+                                index,
+                                {
+                                    "id": "",
+                                    "resolved_id": "",
+                                    "name": "",
+                                    "arguments": "",
+                                    "announced": False,
+                                    "decoded_length": 0,
+                                },
+                            )
+                            call_id = getattr(delta_tool_call, "id", None)
+                            if call_id:
+                                part["id"] = str(call_id)
+                            function = getattr(delta_tool_call, "function", None)
+                            if function is not None:
+                                name_fragment = getattr(function, "name", None)
+                                if name_fragment:
+                                    part["name"] += str(name_fragment)
+                                arguments_fragment = getattr(function, "arguments", None)
+                                if arguments_fragment:
+                                    part["arguments"] += str(arguments_fragment)
+                                    if not part["resolved_id"]:
+                                        part["resolved_id"] = part["id"] or f"call_{index}"
+                                    if part["name"] and not part["announced"]:
+                                        self.observer.add_tool_call_start(
+                                            part["name"], part["resolved_id"]
+                                        )
+                                        part["announced"] = True
+                                    if part["name"] == "final_answer":
+                                        decoded = _decode_partial_json_string(
+                                            part["arguments"], "answer"
+                                        )
+                                        delta_text = decoded[part["decoded_length"]:]
+                                        part["decoded_length"] = len(decoded)
+                                        self.observer.add_final_answer_delta(
+                                            delta_text, tool_call_id=part["resolved_id"]
+                                        )
+                                    elif part["name"] == "python_interpreter":
+                                        decoded = _decode_partial_json_string(
+                                            part["arguments"], "code"
+                                        )
+                                        delta_text = decoded[part["decoded_length"]:]
+                                        part["decoded_length"] = len(decoded)
+                                        self.observer.add_tool_call_argument_delta(
+                                            delta_text,
+                                            tool_name=part["name"],
+                                            tool_call_id=part["resolved_id"],
+                                        )
+                                    else:
+                                        self.observer.add_tool_call_argument_delta(
+                                            str(arguments_fragment),
+                                            tool_name=part["name"] or "tool",
+                                            tool_call_id=part["resolved_id"],
+                                        )
+                                    if token_tracker and not first_token_received:
+                                        token_tracker.record_first_token()
+                                        first_token_received = True
+
                         chunk_list.append(chunk)
                         if self.stop_event.is_set():
                             if token_tracker:
@@ -465,7 +614,7 @@ class OpenAIModel(OpenAIServerModel):
                                 name=part["name"],
                                 arguments=part["arguments"],
                             ),
-                            id=part["id"] or f"call_{index}",
+                            id=part["resolved_id"] or part["id"] or f"call_{index}",
                             type="function",
                         )
                         for index, part in sorted(tool_call_parts.items())
@@ -646,6 +795,29 @@ class OpenAIModel(OpenAIServerModel):
                 self.stop_event.wait(backoff)
                 continue
             except Exception as e:
+                if (
+                    tools_to_call_from
+                    and _allow_native_tool_fallback
+                    and is_native_tool_calling_unsupported(e)
+                ):
+                    logger.warning(
+                        "Provider rejected native tool calling; retrying once with the code protocol: %s",
+                        e,
+                    )
+                    self.last_native_tool_call_unsupported = True
+                    fallback_kwargs = dict(kwargs)
+                    fallback_kwargs.pop("tool_choice", None)
+                    fallback_kwargs.pop("tools", None)
+                    return self.__call__(
+                        messages=messages,
+                        stop_sequences=["Observation:", "Calling tools:"],
+                        response_format=response_format,
+                        tools_to_call_from=None,
+                        _token_tracker=token_tracker,
+                        safe_input_budget_snapshot=safe_input_budget_snapshot,
+                        _allow_native_tool_fallback=False,
+                        **fallback_kwargs,
+                    )
                 if classify_model_error(e) != "retryable":
                     raise
                 if attempt >= self.retry_config.max_attempts:

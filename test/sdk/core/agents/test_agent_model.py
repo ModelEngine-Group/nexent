@@ -1329,6 +1329,17 @@ class TestAgentConfig:
         )
         assert config_max.max_steps == 30
 
+    def test_agent_config_defaults_to_native_auto_protocol(self):
+        config = agent_model_module.AgentConfig(
+            name="native_default",
+            description="Native protocol defaults",
+            tools=[],
+            model_name="test",
+        )
+
+        assert config.action_protocol == "native"
+        assert config.native_tool_choice == "auto"
+
     def test_agent_config_max_steps_rejects_below_lower_bound(self):
         """Test AgentConfig rejects max_steps values below the lower bound (1)."""
         with pytest.raises(Exception):

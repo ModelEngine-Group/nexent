@@ -390,6 +390,7 @@ class MockMessageObserver:
 class MockProcessType:
     MODEL_OUTPUT_THINKING = "model_output_thinking"
     MODEL_OUTPUT = "model_output"
+    WARNING = "warning"
 
 nexent_core_utils_mock.observer = MagicMock()
 nexent_core_utils_mock.observer.MessageObserver = MockMessageObserver
@@ -1383,6 +1384,172 @@ def test_call_aggregates_streamed_native_tool_call_without_text(openai_model_ins
     }]
     assert openai_model_instance.last_finish_reason == "tool_calls"
     assert openai_model_instance.last_response_diagnostics["tool_call_count"] == 1
+
+
+def test_call_emits_trailing_reasoning_before_tool_boundary(openai_model_instance):
+    """A mixed provider delta must not split its reasoning around the tool preview."""
+    chunk = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(
+            finish_reason="tool_calls",
+            delta=types.SimpleNamespace(
+                role="assistant",
+                content=None,
+                reasoning=None,
+                reasoning_content="I have read the guide.",
+                tool_calls=[types.SimpleNamespace(
+                    index=0,
+                    id="call-ordered",
+                    function=types.SimpleNamespace(
+                        name="run_skill_script",
+                        arguments='{"skill_name":"docx"}',
+                    ),
+                )],
+            ),
+        )],
+        usage=None,
+    )
+    ordered_events = MagicMock()
+    ordered_events.attach_mock(
+        openai_model_instance.observer.add_model_reasoning_content,
+        "reasoning",
+    )
+    ordered_events.attach_mock(
+        openai_model_instance.observer.add_tool_call_start,
+        "tool_start",
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [chunk]
+        openai_model_instance.__call__([{"role": "user", "content": "go"}])
+
+    event_names = [event[0] for event in ordered_events.mock_calls]
+    assert event_names.index("reasoning") < event_names.index("tool_start")
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "fragments", "observer_method", "expected"),
+    [
+        (
+            "python_interpreter",
+            ('{"code":"print(', '1)\\n"}'),
+            "add_tool_call_argument_delta",
+            ["print(", "1)\n"],
+        ),
+        (
+            "final_answer",
+            ('{"answer":"Hello ', 'world"}'),
+            "add_final_answer_delta",
+            ["Hello ", "world"],
+        ),
+    ],
+)
+def test_call_streams_displayable_native_arguments(
+    openai_model_instance,
+    tool_name,
+    fragments,
+    observer_method,
+    expected,
+):
+    chunks = []
+    for index, fragment in enumerate(fragments):
+        chunks.append(types.SimpleNamespace(
+            choices=[types.SimpleNamespace(
+                finish_reason="tool_calls" if index == len(fragments) - 1 else None,
+                delta=types.SimpleNamespace(
+                    role="assistant" if index == 0 else None,
+                    content=None,
+                    reasoning=None,
+                    reasoning_content=None,
+                    tool_calls=[types.SimpleNamespace(
+                        index=0,
+                        id="call-stream" if index == 0 else None,
+                        function=types.SimpleNamespace(
+                            name=tool_name if index == 0 else None,
+                            arguments=fragment,
+                        ),
+                    )],
+                ),
+            )],
+            usage=None,
+        ))
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = chunks
+        result = openai_model_instance.__call__([{"role": "user", "content": "go"}])
+
+    openai_model_instance.observer.add_tool_call_start.assert_called_once_with(
+        tool_name, "call-stream"
+    )
+    emitted = [call.args[0] for call in getattr(
+        openai_model_instance.observer, observer_method
+    ).call_args_list]
+    assert emitted == expected
+    assert result.tool_calls[0]["function"]["arguments"] == "".join(fragments)
+
+
+@pytest.mark.parametrize(
+    ("partial", "field", "expected"),
+    [
+        ('{"code":"print(\\"hi\\")\\n', "code", 'print("hi")\n'),
+        ('{"answer":"你好 \\uD83D\\uDE03', "answer", "你好 😃"),
+        ('{"answer":"unfinished\\', "answer", "unfinished"),
+    ],
+)
+def test_decode_partial_json_string(partial, field, expected):
+    assert openai_llm_module._decode_partial_json_string(partial, field) == expected
+
+
+def test_native_tool_rejection_retries_once_without_tools(openai_model_instance):
+    fallback_chunk = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(
+            finish_reason="stop",
+            delta=types.SimpleNamespace(
+                role="assistant",
+                content="<code>print('fallback')</code>",
+                reasoning=None,
+                reasoning_content=None,
+                tool_calls=None,
+            ),
+        )],
+        usage=None,
+    )
+    openai_model_instance._dispatch_chat_completion = MagicMock(
+        side_effect=[
+            ValueError("400 unknown parameter tool_choice: not supported"),
+            [fallback_chunk],
+        ]
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        result = openai_model_instance.__call__(
+            [{"role": "user", "content": "run it"}],
+            tools_to_call_from=[MagicMock()],
+            tool_choice="auto",
+        )
+
+    assert result.content == "<code>print('fallback')</code>"
+    assert openai_model_instance.last_native_tool_call_unsupported is True
+    assert openai_model_instance._dispatch_chat_completion.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "401 tool_choice not supported",
+        "400 model not found",
+    ],
+)
+def test_native_tool_fallback_detector_is_narrow(message):
+    error = ValueError(message)
+    if message.startswith("401"):
+        error.status_code = 401
+    assert openai_llm_module.is_native_tool_calling_unsupported(error) is False
+
+
+def test_native_tool_fallback_detector_accepts_rejected_auto_value():
+    assert openai_llm_module.is_native_tool_calling_unsupported(
+        ValueError("400 invalid value 'auto' for tool_choice")
+    ) is True
 
 def test_call_invalid_dict_message_raises_value_error(openai_model_instance):
     """Passing a dict missing 'content' should raise ValueError during normalization."""

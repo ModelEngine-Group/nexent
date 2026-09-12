@@ -305,6 +305,26 @@ class TestMessageObserver:
         message_data = json.loads(observer.get_cached_message()[0])
         assert message_data["tool_call_id"] == "call-123"
 
+    def test_native_tool_preview_events_preserve_call_identity(self):
+        observer = MessageObserver(lang="en")
+
+        observer.add_tool_call_start("python_interpreter", "call-native")
+        observer.add_tool_call_argument_delta(
+            "print('hi')",
+            tool_name="python_interpreter",
+            tool_call_id="call-native",
+        )
+        observer.add_final_answer_delta("done", tool_call_id="call-final")
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.TOOL_CALL_START.value,
+            ProcessType.TOOL_CALL_ARGUMENT_DELTA.value,
+            ProcessType.FINAL_ANSWER_DELTA.value,
+        ]
+        assert messages[1]["tool_call_id"] == "call-native"
+        assert messages[1]["content"] == "print('hi')"
+
     def test_add_subagent_start_serializes_payload_and_increments_depth(self, observer):
         """Emit a nested sub-agent start event with replay metadata."""
         observer.add_subagent_start("agent-1", "Researcher", task="Analyze Chinese content")

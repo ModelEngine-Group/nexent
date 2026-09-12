@@ -145,6 +145,7 @@ def _format_skills_description(
                 "按需使用 read_skill_config 读取配置，使用 run_skill_script 执行指南指定的脚本。",
                 "每轮只调用一个技能工具并等待结果；不要用文本或代码块模拟调用，也不要重复相同调用。",
                 "引用的附加文件应按需通过 read_skill_md 的 additional_files 参数读取，不要一次加载无关文件。",
+                "仅当当前请求没有提供原生工具定义时，使用一个 <code>...</code> 代码块调用技能函数。",
             ])
         return "\n".join([
             "### Available Skills",
@@ -155,6 +156,7 @@ def _format_skills_description(
             "Use read_skill_config for configuration and run_skill_script for scripts required by the guide.",
             "Call one skill tool per turn and wait for its result. Never simulate calls in text or code blocks, and never repeat an identical call.",
             "Read referenced additional files only as needed through read_skill_md additional_files; do not load unrelated files eagerly.",
+            "Only when this request exposes no native tools, call skill functions through one <code>...</code> block.",
         ])
 
     if language == "zh":
@@ -519,12 +521,14 @@ def _format_skills_usage_requirements(
                 "- 匹配技能时，第一步必须原生调用 read_skill_md 加载指南。\n"
                 "- 严格按指南执行；每轮只原生调用一个技能工具并等待结果。\n"
                 "- run_skill_script 失败时先修复并重试，成功前不得声称产物已生成。"
+                "\n- 当前请求没有原生工具定义时，使用兼容代码协议调用上述技能函数。"
             )
         return (
             "3. Skills\n"
             "- When a skill matches, the first action must be a native read_skill_md call.\n"
             "- Follow the guide faithfully; make one native skill-tool call per turn and wait for its result.\n"
             "- If run_skill_script fails, repair and retry it before claiming an artifact was produced."
+            "\n- When this request exposes no native tools, call these skill functions through the compatible code protocol."
         )
 
     lines = []

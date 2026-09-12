@@ -39,6 +39,9 @@ class ProcessType(Enum):
     MODEL_OUTPUT_THINKING = "model_output_thinking"  # model streaming output, thinking content
     MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
+    TOOL_CALL_START = "tool_call_start"  # provider-native tool call has started
+    TOOL_CALL_ARGUMENT_DELTA = "tool_call_argument_delta"  # streamed native tool arguments
+    FINAL_ANSWER_DELTA = "final_answer_delta"  # streamed native final_answer argument
 
     STEP_COUNT = "step_count"  # current step of agent
     PARSE = "parse"  # code parsing result
@@ -616,6 +619,46 @@ class MessageObserver:
             yield
         finally:
             self._tool_call_id.reset(token)
+
+    @property
+    def current_tool_call_id(self) -> str | None:
+        """Return the provider invocation ID active in this execution context."""
+        return self._tool_call_id.get()
+
+    def add_tool_call_start(self, tool_name: str, tool_call_id: str) -> None:
+        """Announce a provider-native call before its arguments finish streaming."""
+        self._emit(
+            ProcessType.TOOL_CALL_START,
+            "",
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+        )
+
+    def add_tool_call_argument_delta(
+        self,
+        content: str,
+        *,
+        tool_name: str,
+        tool_call_id: str,
+    ) -> None:
+        """Stream a display-safe fragment of provider-native tool arguments."""
+        if content:
+            self._emit(
+                ProcessType.TOOL_CALL_ARGUMENT_DELTA,
+                content,
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+            )
+
+    def add_final_answer_delta(self, content: str, *, tool_call_id: str) -> None:
+        """Stream decoded text from the native final_answer argument."""
+        if content:
+            self._emit(
+                ProcessType.FINAL_ANSWER_DELTA,
+                content,
+                tool_name="final_answer",
+                tool_call_id=tool_call_id,
+            )
 
     def add_subagent_start(self, agent_id, agent_name, task=None,
                            invocation_id=None):

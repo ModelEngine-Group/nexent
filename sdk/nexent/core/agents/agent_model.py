@@ -264,11 +264,11 @@ class AgentConfig(BaseModel):
     model_name: str = Field(description="Model alias from ModelConfig")
     action_protocol: Literal["code", "native"] = Field(
         description="Protocol used for model actions",
-        default="code",
+        default="native",
     )
     native_tool_choice: Literal["required", "auto"] = Field(
         description="Provider tool-choice strategy used by native actions",
-        default="required",
+        default="auto",
     )
     provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
     allow_chat_metadata: bool = Field(

@@ -89,40 +89,14 @@ from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
-NATIVE_TOOL_CALLING_MODELS = frozenset({
-    "deepseek-v4-flash",
-    "qwen3.8-max",
-})
-
-
 def resolve_action_protocol(model_info: Optional[Dict[str, Any]]) -> str:
-    """Select native actions only for models validated against that protocol."""
-    if not model_info:
-        return "code"
-    candidates = (
-        model_info.get("model_name"),
-        model_info.get("display_name"),
-    )
-    for candidate in candidates:
-        normalized = str(candidate or "").strip().casefold().rsplit("/", 1)[-1]
-        if normalized in NATIVE_TOOL_CALLING_MODELS:
-            return "native"
-    return "code"
+    """Prefer provider-native actions; runtime negotiation owns fallback."""
+    return "native"
 
 
 def resolve_native_tool_choice(model_info: Optional[Dict[str, Any]]) -> str:
-    """Adapt native tool forcing to provider/model constraints."""
-    if not model_info:
-        return "required"
-    candidates = (
-        model_info.get("model_name"),
-        model_info.get("display_name"),
-    )
-    for candidate in candidates:
-        normalized = str(candidate or "").strip().casefold().rsplit("/", 1)[-1]
-        if normalized == "qwen3.8-max":
-            return "auto"
-    return "required"
+    """Let every provider-capable model choose whether it needs a tool."""
+    return "auto"
 
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""

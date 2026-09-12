@@ -37,6 +37,45 @@ def test_parse_native_tool_call_accepts_one_structured_call():
     assert call_id == "call-1"
 
 
+def test_parse_native_tool_call_repairs_common_provider_json_damage():
+    message = SimpleNamespace(tool_calls=[SimpleNamespace(
+        id="call-repaired",
+        function=SimpleNamespace(
+            name="run_skill_script",
+            arguments=(
+                '{"skill_name":"docx","script_path":"outputs/create.py" '
+                '"source":"workspace"}'
+            ),
+        ),
+    )])
+
+    _, arguments, _ = core_agent_module.parse_native_tool_call(
+        message,
+        {"run_skill_script"},
+    )
+
+    assert arguments == {
+        "skill_name": "docx",
+        "script_path": "outputs/create.py",
+        "source": "workspace",
+    }
+
+
+def test_native_call_identity_includes_canonical_arguments():
+    first = core_agent_module._native_tool_call_key(
+        "read_skill_md", {"skill_name": "docx"}
+    )
+    same = core_agent_module._native_tool_call_key(
+        "read_skill_md", {"skill_name": "docx"}
+    )
+    different = core_agent_module._native_tool_call_key(
+        "read_skill_md", {"skill_name": "pdf"}
+    )
+
+    assert first == same
+    assert first != different
+
+
 @pytest.mark.parametrize("tool_calls", [[], [object(), object()]])
 def test_parse_native_tool_call_requires_exactly_one_call(tool_calls):
     with pytest.raises(ValueError, match="exactly one native tool call"):

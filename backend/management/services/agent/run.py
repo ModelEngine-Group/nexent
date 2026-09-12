@@ -303,6 +303,13 @@ async def _stream_agent_chunks(
         ProcessType.MODEL_OUTPUT_THINKING.value,
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
     }
+    # Provider-native argument deltas are UI-only previews. Canonical parse,
+    # tool and final_answer events are persisted after the call completes.
+    _TRANSIENT_TYPES = {
+        "tool_call_start",
+        "tool_call_argument_delta",
+        "final_answer_delta",
+    }
 
     captured_skill_files: dict[str, dict] = {}
     skill_file_uploads: list[dict] = []
@@ -505,7 +512,11 @@ async def _stream_agent_chunks(
             # Buffer assistant persistence in memory. Redis/channel publication
             # below remains per chunk; PostgreSQL is touched only once after the
             # stream reaches a terminal state.
-            if streaming_message_id is not None and chunk_type:
+            if (
+                streaming_message_id is not None
+                and chunk_type
+                and chunk_type not in _TRANSIENT_TYPES
+            ):
                 mergeable = chunk_type in _MERGEABLE_TYPES
                 is_continuation = (
                     current_unit is not None

@@ -44,6 +44,7 @@ import {
   extractAidpImageKeys,
   searchImagesRegistry,
   isReasoningChunkType,
+  makeReasoningPart,
   skillFileUploadsRegistry,
   remoteChatModelAdapter,
   parseStepTokenCount,
@@ -71,8 +72,7 @@ type HistoricalChatMode = "planning" | "execution";
 let activeHistoricalConversationId: string | undefined;
 let activeHistoricalChatModeConversationId: string | undefined;
 let historicalChatModeListener:
-  | ((mode: HistoricalChatMode) => void)
-  | undefined;
+  ((mode: HistoricalChatMode) => void) | undefined;
 const historicalChatModeCache = new Map<string, HistoricalChatMode>();
 
 export const restoreHistoricalPlan = (conversationId?: string): void => {
@@ -239,7 +239,7 @@ const buildBranchableHistory = (
   const branchableMessages: BranchableHistoryMessage[] = [];
   let visibleHeadId: string | null = null;
 
-  for (let groupStart = 0; groupStart < messages.length; ) {
+  for (let groupStart = 0; groupStart < messages.length;) {
     const role = messages[groupStart].role;
     let groupEnd = groupStart + 1;
     while (groupEnd < messages.length && messages[groupEnd].role === role) {
@@ -437,7 +437,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                   (item.image_key as string | undefined) ||
                   (isImage ? derivedImageKey : undefined),
                 retrievalHighlightTerms: getRetrievalHighlightTerms(
-                  item.score_details,
+                  item.score_details
                 ),
               });
             }
@@ -458,6 +458,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         if (text) content.push({ type: "text", text });
       } else {
         let reasoningText = "";
+        let pendingParentStepLabel = "";
+        const pendingSubAgentStepLabels = new Map<string, string>();
         // Per-invocation map of currently-open sub-agent runs reconstructed
         // from persisted ``subagent_start`` / ``subagent_end`` units. We do
         // not route inner parts into a separate ``subagent-group`` array;
@@ -543,6 +545,22 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             });
             reasoningText = "";
           }
+        };
+
+        const commitPendingStepLabel = (invocationId?: string) => {
+          const label = invocationId
+            ? pendingSubAgentStepLabels.get(invocationId) || ""
+            : pendingParentStepLabel;
+          if (invocationId) {
+            pendingSubAgentStepLabels.delete(invocationId);
+          } else {
+            pendingParentStepLabel = "";
+          }
+          if (!label) return;
+          const stepPart: any = makeReasoningPart(label, false);
+          const meta = buildMetadata(invocationId);
+          if (meta) stepPart.metadata = meta;
+          content.push(stepPart);
         };
 
         const answerImageKeys = persistedAnswerImageKeys;
@@ -833,8 +851,13 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "step_count") {
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
-              if (top) top.reasoningText += part.content;
-              else reasoningText += part.content;
+              if (top && part.invocation_id) {
+                flushReasoning(part.invocation_id);
+                pendingSubAgentStepLabels.set(part.invocation_id, part.content);
+              } else {
+                flushReasoning();
+                pendingParentStepLabel = part.content;
+              }
             }
             continue;
           }
@@ -842,14 +865,24 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (isReasoningChunkType(part.type)) {
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
-              if (top) top.reasoningText += part.content;
-              else reasoningText += part.content;
+              if (top) {
+                top.reasoningText +=
+                  pendingSubAgentStepLabels.get(part.invocation_id || "") || "";
+                if (part.invocation_id) {
+                  pendingSubAgentStepLabels.delete(part.invocation_id);
+                }
+                top.reasoningText += part.content;
+              } else {
+                reasoningText += pendingParentStepLabel + part.content;
+                pendingParentStepLabel = "";
+              }
             }
             continue;
           }
 
           if (part.type === "tool" || part.type === "tool-call") {
             flushReasoning(part.invocation_id);
+            commitPendingStepLabel(part.invocation_id);
             const toolCallPart = buildToolCallPart({
               type: part.type,
               content: part.content,
@@ -868,7 +901,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "parse") {
             flushReasoning(part.invocation_id);
-            if (part.content.trim()) {
+            commitPendingStepLabel(part.invocation_id);
+            if (
+              part.content.trim() &&
+              !/^\s*final_answer\s*\(/.test(part.content)
+            ) {
               const executionCodePart = buildExecutionCodePart({
                 type: "parse",
                 content: part.content,
@@ -995,8 +1032,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (typeof searchItem === "object" && searchItem !== null) {
               const item = searchItem as Record<string, unknown>;
               const scoreDetails = item.score_details as
-                | Record<string, unknown>
-                | undefined;
+                Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               if (
                 scoreDetails?.chunk_type === "image" ||
@@ -1021,7 +1057,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 citeIndex,
                 toolSign: item.tool_sign as string | undefined,
                 retrievalHighlightTerms: getRetrievalHighlightTerms(
-                  item.score_details,
+                  item.score_details
                 ),
                 messageId,
               });

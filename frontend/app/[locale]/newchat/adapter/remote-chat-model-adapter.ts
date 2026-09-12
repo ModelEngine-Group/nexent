@@ -198,9 +198,7 @@ export interface Nl2aResourceCandidate {
 }
 
 export type Nl2aInstallationFormKind =
-  | "SKILL_CONFIG"
-  | "MCP_REMOTE"
-  | "MCP_CONTAINER";
+  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
 
 export interface Nl2aResourceInstallationOption {
   option_id: string;
@@ -448,7 +446,7 @@ interface ReasoningPart {
  * ``MessagePrimitive.GroupedParts`` ``groupBy`` callback can route the part
  * into the right sub-agent cluster.
  */
-function makeReasoningPart(
+export function makeReasoningPart(
   text: string,
   isRunning: boolean,
   metadata?: SubAgentPartMetadata
@@ -777,6 +775,8 @@ export function buildExecutionCodePart(chunk: SseChunk): any {
     data: {
       code: chunk.content,
       language: "python",
+      isStreaming: false,
+      tool_call_id: chunk.tool_call_id,
     },
     unit_index: chunk.unit_index,
   };
@@ -1452,8 +1452,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const history = historyMessages.map((msg) => {
       const customMetadata = isNl2Agent
         ? (msg.metadata?.custom as
-            | { nl2agentCardAction?: Nl2AgentCardAction }
-            | undefined)
+            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
         : undefined;
       const text = customMetadata?.nl2agentCardAction
         ? JSON.stringify(customMetadata.nl2agentCardAction)
@@ -1549,8 +1548,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (abortHandled) return;
       abortHandled = true;
       const abortReason = abortSignal?.reason as
-        | { detach?: boolean }
-        | undefined;
+        { detach?: boolean } | undefined;
       if (abortReason?.detach) {
         log.log(
           `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
@@ -1578,8 +1576,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     let agentResponse:
-      | ReadableStreamDefaultReader<Uint8Array>
-      | { type: "json"; data: unknown };
+      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
@@ -1686,6 +1683,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const invocationSlots = new Map<string, InvocationSlot>();
     const contentParts: any[] = [];
+    const nativeCodePartIndices = new Map<string, number>();
+    const nativeRegularPreviewCallIds = new Set<string>();
+    const nativePreviewReasoningPartIndices = new Map<string, number>();
+    const nativePreviewCallIdsByScope = new Map<string, string>();
+    const pendingSubAgentStepLabels = new Map<string, string>();
+    let pendingParentStepLabel = "";
+    let nativeFinalAnswerPartIndex: number | null = null;
+    let nativeFinalAnswerCallId: string | null = null;
     const nl2SkillFilePartIndices = new Map<string, number>();
     let nl2SkillSummaryPartIndex: number | null = null;
     const classifyNl2SkillFile = (
@@ -1904,6 +1909,168 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       };
     }
 
+    const takePendingStepLabel = (invocationId?: string): string => {
+      if (invocationId) {
+        const label = pendingSubAgentStepLabels.get(invocationId) || "";
+        pendingSubAgentStepLabels.delete(invocationId);
+        return label;
+      }
+      const label = pendingParentStepLabel;
+      pendingParentStepLabel = "";
+      return label;
+    };
+
+    const commitPendingStepLabel = (invocationId?: string): void => {
+      const label = takePendingStepLabel(invocationId);
+      if (!label) return;
+      const top = resolveSubAgent(invocationId);
+      const part = makeReasoningPart(
+        label,
+        false,
+        top ? subAgentMetadataFor(top) : undefined
+      );
+      contentParts.push(part);
+    };
+
+    const nativePreviewScopeKey = (invocationId?: string): string =>
+      invocationId || "__parent__";
+
+    const beginNativePreview = (
+      callId: string,
+      invocationId?: string
+    ): void => {
+      let reasoningPartIndex: number | undefined;
+      if (invocationId) {
+        const entry = activeSubAgents.get(invocationId);
+        if (
+          entry?.slot.reasoningIdx !== null &&
+          entry?.slot.reasoningIdx !== undefined
+        ) {
+          reasoningPartIndex = entry.slot.reasoningIdx;
+        }
+      } else if (currentReasoningPart) {
+        flushOpenReasoning();
+        reasoningPartIndex = contentParts.length - 1;
+      }
+      flushOpenReasoning(invocationId);
+      const beforeStepLabel = contentParts.length;
+      commitPendingStepLabel(invocationId);
+      if (contentParts.length > beforeStepLabel) {
+        reasoningPartIndex = contentParts.length - 1;
+      }
+      if (reasoningPartIndex !== undefined) {
+        nativePreviewReasoningPartIndices.set(callId, reasoningPartIndex);
+      }
+      nativePreviewCallIdsByScope.set(
+        nativePreviewScopeKey(invocationId),
+        callId
+      );
+    };
+
+    const endNativePreview = (chunk: SseChunk): void => {
+      const callId = chunk.tool_call_id;
+      if (callId) nativePreviewReasoningPartIndices.delete(callId);
+      nativePreviewCallIdsByScope.delete(
+        nativePreviewScopeKey(chunk.invocation_id)
+      );
+    };
+
+    const handleNativePreview = (chunk: SseChunk): boolean => {
+      const callId = chunk.tool_call_id;
+      if (!callId) return false;
+      const toolName = chunk.tool_name || "tool";
+      const toolMeta = resolveSubAgent(chunk.invocation_id);
+
+      if (chunk.type === "final_answer_delta") {
+        if (nativeFinalAnswerPartIndex === null) {
+          flushOpenReasoning(chunk.invocation_id);
+          commitPendingStepLabel(chunk.invocation_id);
+          const part: any = {
+            type: "text",
+            text: "",
+            isStreamingFinalAnswer: true,
+            tool_call_id: callId,
+          };
+          if (toolMeta) part.metadata = subAgentMetadataFor(toolMeta);
+          nativeFinalAnswerPartIndex = contentParts.length;
+          contentParts.push(part);
+        } else if (nativeFinalAnswerCallId !== callId) {
+          contentParts[nativeFinalAnswerPartIndex].text = "";
+          contentParts[nativeFinalAnswerPartIndex].tool_call_id = callId;
+        }
+        nativeFinalAnswerCallId = callId;
+        contentParts[nativeFinalAnswerPartIndex].text += chunk.content;
+        return true;
+      }
+
+      if (toolName === "final_answer") {
+        if (chunk.type === "tool_call_start") {
+          beginNativePreview(callId, chunk.invocation_id);
+        }
+        return true;
+      }
+
+      if (toolName === "python_interpreter") {
+        let partIndex = nativeCodePartIndices.get(callId);
+        if (partIndex === undefined) {
+          beginNativePreview(callId, chunk.invocation_id);
+          partIndex = contentParts.length;
+          const part: any = {
+            type: "data",
+            name: "execution-code",
+            data: {
+              code: "",
+              language: "python",
+              isStreaming: true,
+              tool_call_id: callId,
+            },
+          };
+          if (toolMeta) part.metadata = subAgentMetadataFor(toolMeta);
+          contentParts.push(part);
+          nativeCodePartIndices.set(callId, partIndex);
+        }
+        if (chunk.type === "tool_call_argument_delta") {
+          contentParts[partIndex].data.code += chunk.content;
+        }
+        return true;
+      }
+
+      if (!nativeRegularPreviewCallIds.has(callId)) {
+        beginNativePreview(callId, chunk.invocation_id);
+        nativeRegularPreviewCallIds.add(callId);
+      }
+      return true;
+    };
+
+    const completeNativeCodePreview = (chunk: SseChunk): boolean => {
+      const callId = chunk.tool_call_id;
+      if (!callId) return false;
+      const partIndex = nativeCodePartIndices.get(callId);
+      if (partIndex === undefined) return false;
+      contentParts[partIndex].data = {
+        ...contentParts[partIndex].data,
+        code: chunk.content,
+        isStreaming: false,
+      };
+      return true;
+    };
+
+    const closeStaleNativeToolPreviews = (invocationId?: string): void => {
+      const scopeKey = nativePreviewScopeKey(invocationId);
+      const callId = nativePreviewCallIdsByScope.get(scopeKey);
+      if (callId) nativePreviewReasoningPartIndices.delete(callId);
+      nativePreviewCallIdsByScope.delete(scopeKey);
+    };
+
+    const completeNativeFinalAnswer = (chunk: SseChunk): boolean => {
+      if (nativeFinalAnswerPartIndex === null) return false;
+      const part = contentParts[nativeFinalAnswerPartIndex];
+      part.text = chunk.content;
+      delete part.isStreamingFinalAnswer;
+      endNativePreview(chunk);
+      return true;
+    };
+
     // Accumulate search sources and verified images across the stream. Images
     // are rendered at safe markers inside the answer markdown; source parts
     // remain grouped at the end for the sources panel.
@@ -2023,6 +2190,17 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
 
+          if (
+            chunk.type === "tool_call_start" ||
+            chunk.type === "tool_call_argument_delta" ||
+            chunk.type === "final_answer_delta"
+          ) {
+            if (handleNativePreview(chunk)) {
+              yield buildStreamResult(contentParts);
+            }
+            continue;
+          }
+
           if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
               chunk.content as unknown,
@@ -2077,45 +2255,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "step_count") {
-            // Fold `step_count` into the invocation's reasoning part text
-            // so the rendering layer sees the same reasoning part shape
-            // regardless of whether the data came from streaming or a
-            // historical load. ReasoningTrigger extracts the step label
-            // (``**步骤 N**``) at render time.
-            //
-            // Each parallel invocation owns a stable slot index inside
-            // ``contentParts``: the first step_count (or reasoning) chunk
-            // pushes a fresh reasoning part; later chunks mutate the part
-            // in place. This keeps every per-invocation reasoning part
-            // contiguous in the parts array, so assistant-ui's GroupedParts
-            // yields a single card per invocation even when chunks
-            // interleave across multiple parallel sub-agents.
+            // A step marker is metadata for the next reasoning content, not
+            // a standalone reasoning body. Keeping it pending prevents empty
+            // cards when a model immediately calls a tool, and closing the
+            // previous part here prevents late text from appearing before the
+            // next step label.
             const top = resolveSubAgent(chunk.invocation_id);
+            closeStaleNativeToolPreviews(chunk.invocation_id);
             if (top) {
-              if (top.slot.reasoningIdx === null) {
-                const part = makeReasoningPart(
-                  chunk.content,
-                  true,
-                  subAgentMetadataFor(top)
-                );
-                contentParts.push(part);
-                top.slot.reasoningIdx = contentParts.length - 1;
-              } else {
-                contentParts[top.slot.reasoningIdx].text += chunk.content;
-              }
-              currentReasoningPart = null;
-              yield buildStreamResult(contentParts);
+              flushOpenReasoning(chunk.invocation_id);
+              pendingSubAgentStepLabels.set(
+                chunk.invocation_id!,
+                chunk.content
+              );
             } else {
-              currentReasoningPart = makeReasoningPart(
-                (currentReasoningPart?.text ?? "") + chunk.content,
-                true,
-                undefined
-              );
-              yield buildStreamResult(
-                currentReasoningPart
-                  ? [...contentParts, currentReasoningPart]
-                  : [...contentParts]
-              );
+              flushOpenReasoning();
+              pendingParentStepLabel = chunk.content;
             }
             continue;
           }
@@ -2323,7 +2478,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           if (chunk.type === "parse") {
             flushOpenReasoning(chunk.invocation_id);
-            if (chunk.content.trim()) {
+            commitPendingStepLabel(chunk.invocation_id);
+            if (completeNativeCodePreview(chunk)) {
+              // The streamed native python_interpreter block is finalized in place.
+            } else if (
+              chunk.content.trim() &&
+              !/^\s*final_answer\s*\(/.test(chunk.content)
+            ) {
               const executionCodePart = buildExecutionCodePart(chunk);
               const executionMeta = resolveSubAgent(chunk.invocation_id);
               if (executionMeta) {
@@ -2331,6 +2492,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               }
               contentParts.push(executionCodePart);
             }
+            endNativePreview(chunk);
             yield buildStreamResult(contentParts);
           } else if (partType === "reasoning") {
             // Update the streaming reasoning part in-place. Carry the
@@ -2348,10 +2510,20 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // carries its own ``invocation_id`` (interleaved parallel
             // stream) it is routed to the correct run immediately.
             const top = resolveSubAgent(chunk.invocation_id);
-            if (top) {
+            const previewCallId = nativePreviewCallIdsByScope.get(
+              nativePreviewScopeKey(chunk.invocation_id)
+            );
+            const previewReasoningPartIndex = previewCallId
+              ? nativePreviewReasoningPartIndices.get(previewCallId)
+              : undefined;
+            if (previewReasoningPartIndex !== undefined) {
+              contentParts[previewReasoningPartIndex].text += chunk.content;
+              yield buildStreamResult(contentParts);
+            } else if (top) {
+              const stepLabel = takePendingStepLabel(chunk.invocation_id);
               if (top.slot.reasoningIdx === null) {
                 const part = makeReasoningPart(
-                  chunk.content,
+                  stepLabel + chunk.content,
                   true,
                   subAgentMetadataFor(top)
                 );
@@ -2363,8 +2535,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               currentReasoningPart = null;
               yield buildStreamResult(contentParts);
             } else {
+              const stepLabel = takePendingStepLabel();
               currentReasoningPart = makeReasoningPart(
-                (currentReasoningPart?.text ?? "") + chunk.content,
+                (currentReasoningPart?.text ?? "") + stepLabel + chunk.content,
                 true,
                 undefined
               );
@@ -2378,6 +2551,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // Commit parent reasoning before exposing the tool call so the
             // current streaming snapshot keeps both parts visible.
             flushOpenReasoning(chunk.invocation_id);
+            commitPendingStepLabel(chunk.invocation_id);
             // Resolve the chunk's invocation so the tool-call part is
             // attributed to the right parallel sub-agent. Sub-agent
             // reasoning parts are kept open across tool-calls (see
@@ -2393,6 +2567,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             ) {
               toolCallCount++;
               const toolCallPart = buildToolCallPart(chunk);
+              toolCallPart.status = { type: "complete" };
               if (toolMeta) {
                 toolCallPart.metadata = subAgentMetadataFor(toolMeta);
               }
@@ -2406,15 +2581,20 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // contiguous.
             const textMeta = resolveSubAgent(chunk.invocation_id);
 
+            if (
+              chunk.type === "final_answer" &&
+              completeNativeFinalAnswer(chunk)
+            ) {
+              yield buildStreamResult(contentParts);
+              continue;
+            }
             const textPart: any = {
               type: "text",
               text: chunk.content,
               ...(chunk.type === "warning" && { isWarning: true }),
               ...(chunk.type === "error" && { isError: true }),
             };
-            if (textMeta) {
-              textPart.metadata = subAgentMetadataFor(textMeta);
-            }
+            if (textMeta) textPart.metadata = subAgentMetadataFor(textMeta);
             contentParts.push(textPart);
             yield buildStreamResult(contentParts);
           } else if (partType === "source") {
@@ -2436,7 +2616,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   result.score_details?.chunk_type === "image" ||
                   Boolean(imageMetadata);
                 const retrievalHighlightTerms = getRetrievalHighlightTerms(
-                  result.score_details,
+                  result.score_details
                 );
                 const title =
                   result.title ||
@@ -2499,7 +2679,15 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
-          if (chunk.type === "knowledge_scope_resolved") {
+          if (
+            chunk.type === "tool_call_start" ||
+            chunk.type === "tool_call_argument_delta" ||
+            chunk.type === "final_answer_delta"
+          ) {
+            if (handleNativePreview(chunk)) {
+              yield buildStreamResult(contentParts);
+            }
+          } else if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
               chunk.content as unknown,
               custom?.onKnowledgeScopeResolved
@@ -2525,6 +2713,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           } else if (chunk.type === "plan_step_update") {
             const update = parsePlanStepUpdate(chunk.content);
             if (update) planRegistry.updateStep(update.stepId, update.status);
+          } else if (chunk.type === "step_count") {
+            const top = resolveSubAgent(chunk.invocation_id);
+            closeStaleNativeToolPreviews(chunk.invocation_id);
+            if (top && chunk.invocation_id) {
+              flushOpenReasoning(chunk.invocation_id);
+              pendingSubAgentStepLabels.set(chunk.invocation_id, chunk.content);
+            } else {
+              flushOpenReasoning();
+              pendingParentStepLabel = chunk.content;
+            }
           } else if (chunk.type === "execution_logs") {
             attachExecutionLogsToTool(contentParts, chunk);
             yield buildStreamResult(contentParts);
@@ -2603,7 +2801,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             const partType = mapChunkType(chunk.type);
             if (chunk.type === "parse") {
               flushOpenReasoning(chunk.invocation_id);
-              if (chunk.content.trim()) {
+              commitPendingStepLabel(chunk.invocation_id);
+              if (completeNativeCodePreview(chunk)) {
+                // The streamed native python_interpreter block is finalized in place.
+              } else if (
+                chunk.content.trim() &&
+                !/^\s*final_answer\s*\(/.test(chunk.content)
+              ) {
                 const executionCodePart = buildExecutionCodePart(chunk);
                 const executionMeta = resolveSubAgent(chunk.invocation_id);
                 if (executionMeta) {
@@ -2612,13 +2816,24 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 }
                 contentParts.push(executionCodePart);
               }
+              endNativePreview(chunk);
               yield buildStreamResult(contentParts);
             } else if (partType === "reasoning") {
               const top = resolveSubAgent(chunk.invocation_id);
-              if (top) {
+              const previewCallId = nativePreviewCallIdsByScope.get(
+                nativePreviewScopeKey(chunk.invocation_id)
+              );
+              const previewReasoningPartIndex = previewCallId
+                ? nativePreviewReasoningPartIndices.get(previewCallId)
+                : undefined;
+              if (previewReasoningPartIndex !== undefined) {
+                contentParts[previewReasoningPartIndex].text += chunk.content;
+                yield buildStreamResult(contentParts);
+              } else if (top) {
+                const stepLabel = takePendingStepLabel(chunk.invocation_id);
                 if (top.slot.reasoningIdx === null) {
                   const part = makeReasoningPart(
-                    chunk.content,
+                    stepLabel + chunk.content,
                     true,
                     subAgentMetadataFor(top)
                   );
@@ -2630,8 +2845,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 currentReasoningPart = null;
                 yield buildStreamResult(contentParts);
               } else {
+                const stepLabel = takePendingStepLabel();
                 currentReasoningPart = makeReasoningPart(
-                  (currentReasoningPart?.text ?? "") + chunk.content,
+                  (currentReasoningPart?.text ?? "") +
+                    stepLabel +
+                    chunk.content,
                   true
                 );
                 yield buildStreamResult([
@@ -2643,6 +2861,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               // Commit parent reasoning before exposing the tool call so the
               // final buffered SSE chunk follows the same streaming behavior.
               flushOpenReasoning(chunk.invocation_id);
+              commitPendingStepLabel(chunk.invocation_id);
               if (
                 chunk.type === "tool-call" ||
                 chunk.type === "tool" ||
@@ -2650,6 +2869,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               ) {
                 toolCallCount++;
                 const toolCallPart = buildToolCallPart(chunk);
+                toolCallPart.status = { type: "complete" };
                 const toolMeta = resolveSubAgent(chunk.invocation_id);
                 if (toolMeta)
                   toolCallPart.metadata = {
@@ -2664,24 +2884,31 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               }
               yield buildStreamResult(contentParts);
             } else if (partType === "text") {
-              const textPart: any = {
-                type: "text",
-                text: chunk.content,
-                ...(chunk.type === "warning" && { isWarning: true }),
-                ...(chunk.type === "error" && { isError: true }),
-              };
-              const textMeta = resolveSubAgent(chunk.invocation_id);
-              if (textMeta)
-                textPart.metadata = {
-                  subagentId: textMeta.agentId,
-                  runId: textMeta.runId,
-                  agentName: textMeta.agentName,
-                  depth: textMeta.depth,
-                  task: textMeta.task,
-                  isRunning: textMeta.isRunning,
+              if (
+                chunk.type === "final_answer" &&
+                completeNativeFinalAnswer(chunk)
+              ) {
+                yield buildStreamResult(contentParts);
+              } else {
+                const textPart: any = {
+                  type: "text",
+                  text: chunk.content,
+                  ...(chunk.type === "warning" && { isWarning: true }),
+                  ...(chunk.type === "error" && { isError: true }),
                 };
-              contentParts.push(textPart);
-              yield buildStreamResult(contentParts);
+                const textMeta = resolveSubAgent(chunk.invocation_id);
+                if (textMeta)
+                  textPart.metadata = {
+                    subagentId: textMeta.agentId,
+                    runId: textMeta.runId,
+                    agentName: textMeta.agentName,
+                    depth: textMeta.depth,
+                    task: textMeta.task,
+                    isRunning: textMeta.isRunning,
+                  };
+                contentParts.push(textPart);
+                yield buildStreamResult(contentParts);
+              }
             } else if (partType === "source") {
               try {
                 const searchResults = JSON.parse(chunk.content);
@@ -2699,7 +2926,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     result.score_details?.chunk_type === "image" ||
                     Boolean(imageMetadata);
                   const retrievalHighlightTerms = getRetrievalHighlightTerms(
-                    result.score_details,
+                    result.score_details
                   );
                   const title =
                     result.title ||
