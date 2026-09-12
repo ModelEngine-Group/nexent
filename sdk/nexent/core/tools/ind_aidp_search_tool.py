@@ -18,7 +18,12 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ..utils.observer import MessageObserver, ProcessType
-from ..utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+from ..utils.tools_common_message import (
+    SearchResultTextMessage,
+    ToolCategory,
+    ToolSign,
+    build_knowledge_search_response,
+)
 from ...utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("ind_aidp_search_tool")
@@ -42,13 +47,14 @@ def _field_default(value: Any, fallback: Any) -> Any:
     return fallback if value is None else value
 
 
-def _parse_kds_list(value: Any) -> List[str]:
+def _parse_kds_list(value: Any, allow_empty: bool = False) -> List[str]:
     try:
         parsed = json.loads(value) if isinstance(value, str) else value
     except json.JSONDecodeError as exc:
         raise ValueError(f"kds_list must be a valid JSON array: {exc}") from exc
-    if not isinstance(parsed, list) or not 1 <= len(parsed) <= _MAX_KDS:
-        raise ValueError(f"kds_list must contain 1-{_MAX_KDS} knowledge base IDs")
+    min_length = 0 if allow_empty else 1
+    if not isinstance(parsed, list) or not min_length <= len(parsed) <= _MAX_KDS:
+        raise ValueError(f"kds_list must contain {min_length}-{_MAX_KDS} knowledge base IDs")
     result = [str(item).strip() for item in parsed]
     if any(not item for item in result):
         raise ValueError("kds_list cannot contain empty knowledge base IDs")
@@ -296,22 +302,69 @@ class IndependentAidpSearchTool(Tool):
                 json.dumps({"images_url": image_urls}, ensure_ascii=False),
             )
 
+    @staticmethod
+    def _unique_kds(kds: List[str]) -> List[str]:
+        return list(dict.fromkeys(str(item) for item in kds))
+
+    def _resolve_search_scope(
+        self, kds_list: Optional[List[str]]
+    ) -> tuple[List[str], List[str], List[str], bool, bool]:
+        configured_scope = self._unique_kds(self.kds_list)
+        if kds_list is None:
+            return configured_scope, [], [], False, False
+
+        requested_scope = self._unique_kds(_parse_kds_list(kds_list, allow_empty=True))
+        if not requested_scope:
+            return configured_scope, [], [], False, False
+        used_scope = [item for item in requested_scope if item in configured_scope]
+        unavailable_scope = [item for item in requested_scope if item not in configured_scope]
+        fallback_to_all = bool(requested_scope and not used_scope and configured_scope)
+        if fallback_to_all:
+            used_scope = configured_scope
+        return used_scope, [], unavailable_scope, fallback_to_all, True
+
     def forward(self, query: str, kds_list: Optional[List[str]] = None) -> str:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
-        search_kds_list = self.kds_list if kds_list is None else _parse_kds_list(kds_list)
+        (
+            search_kds_list,
+            permission_denied_scope,
+            unavailable_scope,
+            fallback_to_all,
+            scope_was_specified,
+        ) = self._resolve_search_scope(kds_list)
         normalized_query = query.strip()
+        if not search_kds_list:
+            return build_knowledge_search_response(
+                [],
+                search_kds_list,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
+            )
         self._emit_running_prompt(normalized_query)
         try:
             records = self._execute_request(normalized_query, search_kds_list)
         except httpx.HTTPError as exc:
             raise IndependentAidpSearchError(f"AIDP HTTP error: {exc}") from exc
         if not records:
-            return json.dumps(
-                "No relevant information was found in the configured AIDP knowledge bases.",
-                ensure_ascii=False,
+            return build_knowledge_search_response(
+                [],
+                search_kds_list,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
         ui_results, model_results, image_urls = self._process_records(records)
         self.record_ops += len(model_results)
         self._emit_results(ui_results, image_urls)
-        return json.dumps(model_results, ensure_ascii=False)
+        return build_knowledge_search_response(
+            model_results,
+            search_kds_list,
+            permission_denied_scope,
+            unavailable_scope,
+            fallback_to_all,
+            scope_was_specified,
+        )

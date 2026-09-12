@@ -31,12 +31,7 @@ from typing import Any, Iterable, Sequence
 
 from consts.const import CAN_EDIT_ALL_USER_ROLES
 from database import group_db as group_db_module
-from database.group_db import (
-    filter_tenant_group_ids,
-    query_group_ids_by_user_in_tenant,
-)
 from database import user_tenant_db as user_tenant_db_module
-from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbConflictError,
@@ -44,6 +39,7 @@ from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbPermissionDeniedError,
 )
 from ext_components.aidp.database import aidp_permission_db
+
 
 logger = logging.getLogger("aidp_permission_service")
 
@@ -268,19 +264,20 @@ def update_resource_status(*args: Any, **kwargs: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _compute_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
-    """Return KB rows where the user has non-null permission.
-
-    Pulls ALL active rows for the tenant, applies the permission matrix
-    (management / owner / PRIVATE / group intersection), and keeps only
-    the rows the user can see. Used by both :func:`get_accessible_kbs`
-    and :func:`count_accessible_kbs` so the page slice and the count
-    never disagree on what is visible.
-    """
+def _compute_accessible_rows_with_name_map(
+    user_id: str,
+    tenant_id: str,
+) -> tuple[list[dict], dict[str, str]]:
+    """Return accessible KB rows and all non-empty tenant KB names from one query."""
     rows = aidp_permission_db.list_all_permissions_by_tenant(tenant_id=tenant_id)
     user_groups = _get_user_groups(user_id, tenant_id)
     role = _get_user_role(user_id, tenant_id)
     accessible: list[dict] = []
+    tenant_name_to_id = {
+        str(row["kds_name"]): str(row["kb_id"])
+        for row in rows
+        if row.get("kds_name")
+    }
     for row in rows:
         decision = _resolve_permission(row, user_id, tenant_id, user_groups, role)
         # Drop rows the user cannot see: PRIVATE, not-in-group, or empty
@@ -290,6 +287,12 @@ def _compute_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
         new_row = dict(row)
         new_row["permission"] = decision.permission
         accessible.append(new_row)
+    return accessible, tenant_name_to_id
+
+
+def _compute_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
+    """Return KB rows where the user has non-null permission."""
+    accessible, _ = _compute_accessible_rows_with_name_map(user_id, tenant_id)
     return accessible
 
 
@@ -329,20 +332,11 @@ def count_accessible_kbs(user_id: str, tenant_id: str) -> int:
     return len(accessible)
 
 
-def intersect_accessible_kbs(
+def _intersect_accessible_rows(
     remote_items: Sequence[dict],
-    user_id: str,
-    tenant_id: str,
+    local_rows: Sequence[dict],
 ) -> list[dict]:
-    """Intersect the current AIDP catalog with the user's local permissions.
-
-    The AIDP result is authoritative for whether a resource exists under the
-    currently configured credentials. The local permission table remains
-    authoritative for whether the Nexent user may see that resource. Result
-    order follows the AIDP catalog so pagination remains stable with the
-    upstream listing.
-    """
-    local_rows = _compute_accessible_rows(user_id, tenant_id)
+    """Intersect remote catalog order with the supplied local permission rows."""
     local_by_id = {str(row["kb_id"]): row for row in local_rows}
     protected_local_fields = (
         "tenant_id",
@@ -376,6 +370,33 @@ def intersect_accessible_kbs(
         intersection.append(merged)
         seen_ids.add(kds_id)
     return intersection
+
+
+def intersect_accessible_kbs_with_name_map(
+    remote_items: Sequence[dict],
+    user_id: str,
+    tenant_id: str,
+) -> tuple[list[dict], dict[str, str]]:
+    """Return the accessible catalog and all tenant KB names from one permission query."""
+    local_rows, tenant_name_to_id = _compute_accessible_rows_with_name_map(
+        user_id,
+        tenant_id,
+    )
+    return _intersect_accessible_rows(remote_items, local_rows), tenant_name_to_id
+
+
+def intersect_accessible_kbs(
+    remote_items: Sequence[dict],
+    user_id: str,
+    tenant_id: str,
+) -> list[dict]:
+    """Intersect the current AIDP catalog with the user's local permissions."""
+    accessible_rows, _ = intersect_accessible_kbs_with_name_map(
+        remote_items,
+        user_id,
+        tenant_id,
+    )
+    return accessible_rows
 
 
 def filter_accessible_kds(
@@ -500,6 +521,7 @@ __all__ = [
     "get_accessible_kbs",
     "count_accessible_kbs",
     "intersect_accessible_kbs",
+    "intersect_accessible_kbs_with_name_map",
     "get_allowed_kds_list",
     "get_kds_name_to_id_map",
     "require_permission",

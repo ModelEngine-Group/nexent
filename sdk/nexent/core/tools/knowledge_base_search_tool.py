@@ -16,6 +16,7 @@ from ..utils.tools_common_message import (
     SearchResultTextMessage,
     ToolCategory,
     ToolSign,
+    build_knowledge_search_response,
 )
 
 logger = logging.getLogger("knowledge_base_search_tool")
@@ -181,7 +182,7 @@ class KnowledgeBaseSearchTool(Tool):
         Returns:
             List of actual index_names for ES queries
         """
-        display_map = unwrap_field_info(self.display_name_to_index_map)
+        display_map = self._get_display_name_to_index_map()
         if not display_map:
             return names
 
@@ -192,6 +193,83 @@ class KnowledgeBaseSearchTool(Tool):
             else:
                 converted_names.append(name)
         return converted_names
+
+    def _get_display_name_to_index_map(self) -> dict:
+        display_map = unwrap_field_info(self.display_name_to_index_map)
+        return display_map if isinstance(display_map, dict) else {}
+
+    def _convert_to_display_names(self, index_names: List[str]) -> List[str]:
+        """Convert internal index names to display names for response metadata."""
+        display_map = self._get_display_name_to_index_map()
+        if not display_map:
+            return list(index_names)
+
+        index_to_display = {
+            str(index_name): str(display_name)
+            for display_name, index_name in display_map.items()
+        }
+        return [
+            index_to_display.get(str(index_name), str(index_name))
+            for index_name in index_names
+        ]
+
+    def _build_scope_response(
+        self,
+        results: List[dict],
+        used_scope: List[str],
+        permission_denied_scope: List[str],
+        unavailable_scope: List[str],
+        fallback_to_all: bool,
+        scope_was_specified: bool,
+    ) -> str:
+        """Serialize search results with display names in the model-facing notice."""
+        return build_knowledge_search_response(
+            results,
+            self._convert_to_display_names(used_scope),
+            self._convert_to_display_names(permission_denied_scope),
+            self._convert_to_display_names(unavailable_scope),
+            fallback_to_all,
+            scope_was_specified,
+        )
+
+    @staticmethod
+    def _unique_names(names: List[str]) -> List[str]:
+        return list(dict.fromkeys(str(name) for name in names))
+
+    def _resolve_search_scope(
+        self, index_names: Optional[List[str]]
+    ) -> tuple[List[str], List[str], List[str], bool, bool]:
+        configured_scope = self._unique_names(
+            self._convert_to_index_names(list(self.index_names))
+        )
+        if self._allowed_index_names is not None:
+            available_scope = [
+                name for name in configured_scope if name in self._allowed_index_names
+            ]
+        else:
+            available_scope = configured_scope
+
+        configured_permission_scope = (
+            [name for name in configured_scope if name not in available_scope]
+            if self._allowed_index_names is not None
+            else []
+        )
+        if index_names is None or len(index_names) == 0:
+            return available_scope, [], [], False, False
+
+        requested_scope = self._unique_names(
+            self._convert_to_index_names(list(index_names))
+        )
+
+        used_scope = [name for name in requested_scope if name in available_scope]
+        unavailable_scope = [name for name in requested_scope if name not in configured_scope]
+        permission_denied_scope = [
+            name for name in requested_scope if name in configured_permission_scope
+        ]
+        fallback_to_all = bool(requested_scope and not used_scope and available_scope)
+        if fallback_to_all:
+            used_scope = available_scope
+        return used_scope, permission_denied_scope, unavailable_scope, fallback_to_all, True
 
     def _filter_by_document_paths(self, results: List[dict]) -> List[dict]:
         """Filter search results by allowed document paths for access control.
@@ -224,19 +302,13 @@ class KnowledgeBaseSearchTool(Tool):
         return filtered
 
     def forward(self, query: str, index_names: Optional[List[str]] = None) -> str:
-        # Parse index_names from string (always required)
-        search_index_names = index_names if index_names is not None else self.index_names
-
-        # Convert display names to index names if necessary
-        search_index_names = self._convert_to_index_names(search_index_names)
-
-        # Defense-in-depth: enforce the backend-computed read-permission whitelist.
-        # Even if the LLM fabricates an unauthorized index name (or if the caller bypassed
-        # the backend), forward() drops it here so the underlying ES query never sees it.
-        if self._allowed_index_names is not None:
-            search_index_names = [
-                n for n in search_index_names if n in self._allowed_index_names
-            ]
+        (
+            search_index_names,
+            permission_denied_scope,
+            unavailable_scope,
+            fallback_to_all,
+            scope_was_specified,
+        ) = self._resolve_search_scope(index_names)
 
         # Guard: if no knowledge bases are accessible after permission filtering,
         # return a clear denial message so the LLM can inform the user instead of
@@ -247,7 +319,14 @@ class KnowledgeBaseSearchTool(Tool):
                 "knowledge bases after permission filtering",
                 query,
             )
-            return "No knowledge base is accessible with your current permissions. Please contact the administrator if you need access."
+            return self._build_scope_response(
+                [],
+                search_index_names,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
+            )
 
         # Use the instance search_mode
         search_mode = self.search_mode
@@ -269,9 +348,6 @@ class KnowledgeBaseSearchTool(Tool):
         if is_rerank:
             effective_top_k = effective_top_k * RERANK_OVERSEARCH_MULTIPLIER
 
-        if len(search_index_names) == 0:
-            return json.dumps("No knowledge base selected. No relevant information found.", ensure_ascii=False)
-
         kb_search_data = self._run_search(
             query=query,
             index_names=search_index_names,
@@ -289,11 +365,13 @@ class KnowledgeBaseSearchTool(Tool):
                 query,
                 search_index_names,
             )
-            return json.dumps(
-                "No relevant information was found in the selected knowledge bases. "
-                "Try a broader or shorter query, or explain that the selected scope "
-                "does not contain enough evidence.",
-                ensure_ascii=False,
+            return self._build_scope_response(
+                [],
+                search_index_names,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
 
         if self.rerank and self.rerank_model and kb_search_results:
@@ -317,7 +395,14 @@ class KnowledgeBaseSearchTool(Tool):
             query=query,
         )
 
-        return json.dumps(search_results_return, ensure_ascii=False)
+        return self._build_scope_response(
+            search_results_return,
+            search_index_names,
+            permission_denied_scope,
+            unavailable_scope,
+            fallback_to_all,
+            scope_was_specified,
+        )
 
     def _notify_search_start(self, query: str) -> None:
         if not self.observer:

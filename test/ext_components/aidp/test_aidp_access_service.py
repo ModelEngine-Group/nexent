@@ -33,8 +33,8 @@ def test_snapshot_intersects_remote_catalog_and_builds_name_map():
         return_value={"value": remote_items},
     ), patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=accessible_rows,
+        "intersect_accessible_kbs_with_name_map",
+        return_value=(accessible_rows, {"Remote Two": "2"}),
     ):
         snapshot = service.resolve_current_aidp_access(
             "https://aidp.example", "key", "user", "tenant"
@@ -44,6 +44,7 @@ def test_snapshot_intersects_remote_catalog_and_builds_name_map():
     assert snapshot.accessible_ids == ["2"]
     assert snapshot.accessible_id_set == {"2"}
     assert snapshot.name_to_id == {"Remote Two": "2"}
+    assert snapshot.tenant_name_to_id == {"Remote Two": "2"}
 
 
 def test_remote_catalog_is_cached_but_user_permissions_are_recomputed():
@@ -53,8 +54,8 @@ def test_remote_catalog_is_cached_but_user_permissions_are_recomputed():
         return_value={"value": [{"kds_id": "1"}]},
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ) as mock_intersect:
         service.resolve_current_aidp_access("https://aidp.example", "key", "u1", "tenant")
         service.resolve_current_aidp_access("https://aidp.example", "key", "u2", "tenant")
@@ -74,8 +75,8 @@ def test_catalog_cache_key_scopes_by_url_and_tenant_not_api_key():
         return_value={"value": []},
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         # Same endpoint + tenant, different api_key: cache hit.
         service.resolve_current_aidp_access("https://aidp.example", "key-1", "u", "tenant")
@@ -93,8 +94,8 @@ def test_failed_catalog_request_is_not_cached():
         side_effect=[TimeoutError("down"), {"value": []}],
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         with pytest.raises(TimeoutError):
             service.resolve_current_aidp_access("https://aidp.example", "key", "u", "tenant")
@@ -118,8 +119,8 @@ def test_concurrent_catalog_requests_share_one_remote_fetch():
         side_effect=fetch_catalog,
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         with ThreadPoolExecutor(max_workers=2) as executor:
             first = executor.submit(
@@ -188,8 +189,8 @@ def test_remote_catalog_non_list_value_yields_empty_snapshot():
         return_value={"value": "not-a-list"},
     ), patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         snapshot = service.resolve_current_aidp_access(
             "https://aidp.example", "key", "u", "tenant"
@@ -207,8 +208,8 @@ def test_force_refresh_reloads_cached_catalog():
         return_value={"value": [{"kds_id": "1"}]},
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         service.resolve_current_aidp_access("https://aidp.example", "key", "u", "tenant")
         service.resolve_current_aidp_access(
@@ -231,8 +232,8 @@ def test_expired_catalog_entry_is_dropped_and_reloaded():
         return_value={"value": [{"kds_id": "fresh"}]},
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         snapshot = service.resolve_current_aidp_access(
             "https://aidp.example", "key", "u", "tenant"
@@ -250,8 +251,8 @@ def test_catalog_cache_evicts_lru_entry():
         return_value={"value": []},
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         service.resolve_current_aidp_access("https://one.example", "key", "u", "tenant")
         service.resolve_current_aidp_access("https://two.example", "key", "u", "tenant")
@@ -280,8 +281,8 @@ def test_version_bump_during_load_skips_cache_write():
         side_effect=dispatch,
     ) as mock_fetch, patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         first = service.resolve_current_aidp_access("https://aidp.example", "key", "u", "tenant")
         second = service.resolve_current_aidp_access("https://aidp.example", "key", "u", "tenant")
@@ -307,8 +308,8 @@ def test_finally_keeps_replaced_inflight_future():
             side_effect=loader,
         ), patch.object(
             service.aidp_permission_service,
-            "intersect_accessible_kbs",
-            return_value=[],
+            "intersect_accessible_kbs_with_name_map",
+            return_value=([], {}),
         ):
             snapshot = service.resolve_current_aidp_access(
                 "https://aidp.example", "key", "u", "tenant"
@@ -342,8 +343,8 @@ def test_remote_item_missing_id_is_skipped():
         return_value={"value": [{"kds_name": "no-id"}]},
     ), patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([], {}),
     ):
         snapshot = service.resolve_current_aidp_access(
             "https://aidp.example", "key", "u", "tenant"
@@ -360,8 +361,8 @@ def test_accessible_row_missing_kb_id_is_skipped():
         return_value={"value": [{"kds_id": "1"}]},
     ), patch.object(
         service.aidp_permission_service,
-        "intersect_accessible_kbs",
-        return_value=[{"kds_name": "orphan"}],
+        "intersect_accessible_kbs_with_name_map",
+        return_value=([{"kds_name": "orphan"}], {}),
     ):
         snapshot = service.resolve_current_aidp_access(
             "https://aidp.example", "key", "u", "tenant"

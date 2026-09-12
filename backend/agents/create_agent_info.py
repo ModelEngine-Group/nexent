@@ -10,66 +10,40 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-from nexent.core.utils.observer import MessageObserver
-from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
+from nexent.core.agents.agent_model import (
+    AgentConfig,
+    AgentHistory,
+    AgentRunInfo,
+    AgentVerificationConfig,
+    ExternalA2AAgentConfig,
+    ModelConfig,
+    ToolConfig,
+)
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
-from nexent.core.models.capacity_resolver import (
-    ModelCapacitySnapshot,
-    ProviderCapabilityUnknown,
-    ResolverError,
-    resolve_capacity,
-)
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.agents.sandbox import SandboxConfig
 from nexent.core.models.capacity_budget import (
     ContextBudgetCalculator,
     ContextBudgetSnapshot,
     RequestBudgetOverrides,
     UncertaintyReserveBasisUnknown,
 )
+from nexent.core.models.capacity_resolver import (
+    ModelCapacitySnapshot,
+    ProviderCapabilityUnknown,
+    ResolverError,
+    resolve_capacity,
+)
+from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
-from nexent.core.agents.sandbox import SandboxConfig
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.utils.observer import MessageObserver
 from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
-
-from services.file_management_service import validate_urls_access
-from management.services.model.resolver import get_rerank_model, is_model_available
-from management.services.knowledge_base.service import (
-    ElasticSearchService,
-    get_vector_db_core,
-    get_embedding_model_by_index_name,
-)
-from services.remote_mcp_service import get_remote_mcp_server_list
-from services.memory_external_provider_service import get_memory_external_provider_service
-
-from database.a2a_agent_db import PROTOCOL_JSONRPC
-from services.memory_config_service import build_memory_context
-from services.ind_aidp_service import create_ind_aidp_image_url_builder
-from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
-from database.agent_db import (
-    search_agent_info_by_agent_id,
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-)
-from database.agent_version_db import query_current_version_no
-from database import skill_db
-from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
-from database.model_management_db import get_model_records, get_model_by_model_id
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.client import minio_client
-from utils.model_name_utils import add_repo_to_name
-from utils.prompt_template_utils import get_agent_prompt_template
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.memory_tool_prompt import build_memory_tool_policy
-from utils.automation_tool_prompt import build_automation_tool_policy
-from utils.context_utils import build_context_inputs
-from utils.http_client_utils import create_httpx_client
-from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
     AIDP_API_KEY,
@@ -83,12 +57,46 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
-from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
+from consts.model import ToolParamsRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
+from database import skill_db
+from database.a2a_agent_db import PROTOCOL_JSONRPC
+from database.agent_db import (
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+    search_agent_info_by_agent_id,
+)
+from database.agent_version_db import query_current_version_no
+from database.client import minio_client
+from database.knowledge_db import get_knowledge_name_map_by_index_names
+from database.model_management_db import get_model_by_model_id, get_model_records
+from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
+from management.services.knowledge_base.service import (
+    ElasticSearchService,
+    get_embedding_model_by_index_name,
+    get_vector_db_core,
+)
+from management.services.model.resolver import get_rerank_model, is_model_available
+from services.file_management_service import validate_urls_access
+from services.ind_aidp_service import create_ind_aidp_image_url_builder
+from services.memory_config_service import build_memory_context
+from services.memory_external_provider_service import get_memory_external_provider_service
+from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
+from services.remote_mcp_service import get_remote_mcp_server_list
+from utils.automation_tool_prompt import build_automation_tool_policy
+from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from utils.context_utils import build_context_inputs
+from utils.http_client_utils import create_httpx_client
+from utils.memory_tool_prompt import build_memory_tool_policy
+from utils.model_name_utils import add_repo_to_name
+from utils.prompt_template_utils import get_agent_prompt_template
+from utils.redis_utils import get_redis_client
+
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
+
 
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
@@ -145,7 +153,11 @@ def _build_effective_knowledge_base_summary(
         for tool in tool_list:
             if tool.class_name != "KnowledgeBaseSearchTool":
                 continue
-            index_names = tool.params.get("index_names") or []
+            metadata = tool.metadata if isinstance(tool.metadata, dict) else {}
+            if "allowed_index_names" in metadata:
+                index_names = metadata.get("allowed_index_names") or []
+            else:
+                index_names = tool.params.get("index_names") or []
             if not index_names:
                 if not include_empty_message:
                     return "", []
@@ -155,11 +167,7 @@ def _build_effective_knowledge_base_summary(
                     else "No knowledge base indexes are currently available.\n"
                 )
                 return empty_message, []
-            display_map = (
-                tool.metadata.get("index_name_to_display_map", {})
-                if isinstance(tool.metadata, dict)
-                else {}
-            )
+            display_map = metadata.get("index_name_to_display_map", {})
             for index_name in index_names:
                 try:
                     display_name = display_map.get(index_name, index_name)
@@ -1687,6 +1695,7 @@ async def create_tool_config_list(
         # permissions, but never intersect it with the agent defaults again.
         _allowed_kds_set: set[str] = set()
         _kds_name_to_id_map: dict[str, str] = {}
+        _snapshot: Any = None
         if tool.get("class_name") == "AidpSearchTool":
             try:
                 from ext_components.aidp.services.aidp_access_service import (
@@ -1715,17 +1724,25 @@ async def create_tool_config_list(
             if not isinstance(configured_kds, list):
                 configured_kds = []
             configured_kds = [str(kds_id) for kds_id in configured_kds]
+            configured_kds_set = set(configured_kds)
             # The execution whitelist is the effective tool range, not every
             # KDS the user could access. This prevents model-supplied arguments
             # from expanding a conversation-scoped selection.
-            _allowed_kds_set.intersection_update(configured_kds)
-            param_dict["kds_list"] = [
-                kds_id for kds_id in configured_kds if kds_id in _allowed_kds_set
-            ]
+            _allowed_kds_set.intersection_update(configured_kds_set)
+            if _snapshot is not None:
+                # Keep the full per-run scope in params so the SDK can
+                # distinguish configured-but-denied knowledge bases from
+                # unavailable ones.
+                param_dict["kds_list"] = configured_kds
+                _kds_name_to_id_map.update(_snapshot.tenant_name_to_id)
+            else:
+                # Preserve fail-closed behavior when the access snapshot
+                # cannot be resolved.
+                param_dict["kds_list"] = []
             _kds_name_to_id_map = {
                 name: kds_id
                 for name, kds_id in _kds_name_to_id_map.items()
-                if kds_id in _allowed_kds_set
+                if _snapshot is not None and kds_id in configured_kds_set
             }
 
         tool_config = ToolConfig(
@@ -1802,27 +1819,24 @@ async def create_tool_config_list(
 
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
-            index_names = tool_config.params.get("index_names", [])
+            configured_index_names = tool_config.params.get("index_names", [])
 
             # Enforce knowledge-base-level read permission for the chatting user.
             # Agent-level permission controls "who can use this agent", but each knowledge
             # base has its own "who can read" permission (group_ids + ingroup_permission).
-            # Filter out any index the current user does NOT have at least read access to,
-            # so the tool, its display-name mapping, and the injected KB summary all honour
-            # the per-KB ACL.
-            if index_names:
-                index_names = ElasticSearchService.filter_accessible_indices(
-                    index_names, user_id=user_id, tenant_id=tenant_id,
+            # Keep the complete configured scope in params so the SDK can distinguish
+            # configured-but-denied indices from unconfigured ones.
+            allowed_index_names = configured_index_names
+            if configured_index_names:
+                allowed_index_names = ElasticSearchService.filter_accessible_indices(
+                    configured_index_names, user_id=user_id, tenant_id=tenant_id,
                 )
-                # Persist the filtered list back into params so downstream consumers
-                # (knowledge_base_summary builder, metadata) see only accessible indices.
-                tool_config.params["index_names"] = index_names
 
             display_name_to_index_map = {}
             index_name_to_display_map = {}
-            if index_names:
+            if configured_index_names:
                 knowledge_name_map = get_knowledge_name_map_by_index_names(
-                    index_names,
+                    configured_index_names,
                     tenant_id=tenant_id,
                 )
                 # Reverse the mapping: display_name (knowledge_name) -> index_name
@@ -1840,16 +1854,11 @@ async def create_tool_config_list(
                 "document_paths": document_paths,
                 # Defense-in-depth whitelist: forward() will reject any index not in this list,
                 # even if the LLM fabricates an unauthorized index name.
-                "allowed_index_names": list(index_names),
+                "allowed_index_names": list(allowed_index_names),
             }
 
-            if not index_names:
-                # Empty after permission filtering means the current user has no read access
-                # to any of the agent's configured knowledge bases. Instead of skipping the tool
-                # (which would cause the LLM to hallucinate tool calls against a non-existent tool),
-                # we keep the tool in the list with empty index_names. The SDK forward() will return
-                # a clear "no accessible knowledge base" message, allowing the LLM to explain
-                # the situation to the user instead of entering a retry loop.
+            if not allowed_index_names:
+                # Keep the tool so the SDK can report which configured indices lack read access.
                 logger.warning(
                     "Keeping knowledge_base_search tool for agent '%s' with no accessible "
                     "knowledge bases for user '%s' after permission filtering. "
@@ -1860,10 +1869,13 @@ async def create_tool_config_list(
                 tool_config_list.append(tool_config)
                 continue
 
-            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, _, _ = get_embedding_model_by_index_name(
+                tenant_id,
+                allowed_index_names[0],
+            )
             if not embedding_model:
                 raise ValidationError(
-                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"No embedding model found for index '{allowed_index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:

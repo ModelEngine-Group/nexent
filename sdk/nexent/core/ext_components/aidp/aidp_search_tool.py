@@ -16,7 +16,13 @@ from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...utils.observer import MessageObserver, ProcessType
-from ...utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+from ...utils.pydantic_utils import unwrap_field_info
+from ...utils.tools_common_message import (
+    SearchResultTextMessage,
+    ToolCategory,
+    ToolSign,
+    build_knowledge_search_response,
+)
 from ....utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("aidp_search_tool")
@@ -510,6 +516,42 @@ class AidpSearchTool(Tool):
             return list(kds)
         return [k for k in kds if k in self._allowed_kds_set]
 
+    @staticmethod
+    def _unique_kds(kds: List[str]) -> List[str]:
+        return list(dict.fromkeys(str(item) for item in kds))
+
+    def _resolve_search_scope(
+        self, kds_list: Optional[List[str]]
+    ) -> tuple[List[str], List[str], List[str], bool, bool]:
+        configured_scope = self._unique_kds(
+            self._convert_to_kds_ids(list(self.kds_list))
+        )
+        configured_available_scope = self._filter_by_whitelist(configured_scope)
+        configured_permission_scope = (
+            [item for item in configured_scope if item not in configured_available_scope]
+            if self._whitelist_installed
+            else []
+        )
+        if kds_list is None or len(kds_list) == 0:
+            return configured_available_scope, [], [], False, False
+
+        requested_scope = self._unique_kds(
+            self._convert_to_kds_ids(list(kds_list))
+        )
+        used_scope = [item for item in requested_scope if item in configured_available_scope]
+        unavailable_scope = [item for item in requested_scope if item not in configured_scope]
+        permission_denied_scope = [
+            item for item in requested_scope if item in configured_permission_scope
+        ]
+        fallback_to_all = bool(requested_scope and not used_scope and configured_available_scope)
+        if fallback_to_all:
+            used_scope = configured_available_scope
+        return used_scope, permission_denied_scope, unavailable_scope, fallback_to_all, True
+
+    def _get_kds_name_to_id_map(self) -> Dict[str, str]:
+        kds_map = unwrap_field_info(self.kds_name_to_id_map)
+        return kds_map if isinstance(kds_map, dict) else {}
+
     def _convert_to_kds_ids(self, names: List[str]) -> List[str]:
         """Convert kds_name (display name) to kds_id if a mapping exists.
 
@@ -523,12 +565,7 @@ class AidpSearchTool(Tool):
         Returns:
             List of resolved kds_id values. Unknown names pass through unchanged.
         """
-        kds_map = self.kds_name_to_id_map
-        if isinstance(kds_map, FieldInfo):
-            if kds_map.default_factory is not None:
-                kds_map = kds_map.default_factory()
-            else:
-                kds_map = kds_map.default
+        kds_map = self._get_kds_name_to_id_map()
         if not kds_map:
             return names
 
@@ -540,6 +577,34 @@ class AidpSearchTool(Tool):
                 converted_names.append(name)
         return converted_names
 
+    def _convert_to_kds_names(self, kds_ids: List[str]) -> List[str]:
+        """Convert internal KDS IDs to display names for model-facing metadata."""
+        kds_map = self._get_kds_name_to_id_map()
+        if not kds_map:
+            return list(kds_ids)
+
+        id_to_name = {str(kds_id): str(name) for name, kds_id in kds_map.items()}
+        return [id_to_name.get(str(kds_id), str(kds_id)) for kds_id in kds_ids]
+
+    def _build_scope_response(
+        self,
+        results: List[Dict[str, Any]],
+        used_scope: List[str],
+        permission_denied_scope: List[str],
+        unavailable_scope: List[str],
+        fallback_to_all: bool,
+        scope_was_specified: bool,
+    ) -> str:
+        """Serialize search results with display names in the model-facing notice."""
+        return build_knowledge_search_response(
+            results,
+            self._convert_to_kds_names(used_scope),
+            self._convert_to_kds_names(permission_denied_scope),
+            self._convert_to_kds_names(unavailable_scope),
+            fallback_to_all,
+            scope_was_specified,
+        )
+
     def forward(
         self,
         query: str,
@@ -548,20 +613,13 @@ class AidpSearchTool(Tool):
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
 
-        # Always intersect with the runtime whitelist, regardless of whether
-        # the LLM passed a fresh ``kds_list`` or we fall back to the
-        # configured value. ``_filter_by_whitelist`` is a no-op when no
-        # whitelist has been installed (e.g. SDK unit tests), so it stays
-        # safe to call from anywhere.
-        base_kds = (
-            kds_list
-            if kds_list is not None and len(kds_list) > 0
-            else self.kds_list
-        )
-        # Resolve kds_name (display name) to kds_id before permission
-        # filtering so the whitelist operates on the real ID namespace.
-        base_kds = self._convert_to_kds_ids(list(base_kds))
-        search_kds_list = self._filter_by_whitelist(list(base_kds))
+        (
+            search_kds_list,
+            permission_denied_scope,
+            unavailable_scope,
+            fallback_to_all,
+            scope_was_specified,
+        ) = self._resolve_search_scope(kds_list)
 
         self._emit_running_prompt(query)
 
@@ -577,11 +635,13 @@ class AidpSearchTool(Tool):
             # Permission denial is a valid tool observation, not a transport
             # failure. Returning it lets the agent produce a complete answer
             # while still preventing any request to the AIDP endpoint.
-            return json.dumps(
-                "No AIDP knowledge base is accessible within the selected "
-                "conversation scope. The configured knowledge bases may have "
-                "been removed or your access may have been revoked.",
-                ensure_ascii=False,
+            return self._build_scope_response(
+                [],
+                search_kds_list,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
 
         try:
@@ -599,14 +659,23 @@ class AidpSearchTool(Tool):
                 query,
                 search_kds_list,
             )
-            return json.dumps(
-                "No relevant information was found in the selected AIDP knowledge "
-                "bases. Try a broader or shorter query, or explain that the selected "
-                "scope does not contain enough evidence.",
-                ensure_ascii=False,
+            return self._build_scope_response(
+                [],
+                search_kds_list,
+                permission_denied_scope,
+                unavailable_scope,
+                fallback_to_all,
+                scope_was_specified,
             )
 
         search_results_json, search_results_return, images_url = self._process_records(records)
         self.record_ops += len(search_results_return)
         self._emit_results(search_results_json, images_url)
-        return json.dumps(search_results_return, ensure_ascii=False)
+        return self._build_scope_response(
+            search_results_return,
+            search_kds_list,
+            permission_denied_scope,
+            unavailable_scope,
+            fallback_to_all,
+            scope_was_specified,
+        )
