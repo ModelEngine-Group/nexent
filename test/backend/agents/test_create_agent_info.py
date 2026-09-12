@@ -3380,6 +3380,40 @@ class TestCreateAgentConfig:
             index_name="selected-index"
         )
 
+    def test_scoped_summary_excludes_configured_but_denied_indices(self):
+        """Permission-filtered indices must not enter the routing summary."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": ["allowed-index", "denied-index"]},
+            metadata={
+                "allowed_index_names": ["allowed-index"],
+                "index_name_to_display_map": {
+                    "allowed-index": "Allowed Knowledge Base",
+                    "denied-index": "Denied Knowledge Base",
+                },
+            },
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            mock_es_service.return_value.get_summary.return_value = {
+                "summary": "Allowed summary"
+            }
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == "**Allowed Knowledge Base**: Allowed summary\n\n"
+        assert kb_ids == ["allowed-index"]
+        mock_es_service.return_value.get_summary.assert_called_once_with(
+            index_name="allowed-index"
+        )
+
     def test_scoped_empty_summary_does_not_restore_agent_defaults(self):
         """An empty effective scope stays empty instead of adding legacy text."""
         kb_tool = Mock(
@@ -6844,10 +6878,18 @@ class TestKBPermissionFilteringInCreateToolConfigList:
                 user_id="user_789",
             )
 
-            # Tool should be included (2 accessible KBs remain)
+            # Tool should retain the full configured scope while enforcing the ACL
+            # through metadata.
             assert len(result) == 1
-            # Verify params.index_names was updated to filtered list
-            assert mock_tc_instance.params["index_names"] == ["kb_allowed", "kb_creator"]
+            assert mock_tc_instance.params["index_names"] == [
+                "kb_allowed",
+                "kb_forbidden",
+                "kb_creator",
+            ]
+            assert mock_tc_instance.metadata["allowed_index_names"] == [
+                "kb_allowed",
+                "kb_creator",
+            ]
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_keeps_tool_when_no_accessible_kbs(self):
@@ -6904,6 +6946,8 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             # Tool should be kept in the list (not skipped) so the LLM can call it
             # and receive a clear permission-denial message from the SDK forward()
             assert len(result) == 1
+            assert mock_tc_instance.params["index_names"] == ["kb1", "kb2"]
+            assert mock_tc_instance.metadata["allowed_index_names"] == []
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_preserves_order_after_filtering(self):
@@ -6964,8 +7008,16 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             )
 
             assert len(result) == 1
-            # Order should be preserved from original index_names list
-            assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
+            assert mock_tc_instance.params["index_names"] == [
+                "kb_a",
+                "kb_b",
+                "kb_c",
+                "kb_d",
+            ]
+            assert mock_tc_instance.metadata["allowed_index_names"] == [
+                "kb_b",
+                "kb_d",
+            ]
 
 
 
@@ -7314,17 +7366,10 @@ class TestCreateToolConfigListAidpSearch:
                 "Allowed 2": "kb_allowed_2",
                 "Not selected": "kb_not_selected",
             },
-        )
-        aidp_permission_db_module = types.ModuleType(
-            "ext_components.aidp.database.aidp_permission_db"
-        )
-        aidp_permission_db_module.list_kds_name_to_id_map = MagicMock(
-            return_value={
+            tenant_name_to_id={
                 "Allowed 2": "kb_allowed_2",
                 "Denied configured": "kb_not_accessible",
-                "Outside scope": "kb_other",
-                "": "kb_empty_name",
-            }
+            },
         )
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
@@ -7337,7 +7382,6 @@ class TestCreateToolConfigListAidpSearch:
              patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
              patch.dict(sys.modules, {
                  "ext_components.aidp.services.aidp_access_service": access_module,
-                 "ext_components.aidp.database.aidp_permission_db": aidp_permission_db_module,
              }):
 
             mock_tools.return_value = [{

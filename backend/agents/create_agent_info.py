@@ -98,28 +98,6 @@ logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
 
-def _get_configured_aidp_kds_name_to_id_map(
-    tenant_id: str,
-    configured_kds: set[str],
-) -> dict[str, str]:
-    """Return non-empty name mappings for configured AIDP knowledge bases."""
-    try:
-        from ext_components.aidp.database.aidp_permission_db import (
-            list_kds_name_to_id_map,
-        )
-
-        tenant_name_to_id = list_kds_name_to_id_map(tenant_id)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("AIDP configured KB name lookup failed: %s", exc)
-        return {}
-
-    return {
-        str(name): str(kds_id)
-        for name, kds_id in tenant_name_to_id.items()
-        if str(kds_id) in configured_kds
-    }
-
-
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
     from nexent.core.tools.search_memory_tool import SearchMemoryTool
@@ -175,7 +153,11 @@ def _build_effective_knowledge_base_summary(
         for tool in tool_list:
             if tool.class_name != "KnowledgeBaseSearchTool":
                 continue
-            index_names = tool.params.get("index_names") or []
+            metadata = tool.metadata if isinstance(tool.metadata, dict) else {}
+            if "allowed_index_names" in metadata:
+                index_names = metadata.get("allowed_index_names") or []
+            else:
+                index_names = tool.params.get("index_names") or []
             if not index_names:
                 if not include_empty_message:
                     return "", []
@@ -185,11 +167,7 @@ def _build_effective_knowledge_base_summary(
                     else "No knowledge base indexes are currently available.\n"
                 )
                 return empty_message, []
-            display_map = (
-                tool.metadata.get("index_name_to_display_map", {})
-                if isinstance(tool.metadata, dict)
-                else {}
-            )
+            display_map = metadata.get("index_name_to_display_map", {})
             for index_name in index_names:
                 try:
                     display_name = display_map.get(index_name, index_name)
@@ -1756,12 +1734,7 @@ async def create_tool_config_list(
                 # distinguish configured-but-denied knowledge bases from
                 # unavailable ones.
                 param_dict["kds_list"] = configured_kds
-                _kds_name_to_id_map.update(
-                    _get_configured_aidp_kds_name_to_id_map(
-                        tenant_id,
-                        configured_kds_set,
-                    )
-                )
+                _kds_name_to_id_map.update(_snapshot.tenant_name_to_id)
             else:
                 # Preserve fail-closed behavior when the access snapshot
                 # cannot be resolved.
@@ -1846,27 +1819,24 @@ async def create_tool_config_list(
 
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
-            index_names = tool_config.params.get("index_names", [])
+            configured_index_names = tool_config.params.get("index_names", [])
 
             # Enforce knowledge-base-level read permission for the chatting user.
             # Agent-level permission controls "who can use this agent", but each knowledge
             # base has its own "who can read" permission (group_ids + ingroup_permission).
-            # Filter out any index the current user does NOT have at least read access to,
-            # so the tool, its display-name mapping, and the injected KB summary all honour
-            # the per-KB ACL.
-            if index_names:
-                index_names = ElasticSearchService.filter_accessible_indices(
-                    index_names, user_id=user_id, tenant_id=tenant_id,
+            # Keep the complete configured scope in params so the SDK can distinguish
+            # configured-but-denied indices from unconfigured ones.
+            allowed_index_names = configured_index_names
+            if configured_index_names:
+                allowed_index_names = ElasticSearchService.filter_accessible_indices(
+                    configured_index_names, user_id=user_id, tenant_id=tenant_id,
                 )
-                # Persist the filtered list back into params so downstream consumers
-                # (knowledge_base_summary builder, metadata) see only accessible indices.
-                tool_config.params["index_names"] = index_names
 
             display_name_to_index_map = {}
             index_name_to_display_map = {}
-            if index_names:
+            if configured_index_names:
                 knowledge_name_map = get_knowledge_name_map_by_index_names(
-                    index_names,
+                    configured_index_names,
                     tenant_id=tenant_id,
                 )
                 # Reverse the mapping: display_name (knowledge_name) -> index_name
@@ -1884,16 +1854,11 @@ async def create_tool_config_list(
                 "document_paths": document_paths,
                 # Defense-in-depth whitelist: forward() will reject any index not in this list,
                 # even if the LLM fabricates an unauthorized index name.
-                "allowed_index_names": list(index_names),
+                "allowed_index_names": list(allowed_index_names),
             }
 
-            if not index_names:
-                # Empty after permission filtering means the current user has no read access
-                # to any of the agent's configured knowledge bases. Instead of skipping the tool
-                # (which would cause the LLM to hallucinate tool calls against a non-existent tool),
-                # we keep the tool in the list with empty index_names. The SDK forward() will return
-                # a clear "no accessible knowledge base" message, allowing the LLM to explain
-                # the situation to the user instead of entering a retry loop.
+            if not allowed_index_names:
+                # Keep the tool so the SDK can report which configured indices lack read access.
                 logger.warning(
                     "Keeping knowledge_base_search tool for agent '%s' with no accessible "
                     "knowledge bases for user '%s' after permission filtering. "
@@ -1904,10 +1869,13 @@ async def create_tool_config_list(
                 tool_config_list.append(tool_config)
                 continue
 
-            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, _, _ = get_embedding_model_by_index_name(
+                tenant_id,
+                allowed_index_names[0],
+            )
             if not embedding_model:
                 raise ValidationError(
-                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"No embedding model found for index '{allowed_index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
