@@ -9,7 +9,7 @@ import httpx
 
 from ...monitor import (
     set_monitoring_capacity_snapshot,
-    set_monitoring_safe_input_budget_snapshot,
+    set_monitoring_context_budget_snapshot,
 )
 from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
 from ..concurrency.helpers import (
@@ -136,10 +136,10 @@ def _log_memory_value_assessment(agent: Any) -> None:
 
 
 def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
-    snapshot = getattr(agent_run_info, "safe_input_budget_snapshot", None)
-    if not isinstance(snapshot, dict):
+    snapshot = getattr(agent_run_info, "context_budget_snapshot", None)
+    if snapshot is None:
         return
-    warnings = snapshot.get("warnings") or []
+    warnings = snapshot.warnings
     if "uncertainty_reserve_active" not in warnings:
         return
 
@@ -149,18 +149,18 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
             "W2 applied the unified 10% uncertainty reserve because selected "
             "model capability behavior is not fully verified."
         ),
-        "budget_fingerprint": snapshot.get("fingerprint"),
-        "w1_fingerprint": snapshot.get("w1_fingerprint"),
-        "uncertainty_reserve_tokens": snapshot.get("uncertainty_reserve_tokens"),
-        "hard_input_budget_tokens": snapshot.get("hard_input_budget_tokens"),
+        "budget_fingerprint": snapshot.fingerprint,
+        "w1_fingerprint": snapshot.w1_fingerprint,
+        "uncertainty_reserve_tokens": snapshot.uncertainty_reserve_tokens,
+        "effective_input_limit_tokens": snapshot.effective_input_limit_tokens,
     }
     logger.warning(
         "W2 uncertainty reserve active: budget_fingerprint=%s w1_fingerprint=%s "
-        "uncertainty_reserve_tokens=%s hard_input_budget_tokens=%s",
+        "uncertainty_reserve_tokens=%s effective_input_limit_tokens=%s",
         payload["budget_fingerprint"],
         payload["w1_fingerprint"],
         payload["uncertainty_reserve_tokens"],
-        payload["hard_input_budget_tokens"],
+        payload["effective_input_limit_tokens"],
     )
     try:
         agent_run_info.observer.add_message(
@@ -259,8 +259,12 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
 def agent_run_thread(agent_run_info: AgentRunInfo):
     try:
-        set_monitoring_capacity_snapshot(getattr(agent_run_info, "capacity_snapshot", None))
-        set_monitoring_safe_input_budget_snapshot(getattr(agent_run_info, "safe_input_budget_snapshot", None))
+        set_monitoring_capacity_snapshot(
+            getattr(agent_run_info, "capacity_snapshot", None)
+        )
+        set_monitoring_context_budget_snapshot(
+            getattr(agent_run_info, "context_budget_snapshot", None)
+        )
         _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
         if mcp_host is None or len(mcp_host) == 0:

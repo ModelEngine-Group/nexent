@@ -654,7 +654,7 @@ function parseSseChunk(line: string): SseChunk | null {
  * | model_output_deep_thinking    | reasoning    | Model deep thinking content         |
  * | model_output_code             | reasoning    | Model code output (streamed)        |
  * | step_count                   | text         | Current execution step number       |
- * | parse                         | tool-call    | Code parsing result                |
+ * | parse                         | execution-code | Parsed executable code             |
  * | execution_logs                | (attach)     | Attached to preceding tool result  |
  * | nl2a                          | (metadata)   | NL2Agent structured output         |
  * | agent_new_run                 | text         | Agent basic information            |
@@ -757,6 +757,18 @@ export function buildToolCallPart(chunk: SseChunk): any {
     argsText,
     unit_index: chunk.unit_index,
     tool_call_id: chunk.tool_call_id,
+  };
+}
+
+export function buildExecutionCodePart(chunk: SseChunk): any {
+  return {
+    type: "data" as const,
+    name: "execution-code",
+    data: {
+      code: chunk.content,
+      language: "python",
+    },
+    unit_index: chunk.unit_index,
   };
 }
 
@@ -1968,6 +1980,29 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (verificationPanel) verificationPanel.completed = true;
     };
 
+    const updateHistorySummary = (raw: string): boolean => {
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return false;
+      }
+      const existingIndex = contentParts.findIndex(
+        (part) => part.type === "data" && part.name === "history-summary"
+      );
+      if (payload.status === "idle") {
+        if (existingIndex >= 0) contentParts.splice(existingIndex, 1);
+        return true;
+      }
+      if (payload.status !== "compacting" && payload.status !== "accepted") {
+        return false;
+      }
+      const part = { type: "data", name: "history-summary", data: payload };
+      if (existingIndex >= 0) contentParts[existingIndex] = part;
+      else contentParts.push(part);
+      return true;
+    };
+
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
@@ -1997,6 +2032,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
+
+          if (chunk.type === "history_summary") {
+            flushOpenReasoning();
+            if (updateHistorySummary(chunk.content)) {
+              yield buildStreamResult(contentParts);
+            }
+            continue;
+          }
 
           if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
@@ -2278,7 +2321,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           const partType = mapChunkType(chunk.type);
 
-          if (partType === "reasoning") {
+          if (chunk.type === "parse") {
+            flushOpenReasoning(chunk.invocation_id);
+            if (chunk.content.trim()) {
+              const executionCodePart = buildExecutionCodePart(chunk);
+              const executionMeta = resolveSubAgent(chunk.invocation_id);
+              if (executionMeta) {
+                executionCodePart.metadata = subAgentMetadataFor(executionMeta);
+              }
+              contentParts.push(executionCodePart);
+            }
+            yield buildStreamResult(contentParts);
+          } else if (partType === "reasoning") {
             // Update the streaming reasoning part in-place. Carry the
             // current sub-agent's metadata through to ``groupBy`` so the
             // part clusters inside the matching ``group-subagent-*`` card.
@@ -2444,7 +2498,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
-          if (chunk.type === "knowledge_scope_resolved") {
+          if (chunk.type === "history_summary") {
+            flushOpenReasoning();
+            if (updateHistorySummary(chunk.content)) {
+              yield buildStreamResult(contentParts);
+            }
+          } else if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
               chunk.content as unknown,
               custom?.onKnowledgeScopeResolved
@@ -2538,7 +2597,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               completeVerificationPanel();
             }
             const partType = mapChunkType(chunk.type);
-            if (partType === "reasoning") {
+            if (chunk.type === "parse") {
+              flushOpenReasoning(chunk.invocation_id);
+              if (chunk.content.trim()) {
+                const executionCodePart = buildExecutionCodePart(chunk);
+                const executionMeta = resolveSubAgent(chunk.invocation_id);
+                if (executionMeta) {
+                  executionCodePart.metadata =
+                    subAgentMetadataFor(executionMeta);
+                }
+                contentParts.push(executionCodePart);
+              }
+              yield buildStreamResult(contentParts);
+            } else if (partType === "reasoning") {
               const top = resolveSubAgent(chunk.invocation_id);
               if (top) {
                 if (top.slot.reasoningIdx === null) {

@@ -580,6 +580,7 @@ async def get_agent_info_impl(
 
     model_projection = project_agent_models(agent_info, tenant_id, detail=True)
     agent_info.update(model_projection.fields)
+    agent_info["model_ids"] = model_projection.availability_model_ids
 
     # Get business logic model display name from model_id
     if agent_info.get("business_logic_model_id") is not None:
@@ -606,6 +607,7 @@ async def get_agent_info_impl(
     is_available, unavailable_reasons = check_agent_availability(
         agent_id=agent_id, tenant_id=tenant_id, agent_info=agent_info
     )
+    agent_info["model_ids"] = model_projection.fields["model_ids"]
 
     is_available, unavailable_reasons = apply_deleted_model_reason(
         is_available,

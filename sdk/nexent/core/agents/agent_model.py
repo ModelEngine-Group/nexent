@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
 from ..utils.observer import MessageObserver
+from ..models.capacity_budget import ContextBudgetSnapshot
 from .context.models import ContextItemInput
 
 
@@ -286,8 +287,8 @@ class AgentConfig(BaseModel):
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
         default=None,
     )
     verification_config: AgentVerificationConfig = Field(
@@ -401,8 +402,8 @@ class AgentRunInfo(BaseModel):
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
         default=None,
     )
     enable_planning: bool = Field(description="Whether to enable the planning phase before execution", default=False)

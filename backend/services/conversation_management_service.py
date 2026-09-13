@@ -193,6 +193,11 @@ def persist_history_summary_candidate(
         covered_through_message_id=field("covered_through_message_id"),
         previous_summary_unit_id=field("previous_summary_unit_id"),
         trigger=field("trigger"),
+        history_tokens_before=field("history_tokens_before"),
+        history_tokens_after=field("history_tokens_after"),
+        compaction_attempts=field("compaction_attempts"),
+        compaction_trigger_threshold_tokens=field("compaction_trigger_threshold_tokens"),
+        compaction_target_tokens=field("compaction_target_tokens"),
     )
 
 

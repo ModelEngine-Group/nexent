@@ -8,12 +8,12 @@ to instantiate provider classes at runtime.
 import importlib.util
 import logging
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 import yaml
-
 from consts.const import MEMORY_PROVIDER_PLUGINS_DIR
 from nexent.memory.providers.base import (
     IngestibleMemoryProvider,
@@ -47,65 +47,59 @@ _PROTOCOL_METHOD_MAP = {
     "ingestible": "ingest",
 }
 
+BUILTIN_MEMORY_PROVIDER_PLUGINS_DIR = (
+    Path(__file__).resolve().parent.parent / "memory_provider_plugins"
+)
+
 
 class PluginLoader:
-    """Scan a plugin directory at startup and load all valid memory provider plugins."""
+    """Discover memory provider plugins from ordered, hot-reloadable directories."""
 
-    def __init__(self, plugins_dir: str):
+    def __init__(
+        self,
+        plugins_dir: str,
+        builtin_plugins_dir: str | None = None,
+        include_builtin_plugins: bool = False,
+    ):
+        if include_builtin_plugins and builtin_plugins_dir is None:
+            builtin_plugins_dir = str(BUILTIN_MEMORY_PROVIDER_PLUGINS_DIR)
         self.plugins_dir = plugins_dir
+        self.builtin_plugins_dir = builtin_plugins_dir
+        self._plugin_sources: list[tuple[str, Path]] = []
+        if builtin_plugins_dir:
+            self._plugin_sources.append(("builtin", Path(builtin_plugins_dir)))
+        if plugins_dir:
+            external_path = Path(plugins_dir)
+            if not self._plugin_sources or external_path != self._plugin_sources[0][1]:
+                self._plugin_sources.append(("external", external_path))
         self._plugins: dict[str, PluginInfo] = {}
+        self._fingerprint: tuple | None = None
+        self._refresh_lock = threading.RLock()
 
     def load_all(self) -> None:
-        """Scan the plugin directory and load every valid plugin.
+        """Force a scan of every configured directory.
 
         Plugins that fail validation or import are logged as warnings and
         skipped without affecting other plugins or application startup.
         """
-        plugins_path = Path(self.plugins_dir)
-        if not plugins_path.is_dir():
-            logger.info(
-                "Plugin directory does not exist, skipping scan: %s",
-                self.plugins_dir,
-            )
-            return
+        self._refresh(force=True)
 
-        success_count = 0
-        failure_count = 0
-
-        for child in sorted(plugins_path.iterdir()):
-            if not child.is_dir():
-                continue
-
-            try:
-                plugin_info = self._load_single_plugin(child)
-                if plugin_info is not None:
-                    self._plugins[plugin_info.name] = plugin_info
-                    success_count += 1
-                else:
-                    failure_count += 1
-            except Exception:
-                logger.warning(
-                    "Unexpected error loading plugin from %s",
-                    child,
-                    exc_info=True,
-                )
-                failure_count += 1
-
-        logger.info(
-            "Plugin scan complete: %d loaded, %d failed",
-            success_count,
-            failure_count,
-        )
+    def refresh_if_changed(self) -> bool:
+        """Refresh the registry when plugin directory contents have changed."""
+        return self._refresh(force=False)
 
     def get_plugin(self, name: str) -> PluginInfo | None:
+        self.refresh_if_changed()
         return self._plugins.get(name)
 
     def list_plugins(self) -> list[PluginInfo]:
+        self.refresh_if_changed()
         return list(self._plugins.values())
 
     def build_provider(
         self, name: str, config: dict
-    ) -> Union[SearchableMemoryProvider, IngestibleMemoryProvider]:
+    ) -> SearchableMemoryProvider | IngestibleMemoryProvider:
+        self.refresh_if_changed()
         plugin = self._plugins.get(name)
         if plugin is None:
             raise ValueError(
@@ -113,6 +107,115 @@ class PluginLoader:
                 f"Available: {list(self._plugins.keys())}"
             )
         return plugin.provider_class(config)
+
+    # ------------------------------------------------------------------
+    # Discovery and refresh
+    # ------------------------------------------------------------------
+
+    def _refresh(self, force: bool) -> bool:
+        fingerprint = self._calculate_fingerprint()
+        if not force and fingerprint == self._fingerprint:
+            return False
+
+        with self._refresh_lock:
+            fingerprint = self._calculate_fingerprint()
+            if not force and fingerprint == self._fingerprint:
+                return False
+
+            plugins, loaded_count, failure_count = self._scan_sources()
+            self._plugins = plugins
+            self._fingerprint = self._calculate_fingerprint()
+            logger.info(
+                "Plugin scan complete: %d loaded, %d failed, %d available",
+                loaded_count,
+                failure_count,
+                len(plugins),
+            )
+            return True
+
+    def _calculate_fingerprint(self) -> tuple:
+        entries: list[tuple] = []
+        for source_name, plugins_path in self._plugin_sources:
+            entries.append((source_name, str(plugins_path)))
+            try:
+                if not plugins_path.is_dir():
+                    entries.append(("missing",))
+                    continue
+                for path in sorted(plugins_path.rglob("*")):
+                    try:
+                        stat = path.stat()
+                        entries.append(
+                            (
+                                str(path.relative_to(plugins_path)),
+                                path.is_dir(),
+                                stat.st_size,
+                                stat.st_mtime_ns,
+                                stat.st_ctime_ns,
+                            )
+                        )
+                    except OSError as exc:
+                        entries.append((str(path), "unavailable", type(exc).__name__))
+            except OSError as exc:
+                entries.append(("unavailable", type(exc).__name__))
+        return tuple(entries)
+
+    def _scan_sources(self) -> tuple[dict[str, PluginInfo], int, int]:
+        plugins: dict[str, PluginInfo] = {}
+        plugin_sources: dict[str, str] = {}
+        loaded_count = 0
+        failure_count = 0
+
+        for source_name, plugins_path in self._plugin_sources:
+            if not plugins_path.is_dir():
+                logger.info(
+                    "Plugin directory does not exist, skipping %s scan: %s",
+                    source_name,
+                    plugins_path,
+                )
+                continue
+
+            try:
+                children = sorted(plugins_path.iterdir())
+            except OSError:
+                logger.warning(
+                    "Plugin directory cannot be read, skipping %s scan: %s",
+                    source_name,
+                    plugins_path,
+                    exc_info=True,
+                )
+                failure_count += 1
+                continue
+
+            for child in children:
+                if not child.is_dir():
+                    continue
+
+                try:
+                    plugin_info = self._load_single_plugin(child)
+                    if plugin_info is None:
+                        failure_count += 1
+                        continue
+
+                    previous_source = plugin_sources.get(plugin_info.name)
+                    if previous_source is not None:
+                        logger.warning(
+                            "Plugin %r from %s overrides plugin from %s",
+                            plugin_info.name,
+                            source_name,
+                            previous_source,
+                        )
+                    plugins[plugin_info.name] = plugin_info
+                    plugin_sources[plugin_info.name] = source_name
+                    loaded_count += 1
+                except Exception:
+                    logger.warning(
+                        "Unexpected error loading plugin from %s",
+                        child,
+                        exc_info=True,
+                    )
+                    failure_count += 1
+
+        return plugins, loaded_count, failure_count
 
     # ------------------------------------------------------------------
     # Internal helpers

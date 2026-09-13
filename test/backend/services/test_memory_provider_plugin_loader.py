@@ -1,5 +1,7 @@
+import shutil
 import sys
 import types
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -40,7 +42,8 @@ sys.modules["nexent.memory"] = memory_pkg
 sys.modules["nexent.memory.providers"] = providers_pkg
 sys.modules["nexent.memory.providers.base"] = providers_base
 
-from backend.services.memory_provider_plugin_loader import PluginLoader  # noqa: E402
+from backend.services import memory_provider_plugin_loader as plugin_loader_module
+from backend.services.memory_provider_plugin_loader import PluginLoader
 
 
 @pytest.fixture
@@ -55,6 +58,10 @@ def _create_plugin(directory, name, manifest_content, entry_content=None):
     if entry_content:
         (plugin_dir / "provider.py").write_text(entry_content)
     return plugin_dir
+
+
+def _manifest_for(name):
+    return VALID_MANIFEST.replace("name: test-provider", f"name: {name}")
 
 
 VALID_MANIFEST = """
@@ -190,6 +197,312 @@ def test_build_provider_plugin_not_found(plugins_dir):
 
     with pytest.raises(ValueError, match="not found"):
         loader.build_provider("nonexistent", {})
+
+
+def test_ac_001_builtin_plugin_is_discovered_when_external_directory_is_empty(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+
+    assert [plugin.name for plugin in loader.list_plugins()] == ["mem0"]
+
+
+def test_include_builtin_plugins_uses_default_builtin_directory(tmp_path, monkeypatch):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    monkeypatch.setattr(
+        plugin_loader_module,
+        "BUILTIN_MEMORY_PROVIDER_PLUGINS_DIR",
+        builtin_dir,
+    )
+
+    loader = PluginLoader(str(external_dir), include_builtin_plugins=True)
+
+    assert loader.builtin_plugins_dir == str(builtin_dir)
+    assert loader._plugin_sources == [
+        ("builtin", builtin_dir),
+        ("external", external_dir),
+    ]
+
+
+def test_empty_external_directory_argument_only_registers_builtin_source(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+
+    loader = PluginLoader("", builtin_plugins_dir=str(builtin_dir))
+
+    assert loader._plugin_sources == [("builtin", builtin_dir)]
+
+
+def test_same_builtin_and_external_directory_is_scanned_once(tmp_path):
+    shared_dir = tmp_path / "shared"
+
+    loader = PluginLoader(
+        str(shared_dir),
+        builtin_plugins_dir=str(shared_dir),
+    )
+
+    assert loader._plugin_sources == [("builtin", shared_dir)]
+
+
+def test_ac_002_builtin_and_external_plugins_are_merged(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+    _create_plugin(
+        external_dir,
+        "partner-memory",
+        _manifest_for("partner-memory"),
+        VALID_ENTRY,
+    )
+
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+
+    assert {plugin.name for plugin in loader.list_plugins()} == {
+        "mem0",
+        "partner-memory",
+    }
+
+
+def test_ac_003_external_plugin_overrides_builtin_and_removal_restores_builtin(
+    tmp_path, caplog
+):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    builtin_entry = VALID_ENTRY.replace(
+        "class TestProvider:", 'class TestProvider:\n    source = "builtin"'
+    )
+    external_entry = VALID_ENTRY.replace(
+        "class TestProvider:", 'class TestProvider:\n    source = "external"'
+    )
+    _create_plugin(
+        builtin_dir, "shared-provider", _manifest_for("shared-provider"), builtin_entry
+    )
+    external_plugin_dir = _create_plugin(
+        external_dir,
+        "shared-provider",
+        _manifest_for("shared-provider"),
+        external_entry,
+    )
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+
+    loader.load_all()
+    assert loader.get_plugin("shared-provider").provider_class.source == "external"
+    assert "overrides plugin from builtin" in caplog.text
+
+    shutil.rmtree(external_plugin_dir)
+    assert loader.get_plugin("shared-provider").provider_class.source == "builtin"
+
+
+def test_ac_008_new_external_plugin_is_discovered_without_reloading_process(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+    loader_identity = id(loader)
+
+    _create_plugin(
+        external_dir,
+        "hot-added",
+        _manifest_for("hot-added"),
+        VALID_ENTRY,
+    )
+
+    assert loader.get_plugin("hot-added") is not None
+    assert id(loader) == loader_identity
+
+
+def test_ac_004_invalid_external_plugin_does_not_hide_builtin_plugin(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+    _create_plugin(
+        external_dir,
+        "incomplete-provider",
+        _manifest_for("incomplete-provider"),
+        entry_content=None,
+    )
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+
+    loader.load_all()
+
+    assert [plugin.name for plugin in loader.list_plugins()] == ["mem0"]
+
+
+def test_ac_008_external_plugin_update_is_discovered_without_restart(tmp_path):
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    entry_v1 = VALID_ENTRY.replace(
+        "class TestProvider:", 'class TestProvider:\n    version = "v1"'
+    )
+    plugin_dir = _create_plugin(
+        external_dir,
+        "hot-updated",
+        _manifest_for("hot-updated"),
+        entry_v1,
+    )
+    loader = PluginLoader(str(external_dir))
+    loader.load_all()
+    assert loader.get_plugin("hot-updated").provider_class.version == "v1"
+
+    entry_v2 = entry_v1.replace('version = "v1"', 'version = "version-two"')
+    (plugin_dir / "provider.py").write_text(entry_v2)
+
+    assert loader.get_plugin("hot-updated").provider_class.version == "version-two"
+
+
+def test_ac_010_unchanged_directories_do_not_reimport_plugins(tmp_path, monkeypatch):
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    _create_plugin(
+        external_dir,
+        "stable-provider",
+        _manifest_for("stable-provider"),
+        VALID_ENTRY,
+    )
+    loader = PluginLoader(str(external_dir))
+    import_count = 0
+    original_import = loader._import_module
+
+    def counting_import(plugin_name, entry_file):
+        nonlocal import_count
+        import_count += 1
+        return original_import(plugin_name, entry_file)
+
+    monkeypatch.setattr(loader, "_import_module", counting_import)
+    loader.load_all()
+
+    loader.list_plugins()
+    loader.get_plugin("stable-provider")
+    loader.build_provider("stable-provider", {})
+    assert import_count == 1
+
+
+def test_ac_011_concurrent_refresh_exposes_complete_registry(tmp_path):
+    builtin_dir = tmp_path / "builtin"
+    external_dir = tmp_path / "external"
+    builtin_dir.mkdir()
+    external_dir.mkdir()
+    _create_plugin(builtin_dir, "mem0", _manifest_for("mem0"), VALID_ENTRY)
+    loader = PluginLoader(
+        str(external_dir), builtin_plugins_dir=str(builtin_dir)
+    )
+    loader.load_all()
+    _create_plugin(
+        external_dir,
+        "hot-added",
+        _manifest_for("hot-added"),
+        VALID_ENTRY,
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(
+            executor.map(
+                lambda _: {plugin.name for plugin in loader.list_plugins()},
+                range(32),
+            )
+        )
+
+    assert all(result == {"mem0", "hot-added"} for result in results)
+
+
+def test_fingerprint_records_unavailable_entry(tmp_path, monkeypatch):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    unavailable = plugins_dir / "unavailable"
+    loader = PluginLoader(str(plugins_dir))
+    original_stat = Path.stat
+
+    monkeypatch.setattr(Path, "rglob", lambda self, pattern: [unavailable])
+
+    def failing_stat(path):
+        if path == unavailable:
+            raise OSError("entry unavailable")
+        return original_stat(path)
+
+    monkeypatch.setattr(Path, "stat", failing_stat)
+
+    fingerprint = loader._calculate_fingerprint()
+
+    assert (str(unavailable), "unavailable", "OSError") in fingerprint
+
+
+def test_fingerprint_records_unavailable_source(tmp_path, monkeypatch):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    loader = PluginLoader(str(plugins_dir))
+
+    monkeypatch.setattr(
+        Path,
+        "rglob",
+        lambda self, pattern: (_ for _ in ()).throw(OSError("source unavailable")),
+    )
+
+    assert ("unavailable", "OSError") in loader._calculate_fingerprint()
+
+
+def test_scan_sources_skips_directory_when_listing_fails(tmp_path, monkeypatch, caplog):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    loader = PluginLoader(str(plugins_dir))
+
+    monkeypatch.setattr(
+        Path,
+        "iterdir",
+        lambda self: (_ for _ in ()).throw(OSError("listing failed")),
+    )
+
+    plugins, loaded_count, failure_count = loader._scan_sources()
+
+    assert plugins == {}
+    assert loaded_count == 0
+    assert failure_count == 1
+    assert "cannot be read" in caplog.text
+
+
+def test_scan_sources_isolates_unexpected_plugin_error(tmp_path, monkeypatch, caplog):
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "broken"
+    plugin_dir.mkdir(parents=True)
+    loader = PluginLoader(str(plugins_dir))
+
+    monkeypatch.setattr(
+        loader,
+        "_load_single_plugin",
+        lambda child: (_ for _ in ()).throw(RuntimeError("unexpected failure")),
+    )
+
+    plugins, loaded_count, failure_count = loader._scan_sources()
+
+    assert plugins == {}
+    assert loaded_count == 0
+    assert failure_count == 1
+    assert "Unexpected error loading plugin" in caplog.text
 
 
 def test_protocol_validation_searchable_only(plugins_dir):

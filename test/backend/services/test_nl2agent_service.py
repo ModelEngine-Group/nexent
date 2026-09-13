@@ -7,6 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from nexent.core.agents.context import ContextItemInput, ContextItemType
+from nexent.core.models.capacity_budget import (
+    ContextBudgetSnapshot,
+    compute_context_budget_fingerprint,
+)
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
@@ -43,6 +47,33 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceRequirement,
 )
 from utils.http_client_utils import create_httpx_client
+
+
+def _context_budget_snapshot() -> ContextBudgetSnapshot:
+    values = {
+        "resolver_version": "2.0.0",
+        "w1_fingerprint": "capacity-fingerprint",
+        "provider": "openai",
+        "model_name": "gpt-4o",
+        "requested_output_tokens": 2768,
+        "output_reserve_source": "model_default",
+        "uncertainty_reserve_tokens": 0,
+        "uncertainty_reserve_basis": "none",
+        "approved_profile_reserve_tokens": None,
+        "effective_input_limit_tokens": 30000,
+        "compaction_trigger_ratio": 0.8,
+        "compaction_trigger_ratio_source": "code_default",
+        "compaction_trigger_threshold_tokens": 24000,
+        "compaction_target_ratio": 0.6,
+        "compaction_target_ratio_source": "code_default",
+        "compaction_target_tokens": 18000,
+        "field_sources": {},
+        "warnings": [],
+    }
+    return ContextBudgetSnapshot(
+        **values,
+        fingerprint=compute_context_budget_fingerprint(**values),
+    )
 
 
 @pytest.fixture
@@ -1389,10 +1420,7 @@ async def test_build_run_info_is_ephemeral(mocker):
     }
     capacity_snapshot = {"capacity_fingerprint": "capacity-fingerprint"}
     resolved_capacity_snapshot = MagicMock(context_window_tokens=32768)
-    safe_input_budget_snapshot = {
-        "soft_input_budget_tokens": 24000,
-        "hard_input_budget_tokens": 30000,
-    }
+    context_budget_snapshot = _context_budget_snapshot()
     join_query = mocker.patch(
         "services.nl2agent_service.join_minio_file_description_to_query",
         new_callable=AsyncMock,
@@ -1411,9 +1439,9 @@ async def test_build_run_info_is_ephemeral(mocker):
         "services.nl2agent_service._resolve_input_budget",
         return_value=(32768, capacity_snapshot, resolved_capacity_snapshot),
     )
-    resolve_safe_input_budget = mocker.patch(
-        "services.nl2agent_service._resolve_safe_input_budget",
-        return_value=safe_input_budget_snapshot,
+    resolve_context_budget = mocker.patch(
+        "services.nl2agent_service._resolve_context_budget",
+        return_value=context_budget_snapshot,
     )
     mocker.patch(
         "services.nl2agent_service.LOCAL_MCP_SERVER",
@@ -1459,17 +1487,15 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.query == "final query"
     assert run_info.agent_config.name == "__nl2agent_runtime__"
     assert run_info.agent_config.context_manager_config.token_threshold == 24000
-    assert (
-        run_info.agent_config.context_manager_config.hard_input_budget_tokens
-        == 30000
-    )
+    assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
+    assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000
     assert run_info.agent_config.capacity_snapshot == capacity_snapshot
     assert (
-        run_info.agent_config.safe_input_budget_snapshot
-        == safe_input_budget_snapshot
+        run_info.agent_config.context_budget_snapshot
+        == context_budget_snapshot
     )
     assert run_info.capacity_snapshot == capacity_snapshot
-    assert run_info.safe_input_budget_snapshot == safe_input_budget_snapshot
+    assert run_info.context_budget_snapshot == context_budget_snapshot
     assert run_info.history[0].content == (
         "Build an agent that summarizes weather risks."
     )
@@ -1517,7 +1543,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         tenant_id="tenant-a",
     )
     resolve_input_budget.assert_called_once_with(default_model)
-    resolve_safe_input_budget.assert_called_once_with(
+    resolve_context_budget.assert_called_once_with(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id="tenant-a",
         agent_requested_output_tokens=None,
@@ -1647,7 +1673,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
         return_value=(8192, capacity_snapshot, None),
     )
     mocker.patch(
-        "services.nl2agent_service._resolve_safe_input_budget",
+        "services.nl2agent_service._resolve_context_budget",
         return_value=None,
     )
     mocker.patch(
@@ -1680,8 +1706,9 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     context_config = run_info.agent_config.context_manager_config
     assert context_config.token_threshold == 8192
     assert context_config.context_window_tokens == 8192
-    assert context_config.soft_input_budget_tokens == 0
-    assert context_config.hard_input_budget_tokens == 0
+    assert context_config.compaction_trigger_threshold_tokens == 0
+    assert context_config.effective_input_limit_tokens == 0
+    assert context_config.compaction_target_tokens == 0
     assert run_info.model_config_list == model_configs
     assert run_info.history == []
     assert len(run_info.context_input.items) == 2
