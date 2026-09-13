@@ -34,13 +34,7 @@ class BoundedExecutor:
         return max(0, self.submitted - self.policy.max_workers)
 
     def submit(self, fn: Callable, *args, **kwargs) -> Future:
-        timeout = self.policy.queue_timeout_seconds
-        if timeout is None:
-            acquired = self._permits.acquire()
-        elif timeout == 0:
-            acquired = self._permits.acquire(blocking=False)
-        else:
-            acquired = self._permits.acquire(timeout=timeout)
+        acquired = self._permits.acquire(blocking=False)
         if not acquired:
             raise ThreadCapacityExceeded(
                 lane=self.policy.name,

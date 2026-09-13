@@ -8,8 +8,13 @@ from typing import Any, Optional, Dict
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from nexent.core.agents.run_agent import agent_run
-from nexent.core.concurrency import ManagedTaskSpec
+from nexent.core.agents.run_agent import DeferredAgentRun, agent_run
+from nexent.core.concurrency import (
+    ManagedExecution,
+    ManagedTaskSpec,
+    ThreadCapacityExceeded,
+    ThreadQueueTimedOut,
+)
 from nexent.memory.models import MemoryIngestUnit
 from nexent.core.models import OpenAIModel
 
@@ -32,6 +37,8 @@ from consts.exceptions import (
     MemoryPreparationException,
     RuntimeMetadataValidationError,
     RuntimeMetadataVersionConflict,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
 )
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from nexent.core.utils.observer import ProcessType
@@ -364,6 +371,8 @@ async def _stream_agent_chunks(
     resume_from_unit_index: int = 0,
     resume_message_id: Optional[int] = None,
     channel: Optional[Any] = None,
+    execution: Optional[ManagedExecution] = None,
+    deferred_run: Optional[DeferredAgentRun] = None,
 ):
     """
     Yield SSE chunks from agent_run while buffering assistant persistence.
@@ -469,6 +478,8 @@ async def _stream_agent_chunks(
         async for agent_chunk in agent_run(
             agent_run_info,
             thread_manager=runtime_thread_manager,
+            execution=execution,
+            deferred_run=deferred_run,
         ):
             yield agent_chunk
 
@@ -1215,6 +1226,8 @@ async def generate_stream(
     enable_memory: bool = False,
     channel: Optional[Any] = None,
     reservation_token: Optional[str] = None,
+    execution: Optional[ManagedExecution] = None,
+    deferred_run: Optional[DeferredAgentRun] = None,
 ):
     """Unified streaming entry point.
 
@@ -1292,6 +1305,8 @@ async def generate_stream(
             agent_run_info=agent_run_info,
             memory_ctx=memory_context,
             channel=channel,
+            execution=execution,
+            deferred_run=deferred_run,
         ):
             yield data_chunk
 
@@ -1325,6 +1340,8 @@ async def generate_stream(
                 enable_memory=False,
                 channel=channel,
                 reservation_token=reservation_token,
+                execution=execution,
+                deferred_run=deferred_run,
             ):
                 yield data_chunk
         except Exception as run_exc:
@@ -1348,6 +1365,19 @@ async def generate_stream(
     finally:
         if cancel_poll_task and not cancel_poll_task.done():
             cancel_poll_task.cancel()
+        if (
+            agent_run_info is None
+            and deferred_run is not None
+            and execution is not None
+            and not execution.future.done()
+        ):
+            deferred_run.cancel()
+            runtime_thread_manager.cancel(
+                execution.execution_id,
+                reason="agent preparation ended before worker binding",
+                wait_timeout=0,
+                mark_stuck_on_timeout=False,
+            )
         if reservation_token is not None:
             agent_run_manager.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
@@ -1863,12 +1893,51 @@ async def run_agent_stream(
         )
 
     # Normal mode: start new stream
+    deferred_run = DeferredAgentRun()
+    run_identifier = _agent_run_identifier(agent_request)
+    execution = None
+    try:
+        execution = runtime_thread_manager.submit(
+            "agent-run",
+            ManagedTaskSpec(
+                task_name="agent-run",
+                owner="backend.management.services.agent.run",
+                run_id=str(run_identifier),
+                close_hook=deferred_run.cancel,
+                pass_cancel_event=True,
+            ),
+            deferred_run.run,
+        )
+        await runtime_thread_manager.wait_until_started(execution)
+    except ThreadCapacityExceeded as exc:
+        raise RuntimeCapacityExceededError() from exc
+    except ThreadQueueTimedOut as exc:
+        deferred_run.cancel()
+        raise RuntimeQueueTimeoutError(exc.timeout_seconds) from exc
+    except BaseException:
+        deferred_run.cancel()
+        if execution is not None:
+            runtime_thread_manager.cancel(
+                execution.execution_id,
+                reason="agent admission failed",
+                wait_timeout=0,
+                mark_stuck_on_timeout=False,
+            )
+        raise
+
     try:
         reservation_token = agent_run_manager.reserve_agent_run(
-            _agent_run_identifier(agent_request),
+            run_identifier,
             resolved_user_id,
         )
     except AgentRunAlreadyActiveError:
+        deferred_run.cancel()
+        runtime_thread_manager.cancel(
+            execution.execution_id,
+            reason="agent run already active",
+            wait_timeout=0,
+            mark_stuck_on_timeout=False,
+        )
         logger.warning(
             "Rejected concurrent agent run, user_id=%s, conversation_id=%s",
             resolved_user_id,
@@ -1932,6 +2001,13 @@ async def run_agent_stream(
                 user_id=resolved_user_id,
             )
     except Exception:
+        deferred_run.cancel()
+        runtime_thread_manager.cancel(
+            execution.execution_id,
+            reason="agent stream setup failed",
+            wait_timeout=0,
+            mark_stuck_on_timeout=False,
+        )
         agent_run_manager.release_agent_run_reservation(
             _agent_run_identifier(agent_request),
             resolved_user_id,
@@ -1945,6 +2021,8 @@ async def run_agent_stream(
         "language": language,
         "enable_memory": use_memory_stream,
         "reservation_token": reservation_token,
+        "execution": execution,
+        "deferred_run": deferred_run,
     }
     if channel is not None:
         stream_kwargs["channel"] = channel
@@ -2012,6 +2090,14 @@ async def run_agent_stream(
             )
             yield _safe_agent_stream_error_chunk()
         finally:
+            if channel is None and not execution.future.done():
+                deferred_run.cancel()
+                runtime_thread_manager.cancel(
+                    execution.execution_id,
+                    reason="agent response stream closed",
+                    wait_timeout=0,
+                    mark_stuck_on_timeout=False,
+                )
             agent_run_manager.release_agent_run_reservation(
                 _agent_run_identifier(agent_request),
                 resolved_user_id,

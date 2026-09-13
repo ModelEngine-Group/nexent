@@ -1,27 +1,71 @@
 import asyncio
-from copy import deepcopy
 import json
 import logging
+import threading
+from copy import deepcopy
 from typing import Any, Dict, Union
 
 import httpx
-from smolagents import ToolCollection
 
 from ...monitor import (
     set_monitoring_capacity_snapshot,
     set_monitoring_safe_input_budget_snapshot,
 )
-from ..concurrency import ManagedTaskSpec, ThreadManager
+from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
 from ..concurrency.helpers import (
     get_fallback_thread_manager,
     shutdown_fallback_thread_manager,
 )
 from .agent_model import AgentRunInfo
+from .managed_mcp import ManagedMCPToolCollection
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+class DeferredAgentRun:
+    """Managed worker target that waits for request preparation to bind run data."""
+
+    def __init__(self):
+        self._ready = threading.Event()
+        self._lock = threading.Lock()
+        self._agent_run_info: AgentRunInfo | None = None
+        self._cancelled = False
+
+    def bind(self, agent_run_info: AgentRunInfo) -> None:
+        with self._lock:
+            if self._agent_run_info is not None:
+                raise RuntimeError("Deferred agent run is already bound")
+            self._agent_run_info = agent_run_info
+            cancelled = self._cancelled
+            self._ready.set()
+        if cancelled:
+            agent_run_info.cancellation_scope.cancel()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            agent_run_info = self._agent_run_info
+            self._ready.set()
+        if agent_run_info is not None:
+            agent_run_info.cancellation_scope.cancel()
+
+    def run(self, cancel_event: threading.Event) -> None:
+        while not self._ready.wait(0.05):
+            if cancel_event.is_set():
+                self.cancel()
+                return
+        with self._lock:
+            agent_run_info = self._agent_run_info
+            cancelled = self._cancelled or cancel_event.is_set()
+        if agent_run_info is None:
+            return
+        if cancelled:
+            agent_run_info.cancellation_scope.cancel()
+            return
+        agent_run_thread(agent_run_info)
 
 
 def _get_default_agent_thread_manager() -> ThreadManager:
@@ -233,6 +277,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 workspace_path=getattr(agent_run_info, "workspace_path", None),
                 workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
                 minio_files=getattr(agent_run_info, "minio_files", None),
+                cancellation_scope=agent_run_info.cancellation_scope,
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
@@ -252,8 +297,17 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         else:
             agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
             mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
+            mcp_cancellation_scope = agent_run_info.cancellation_scope or RunCancellationScope(
+                agent_run_info.stop_event
+            )
 
-            with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
+            with ManagedMCPToolCollection(
+                manager=agent_run_info.thread_manager or _get_default_agent_thread_manager(),
+                server_parameters=mcp_client_list,
+                cancellation_scope=mcp_cancellation_scope,
+                tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
+                close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
+            ) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
@@ -268,6 +322,7 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     workspace_path=getattr(agent_run_info, "workspace_path", None),
                     workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
                     minio_files=getattr(agent_run_info, "minio_files", None),
+                    cancellation_scope=agent_run_info.cancellation_scope,
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,
@@ -310,6 +365,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 async def agent_run(
     agent_run_info: AgentRunInfo,
     thread_manager: ThreadManager | None = None,
+    execution: ManagedExecution | None = None,
+    deferred_run: DeferredAgentRun | None = None,
 ):
     observer = agent_run_info.observer
     manager = thread_manager or _get_default_agent_thread_manager()
@@ -317,19 +374,26 @@ async def agent_run(
     if run_id is None and getattr(agent_run_info, "conversation_id", None) is not None:
         run_id = str(agent_run_info.conversation_id)
     runtime_metadata = getattr(agent_run_info, "runtime_metadata", {}) or {}
-    execution = manager.submit(
-        "agent-run",
-        ManagedTaskSpec(
-            task_name="agent-run",
-            owner="nexent.core.agents.run_agent",
-            run_id=run_id,
-            attempt_id=runtime_metadata.get("attempt_id"),
-            close_hook=agent_run_info.stop_event.set,
-        ),
-        agent_run_thread,
-        agent_run_info,
-    )
+    if agent_run_info.cancellation_scope is None:
+        agent_run_info.cancellation_scope = RunCancellationScope(agent_run_info.stop_event)
     agent_run_info.thread_manager = manager
+    if execution is None:
+        execution = manager.submit(
+            "agent-run",
+            ManagedTaskSpec(
+                task_name="agent-run",
+                owner="nexent.core.agents.run_agent",
+                run_id=run_id,
+                attempt_id=runtime_metadata.get("attempt_id"),
+                close_hook=agent_run_info.cancellation_scope.cancel,
+            ),
+            agent_run_thread,
+            agent_run_info,
+        )
+    elif deferred_run is None:
+        raise ValueError("deferred_run is required with a pre-admitted execution")
+    else:
+        deferred_run.bind(agent_run_info)
     agent_run_info.thread_execution_id = execution.execution_id
     agent_run_info.thread_future = execution.future
 

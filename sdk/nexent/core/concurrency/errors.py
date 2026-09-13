@@ -20,5 +20,16 @@ class ThreadCapacityExceeded(ThreadManagerError):
         super().__init__(f"Thread lane '{lane}' is full (capacity={capacity}, queued={queued})")
 
 
+class ThreadQueueTimedOut(ThreadManagerError, TimeoutError):
+    """Raised when a queued task reaches its deadline before starting."""
+
+    def __init__(self, lane: str, timeout_seconds: float):
+        self.lane = lane
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            f"Thread lane '{lane}' queue wait exceeded {timeout_seconds:.3f} seconds"
+        )
+
+
 class InvalidThreadPolicy(ThreadManagerError, ValueError):
     """Raised when a lane policy cannot provide safe bounded execution."""

@@ -109,3 +109,19 @@ def classify_model_error(exc: BaseException) -> str:
 
     # Unknown error: prefer failing fast over retrying blindly.
     return "non_retryable"
+
+
+def get_retry_after_seconds(exc: BaseException) -> float | None:
+    """Read a numeric Retry-After value from OpenAI-compatible errors."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        headers = getattr(exc, "headers", None)
+    if not headers:
+        return None
+    value = headers.get("Retry-After") or headers.get("retry-after")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, parsed)

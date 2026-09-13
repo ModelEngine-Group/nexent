@@ -4,12 +4,14 @@ from .context import (
     get_default_thread_manager,
     set_default_thread_manager,
 )
+from .cancellation import ResourceToken, RunCancellationScope
 from .errors import (
     InvalidThreadPolicy,
     ThreadCapacityExceeded,
     ThreadManagerDraining,
     ThreadManagerError,
     ThreadManagerNotRunning,
+    ThreadQueueTimedOut,
 )
 from .helpers import (
     get_fallback_thread_manager,
@@ -54,7 +56,10 @@ __all__ = [
     "ThreadManagerDraining",
     "ThreadManagerError",
     "ThreadManagerNotRunning",
+    "ThreadQueueTimedOut",
     "ThreadManagerSnapshot",
+    "ResourceToken",
+    "RunCancellationScope",
     "run_blocking",
     "shutdown_fallback_thread_manager",
     "set_default_thread_manager",

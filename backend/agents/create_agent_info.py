@@ -81,6 +81,8 @@ from consts.const import (
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
+    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
@@ -2317,6 +2319,8 @@ async def create_agent_run_info(
         mcp_host=mcp_host,
         history=converted_history,
         stop_event=threading.Event(),
+        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
         safe_input_budget_snapshot=getattr(
             agent_config,

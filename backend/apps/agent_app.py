@@ -33,6 +33,8 @@ from consts.exceptions import (
     AppException,
     UnauthorizedError,
     ValidationError,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
@@ -84,6 +86,22 @@ from utils.auth_utils import (
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
+
+
+def _runtime_overload_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, RuntimeQueueTimeoutError):
+        code = "RUNTIME_QUEUE_TIMEOUT"
+        retry_after = exc.retry_after_seconds
+        message = "Agent runtime queue wait timed out."
+    else:
+        code = "RUNTIME_CAPACITY_FULL"
+        retry_after = 1
+        message = "Agent runtime is at capacity."
+    return JSONResponse(
+        status_code=HTTPStatus.TOO_MANY_REQUESTS,
+        content={"code": code, "message": message, "retryable": True},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")
@@ -141,6 +159,8 @@ async def agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -184,6 +204,8 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
         raise HTTPException(

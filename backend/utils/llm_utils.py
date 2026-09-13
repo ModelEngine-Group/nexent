@@ -9,6 +9,7 @@ from consts.exceptions import AppException
 from database.model_management_db import get_model_by_model_id
 from services.model_gateway_service import get_llm_adapter_from_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from nexent.core.models.retry import get_retry_after_seconds
 
 logger = logging.getLogger("llm_utils")
 
@@ -128,6 +129,7 @@ def call_llm_for_system_prompt(
         {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
     ]
     for attempt in range(1, _LLM_RETRY_MAX_ATTEMPTS + 1):
+        current_request = None
         try:
             completion_kwargs = llm._prepare_completion_kwargs(
                 messages=messages,
@@ -192,6 +194,9 @@ def call_llm_for_system_prompt(
                     _LLM_RETRY_BACKOFF_BASE * (2 ** (attempt - 1)),
                     _LLM_RETRY_MAX_BACKOFF,
                 ) * random.uniform(0.5, 1.5)
+                retry_after = get_retry_after_seconds(exc)
+                if retry_after is not None:
+                    backoff = max(backoff, retry_after)
                 logger.warning(
                     "call_llm_for_system_prompt attempt %d/%d failed with transient "
                     "error (%s); retrying after %.2fs",
@@ -217,6 +222,13 @@ def call_llm_for_system_prompt(
                 raise AppException(ErrorCode.MODEL_CONNECTION_ERROR)
             else:
                 raise AppException(ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
+        finally:
+            close_stream = getattr(current_request, "close", None)
+            if callable(close_stream):
+                try:
+                    close_stream()
+                except Exception:
+                    logger.warning("Failed to close prompt-generation model stream", exc_info=True)
 
 
 __all__ = ["call_llm_for_system_prompt", "_process_thinking_tokens"]

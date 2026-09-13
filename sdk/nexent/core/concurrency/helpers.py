@@ -34,6 +34,7 @@ def get_fallback_thread_manager():
                         ("control-io", 2, 8),
                         ("evaluation", 2, 8),
                         ("background-service", 2, 4),
+                        ("mcp-session", 4, 0),
                         ("sandbox", 2, 4),
                     )
                 }

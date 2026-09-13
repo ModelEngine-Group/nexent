@@ -118,6 +118,9 @@ class ManagedExecution:
     started_at_monotonic: float | None = None
     finished_at_monotonic: float | None = None
     terminal_reason: str | None = None
+    queue_deadline_monotonic: float | None = None
+    started_event: threading.Event = field(default_factory=threading.Event)
+    _queue_timeout_requested: bool = False
     _close_called: bool = False
 
 

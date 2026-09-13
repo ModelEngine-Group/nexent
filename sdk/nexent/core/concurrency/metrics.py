@@ -15,6 +15,7 @@ class ThreadMetricRecord:
     completed_count: int
     failed_count: int
     cancelled_count: int
+    timed_out_count: int
     rejected_count: int
     stuck_count: int
     total_queue_wait_ms: float
@@ -37,6 +38,7 @@ class ThreadMetrics:
                 "completed_count": 0,
                 "failed_count": 0,
                 "cancelled_count": 0,
+                "timed_out_count": 0,
                 "rejected_count": 0,
                 "stuck_count": 0,
                 "total_queue_wait_ms": 0.0,
@@ -77,6 +79,8 @@ class ThreadMetrics:
                 ExecutionState.TIMED_OUT,
             }:
                 row["cancelled_count"] += 1
+                if execution.state is ExecutionState.TIMED_OUT:
+                    row["timed_out_count"] += 1
             if execution.started_at_monotonic is not None and execution.finished_at_monotonic is not None:
                 row["total_run_ms"] += max(
                     0.0,

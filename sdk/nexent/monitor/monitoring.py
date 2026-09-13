@@ -2211,9 +2211,36 @@ class _MonitoredStreamIterator:
         self._first_chunk_time: Optional[float] = None
         self._input_tokens: int = 0
         self._output_tokens: int = 0
+        self._state_lock = threading.Lock()
+        self._closed = False
+        self._finalized = False
 
     def __iter__(self):
         return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_value is not None and isinstance(exc_value, Exception):
+            self._error = exc_value
+        self.close()
+        return False
+
+    def close(self):
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+        try:
+            close = getattr(self._stream, "close", None)
+            if callable(close):
+                close()
+        except Exception as exc:
+            self._error = self._error or exc
+            raise
+        finally:
+            self._finalize()
 
     def __next__(self):
         try:
@@ -2235,6 +2262,10 @@ class _MonitoredStreamIterator:
             raise
 
     def _finalize(self):
+        with self._state_lock:
+            if self._finalized:
+                return
+            self._finalized = True
         try:
             request_duration_ms = int((time.time() - self._start_time) * 1000)
 

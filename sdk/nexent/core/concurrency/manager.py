@@ -17,6 +17,7 @@ from .errors import (
     ThreadCapacityExceeded,
     ThreadManagerDraining,
     ThreadManagerNotRunning,
+    ThreadQueueTimedOut,
 )
 from .metrics import ThreadMetrics
 from .models import (
@@ -133,6 +134,11 @@ class ThreadManager:
             if executor is None:
                 raise KeyError(f"Unknown thread lane '{lane}'")
             execution = ManagedExecution(lane=lane, spec=spec)
+            if executor.policy.queue_timeout_seconds is not None:
+                execution.queue_deadline_monotonic = (
+                    execution.created_at_monotonic
+                    + executor.policy.queue_timeout_seconds
+                )
             self._executions[execution.execution_id] = execution
             counts = self._lifecycle_counts_locked()
 
@@ -195,6 +201,45 @@ class ThreadManager:
         self._metrics.queued(lane, spec.task_name)
         future.add_done_callback(lambda completed_future: self._handle_future_done(execution, completed_future))
         return execution
+
+    async def wait_until_started(self, execution: ManagedExecution) -> ManagedExecution:
+        """Wait for a queued execution to start or atomically expire its queue deadline."""
+        timeout = self._policies[execution.lane].queue_timeout_seconds
+        while True:
+            with self._lock:
+                if execution.started_event.is_set() or execution.state in {
+                    ExecutionState.STARTING,
+                    ExecutionState.RUNNING,
+                    ExecutionState.STOP_REQUESTED,
+                    ExecutionState.SUCCEEDED,
+                }:
+                    return execution
+                future = execution.future
+                if execution.state is ExecutionState.TIMED_OUT:
+                    raise ThreadQueueTimedOut(execution.lane, timeout or 0)
+                if execution.state in _TERMINAL_STATES:
+                    raise CancelledError(
+                        f"Execution {execution.execution_id} ended before starting"
+                    )
+                deadline = execution.queue_deadline_monotonic
+
+            if deadline is None:
+                await asyncio.sleep(0.01)
+                continue
+
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(0.01, remaining))
+                continue
+
+            with self._lock:
+                if execution.started_event.is_set() or execution.state is not ExecutionState.QUEUED:
+                    continue
+                execution._queue_timeout_requested = True
+                execution.terminal_reason = "queue deadline exceeded before start"
+                if future is not None and future.cancel():
+                    raise ThreadQueueTimedOut(execution.lane, timeout or 0)
+                execution._queue_timeout_requested = False
 
     def register_service(
         self,
@@ -540,6 +585,7 @@ class ThreadManager:
             execution.state = ExecutionState.STARTING
             execution.started_at_monotonic = time.monotonic()
             execution.thread_ref = weakref.ref(threading.current_thread())
+            execution.started_event.set()
             execution.state = ExecutionState.RUNNING
             counts = self._lifecycle_counts_locked()
         self._metrics.started(execution)
@@ -598,7 +644,11 @@ class ThreadManager:
         with self._lock:
             if execution.execution_id not in self._executions:
                 return
-            execution.state = ExecutionState.CANCELLED
+            execution.state = (
+                ExecutionState.TIMED_OUT
+                if execution._queue_timeout_requested
+                else ExecutionState.CANCELLED
+            )
             execution.finished_at_monotonic = time.monotonic()
             self._finalize_execution_locked(execution)
 

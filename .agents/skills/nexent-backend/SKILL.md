@@ -16,6 +16,7 @@ Repository paths below are relative to the root; reference links resolve from th
 | Business orchestration and domain errors | [Services](references/services.md) |
 | Relational schema design, models, keys/indexes, queries, transactions, SQL migrations | [Database](references/database.md) |
 | Environment configuration and SDK configuration parameters | [Configuration](references/configuration.md) |
+| Threads, worker pools, blocking calls, background loops, streaming resource lifetime | [Thread lifecycle](references/thread-lifecycle.md) |
 
 3. Preserve public contracts. Apply conventions to the changed scope; do not refactor unrelated legacy behavior merely to satisfy a rule.
 4. Verify affected success and failure behavior. For Python unit tests, use `nexent-python-tests` linked from root `AGENTS.md`. Unit-test mocks do not establish live-integration acceptance.

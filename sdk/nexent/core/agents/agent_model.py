@@ -353,6 +353,21 @@ class AgentRunInfo(BaseModel):
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
+    cancellation_scope: Optional[Any] = Field(
+        description="Run-scoped cancellation and active resource registry",
+        default=None,
+        exclude=True,
+    )
+    mcp_tool_timeout_seconds: float = Field(
+        description="Hard timeout for one MCP tool invocation",
+        default=120.0,
+        gt=0,
+    )
+    mcp_close_timeout_seconds: float = Field(
+        description="Maximum wait for an MCP context to close",
+        default=5.0,
+        gt=0,
+    )
     thread_manager: Optional[Any] = Field(
         description="Injected process-local thread manager",
         default=None,
