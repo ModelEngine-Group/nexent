@@ -6,9 +6,8 @@ import {
   defaultGenerativeUILibrary,
 } from "@assistant-ui/react-generative-ui";
 import { useAui } from "@assistant-ui/react";
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
-import { z } from "zod";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
   PieChart, Pie, Cell,
@@ -235,6 +234,197 @@ const RechartsChartRenderer = memo(function RechartsChartRenderer({
 });
 
 // ---------------------------------------------------------------------------
+// TodoListRenderer — interactive todo list with pure client-side state.
+// Items added/deleted/toggled live only in useState; no new chat messages,
+// no round-trip to model. Model emits initial items, client owns mutations.
+// ---------------------------------------------------------------------------
+
+interface TodoItem {
+  id: string;
+  text: string;
+  done?: boolean;
+}
+
+interface TodoListRendererProps {
+  items?: TodoItem[];
+  placeholder?: string; // input placeholder
+}
+
+const TodoListRenderer = memo(function TodoListRenderer({
+  items: initialItems,
+  placeholder = "添加新待办...",
+}: TodoListRendererProps) {
+  // Normalize initial items from model (may be inline array or undefined)
+  const normalizedInitial: TodoItem[] = Array.isArray(initialItems)
+    ? initialItems.map((it, i) => ({
+        id: String(it?.id ?? i),
+        text: String(it?.text ?? ""),
+        done: Boolean(it?.done),
+      }))
+    : [];
+
+  const [items, setItems] = useState<TodoItem[]>(normalizedInitial);
+  const [input, setInput] = useState("");
+
+  const handleDelete = (id: string) => {
+    setItems((prev) => prev.filter((it) => it.id !== id));
+  };
+
+  const handleToggle = (id: string) => {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === id ? { ...it, done: !it.done } : it
+      )
+    );
+  };
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const text = input.trim();
+    if (!text) return;
+    setItems((prev) => [
+      ...prev,
+      { id: String(Date.now()), text, done: false },
+    ]);
+    setInput("");
+  };
+
+  return (
+    <div
+      data-aui="todolist"
+      style={{
+        width: "100%",
+        maxWidth: "100%",
+        boxSizing: "border-box",
+        height: "auto", // override globals.css fixed heights
+      }}
+    >
+      {/* Item list */}
+      <ul
+        style={{
+          listStyle: "none",
+          margin: 0,
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        {items.length === 0 ? (
+          <li
+            style={{
+              padding: "12px 8px",
+              color: "#6b7280",
+              fontSize: 13,
+              textAlign: "center",
+              border: "1px dashed #e5e7eb",
+              borderRadius: 8,
+            }}
+          >
+            暂无待办，添加一个吧
+          </li>
+        ) : (
+          items.map((item) => (
+            <li
+              key={item.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "6px 8px",
+                borderRadius: 6,
+                background: item.done ? "#f9fafb" : "#ffffff",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={!!item.done}
+                onChange={() => handleToggle(item.id)}
+                style={{ flexShrink: 0 }}
+              />
+              <span
+                style={{
+                  flex: 1,
+                  fontSize: 14,
+                  color: item.done ? "#9ca3af" : "#1f2937",
+                  textDecoration: item.done ? "line-through" : "none",
+                  wordBreak: "break-word",
+                }}
+              >
+                {item.text}
+              </span>
+              <button
+                onClick={() => handleDelete(item.id)}
+                aria-label="删除待办"
+                style={{
+                  flexShrink: 0,
+                  padding: "2px 8px",
+                  fontSize: 12,
+                  color: "#ef4444",
+                  background: "transparent",
+                  border: "1px solid #fecaca",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  lineHeight: 1.4,
+                }}
+              >
+                删除
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+
+      {/* Add form */}
+      <form
+        onSubmit={handleSubmit}
+        style={{
+          display: "flex",
+          gap: 8,
+          marginTop: 12,
+        }}
+      >
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={placeholder}
+          style={{
+            flex: 1,
+            padding: "6px 10px",
+            fontSize: 14,
+            border: "1px solid #d1d5db",
+            borderRadius: 6,
+            outline: "none",
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+        />
+        <button
+          type="submit"
+          style={{
+            padding: "6px 14px",
+            fontSize: 14,
+            color: "#ffffff",
+            background: "#2563eb",
+            border: "none",
+            borderRadius: 6,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          添加
+        </button>
+      </form>
+    </div>
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Custom library overrides — supplement the default library where the model's
 // A2UI components need richer visual rendering than the minimal default.
 // Currently: Input needs a visible label (default only sets aria-label).
@@ -444,6 +634,42 @@ const customLibrary = {
           stacked: stacked as boolean | undefined,
           showLegend: showLegend as boolean | undefined,
         }),
+      });
+    },
+  },
+
+  // TodoList — interactive, client-side state only. Model emits initial items;
+  // user mutations (add/delete/toggle) live purely in React useState inside
+  // TodoListRenderer. No $dispatch, no new chat messages.
+  // NOTE: JSONGenerativeUI.buildPresentParameters iterates ALL library keys and
+  // reads .properties and .description from each entry. We MUST provide both.
+  // We use plain JSON Schema7 (supported by toJSONSchema in assistant-stream)
+  // instead of Zod — avoids adding a dependency.
+  TodoList: {
+    description:
+      "An interactive to-do list with checkboxes, per-item delete buttons, and a bottom input+submit form. All mutations are client-side only — no new chat messages.",
+    properties: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              text: { type: "string" },
+              done: { type: "boolean" },
+            },
+          },
+        },
+        placeholder: { type: "string" },
+      },
+    },
+    render: ({ items, placeholder }) => {
+      const normalizedItems = Array.isArray(items) ? items : [];
+      return jsx(TodoListRenderer, {
+        items: normalizedItems as TodoItem[],
+        placeholder: placeholder as string | undefined,
       });
     },
   },

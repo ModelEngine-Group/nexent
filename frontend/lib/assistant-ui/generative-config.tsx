@@ -138,6 +138,7 @@ const SUPPORTED_COMPONENTS = new Set([
   "Button",
   "TextField",
   "CheckBox",
+  "TodoList", // custom client-side interactive component (must NOT fall through to default)
 ]);
 
 /** Mapping for components that have a direct 1:1 equivalent in the generative-ui library. */
@@ -804,13 +805,40 @@ export function A2uiBridgeSurface({
   // the provided onAction handler. If no handler, no dispatch is wired up.
   const actionRegistry: ActionRegistry | undefined = useMemo(() => {
     if (!onAction) return undefined;
+
+    // Action names that MUST be handled client-side — never forward to backend.
+    // These correspond to model-emitted UI patterns that should be interactive
+    // without triggering new chat messages (e.g. model uses List+Button instead
+    // of TodoList).  Prefer the model emitting TodoList; this is a safety net.
+    const CLIENT_ONLY_ACTIONS = new Set<string>([
+      "add_todo",
+      "delete_todo",
+      "toggle_todo",
+      "mark_done",
+      "mark_undone",
+      "complete_task",
+      "add_task",
+      "delete_task",
+    ]);
+
     return createActionRegistry({
       "a2ui:action": ({ payload }) => {
         // payload = { type: "a2ui:action", name, surfaceId, sourceComponentId, context? }
+        const actionName = String(payload.name ?? "");
+        // Block client-only actions — do NOT forward to backend (no new chat)
+        if (CLIENT_ONLY_ACTIONS.has(actionName)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[A2uiBridgeSurface] Blocking client-only action "${actionName}" — ` +
+              `this action must not generate a new chat message. Consider using ` +
+              `the TodoList component instead of List+Button+action for interactive lists.`
+          );
+          return;
+        }
         // Convert to generic action shape and forward to caller.
         const action: Record<string, unknown> = {
-          label: String(payload.name ?? ""),
-          name: String(payload.name ?? ""),
+          label: actionName,
+          name: actionName,
         };
         if (payload.context !== undefined) {
           action.context = payload.context;

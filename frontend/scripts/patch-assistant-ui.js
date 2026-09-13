@@ -1,7 +1,8 @@
 // Persistent patch for @assistant-ui/react-generative-ui/dist/a2ui/convert.js
-// Patches Chart and Table branches to resolve Nexus model format:
+// Patches Chart, Table, and TodoList branches to resolve Nexus model format:
 //   - chartType  → variant
 //   - dataModel.valueList → data[] / rows[]
+//   - TodoList: add to SUPPORTED_COMPONENTS + mappedProps pass-through
 // Run this script after npm install to re-apply patches.
 //   node scripts/patch-assistant-ui.js
 
@@ -107,3 +108,18 @@ content = content.replace(
 
 fs.writeFileSync(convertPath, content, "utf-8");
 console.log("✅ Patched convert.js — Chart & Table resolve from dataSource");
+
+// Step 4: Add "TodoList" to SUPPORTED_COMPONENTS
+content = content.replace(
+  `"Carousel"\n]);`,
+  `"Carousel",\n\t"TodoList" // custom client-side interactive component\n]);`
+);
+
+// Step 5: Add TodoList case to mappedProps (before the closing of mappedProps fn)
+content = content.replace(
+  `\tif (component === "RadioGroup") {\n\t\tconst options = props["options"] ?? props["choices"];\n\t\treturn {\n\t\t\t$type: "RadioGroup",\n\t\t\t...Array.isArray(options) ? { options } : {},\n\t\t\t...label !== void 0 ? { label } : {},\n\t\t\t...name !== void 0 ? { name } : {}\n\t\t};\n\t}\n};`,
+  `\tif (component === "RadioGroup") {\n\t\tconst options = props["options"] ?? props["choices"];\n\t\treturn {\n\t\t\t$type: "RadioGroup",\n\t\t\t...Array.isArray(options) ? { options } : {},\n\t\t\t...label !== void 0 ? { label } : {},\n\t\t\t...name !== void 0 ? { name } : {}\n\t\t};\n\t}\n\tif (component === "TodoList") {\n\t\t// Custom client-side interactive component — pass items/placeholder through.\n\t\t// No dataModel binding; items are always inline [{id, text, done}].\n\t\treturn {\n\t\t\t$type: "TodoList",\n\t\t\t...Array.isArray(props["items"]) ? { items: props["items"] } : {},\n\t\t\t...typeof props["placeholder"] === "string" ? { placeholder: props["placeholder"] } : {}\n\t\t};\n\t}\n};`
+);
+
+fs.writeFileSync(convertPath, content, "utf-8");
+console.log("✅ Patched convert.js — TodoList support added");

@@ -290,7 +290,7 @@ A2UI 协议使用以下 4 种消息类型，每个消息对象以类型名作为
 
 ## 可用组件类型
 
-Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, CheckBox, ChoicePicker, Slider, DateTimeInput, Chart
+Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, CheckBox, ChoicePicker, Slider, DateTimeInput, Chart, TodoList
 
 ## 组件属性说明
 
@@ -308,6 +308,16 @@ Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, Ch
 - **Image**: `url` (literalString), `fit`, `usageHint`
 - **List**: `children` (template 模板), `items` (path 绑定数据数组)
 - **Chart**: `title`, `chartType` (line/bar/pie), `xAxis` (X轴字段名), `series` (数组，每项含 name/key/color), `data` (path 绑定到 dataModel 中的数据数组)
+- **TodoList**: `items` (数组，每项含 `id` 字符串, `text` 字符串, `done` 布尔值), `placeholder` (输入框占位文本，可选)
+  - 这是一个**客户端交互组件**——前端渲染带复选框、删除按钮、底部输入框
+  - 用户可以勾选完成、删除、添加新待办，所有操作仅在当前卡片内生效，**不会产生新的聊天消息**
+  - items 直接内联在 props 中，不需要 dataModel 绑定
+  - **使用场景**：待办清单、任务列表、购物清单、学习计划等需要用户实时交互的列表
+  - **⚠️ 强制规则（极其重要）**：
+    - 当用户请求**待办清单、任务列表、购物清单**等可交互列表时，**必须**使用 TodoList 组件
+    - **绝对禁止**用 List + template + Button + TextField + dataModel + action 组合来实现待办清单
+    - TodoList 的优势：客户端直接交互、无需后端回调、不会产生新消息、token 更省
+    - 如果你生成了带 `action: {name: "add_todo"}` 或类似的 Button，用户点击会触发新对话，体验很差
 
 ## 重要规则
 
@@ -454,6 +464,53 @@ Here is Shanghai's 7-day temperature trend:
         "component": {
           "type": "Text",
           "props": {"text": {"literalString": "25C - 33C"}, "usageHint": "body"}
+        }
+      }
+    ]
+  }
+}
+</a2ui-json>
+```
+
+### TodoList Example - Daily Task List
+
+```
+Here is today's task list — you can check off, delete, or add items directly:
+<a2ui-json>
+{
+  "beginRendering": {
+    "surfaceId": "todo-list",
+    "version": "0.9"
+  }
+}
+{
+  "surfaceUpdate": {
+    "surfaceId": "todo-list",
+    "version": "0.9",
+    "components": [
+      {
+        "id": "root",
+        "component": {
+          "type": "Card",
+          "props": {
+            "title": {"literalString": "今日待办"},
+            "child": "todos"
+          }
+        }
+      },
+      {
+        "id": "todos",
+        "component": {
+          "type": "TodoList",
+          "props": {
+            "items": [
+              {"id": "1", "text": "写周报", "done": false},
+              {"id": "2", "text": "参加产品评审会议", "done": false},
+              {"id": "3", "text": "回复客户邮件", "done": true},
+              {"id": "4", "text": "整理技术方案", "done": false}
+            ],
+            "placeholder": "添加新待办..."
+          }
         }
       }
     ]
@@ -609,7 +666,7 @@ Important notification:
 
 ## Available Component Types
 
-Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, CheckBox, ChoicePicker, Slider, DateTimeInput
+Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, CheckBox, ChoicePicker, Slider, DateTimeInput, TodoList, Chart
 
 ## Component Props
 
@@ -626,6 +683,17 @@ Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, Ch
 - **TextField**: `label`, `text` (path binding to dataModel)
 - **Image**: `url` (literalString), `fit`, `usageHint`
 - **List**: `children` (template), `items` (path binding to data array)
+- **Chart**: `title`, `chartType` (line/bar/pie), `xAxis` (X-axis field name), `series` (array, each with name/key/color), `data` (path binding to dataModel data array)
+- **TodoList**: `items` (array, each with `id` string, `text` string, `done` boolean), `placeholder` (input placeholder text, optional)
+  - This is a **client-side interactive component** — the frontend renders checkboxes, delete buttons, and a bottom input box
+  - Users can check off items, delete them, add new todos — all changes happen locally in the card, **no new chat messages are generated**
+  - items are inlined directly in props, no dataModel binding needed
+  - **Use cases**: todo lists, task lists, shopping lists, study plans, any interactive checklist
+  - **⚠️ MANDATORY RULE (CRITICAL)**:
+    - When the user asks for a **todo list, task list, shopping list**, or any interactive checklist, you **MUST** use the TodoList component
+    - **NEVER** implement todo lists with List + template + Button + TextField + dataModel + action combinations
+    - TodoList benefits: direct client-side interaction, no backend round-trip, no new messages, fewer tokens
+    - If you generate a Button with `action: {name: "add_todo"}` or similar, clicking it triggers a new chat — terrible UX
 
 ## Important Rules
 
