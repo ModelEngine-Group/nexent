@@ -104,6 +104,8 @@ import {
 import { VerificationPanel } from "../ui/verification-panel";
 import { A2UIRenderer as A2UITextRenderer, A2UIActionProvider, setGlobalA2UIActionHandler, mightContainA2UI, parseA2UIMessage, type A2UIAction, type A2UIParseResult } from "@/lib/a2ui";
 import { A2uiBridgeSurface } from "@/lib/assistant-ui/generative-config";
+import { nexusMessagesToAguiSnapshot } from "@/lib/a2ui/agui-bridge";
+import { presentTool } from "@/lib/assistant-ui/a2ui-toolkit";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -173,6 +175,13 @@ export interface ThreadProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
   showComposer?: boolean;
+  /**
+   * Optional callback for A2UI generative-ui button actions. When AG-UI
+   * runtime is present (agent-debug/nl2agent/nl2skill), Chat wires this to
+   * `useAgUiSendA2uiAction` so button clicks go through forwardedProps.
+   * When absent (newchat), this is undefined and buttons are inert.
+   */
+  a2uiOnAction?: (action: Record<string, unknown>) => void;
 }
 
 /**
@@ -240,6 +249,7 @@ export const Thread: FC<ThreadProps> = ({
   onRuntimeMetadataChange,
   readOnly = false,
   showComposer = true,
+  a2uiOnAction,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -477,6 +487,7 @@ export const Thread: FC<ThreadProps> = ({
         onCreateShare={createShare}
         selection={selection}
         onPanelClose={close}
+        a2uiOnAction={a2uiOnAction}
       />
       <Dialog
         open={Boolean(manualShareUrl)}
@@ -577,6 +588,7 @@ interface ThreadViewProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
   showComposer: boolean;
+  a2uiOnAction?: (action: Record<string, unknown>) => void;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -619,6 +631,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onRuntimeMetadataChange,
   readOnly,
   showComposer,
+  a2uiOnAction,
 }) => {
   const { t } = useTranslation();
 
@@ -742,6 +755,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               backendMessageIdsByAuiId={backendMessageIdsByAuiId}
               onToggleShareMessage={onToggleShareMessage}
               conversationId={conversationId}
+              a2uiOnAction={a2uiOnAction}
             />
           ) : (
             <ThreadWelcomeContent
@@ -956,6 +970,7 @@ export const ThreadMessages: FC<{
   conversationId?: number;
   enableSkillDirectives?: boolean;
   onSkillFileSelect?: (path: string) => void;
+  a2uiOnAction?: (action: Record<string, unknown>) => void;
 }> = ({
   agent,
   readOnly = false,
@@ -966,6 +981,7 @@ export const ThreadMessages: FC<{
   conversationId,
   enableSkillDirectives = false,
   onSkillFileSelect,
+  a2uiOnAction,
 }) => {
   const { t } = useTranslation();
   const messages = useAuiState((s) => s.thread.messages);
@@ -1008,10 +1024,11 @@ export const ThreadMessages: FC<{
           readOnly={readOnly}
           conversationId={conversationId}
           onSkillFileSelect={onSkillFileSelect}
+          a2uiOnAction={a2uiOnAction}
         />
       ),
     }),
-    [agent, readOnly, conversationId, enableSkillDirectives, onSkillFileSelect]
+    [agent, readOnly, conversationId, enableSkillDirectives, onSkillFileSelect, a2uiOnAction]
   );
 
   if (shareMode) {
@@ -1080,6 +1097,7 @@ export const ThreadMessages: FC<{
             readOnly={readOnly}
             conversationId={conversationId}
             onSkillFileSelect={onSkillFileSelect}
+            a2uiOnAction={a2uiOnAction}
           />
         );
       }}
@@ -1221,7 +1239,8 @@ const AssistantMessage: FC<{
   readOnly?: boolean;
   conversationId?: number;
   onSkillFileSelect?: (path: string) => void;
-}> = ({ agent, readOnly = false, conversationId, onSkillFileSelect }) => {
+  a2uiOnAction?: (action: Record<string, unknown>) => void;
+}> = ({ agent, readOnly = false, conversationId, onSkillFileSelect, a2uiOnAction }) => {
   const { t } = useTranslation();
   const aui = useAui();
 
@@ -1292,6 +1311,39 @@ const AssistantMessage: FC<{
     type?: string;
     skillFileAttachments?: CompleteAttachment[];
   }>;
+
+  // DEBUG: dump all parts when they change
+  useEffect(() => {
+    console.warn("[AssistantMessage] content parts:", {
+      count: content.length,
+      types: content.map((p) => {
+        const anyP = p as Record<string, unknown>;
+        return {
+          type: anyP.type,
+          toolCallName: anyP.toolCallName,
+          toolCallId: anyP.toolCallId,
+          hasParsedArgs: !!anyP.parsedArgs,
+          argsKeys:
+            anyP.parsedArgs && typeof anyP.parsedArgs === "object"
+              ? Object.keys(anyP.parsedArgs as object)
+              : null,
+          // Dump ALL keys for tool-call parts
+          allKeys: anyP.type === "tool-call" ? Object.keys(anyP) : undefined,
+        };
+      }),
+    });
+    // Also dump full part object for a2ui tool-call
+    for (const p of content) {
+      const anyP = p as Record<string, unknown>;
+      if (
+        anyP.type === "tool-call" &&
+        typeof anyP.toolCallId === "string" &&
+        anyP.toolCallId.startsWith("a2ui:")
+      ) {
+        console.warn("[AssistantMessage] FULL a2ui tool-call part:", anyP);
+      }
+    }
+  }, [content]);
   const streamedSkillFileAttachments = useMemo(() => {
     for (let index = content.length - 1; index >= 0; index -= 1) {
       const part = content[index];
@@ -1360,17 +1412,27 @@ const AssistantMessage: FC<{
             const isExecutionCodePart =
               part.type === "data" &&
               (part as { name?: string }).name === "execution-code";
+            // A2UI present tool-calls (synthesised from ACTIVITY_SNAPSHOT by
+            // the AG-UI runtime) should render as standalone surfaces, not
+            // hidden inside the collapsed tool trace group.
+            const isA2uiToolCall =
+              part.type === "tool-call" &&
+              typeof (part as { toolCallId?: string }).toolCallId ===
+                "string" &&
+              (part as { toolCallId: string }).toolCallId.startsWith("a2ui:");
             const chainPath: `group-${string}`[] = isImagePart
               ? ["group-image"]
               : part.type === "reasoning"
                 ? ["group-chainOfThought", "group-reasoning"]
                 : isExecutionCodePart
                   ? ["group-chainOfThought", "group-execution-code"]
-                  : part.type === "tool-call"
-                    ? ["group-chainOfThought", "group-tool"]
-                    : part.type === "source"
-                      ? ["group-source"]
-                      : ["group-default"];
+                  : isA2uiToolCall
+                    ? ["group-default"]
+                    : part.type === "tool-call"
+                      ? ["group-chainOfThought", "group-tool"]
+                      : part.type === "source"
+                        ? ["group-source"]
+                        : ["group-default"];
             if (subagentId !== undefined) {
               const groupKey =
                 `group-subagent-${subagentId}-${runId ?? "unknown"}` as const;
@@ -1379,6 +1441,13 @@ const AssistantMessage: FC<{
                 groupKey,
                 ...chainPath,
               ] as `group-${string}`[];
+            }
+            if (isA2uiToolCall) {
+              console.warn("[Thread] A2UI part routing:", {
+                toolCallId: (part as { toolCallId?: string }).toolCallId,
+                chainPath,
+                partType: (part as { type?: string }).type,
+              });
             }
             return chainPath;
           }}
@@ -1488,9 +1557,21 @@ const AssistantMessage: FC<{
                 }
                 const textContent = textPart.text || "";
                 if (mightContainA2UI(textContent)) {
+                  // eslint-disable-next-line no-console
+                  console.warn("[DEBUG] mightContainA2UI=true, content length=", textContent.length);
                   // Parse with LRU cache to avoid re-parsing identical content
                   // on every React re-render during SSE streaming.
                   const parsed = cachedParseA2UI(textContent);
+                  // eslint-disable-next-line no-console
+                  console.warn("[DEBUG] parse result:", {
+                    isAguiFormat: parsed.isAguiFormat,
+                    hasAguiSnapshot: !!parsed.aguiSnapshot,
+                    blocksCount: parsed.blocks?.length ?? 0,
+                    blockTypes: parsed.blocks?.map((b) => b.type) ?? [],
+                    firstBlockParsedType: parsed.blocks?.[0]?.parsed
+                      ? Object.keys(parsed.blocks[0].parsed)[0]
+                      : null,
+                  });
                   const legacyRenderer = (
                     <A2UIActionProvider onAction={handleA2UIAction}>
                       <A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} />
@@ -1498,16 +1579,43 @@ const AssistantMessage: FC<{
                   );
                   // AG-UI ACTIVITY_SNAPSHOT → native generative-ui path with legacy fallback for custom components
                   if (parsed.isAguiFormat && parsed.aguiSnapshot) {
+                    // eslint-disable-next-line no-console
+                    console.warn("[DEBUG] taking AG-UI bridge path");
                     return (
                       <A2uiBridgeSurface
                         snapshot={parsed.aguiSnapshot}
                         className="a2ui-chat-message"
+                        onAction={a2uiOnAction}
                       >
                         {legacyRenderer}
                       </A2uiBridgeSurface>
                     );
                   }
-                  // Legacy <a2ui-json>...</a2ui-json> format → legacy renderer
+                  // Legacy <a2ui-json>...</a2ui-json> format → convert Nexus nested
+                  // messages to AG-UI ACTIVITY_SNAPSHOT so both formats share the
+                  // same A2uiBridgeSurface → preprocessOperations → renderGenerativeUI pipeline.
+                  const nexusMessages = parsed.blocks
+                    .map((b) => b.parsed)
+                    .filter((p): p is Record<string, unknown> => !!p && typeof p === "object");
+                  // eslint-disable-next-line no-console
+                  console.warn("[DEBUG] legacy path, nexusMessages count=", nexusMessages.length, "keys=", nexusMessages.map((m) => Object.keys(m)[0]));
+                  if (nexusMessages.length > 0) {
+                    const aguiSnapshot = nexusMessagesToAguiSnapshot(nexusMessages);
+                    // eslint-disable-next-line no-console
+                    console.warn("[DEBUG] converted to AG-UI snapshot, ops count=", aguiSnapshot.content.a2ui_operations.length);
+                    return (
+                      <A2uiBridgeSurface
+                        snapshot={aguiSnapshot}
+                        className="a2ui-chat-message"
+                        onAction={a2uiOnAction}
+                      >
+                        {legacyRenderer}
+                      </A2uiBridgeSurface>
+                    );
+                  }
+                  // Last resort — no blocks parsed
+                  // eslint-disable-next-line no-console
+                  console.warn("[DEBUG] falling back to legacy renderer directly");
                   return legacyRenderer;
                 }
                 return <MarkdownText />;
@@ -1528,12 +1636,30 @@ const AssistantMessage: FC<{
               }
               case "reasoning":
                 return <Reasoning {...part} />;
-              case "tool-call":
-                return (
-                  (part as typeof part & { toolUI?: unknown }).toolUI ?? (
-                    <ToolFallback {...part} />
-                  )
-                );
+              case "tool-call": {
+                const toolCallPart = part as typeof part & {
+                  toolCallId?: string;
+                  toolCallName?: string;
+                  args?: unknown;
+                  argsText?: string;
+                  result?: unknown;
+                  toolUI?: unknown;
+                };
+                const isA2ui =
+                  typeof toolCallPart.toolCallId === "string" &&
+                  toolCallPart.toolCallId.startsWith("a2ui:");
+                if (isA2ui) {
+                  console.warn("[Thread] A2UI tool-call:", {
+                    toolCallId: toolCallPart.toolCallId,
+                    toolCallName: toolCallPart.toolCallName,
+                    hasToolUI: !!toolCallPart.toolUI,
+                    toolUIType: typeof toolCallPart.toolUI,
+                  });
+                }
+                const toolUI = toolCallPart.toolUI;
+                if (toolUI) return toolUI;
+                return <ToolFallback {...part} />;
+              }
               case "indicator":
                 return <AssistantWorkingIndicator />;
               case "source":
@@ -1594,6 +1720,7 @@ const AssistantMessage: FC<{
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {/* Standalone A2UI removed — GroupedParts handles present tool-calls */}
         {nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}

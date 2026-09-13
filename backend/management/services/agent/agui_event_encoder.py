@@ -53,6 +53,7 @@ AGUI_STEP_STARTED = "STEP_STARTED"
 AGUI_STEP_FINISHED = "STEP_FINISHED"
 
 AGUI_CUSTOM = "CUSTOM"
+AGUI_RAW = "RAW"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,6 +129,14 @@ class AgUiEventEncoder:
         # a string subagentRunId per nested invocation.
         self._subagent_ids: Dict[str, str] = {}  # key: agent_id → AG-UI runId
 
+        # ---- FINAL_ANSWER A2UI tag buffer -----------------------------------
+        # The model emits A2UI as <a2ui-json>...</a2ui-json> embedded inside
+        # FINAL_ANSWER text.  Tags may be split across streaming deltas, so
+        # we accumulate and scan for complete open/close pairs.  Plain text
+        # goes out as TEXT_MESSAGE_CONTENT; captured JSON becomes
+        # ACTIVITY_SNAPSHOT events that useAgUiRuntime consumes natively.
+        self._final_answer_buffer: str = ""
+
     # ------------------------------------------------------------------
     # Public accessors
     # ------------------------------------------------------------------
@@ -145,14 +154,24 @@ class AgUiEventEncoder:
     # ------------------------------------------------------------------
 
     def run_started_event(self, input_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Emit a ``RUN_STARTED`` event.  Call before the first chunk."""
-        return {
+        """Emit a ``RUN_STARTED`` event.  Call before the first chunk.
+
+        ``input`` is optional in the AG-UI schema and requires the full
+        RunAgentInput shape (threadId, runId, messages, tools, context...).
+        Nexus only has a partial picture here, so we deliberately omit it
+        to avoid Zod validation failures on the frontend.
+        """
+        event: Dict[str, Any] = {
             "type": AGUI_RUN_STARTED,
             "threadId": self._thread_id,
             "runId": self._run_id,
             "timestamp": _ts_ms(),
-            "input": input_state or {},
         }
+        if input_state:
+            # Wrap Nexus input as a plain metadata field instead of
+            # pretending it's a RunAgentInput.
+            event["metadata"] = {"nexus_input": input_state}
+        return event
 
     def run_finished_event(
         self,
@@ -160,7 +179,12 @@ class AgUiEventEncoder:
         interrupts: Optional[List[Dict[str, Any]]] = None,
         result: Any = None,
     ) -> Dict[str, Any]:
-        """Emit a ``RUN_FINISHED`` event.  Call in ``finally:`` block."""
+        """Emit a ``RUN_FINISHED`` event.  Call in ``finally:`` block.
+
+        IMPORTANT: Call ``_drain_open_step_events()`` *before* this, otherwise
+        AG-UI client will reject RUN_FINISHED with "steps still active".
+        This method does NOT emit STEP_FINISHED itself.
+        """
         outcome_obj: Dict[str, Any] = {"type": outcome}
         if outcome == "interrupt" and interrupts:
             outcome_obj["interrupts"] = interrupts
@@ -173,6 +197,44 @@ class AgUiEventEncoder:
             "outcome": outcome_obj,
             "result": result,
         }
+
+    def _drain_open_step_events(self) -> List[Dict[str, Any]]:
+        """If a step is still open, emit STEP_FINISHED and clear state.
+
+        Called before text-finalising events (FINAL_ANSWER) and before
+        RUN_FINISHED so AG-UI state machine never sees a stray open step.
+        """
+        if self._current_step_msg_id is None:
+            return []
+        step_name = self._current_step_msg_id
+        self._current_step_msg_id = None
+        return [{
+            "type": AGUI_STEP_FINISHED,
+            "stepName": step_name,
+            "timestamp": _ts_ms(),
+        }]
+
+    def _drain_open_message_events(self) -> List[Dict[str, Any]]:
+        """Close any open TEXT_MESSAGE or REASONING_MESSAGE with *_END events.
+
+        AG-UI client rejects RUN_FINISHED while any message is still active.
+        """
+        events: List[Dict[str, Any]] = []
+        if self._text_msg_id is not None:
+            events.append({
+                "type": AGUI_TEXT_MESSAGE_END,
+                "messageId": self._text_msg_id,
+                "timestamp": _ts_ms(),
+            })
+            self._text_msg_id = None
+        if self._reasoning_msg_id is not None:
+            events.append({
+                "type": AGUI_REASONING_MESSAGE_END,
+                "messageId": self._reasoning_msg_id,
+                "timestamp": _ts_ms(),
+            })
+            self._reasoning_msg_id = None
+        return events
 
     # ------------------------------------------------------------------
     # Main encode entry point
@@ -201,7 +263,19 @@ class AgUiEventEncoder:
         # ---- Dispatch by ProcessType ---------------------------------------
         events: List[Dict[str, Any]] = []
 
-        if process_type == ProcessType.MODEL_OUTPUT_THINKING.value:
+        if process_type == ProcessType.STEP_COUNT.value:
+            # Drain previous step before opening a new one
+            events.extend(self._drain_open_step_events())
+            events.append(self._step_started_event(subagent_run_id))
+
+        elif process_type == ProcessType.FINAL_ANSWER.value:
+            # Final answer closes the active step.
+            # NOTE: A2UI content should arrive via ProcessType.A2UI natively.
+            # _encode_a2ui_tagged_text() is kept as fallback for old clients.
+            events.extend(self._drain_open_step_events())
+            events.extend(self._encode_a2ui_tagged_text(content, subagent_run_id))
+
+        elif process_type == ProcessType.MODEL_OUTPUT_THINKING.value:
             events.extend(self._encode_reasoning_delta(content, subagent_run_id))
 
         elif process_type == ProcessType.MODEL_OUTPUT_DEEP_THINKING.value:
@@ -209,12 +283,6 @@ class AgUiEventEncoder:
 
         elif process_type == ProcessType.MODEL_OUTPUT_CODE.value:
             events.extend(self._encode_text_delta(content, subagent_run_id))
-
-        elif process_type == ProcessType.FINAL_ANSWER.value:
-            events.extend(self._encode_text_delta(content, subagent_run_id))
-
-        elif process_type == ProcessType.STEP_COUNT.value:
-            events.append(self._step_started_event(subagent_run_id))
 
         elif process_type == ProcessType.TOOL.value:
             events.extend(self._encode_tool_start(chunk_dict, subagent_run_id))
@@ -237,55 +305,58 @@ class AgUiEventEncoder:
 
         elif process_type == ProcessType.A2UI.value:
             # content is already an AG-UI ACTIVITY_SNAPSHOT JSON string or dict
+            print(f"[AgUiEncoder] ProcessType.A2UI received, content_type={type(content).__name__}, content_len={len(str(content))}", flush=True)
+            events.extend(self._encode_activity_snapshot(content, subagent_run_id))
+            print(f"[AgUiEncoder] ProcessType.A2UI → {len(events)} events, types={[e.get('type') for e in events]}", flush=True)
+
+        elif process_type == ProcessType.CARD.value:
+            # CARD can be either Nexus custom cards or A2UI surface payloads.
+            # Route through _encode_activity_snapshot so A2UI-shaped content
+            # produces proper AG-UI ACTIVITY_SNAPSHOT events that useAgUiRuntime
+            # can consume natively; raw custom cards fall through to RAW.
             events.extend(self._encode_activity_snapshot(content, subagent_run_id))
 
         elif process_type == ProcessType.PLAN.value:
             events.append(self._state_delta_event("plan", content, subagent_run_id))
 
-        elif process_type == ProcessType.PLAN_STEP_UPDATE.value:
-            events.append(self._state_delta_event("plan_step", content, subagent_run_id))
-
         elif process_type == ProcessType.NL2A_STATE.value:
             events.append(self._state_delta_event("nl2a_state", content, subagent_run_id))
 
         elif process_type == ProcessType.TOKEN_COUNT.value:
-            events.append(self._custom_event("token_count", content, subagent_run_id))
+            events.append(self._raw_event("token_count", content, subagent_run_id))
 
         elif process_type == ProcessType.SEARCH_CONTENT.value:
-            events.append(self._custom_event("search_content", content, subagent_run_id))
+            events.append(self._raw_event("search_content", content, subagent_run_id))
 
         elif process_type == ProcessType.PICTURE_WEB.value:
-            events.append(self._custom_event("picture_web", content, subagent_run_id))
-
-        elif process_type == ProcessType.CARD.value:
-            events.append(self._custom_event("card", content, subagent_run_id))
+            events.append(self._raw_event("picture_web", content, subagent_run_id))
 
         elif process_type == ProcessType.SKILL_ARTIFACT.value:
-            events.append(self._custom_event("skill_artifact", content, subagent_run_id))
+            events.append(self._raw_event("skill_artifact", content, subagent_run_id))
 
         elif process_type == ProcessType.FILE_ARTIFACT.value:
-            events.append(self._custom_event("file_artifact", content, subagent_run_id))
+            events.append(self._raw_event("file_artifact", content, subagent_run_id))
 
         elif process_type == ProcessType.MEMORY_SEARCH.value:
-            events.append(self._custom_event("memory_search", content, subagent_run_id))
+            events.append(self._raw_event("memory_search", content, subagent_run_id))
 
         elif process_type == ProcessType.VERIFICATION.value:
-            events.append(self._custom_event("verification", content, subagent_run_id))
+            events.append(self._raw_event("verification", content, subagent_run_id))
 
         elif process_type == ProcessType.AUTOMATION_PROPOSAL.value:
-            events.append(self._custom_event("automation_proposal", content, subagent_run_id))
+            events.append(self._raw_event("automation_proposal", content, subagent_run_id))
 
         elif process_type == ProcessType.HISTORY_SUMMARY.value:
-            events.append(self._custom_event("history_summary", content, subagent_run_id))
+            events.append(self._raw_event("history_summary", content, subagent_run_id))
 
         elif process_type == ProcessType.MAX_STEPS_REACHED.value:
-            events.append(self._custom_event("max_steps_reached", content, subagent_run_id))
+            events.append(self._raw_event("max_steps_reached", content, subagent_run_id))
 
         elif process_type == ProcessType.NL2A.value:
-            events.append(self._custom_event("nl2a", content, subagent_run_id))
+            events.append(self._raw_event("nl2a", content, subagent_run_id))
 
         elif process_type == ProcessType.PARSE.value:
-            events.append(self._custom_event("parse", content, subagent_run_id))
+            events.append(self._raw_event("parse", content, subagent_run_id))
 
         # AGENT_NEW_RUN / AGENT_FINISH / OTHER → skip (handled by run boundary)
         # STEP_COUNT already handled above
@@ -317,6 +388,7 @@ class AgUiEventEncoder:
         return [{
             "type": AGUI_REASONING_MESSAGE_START,
             "messageId": self._reasoning_msg_id,
+            "role": "reasoning",
             "timestamp": _ts_ms(),
             **({"subagentRunId": subagent_run_id} if subagent_run_id else {}),
         }]
@@ -335,6 +407,614 @@ class AgUiEventEncoder:
             "timestamp": _ts_ms(),
             **({"subagentRunId": subagent_run_id} if subagent_run_id else {}),
         })
+        return events
+
+    # ------------------------------------------------------------------
+    # FINAL_ANSWER: streaming <a2ui-json> tag detector
+    # ------------------------------------------------------------------
+
+    _A2UI_OPEN = "<a2ui-json>"
+    _A2UI_CLOSE = "</a2ui-json>"
+
+    def _encode_a2ui_tagged_text(
+        self, content: Any, subagent_run_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Split FINAL_ANSWER text by ``<a2ui-json>...</a2ui-json>`` tags.
+
+        Tags may be split across streaming deltas (the model emits token by
+        token), so we accumulate into ``_final_answer_buffer`` and emit as
+        soon as a complete open/close pair is found.  Plain prefix text goes
+        out as ``TEXT_MESSAGE_CONTENT``; captured JSON becomes an
+        ``ACTIVITY_SNAPSHOT`` with ``activityType="a2ui-surface"`` and
+        ``content.a2ui_operations``.
+
+        Any trailing text after the last closed tag (or an incomplete tag
+        spanning into the next chunk) stays in the buffer for the next call.
+        """
+        events: List[Dict[str, Any]] = []
+        if content is None:
+            return events
+
+        self._final_answer_buffer += (
+            str(content) if not isinstance(content, str) else content
+        )
+
+        loop_count = 0
+        while True:
+            loop_count += 1
+            buf = self._final_answer_buffer
+            open_idx = buf.find(self._A2UI_OPEN)
+
+            if open_idx == -1:
+                # No open tag at all — whole buffer is plain text.
+                if buf:
+                    events.extend(self._encode_text_delta(buf, subagent_run_id))
+                    self._final_answer_buffer = ""
+                print(
+                    f"[AgUiEncoder] _encode_a2ui_tagged_text: no open tag, "
+                    f"emit {len(events)} text events, buffer cleared",
+                    flush=True,
+                )
+                return events
+
+            # Emit plain text before the open tag (if any)
+            if open_idx > 0:
+                events.extend(
+                    self._encode_text_delta(buf[:open_idx], subagent_run_id)
+                )
+                buf = buf[open_idx:]
+                open_idx = 0  # buf[0] is now '<' of the open tag
+
+            # Find matching close tag after the open tag
+            close_idx = buf.find(
+                self._A2UI_CLOSE, len(self._A2UI_OPEN)
+            )
+            if close_idx == -1:
+                # Tag opened but not yet closed — leave in buffer, wait for
+                # more deltas (or flush_final_answer_buffer on run end).
+                self._final_answer_buffer = buf
+                print(
+                    f"[AgUiEncoder] _encode_a2ui_tagged_text: open tag found at loop#{loop_count} "
+                    f"but close tag missing — buffering {len(buf)} chars, return {len(events)} events",
+                    flush=True,
+                )
+                return events
+
+            # Complete <a2ui-json>...</a2ui-json> pair — extract inner JSON
+            inner = buf[len(self._A2UI_OPEN):close_idx]
+            print(
+                f"[AgUiEncoder] _encode_a2ui_tagged_text: complete pair at loop#{loop_count}, "
+                f"inner={len(inner)} chars",
+                flush=True,
+            )
+            events.extend(
+                self._encode_a2ui_json_content(inner, subagent_run_id)
+            )
+
+            # Continue with the text after this close tag (may contain more
+            # plain text + another <a2ui-json> block — loop again)
+            self._final_answer_buffer = buf[
+                close_idx + len(self._A2UI_CLOSE):
+            ]
+
+    def _encode_a2ui_json_content(
+        self, json_inner: str, subagent_run_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Parse the inner text of an ``<a2ui-json>`` block into an
+        ``ACTIVITY_SNAPSHOT`` event.
+
+        The model emits a stream of independent JSON objects, each on its
+        own "logical line" — but those objects may be pretty-printed with
+        internal newlines (indentation), so naive ``splitlines()`` breaks
+        on the first ``{`` that spans multiple lines.  We use
+        ``json.JSONDecoder().raw_decode`` instead: it finds the next
+        complete JSON object at any offset and returns the remaining index,
+        which lets us walk the string extracting one object at a time
+        regardless of whitespace layout.
+        """
+        decoder = json.JSONDecoder()
+        operations: List[Dict[str, Any]] = []
+        pos = 0
+        n = len(json_inner)
+
+        while pos < n:
+            # Skip whitespace between objects (newlines, spaces, commas)
+            while pos < n and json_inner[pos] in " \t\r\n,":
+                pos += 1
+            if pos >= n:
+                break
+
+            try:
+                obj, end = decoder.raw_decode(json_inner, pos)
+                if isinstance(obj, dict):
+                    operations.append(obj)
+                else:
+                    print(
+                        f"[AgUiEncoder] a2ui JSON block parsed but not dict: "
+                        f"type={type(obj).__name__}",
+                        flush=True,
+                    )
+                pos = end
+            except json.JSONDecodeError as e:
+                print(
+                    f"[AgUiEncoder] a2ui JSON raw_decode failed at pos={pos}: {e}",
+                    flush=True,
+                )
+                # Advance past this character so we don't infinite-loop
+                pos += 1
+
+        print(
+            f"[AgUiEncoder] a2ui parse: collected {len(operations)} ops, "
+            f"first keys={list(operations[0].keys()) if operations else []}",
+            flush=True,
+        )
+
+        if not operations:
+            print(
+                f"[AgUiEncoder] NO operations → emit RAW a2ui_empty_block",
+                flush=True,
+            )
+            return [self._raw_event(
+                "a2ui_empty_block", json_inner, subagent_run_id
+            )]
+
+        # ---- Format conversion: Nexus A2UI → AG-UI runtime A2UI ----------
+        # The model emits Nexus-specific operation names and a nested version
+        # field.  AG-UI's applyA2uiOperations reducer expects:
+        #   - operation keys: createSurface / updateComponents / updateDataModel / deleteSurface
+        #   - version at TOP level with "v" prefix: "v0.9" or "v1.0"
+        # We translate the Nexus format to the AG-UI format here.
+        agui_ops = [
+            self._convert_nexus_a2ui_op(op) for op in operations
+        ]
+
+        # ---- P2: Auto-complete Button action context from dataModel ------
+        # Nexus model often emits Button actions without `context`, so the
+        # backend never receives the form values.  As a fallback, collect
+        # every path from updateDataModel ops and wire them into every
+        # Button action that is missing context.  The frontend converter
+        # (convert.js) resolves these paths to actual form values at click
+        # time, so the agent sees complete data regardless of whether the
+        # model emits context or not.
+        agui_ops = self._ensure_button_action_context(agui_ops)
+
+        print(
+            f"[AgUiEncoder] a2ui converted: {len(agui_ops)} ops, "
+            f"first keys={list(agui_ops[0].keys()) if agui_ops else []}",
+            flush=True,
+        )
+
+        # DUMP the full AG-UI format operations so we can verify the component
+        # structure matches what applyA2uiOperations / convertSurfaceToUISpec
+        # expect (children as string ID refs, flat component list).
+        print(
+            f"[AgUiEncoder] AGUI_OPS_DUMP={json.dumps(agui_ops, ensure_ascii=False)[:3000]}",
+            flush=True,
+        )
+
+        return self._encode_activity_snapshot(
+            {"a2ui_operations": agui_ops}, subagent_run_id
+        )
+
+    # ------------------------------------------------------------------
+    # Nexus → AG-UI A2UI operation format adapter
+    # ------------------------------------------------------------------
+
+    _NEXUS_TO_AGUI_OP = {
+        "beginRendering": "createSurface",
+        "createSurface": "createSurface",
+        "surfaceUpdate": "updateComponents",
+        "updateComponents": "updateComponents",
+        "dataModelUpdate": "updateDataModel",
+        "updateDataModel": "updateDataModel",
+        "deleteSurface": "deleteSurface",
+    }
+
+    def _convert_nexus_a2ui_op(
+        self, op: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Translate one Nexus-format A2UI operation to AG-UI format.
+
+        Nexus shape::
+
+            {"beginRendering": {"surfaceId": "foo", "version": "0.9", ...}}
+
+        AG-UI shape::
+
+            {"version": "v0.9", "createSurface": {"surfaceId": "foo", ...}}
+
+        The AG-UI reducer also validates that ``version`` has the ``"v"``
+        prefix and lives at the top level (not nested inside the payload).
+        Component entries also need flattening: Nexus nests the full
+        component tree under ``entry.component`` while AG-UI expects the
+        component *type name* as ``entry.component`` with props/children
+        lifted to the sibling level.
+        """
+        if not isinstance(op, dict):
+            return {"version": "v0.9", "_unknown": str(op)}
+
+        # Find the single operation key (ignoring a stray top-level "version"
+        # if the model sometimes emits it there too).
+        op_keys = [k for k in op.keys() if k != "version"]
+        if len(op_keys) != 1:
+            return {"version": "v0.9", "_unknown": op}
+
+        op_key = op_keys[0]
+        payload = op.get(op_key)
+        if not isinstance(payload, dict):
+            return {"version": "v0.9", "_unknown": op}
+
+        # Translate operation name
+        agui_key = self._NEXUS_TO_AGUI_OP.get(op_key, op_key)
+
+        # Extract version from payload and promote to top-level with "v" prefix
+        raw_version = payload.pop("version", None)
+        if raw_version is None and "version" in op:
+            raw_version = op["version"]
+        if isinstance(raw_version, str):
+            v_normalized = raw_version if raw_version.startswith("v") else f"v{raw_version}"
+        else:
+            v_normalized = "v0.9"
+
+        # Flatten Nexus components: model uses nested component tree with
+        # children as inline objects, but AG-UI reducer expects children as
+        # string ID references.  We walk the tree, collect every component
+        # node into a flat list, and replace each child object with its "id".
+        if "components" in payload and isinstance(payload["components"], list):
+            flat_components: List[Dict[str, Any]] = []
+            for root_comp in payload["components"]:
+                self._flatten_and_collect(root_comp, flat_components)
+            payload["components"] = flat_components
+            print(
+                f"[AgUiEncoder] FLATTENED components: {len(flat_components)} nodes. "
+                f"Sample root: id={flat_components[0].get('id') if flat_components else None}, "
+                f"component={flat_components[0].get('component') if flat_components else None}, "
+                f"children={flat_components[0].get('children') if flat_components else None}",
+                flush=True,
+            )
+
+        return {
+            "version": v_normalized,
+            agui_key: payload,
+        }
+
+    def _flatten_and_collect(
+        self, comp: Any, collected: List[Dict[str, Any]]
+    ) -> str | None:
+        """Flatten one Nexus A2UI component and recursively collect its children.
+
+        Nexus components nest the full tree inline::
+
+            {"id": "root", "component": {"type": "Card", "props": {...},
+              "children": [{"id": "name-field", "component": {"type": "TextField", ...}}]}}
+
+        AG-UI reducer expects a **flat list** of every component, with
+        ``children`` as **string ID references**::
+
+            {"id": "root", "component": "Card", "props": {...},
+             "children": ["name-field"]}    ← ID only, no objects
+
+        Returns the component's ``id`` so the caller can use it as a child
+        reference.  The node is appended to ``collected`` as a side effect.
+        """
+        if not isinstance(comp, dict):
+            return None
+
+        node_id = comp.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            # Skip nodes without an id — we can't reference them
+            return None
+
+        inner = comp.get("component")
+        if not isinstance(inner, dict):
+            # Already flat — still process children to convert to ID refs
+            flat_node: Dict[str, Any] = {k: v for k, v in comp.items()}
+        else:
+            flat_node = {"id": node_id}
+            if "type" in inner:
+                flat_node["component"] = inner["type"]
+            if "props" in inner:
+                flat_node["props"] = inner["props"]
+            # Preserve any other top-level fields (explicitList, gap, etc.)
+            for k, v in comp.items():
+                if k not in ("id", "component"):
+                    flat_node[k] = v
+
+        # --- Extract child refs from Nexus props into top-level children ---
+        # Nexus stashes child IDs in several places inside props:
+        #   props.child          → single string ID (Card, Button, Text etc.)
+        #   props.children       → {"explicitList": [...], ...} object wrapper
+        #   props.children       → plain string[] array (some Columns)
+        # AG-UI reducer/converter expects top-level children: string[].
+        props = flat_node.get("props", {})
+        if isinstance(props, dict):
+            child_ids: List[str] = []
+
+            # 1. Singular "child" string → ["child"]
+            singular_child = props.get("child")
+            if isinstance(singular_child, str):
+                child_ids.append(singular_child)
+                props.pop("child", None)
+            elif isinstance(singular_child, dict):
+                # Nested child object — recurse to flatten, use its id
+                child_id = self._flatten_and_collect(singular_child, collected)
+                if child_id:
+                    child_ids.append(child_id)
+                props.pop("child", None)
+
+            # 2. "children" — could be explicitList wrapper, plain string[],
+            #    or array of nested component objects
+            children_raw = props.get("children")
+            if children_raw is not None:
+                props.pop("children", None)
+                if isinstance(children_raw, dict):
+                    # explicitList wrapper — extract the array
+                    explicit = children_raw.get("explicitList")
+                    if isinstance(explicit, list):
+                        for item in explicit:
+                            if isinstance(item, str):
+                                child_ids.append(item)
+                            elif isinstance(item, dict):
+                                child_id = self._flatten_and_collect(item, collected)
+                                if child_id:
+                                    child_ids.append(child_id)
+                elif isinstance(children_raw, list):
+                    for item in children_raw:
+                        if isinstance(item, str):
+                            child_ids.append(item)
+                        elif isinstance(item, dict):
+                            child_id = self._flatten_and_collect(item, collected)
+                            if child_id:
+                                child_ids.append(child_id)
+
+            if child_ids:
+                flat_node["children"] = child_ids
+
+        # Also handle top-level children (rare, but Nexus might emit them).
+        top_children = flat_node.get("children")
+        if isinstance(top_children, list) and top_children and not all(
+            isinstance(c, str) for c in top_children
+        ):
+            # Mixed — recurse any object children
+            flat_node["children"] = [
+                c if isinstance(c, str) else (self._flatten_and_collect(c, collected) or "")
+                for c in top_children
+            ]
+            flat_node["children"] = [c for c in flat_node["children"] if c]
+
+        collected.append(flat_node)
+        return node_id
+
+    # ------------------------------------------------------------------
+    # P2: Button action context auto-completion (fallback for models that
+    # don't emit context).
+    # ------------------------------------------------------------------
+
+    def _ensure_button_action_context(
+        self, agui_ops: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Patch Button action context by auto-collecting dataModel paths.
+
+        Nexus-model A2UI specs frequently omit the ``context`` field on
+        Button actions, which means the frontend has nothing to resolve and
+        the backend never receives form values on interaction.  This helper
+        walks the ops *after* Nexus→AG-UI conversion, collects every path
+        from ``updateDataModel`` entries, and injects them as context on
+        every Button that lacks one.
+
+        The frontend ``convert.js`` ``mappedAction`` callback already knows
+        how to resolve ``{"path": "/foo/bar"}`` bindings against the live
+        DataModel, so once we wire the paths here the click payload will
+        automatically carry real values.
+        """
+        # 1. Collect all dataModel paths across every updateDataModel op
+        all_paths: List[str] = []
+        for op in agui_ops:
+            payload = op.get("updateDataModel")
+            if not isinstance(payload, dict):
+                continue
+            for dm_entry in payload.get("contents", []):
+                if isinstance(dm_entry, dict):
+                    self._collect_datamodel_paths(dm_entry, "", all_paths)
+
+        # DEBUG: Always print what P2 sees
+        has_button = any(
+            c.get("component") == "Button"
+            for op in agui_ops
+            if isinstance(op.get("updateComponents"), dict)
+            for c in op["updateComponents"].get("components", [])
+            if isinstance(c, dict)
+        )
+        print(
+            f"[AgUiEncoder-P2] input: ops={len(agui_ops)}, "
+            f"dataModel_paths={all_paths}, has_Button={has_button}",
+            flush=True,
+        )
+
+        if not all_paths:
+            print("[AgUiEncoder-P2] skip: no dataModel paths found", flush=True)
+            return agui_ops
+
+        # 2. Walk every updateComponents op and patch Button actions
+        patched_count = 0
+        fixed_count = 0
+        for op in agui_ops:
+            payload = op.get("updateComponents")
+            if not isinstance(payload, dict):
+                continue
+            for comp in payload.get("components", []):
+                if not isinstance(comp, dict):
+                    continue
+                if comp.get("component") != "Button":
+                    continue
+                props = comp.get("props") or {}
+                action = props.get("action")
+                if not isinstance(action, dict):
+                    continue
+                existing_ctx = action.get("context")
+
+                if isinstance(existing_ctx, dict) and existing_ctx:
+                    # Model emitted context — but paths may not match dataModel!
+                    # e.g. model says "/form/name" but dataModel has "/name".
+                    # Try to fix paths by matching the last segment against
+                    # known dataModel paths.
+                    fixed_ctx = self._fix_context_paths(existing_ctx, all_paths)
+                    if fixed_ctx != existing_ctx:
+                        action["context"] = fixed_ctx
+                        fixed_count += 1
+                        print(
+                            f"[AgUiEncoder-P2] FIXED context paths for Button {comp.get('id')}: "
+                            f"before={existing_ctx} → after={fixed_ctx}",
+                            flush=True,
+                        )
+                    continue
+
+                # No context at all — build from all dataModel paths
+                new_context: Dict[str, Any] = {}
+                for p in all_paths:
+                    key = p.split("/")[-1] if p else "field"
+                    if not key:
+                        key = "field"
+                    if key in new_context:
+                        key = p.strip("/").replace("/", "_")
+                    new_context[key] = {"path": p}
+                action["context"] = new_context
+                patched_count += 1
+
+        if patched_count or fixed_count:
+            print(
+                f"[AgUiEncoder-P2] SUMMARY: patched={patched_count}, "
+                f"fixed_paths={fixed_count}, "
+                f"dataModel_paths={all_paths}",
+                flush=True,
+            )
+
+        # DEBUG: Dump final Button actions to confirm P2 fix propagated
+        try:
+            for op in agui_ops:
+                payload = op.get("updateComponents")
+                if not isinstance(payload, dict):
+                    continue
+                for comp in payload.get("components", []):
+                    if isinstance(comp, dict) and comp.get("component") == "Button":
+                        action = (comp.get("props") or {}).get("action", {})
+                        print(
+                            f"[AgUiEncoder-P2-FINAL] Button={comp.get('id')} "
+                            f"action.context={json.dumps(action.get('context'), ensure_ascii=False)}",
+                            flush=True,
+                        )
+        except Exception:
+            pass
+
+        return agui_ops
+
+    @staticmethod
+    def _fix_context_paths(
+        context: Dict[str, Any], known_paths: List[str]
+    ) -> Dict[str, Any]:
+        """Fix model-emitted context paths to match actual dataModel paths.
+
+        Nexus models frequently guess the path prefix (e.g. emit
+        ``/form/name`` when the dataModel actually has ``/name``).  This
+        helper walks every binding in the context and, if the referenced
+        path doesn't exist in ``known_paths``, tries to find a match by
+        stripping leading segments until it hits a known path.
+
+        If no match is found, the original path is kept as-is (better to
+        send a slightly-wrong path than to drop the field entirely).
+        """
+        if not known_paths:
+            return context
+
+        # Build a lookup by last segment for fast matching
+        last_seg_to_path: Dict[str, str] = {}
+        for p in known_paths:
+            seg = p.split("/")[-1] if p else ""
+            if seg and seg not in last_seg_to_path:
+                last_seg_to_path[seg] = p
+
+        result: Dict[str, Any] = {}
+        for key, value in context.items():
+            if isinstance(value, dict) and "path" in value and isinstance(value["path"], str):
+                orig_path = value["path"]
+                if orig_path in known_paths:
+                    # Already correct — keep as-is
+                    result[key] = value
+                else:
+                    # Try to fix by matching last segment
+                    last_seg = orig_path.split("/")[-1] if orig_path else ""
+                    fixed_path = last_seg_to_path.get(last_seg, orig_path)
+                    if fixed_path != orig_path:
+                        result[key] = {**value, "path": fixed_path}
+                    else:
+                        # No match found — keep original, hope frontend resolves
+                        result[key] = value
+            else:
+                result[key] = value
+        return result
+
+    @staticmethod
+    def _collect_datamodel_paths(
+        dm_entry: Dict[str, Any], prefix: str, out: List[str]
+    ) -> None:
+        """Recursively extract JSON Pointer paths from a dataModel entry.
+
+        Handles both flat ``{key, valueString}`` entries and nested
+        ``{key, valueMap: [{key, valueString}]}`` (recursive maps).
+
+        Produces absolute paths like ``/booking/partySize`` so the
+        frontend converter can resolve them from the live DataModel.
+        """
+        key = dm_entry.get("key")
+        full_path = f"{prefix}/{key}" if key else prefix
+        if key and full_path not in out:
+            out.append(full_path)
+
+        value_map = dm_entry.get("valueMap")
+        if isinstance(value_map, list):
+            for child in value_map:
+                if isinstance(child, dict):
+                    AgUiEventEncoder._collect_datamodel_paths(child, full_path, out)
+
+        # Also traverse valueList if present
+        value_list = dm_entry.get("valueList")
+        if isinstance(value_list, list):
+            for i, child in enumerate(value_list):
+                if isinstance(child, dict):
+                    AgUiEventEncoder._collect_datamodel_paths(child, f"{full_path}/{i}", out)
+
+    def flush_final_answer_buffer(
+        self, subagent_run_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Force-emit any text still lingering in ``_final_answer_buffer``.
+
+        Called **once** in ``run.py``'s ``finally`` block before draining open
+        messages and emitting ``RUN_FINISHED``.  If the buffer ends with an
+        incomplete ``<a2ui-json>`` tag (model got cut off mid-tag), we still
+        emit the accumulated text up to that point as plain text, then drop
+        the unclosed tag — better to lose one malformed operation than to
+        corrupt the AG-UI state machine by hanging RUN_FINISHED.
+        """
+        events: List[Dict[str, Any]] = []
+        buf = self._final_answer_buffer
+        if not buf:
+            return events
+
+        close_idx = buf.find(self._A2UI_CLOSE)
+        if close_idx == -1:
+            # No close tag at all — emit everything as plain text
+            events.extend(self._encode_text_delta(buf, subagent_run_id))
+        else:
+            # Close tag exists somewhere; _encode_a2ui_tagged_text will find
+            # complete pairs and emit them properly.  Just re-enter the
+            # normal flow by re-feeding "" (buffer is already accumulated).
+            events.extend(self._encode_a2ui_tagged_text("", subagent_run_id))
+
+        # Emit whatever is still left (trailing unclosed tag — plain text it)
+        if self._final_answer_buffer:
+            leftover = self._final_answer_buffer
+            self._final_answer_buffer = ""
+            events.extend(self._encode_text_delta(leftover, subagent_run_id))
         return events
 
     def _encode_reasoning_delta(
@@ -437,7 +1117,7 @@ class AgUiEventEncoder:
         return {
             "type": AGUI_SUBAGENT_STARTED,
             "subagentRunId": subagent_run_id,
-            "subagentName": str(agent_name),
+            "name": str(agent_name),
             "timestamp": _ts_ms(),
         }
 
@@ -447,7 +1127,7 @@ class AgUiEventEncoder:
         return {
             "type": AGUI_SUBAGENT_FINISHED,
             "subagentRunId": subagent_run_id or _gen_id("subrun"),
-            "status": "success",
+            "outcome": {"type": "success"},
             "timestamp": _ts_ms(),
         }
 
@@ -476,7 +1156,7 @@ class AgUiEventEncoder:
         self._current_step_msg_id = _gen_id("step")
         event: Dict[str, Any] = {
             "type": AGUI_STEP_STARTED,
-            "stepId": self._current_step_msg_id,
+            "stepName": self._current_step_msg_id,
             "timestamp": _ts_ms(),
         }
         if subagent_run_id:
@@ -486,59 +1166,164 @@ class AgUiEventEncoder:
     def _encode_activity_snapshot(
         self, content: Any, subagent_run_id: Optional[str]
     ) -> List[Dict[str, Any]]:
-        """A2UI chunk → AG-UI ACTIVITY_SNAPSHOT.
+        """A2UI / CARD chunk → AG-UI ACTIVITY_SNAPSHOT.
 
-        The backend A2UI layer already wraps Nexus A2UI output into
-        ``{"type": "ACTIVITY_SNAPSHOT", "messageId": "...", "activityType": "a2ui-surface",
-           "content": {"a2ui_operations": [...]}, ...}``.  We may receive either the
-        raw dict or a JSON string — normalise and forward.
+        Accepts three shapes and dispatches accordingly:
+
+        1. Already a full AG-UI ACTIVITY_SNAPSHOT dict (``type`` + ``activityType`` +
+           ``content.a2ui_operations`` emitted by the A2UI layer).  Forward as-is.
+        2. A raw Nexus A2UI surface payload dict (no wrapping).  Wrap into a
+           minimal ACTIVITY_SNAPSHOT so useAgUiRuntime picks it up.
+        3. Any other shape — treat as opaque Nexus card content and emit as
+           RAW so the frontend adapter can decide what to do with it.
         """
-        # content might be:
-        # 1. already a parsed AG-UI ACTIVITY_SNAPSHOT dict (from a2ui_to_agui)
-        # 2. a JSON string of the same dict
-        # 3. raw Nexus A2UI JSON (fallback — shouldn't happen after our a2ui_to_agui)
         if isinstance(content, str):
+            # Fallback: if the string contains <a2ui-json> tags, extract
+            # the inner JSON and use _encode_a2ui_json_content (which has
+            # the proven raw_decode + Nexus→AG-UI conversion pipeline).
+            if self._A2UI_OPEN in content:
+                open_idx = content.find(self._A2UI_OPEN)
+                close_idx = content.find(self._A2UI_CLOSE, open_idx + len(self._A2UI_OPEN))
+                if close_idx > open_idx:
+                    inner = content[open_idx + len(self._A2UI_OPEN):close_idx]
+                    print(f"[AgUiEncoder] _encode_activity_snapshot: detected <a2ui-json> tags in string, forwarding to _encode_a2ui_json_content, inner={len(inner)} chars", flush=True)
+                    return self._encode_a2ui_json_content(inner, subagent_run_id)
+
             try:
                 content = json.loads(content)
-            except (json.JSONDecodeError, TypeError):
-                # Not valid JSON — emit as custom
-                return [self._custom_event("a2ui_raw", content, subagent_run_id)]
+                print(f"[AgUiEncoder] _encode_activity_snapshot: JSON parsed, type={type(content).__name__}", flush=True)
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f"[AgUiEncoder] _encode_activity_snapshot: JSON parse FAILED → RAW, error={e}", flush=True)
+                # Plain string — emit as RAW
+                return [self._raw_event("card", content, subagent_run_id)]
 
         if not isinstance(content, dict):
-            return [self._custom_event("a2ui_unknown", str(content), subagent_run_id)]
+            return [self._raw_event("card", str(content), subagent_run_id)]
 
-        # If content.type is already ACTIVITY_SNAPSHOT, it's already AG-UI-shaped
+        # 1. Already AG-UI-shaped: {"type": "ACTIVITY_SNAPSHOT", ...}
         if content.get("type") == AGUI_ACTIVITY_SNAPSHOT:
-            event = dict(content)  # shallow copy
-            # Ensure timestamp is present
+            print(f"[AgUiEncoder] _encode_activity_snapshot: case 1 (ACTIVITY_SNAPSHOT), activityType={content.get('activityType')}", flush=True)
+            event = dict(content)
+            if "messageId" not in event:
+                event["messageId"] = _gen_id("a2ui")
             if "timestamp" not in event:
                 event["timestamp"] = _ts_ms()
+            if "replace" not in event:
+                event["replace"] = True
             if subagent_run_id and "subagentRunId" not in event:
                 event["subagentRunId"] = subagent_run_id
+
+            # Nexus→AG-UI op conversion + flatten: SDK may send ops with
+            # Nexus-format keys (beginRendering, surfaceUpdate) and nested
+            # component trees.  Run them through _convert_nexus_a2ui_op to
+            # ensure the frontend reducer gets proper AG-UI flat format.
+            ops = event.get("content", {}).get("a2ui_operations")
+            if isinstance(ops, list) and ops:
+                has_nexus_keys = any(
+                    any(k in op for k in self._NEXUS_TO_AGUI_OP if k not in ("createSurface", "updateComponents", "updateDataModel", "deleteSurface"))
+                    for op in ops if isinstance(op, dict)
+                )
+                has_nested_component = False
+                for op in ops:
+                    if not isinstance(op, dict):
+                        continue
+                    payload = next((op[k] for k in op if k != "version"), None)
+                    if isinstance(payload, dict):
+                        components = payload.get("components")
+                        if isinstance(components, list):
+                            for comp in components:
+                                if isinstance(comp, dict) and isinstance(comp.get("component"), dict):
+                                    has_nested_component = True
+                                    break
+
+                # Always run P2 — SDK sends AG-UI flat ops (has_nexus_keys=False,
+                # has_nested_component=False) but Button actions still need
+                # context auto-completion.  Only run Nexus conversion if needed.
+                if has_nexus_keys or has_nested_component:
+                    print(f"[AgUiEncoder] _encode_activity_snapshot: converting Nexus-format ops (has_nexus_keys={has_nexus_keys}, has_nested_component={has_nested_component})", flush=True)
+                    ops = [
+                        self._convert_nexus_a2ui_op(op) for op in ops
+                    ]
+
+                # P2: Auto-complete Button action context from dataModel
+                event["content"]["a2ui_operations"] = self._ensure_button_action_context(ops)
+
             return [event]
 
-        # Otherwise treat as unknown A2UI payload
-        return [self._custom_event("a2ui_unwrapped", content, subagent_run_id)]
+        # 2. Raw A2UI surface payload — wrap into ACTIVITY_SNAPSHOT
+        #    Heuristic: has "a2ui_operations" or looks like a surface payload
+        has_ops = "a2ui_operations" in content
+        has_surface = any(
+            k in content
+            for k in ("surfaceId", "createSurface", "updateComponents", "updateDataModel")
+        )
+        if has_ops or has_surface:
+            wrapped = {
+                "type": AGUI_ACTIVITY_SNAPSHOT,
+                "messageId": content.get("messageId") or _gen_id("a2ui"),
+                "activityType": "a2ui-surface",
+                "replace": True,
+                "content": (
+                    {"a2ui_operations": content["a2ui_operations"]}
+                    if has_ops
+                    else {"a2ui_operations": [content]}
+                ),
+                "timestamp": _ts_ms(),
+            }
+            if subagent_run_id:
+                wrapped["subagentRunId"] = subagent_run_id
+            return [wrapped]
+
+        # 3. Nexus custom card — emit as RAW so frontend adapter handles it
+        return [self._raw_event("card", content, subagent_run_id)]
 
     def _state_delta_event(
         self, state_key: str, content: Any, subagent_run_id: Optional[str]
     ) -> Dict[str, Any]:
+        """AG-UI STATE_DELTA requires ``delta`` to be an array of patches.
+        We wrap our Nexus {key: value} object as a single-element array
+        so the schema validates cleanly."""
         return {
             "type": AGUI_STATE_DELTA,
-            "messageId": _gen_id("state"),
-            "delta": {state_key: content},
+            "delta": [{state_key: content}],
             "timestamp": _ts_ms(),
             **({"subagentRunId": subagent_run_id} if subagent_run_id else {}),
         }
 
+    def _raw_event(
+        self, source: str, content: Any, subagent_run_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """Emit a ``RAW`` AG-UI event — the standard way to carry opaque
+        domain-specific payloads that the runtime does not interpret natively.
+
+        ``RAW`` carries ``event`` (the opaque payload) and optional ``source``
+        (a string tag so middleware / frontend code can route it).  This
+        replaces the previous ``CUSTOM`` emission which used wrong field
+        names (``source``/``event`` instead of the official ``name``/``value``).
+        """
+        event: Dict[str, Any] = {
+            "type": AGUI_RAW,
+            "event": content,
+            "source": source,
+            "timestamp": _ts_ms(),
+        }
+        if subagent_run_id:
+            event["subagentRunId"] = subagent_run_id
+        return event
+
+    # Legacy fallback — only used for truly unknown A2UI payloads
     def _custom_event(
         self, source: str, content: Any, subagent_run_id: Optional[str]
     ) -> Dict[str, Any]:
-        """Generic fallback for ProcessTypes without a first-class AG-UI mapping."""
+        """Legacy ``CUSTOM`` event emitter kept for backward compatibility.
+
+        Prefer :meth:`_raw_event` for new code — it produces a well-formed
+        AG-UI ``RAW`` event that the runtime can pass through to subscribers.
+        """
         return {
             "type": AGUI_CUSTOM,
-            "source": source,
-            "event": content,
+            "name": source,
+            "value": content,
             "timestamp": _ts_ms(),
             **({"subagentRunId": subagent_run_id} if subagent_run_id else {}),
         }

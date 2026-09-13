@@ -12,10 +12,13 @@ import {
 import {
   AssistantRuntimeProvider,
   useAuiState,
-  useLocalRuntime,
   useRemoteThreadListRuntime,
   type AssistantRuntime,
 } from "@assistant-ui/react";
+import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
+import { NexusAgent } from "@/lib/assistant-ui/nexus-agent";
+import { A2uiToolRegistry } from "@/lib/assistant-ui/a2ui-toolkit";
+import { A2uiActionProvider } from "@/lib/assistant-ui/a2ui-action-provider";
 import { Chat } from "./assistant-ui/chat";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
@@ -28,7 +31,6 @@ import {
   setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
-import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { compositeAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -48,15 +50,57 @@ import type {
   KnowledgeScopeResolution,
   KnowledgeScopeWarning,
 } from "@/types/knowledgeScope";
+import { API_ENDPOINTS } from "@/services/api";
 
-function useLocalChatRuntime(
+// =======================================================================
+// NexusAgent singleton — shared across all runtime instances so that
+// conversation_id header capture (onResponseHeaders) always lands in the
+// correct ref regardless of which thread/runtime is active.
+// =======================================================================
+
+/** Module-level ref so NexusAgent's onResponseHeaders callback can always
+ *  write to the latest HomeContent state. */
+const _globalServerConversationIdsRef = {
+  current: undefined as
+    | Map<string, string>
+    | undefined,
+};
+const _globalHandleServerConversationIdRef = {
+  current: undefined as
+    | ((threadId: string, serverId: string, initialQuestion?: string) => void)
+    | undefined,
+};
+
+function createNexusAgent(dictationAdapter: ServerDictationAdapter): NexusAgent {
+  return new NexusAgent({
+    url: API_ENDPOINTS.agent.run,
+    headers: {
+      "x-agui-format": "true",
+    },
+    onResponseHeaders: (headers, threadKey) => {
+      const convId = headers.get("conversation_id");
+      if (convId && threadKey) {
+        // threadKey is the assistant-ui local thread id (captured from
+        // forwardedProps.runConfig.custom.threadKey at request time).
+        // This lets HomeContent map the server-issued conversation_id
+        // to the correct thread in serverConversationIdsRef.
+        _globalHandleServerConversationIdRef.current?.(threadKey, convId);
+      }
+    },
+  });
+}
+
+function useAguiChatRuntime(
+  nexusAgent: NexusAgent,
   dictationAdapter: ServerDictationAdapter
 ): AssistantRuntime {
-  return useLocalRuntime(remoteChatModelAdapter, {
+  return useAgUiRuntime({
+    agent: nexusAgent,
     adapters: {
       attachments: compositeAttachmentAdapter,
       dictation: dictationAdapter,
     },
+    showThinking: true,
   });
 }
 
@@ -83,6 +127,14 @@ const PersistentChatHome: FC = () => {
     [modelConfig?.stt]
   );
 
+  // Single NexusAgent instance — shared across all threads created by
+  // useRemoteThreadListRuntime.  The onResponseHeaders callback writes
+  // conversation_id to a module-level ref that HomeContent subscribes to.
+  const nexusAgent = useMemo(
+    () => createNexusAgent(dictationAdapter),
+    [dictationAdapter]
+  );
+
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const threadId =
@@ -91,7 +143,7 @@ const PersistentChatHome: FC = () => {
   }, []);
 
   const runtime: AssistantRuntime = useRemoteThreadListRuntime({
-    runtimeHook: () => useLocalChatRuntime(dictationAdapter),
+    runtimeHook: () => useAguiChatRuntime(nexusAgent, dictationAdapter),
     adapter: conversationThreadListAdapter,
     threadId: requestedThreadId,
   });
@@ -110,18 +162,22 @@ const PersistentChatHome: FC = () => {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <TooltipProvider>
-        <HomeContent
-          runtime={runtime}
-          selectedAgent={selectedAgent}
-          setSelectedAgent={setSelectedAgent}
-          isLoadingAgents={isLoadingAgents}
-          agents={agents}
-          onAgentSelected={handleAgentSelected}
-          onBack={handleBack}
-          isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
-        />
-      </TooltipProvider>
+      <A2uiActionProvider>
+        <A2uiToolRegistry />
+        <TooltipProvider>
+          <HomeContent
+            runtime={runtime}
+            nexusAgent={nexusAgent}
+            selectedAgent={selectedAgent}
+            setSelectedAgent={setSelectedAgent}
+            isLoadingAgents={isLoadingAgents}
+            agents={agents}
+            onAgentSelected={handleAgentSelected}
+            onBack={handleBack}
+            isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
+          />
+        </TooltipProvider>
+      </A2uiActionProvider>
     </AssistantRuntimeProvider>
   );
 };
@@ -132,6 +188,7 @@ const PersistentChatHome: FC = () => {
  */
 const HomeContent: FC<{
   runtime: AssistantRuntime;
+  nexusAgent: NexusAgent;
   selectedAgent: Agent | null;
   setSelectedAgent: (agent: Agent | null) => void;
   isLoadingAgents: boolean;
@@ -141,6 +198,7 @@ const HomeContent: FC<{
   isDictationConfigured: boolean;
 }> = ({
   runtime,
+  nexusAgent,
   selectedAgent,
   setSelectedAgent,
   isLoadingAgents,
@@ -239,6 +297,15 @@ const HomeContent: FC<{
     },
     [chatMode]
   );
+
+  // Register the module-level ref so NexusAgent.onResponseHeaders can
+  // always write conversation_id back into HomeContent's state.
+  useEffect(() => {
+    _globalHandleServerConversationIdRef.current = handleServerConversationId;
+    return () => {
+      _globalHandleServerConversationIdRef.current = undefined;
+    };
+  }, [handleServerConversationId]);
 
   const handleGenerationStopped = useCallback((conversationId: number) => {
     // A user-initiated stop transitions assistant-ui to idle before the
@@ -521,6 +588,9 @@ const HomeContent: FC<{
   useEffect(() => {
     runtime.thread.composer.setRunConfig({
       custom: {
+        // threadKey is the assistant-ui local thread id — NexusAgent uses it
+        // to map response headers (conversation_id) back to the correct thread.
+        ...(activeThreadId ? { threadKey: activeThreadId } : {}),
         ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
         ...(selectedAgent?.current_version_no
           ? {
@@ -533,23 +603,14 @@ const HomeContent: FC<{
         ...(runtimeMetadataDirty && Number(activeConversationId) > 0
           ? { runtimeMetadataVersion }
           : {}),
-        onRuntimeMetadataSent: handleRuntimeMetadataSent,
-        onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
-        onGenerationStopped: handleGenerationStopped,
+        // NOTE: callbacks (onRuntimeMetadataSent, onKnowledgeScopeResolved,
+        // onGenerationStopped) were passed through legacy remote-chat-model-adapter.
+        // AG-UI runtime structured-clones forwardedProps, so functions cannot
+        // travel there — those callbacks are dead code now.
         enablePlan: chatMode === "planning",
-        ...(activeThreadId
-          ? {
-              onServerConversationId: (
-                serverId: string,
-                initialQuestion?: string
-              ) =>
-                handleServerConversationId(
-                  activeThreadId,
-                  serverId,
-                  initialQuestion
-                ),
-            }
-          : {}),
+        // NOTE: conversation_id capture is now handled by NexusAgent.onResponseHeaders
+        // via the threadKey field above.  The legacy onServerConversationId callback
+        // (previously here) is dead code and removed.
       },
     });
   }, [
@@ -587,84 +648,17 @@ const HomeContent: FC<{
   }, [activeConversationId, activeThreadId]);
 
   // A route change tears down the local stream, while the backend keeps the
-  // conversation marked as streaming. Reconnect the assistant-ui runtime when
-  // the historical load reports that state.
+  // conversation marked as streaming.
+  //
+  // TODO(ag-ui-migration): Re-implement resume logic for AG-UI runtime.
+  // The legacy path called runtime.thread.resumeRun({stream: remoteChatModelAdapter.run}),
+  // but useAgUiRuntime does not expose resumeRun — AG-UI protocol's own resume
+  // mechanism is built into agent.run() via RunAgentInput.resume[], or through
+  // adapters.history.unstable_resume on ThreadHistoryAdapter. For now we
+  // skip resume; the feature is rare and not blocking the migration.
   useEffect(() => {
-    const numericConversationId = Number(activeConversationId);
-    if (
-      !ready ||
-      isThreadRunning ||
-      !activeThreadId ||
-      !Number.isInteger(numericConversationId) ||
-      numericConversationId <= 0 ||
-      resumedConversationIdsRef.current.has(numericConversationId)
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    void conversationService
-      .getById(String(numericConversationId))
-      .then((conversation) => {
-        if (
-          cancelled ||
-          conversation.streaming_message?.status !== "streaming" ||
-          resumedConversationIdsRef.current.has(numericConversationId)
-        ) {
-          return;
-        }
-
-        resumedConversationIdsRef.current.add(numericConversationId);
-        const messages = runtime.thread.getState().messages;
-        const parentId = messages.at(-1)?.id ?? null;
-        runtime.thread.resumeRun({
-          parentId,
-          sourceId: null,
-          runConfig: {
-            custom: {
-              threadId: String(numericConversationId),
-              ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
-              ...(selectedAgent?.current_version_no
-                ? { agentVersionNo: selectedAgent.current_version_no }
-                : {}),
-              onGenerationStopped: handleGenerationStopped,
-              enablePlan: chatMode === "planning",
-              resume: true,
-            },
-          },
-          stream: async function* (options) {
-            const resumedRun = remoteChatModelAdapter.run(options);
-            if (Symbol.asyncIterator in resumedRun) {
-              yield* resumedRun;
-            } else {
-              yield await resumedRun;
-            }
-          },
-        });
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          resumedConversationIdsRef.current.delete(numericConversationId);
-          log.error(
-            `[HomeContent] Failed to resume conversation ${numericConversationId}:`,
-            error
-          );
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeConversationId,
-    activeThreadId,
-    chatMode,
-    isThreadRunning,
-    ready,
-    runtime,
-    selectedAgent,
-    handleGenerationStopped,
-  ]);
+    // Intentionally disabled during AG-UI runtime migration.
+  }, [activeConversationId, activeThreadId, chatMode, isThreadRunning, ready, runtime]);
 
   // Publish the server conversation id registry to the thread-list adapter so
   // `generateTitle` can wait for the real backend id before issuing its

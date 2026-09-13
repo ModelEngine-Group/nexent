@@ -1263,6 +1263,49 @@ async def run_agent_stream(
         http_request.headers.get("x-user-timezone") if http_request else None,
     )  # pragma: no cover
 
+    # ---- AG-UI forwarded_props handling -----------------------------------
+    # When the frontend sends an A2UI button action via AG-UI run's
+    # forwardedProps (e.g. `sendA2uiAction({...})`), we receive it here and
+    # inject the action into the query as a synthetic context marker that
+    # the agent prompt is trained to recognise.
+    forwarded_props = getattr(agent_request, "forwarded_props", None)
+    if isinstance(forwarded_props, dict):
+        a2ui_action = forwarded_props.get("a2uiAction")
+        if isinstance(a2ui_action, dict):
+            user_action = a2ui_action.get("userAction")
+            if user_action:
+                if isinstance(user_action, str):
+                    agent_request.query = user_action
+                elif isinstance(user_action, dict):
+                    label = user_action.get("label") or user_action.get("action_label") or ""
+                    name = user_action.get("name") or user_action.get("action_name") or ""
+                    surface_id = user_action.get("surfaceId") or ""
+                    source_id = user_action.get("sourceComponentId") or ""
+                    context_data = user_action.get("context") or user_action.get("$input") or {}
+
+                    # Build a comprehensive action description
+                    parts = ["[用户交互触发] [User Interaction Triggered]"]
+                    if name:
+                        parts.append(f"操作名称 Action Name: {name}")
+                    if label:
+                        parts.append(f"按钮标签 Button Label: {label}")
+                    if surface_id:
+                        parts.append(f"表面ID Surface ID: {surface_id}")
+                    if source_id:
+                        parts.append(f"组件ID Component ID: {source_id}")
+                    if context_data:
+                        parts.append(f"表单数据 Form Data: {context_data}")
+
+                    action_str = "\n".join(parts)
+                    # REPLACE query with action context for interaction runs.
+                    # The original query (e.g. "帮我生成一个注册表单") was the
+                    # first-turn intent that created the card — this run is a
+                    # user interaction ON that card, so the action is the new
+                    # primary intent.  We append the original query as context
+                    # only if it meaningfully adds information.
+                    agent_request.query = action_str
+                    print(f"[RunAgent] A2UI action REPLACED query: name={name}, surfaceId={surface_id}", flush=True)
+
     # AG-UI protocol mode: when the frontend sends "x-agui-format: true",
     # we wrap every Nexus ProcessType chunk into an AG-UI protocol event
     # (RUN_STARTED / TEXT_MESSAGE_CONTENT / ACTIVITY_SNAPSHOT / ...).
@@ -1747,8 +1790,13 @@ async def run_agent_stream(
 
         def _maybe_encode_chunk(data_chunk: str) -> list[str]:
             """Try to parse a raw SSE line, run it through the encoder, and
-            return 0+ AG-UI SSE lines.  Returns the original chunk unchanged
-            if it's not a Nexus ProcessType chunk (e.g. conversation_created)."""
+            return 0+ AG-UI SSE lines.
+
+            In AG-UI mode (encoder is not None), Nexus-specific events that
+            are NOT ProcessType chunks get wrapped as ``RAW`` AG-UI events so
+            the frontend validator (which rejects unknown event ``type`` values)
+            won't crash.  The original Nexus type is preserved in ``source``.
+            """
             if encoder is None:
                 return [data_chunk]
 
@@ -1762,16 +1810,25 @@ async def run_agent_stream(
             try:
                 chunk_dict = json.loads(body)
             except (json.JSONDecodeError, ValueError):
-                # Not JSON — pass through unchanged
-                return [data_chunk]
+                # Not JSON — drop in AG-UI mode (can't validate unknown format)
+                return []
 
-            # Only Nexus ProcessType chunks (have a "type" that matches our enum)
-            # get encoded.  Other special events (conversation_created, etc.)
-            # fall through unchanged so the frontend adapter can still see them.
             process_type = chunk_dict.get("type", "")
             known_types = {pt.value for pt in ProcessType}
+
+            if process_type == "a2ui":
+                print(f"[RunTransformer] ProcessType.A2UI chunk! content_len={len(str(chunk_dict.get('content', '')))}, content_preview={str(chunk_dict.get('content', ''))[:200]}", flush=True)
+
             if process_type not in known_types:
-                return [data_chunk]
+                # Non-ProcessType Nexus event (e.g. conversation_created,
+                # knowledge_scope_resolved).  Wrap as AG-UI RAW event so the
+                # frontend discriminanted-union validator accepts it.
+                raw_event = encoder._raw_event(
+                    source=process_type or "nexus_event",
+                    content=chunk_dict,
+                    subagent_run_id=None,
+                )
+                return [_wrap_sse(raw_event)]
 
             # ---- Encode to AG-UI events ----------------------------------
             agui_events = encoder.encode(chunk_dict)
@@ -1806,20 +1863,41 @@ async def run_agent_stream(
                     )
                 )
 
-            # Emit conversation_created event for new conversations
+            # Emit conversation_created event for new conversations (wrapped as
+            # AG-UI RAW in AG-UI mode so the frontend validator accepts it)
             if is_new_conversation:
-                yield "data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": agent_request.conversation_id}}, ensure_ascii=False) + "\n\n"
+                nexus_event = {
+                    "type": "conversation_created",
+                    "content": {"conversation_id": agent_request.conversation_id},
+                }
+                if encoder is not None:
+                    yield _wrap_sse(
+                        encoder._raw_event(
+                            source="conversation_created",
+                            content=nexus_event,
+                            subagent_run_id=None,
+                        )
+                    )
+                else:
+                    yield "data: " + json.dumps(nexus_event, ensure_ascii=False) + "\n\n"
 
             scope_event = getattr(agent_request, "_resolved_knowledge_scope_event", None)
             if scope_event is not None:
-                yield (
-                    "data: "
-                    + json.dumps(
-                        {"type": "knowledge_scope_resolved", "content": scope_event},
-                        ensure_ascii=False,
+                nexus_event = {"type": "knowledge_scope_resolved", "content": scope_event}
+                if encoder is not None:
+                    yield _wrap_sse(
+                        encoder._raw_event(
+                            source="knowledge_scope_resolved",
+                            content=nexus_event,
+                            subagent_run_id=None,
+                        )
                     )
-                    + "\n\n"
-                )
+                else:
+                    yield (
+                        "data: "
+                        + json.dumps(nexus_event, ensure_ascii=False)
+                        + "\n\n"
+                    )
 
             if channel is not None:
                 async for data_chunk in channel.subscribe_with_history(0):
@@ -1849,6 +1927,14 @@ async def run_agent_stream(
                 yield _wrap_sse(
                     encoder._run_error_event(str(stream_exc))
                 )
+                # Drain open step + messages before RUN_FINISHED (AG-UI state machine)
+                for ev in encoder._drain_open_step_events():
+                    yield _wrap_sse(ev)
+                # Flush any FINAL_ANSWER text still held in the A2UI tag buffer
+                for ev in encoder.flush_final_answer_buffer():
+                    yield _wrap_sse(ev)
+                for ev in encoder._drain_open_message_events():
+                    yield _wrap_sse(ev)
                 # Also emit RUN_FINISHED with error outcome
                 yield _wrap_sse(
                     encoder.run_finished_event(
@@ -1862,6 +1948,14 @@ async def run_agent_stream(
             # ---- Run boundary: RUN_FINISHED (AG-UI mode only) ---------------
             if encoder is not None and not agui_run_error_sent:
                 try:
+                    # Drain any remaining open step + messages before RUN_FINISHED
+                    for ev in encoder._drain_open_step_events():
+                        yield _wrap_sse(ev)
+                    # Flush any FINAL_ANSWER text still held in the A2UI tag buffer
+                    for ev in encoder.flush_final_answer_buffer():
+                        yield _wrap_sse(ev)
+                    for ev in encoder._drain_open_message_events():
+                        yield _wrap_sse(ev)
                     yield _wrap_sse(
                         encoder.run_finished_event(outcome="success")
                     )

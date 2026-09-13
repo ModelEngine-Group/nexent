@@ -1,11 +1,9 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useMemo } from "react";
-import {
-  AssistantRuntimeProvider,
-  useLocalRuntime,
-  type ChatModelAdapter,
-} from "@assistant-ui/react";
+import { forwardRef, useImperativeHandle, useMemo, useState, useEffect } from "react";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
+import { NexusAgent, type NexusRunConfig } from "@/lib/assistant-ui/nexus-agent";
 import { useTranslation } from "react-i18next";
 import {
   MessageSquareIcon,
@@ -19,12 +17,13 @@ import type { Agent } from "@/types/agentConfig";
 import { compositeAttachmentAdapter } from "../adapter/attachment-adapter";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "../adapter/server-dictation-adapter";
-import {
-  remoteChatModelAdapter,
-  type Nl2AgentStateEvent,
-} from "../adapter/remote-chat-model-adapter";
 import { Chat } from "./chat";
 import type { WelcomeSuggestion } from "./thread";
+import { getAuthHeaders } from "@/lib/auth";
+import { API_ENDPOINTS } from "@/services/api";
+
+// Register nl2agent endpoint URL with NexusAgent
+NexusAgent.registerEndpoint("nl2agent", API_ENDPOINTS.agent.nl2agentRun);
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -40,7 +39,7 @@ export interface Nl2AgentChatPanelProps {
   agentId?: number | null;
   disabled?: boolean;
   showOptimizationSuggestions?: boolean;
-  onStateEvent?: (event: Nl2AgentStateEvent) => void;
+  onStateEvent?: (event: unknown) => void;
   onStopped?: (agentId: number) => void;
 }
 
@@ -63,6 +62,34 @@ export const Nl2AgentChatPanel = forwardRef<
 ) {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
+
+  // ---- NexusAgent: memoized with nl2agent endpoint -------------------------
+  const nexusAgent = useMemo(
+    () =>
+      new NexusAgent({
+        url: API_ENDPOINTS.agent.nl2agentRun,
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json",
+          "x-agui-format": "true",
+        },
+      }),
+    []
+  );
+
+  // ---- runConfig ----------------------------------------------------------
+  const [runConfig, setRunConfig] = useState<NexusRunConfig>({
+    agent_id: agentId ?? undefined,
+    runtime_mode: "nl2agent",
+  });
+
+  useEffect(() => {
+    nexusAgent.setRunConfig({
+      agent_id: agentId ?? undefined,
+      runtime_mode: "nl2agent",
+    });
+  }, [nexusAgent, agentId]);
+
   const adapters = useMemo(
     () => ({
       attachments: compositeAttachmentAdapter,
@@ -70,26 +97,15 @@ export const Nl2AgentChatPanel = forwardRef<
     }),
     [modelConfig?.stt]
   );
-  const chatModelAdapter = useMemo<ChatModelAdapter>(
-    () => ({
-      run(options) {
-        return remoteChatModelAdapter.run({
-          ...options,
-          runConfig: {
-            custom: {
-              ...options.runConfig?.custom,
-              runtimeMode: "nl2agent",
-              agentId,
-              onNl2AgentState: onStateEvent,
-              onNl2AgentStopped: onStopped,
-            },
-          },
-        });
-      },
-    }),
-    [agentId, onStateEvent, onStopped]
-  );
-  const runtime = useLocalRuntime(chatModelAdapter, { adapters });
+
+  // ---- useAgUiRuntime -----------------------------------------------------
+  const runtime = useAgUiRuntime({
+    agent: nexusAgent,
+    adapters,
+    showThinking: true,
+    onError: (e) => console.error("[NL2Agent] AG-UI runtime error:", e),
+  });
+
   useImperativeHandle(
     ref,
     () => ({

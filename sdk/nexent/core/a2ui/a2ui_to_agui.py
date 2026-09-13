@@ -65,39 +65,52 @@ def _strip_tags(text: str) -> str:
 def parse_a2ui_content(content: str) -> list[dict[str, Any]] | None:
     """Parse raw content (text, tagged block, JSON, or JSONL) into A2UI messages.
 
+    Supports JSONL, multi-line JSON objects, JSON array, and single JSON object.
+    Uses json.JSONDecoder().raw_decode() for robust multi-object extraction,
+    matching the strategy used by the validator so both paths give the same result.
+
     Returns None when content is not parseable A2UI at all.
     """
     text = _strip_tags(content) if content else ""
     if not text:
         return None
 
-    # Try JSON array
+    # 1. Try raw_decode for multiple concatenated JSON objects (most common for A2UI)
+    decoder = json.JSONDecoder()
+    messages: list[dict[str, Any]] = []
+    idx = 0
+    text_len = len(text)
+
+    while idx < text_len:
+        while idx < text_len and text[idx] in " \t\n\r":
+            idx += 1
+        if idx >= text_len:
+            break
+        try:
+            obj, end_idx = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            break
+        if isinstance(obj, dict) and A2UI_MESSAGE_KEYS.intersection(obj):
+            messages.append(obj)
+        elif isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, dict) and A2UI_MESSAGE_KEYS.intersection(item):
+                    messages.append(item)
+        idx = end_idx
+
+    if messages:
+        return messages
+
+    # 2. Fallback: try single JSON object or array
     try:
         data = json.loads(text)
-        if isinstance(data, list) and all(
-            isinstance(item, dict) and A2UI_MESSAGE_KEYS.intersection(item)
-            for item in data
-        ):
-            return data
-        if isinstance(data, dict) and A2UI_MESSAGE_KEYS.intersection(data):
-            return [data]
     except json.JSONDecodeError:
-        pass
+        return None
 
-    # Try JSONL
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    if lines and all(l.startswith("{") and l.endswith("}") for l in lines):
-        messages: list[dict[str, Any]] = []
-        try:
-            for line in lines:
-                parsed = json.loads(line)
-                if not isinstance(parsed, dict) or not A2UI_MESSAGE_KEYS.intersection(parsed):
-                    return None
-                messages.append(parsed)
-            return messages
-        except json.JSONDecodeError:
-            return None
-
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict) and A2UI_MESSAGE_KEYS.intersection(item)] or None
+    if isinstance(data, dict) and A2UI_MESSAGE_KEYS.intersection(data):
+        return [data]
     return None
 
 
@@ -183,21 +196,25 @@ def wrap_as_activity_snapshot(content: str) -> dict[str, Any] | None:
     The returned dict is ready for JSON serialization as an SSE ``data:`` line.
     """
     messages = parse_a2ui_content(content)
+    print(f"[wrap_as_activity_snapshot] parse_a2ui_content → messages={len(messages) if messages else None}, content_preview={content[:100]}", flush=True)
     if messages is None:
         return None
 
     operations = a2ui_messages_to_operations(messages)
+    print(f"[wrap_as_activity_snapshot] a2ui_messages_to_operations → ops_count={len(operations)}", flush=True)
     if not operations:
         return None
 
     surface_id = extract_surface_id(operations)
-    return {
+    result = {
         "type": "ACTIVITY_SNAPSHOT",
         "messageId": f"a2ui-surface-call_{surface_id}",
         "activityType": "a2ui-surface",
         "replace": True,
         "content": {"a2ui_operations": operations},
     }
+    print(f"[wrap_as_activity_snapshot] returning snapshot with surface_id={surface_id}", flush=True)
+    return result
 
 
 def is_activity_snapshot(obj: Any) -> bool:

@@ -1,4 +1,8 @@
 import { BASE_PATH } from "./base-path.mjs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let userConfig = undefined
 try {
@@ -30,6 +34,14 @@ const nextConfig = {
   outputFileTracingRoot: process.cwd(),
   webpack: (config) => {
     config.resolve.alias.canvas = false;
+    // Resolve AG-UI packages from .pnpm store using absolute paths,
+    // because pnpm's isolated node_modules doesn't hoist them to the top level.
+    const pnpmRoot = `${__dirname}/node_modules/.pnpm`;
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "@ag-ui/client": `${pnpmRoot}/@ag-ui+client@0.0.59/node_modules/@ag-ui/client`,
+      "@ag-ui/core": `${pnpmRoot}/@ag-ui+client@0.0.59/node_modules/@ag-ui/core`,
+    };
     return config;
   },
 }

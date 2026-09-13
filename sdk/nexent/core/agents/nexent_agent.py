@@ -1193,6 +1193,7 @@ class NexentAgent:
                     if is_a2ui_enabled() and should_finalize_a2ui_content(final_answer_str):
                         try:
                             a2ui_validation = validate_a2ui_response(final_answer_str)
+                            print(f"[SDK-A2UI] validation.valid={a2ui_validation.valid}, error={a2ui_validation.error if not a2ui_validation.valid else None}", flush=True)
                             if a2ui_validation.valid:
                                 # Wrap A2UI content as AG-UI ACTIVITY_SNAPSHOT for
                                 # assistant-ui's JSONGenerativeUI on the frontend.
@@ -1203,11 +1204,17 @@ class NexentAgent:
                                     snapshot if snapshot is not None else final_answer_str,
                                     ensure_ascii=False,
                                 )
+                                print(f"[SDK-A2UI] snapshot.type={snapshot.get('type') if snapshot else None}, activityType={snapshot.get('activityType') if snapshot else None}, ops_count={len(snapshot.get('content', {}).get('a2ui_operations', [])) if snapshot else 0}", flush=True)
                                 observer.add_message(
                                     self.agent.agent_name,
                                     ProcessType.A2UI,
                                     a2ui_payload,
                                 )
+                                print(f"[SDK-A2UI] sent ProcessType.A2UI payload={len(a2ui_payload)} chars", flush=True)
+                                # Strip <a2ui-json> tags from FINAL_ANSWER text —
+                                # A2UI was already sent natively via ProcessType.A2UI.
+                                final_answer_str = strip_tagged_a2ui_blocks(final_answer_str)
+                                print(f"[SDK-A2UI] FINAL_ANSWER stripped, remaining={len(final_answer_str)} chars", flush=True)
                             else:
                                 # Validation failed - degrade by stripping A2UI tags
                                 stripped = strip_tagged_a2ui_blocks(final_answer_str)

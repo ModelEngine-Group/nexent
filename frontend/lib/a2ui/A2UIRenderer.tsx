@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React, { useMemo, useState, useCallback, createContext, useContext, useRef, useEffect } from 'react';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { parseA2UIMessage, type A2UIParseResult, type A2UIBlock } from './parser';
 import { A2UI_OPEN_TAG, A2UI_CLOSE_TAG } from './constants';
 
@@ -1012,6 +1012,9 @@ function A2UIChart(props: A2UIChartProps) {
     return extractChartData(dataMap, xAxis, series);
   }, [dataMap, xAxis, series]);
 
+  // eslint-disable-next-line no-console
+  console.warn("[A2UIChart]", { title, chartType, xAxis, seriesCount: series.length, chartDataLength: chartData.length, dataMapSize: dataMap?.size });
+
   return (
     <div className="a2ui-chart rounded-lg border border-border bg-card p-4">
       {title && <h4 className="text-sm font-semibold mb-3">{title}</h4>}
@@ -1032,16 +1035,19 @@ function A2UISimpleChart({ chartType, series, xAxis, chartData }: A2UISimpleChar
   const names = series.map((s) => (s.name as string) || (s.key as string) || 'Value');
   const dataKeys = series.map((s) => (s.key as string) || (s.name as string) || 'value');
 
+  // eslint-disable-next-line no-console
+  console.warn("[A2UISimpleChart]", { chartType, xAxis, seriesCount: series.length, chartDataLength: chartData.length, dataKeys });
+
   if (chartData.length === 0) {
     return (
-      <div className="text-sm text-muted-foreground text-center py-8">
+      <div className="text-sm text-muted-foreground text-center py-8 border border-dashed rounded-md">
         Chart data not available
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" style={{ width: '100%', minHeight: 320 }}>
       {/* Legend */}
       <div className="flex gap-4 mb-2">
         {series.map((s, i) => (
@@ -1054,10 +1060,10 @@ function A2UISimpleChart({ chartType, series, xAxis, chartData }: A2UISimpleChar
           </div>
         ))}
       </div>
-      {/* Chart */}
-      <ResponsiveContainer width="100%" height={300}>
+      {/* Chart — fixed height div + explicit recharts width/height to avoid ResponsiveContainer 0-size bug */}
+      <div style={{ width: '100%', height: 300, minWidth: 300 }}>
         {chartType === 'bar' ? (
-          <BarChart data={chartData}>
+          <BarChart data={chartData} width={undefined} height={300} layout="horizontal">
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey={xAxis} />
             <YAxis />
@@ -1068,7 +1074,7 @@ function A2UISimpleChart({ chartType, series, xAxis, chartData }: A2UISimpleChar
             ))}
           </BarChart>
         ) : chartType === 'pie' ? (
-          <PieChart>
+          <PieChart width={undefined} height={300}>
             <Pie
               data={chartData}
               dataKey={dataKeys[0]}
@@ -1086,7 +1092,7 @@ function A2UISimpleChart({ chartType, series, xAxis, chartData }: A2UISimpleChar
             <Legend />
           </PieChart>
         ) : (
-          <LineChart data={chartData}>
+          <LineChart data={chartData} width={undefined} height={300}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey={xAxis} />
             <YAxis />
@@ -1097,7 +1103,7 @@ function A2UISimpleChart({ chartType, series, xAxis, chartData }: A2UISimpleChar
             ))}
           </LineChart>
         )}
-      </ResponsiveContainer>
+      </div>
     </div>
   );
 }

@@ -819,6 +819,10 @@ class AgentRequest(BaseModel):
         ge=0,
         description="Optional optimistic-lock version for runtime metadata updates",
     )
+    forwarded_props: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="AG-UI forwarded props — opaque key-value pairs from the client runtime",
+    )
 
     @field_validator("context_policy")
     @classmethod

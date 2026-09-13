@@ -726,8 +726,17 @@ function normalizeAgUiChunk(raw: Record<string, unknown>): SseChunk | null {
     } as unknown as SseChunk;
   }
 
-  // ---- CUSTOM: map source → ProcessType-equivalent --------------------
+  // ---- CUSTOM: map name → ProcessType-equivalent (legacy encoder path) ---
   if (type === "CUSTOM") {
+    const name = (raw.name as string) || "";
+    return {
+      type: name,
+      content: raw.event,
+    } as unknown as SseChunk;
+  }
+
+  // ---- RAW: map source → ProcessType-equivalent (current encoder path) -
+  if (type === "RAW") {
     const source = (raw.source as string) || "";
     return {
       type: source,

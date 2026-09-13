@@ -42,17 +42,90 @@ import {
   type A2uiOperationResult,
 } from "@assistant-ui/react-generative-ui/a2ui";
 import {
+  createActionRegistry,
   defaultGenerativeUILibrary,
   renderGenerativeUI,
+  type ActionRegistry,
 } from "@assistant-ui/react-generative-ui";
+import { customLibrary } from "./a2ui-toolkit";
 
 // ---------------------------------------------------------------------------
-// Custom component preprocessor — maps A2UI components outside
-// convertSurfaceToUISpec's SUPPORTED_COMPONENTS set into compositions of
-// standard components (Text / Card / Column / Row / Button / TextField /
-// CheckBox / Divider / Image).  Runs on each operation's components array
-// **before** applyA2uiOperations, so the reducer + converter never see
-// unknown component names and produce zero warnings.
+// DataModel lookup — collected from updateDataModel operations BEFORE
+// preprocessComponents runs, so the Chart transformer can resolve Nexus
+// path bindings (xAxis: "quarter", series[].key → column in dataModel).
+// ---------------------------------------------------------------------------
+
+interface DataModelColumn {
+  /** columnName → array of values */
+  columns: Record<string, unknown[]>;
+  /** array of row objects */
+  rows: Record<string, unknown>[];
+}
+
+/** Module-level cache — set by preprocessOperations, read by Chart preprocess. */
+let _dataModelColumn: DataModelColumn | null = null;
+
+/**
+ * Walk every `updateDataModel` operation and build a column-oriented lookup.
+ * Nexus emits dataModel as a flat valueList where each row is a consecutive
+ * group of {key, value} entries. Row boundaries detected by first-key recurrence.
+ */
+function buildDataModelColumn(operations: unknown[]): DataModelColumn {
+  const columns: Record<string, unknown[]> = {};
+  const rows: Record<string, unknown>[] = [];
+
+  for (const op of operations) {
+    if (typeof op !== "object" || op === null) continue;
+    const contents = (op as Record<string, unknown>).updateDataModel
+      ?.contents;
+    if (!Array.isArray(contents)) continue;
+
+    for (const content of contents) {
+      const valueList = (content as Record<string, unknown>)
+        .valueList as Array<Record<string, unknown>> | undefined;
+      if (!Array.isArray(valueList) || valueList.length === 0) continue;
+
+      // Detect row structure: collect unique keys in order
+      const orderedKeys: string[] = [];
+      for (const item of valueList) {
+        const k = String(item.key ?? "");
+        if (k && !orderedKeys.includes(k)) orderedKeys.push(k);
+      }
+      if (orderedKeys.length === 0) continue;
+
+      let currentRow: Record<string, unknown> = {};
+      for (const item of valueList) {
+        const k = String(item.key ?? "");
+        if (!k) continue;
+        const v =
+          item.valueString !== undefined
+            ? item.valueString
+            : item.valueNumber !== undefined
+              ? item.valueNumber
+              : item.valueBoolean !== undefined
+                ? item.valueBoolean
+                : item.value;
+        // Row boundary: first key recurring
+        if (
+          k === orderedKeys[0] &&
+          Object.keys(currentRow).length > 0
+        ) {
+          rows.push(currentRow);
+          currentRow = {};
+        }
+        currentRow[k] = v;
+        if (!columns[k]) columns[k] = [];
+        columns[k].push(v);
+      }
+      if (Object.keys(currentRow).length > 0) rows.push(currentRow);
+    }
+  }
+
+  return { columns, rows };
+}
+
+// ---------------------------------------------------------------------------
+// Custom component preprocessor
 // ---------------------------------------------------------------------------
 
 const SUPPORTED_COMPONENTS = new Set([
@@ -277,14 +350,104 @@ function preprocessComponent(
       } as Record<string, unknown>;
     }
 
-    case "Table":
     case "Chart": {
-      // Table / Chart → Card with a markdown data table rendered as Text.
-      //  1. Chart: extract xAxis + series data points → markdown table
-      //  2. Table: use headers + rows → markdown table
-      const id = String((node.id as string) ?? `${component.toLowerCase()}-${nextId()}`);
-      const title = String((node.title as string) ?? (component === "Chart" ? "图表" : "表格"));
-      const markdownText = buildDataMarkdown(node, component);
+      // Nexus Chart props → assistant-ui Chart props.
+      // assistant-ui expects: { variant, data, series }
+      // Nexus model emits:     { chartType, xAxis: fieldName, series: [{key: fieldName, ...}] }
+      const props = (node.props as Record<string, unknown>) ?? {};
+
+      // Resolve a literalString binding or plain value
+      const resolveBinding = (v: unknown): unknown => {
+        if (
+          v !== null &&
+          typeof v === "object" &&
+          "literalString" in (v as Record<string, unknown>)
+        ) {
+          return (v as Record<string, unknown>).literalString;
+        }
+        return v;
+      };
+
+      const chartType = String(
+        resolveBinding(props.chartType ?? node.chartType) ?? "line"
+      );
+      // Map Nexus chartType → assistant-ui variant (same names mostly)
+      const variantMap: Record<string, string> = {
+        bar: "bar",
+        line: "line",
+        pie: "pie",
+        column: "bar",
+        area: "line",
+      };
+      const variant = variantMap[chartType] ?? chartType;
+
+      // Resolve data: prefer inline props.data, else build from dataModel
+      let data: unknown[] = [];
+      const inlineData = Array.isArray(props.data)
+        ? (props.data as unknown[])
+        : Array.isArray(node.chartData)
+          ? (node.chartData as unknown[])
+          : [];
+      if (inlineData.length > 0) {
+        data = inlineData;
+      } else if (_dataModelColumn) {
+        // Build from dataModel rows — map xAxis + series keys to columns
+        const rows = _dataModelColumn.rows;
+        const xAxisField =
+          typeof props.xAxis === "string" ? props.xAxis : undefined;
+        const seriesArr = Array.isArray(props.series)
+          ? (props.series as Array<Record<string, unknown>>)
+          : [];
+
+        if (xAxisField && rows.length > 0) {
+          data = rows.map((row) => {
+            // Pivot row: Nexus uses key→value; assistant-ui Chart needs column key→value
+            const out: Record<string, unknown> = {};
+            out[xAxisField] = row[xAxisField];
+            for (const s of seriesArr) {
+              const k = String(s.key ?? "");
+              if (k) out[k] = row[k];
+            }
+            return out;
+          });
+        } else {
+          // Fallback: use all dataModel rows as-is
+          data = rows;
+        }
+      }
+
+      // Strip raw props assistant-ui won't understand, keep data-friendly ones
+      const transformedProps: Record<string, unknown> = {
+        ...props,
+        variant,
+        data,
+      };
+      // Remove Nexus-specific props that would confuse assistant-ui
+      delete transformedProps.chartType;
+      delete transformedProps.xAxis;
+      // Keep series as-is — assistant-ui understands it
+
+      // eslint-disable-next-line no-console
+      console.warn("[Chart preprocess]", {
+        chartType,
+        variant,
+        seriesCount: Array.isArray(props.series) ? props.series.length : 0,
+        dataRows: data.length,
+      });
+
+      return { ...node, props: transformedProps };
+    }
+
+    case "Table": {
+      // Table → Card with a markdown data table rendered as Text.
+      const id = String((node.id as string) ?? `table-${nextId()}`);
+      const props = (node.props as Record<string, unknown>) ?? {};
+      const rawTitle = props.title ?? node.title;
+      const title =
+        typeof rawTitle === "object" && rawTitle !== null && "literalString" in rawTitle
+          ? String((rawTitle as Record<string, unknown>).literalString ?? "")
+          : String(rawTitle ?? "表格");
+      const markdownText = buildDataMarkdown(node, "Table");
       const contentId = `${id}-content`;
       return {
         id,
@@ -315,71 +478,46 @@ function preprocessComponent(
   }
 }
 
-/** Convert a Table or Chart node's structured data into a markdown table string. */
+/** Convert a Table node's structured data into a markdown table string. */
 function buildDataMarkdown(
   node: Record<string, unknown>,
-  kind: "Table" | "Chart"
+  _kind: "Table" | "Chart"
 ): string {
-  if (kind === "Table") {
-    const headers = Array.isArray(node.headers)
-      ? (node.headers as string[])
-      : [];
-    const rows = Array.isArray(node.rows)
-      ? (node.rows as Array<unknown[]>)
-      : [];
-    if (headers.length === 0 && rows.length === 0) {
-      return "_暂无数据_";
+  // AG-UI flat format: all visual properties live in node.props.
+  const props = (node.props as Record<string, unknown>) ?? {};
+
+  // Resolve a value that may be a literalString binding object or plain value
+  const resolveBinding = (v: unknown): unknown => {
+    if (
+      v !== null &&
+      typeof v === "object" &&
+      "literalString" in (v as Record<string, unknown>)
+    ) {
+      return (v as Record<string, unknown>).literalString;
     }
-    const esc = (v: unknown) => String(v).replace(/\|/g, "\\|");
-    const headerLine = headers.map(esc).join(" | ");
-    const sepLine = headers.map(() => "---").join(" | ");
-    const rowLines = rows.map((r) =>
-      (Array.isArray(r) ? r : [r]).map(esc).join(" | ")
-    );
-    return `\n| ${headerLine} |\n| ${sepLine} |\n${rowLines
-      .map((r) => `| ${r} |`)
-      .join("\n")}\n`;
-  }
+    return v;
+  };
 
-  // Chart
-  const chartType = String((node.chartType as string) ?? "");
-  const series = Array.isArray(node.series)
-    ? (node.series as Array<Record<string, unknown>>)
+  const headers = Array.isArray(props.headers)
+    ? (props.headers as string[])
+    : props.headers !== undefined
+      ? [String(resolveBinding(props.headers))]
+      : [];
+  const rows = Array.isArray(props.rows)
+    ? (props.rows as Array<unknown[]>)
     : [];
-  const xAxis = Array.isArray(node.xAxis)
-    ? (node.xAxis as unknown[])
-    : [];
-  const chartData = Array.isArray(node.chartData)
-    ? (node.chartData as Array<Record<string, unknown>>)
-    : [];
-
-  // chartData is the more direct format: [{key, value}] per data point
-  if (chartData.length > 0) {
-    const header = Object.keys(chartData[0]).join(" | ");
-    const sep = Object.keys(chartData[0]).map(() => "---").join(" | ");
-    const rows = chartData.map((d) => Object.values(d).join(" | "));
-    return `\n*${chartType}*\n| ${header} |\n| ${sep} |\n${rows
-      .map((r) => `| ${r} |`)
-      .join("\n")}\n`;
+  if (headers.length === 0 && rows.length === 0) {
+    return "_暂无数据_";
   }
-
-  if (series.length > 0 && xAxis.length > 0) {
-    const header = `时间 | ${series.map((s) => String(s.name ?? "series")).join(" | ")}`;
-    const sep = `--- | ${series.map(() => "---").join(" | ")}`;
-    const rows = xAxis.map((x, i) => {
-      const vals = series.map((s) => {
-        const data = Array.isArray(s.data) ? s.data : [];
-        const v = (data as unknown[])[i];
-        return v !== undefined ? String(v) : "-";
-      });
-      return `${String(x)} | ${vals.join(" | ")}`;
-    });
-    return `\n*${chartType || "chart"}*\n| ${header} |\n| ${sep} |\n${rows
-      .map((r) => `| ${r} |`)
-      .join("\n")}\n`;
-  }
-
-  return "_暂无数据_";
+  const esc = (v: unknown) => String(v).replace(/\|/g, "\\|");
+  const headerLine = headers.map(esc).join(" | ");
+  const sepLine = headers.map(() => "---").join(" | ");
+  const rowLines = rows.map((r) =>
+    (Array.isArray(r) ? r : [r]).map(esc).join(" | ")
+  );
+  return `\n| ${headerLine} |\n| ${sepLine} |\n${rowLines
+    .map((r) => `| ${r} |`)
+    .join("\n")}\n`;
 }
 
 /**
@@ -460,13 +598,23 @@ export function preprocessComponents(
 export function preprocessOperations(
   operations: unknown[]
 ): unknown[] {
-  return operations.map((op) => {
+  // eslint-disable-next-line no-console
+  console.warn("[DEBUG preprocessOperations] called with", operations.length, "ops");
+  // Collect dataModel FIRST — Chart preprocess needs it to resolve Nexus
+  // path bindings (xAxis + series[].key → columns in dataModel).
+  _dataModelColumn = buildDataModelColumn(operations);
+  // eslint-disable-next-line no-console
+  console.warn("[DEBUG preprocessOperations] dataModel rows:", _dataModelColumn.rows.length);
+
+  const result = operations.map((op) => {
     if (typeof op !== "object" || op === null) return op;
     const o = op as Record<string, unknown>;
     const uc = o.updateComponents;
     if (uc && typeof uc === "object") {
       const ucObj = uc as Record<string, unknown>;
       if (Array.isArray(ucObj.components)) {
+        // eslint-disable-next-line no-console
+        console.warn("[DEBUG preprocessOperations] preprocessing", ucObj.components.length, "components:", ucObj.components.map((c: any) => c.component ?? c.id));
         return {
           ...o,
           updateComponents: {
@@ -478,6 +626,10 @@ export function preprocessOperations(
     }
     return op;
   });
+
+  // Clear after use to avoid stale data across unrelated surfaces
+  _dataModelColumn = null;
+  return result;
 }
 
 /** Type guard: is a decoded SSE content payload an AG-UI ACTIVITY_SNAPSHOT? */
@@ -587,6 +739,14 @@ export interface A2uiBridgeSurfaceProps {
   /** Fallback renderer for surfaces with custom (non-standard) components. */
   children?: React.ReactNode;
   className?: string;
+  /**
+   * Optional handler for A2UI button actions. When provided, "a2ui:action"
+   * events (from convertSurfaceToUISpec) are dispatched through this handler.
+   * Pass `(action) => sendA2uiAction(action)` from `useAgUiSendA2uiAction()`
+   * when inside an AG-UI runtime context. If omitted, interactive components
+   * render but do nothing on click.
+   */
+  onAction?: (action: Record<string, unknown>) => void;
 }
 
 /**
@@ -603,8 +763,11 @@ export function A2uiBridgeSurface({
   snapshot,
   children,
   className = "",
+  onAction,
 }: A2uiBridgeSurfaceProps) {
   const ops = useMemo(() => extractOperations(snapshot), [snapshot]);
+  // eslint-disable-next-line no-console
+  console.warn("[A2uiBridgeSurface] rendered, snapshot=", snapshot ? "present" : "null", "ops count=", ops?.length ?? 0);
   const { state, apply } = useA2uiSurfaceState();
 
   // Apply new ops whenever they arrive
@@ -637,6 +800,26 @@ export function A2uiBridgeSurface({
     return convertSurface(state.get(surfaceId));
   }, [state, surfaceId]);
 
+  // Action registry: routes "a2ui:action" (from convertSurfaceToUISpec) through
+  // the provided onAction handler. If no handler, no dispatch is wired up.
+  const actionRegistry: ActionRegistry | undefined = useMemo(() => {
+    if (!onAction) return undefined;
+    return createActionRegistry({
+      "a2ui:action": ({ payload }) => {
+        // payload = { type: "a2ui:action", name, surfaceId, sourceComponentId, context? }
+        // Convert to generic action shape and forward to caller.
+        const action: Record<string, unknown> = {
+          label: String(payload.name ?? ""),
+          name: String(payload.name ?? ""),
+        };
+        if (payload.context !== undefined) {
+          action.context = payload.context;
+        }
+        onAction(action);
+      },
+    });
+  }, [onAction]);
+
   if (!ops || ops.length === 0) {
     return <div className={className}>{children}</div>;
   }
@@ -658,10 +841,12 @@ export function A2uiBridgeSurface({
     return <div className={className}>{children}</div>;
   }
 
-  // Native generative-ui render path
+  // Native generative-ui render path, optionally with wired action dispatch
   return (
     <div className={`a2ui-generative-surface ${className}`}>
-      {renderGenerativeUI(converted.spec, defaultGenerativeUILibrary)}
+      {renderGenerativeUI(converted.spec, customLibrary, actionRegistry
+        ? { status: "done", dispatch: actionRegistry.dispatch.bind(actionRegistry) }
+        : { status: "done" })}
     </div>
   );
 }
