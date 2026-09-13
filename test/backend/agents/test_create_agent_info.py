@@ -3273,6 +3273,7 @@ class TestCreateAgentConfig:
             kb_tool_1.name = "kb_tool_1"
             kb_tool_1.params = {"index_names": ["idx_a", "idx_b"]}
             kb_tool_1.metadata = {
+                "allowed_index_names": ["idx_a", "idx_b"],
                 "index_name_to_display_map": {"idx_a": "idx_a", "idx_b": "idx_b"}
             }
 
@@ -3286,6 +3287,7 @@ class TestCreateAgentConfig:
             kb_tool_2.name = "kb_tool_2"
             kb_tool_2.params = {"index_names": ["idx_c"]}
             kb_tool_2.metadata = {
+                "allowed_index_names": ["idx_c"],
                 "index_name_to_display_map": {"idx_c": "idx_c"}
             }
 
@@ -3352,6 +3354,7 @@ class TestCreateAgentConfig:
             class_name="KnowledgeBaseSearchTool",
             params={"index_names": ["selected-index"]},
             metadata={
+                "allowed_index_names": ["selected-index"],
                 "index_name_to_display_map": {
                     "selected-index": "Selected Knowledge Base"
                 }
@@ -3419,7 +3422,7 @@ class TestCreateAgentConfig:
         kb_tool = Mock(
             class_name="KnowledgeBaseSearchTool",
             params={"index_names": []},
-            metadata={},
+            metadata={"allowed_index_names": []},
         )
 
         with patch(
@@ -3502,6 +3505,7 @@ class TestCreateAgentConfig:
             kb_tool.params = {"index_names": ["idx1", "idx2"]}
             # The tool.metadata contains the index_name -> display_name mapping
             kb_tool.metadata = {
+                "allowed_index_names": ["idx1", "idx2"],
                 "index_name_to_display_map": {
                     "idx1": "Custom Name 1",
                     "idx2": "Custom Name 2"
@@ -3613,7 +3617,7 @@ class TestCreateAgentConfig:
             kb_tool.class_name = "KnowledgeBaseSearchTool"
             kb_tool.name = "kb_tool"
             kb_tool.params = {"index_names": ["idx1", "idx2"]}
-            kb_tool.metadata = {}  # Empty metadata
+            kb_tool.metadata = {"allowed_index_names": ["idx1", "idx2"]}
 
             mock_create_tools.return_value = [kb_tool]
             mock_get_template.return_value = {"system_prompt": "{{ knowledge_base_summary }}"}

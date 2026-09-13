@@ -154,10 +154,7 @@ def _build_effective_knowledge_base_summary(
             if tool.class_name != "KnowledgeBaseSearchTool":
                 continue
             metadata = tool.metadata if isinstance(tool.metadata, dict) else {}
-            if "allowed_index_names" in metadata:
-                index_names = metadata.get("allowed_index_names") or []
-            else:
-                index_names = tool.params.get("index_names") or []
+            index_names = metadata.get("allowed_index_names") or []
             if not index_names:
                 if not include_empty_message:
                     return "", []
