@@ -10,40 +10,66 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentHistory,
-    AgentRunInfo,
-    AgentVerificationConfig,
-    ExternalA2AAgentConfig,
-    ModelConfig,
-    ToolConfig,
-)
+from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
-from nexent.core.agents.sandbox import SandboxConfig
-from nexent.core.models.capacity_budget import (
-    ContextBudgetCalculator,
-    ContextBudgetSnapshot,
-    RequestBudgetOverrides,
-    UncertaintyReserveBasisUnknown,
-)
+from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
     ProviderCapabilityUnknown,
     ResolverError,
     resolve_capacity,
 )
-from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
+from nexent.core.models.capacity_budget import (
+    ContextBudgetCalculator,
+    ContextBudgetSnapshot,
+    RequestBudgetOverrides,
+    UncertaintyReserveBasisUnknown,
+)
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
-from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.sandbox import SandboxConfig
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
+
+from services.file_management_service import validate_urls_access
+from management.services.model.resolver import get_rerank_model, is_model_available
+from management.services.knowledge_base.service import (
+    ElasticSearchService,
+    get_vector_db_core,
+    get_embedding_model_by_index_name,
+)
+from services.remote_mcp_service import get_remote_mcp_server_list
+from services.memory_external_provider_service import get_memory_external_provider_service
+
+from database.a2a_agent_db import PROTOCOL_JSONRPC
+from services.memory_config_service import build_memory_context
+from services.ind_aidp_service import create_ind_aidp_image_url_builder
+from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
+from database.agent_db import (
+    search_agent_info_by_agent_id,
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+)
+from database.agent_version_db import query_current_version_no
+from database import skill_db
+from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
+from database.model_management_db import get_model_records, get_model_by_model_id
+from database.knowledge_db import get_knowledge_name_map_by_index_names
+from database.client import minio_client
+from utils.model_name_utils import add_repo_to_name
+from utils.prompt_template_utils import get_agent_prompt_template
+from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.memory_tool_prompt import build_memory_tool_policy
+from utils.automation_tool_prompt import build_automation_tool_policy
+from utils.context_utils import build_context_inputs
+from utils.http_client_utils import create_httpx_client
+from utils.redis_utils import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
     AIDP_API_KEY,
@@ -57,42 +83,9 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
 )
-from consts.exceptions import ValidationError
 from consts.model import ToolParamsRequest
+from consts.exceptions import ValidationError
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
-from database import skill_db
-from database.a2a_agent_db import PROTOCOL_JSONRPC
-from database.agent_db import (
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-    search_agent_info_by_agent_id,
-)
-from database.agent_version_db import query_current_version_no
-from database.client import minio_client
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.model_management_db import get_model_by_model_id, get_model_records
-from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
-from management.services.knowledge_base.service import (
-    ElasticSearchService,
-    get_embedding_model_by_index_name,
-    get_vector_db_core,
-)
-from management.services.model.resolver import get_rerank_model, is_model_available
-from services.file_management_service import validate_urls_access
-from services.ind_aidp_service import create_ind_aidp_image_url_builder
-from services.memory_config_service import build_memory_context
-from services.memory_external_provider_service import get_memory_external_provider_service
-from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
-from services.remote_mcp_service import get_remote_mcp_server_list
-from utils.automation_tool_prompt import build_automation_tool_policy
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
-from utils.context_utils import build_context_inputs
-from utils.http_client_utils import create_httpx_client
-from utils.memory_tool_prompt import build_memory_tool_policy
-from utils.model_name_utils import add_repo_to_name
-from utils.prompt_template_utils import get_agent_prompt_template
-from utils.redis_utils import get_redis_client
-
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -1692,21 +1685,23 @@ async def create_tool_config_list(
         # permissions, but never intersect it with the agent defaults again.
         _allowed_kds_set: set[str] = set()
         _kds_name_to_id_map: dict[str, str] = {}
-        _snapshot: Any = None
         if tool.get("class_name") == "AidpSearchTool":
             try:
                 from ext_components.aidp.services.aidp_access_service import (
                     resolve_current_aidp_access,
                 )
-                _snapshot = resolve_current_aidp_access(
+                snapshot = resolve_current_aidp_access(
                     server_url=AIDP_SERVER_URL,
                     api_key=AIDP_API_KEY,
                     user_id=user_id,
                     tenant_id=tenant_id,
                     aidp_tenant_id=AIDP_TENANT_ID,
                 )
-                _allowed_kds_set = set(_snapshot.accessible_id_set)
-                _kds_name_to_id_map = dict(_snapshot.name_to_id)
+                _allowed_kds_set = set(snapshot.accessible_id_set)
+                _kds_name_to_id_map = {
+                    **snapshot.name_to_id,
+                    **snapshot.tenant_name_to_id,
+                }
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "AIDP access snapshot lookup failed: %s", exc,
@@ -1726,20 +1721,13 @@ async def create_tool_config_list(
             # KDS the user could access. This prevents model-supplied arguments
             # from expanding a conversation-scoped selection.
             _allowed_kds_set.intersection_update(configured_kds_set)
-            if _snapshot is not None:
-                # Keep the full per-run scope in params so the SDK can
-                # distinguish configured-but-denied knowledge bases from
-                # unavailable ones.
-                param_dict["kds_list"] = configured_kds
-                _kds_name_to_id_map.update(_snapshot.tenant_name_to_id)
-            else:
-                # Preserve fail-closed behavior when the access snapshot
-                # cannot be resolved.
-                param_dict["kds_list"] = []
+            # Keep the full per-run scope in params so the SDK can distinguish
+            # configured-but-denied knowledge bases from unavailable ones.
+            param_dict["kds_list"] = configured_kds
             _kds_name_to_id_map = {
                 name: kds_id
                 for name, kds_id in _kds_name_to_id_map.items()
-                if _snapshot is not None and kds_id in configured_kds_set
+                if kds_id in configured_kds_set
             }
 
         tool_config = ToolConfig(

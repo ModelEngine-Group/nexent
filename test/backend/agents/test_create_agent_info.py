@@ -7432,7 +7432,7 @@ class TestCreateToolConfigListAidpSearch:
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
-        """When get_allowed_kds_list raises, a warning is logged and allowed_kds_set stays empty."""
+        """Snapshot failure keeps configured scope but leaves execution denied."""
         access_module = MagicMock()
         access_module.resolve_current_aidp_access.side_effect = Exception("AIDP down")
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
@@ -7475,10 +7475,11 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # Snapshot failure is fail-closed even when the tool requested a KB.
-            assert mock_tc_instance.params["kds_list"] == []
+            # The configured scope is independent from permission resolution.
+            assert mock_tc_instance.params["kds_list"] == ["kb_requested"]
             assert mock_tc_instance.metadata is not None
             assert mock_tc_instance.metadata["allowed_kds_set"] == []
+            assert mock_tc_instance.metadata["kds_name_to_id_map"] == {}
 
     @pytest.mark.asyncio
     async def test_aidp_search_metadata_merges_langchain_tool(self):
