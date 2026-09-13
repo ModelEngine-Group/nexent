@@ -236,6 +236,7 @@ def _load_a2a_agent_proxy_module():
                 return executor.submit(fn, *args, **kwargs).result()
 
     concurrency_module.ManagedTaskSpec = ManagedTaskSpec
+    concurrency_module.RunCancellationScope = MagicMock
     concurrency_module.get_current_thread_manager = lambda: DirectTestManager()
     sys.modules["sdk.nexent.core.concurrency"] = concurrency_module
 
@@ -1102,7 +1103,7 @@ class TestExternalA2AAgentProxy:
 
     @pytest.mark.asyncio
     async def test_call_raises_timeout_exception(self):
-        """Test call() re-raises TimeoutException after logging error."""
+        """Test call() re-raises TimeoutException after logging a warning."""
         info = self._make_info()
         proxy = ExternalA2AAgentProxy(info)
 
@@ -1114,9 +1115,12 @@ class TestExternalA2AAgentProxy:
         with patch.object(a2a_agent_proxy, "logger") as mock_logger:
             with pytest.raises(_mock_httpx.TimeoutException):
                 await proxy.call("test query")
-            mock_logger.error.assert_called_once()
-            assert "timeout" in mock_logger.error.call_args[0][0].lower()
-            assert info.name in mock_logger.error.call_args[0][0]
+            mock_logger.warning.assert_called_once()
+            mock_logger.error.assert_not_called()
+            warning_args = mock_logger.warning.call_args.args
+            assert "event=%s" in warning_args[0]
+            assert "a2a_request_timeout" in warning_args
+            assert info.agent_id in warning_args
 
     @pytest.mark.asyncio
     async def test_call_raises_http_status_error(self):

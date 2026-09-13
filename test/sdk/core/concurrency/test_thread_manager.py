@@ -30,6 +30,7 @@ from nexent.core.concurrency import (
     ThreadCapacityExceeded,
     ThreadManager,
     ThreadManagerDraining,
+    ThreadQueueTimedOut,
     clear_default_thread_manager,
     get_current_thread_manager,
     run_blocking,
@@ -37,7 +38,7 @@ from nexent.core.concurrency import (
 )
 
 
-def _manager(*, workers=1, queue_size=1, cancel_grace=0.05):
+def _manager(*, workers=1, queue_size=1, cancel_grace=0.05, queue_timeout=0):
     manager = ThreadManager(
         service_name="test-runtime",
         lane_policies={
@@ -45,7 +46,7 @@ def _manager(*, workers=1, queue_size=1, cancel_grace=0.05):
                 name="agent-run",
                 max_workers=workers,
                 max_queue_size=queue_size,
-                queue_timeout_seconds=0,
+                queue_timeout_seconds=queue_timeout,
                 cancel_grace_seconds=cancel_grace,
                 shutdown_grace_seconds=0.2,
             ),
@@ -249,6 +250,99 @@ def test_tc_tlm_005_worker_and_queue_capacity_rejects_extra_task(caplog):
     first.future.result(timeout=1)
     second.future.result(timeout=1)
     asyncio.run(manager.shutdown(timeout=1))
+
+
+def test_ut_sdk_tlm_025_capacity_rejection_is_immediate_and_never_runs_target():
+    manager = _manager(workers=1, queue_size=1, queue_timeout=0.5)
+    release = threading.Event()
+    started = threading.Event()
+    rejected_target_ran = threading.Event()
+    first = manager.submit(
+        "agent-run",
+        _spec("capacity-blocker"),
+        lambda: (started.set(), release.wait(1)),
+    )
+    assert started.wait(1)
+    second = manager.submit("agent-run", _spec("capacity-queued"), lambda: None)
+
+    began = time.monotonic()
+    with pytest.raises(ThreadCapacityExceeded):
+        manager.submit(
+            "agent-run",
+            _spec("capacity-rejected"),
+            rejected_target_ran.set,
+        )
+
+    assert time.monotonic() - began < 0.1
+    assert rejected_target_ran.is_set() is False
+    assert manager.snapshot().active_count == 2
+    release.set()
+    first.future.result(timeout=1)
+    second.future.result(timeout=1)
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+@pytest.mark.asyncio
+async def test_ut_sdk_tlm_026_queued_deadline_cancels_before_target_starts():
+    manager = _manager(workers=1, queue_size=1, queue_timeout=0.05)
+    release = threading.Event()
+    started = threading.Event()
+    queued_target_ran = threading.Event()
+    first = manager.submit(
+        "agent-run",
+        _spec("deadline-blocker"),
+        lambda: (started.set(), release.wait(1)),
+    )
+    assert started.wait(1)
+    queued = manager.submit(
+        "agent-run",
+        _spec("deadline-queued"),
+        queued_target_ran.set,
+    )
+
+    with pytest.raises(ThreadQueueTimedOut):
+        await manager.wait_until_started(queued)
+
+    assert queued.state is ExecutionState.TIMED_OUT
+    assert queued_target_ran.is_set() is False
+    assert queued.execution_id not in manager.snapshot().active_execution_ids
+    record = next(
+        item for item in manager.metrics_snapshot() if item.task_name == "deadline-queued"
+    )
+    assert record.timed_out_count == 1
+    release.set()
+    first.future.result(timeout=1)
+    await manager.shutdown(timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_ut_sdk_tlm_026_worker_start_wins_queue_deadline_race():
+    manager = _manager(workers=1, queue_size=1, queue_timeout=0.2)
+    release = threading.Event()
+    started = threading.Event()
+    queued_started = threading.Event()
+    queued_release = threading.Event()
+    first = manager.submit(
+        "agent-run",
+        _spec("race-blocker"),
+        lambda: (started.set(), release.wait(1)),
+    )
+    assert started.wait(1)
+    queued = manager.submit(
+        "agent-run",
+        _spec("race-queued"),
+        lambda: (queued_started.set(), queued_release.wait(1)),
+    )
+
+    release.set()
+    await manager.wait_until_started(queued)
+
+    assert queued_started.wait(1)
+    assert queued.state is ExecutionState.RUNNING
+    queued_release.set()
+    first.future.result(timeout=1)
+    queued.future.result(timeout=1)
+    await manager.shutdown(timeout=1)
 
 
 @pytest.mark.asyncio

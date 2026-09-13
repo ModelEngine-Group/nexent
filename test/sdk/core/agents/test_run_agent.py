@@ -356,7 +356,6 @@ def basic_agent_run_info(mock_observer):
         temperature=0.1,
         top_p=0.95,
     )
-
     agent_cfg = AgentConfig(
         name="agent",
         description="desc",
@@ -374,6 +373,17 @@ def basic_agent_run_info(mock_observer):
         conversation_id=273,
         user_id="test_user",
     )
+
+
+def _mock_managed_mcp(monkeypatch):
+    collection = MagicMock(name="ManagedMCPCollection")
+    context = MagicMock(
+        __enter__=MagicMock(return_value=collection),
+        __exit__=MagicMock(return_value=None),
+    )
+    factory = MagicMock(return_value=context)
+    monkeypatch.setattr(run_agent, "ManagedMCPToolCollection", factory)
+    return factory, collection
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +416,7 @@ def test_agent_run_thread_local_flow(basic_agent_run_info, monkeypatch):
         workspace_path=None,
         workspace_run_id=None,
         minio_files=None,
+        cancellation_scope=None,
     )
 
     # Following methods on the NexentAgent instance should be invoked
@@ -492,17 +503,7 @@ def test_agent_run_thread_mcp_flow(
     # Give the AgentRunInfo an MCP host list (string format, auto-detect transport)
     basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
 
-    # Prepare ToolCollection.from_mcp to return a context manager
-    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
-    mock_context_manager = MagicMock(
-        __enter__=MagicMock(return_value=mock_tool_collection),
-        __exit__=MagicMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        run_agent.ToolCollection,
-        "from_mcp",
-        MagicMock(return_value=mock_context_manager),
-    )
+    managed_mcp_factory, mock_tool_collection = _mock_managed_mcp(monkeypatch)
 
     # Patch NexentAgent
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
@@ -518,12 +519,12 @@ def test_agent_run_thread_mcp_flow(
         "", ProcessType.AGENT_NEW_RUN, "<MCP_START>"
     )
 
-    # ToolCollection.from_mcp should be called with the expected client list and trust_remote_code=True
     expected_client_list = [
         {"url": "http://mcp.server/mcp", "transport": "streamable-http"}
     ]
-    run_agent.ToolCollection.from_mcp.assert_called_once_with(
-        expected_client_list, trust_remote_code=True
+    assert (
+        managed_mcp_factory.call_args.kwargs["server_parameters"]
+        == expected_client_list
     )
 
     # NexentAgent should be instantiated with mcp_tool_collection
@@ -541,6 +542,7 @@ def test_agent_run_thread_mcp_flow(
         workspace_path=None,
         workspace_run_id=None,
         minio_files=None,
+        cancellation_scope=None,
     )
 
     # Subsequent calls on NexentAgent instance should mirror the local flow
@@ -575,17 +577,7 @@ def test_agent_run_thread_mcp_flow_with_explicit_transport(
     # Give the AgentRunInfo an MCP host list with explicit transport
     basic_agent_run_info.mcp_host = [{"url": "http://mcp.server", "transport": "sse"}]
 
-    # Prepare ToolCollection.from_mcp to return a context manager
-    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
-    mock_context_manager = MagicMock(
-        __enter__=MagicMock(return_value=mock_tool_collection),
-        __exit__=MagicMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        run_agent.ToolCollection,
-        "from_mcp",
-        MagicMock(return_value=mock_context_manager),
-    )
+    managed_mcp_factory, _ = _mock_managed_mcp(monkeypatch)
 
     # Patch NexentAgent
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
@@ -596,10 +588,10 @@ def test_agent_run_thread_mcp_flow_with_explicit_transport(
     # Execute
     run_agent.agent_run_thread(basic_agent_run_info)
 
-    # ToolCollection.from_mcp should be called with the expected client list
     expected_client_list = [{"url": "http://mcp.server", "transport": "sse"}]
-    run_agent.ToolCollection.from_mcp.assert_called_once_with(
-        expected_client_list, trust_remote_code=True
+    assert (
+        managed_mcp_factory.call_args.kwargs["server_parameters"]
+        == expected_client_list
     )
 
 
@@ -617,17 +609,7 @@ def test_agent_run_thread_mcp_flow_mixed_formats(
         },  # Explicit: streamable-http
     ]
 
-    # Prepare ToolCollection.from_mcp to return a context manager
-    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
-    mock_context_manager = MagicMock(
-        __enter__=MagicMock(return_value=mock_tool_collection),
-        __exit__=MagicMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        run_agent.ToolCollection,
-        "from_mcp",
-        MagicMock(return_value=mock_context_manager),
-    )
+    managed_mcp_factory, _ = _mock_managed_mcp(monkeypatch)
 
     # Patch NexentAgent
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
@@ -638,14 +620,14 @@ def test_agent_run_thread_mcp_flow_mixed_formats(
     # Execute
     run_agent.agent_run_thread(basic_agent_run_info)
 
-    # ToolCollection.from_mcp should be called with normalized client list
     expected_client_list = [
         {"url": "http://mcp1.server/mcp", "transport": "streamable-http"},
         {"url": "http://mcp2.server/sse", "transport": "sse"},
         {"url": "http://mcp3.server/mcp", "transport": "streamable-http"},
     ]
-    run_agent.ToolCollection.from_mcp.assert_called_once_with(
-        expected_client_list, trust_remote_code=True
+    assert (
+        managed_mcp_factory.call_args.kwargs["server_parameters"]
+        == expected_client_list
     )
 
 
@@ -1159,16 +1141,7 @@ def test_agent_run_thread_mcp_connection_error(basic_agent_run_info, monkeypatch
     """Test that MCP connection errors are properly handled."""
     basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
 
-    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
-    mock_context_manager = MagicMock(
-        __enter__=MagicMock(return_value=mock_tool_collection),
-        __exit__=MagicMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        run_agent.ToolCollection,
-        "from_mcp",
-        MagicMock(return_value=mock_context_manager),
-    )
+    _mock_managed_mcp(monkeypatch)
 
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     mock_nexent_instance.create_single_agent.side_effect = Exception(
@@ -1189,16 +1162,7 @@ def test_agent_run_thread_chinese_lang(basic_agent_run_info, monkeypatch):
     basic_agent_run_info.mcp_host = ["http://mcp.server/mcp"]
     basic_agent_run_info.observer.lang = "zh"
 
-    mock_tool_collection = MagicMock(name="ToolCollectionInstance")
-    mock_context_manager = MagicMock(
-        __enter__=MagicMock(return_value=mock_tool_collection),
-        __exit__=MagicMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        run_agent.ToolCollection,
-        "from_mcp",
-        MagicMock(return_value=mock_context_manager),
-    )
+    _mock_managed_mcp(monkeypatch)
 
     mock_nexent_instance = MagicMock(name="NexentAgentInstance")
     mock_nexent_instance.create_single_agent.side_effect = Exception(

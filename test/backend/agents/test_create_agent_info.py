@@ -570,14 +570,6 @@ def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch
     factory.assert_called_once_with()
 
 
-@pytest.fixture(autouse=True)
-def run_create_agent_thread_work_inline(monkeypatch):
-    async def run_inline(func, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    monkeypatch.setattr(create_agent_info_module.asyncio, "to_thread", run_inline)
-
-
 def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
     monkeypatch.setattr(
         create_agent_info_module,
@@ -4107,6 +4099,8 @@ class TestCreateAgentRunInfo:
                 }],
                 history=[],
                 stop_event="stop_event",
+                mcp_tool_timeout_seconds=ANY,
+                mcp_close_timeout_seconds=ANY,
                 capacity_snapshot=None,
                 context_budget_snapshot=None,
                 redis_client=ANY,

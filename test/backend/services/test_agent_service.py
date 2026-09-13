@@ -74,6 +74,15 @@ class _ManagedTaskSpec:
         self.__dict__.update(kwargs)
 
 
+class _ThreadCapacityExceeded(RuntimeError):
+    pass
+
+
+class _ThreadQueueTimedOut(RuntimeError):
+    def __init__(self, timeout_seconds=1):
+        self.timeout_seconds = timeout_seconds
+
+
 async def _run_blocking(_task_name, fn, *args, **kwargs):
     kwargs.pop("lane", None)
     kwargs.pop("owner", None)
@@ -85,6 +94,9 @@ async def _run_managed(_lane, _spec, fn, *args, **kwargs):
 
 
 _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
+_concurrency_module.ManagedExecution = MagicMock
+_concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
+_concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
 sys.modules["nexent.core.concurrency"] = _concurrency_module
 _thread_lifecycle_module = types.ModuleType("services.thread_lifecycle_service")
@@ -92,6 +104,11 @@ _thread_lifecycle_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_module.runtime_thread_manager.run = AsyncMock(
     side_effect=_run_managed
 )
+_thread_lifecycle_module.runtime_thread_manager.submit.return_value = MagicMock(
+    execution_id="execution-test",
+    future=MagicMock(done=MagicMock(return_value=True)),
+)
+_thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
@@ -4714,6 +4731,65 @@ async def test_run_agent_stream_rejects_inaccessible_conversation_before_side_ef
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("wait_error", "expected_error"),
+    [
+        (None, agent_run_service.RuntimeCapacityExceededError),
+        (_ThreadQueueTimedOut(0.05), agent_run_service.RuntimeQueueTimeoutError),
+    ],
+)
+async def test_ut_be_tlm_027_runtime_overload_precedes_run_side_effects(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+    wait_error,
+    expected_error,
+):
+    monkeypatch.setattr(
+        agent_run_service,
+        "_resolve_user_tenant_language",
+        lambda **kwargs: ("user-a", "tenant-a", "en"),
+    )
+    save_user_message = MagicMock()
+    reserve_run = MagicMock()
+    create_channel = AsyncMock()
+    monkeypatch.setattr(agent_run_service, "save_messages", save_user_message)
+    monkeypatch.setattr(
+        agent_run_service.agent_run_manager, "reserve_agent_run", reserve_run
+    )
+    monkeypatch.setattr(
+        agent_run_service.streaming_channel_manager,
+        "get_or_create_channel",
+        create_channel,
+    )
+    execution = MagicMock(execution_id="execution-overload")
+    if wait_error is None:
+        monkeypatch.setattr(
+            agent_run_service.runtime_thread_manager,
+            "submit",
+            MagicMock(side_effect=_ThreadCapacityExceeded()),
+        )
+    else:
+        monkeypatch.setattr(
+            agent_run_service.runtime_thread_manager,
+            "submit",
+            MagicMock(return_value=execution),
+        )
+        monkeypatch.setattr(
+            agent_run_service.runtime_thread_manager,
+            "wait_until_started",
+            AsyncMock(side_effect=wait_error),
+        )
+
+    with pytest.raises(expected_error):
+        await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    save_user_message.assert_not_called()
+    reserve_run.assert_not_called()
+    create_channel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @patch(
     "management.services.agent.run._resolve_user_tenant_language",
     return_value=(None, None, "en"),
@@ -4761,6 +4837,8 @@ async def test_run_agent_stream(
         language="en",
         enable_memory=False,
         reservation_token=ANY,
+        execution=ANY,
+        deferred_run=ANY,
         channel=streaming_channel_manager_mock._latest_channel,
     )
 
@@ -5065,6 +5143,8 @@ async def test_non_debug_producer_survives_sse_disconnect(
         language="en",
         enable_memory=False,
         reservation_token=ANY,
+        execution=ANY,
+        deferred_run=ANY,
         channel=channel,
     )
 
@@ -5171,6 +5251,8 @@ async def test_debug_stream_keeps_direct_execution_path(
         language="en",
         enable_memory=False,
         reservation_token=ANY,
+        execution=ANY,
+        deferred_run=ANY,
     )
 
 
@@ -6238,6 +6320,8 @@ async def test_run_agent_stream_no_memory(
         language="en",
         enable_memory=False,
         reservation_token=ANY,
+        execution=ANY,
+        deferred_run=ANY,
         channel=streaming_channel_manager_mock._latest_channel,
     )
 
