@@ -22,6 +22,7 @@ from ...utils.tools_common_message import (
     ToolCategory,
     ToolSign,
     build_knowledge_search_response,
+    resolve_knowledge_search_scope,
 )
 from ....utils.http_client_manager import http_client_manager
 
@@ -516,37 +517,21 @@ class AidpSearchTool(Tool):
             return list(kds)
         return [k for k in kds if k in self._allowed_kds_set]
 
-    @staticmethod
-    def _unique_kds(kds: List[str]) -> List[str]:
-        return list(dict.fromkeys(str(item) for item in kds))
-
     def _resolve_search_scope(
         self, kds_list: Optional[List[str]]
-    ) -> tuple[List[str], List[str], List[str], bool, bool]:
-        configured_scope = self._unique_kds(
-            self._convert_to_kds_ids(list(self.kds_list))
+    ):
+        configured_scope = self._convert_to_kds_ids(list(self.kds_list))
+        requested_scope = (
+            None
+            if kds_list is None or len(kds_list) == 0
+            else self._convert_to_kds_ids(list(kds_list))
         )
-        configured_available_scope = self._filter_by_whitelist(configured_scope)
-        configured_permission_scope = (
-            [item for item in configured_scope if item not in configured_available_scope]
-            if self._whitelist_installed
-            else []
+        return resolve_knowledge_search_scope(
+            configured_scope=configured_scope,
+            available_scope=self._filter_by_whitelist(configured_scope),
+            requested_scope=requested_scope,
+            permission_tracking_enabled=self._whitelist_installed,
         )
-        if kds_list is None or len(kds_list) == 0:
-            return configured_available_scope, [], [], False, False
-
-        requested_scope = self._unique_kds(
-            self._convert_to_kds_ids(list(kds_list))
-        )
-        used_scope = [item for item in requested_scope if item in configured_available_scope]
-        unavailable_scope = [item for item in requested_scope if item not in configured_scope]
-        permission_denied_scope = [
-            item for item in requested_scope if item in configured_permission_scope
-        ]
-        fallback_to_all = bool(requested_scope and not used_scope and configured_available_scope)
-        if fallback_to_all:
-            used_scope = configured_available_scope
-        return used_scope, permission_denied_scope, unavailable_scope, fallback_to_all, True
 
     def _get_kds_name_to_id_map(self) -> Dict[str, str]:
         kds_map = unwrap_field_info(self.kds_name_to_id_map)
@@ -613,13 +598,8 @@ class AidpSearchTool(Tool):
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
 
-        (
-            search_kds_list,
-            permission_denied_scope,
-            unavailable_scope,
-            fallback_to_all,
-            scope_was_specified,
-        ) = self._resolve_search_scope(kds_list)
+        scope = self._resolve_search_scope(kds_list)
+        search_kds_list = scope.used_scope
 
         self._emit_running_prompt(query)
 
@@ -638,10 +618,10 @@ class AidpSearchTool(Tool):
             return self._build_scope_response(
                 [],
                 search_kds_list,
-                permission_denied_scope,
-                unavailable_scope,
-                fallback_to_all,
-                scope_was_specified,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
             )
 
         try:
@@ -662,10 +642,10 @@ class AidpSearchTool(Tool):
             return self._build_scope_response(
                 [],
                 search_kds_list,
-                permission_denied_scope,
-                unavailable_scope,
-                fallback_to_all,
-                scope_was_specified,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
             )
 
         search_results_json, search_results_return, images_url = self._process_records(records)
@@ -674,8 +654,8 @@ class AidpSearchTool(Tool):
         return self._build_scope_response(
             search_results_return,
             search_kds_list,
-            permission_denied_scope,
-            unavailable_scope,
-            fallback_to_all,
-            scope_was_specified,
+            scope.permission_denied_scope,
+            scope.unavailable_scope,
+            scope.fallback_to_all,
+            scope.scope_was_specified,
         )

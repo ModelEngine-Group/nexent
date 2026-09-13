@@ -31,6 +31,14 @@ def _restore_modules():
         else:
             sys.modules[name] = original_module
 
+_real_tools_common_spec = importlib.util.spec_from_file_location(
+    "_real_tools_common_message",
+    REPO_ROOT / "sdk" / "nexent" / "core" / "utils" / "tools_common_message.py",
+)
+_real_tools_common = importlib.util.module_from_spec(_real_tools_common_spec)
+assert _real_tools_common_spec and _real_tools_common_spec.loader
+_real_tools_common_spec.loader.exec_module(_real_tools_common)
+
 sdk_pkg = _pkg("sdk", REPO_ROOT / "sdk")
 nexent_pkg = _pkg("sdk.nexent", REPO_ROOT / "sdk" / "nexent")
 core_pkg = _pkg("sdk.nexent.core", REPO_ROOT / "sdk" / "nexent" / "core")
@@ -140,6 +148,9 @@ tools_common_mod.SearchResultTextMessage = SearchResultTextMessage
 tools_common_mod.ToolCategory = _ToolCategory
 tools_common_mod.ToolSign = _ToolSign
 tools_common_mod.build_knowledge_search_response = build_knowledge_search_response
+tools_common_mod.resolve_knowledge_search_scope = (
+    _real_tools_common.resolve_knowledge_search_scope
+)
 _set_module("sdk.nexent.core.utils.tools_common_message", tools_common_mod)
 utils_pkg.tools_common_message = tools_common_mod
 

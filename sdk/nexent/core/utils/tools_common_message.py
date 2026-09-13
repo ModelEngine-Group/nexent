@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 
 class ToolSign(Enum):
@@ -101,6 +101,64 @@ class SearchResultTextMessage:
             "index": index,
             "reference_mark": f"[[{index}]]",
         }
+
+
+@dataclass(frozen=True)
+class KnowledgeSearchScope:
+    """Resolved knowledge-base scope for search tools."""
+
+    used_scope: List[str]
+    permission_denied_scope: List[str]
+    unavailable_scope: List[str]
+    fallback_to_all: bool
+    scope_was_specified: bool
+
+
+def _unique_scope(scope: Sequence[str]) -> List[str]:
+    return list(dict.fromkeys(str(item) for item in scope))
+
+
+def resolve_knowledge_search_scope(
+    configured_scope: Sequence[str],
+    available_scope: Sequence[str],
+    requested_scope: Optional[Sequence[str]],
+    *,
+    permission_tracking_enabled: bool = True,
+) -> KnowledgeSearchScope:
+    """Resolve requested, configured, and permission-filtered knowledge-base scopes."""
+    configured = _unique_scope(configured_scope)
+    available_set = set(_unique_scope(available_scope))
+    available = [item for item in configured if item in available_set]
+
+    if requested_scope is None or len(requested_scope) == 0:
+        return KnowledgeSearchScope(
+            used_scope=available,
+            permission_denied_scope=[],
+            unavailable_scope=[],
+            fallback_to_all=False,
+            scope_was_specified=False,
+        )
+
+    requested = _unique_scope(requested_scope)
+    configured_set = set(configured)
+    used_scope = [item for item in requested if item in available_set]
+    permission_denied_scope = (
+        [item for item in requested if item in configured_set and item not in available_set]
+        if permission_tracking_enabled
+        else []
+    )
+    unavailable_scope = [item for item in requested if item not in configured_set]
+    fallback_to_all = bool(requested and not used_scope and available)
+    if fallback_to_all:
+        used_scope = available
+
+    return KnowledgeSearchScope(
+        used_scope=used_scope,
+        permission_denied_scope=permission_denied_scope,
+        unavailable_scope=unavailable_scope,
+        fallback_to_all=fallback_to_all,
+        scope_was_specified=True,
+    )
 
 
 def build_knowledge_search_response(

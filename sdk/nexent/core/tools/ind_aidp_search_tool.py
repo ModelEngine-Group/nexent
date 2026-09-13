@@ -23,6 +23,7 @@ from ..utils.tools_common_message import (
     ToolCategory,
     ToolSign,
     build_knowledge_search_response,
+    resolve_knowledge_search_scope,
 )
 from ...utils.http_client_manager import http_client_manager
 
@@ -302,46 +303,34 @@ class IndependentAidpSearchTool(Tool):
                 json.dumps({"images_url": image_urls}, ensure_ascii=False),
             )
 
-    @staticmethod
-    def _unique_kds(kds: List[str]) -> List[str]:
-        return list(dict.fromkeys(str(item) for item in kds))
-
     def _resolve_search_scope(
         self, kds_list: Optional[List[str]]
-    ) -> tuple[List[str], List[str], List[str], bool, bool]:
-        configured_scope = self._unique_kds(self.kds_list)
-        if kds_list is None:
-            return configured_scope, [], [], False, False
-
-        requested_scope = self._unique_kds(_parse_kds_list(kds_list, allow_empty=True))
-        if not requested_scope:
-            return configured_scope, [], [], False, False
-        used_scope = [item for item in requested_scope if item in configured_scope]
-        unavailable_scope = [item for item in requested_scope if item not in configured_scope]
-        fallback_to_all = bool(requested_scope and not used_scope and configured_scope)
-        if fallback_to_all:
-            used_scope = configured_scope
-        return used_scope, [], unavailable_scope, fallback_to_all, True
+    ):
+        return resolve_knowledge_search_scope(
+            configured_scope=self.kds_list,
+            available_scope=self.kds_list,
+            requested_scope=(
+                None
+                if kds_list is None
+                else _parse_kds_list(kds_list, allow_empty=True)
+            ),
+            permission_tracking_enabled=False,
+        )
 
     def forward(self, query: str, kds_list: Optional[List[str]] = None) -> str:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
-        (
-            search_kds_list,
-            permission_denied_scope,
-            unavailable_scope,
-            fallback_to_all,
-            scope_was_specified,
-        ) = self._resolve_search_scope(kds_list)
+        scope = self._resolve_search_scope(kds_list)
+        search_kds_list = scope.used_scope
         normalized_query = query.strip()
         if not search_kds_list:
             return build_knowledge_search_response(
                 [],
                 search_kds_list,
-                permission_denied_scope,
-                unavailable_scope,
-                fallback_to_all,
-                scope_was_specified,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
             )
         self._emit_running_prompt(normalized_query)
         try:
@@ -352,10 +341,10 @@ class IndependentAidpSearchTool(Tool):
             return build_knowledge_search_response(
                 [],
                 search_kds_list,
-                permission_denied_scope,
-                unavailable_scope,
-                fallback_to_all,
-                scope_was_specified,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
             )
         ui_results, model_results, image_urls = self._process_records(records)
         self.record_ops += len(model_results)
@@ -363,8 +352,8 @@ class IndependentAidpSearchTool(Tool):
         return build_knowledge_search_response(
             model_results,
             search_kds_list,
-            permission_denied_scope,
-            unavailable_scope,
-            fallback_to_all,
-            scope_was_specified,
+            scope.permission_denied_scope,
+            scope.unavailable_scope,
+            scope.fallback_to_all,
+            scope.scope_was_specified,
         )
