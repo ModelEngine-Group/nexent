@@ -196,12 +196,10 @@ def wrap_as_activity_snapshot(content: str) -> dict[str, Any] | None:
     The returned dict is ready for JSON serialization as an SSE ``data:`` line.
     """
     messages = parse_a2ui_content(content)
-    print(f"[wrap_as_activity_snapshot] parse_a2ui_content → messages={len(messages) if messages else None}, content_preview={content[:100]}", flush=True)
     if messages is None:
         return None
 
     operations = a2ui_messages_to_operations(messages)
-    print(f"[wrap_as_activity_snapshot] a2ui_messages_to_operations → ops_count={len(operations)}", flush=True)
     if not operations:
         return None
 
@@ -213,7 +211,6 @@ def wrap_as_activity_snapshot(content: str) -> dict[str, Any] | None:
         "replace": True,
         "content": {"a2ui_operations": operations},
     }
-    print(f"[wrap_as_activity_snapshot] returning snapshot with surface_id={surface_id}", flush=True)
     return result
 
 

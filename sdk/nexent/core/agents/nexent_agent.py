@@ -1193,7 +1193,6 @@ class NexentAgent:
                     if is_a2ui_enabled() and should_finalize_a2ui_content(final_answer_str):
                         try:
                             a2ui_validation = validate_a2ui_response(final_answer_str)
-                            print(f"[SDK-A2UI] validation.valid={a2ui_validation.valid}, error={a2ui_validation.error if not a2ui_validation.valid else None}", flush=True)
                             if a2ui_validation.valid:
                                 # Wrap A2UI content as AG-UI ACTIVITY_SNAPSHOT for
                                 # assistant-ui's JSONGenerativeUI on the frontend.

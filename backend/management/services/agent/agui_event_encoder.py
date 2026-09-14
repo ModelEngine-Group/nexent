@@ -12,9 +12,12 @@ without touching SDK internals.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from nexent.core.utils.observer import ProcessType
 
@@ -305,9 +308,15 @@ class AgUiEventEncoder:
 
         elif process_type == ProcessType.A2UI.value:
             # content is already an AG-UI ACTIVITY_SNAPSHOT JSON string or dict
-            print(f"[AgUiEncoder] ProcessType.A2UI received, content_type={type(content).__name__}, content_len={len(str(content))}", flush=True)
+            logger.debug(
+                "[AgUiEncoder] ProcessType.A2UI received, content_type=%s, content_len=%d",
+                type(content).__name__, len(str(content)),
+            )
             events.extend(self._encode_activity_snapshot(content, subagent_run_id))
-            print(f"[AgUiEncoder] ProcessType.A2UI → {len(events)} events, types={[e.get('type') for e in events]}", flush=True)
+            logger.debug(
+                "[AgUiEncoder] ProcessType.A2UI → %d events, types=%s",
+                len(events), [e.get("type") for e in events],
+            )
 
         elif process_type == ProcessType.CARD.value:
             # CARD can be either Nexus custom cards or A2UI surface payloads.
@@ -450,10 +459,10 @@ class AgUiEventEncoder:
                 if buf:
                     events.extend(self._encode_text_delta(buf, subagent_run_id))
                     self._final_answer_buffer = ""
-                print(
-                    f"[AgUiEncoder] _encode_a2ui_tagged_text: no open tag, "
-                    f"emit {len(events)} text events, buffer cleared",
-                    flush=True,
+                logger.debug(
+                    "[AgUiEncoder] _encode_a2ui_tagged_text: no open tag, "
+                    "emit %d text events, buffer cleared",
+                    len(events),
                 )
                 return events
 
@@ -473,19 +482,19 @@ class AgUiEventEncoder:
                 # Tag opened but not yet closed — leave in buffer, wait for
                 # more deltas (or flush_final_answer_buffer on run end).
                 self._final_answer_buffer = buf
-                print(
-                    f"[AgUiEncoder] _encode_a2ui_tagged_text: open tag found at loop#{loop_count} "
-                    f"but close tag missing — buffering {len(buf)} chars, return {len(events)} events",
-                    flush=True,
+                logger.debug(
+                    "[AgUiEncoder] _encode_a2ui_tagged_text: open tag found at loop#%d "
+                    "but close tag missing — buffering %d chars, return %d events",
+                    loop_count, len(buf), len(events),
                 )
                 return events
 
             # Complete <a2ui-json>...</a2ui-json> pair — extract inner JSON
             inner = buf[len(self._A2UI_OPEN):close_idx]
-            print(
-                f"[AgUiEncoder] _encode_a2ui_tagged_text: complete pair at loop#{loop_count}, "
-                f"inner={len(inner)} chars",
-                flush=True,
+            logger.debug(
+                "[AgUiEncoder] _encode_a2ui_tagged_text: complete pair at loop#%d, "
+                "inner=%d chars",
+                loop_count, len(inner),
             )
             events.extend(
                 self._encode_a2ui_json_content(inner, subagent_run_id)
@@ -529,31 +538,29 @@ class AgUiEventEncoder:
                 if isinstance(obj, dict):
                     operations.append(obj)
                 else:
-                    print(
-                        f"[AgUiEncoder] a2ui JSON block parsed but not dict: "
-                        f"type={type(obj).__name__}",
-                        flush=True,
+                    logger.debug(
+                        "[AgUiEncoder] a2ui JSON block parsed but not dict: "
+                        "type=%s",
+                        type(obj).__name__,
                     )
                 pos = end
             except json.JSONDecodeError as e:
-                print(
-                    f"[AgUiEncoder] a2ui JSON raw_decode failed at pos={pos}: {e}",
-                    flush=True,
+                logger.debug(
+                    "[AgUiEncoder] a2ui JSON raw_decode failed at pos=%d: %s",
+                    pos, e,
                 )
                 # Advance past this character so we don't infinite-loop
                 pos += 1
 
-        print(
-            f"[AgUiEncoder] a2ui parse: collected {len(operations)} ops, "
-            f"first keys={list(operations[0].keys()) if operations else []}",
-            flush=True,
+        logger.debug(
+            "[AgUiEncoder] a2ui parse: collected %d ops, "
+            "first keys=%s",
+            len(operations),
+            list(operations[0].keys()) if operations else [],
         )
 
         if not operations:
-            print(
-                f"[AgUiEncoder] NO operations → emit RAW a2ui_empty_block",
-                flush=True,
-            )
+            logger.debug("[AgUiEncoder] NO operations → emit RAW a2ui_empty_block")
             return [self._raw_event(
                 "a2ui_empty_block", json_inner, subagent_run_id
             )]
@@ -578,18 +585,19 @@ class AgUiEventEncoder:
         # model emits context or not.
         agui_ops = self._ensure_button_action_context(agui_ops)
 
-        print(
-            f"[AgUiEncoder] a2ui converted: {len(agui_ops)} ops, "
-            f"first keys={list(agui_ops[0].keys()) if agui_ops else []}",
-            flush=True,
+        logger.debug(
+            "[AgUiEncoder] a2ui converted: %d ops, "
+            "first keys=%s",
+            len(agui_ops),
+            list(agui_ops[0].keys()) if agui_ops else [],
         )
 
         # DUMP the full AG-UI format operations so we can verify the component
         # structure matches what applyA2uiOperations / convertSurfaceToUISpec
         # expect (children as string ID refs, flat component list).
-        print(
-            f"[AgUiEncoder] AGUI_OPS_DUMP={json.dumps(agui_ops, ensure_ascii=False)[:3000]}",
-            flush=True,
+        logger.debug(
+            "[AgUiEncoder] AGUI_OPS_DUMP=%s",
+            json.dumps(agui_ops, ensure_ascii=False)[:3000],
         )
 
         return self._encode_activity_snapshot(
@@ -665,12 +673,13 @@ class AgUiEventEncoder:
             for root_comp in payload["components"]:
                 self._flatten_and_collect(root_comp, flat_components)
             payload["components"] = flat_components
-            print(
-                f"[AgUiEncoder] FLATTENED components: {len(flat_components)} nodes. "
-                f"Sample root: id={flat_components[0].get('id') if flat_components else None}, "
-                f"component={flat_components[0].get('component') if flat_components else None}, "
-                f"children={flat_components[0].get('children') if flat_components else None}",
-                flush=True,
+            logger.debug(
+                "[AgUiEncoder] FLATTENED components: %d nodes. "
+                "Sample root: id=%s, component=%s, children=%s",
+                len(flat_components),
+                flat_components[0].get("id") if flat_components else None,
+                flat_components[0].get("component") if flat_components else None,
+                flat_components[0].get("children") if flat_components else None,
             )
 
         return {
@@ -825,14 +834,14 @@ class AgUiEventEncoder:
             for c in op["updateComponents"].get("components", [])
             if isinstance(c, dict)
         )
-        print(
-            f"[AgUiEncoder-P2] input: ops={len(agui_ops)}, "
-            f"dataModel_paths={all_paths}, has_Button={has_button}",
-            flush=True,
+        logger.debug(
+            "[AgUiEncoder-P2] input: ops=%d, "
+            "dataModel_paths=%s, has_Button=%s",
+            len(agui_ops), all_paths, has_button,
         )
 
         if not all_paths:
-            print("[AgUiEncoder-P2] skip: no dataModel paths found", flush=True)
+            logger.debug("[AgUiEncoder-P2] skip: no dataModel paths found")
             return agui_ops
 
         # 2. Walk every updateComponents op and patch Button actions
@@ -862,10 +871,10 @@ class AgUiEventEncoder:
                     if fixed_ctx != existing_ctx:
                         action["context"] = fixed_ctx
                         fixed_count += 1
-                        print(
-                            f"[AgUiEncoder-P2] FIXED context paths for Button {comp.get('id')}: "
-                            f"before={existing_ctx} → after={fixed_ctx}",
-                            flush=True,
+                        logger.debug(
+                            "[AgUiEncoder-P2] FIXED context paths for Button %s: "
+                            "before=%s → after=%s",
+                            comp.get("id"), existing_ctx, fixed_ctx,
                         )
                     continue
 
@@ -882,11 +891,11 @@ class AgUiEventEncoder:
                 patched_count += 1
 
         if patched_count or fixed_count:
-            print(
-                f"[AgUiEncoder-P2] SUMMARY: patched={patched_count}, "
-                f"fixed_paths={fixed_count}, "
-                f"dataModel_paths={all_paths}",
-                flush=True,
+            logger.debug(
+                "[AgUiEncoder-P2] SUMMARY: patched=%d, "
+                "fixed_paths=%d, "
+                "dataModel_paths=%s",
+                patched_count, fixed_count, all_paths,
             )
 
         # DEBUG: Dump final Button actions to confirm P2 fix propagated
@@ -898,10 +907,11 @@ class AgUiEventEncoder:
                 for comp in payload.get("components", []):
                     if isinstance(comp, dict) and comp.get("component") == "Button":
                         action = (comp.get("props") or {}).get("action", {})
-                        print(
-                            f"[AgUiEncoder-P2-FINAL] Button={comp.get('id')} "
-                            f"action.context={json.dumps(action.get('context'), ensure_ascii=False)}",
-                            flush=True,
+                        logger.debug(
+                            "[AgUiEncoder-P2-FINAL] Button=%s "
+                            "action.context=%s",
+                            comp.get("id"),
+                            json.dumps(action.get("context"), ensure_ascii=False),
                         )
         except Exception:
             pass
@@ -1186,14 +1196,25 @@ class AgUiEventEncoder:
                 close_idx = content.find(self._A2UI_CLOSE, open_idx + len(self._A2UI_OPEN))
                 if close_idx > open_idx:
                     inner = content[open_idx + len(self._A2UI_OPEN):close_idx]
-                    print(f"[AgUiEncoder] _encode_activity_snapshot: detected <a2ui-json> tags in string, forwarding to _encode_a2ui_json_content, inner={len(inner)} chars", flush=True)
+                    logger.debug(
+                        "[AgUiEncoder] _encode_activity_snapshot: detected <a2ui-json> "
+                        "tags in string, forwarding to _encode_a2ui_json_content, "
+                        "inner=%d chars",
+                        len(inner),
+                    )
                     return self._encode_a2ui_json_content(inner, subagent_run_id)
 
             try:
                 content = json.loads(content)
-                print(f"[AgUiEncoder] _encode_activity_snapshot: JSON parsed, type={type(content).__name__}", flush=True)
+                logger.debug(
+                    "[AgUiEncoder] _encode_activity_snapshot: JSON parsed, type=%s",
+                    type(content).__name__,
+                )
             except (json.JSONDecodeError, TypeError) as e:
-                print(f"[AgUiEncoder] _encode_activity_snapshot: JSON parse FAILED → RAW, error={e}", flush=True)
+                logger.debug(
+                    "[AgUiEncoder] _encode_activity_snapshot: JSON parse FAILED → RAW, error=%s",
+                    e,
+                )
                 # Plain string — emit as RAW
                 return [self._raw_event("card", content, subagent_run_id)]
 
@@ -1202,7 +1223,11 @@ class AgUiEventEncoder:
 
         # 1. Already AG-UI-shaped: {"type": "ACTIVITY_SNAPSHOT", ...}
         if content.get("type") == AGUI_ACTIVITY_SNAPSHOT:
-            print(f"[AgUiEncoder] _encode_activity_snapshot: case 1 (ACTIVITY_SNAPSHOT), activityType={content.get('activityType')}", flush=True)
+            logger.debug(
+                "[AgUiEncoder] _encode_activity_snapshot: case 1 (ACTIVITY_SNAPSHOT), "
+                "activityType=%s",
+                content.get("activityType"),
+            )
             event = dict(content)
             if "messageId" not in event:
                 event["messageId"] = _gen_id("a2ui")
@@ -1240,7 +1265,11 @@ class AgUiEventEncoder:
                 # has_nested_component=False) but Button actions still need
                 # context auto-completion.  Only run Nexus conversion if needed.
                 if has_nexus_keys or has_nested_component:
-                    print(f"[AgUiEncoder] _encode_activity_snapshot: converting Nexus-format ops (has_nexus_keys={has_nexus_keys}, has_nested_component={has_nested_component})", flush=True)
+                    logger.debug(
+                        "[AgUiEncoder] _encode_activity_snapshot: converting Nexus-format ops "
+                        "(has_nexus_keys=%s, has_nested_component=%s)",
+                        has_nexus_keys, has_nested_component,
+                    )
                     ops = [
                         self._convert_nexus_a2ui_op(op) for op in ops
                     ]

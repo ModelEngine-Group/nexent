@@ -1245,12 +1245,10 @@ const AssistantMessage: FC<{
   const aui = useAui();
 
   const handleA2UIAction = useCallback((action: A2UIAction) => {
-    console.log('[A2UI_ACTION] handleA2UIAction called:', action.type, action.value);
     if (action.type === 'submit' || action.type === 'click') {
       const formData = action.path ? (() => {
         try { return JSON.parse(action.path); } catch { return {}; }
       })() : {};
-      console.log('[A2UI_ACTION] formData:', formData);
       const formEntries = Object.entries(formData as Record<string, unknown>);
       const actionLabel = action.label || '';
       const actionValue = typeof action.value === 'string' ? action.value : '';
@@ -1266,7 +1264,6 @@ const AssistantMessage: FC<{
       const messageText = lines.join('\n');
 
       try {
-        console.log('[A2UI_ACTION] messageText:', messageText);
         const runConfig: Record<string, unknown> = {
           custom: {
             agentId: agent.id,
@@ -1275,7 +1272,6 @@ const AssistantMessage: FC<{
         if (conversationId) {
           (runConfig.custom as Record<string, unknown>).threadId = conversationId;
         }
-        console.log('[A2UI_ACTION] appending message with runConfig:', runConfig);
         aui.thread.append({
           role: 'user',
           content: [{ type: 'text', text: messageText }],
@@ -1312,38 +1308,6 @@ const AssistantMessage: FC<{
     skillFileAttachments?: CompleteAttachment[];
   }>;
 
-  // DEBUG: dump all parts when they change
-  useEffect(() => {
-    console.warn("[AssistantMessage] content parts:", {
-      count: content.length,
-      types: content.map((p) => {
-        const anyP = p as Record<string, unknown>;
-        return {
-          type: anyP.type,
-          toolCallName: anyP.toolCallName,
-          toolCallId: anyP.toolCallId,
-          hasParsedArgs: !!anyP.parsedArgs,
-          argsKeys:
-            anyP.parsedArgs && typeof anyP.parsedArgs === "object"
-              ? Object.keys(anyP.parsedArgs as object)
-              : null,
-          // Dump ALL keys for tool-call parts
-          allKeys: anyP.type === "tool-call" ? Object.keys(anyP) : undefined,
-        };
-      }),
-    });
-    // Also dump full part object for a2ui tool-call
-    for (const p of content) {
-      const anyP = p as Record<string, unknown>;
-      if (
-        anyP.type === "tool-call" &&
-        typeof anyP.toolCallId === "string" &&
-        anyP.toolCallId.startsWith("a2ui:")
-      ) {
-        console.warn("[AssistantMessage] FULL a2ui tool-call part:", anyP);
-      }
-    }
-  }, [content]);
   const streamedSkillFileAttachments = useMemo(() => {
     for (let index = content.length - 1; index >= 0; index -= 1) {
       const part = content[index];
@@ -1441,13 +1405,6 @@ const AssistantMessage: FC<{
                 groupKey,
                 ...chainPath,
               ] as `group-${string}`[];
-            }
-            if (isA2uiToolCall) {
-              console.warn("[Thread] A2UI part routing:", {
-                toolCallId: (part as { toolCallId?: string }).toolCallId,
-                chainPath,
-                partType: (part as { type?: string }).type,
-              });
             }
             return chainPath;
           }}
@@ -1557,21 +1514,9 @@ const AssistantMessage: FC<{
                 }
                 const textContent = textPart.text || "";
                 if (mightContainA2UI(textContent)) {
-                  // eslint-disable-next-line no-console
-                  console.warn("[DEBUG] mightContainA2UI=true, content length=", textContent.length);
                   // Parse with LRU cache to avoid re-parsing identical content
                   // on every React re-render during SSE streaming.
                   const parsed = cachedParseA2UI(textContent);
-                  // eslint-disable-next-line no-console
-                  console.warn("[DEBUG] parse result:", {
-                    isAguiFormat: parsed.isAguiFormat,
-                    hasAguiSnapshot: !!parsed.aguiSnapshot,
-                    blocksCount: parsed.blocks?.length ?? 0,
-                    blockTypes: parsed.blocks?.map((b) => b.type) ?? [],
-                    firstBlockParsedType: parsed.blocks?.[0]?.parsed
-                      ? Object.keys(parsed.blocks[0].parsed)[0]
-                      : null,
-                  });
                   const legacyRenderer = (
                     <A2UIActionProvider onAction={handleA2UIAction}>
                       <A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} />
@@ -1579,8 +1524,6 @@ const AssistantMessage: FC<{
                   );
                   // AG-UI ACTIVITY_SNAPSHOT → native generative-ui path with legacy fallback for custom components
                   if (parsed.isAguiFormat && parsed.aguiSnapshot) {
-                    // eslint-disable-next-line no-console
-                    console.warn("[DEBUG] taking AG-UI bridge path");
                     return (
                       <A2uiBridgeSurface
                         snapshot={parsed.aguiSnapshot}
@@ -1597,12 +1540,8 @@ const AssistantMessage: FC<{
                   const nexusMessages = parsed.blocks
                     .map((b) => b.parsed)
                     .filter((p): p is Record<string, unknown> => !!p && typeof p === "object");
-                  // eslint-disable-next-line no-console
-                  console.warn("[DEBUG] legacy path, nexusMessages count=", nexusMessages.length, "keys=", nexusMessages.map((m) => Object.keys(m)[0]));
                   if (nexusMessages.length > 0) {
                     const aguiSnapshot = nexusMessagesToAguiSnapshot(nexusMessages);
-                    // eslint-disable-next-line no-console
-                    console.warn("[DEBUG] converted to AG-UI snapshot, ops count=", aguiSnapshot.content.a2ui_operations.length);
                     return (
                       <A2uiBridgeSurface
                         snapshot={aguiSnapshot}
@@ -1614,8 +1553,6 @@ const AssistantMessage: FC<{
                     );
                   }
                   // Last resort — no blocks parsed
-                  // eslint-disable-next-line no-console
-                  console.warn("[DEBUG] falling back to legacy renderer directly");
                   return legacyRenderer;
                 }
                 return <MarkdownText />;
@@ -1645,17 +1582,6 @@ const AssistantMessage: FC<{
                   result?: unknown;
                   toolUI?: unknown;
                 };
-                const isA2ui =
-                  typeof toolCallPart.toolCallId === "string" &&
-                  toolCallPart.toolCallId.startsWith("a2ui:");
-                if (isA2ui) {
-                  console.warn("[Thread] A2UI tool-call:", {
-                    toolCallId: toolCallPart.toolCallId,
-                    toolCallName: toolCallPart.toolCallName,
-                    hasToolUI: !!toolCallPart.toolUI,
-                    toolUIType: typeof toolCallPart.toolUI,
-                  });
-                }
                 const toolUI = toolCallPart.toolUI;
                 if (toolUI) return toolUI;
                 return <ToolFallback {...part} />;

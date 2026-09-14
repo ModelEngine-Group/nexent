@@ -210,63 +210,22 @@ export class NexusAgent extends HttpAgent {
     super(config);
     const self = this;
 
-    // Override fetch to capture response headers and tee SSE for debug logging.
+    // Override fetch to capture response headers.
     // HttpAgent stores fetch as a public instance property, so we can replace it
     // after super() and it will be used by the inherited run() method.
     const origFetch = (config.fetch ?? fetch) as typeof fetch;
     this.fetch = (async (url: string, init: RequestInit): Promise<Response> => {
       const threadKey = self._pendingThreadKey;
       const resp = await origFetch(url, init);
-      console.log("[NexusAgent.fetch] status:", resp.status, "content-type:", resp.headers.get("content-type"));
 
       if (
         resp.ok &&
         resp.headers.get("content-type")?.includes("text/event-stream") &&
         resp.body
       ) {
-        // Tee the SSE stream so we can log events without consuming the real body.
-        const [loggedBody, originalBody] = resp.body.tee();
         self._onResponseHeaders?.(resp.headers, threadKey);
         self._pendingThreadKey = undefined;
-
-        const reader = loggedBody.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        const MAX_LOG_LINES = 500;  // Increased from 20 so we can see ACTIVITY_SNAPSHOT / RUN_FINISHED
-        let lineCount = 0;
-        (async () => {
-          try {
-            while (lineCount < MAX_LOG_LINES) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() || "";
-              for (const line of lines) {
-                if (line.startsWith("data:")) {
-                  const payload = line.substring(5);
-                  // Highlight critical events so they stand out in DevTools
-                  if (payload.includes('"ACTIVITY_SNAPSHOT"') || payload.includes('"RUN_FINISHED"') || payload.includes('"RUN_ERROR"')) {
-                    console.warn("═══ [NexusAgent KEY EVENT] ═══", JSON.parse(payload));
-                  } else {
-                    console.log("[NexusAgent SSE]", payload.substring(0, 300));
-                  }
-                  lineCount++;
-                } else if (line.trim()) {
-                  console.log("[NexusAgent SSE raw]", line.substring(0, 200));
-                  lineCount++;
-                }
-              }
-            }
-            if (lineCount >= MAX_LOG_LINES) {
-              console.log(`[NexusAgent SSE] log truncated at ${MAX_LOG_LINES} lines`);
-            }
-          } catch (e) {
-            console.error("[NexusAgent SSE log error]", e);
-          }
-        })();
-
-        return new Response(originalBody, resp);
+        return resp;
       }
 
       self._onResponseHeaders?.(resp.headers, threadKey);
@@ -329,14 +288,7 @@ export class NexusAgent extends HttpAgent {
    * schema (query string, numeric conversation_id, minio_files, ...).
    */
   protected requestInit(input: RunAgentInput): RequestInit {
-    console.log('[NexusAgent.requestInit] CALLED', {
-      threadId: input.threadId,
-      runId: input.runId,
-      messageCount: input.messages?.length,
-      hasForwardedProps: !!input.forwardedProps,
-    });
     const body = this._buildAgentRequestBody(input);
-    console.log('[NexusAgent.requestInit] body keys:', Object.keys(body));
 
     return {
       method: "POST",

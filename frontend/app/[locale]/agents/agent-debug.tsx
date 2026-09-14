@@ -82,7 +82,7 @@ const AgentDebugChat: FC<AgentDebugChatProps> = ({ agent, agentId }) => {
     agent: nexusAgent,
     adapters,
     showThinking: true,
-    onError: (e) => console.error("[AgentDebug] AG-UI runtime error:", e),
+    onError: (e) => console.error("AG-UI runtime error:", e),
   });
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {

@@ -39,9 +39,6 @@ const RechartsChartRenderer = memo(function RechartsChartRenderer({
   stacked = false,
   showLegend = true,
 }: RechartsChartRendererProps) {
-  // eslint-disable-next-line no-console
-  console.warn("[RechartsChartRenderer] CALLED", { variant, dataRows: data.length, seriesCount: series.length, xAxisKey });
-
   const containerStyle: React.CSSProperties = {
     width: "100%",
     maxWidth: "100%",
@@ -223,9 +220,7 @@ const RechartsChartRenderer = memo(function RechartsChartRenderer({
     );
   }
 
-  // Unknown variant — show debug info
-  // eslint-disable-next-line no-console
-  console.warn("[RechartsChartRenderer] UNKNOWN variant:", variant);
+  // Unknown variant — show placeholder
   return (
     <div style={{ padding: 16, color: "#6b7280", fontSize: 13, height: 120, display: "flex", alignItems: "center", justifyContent: "center" }}>
       Chart variant "{variant}" not supported ({data.length} rows × {series.length} series)
@@ -521,16 +516,6 @@ const customLibrary = {
         xAxis,
       } = props as Record<string, unknown>;
 
-      // eslint-disable-next-line no-console
-      console.warn("[Chart customLibrary]", {
-        variant,
-        chartType,
-        dataLength: Array.isArray(data) ? data.length : 0,
-        seriesLength: Array.isArray(series) ? series.length : 0,
-        xAxis,
-        propsKeys: Object.keys(props as object),
-      });
-
       // Determine variant
       const v = String(
         variant ?? chartType ?? "line"
@@ -566,8 +551,6 @@ const customLibrary = {
 
       // Fallback: if no data and no series, show placeholder
       if (chartData.length === 0) {
-        // eslint-disable-next-line no-console
-        console.warn("[Chart customLibrary] NO DATA — showing placeholder");
         return jsxs("div", {
           "data-aui": "chart",
           "data-aui-variant": normalizedVariant,
@@ -606,14 +589,6 @@ const customLibrary = {
           ];
         }
       }
-
-      // eslint-disable-next-line no-console
-      console.warn("[Chart customLibrary] RENDERING", {
-        normalizedVariant,
-        chartDataRows: chartData.length,
-        xAxisKey,
-        rechartsSeries,
-      });
 
       // ===== Recharts render — REAL React component for proper context/hooks =====
       return jsx("div", {
@@ -706,11 +681,9 @@ const a2uiActionRegistry = createActionRegistry({
    * for the backend agent run.
    */
   "a2ui:action": ({ payload }) => {
-    console.warn("[A2UI] action handler called, payload:", payload);
     if (!_sendA2uiAction) {
       // Bridge not yet connected — this should never happen since the Provider
       // mounts before any A2UI surface can render, but be defensive.
-      console.warn("[A2UI] sendA2uiAction bridge not mounted; action dropped", payload);
       return undefined;
     }
 
@@ -718,11 +691,6 @@ const a2uiActionRegistry = createActionRegistry({
     const action = payload as Record<string, unknown>;
     const ctx = action.context as Record<string, unknown> | undefined;
     const win = typeof window !== "undefined" ? (window as unknown as { __auiFormStore__?: Map<string, string> }) : null;
-    console.warn("[A2UI] store debug:", {
-      hasContext: !!ctx,
-      ctxKeys: ctx ? Object.keys(ctx) : [],
-      store: win?.__auiFormStore__ ? Object.fromEntries(win.__auiFormStore__.entries()) : null,
-    });
     if (ctx && win?.__auiFormStore__) {
       const store = win.__auiFormStore__;
       const overrides: Record<string, string> = {};
@@ -732,9 +700,6 @@ const a2uiActionRegistry = createActionRegistry({
       }
       if (Object.keys(overrides).length > 0) {
         action.context = { ...ctx, ...overrides };
-        console.warn("[A2UI] store overrides applied:", overrides, "→ final context:", action.context);
-      } else {
-        console.warn("[A2UI] store has no matching keys — skipping override");
       }
     }
 
@@ -783,17 +748,10 @@ export function A2uiToolRegistry() {
   const aui = useAui();
 
   useEffect(() => {
-    console.log("[A2uiToolRegistry] mounting...", {
-      hasAui: !!aui,
-      tools: aui.tools,
-      presentToolRender: presentTool.render,
-    });
     const unsub = aui.tools.setToolUI("present", presentTool.render, {
       standalone: true,
     });
-    console.log("[A2uiToolRegistry] present tool registered! unsub=", typeof unsub);
     return () => {
-      console.log("[A2uiToolRegistry] unregistering...");
       unsub();
     };
   }, [aui]);

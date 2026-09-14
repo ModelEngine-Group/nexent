@@ -273,13 +273,8 @@ export function A2UIRenderer({ content, onAction, className = '' }: A2UIRenderer
   const dataMap = useMemo(() => buildDataMap(parsed.blocks), [parsed.blocks]);
 
   const renderId = useMemo(() => Math.random().toString(36).slice(2, 8), []);
-  if (process.env.NODE_ENV !== 'production') {
-    // eslint-disable-next-line no-console
-    console.debug(`[A2UI_RENDERER:${renderId}] entry: onAction type:`, typeof effectiveOnAction, 'isA2UI:', parsed.isA2UI, 'blocks:', parsed.blocks.length);
-  }
   if (typeof effectiveOnAction !== 'function') {
-    // eslint-disable-next-line no-console
-    console.warn(`[A2UI_RENDERER:${renderId}] onAction is NOT a function! Call stack:\n`, new Error('A2UI_RENDERER no onAction').stack);
+    console.warn(`[A2UI_RENDERER:${renderId}] onAction is not a function — interactive components will be inert.`);
   }
 
   if (!parsed.isA2UI) {
@@ -724,7 +719,6 @@ function A2UIButtonComponent({ node, nodeMap, onAction, defaultSchema, dataMap, 
   const handleClick = useCallback(() => {
     const formValues = formCtx?.getFormValues() || {};
     const handler = onAction ?? actionFromContext ?? globalA2UIActionHandler ?? undefined;
-    // console.debug('[A2UI_BUTTON] handleClick called, actionName:', actionName, 'formValues:', formValues, 'onAction defined:', typeof handler === 'function');
     handler?.({
       type: isSubmit ? 'submit' : 'click',
       value: actionName,
@@ -1012,9 +1006,6 @@ function A2UIChart(props: A2UIChartProps) {
     return extractChartData(dataMap, xAxis, series);
   }, [dataMap, xAxis, series]);
 
-  // eslint-disable-next-line no-console
-  console.warn("[A2UIChart]", { title, chartType, xAxis, seriesCount: series.length, chartDataLength: chartData.length, dataMapSize: dataMap?.size });
-
   return (
     <div className="a2ui-chart rounded-lg border border-border bg-card p-4">
       {title && <h4 className="text-sm font-semibold mb-3">{title}</h4>}
@@ -1034,9 +1025,6 @@ function A2UISimpleChart({ chartType, series, xAxis, chartData }: A2UISimpleChar
   const colors = series.map((s) => (s.color as string) || '#3b82f6');
   const names = series.map((s) => (s.name as string) || (s.key as string) || 'Value');
   const dataKeys = series.map((s) => (s.key as string) || (s.name as string) || 'value');
-
-  // eslint-disable-next-line no-console
-  console.warn("[A2UISimpleChart]", { chartType, xAxis, seriesCount: series.length, chartDataLength: chartData.length, dataKeys });
 
   if (chartData.length === 0) {
     return (

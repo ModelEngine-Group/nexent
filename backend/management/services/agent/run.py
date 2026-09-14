@@ -1304,7 +1304,10 @@ async def run_agent_stream(
                     # primary intent.  We append the original query as context
                     # only if it meaningfully adds information.
                     agent_request.query = action_str
-                    print(f"[RunAgent] A2UI action REPLACED query: name={name}, surfaceId={surface_id}", flush=True)
+                    logger.debug(
+                        "[RunAgent] A2UI action REPLACED query: name=%s, surfaceId=%s",
+                        name, surface_id,
+                    )
 
     # AG-UI protocol mode: when the frontend sends "x-agui-format: true",
     # we wrap every Nexus ProcessType chunk into an AG-UI protocol event
@@ -1817,7 +1820,11 @@ async def run_agent_stream(
             known_types = {pt.value for pt in ProcessType}
 
             if process_type == "a2ui":
-                print(f"[RunTransformer] ProcessType.A2UI chunk! content_len={len(str(chunk_dict.get('content', '')))}, content_preview={str(chunk_dict.get('content', ''))[:200]}", flush=True)
+                logger.debug(
+                    "[RunTransformer] ProcessType.A2UI chunk! content_len=%d, content_preview=%s",
+                    len(str(chunk_dict.get("content", ""))),
+                    str(chunk_dict.get("content", ""))[:200],
+                )
 
             if process_type not in known_types:
                 # Non-ProcessType Nexus event (e.g. conversation_created,

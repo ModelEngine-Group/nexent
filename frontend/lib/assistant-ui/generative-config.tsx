@@ -428,14 +428,6 @@ function preprocessComponent(
       delete transformedProps.xAxis;
       // Keep series as-is — assistant-ui understands it
 
-      // eslint-disable-next-line no-console
-      console.warn("[Chart preprocess]", {
-        chartType,
-        variant,
-        seriesCount: Array.isArray(props.series) ? props.series.length : 0,
-        dataRows: data.length,
-      });
-
       return { ...node, props: transformedProps };
     }
 
@@ -599,13 +591,9 @@ export function preprocessComponents(
 export function preprocessOperations(
   operations: unknown[]
 ): unknown[] {
-  // eslint-disable-next-line no-console
-  console.warn("[DEBUG preprocessOperations] called with", operations.length, "ops");
   // Collect dataModel FIRST — Chart preprocess needs it to resolve Nexus
   // path bindings (xAxis + series[].key → columns in dataModel).
   _dataModelColumn = buildDataModelColumn(operations);
-  // eslint-disable-next-line no-console
-  console.warn("[DEBUG preprocessOperations] dataModel rows:", _dataModelColumn.rows.length);
 
   const result = operations.map((op) => {
     if (typeof op !== "object" || op === null) return op;
@@ -614,8 +602,6 @@ export function preprocessOperations(
     if (uc && typeof uc === "object") {
       const ucObj = uc as Record<string, unknown>;
       if (Array.isArray(ucObj.components)) {
-        // eslint-disable-next-line no-console
-        console.warn("[DEBUG preprocessOperations] preprocessing", ucObj.components.length, "components:", ucObj.components.map((c: any) => c.component ?? c.id));
         return {
           ...o,
           updateComponents: {
@@ -767,8 +753,6 @@ export function A2uiBridgeSurface({
   onAction,
 }: A2uiBridgeSurfaceProps) {
   const ops = useMemo(() => extractOperations(snapshot), [snapshot]);
-  // eslint-disable-next-line no-console
-  console.warn("[A2uiBridgeSurface] rendered, snapshot=", snapshot ? "present" : "null", "ops count=", ops?.length ?? 0);
   const { state, apply } = useA2uiSurfaceState();
 
   // Apply new ops whenever they arrive
@@ -879,19 +863,4 @@ export function A2uiBridgeSurface({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Toolkit factory — for runtime registration once AG-UI runtime is wired up.
-// Currently returns a stub (present tool is **not** registered as an actual
-// frontend tool because we haven't migrated away from useLocalRuntime yet).
-// ---------------------------------------------------------------------------
 
-export function createA2uiToolkitStub() {
-  // Intentionally returns null — the real toolkit construction depends on
-  // being inside an AG-UI runtime context (useAgUiRuntime), which this
-  // project does not yet use. When Layer 4 (runtime migration) lands, this
-  // factory will be replaced with a live JSONGenerativeUI.present() toolkit.
-  return {
-    toolkit: null as null,
-    __placeholder: true,
-  };
-}

@@ -12,15 +12,6 @@
 import { A2UI_BLOCK_PATTERN, A2UI_OPEN_TAG, A2UI_CLOSE_TAG, DEFAULT_A2UI_SCHEMA } from './constants';
 import { isAguiActivitySnapshot, extractA2uiMessages } from './agui-bridge';
 
-// Toggled via localStorage.setItem('a2ui-parser-debug', 'true') or dev mode.
-const A2UI_PARSER_DEBUG = process.env.NODE_ENV !== 'production'
-  && typeof localStorage !== 'undefined'
-  && localStorage.getItem('a2ui-parser-debug') === 'true';
-
-function parserLog(...args: unknown[]) {
-  if (A2UI_PARSER_DEBUG) console.debug('[A2UI_PARSER]', ...args);
-}
-
 export interface A2UIParseResult {
   isA2UI: boolean;
   schema: Record<string, unknown> | null;
@@ -92,16 +83,11 @@ export function parseA2UIMessage(rawContent: string): A2UIParseResult {
 
   // Try tagged block format first
   const taggedBlocks = extractTaggedBlocks(rawContent);
-  parserLog('extractTaggedBlocks found:', taggedBlocks.length, 'blocks');
   if (taggedBlocks.length > 0) {
     result.isA2UI = true;
     result.content = taggedBlocks.join('\n');
     // Parse each tagged block as JSONL (multiple JSON objects separated by whitespace)
     result.blocks = parseTaggedBlockAsMessages(taggedBlocks);
-    parserLog('parsed blocks after splitJsonObjects:', result.blocks.length, 'blocks');
-    for (let i = 0; i < result.blocks.length; i++) {
-      parserLog('block', i, 'type:', result.blocks[i].type, 'hasParsed:', !!result.blocks[i].parsed);
-    }
 
     // Extract schema from beginRendering or first object
     for (const block of result.blocks) {
@@ -158,7 +144,6 @@ export function parseA2UIMessage(rawContent: string): A2UIParseResult {
           // Single JSON parse failed - try splitting into multiple JSON objects
           // (handles concatenated JSON objects like {...}{...}{...} on one line)
           const subMessages = splitJsonObjects(trimmedLine);
-          parserLog('JSONL fallback: splitJsonObjects found', subMessages.length, 'sub-messages on one line');
           for (const msgStr of subMessages) {
             const subParsed = safeParseJSON(msgStr);
             if (subParsed && isValidA2UIObject(subParsed)) {
@@ -221,9 +206,7 @@ function extractTaggedBlocks(content: string): string[] {
 function parseTaggedBlockAsMessages(blockContents: string[]): A2UIBlock[] {
   const blocks: A2UIBlock[] = [];
   for (const content of blockContents) {
-    parserLog('parseTaggedBlockAsMessages: content length:', content.length);
     const messages = splitJsonObjects(content);
-    parserLog('splitJsonObjects returned:', messages.length, 'messages');
     if (messages.length === 0) {
       // Couldn't split - treat entire content as one block
       blocks.push({
@@ -311,7 +294,6 @@ function splitJsonObjects(content: string): string[] {
         continue;
       }
       // Brace-counting found a boundary but JSON is invalid - try progressive parse
-      parserLog('splitJsonObjects: brace-counting found boundary but JSON parse failed at position', start, 'length:', candidate.length);
     }
 
     // Slow path: progressive parse - try increasingly longer substrings
@@ -333,7 +315,6 @@ function splitJsonObjects(content: string): string[] {
     }
 
     if (!found) {
-      parserLog('splitJsonObjects: failed to parse JSON object at position', start, 'preview:', content.slice(start, Math.min(start + 100, len)));
       // Skip this '{' and try to find the next one
       idx++;
       while (idx < len && content[idx] !== '{') {
