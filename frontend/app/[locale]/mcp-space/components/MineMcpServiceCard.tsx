@@ -191,7 +191,7 @@ export default function MineMcpServiceCard({
           </div>
         </div>
         <div className="flex shrink-0 items-start gap-1.5">
-          {onHealthCheck ? (
+          {onHealthCheck && isOwned ? (
             <Tooltip
               title={t("mcpConfig.serverList.button.healthCheck")}
               placement="top"
