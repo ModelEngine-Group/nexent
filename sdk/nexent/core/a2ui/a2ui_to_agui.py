@@ -165,6 +165,19 @@ def a2ui_messages_to_operations(
                 components = surface.get("components")
                 flat_components = _flatten_and_resolve_components(components)
                 if flat_components is not None:
+                    # DEBUG: confirm SDK-side flatten+resolve is running
+                    if flat_components:
+                        sample_props = flat_components[0].get("props", {}) if flat_components else {}
+                        logger.info(
+                            "[A2UI SDK] flatten+resolve produced %d components. "
+                            "first_props=%s (literalString unwrapped: %s)",
+                            len(flat_components),
+                            sample_props,
+                            not any(
+                                isinstance(v, dict) and set(v.keys()) <= _LITERAL_BINDING_KEYS
+                                for v in sample_props.values()
+                            ),
+                        )
                     operations.append({
                         "version": version,
                         "updateComponents": {
