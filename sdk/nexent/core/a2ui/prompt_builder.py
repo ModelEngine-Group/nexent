@@ -306,7 +306,7 @@ Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, Ch
   - **重要**: 按钮点击时前端会自动从 dataModel 取值填充 context，后端收到完整表单值
 - **TextField**: `label`, `text` (path 绑定到 dataModel)
 - **Image**: `url` (literalString), `fit`, `usageHint`
-- **List**: `children` (template 模板), `items` (path 绑定数据数组)
+- **List**: ⚠️ template 循环渲染暂不支持。如需展示多条相似数据（如商品列表、房间列表），请用 **Column + 显式 Row** 逐个展开每项，不要依赖 List 的 children.template + items path 绑定
 - **Chart**: `title`, `chartType` (line/bar/pie), `xAxis` (X轴字段名), `series` (数组，每项含 name/key/color), `data` (path 绑定到 dataModel 中的数据数组)
 - **TodoList**: `items` (数组，每项含 `id` 字符串, `text` 字符串, `done` 布尔值), `placeholder` (输入框占位文本，可选)
   - 这是一个**客户端交互组件**——前端渲染带复选框、删除按钮、底部输入框
@@ -682,7 +682,7 @@ Text, Image, Icon, Row, Column, List, Card, Tabs, Divider, Button, TextField, Ch
   - **IMPORTANT**: On button click the frontend automatically resolves paths and fills context with actual form values; the backend receives complete form data
 - **TextField**: `label`, `text` (path binding to dataModel)
 - **Image**: `url` (literalString), `fit`, `usageHint`
-- **List**: `children` (template), `items` (path binding to data array)
+- **List**: ⚠️ template loop rendering is NOT supported. For multiple similar items (product lists, room lists), use **Column + explicit Row** for each item. Do NOT rely on List's children.template + items path binding
 - **Chart**: `title`, `chartType` (line/bar/pie), `xAxis` (X-axis field name), `series` (array, each with name/key/color), `data` (path binding to dataModel data array)
 - **TodoList**: `items` (array, each with `id` string, `text` string, `done` boolean), `placeholder` (input placeholder text, optional)
   - This is a **client-side interactive component** — the frontend renders checkboxes, delete buttons, and a bottom input box
