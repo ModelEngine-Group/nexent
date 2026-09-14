@@ -976,7 +976,7 @@ async def get_model_catalog_all(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
-                "message": f"catalog unavailable: {e}",
+                "message": "catalog unavailable",
                 "catalog_available": False,
                 "data": {"version": "0.0.0", "metadata": {}, "providers": []},
             },
@@ -1021,7 +1021,7 @@ async def list_model_catalog_providers(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
-                "message": f"catalog unavailable: {e}",
+                "message": "catalog unavailable",
                 "catalog_available": False,
                 "data": [],
             },
@@ -1060,7 +1060,7 @@ async def get_inference_field_specs(
         return JSONResponse(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             content={
-                "message": f"failed to load inference field specs: {e}",
+                "message": "failed to load inference field specs",
                 "data": {},
             },
         )
@@ -1099,7 +1099,7 @@ async def list_model_catalog_models(
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
-                "message": f"catalog unavailable: {e}",
+                "message": "catalog unavailable",
                 "catalog_available": False,
                 "provider": provider,
                 "filter_model_type": model_type,
@@ -1156,7 +1156,7 @@ async def get_model_catalog_profile(
         return JSONResponse(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             content={
-                "message": f"catalog unavailable: {e}",
+                "message": "catalog unavailable",
                 "catalog_available": False,
                 "provider": provider,
                 "model_name": model_name,
