@@ -8,12 +8,11 @@
 
 ### 1.1 记录版本、Helm 和存储状态
 
-默认 namespace 为 `nexent`，应按实际环境调整。执行 `kubectl` 的本地机器是备份目标。
+先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。以下命令不要求仓库位于某个固定系统路径。默认 namespace 为 `nexent`，应按实际环境调整。执行 `kubectl` 的本地机器是备份目标。
 
 ```bash
 set -euo pipefail
 
-CODE_DIR=/opt/nexent
 TARGET_VERSION=X.Y.Z
 NS=nexent
 APP_RELEASE=nexent
@@ -23,7 +22,6 @@ STAMP=$(date -u +%Y%m%d-%H%M%S)
 K8S_BACKUP_DIR="$BACKUP_BASE/k8s-$STAMP"
 
 mkdir -p "$K8S_BACKUP_DIR/data"
-cd "$CODE_DIR"
 
 printf 'target_version=%s\n' "$TARGET_VERSION" > "$K8S_BACKUP_DIR/version.txt"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -162,24 +160,49 @@ du -sh "$K8S_BACKUP_DIR/data"/*
 
 ## 2. 执行升级
 
-通过 Git 管理部署代码时，先确认当前分支和目标版本，再以快进方式更新。
+### 2.1 在线升级
+
+在能够访问 GitHub 和所需镜像仓库的环境中，使用当前 Nexent 仓库执行在线升级。先确认当前分支和目标版本，再以快进方式更新。
 
 ```bash
-cd "$CODE_DIR"
 git branch --show-current
 git pull --ff-only
-bash deploy.sh --defaults k8s --version X.Y.Z
+bash deploy.sh k8s --defaults --version X.Y.Z
 ```
 
-`--defaults` 会复用已保存的 Kubernetes 部署配置并跳过交互界面。升级前应确认 `deploy/k8s/deploy.options` 中的组件、端口策略、镜像源、持久化模式和 namespace 与原环境一致。
+`--defaults` 会复用已保存的 Kubernetes 部署配置并跳过交互界面。升级前应确认 `deploy/k8s/deploy.options` 中的组件、端口策略、镜像源、持久化模式和 namespace 与原环境一致。更多在线部署说明参见 [Kubernetes 安装部署](./kubernetes-installation.md#在线部署)。
 
-使用完整离线部署包时，在新包根目录执行：
+### 2.2 离线升级
+
+目标集群无法访问公网镜像仓库时，按 [Kubernetes 离线部署](./kubernetes-installation.md#离线部署) 下载与集群节点架构匹配的目标版本包，复制到能够访问目标集群的管理节点并解压：
 
 ```bash
-bash deploy.sh --load-images --reuse-from /opt/nexent-old-package --defaults k8s
+unzip nexent-<version>-amd64.zip -d nexent-<version>
+cd nexent-<version>
 ```
 
-`--reuse-from` 仅用于离线包入口，会复用旧包的 `.env`、`monitoring.env` 和 Kubernetes 部署选项。
+单节点且使用 Docker 容器运行时的集群，可直接加载新包镜像并升级：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  --defaults \
+  k8s
+```
+
+其他单节点或多节点集群，应将新包镜像推送到集群可访问的内部仓库：
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  --defaults \
+  k8s
+```
+
+`/path/to/previous/nexent` 必须是上一版已解压部署包的实际根目录，且包含 `deploy/env/.env`。`--reuse-from` 会复用旧包的 `.env`、`monitoring.env` 和 Kubernetes 部署选项。ARM64 集群节点应使用对应的 `arm64` 包名。
 
 升级时由 `nexent-config` 执行数据库自动迁移，其他后端服务会等待迁移达到目标状态。已合并的 SQL 文件不可修改、改名或删除。
 

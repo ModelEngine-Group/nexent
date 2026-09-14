@@ -8,12 +8,11 @@ This guide applies to Nexent deployments managed with Helm. Run the upgrade duri
 
 ### 1.1 Record the Version, Helm, and Storage State
 
-The default namespace is `nexent`; adjust it for the actual environment. The machine running `kubectl` is the backup destination.
+Start in the root of the Nexent repository currently used for deployment. For an offline deployment, start in the root of the previously extracted deployment package. The commands do not require the repository to be installed at any fixed system path. The default namespace is `nexent`; adjust it for the actual environment. The machine running `kubectl` is the backup destination.
 
 ```bash
 set -euo pipefail
 
-CODE_DIR=/opt/nexent
 TARGET_VERSION=X.Y.Z
 NS=nexent
 APP_RELEASE=nexent
@@ -23,7 +22,6 @@ STAMP=$(date -u +%Y%m%d-%H%M%S)
 K8S_BACKUP_DIR="$BACKUP_BASE/k8s-$STAMP"
 
 mkdir -p "$K8S_BACKUP_DIR/data"
-cd "$CODE_DIR"
 
 printf 'target_version=%s\n' "$TARGET_VERSION" > "$K8S_BACKUP_DIR/version.txt"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -162,24 +160,49 @@ du -sh "$K8S_BACKUP_DIR/data"/*
 
 ## 2. Perform the Upgrade
 
-For a Git-managed deployment, confirm the current branch and target version, then update with fast-forward only.
+### 2.1 Online Upgrade
+
+In an environment that can reach GitHub and the required image registries, perform an online upgrade from the current Nexent repository. Confirm the current branch and target version, then update with fast-forward only.
 
 ```bash
-cd "$CODE_DIR"
 git branch --show-current
 git pull --ff-only
-bash deploy.sh --defaults k8s --version X.Y.Z
+bash deploy.sh k8s --defaults --version X.Y.Z
 ```
 
-`--defaults` reuses the saved Kubernetes deployment configuration and skips the interactive interface. Before upgrading, verify that the components, port policy, image source, persistence mode, and namespace in `deploy/k8s/deploy.options` match the current environment.
+`--defaults` reuses the saved Kubernetes deployment configuration and skips the interactive interface. Before upgrading, verify that the components, port policy, image source, persistence mode, and namespace in `deploy/k8s/deploy.options` match the current environment. See [Kubernetes Installation and Deployment](./kubernetes-installation.md#online-deployment) for more information about online deployment.
 
-For a complete offline deployment package, run the following from the new package root:
+### 2.2 Offline Upgrade
+
+When the target cluster cannot access public image registries, follow [Kubernetes Offline Deployment](./kubernetes-installation.md#offline-deployment) to download a target-version package matching the cluster node architecture, copy it to a management host that can reach the cluster, and extract it:
 
 ```bash
-bash deploy.sh --load-images --reuse-from /opt/nexent-old-package --defaults k8s
+unzip nexent-<version>-amd64.zip -d nexent-<version>
+cd nexent-<version>
 ```
 
-`--reuse-from` is available only through the offline-package entrypoint. It reuses `.env`, `monitoring.env`, and Kubernetes deployment options from the old package.
+For a single-node cluster backed by the Docker container runtime, load the new package images directly and upgrade:
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  --defaults \
+  k8s
+```
+
+For other single-node or multi-node clusters, push the new package images to an internal registry accessible to the cluster:
+
+```bash
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --push-images \
+  --image-registry-prefix registry.example.com/nexent \
+  --defaults \
+  k8s
+```
+
+`/path/to/previous/nexent` must be the actual root of the previously extracted deployment package and contain `deploy/env/.env`. `--reuse-from` reuses its `.env`, `monitoring.env`, and Kubernetes deployment options. Use the corresponding `arm64` package name for ARM64 cluster nodes.
 
 During the upgrade, `nexent-config` runs automatic database migrations while the other backend services wait for migrations to reach the target state. Existing merged SQL files must not be modified, renamed, or deleted.
 

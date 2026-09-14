@@ -8,19 +8,17 @@ This guide applies to Nexent deployments managed with Docker Compose. Run the up
 
 ### 1.1 Record the Version and Deployment Configuration
 
-Set the actual deployment path, target version, and backup directory in the same Bash session. `BACKUP_BASE` must be outside `ROOT_DIR`.
+Start in the root of the Nexent repository currently used for deployment. For an offline deployment, start in the root of the previously extracted deployment package. The commands do not require the repository to be installed at any fixed system path. `BACKUP_BASE` must be outside `ROOT_DIR`.
 
 ```bash
 set -euo pipefail
 
-CODE_DIR=/opt/nexent
 TARGET_VERSION=X.Y.Z
 BACKUP_BASE=/backup/nexent
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 BACKUP_DIR="$BACKUP_BASE/docker-$STAMP"
 
 mkdir -p "$BACKUP_DIR/config"
-cd "$CODE_DIR"
 
 set -a
 source deploy/env/.env
@@ -120,24 +118,33 @@ du -sh "$ROOT_DIR" "$BACKUP_DIR"
 
 ## 2. Perform the Upgrade
 
-For a Git-managed deployment, confirm the current branch and target version, then update with fast-forward only. Do not use an unrecorded `latest` value in place of a specific version.
+### 2.1 Online Upgrade
+
+In an environment that can reach GitHub and the required image registries, perform an online upgrade from the current Nexent repository. Confirm the current branch and target version, then update with fast-forward only. Do not use an unrecorded `latest` value in place of a specific version.
 
 ```bash
-cd "$CODE_DIR"
 git branch --show-current
 git pull --ff-only
-bash deploy.sh --defaults docker --version X.Y.Z
+bash deploy.sh docker --defaults --version X.Y.Z
 ```
 
-`--defaults` reuses the saved deployment configuration and skips the interactive interface. Before upgrading, verify that `deploy/docker/deploy.options` exists and that its components, port policy, and image source match the current environment.
+`--defaults` reuses the saved deployment configuration and skips the interactive interface. Before upgrading, verify that `deploy/docker/deploy.options` exists and that its components, port policy, and image source match the current environment. See [Docker Installation and Deployment](./installation.md#online-deployment) for more information about online deployment.
 
-For a complete offline deployment package, run the following from the new package root:
+### 2.2 Offline Upgrade
+
+When the target host cannot access public image registries, follow [Docker Offline Deployment](./installation.md#offline-deployment) to download a target-version package matching the server architecture, copy it to the target host, and extract it into a new directory:
 
 ```bash
-bash deploy.sh --load-images --reuse-from /opt/nexent-old-package --defaults docker
+unzip nexent-<version>-amd64.zip -d nexent-<version>
+cd nexent-<version>
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  --defaults \
+  docker
 ```
 
-`--reuse-from` is available only through the offline-package entrypoint. It reuses `.env`, `monitoring.env`, and Docker deployment options from the old package.
+`/path/to/previous/nexent` must be the actual root of the previously extracted deployment package and contain `deploy/env/.env`. `--reuse-from` reuses its `.env`, `monitoring.env`, and Docker deployment options, while `--load-images` loads images from the new package. Use the corresponding `arm64` package name on an ARM64 server.
 
 During the upgrade, `nexent-config` runs automatic database migrations while the other backend containers wait for migrations to reach the target state. Existing merged SQL files must not be modified, renamed, or deleted.
 

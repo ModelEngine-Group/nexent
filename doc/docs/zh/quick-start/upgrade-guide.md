@@ -8,19 +8,17 @@
 
 ### 1.1 记录版本与部署配置
 
-在同一 Bash 会话中设置实际部署路径、目标版本和备份目录。`BACKUP_BASE` 必须位于 `ROOT_DIR` 之外。
+先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。以下命令不要求仓库位于某个固定系统路径。`BACKUP_BASE` 必须位于 `ROOT_DIR` 之外。
 
 ```bash
 set -euo pipefail
 
-CODE_DIR=/opt/nexent
 TARGET_VERSION=X.Y.Z
 BACKUP_BASE=/backup/nexent
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 BACKUP_DIR="$BACKUP_BASE/docker-$STAMP"
 
 mkdir -p "$BACKUP_DIR/config"
-cd "$CODE_DIR"
 
 set -a
 source deploy/env/.env
@@ -120,24 +118,33 @@ du -sh "$ROOT_DIR" "$BACKUP_DIR"
 
 ## 2. 执行升级
 
-通过 Git 管理部署代码时，先确认当前分支和目标版本，再以快进方式更新。不要用未记录的 `latest` 代替明确版本。
+### 2.1 在线升级
+
+在能够访问 GitHub 和所需镜像仓库的环境中，使用当前 Nexent 仓库执行在线升级。先确认当前分支和目标版本，再以快进方式更新。不要用未记录的 `latest` 代替明确版本。
 
 ```bash
-cd "$CODE_DIR"
 git branch --show-current
 git pull --ff-only
-bash deploy.sh --defaults docker --version X.Y.Z
+bash deploy.sh docker --defaults --version X.Y.Z
 ```
 
-`--defaults` 会复用已保存的部署配置并跳过交互界面。升级前应确认 `deploy/docker/deploy.options` 存在且组件、端口策略、镜像源与原环境一致。
+`--defaults` 会复用已保存的部署配置并跳过交互界面。升级前应确认 `deploy/docker/deploy.options` 存在且组件、端口策略、镜像源与原环境一致。更多在线部署说明参见 [Docker 安装部署](./installation.md#在线部署)。
 
-使用完整离线部署包时，在新包根目录执行：
+### 2.2 离线升级
+
+目标主机无法访问公网镜像仓库时，按 [Docker 离线部署](./installation.md#离线部署) 下载与服务器架构匹配的目标版本包，复制到目标主机并解压到新目录：
 
 ```bash
-bash deploy.sh --load-images --reuse-from /opt/nexent-old-package --defaults docker
+unzip nexent-<version>-amd64.zip -d nexent-<version>
+cd nexent-<version>
+bash deploy.sh \
+  --reuse-from /path/to/previous/nexent \
+  --load-images \
+  --defaults \
+  docker
 ```
 
-`--reuse-from` 仅用于离线包入口，会复用旧包的 `.env`、`monitoring.env` 和 Docker 部署选项。
+`/path/to/previous/nexent` 必须是上一版已解压部署包的实际根目录，且包含 `deploy/env/.env`。`--reuse-from` 会复用旧包的 `.env`、`monitoring.env` 和 Docker 部署选项，`--load-images` 会加载新包中的镜像。ARM64 服务器应使用对应的 `arm64` 包名。
 
 升级时由 `nexent-config` 执行数据库自动迁移，其他后端容器会等待迁移达到目标状态。已合并的 SQL 文件不可修改、改名或删除。
 
