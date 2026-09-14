@@ -76,6 +76,144 @@ medical,finance
 
 脚本只同步选中的 Profile，不会同步其他类别。
 
+## 3.1 从 Nexent 导出的普通 Agent 生成 Official Bundle
+
+仓库中已经提供转换脚本：
+
+```text
+scripts/build_official_agent_bundle.py
+```
+
+它将 Nexent 导出的普通 Agent JSON 或 ZIP 转换为官方 Bundle 目录。ZIP 输入应包含：
+
+```text
+agent.zip
+├── agent.json
+└── skills/
+    └── <skill-name>.zip
+```
+
+JSON 只能转换 Agent 配置；如果 Agent 引用了 Skill，建议使用 ZIP，以便同时携带 Skill 压缩包。
+
+### 3.1.1 导出普通 Agent
+
+在 Nexent 页面中进入“智能体仓库 → 我的 Agent”，对目标 Agent 执行“导出”：
+
+- 选择 JSON：只导出 Agent 配置；
+- 选择 ZIP：导出 Agent 配置和 Skill 文件。
+
+将下载文件放到 Nexent 仓库外的临时目录，例如：
+
+```text
+/opt/agent-exports/medical_assistant.zip
+```
+
+### 3.1.2 转换为 Profile 目录
+
+从 Nexent 仓库根目录执行：
+
+```bash
+python scripts/build_official_agent_bundle.py \
+  --input /opt/agent-exports/medical_assistant.zip \
+  --name medical_assistant \
+  --icon 🏥 \
+  --tags medical,clinical \
+  --version-label V1 \
+  --output deploy/docker/assets/official-agents/medical
+```
+
+执行后生成：
+
+```text
+deploy/docker/assets/official-agents/medical/medical_assistant/
+├── agent.json
+└── skills/
+    └── <skill-name>.zip
+```
+
+这里的 `medical` 是 Profile 名称，`medical_assistant` 是 Bundle 目录名。`--output` 应指向 Profile 目录，不能只指向 `deploy/docker/assets/official-agents`，否则生成的 Bundle 不在脚本所扫描的 Profile 层级下。
+
+### 3.1.3 带入知识库文档
+
+转换脚本会从 Agent 工具配置中的 `index_names` 识别知识库引用，并生成 Bundle 内部的逻辑知识库名称，例如 `kb-1`。默认情况下，脚本会尝试从源 Nexent 数据库查询知识库显示名称和描述。
+
+为官方智能体准备文档时，可以使用 `--kb-dir` 将本地文档目录复制到对应知识库：
+
+```bash
+python scripts/build_official_agent_bundle.py \
+  --input /opt/agent-exports/medical_assistant.zip \
+  --name medical_assistant \
+  --tags medical,clinical \
+  --output deploy/docker/assets/official-agents/medical \
+  --kb-dir /opt/agent-exports/medical-kb
+```
+
+生成结果类似：
+
+```text
+deploy/docker/assets/official-agents/medical/medical_assistant/
+├── agent.json
+├── skills/
+└── kb/
+    └── kb-1/
+        ├── guideline.pdf
+        └── protocol.docx
+```
+
+一个 Bundle 有多个知识库时，可以重复指定 `--kb-dir`：
+
+```bash
+python scripts/build_official_agent_bundle.py \
+  --input agent.zip \
+  --output deploy/docker/assets/official-agents/medical \
+  --kb-dir /opt/agent-exports/kb-1 \
+  --kb-dir /opt/agent-exports/kb-2
+```
+
+如果目录名与生成的逻辑名称相同，脚本会按名称匹配；否则按知识库出现顺序匹配。也可以直接手工将文档放到生成目录的 `kb/<logical_index_name>/` 下。
+
+### 3.1.4 无法连接源数据库时
+
+如果源数据库不可访问，转换脚本会打印 `DB lookup skipped`，仍然生成 Bundle，但知识库显示名称会退化为生成的逻辑名称，例如 `kb-1`。这不会阻止转换，但建议在发布前手工修改 `agent.json` 中对应 `knowledge_bases` 项的 `display_name` 和 `description`，并确认工具中的 `params.index_names` 使用同一个逻辑名称。
+
+也可以显式跳过数据库查询：
+
+```bash
+python scripts/build_official_agent_bundle.py \
+  --input agent.zip \
+  --output deploy/docker/assets/official-agents/medical \
+  --no-db-lookup
+```
+
+`--no-db-lookup` 只影响知识库元数据查询，不会自动把源知识库文档复制进 Bundle。文档仍需通过 `--kb-dir` 或手工复制到 `kb/` 目录。
+
+### 3.1.5 发布前检查
+
+转换完成后，确认以下内容：
+
+```bash
+find deploy/docker/assets/official-agents/medical \
+  -type f \( -name agent.json -o -name '*.zip' \) -print
+```
+
+并检查 `agent.json`：
+
+- `agent_id` 和 `agent_info` 完整；
+- 根 Agent 名称符合发布命名要求；
+- `knowledge_bases[].logical_index_name` 与工具 `params.index_names` 一致；
+- 文档存在于 `kb/<logical_index_name>/`；
+- Skill ZIP 文件名与 Agent 的 `skill_names` 一致；
+- `--tags` 已设置为希望用户在复制/上架流程中看到的标签。
+
+检查通过后，再执行本指南第 4 节的官方智能体部署命令：
+
+```bash
+bash deploy/deploy-official-agents.sh \
+  --source local \
+  --path deploy/docker/assets/official-agents \
+  --profiles medical
+```
+
 ## 4. 统一部署命令
 
 在 Nexent 仓库根目录执行：
