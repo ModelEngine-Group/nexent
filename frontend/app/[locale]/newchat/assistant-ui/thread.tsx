@@ -1613,9 +1613,14 @@ const AssistantMessage: FC<{
                 }
                 const textContent = textPart.text || "";
                 if (mightContainA2UI(textContent)) {
-                  // Parse with LRU cache to avoid re-parsing identical content
-                  // on every React re-render during SSE streaming.
                   const parsed = cachedParseA2UI(textContent);
+                  // eslint-disable-next-line no-console
+                  console.debug("[thread A2UI]",
+                    "isAguiFormat:", parsed.isAguiFormat,
+                    "hasAguiSnapshot:", !!parsed.aguiSnapshot,
+                    "blocks:", parsed.blocks?.length ?? 0,
+                    "blockTypes:", parsed.blocks?.map(b => b.type).join(","),
+                  );
                   const legacyRenderer = (
                     <A2UIActionProvider onAction={handleA2UIAction}>
                       <A2UITextRenderer content={textContent} className="a2ui-chat-message" onAction={handleA2UIAction} />

@@ -712,6 +712,20 @@ function normalizeAgUiChunk(raw: Record<string, unknown>): SseChunk | null {
 
   // ---- A2UI ActivitySnapshot ------------------------------------------
   if (type === "ACTIVITY_SNAPSHOT") {
+    // DEBUG: capture raw ACTIVITY_SNAPSHOT as it arrives from SSE
+    try {
+      const parsed = typeof raw.content === 'string' ? JSON.parse(raw.content) : raw.content;
+      const ops = parsed?.a2ui_operations || [];
+      const firstOp = ops[0];
+      const firstComp = firstOp?.updateComponents?.components?.[0];
+      console.debug("[ACTIVITY_SNAPSHOT SSE]",
+        "activityType:", raw.activityType,
+        "opsCount:", ops.length,
+        "firstComp:", firstComp?.component,
+        "firstProps:", JSON.stringify(firstComp?.props),
+        "hasLiteral:", JSON.stringify(firstComp?.props).includes("literalString"),
+      );
+    } catch { /* best-effort */ }
     // Preserve the full AG-UI event as content for the A2UI parser
     return {
       type: "a2ui",

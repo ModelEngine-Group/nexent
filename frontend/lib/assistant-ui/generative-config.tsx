@@ -160,6 +160,8 @@ function unwrapLiteralStrings(obj: Record<string, unknown>): Record<string, unkn
       typeof v === "object" &&
       "literalString" in (v as Record<string, unknown>)
     ) {
+      // eslint-disable-next-line no-console
+      console.debug("[unwrap]", key, "literalString →", (v as Record<string, unknown>).literalString);
       obj[key] = (v as Record<string, unknown>).literalString;
     } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
       // Recurse into nested prop objects (e.g. Button.action.context values)
@@ -790,10 +792,19 @@ export function A2uiBridgeSurface({
   // Preprocess before applying so Nexus binding syntax
   // ({literalString: "xxx"}) is unwrapped and composite components
   // (Slider, Table, Chart, etc.) are expanded into supported primitives.
-  const ops = useMemo(
-    () => (rawOps ? (preprocessOperations(rawOps) as A2uiOperation[]) : null),
-    [rawOps]
-  );
+  const ops = useMemo(() => {
+    if (!rawOps) return null;
+    const result = preprocessOperations(rawOps) as A2uiOperation[];
+    // eslint-disable-next-line no-console
+    console.debug("[A2uiBridgeSurface] preprocess done, ops count:", result.length,
+      "first components:", JSON.stringify(
+        (result[0] as any)?.updateComponents?.components?.map(
+          (c: any) => ({ id: c.id, component: c.component, props: c.props })
+        ) ?? null
+      )
+    );
+    return result;
+  }, [rawOps]);
   const { state, apply } = useA2uiSurfaceState();
 
   // Apply new ops whenever they arrive
