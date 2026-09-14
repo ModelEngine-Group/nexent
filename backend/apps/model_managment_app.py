@@ -73,7 +73,9 @@ try:
     )
     _CATALOG_AVAILABLE = True
 except Exception as _exc:  # noqa: BLE001
-    logger.warning("Model catalog unavailable: %s", _exc)
+    logging.getLogger("model_management_app").warning(
+        "Model catalog unavailable: %s", _exc
+    )
     _CATALOG_AVAILABLE = False
 
     def list_catalog_providers():

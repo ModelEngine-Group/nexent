@@ -57,7 +57,7 @@ export function useModelCatalog(options?: { staleTime?: number }) {
   // Provider key -> provider info lookup for fast access in dropdowns
   const providerByKey = useMemo(() => {
     const map = new Map<string, ModelCatalogProviderInfo>();
-    providers.forEach((p) => map.set(p.provider_key, p));
+    providers.forEach((p) => map.set(p.id, p));
     return map;
   }, [providers]);
 
@@ -65,7 +65,7 @@ export function useModelCatalog(options?: { staleTime?: number }) {
   const modelsByProviderKey = useMemo(() => {
     const map = new Map<string, ModelCatalogModelEntry[]>();
     catalog.providers.forEach((block) => {
-      map.set(block.provider_info.provider_key, block.models ?? []);
+      map.set(block.provider_info.id, block.models ?? []);
     });
     return map;
   }, [catalog.providers]);

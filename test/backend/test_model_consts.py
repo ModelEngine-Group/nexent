@@ -430,7 +430,7 @@ def test_conversation_request_response():
     """Test ConversationRequest and ConversationResponse"""
     # Default title is Chinese
     req = model_consts.ConversationRequest()
-    assert req.title == "新对�?
+    assert req.title == "新对话"
 
     # Custom title
     req = model_consts.ConversationRequest(title="My Chat")

@@ -196,14 +196,11 @@ export interface ModelValidationResponse {
  * field-level mapping is needed between backend and frontend.
  */
 export interface ModelCatalogProviderInfo {
-  provider_key: string;         // e.g. "silicon", "dashscope"
-  display_name: string;             // human-readable (zh-CN) name for UI buttons
-  base_url?: string | null;       // default API base URL for this provider
-  supported_model_types: ModelType[]; // llm / embedding / rerank / ...
+  id: string;                    // e.g. "silicon", "dashscope" (Pydantic field name)
+  display_name: string;          // human-readable (zh-CN) name for UI buttons
+  base_url?: string | null;      // default API base URL for this provider
+  supported_types: string[];     // llm / embedding / rerank / ...
   model_count?: number;          // how many preset models are registered
-  capabilities?: string[];             // e.g. ["support_reasoning", "tool_calls"]
-  docs_url?: string | null;
-  pricing_url?: string | null;
 }
 
 /**

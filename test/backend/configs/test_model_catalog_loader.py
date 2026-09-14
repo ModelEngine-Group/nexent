@@ -81,7 +81,7 @@ class TestModelCatalogLoaderSmoke:
         for p in providers:
             assert isinstance(p, ModelCatalogProviderInfo)
             # Verify non-empty
-            assert p.provider_key
+            assert p.id
             assert p.display_name
             # At least one model per provider (otherwise why list it?)
             assert p.model_count and p.model_count > 0
@@ -89,10 +89,10 @@ class TestModelCatalogLoaderSmoke:
             # Spot-check: get a model profile and validate it
             from configs.model_catalog_loader import list_models_by_provider
 
-            entries = list_models_by_provider(p.provider_key)
+            entries = list_models_by_provider(p.id)
             if entries:
                 entry = entries[0]
-                prof = get_model_profile(p.provider_key, entry["model_name"])
+                prof = get_model_profile(p.id, entry["model_name"])
                 assert isinstance(prof, ModelCatalogProfile)
                 assert prof.model_type  # required field
 
