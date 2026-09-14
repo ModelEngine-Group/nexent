@@ -1519,7 +1519,7 @@ def test_merge_existing_model_tokens_empty_model_repo_matches_bare_name():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_silicon_success():
-    """Should successfully get models from Silicon provider."""
+    """Silicon provider models are fetched via the unified OpenAI-compatible adapter."""
     model_data = {
         "provider": "silicon",
         "model_type": "llm",
@@ -1536,7 +1536,7 @@ async def test_get_provider_models_silicon_success():
     ]
 
     with mock.patch(
-        "backend.services.model_provider_service.SiliconModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = expected_models
@@ -1547,7 +1547,7 @@ async def test_get_provider_models_silicon_success():
         # Verify the result
         assert result == expected_models
 
-        # Verify SiliconModelProvider was instantiated
+        # Verify the unified adapter was instantiated
         mock_provider_class.assert_called_once()
 
         # Verify get_models was called with correct parameters
@@ -1556,7 +1556,7 @@ async def test_get_provider_models_silicon_success():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_silicon_empty_result():
-    """Should handle empty result from Silicon provider."""
+    """Should handle empty result from the unified adapter for Silicon provider."""
     model_data = {
         "provider": "silicon",
         "model_type": "embedding",
@@ -1564,7 +1564,7 @@ async def test_get_provider_models_silicon_empty_result():
     }
 
     with mock.patch(
-        "backend.services.model_provider_service.SiliconModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = []
@@ -1578,7 +1578,7 @@ async def test_get_provider_models_silicon_empty_result():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_silicon_exception():
-    """Should handle exceptions from Silicon provider and return empty list."""
+    """Should handle exceptions from the unified adapter and let them propagate."""
     model_data = {
         "provider": "silicon",
         "model_type": "llm",
@@ -1586,7 +1586,7 @@ async def test_get_provider_models_silicon_exception():
     }
 
     with mock.patch(
-        "backend.services.model_provider_service.SiliconModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.side_effect = Exception(
@@ -1602,7 +1602,7 @@ async def test_get_provider_models_silicon_exception():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_silicon_constructor_exception():
-    """Should handle exceptions from SiliconModelProvider constructor."""
+    """Should handle exceptions from the unified adapter constructor."""
     model_data = {
         "provider": "silicon",
         "model_type": "llm",
@@ -1610,7 +1610,7 @@ async def test_get_provider_models_silicon_constructor_exception():
     }
 
     with mock.patch(
-        "backend.services.model_provider_service.SiliconModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_class.side_effect = Exception("Constructor error")
 
@@ -1621,7 +1621,7 @@ async def test_get_provider_models_silicon_constructor_exception():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_silicon_internal_exception_handling():
-    """Should test that SiliconModelProvider.get_models() handles internal exceptions correctly."""
+    """The unified adapter's internal exception handling surfaces through get_provider_models."""
 
     model_data = {
         "provider": "silicon",
@@ -1629,9 +1629,8 @@ async def test_get_provider_models_silicon_internal_exception_handling():
         "api_key": "test-key",
     }
 
-    # Test with a mock that simulates the real SiliconModelProvider behavior
     with mock.patch(
-        "backend.services.model_provider_service.SiliconModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         # Create a mock instance that simulates the real provider's exception handling
         mock_provider_instance = mock.AsyncMock()
@@ -1664,35 +1663,51 @@ async def test_get_provider_models_silicon_internal_exception_handling():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_unsupported_provider():
-    """Should return empty list for unsupported providers."""
+    """Unknown providers also route through the unified OpenAI-compatible adapter."""
     model_data = {
         "provider": "unsupported_provider",
         "model_type": "llm",
         "api_key": "test-key",
     }
 
-    result = await get_provider_models(model_data)
+    with mock.patch(
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = [{"id": "test-model"}]
+        mock_provider_class.return_value = mock_provider_instance
 
-    assert result == []
+        result = await get_provider_models(model_data)
+
+        assert result == [{"id": "test-model"}]
+        mock_provider_class.assert_called_once()
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
 
 
 @pytest.mark.asyncio
 async def test_get_provider_models_missing_provider():
-    """Should handle missing provider key gracefully."""
+    """A missing provider key no longer raises: the unified adapter ignores it."""
     model_data = {
         "model_type": "llm",
         "api_key": "test-key",
     }
 
-    # Since get_provider_models doesn't handle missing provider key,
-    # it should raise KeyError
-    with pytest.raises(KeyError, match="'provider'"):
-        await get_provider_models(model_data)
+    with mock.patch(
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
+    ) as mock_provider_class:
+        mock_provider_instance = mock.AsyncMock()
+        mock_provider_instance.get_models.return_value = []
+        mock_provider_class.return_value = mock_provider_instance
+
+        result = await get_provider_models(model_data)
+
+        assert result == []
+        mock_provider_instance.get_models.assert_called_once_with(model_data)
 
 
 @pytest.mark.asyncio
 async def test_get_provider_models_silicon_with_different_model_types():
-    """Should work with different model types for Silicon provider."""
+    """Should work with different model types through the unified adapter."""
     test_cases = [
         {"model_type": "llm", "expected_sub_type": "chat"},
         {"model_type": "vlm", "expected_sub_type": "chat"},
@@ -1708,7 +1723,7 @@ async def test_get_provider_models_silicon_with_different_model_types():
         }
 
         with mock.patch(
-            "backend.services.model_provider_service.SiliconModelProvider"
+            "backend.services.model_provider_service.OpenAICompatibleProvider"
         ) as mock_provider_class:
             mock_provider_instance = mock.AsyncMock()
             mock_provider_instance.get_models.return_value = [
@@ -2107,9 +2122,7 @@ async def test_prepare_model_dict_modelengine_base_url_stripping():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_modelengine_success():
-    """Should successfully get models from ModelEngine provider."""
-    from backend.services.model_provider_service import ModelEngineProvider
-
+    """ModelEngine provider models are fetched via the unified OpenAI-compatible adapter."""
     model_data = {"provider": "modelengine", "model_type": "llm"}
 
     expected_models = [
@@ -2122,7 +2135,7 @@ async def test_get_provider_models_modelengine_success():
     ]
 
     with mock.patch(
-        "backend.services.model_provider_service.ModelEngineProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = expected_models
@@ -2137,13 +2150,11 @@ async def test_get_provider_models_modelengine_success():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_modelengine_empty_result():
-    """Should handle empty result from ModelEngine provider."""
-    from backend.services.model_provider_service import ModelEngineProvider
-
+    """Should handle empty result from the unified adapter for ModelEngine provider."""
     model_data = {"provider": "modelengine", "model_type": "embedding"}
 
     with mock.patch(
-        "backend.services.model_provider_service.ModelEngineProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = []
@@ -2588,9 +2599,7 @@ def test_get_model_engine_raw_url_trailing_slash():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_dashscope_success():
-    """Should successfully get models from DashScope provider."""
-    from backend.services.model_provider_service import DashScopeModelProvider
-
+    """DashScope provider models are fetched via the unified OpenAI-compatible adapter."""
     model_data = {
         "provider": "dashscope",
         "model_type": "llm",
@@ -2607,7 +2616,7 @@ async def test_get_provider_models_dashscope_success():
     ]
 
     with mock.patch(
-        "backend.services.model_provider_service.DashScopeModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = expected_models
@@ -2622,7 +2631,7 @@ async def test_get_provider_models_dashscope_success():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_dashscope_empty_result():
-    """Should handle empty result from DashScope provider."""
+    """Should handle empty result from the unified adapter for DashScope provider."""
     model_data = {
         "provider": "dashscope",
         "model_type": "embedding",
@@ -2630,7 +2639,7 @@ async def test_get_provider_models_dashscope_empty_result():
     }
 
     with mock.patch(
-        "backend.services.model_provider_service.DashScopeModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = []
@@ -2649,9 +2658,7 @@ async def test_get_provider_models_dashscope_empty_result():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_tokenpony_success():
-    """Should successfully get models from TokenPony provider."""
-    from backend.services.model_provider_service import TokenPonyModelProvider
-
+    """TokenPony provider models are fetched via the unified OpenAI-compatible adapter."""
     model_data = {
         "provider": "tokenpony",
         "model_type": "llm",
@@ -2668,7 +2675,7 @@ async def test_get_provider_models_tokenpony_success():
     ]
 
     with mock.patch(
-        "backend.services.model_provider_service.TokenPonyModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = expected_models
@@ -2683,7 +2690,7 @@ async def test_get_provider_models_tokenpony_success():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_tokenpony_empty_result():
-    """Should handle empty result from TokenPony provider."""
+    """Should handle empty result from the unified adapter for TokenPony provider."""
     model_data = {
         "provider": "tokenpony",
         "model_type": "embedding",
@@ -2691,7 +2698,7 @@ async def test_get_provider_models_tokenpony_empty_result():
     }
 
     with mock.patch(
-        "backend.services.model_provider_service.TokenPonyModelProvider"
+        "backend.services.model_provider_service.OpenAICompatibleProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = []
