@@ -90,6 +90,7 @@ from backend.database.remote_mcp_db import (
     clear_mcp_record_market_id,
     update_mcp_record_registry_json_by_id,
 )
+import backend.database.remote_mcp_db as remote_mcp_db
 
 
 class MockMcpRecord:
@@ -191,6 +192,28 @@ def test_create_mcp_record_failure(monkeypatch, mock_session):
 
     with pytest.raises(SQLAlchemyError):
         create_mcp_record({"mcp_name": "test_mcp"}, "tenant1", "user1")
+
+
+def test_create_mcp_record_rejects_tenant_limit(monkeypatch, mock_session):
+    """The database write enforces the quota atomically at the boundary."""
+    session, query = mock_session
+    query.filter.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.remote_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.remote_mcp_db._MCP_SERVICE_LIMIT", 1)
+
+    class LimitReached(Exception):
+        def __init__(self, message, **kwargs):
+            super().__init__(message)
+            self.details = kwargs
+
+    monkeypatch.setattr(remote_mcp_db, "TenantResourceLimitError", LimitReached)
+
+    with pytest.raises(LimitReached, match="maximum 1 MCP services per tenant"):
+        create_mcp_record({"mcp_name": "over-limit"}, "tenant1", "user1")
+    session.add.assert_not_called()
 
 
 # ============================================================================
