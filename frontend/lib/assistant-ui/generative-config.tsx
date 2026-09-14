@@ -742,6 +742,14 @@ export function convertSurface(
     return { spec: null, warnings: ["surface not found"], hasCustomComponents: false };
   }
   const result = convertSurfaceToUISpec(surface);
+  // DEBUG: log warnings and spec root — browser console.log is always visible
+  // eslint-disable-next-line no-console
+  console.log("[convertSurfaceToUISpec]",
+    "warnings:", result.warnings.slice(0, 10),
+    "componentCount:", Object.keys(surface.components || {}).length,
+    "rootType:", (surface.components as any)?.root?.component,
+    "rootSpec:", result.spec ? { $type: (result.spec as any).$type, $$typeof: (result.spec as any).$$typeof } : null,
+  );
   const unknownWarnings = result.warnings.filter((w) =>
     w.includes("Unknown A2UI component") || w.includes("was skipped")
   );
