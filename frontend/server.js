@@ -10,7 +10,11 @@ import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
-import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
+import {
+  ensureDir,
+  readLocaleConfig,
+  saveLocaleConfig,
+} from "./build-config.js";
 
 const { createProxyServer } = httpProxy;
 const __filename = fileURLToPath(import.meta.url);
@@ -20,7 +24,10 @@ let nextConfig;
 
 if (!dev) {
   nextConfig = JSON.parse(
-    fs.readFileSync(path.join(__dirname, ".next", "required-server-files.json"), "utf8")
+    fs.readFileSync(
+      path.join(__dirname, ".next", "required-server-files.json"),
+      "utf8"
+    )
   ).config;
   process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
 }
@@ -50,9 +57,31 @@ const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
 const SHARE_BASE_URL =
   process.env.SHARE_BASE_URL || process.env.NEXT_PUBLIC_SHARE_BASE_URL || "";
 
-const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
-const LOCALES_CONFIG_DIR = path.resolve(__dirname, "./public/locales");
+const BUILT_IN_PUBLIC_DIR = path.resolve(__dirname, "./public");
+const PROJECT_CONFIG_DIR = path.resolve(
+  process.env.PROJECT_CONFIG_DIR || BUILT_IN_PUBLIC_DIR
+);
+const ICON_UPLOAD_DIR = PROJECT_CONFIG_DIR;
 const PORT = 3000;
+
+const PROJECT_CONFIG_ASSETS = {
+  "/modelengine-logo.png": {
+    relativePath: "modelengine-logo.png",
+    contentType: "image/png",
+  },
+  "/modelengine-logo2.png": {
+    relativePath: "modelengine-logo2.png",
+    contentType: "image/png",
+  },
+  "/locales/zh/custom.json": {
+    relativePath: path.join("locales", "zh", "custom.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+  "/locales/en/custom.json": {
+    relativePath: path.join("locales", "en", "custom.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+};
 
 function withoutBasePath(pathname) {
   if (
@@ -238,7 +267,10 @@ async function isSuperAdminRequest(req) {
     const userRole = data?.data?.user?.user_role;
     return SUPER_ADMIN_ROLES.has(userRole);
   } catch (error) {
-    console.error("[isSuperAdminRequest] Error checking super admin:", error.message);
+    console.error(
+      "[isSuperAdminRequest] Error checking super admin:",
+      error.message
+    );
     return false;
   }
 }
@@ -401,7 +433,9 @@ function forwardAuthRequest(req, res, targetUrl) {
               ) {
                 setPendingOAuthCookie(res, data.data.pending_token);
                 const locale = getPreferredLocale(cookies);
-                res.writeHead(302, { Location: withBasePath(`/${locale}/oauth/complete`) });
+                res.writeHead(302, {
+                  Location: withBasePath(`/${locale}/oauth/complete`),
+                });
                 res.end();
                 return;
               } else if (data.data && data.data.session) {
@@ -468,7 +502,9 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                   oauth_error_description:
                     data.data.oauth_error_description || "",
                 });
-                res.writeHead(302, { Location: `${withBasePath("/")}?${errorParams.toString()}` });
+                res.writeHead(302, {
+                  Location: `${withBasePath("/")}?${errorParams.toString()}`,
+                });
                 res.end();
                 return;
               }
@@ -558,6 +594,7 @@ app.prepare().then(() => {
 
     // Route dispatch uses paths without the Next.js base path.
     if (handleFrontendConfigApi(internalPathname, req, res)) return;
+    if (handleProjectConfigAsset(internalPathname, req, res)) return;
     if (await handleProjectConfigApi(internalPathname, req, res)) return;
     if (handleAttachmentProxy(internalPathname, req, res)) return;
     if (handleAllApiProxy(internalPathname, req, res)) return;
@@ -618,6 +655,29 @@ function handleFrontendConfigApi(pathname, req, res) {
   return true;
 }
 
+function handleProjectConfigAsset(pathname, req, res) {
+  const asset = PROJECT_CONFIG_ASSETS[pathname];
+  if (!asset || (req.method !== "GET" && req.method !== "HEAD")) return false;
+
+  const persistedPath = path.join(PROJECT_CONFIG_DIR, asset.relativePath);
+  const builtInPath = path.join(BUILT_IN_PUBLIC_DIR, asset.relativePath);
+  const selectedPath = fs.existsSync(persistedPath)
+    ? persistedPath
+    : builtInPath;
+  if (!fs.existsSync(selectedPath)) return false;
+
+  res.writeHead(200, {
+    "Content-Type": asset.contentType,
+    "Cache-Control": "no-store",
+  });
+  if (req.method === "HEAD") {
+    res.end();
+  } else {
+    fs.createReadStream(selectedPath).pipe(res);
+  }
+  return true;
+}
+
 /**
  * 接口：/api/config/project-config 上传Logo+修改多语言配置
  */
@@ -631,6 +691,7 @@ async function handleProjectConfigApi(pathname, req, res) {
   }
 
   // 文件上传处理
+  ensureDir(ICON_UPLOAD_DIR);
   const form = new multiparty.Form({ uploadDir: ICON_UPLOAD_DIR });
   try {
     const { fields, files } = await parseMultipartForm(form, req);
@@ -651,7 +712,8 @@ async function handleProjectConfigApi(pathname, req, res) {
  * 静态附件代理 /attachments/
  */
 function handleAttachmentProxy(pathname, req, res) {
-  const isAttachmentRoute = pathname.includes("/attachments/") && !pathname.startsWith("/api/");
+  const isAttachmentRoute =
+    pathname.includes("/attachments/") && !pathname.startsWith("/api/");
   if (!isAttachmentRoute) return false;
 
   proxy.web(req, res, { target: MINIO_BACKEND });
@@ -682,7 +744,9 @@ function handleAllApiProxy(pathname, req, res) {
     "/api/file/storage",
     "/api/file/preprocess",
   ];
-  const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
+  const isRuntime = runtimePathPrefixes.some((prefix) =>
+    pathname.startsWith(prefix)
+  );
 
   // 3. skills 特殊接口
   // 分发代理目标
