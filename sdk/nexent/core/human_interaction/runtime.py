@@ -1,31 +1,34 @@
 """CoreAgent lifecycle adapter; persistence and human decisions remain host ports."""
 
-from copy import deepcopy
 import hashlib
 import inspect
+from copy import deepcopy
 
 from smolagents import Tool
 from smolagents.memory import TaskStep
 
+from .clarification import CLARIFICATION_POLICY, ClarificationForm
 from .codec import decode_step, encode_step, json_copy
-from .contracts import InteractionPort, RecoveryRequired
+from .contracts import InteractionPort, RecoveryRequired, StepSteered
 from .executor import LinearToolExecutor
 
 
 class AskUserTool(Tool):
     name = "ask_user"
-    description = (
-        "Pause the current run to ask the user for missing information or a choice. "
-        "Use this proactively when the goal is ambiguous. The validated answer is returned when the run resumes. "
-        "Never ask for passwords or credentials."
-    )
+    description = CLARIFICATION_POLICY
     inputs = {
-        "question": {"type": "string", "description": "A clear question for the user"},
-        "options": {"type": "array", "description": "Optional list of distinct choice strings", "nullable": True},
+        "questions": {
+            "type": "array",
+            "description": (
+                "1-5 essential questions only, each with unique id, type (text/single_choice/"
+                "multiple_choice), title, required (boolean), options ([{id,label}] for choices), "
+                "allow_other (boolean for choices), placeholder (optional). Use 2-12 options for choices."
+            ),
+        },
     }
     output_type = "string"
 
-    def forward(self, question: str, options: list | None = None) -> str:
+    def forward(self, questions: list) -> str:
         raise RuntimeError("ask_user requires an application interaction port")
 
 
@@ -44,6 +47,13 @@ class DurablePlanRepo:
 
 
 class HumanInteractionRuntime:
+    preserves_executor = False
+    instructions = CLARIFICATION_POLICY + (
+        " Executable code must use only linear variable assignments, JSON values, registered tool calls, "
+        "and print. Do not use imports, attributes, nested calls, loops, or callbacks. "
+        "Use separate steps for complex work. Human approval never replaces resource permissions."
+    )
+
     def __init__(self, port: InteractionPort):
         self.port = port
         self.agent = None
@@ -51,8 +61,12 @@ class HumanInteractionRuntime:
         self.initial_state = {}
         self.final_verification_round = 0
         self.restored = False
+        self.legacy_replay_step = None
         self.suspended = False
         self.steering_ids = []
+        self.clarifications = []
+        self.clarification_context = []
+        self.clarification_context_step = 0
         self.block_has_receipts = False
         self.completed_output = None
 
@@ -101,8 +115,21 @@ class HumanInteractionRuntime:
         agent.python_executor.state = json_copy(data["state"])
         self.initial_state = json_copy(data["state"])
         self.pending_step = decode_step(data["pending_step"], agent.logger) if data["pending_step"] else None
+        self.legacy_replay_step = (
+            agent.step_number if self.pending_step is not None and data.get("clarification_schema_version", 1) == 1
+            else None
+        )
         self.final_verification_round = data["final_verification_round"]
         self.steering_ids = data.get("steering_ids", [])
+        self.clarifications = data.get("clarifications", [])
+        self.clarification_context_step = data.get("clarification_context_step", 0)
+        self.clarification_context = data.get("clarification_context", [])
+        if "clarification_context" not in data and self.clarifications:
+            # Old checkpoints stored a step counter instead of delivered answers.
+            # Derive delivery from actual memory, including an answer pending at suspension.
+            context = self._clarification_task(self.clarifications)
+            if any(isinstance(step, TaskStep) and step.task == context for step in agent.memory.steps):
+                self.clarification_context = deepcopy(self.clarifications)
         self.completed_output = data.get("completed_output")
         self.restore_plan()
         self.restored = True
@@ -119,24 +146,53 @@ class HumanInteractionRuntime:
         agent = self.agent
         return json_copy({
             "codec": 1, "task": agent.task, "step_number": agent.step_number,
+            "clarification_schema_version": 1 if self.legacy_replay_step == agent.step_number else 2,
             "history_step_count": agent._history_step_count,
             "memory": [encode_step(step) for step in agent.memory.steps],
             # Replay uses the state at the beginning of the current block.
             "state": self.initial_state,
             "pending_step": encode_step(self.pending_step) if self.pending_step else None,
             "final_verification_round": self.final_verification_round, "steering_ids": self.steering_ids,
+            "clarifications": self.clarifications,
+            "clarification_context": self.clarification_context,
+            "clarification_context_step": self.clarification_context_step,
             "completed_output": self.completed_output,
         })
 
+    def _record_clarification(self, question, answer):
+        normalized = question.strip()
+        current = {"question": normalized, "answer": answer}
+        for index, item in enumerate(self.clarifications):
+            if item["question"] == normalized:
+                self.clarifications[index] = current
+                return
+        self.clarifications.append(current)
+
+    @staticmethod
+    def _clarification_task(answers):
+        lines = ["Current-run human clarification (authoritative user input):"]
+        for item in answers:
+            lines.extend([f"Question: {item['question']}", f"Answer: {item['answer']}"])
+        lines.append("Use these answers for the current task. Do not call ask_user again for the same information.")
+        return "\n".join(lines)
+
+    def _inject_clarification_context(self):
+        # Answers remain in current-run memory. Re-appending them on every step
+        # creates new user tasks and can supersede newer steering with old intent.
+        changed = [item for item in self.clarifications if item not in self.clarification_context]
+        if not changed:
+            return
+        self.agent.memory.steps.append(TaskStep(task=self._clarification_task(changed)))
+        self.clarification_context = deepcopy(self.clarifications)
+        self.clarification_context_step = self.agent.step_number
+
     def safe_boundary(self):
+        self._inject_clarification_context()
         feedback = self.port.boundary(self.capture())
         if feedback:
-            self.steering_ids.append(feedback["request_id"])
-            self.agent.memory.steps.append(TaskStep(task=(
-                "User steering for this same run (does not grant tool authorization):\n" + feedback["text"]
-                + "\nRe-evaluate pending actions and revise the plan if needed. Do not repeat completed actions."
-            )))
-            if self.pending_step is not None:
+            self.steering_ids.extend(feedback.get("request_ids", [feedback["request_id"]]))
+            interrupted = self.pending_step is not None
+            if interrupted:
                 # Keep completed tool evidence, abandon only the unexecuted suffix.
                 self.pending_step.observations = feedback.get("completed_actions", "")
                 self.pending_step.code_action = None
@@ -144,24 +200,33 @@ class HumanInteractionRuntime:
                 self.agent.step_number += 1
                 self.pending_step = None
                 self.initial_state = json_copy(self.agent.python_executor.state)
-                self.port.save_checkpoint(self.capture())
-                return True
+            self.agent.memory.steps.append(TaskStep(task=(
+                "User steering for this same run (does not grant tool authorization):\n" + feedback["text"]
+                + "\nRe-evaluate pending actions and revise the plan if needed. Do not repeat completed actions."
+            )))
             self.port.save_checkpoint(self.capture())
+            return interrupted
         return False
 
     def start_step(self, step):
+        if step is not self.pending_step:
+            self.legacy_replay_step = None
         self.block_has_receipts = False
         self.pending_step = step
         self.initial_state = json_copy(self.agent.python_executor.state)
-        self.safe_boundary()
+        self._inject_clarification_context()
+        if self.safe_boundary():
+            raise StepSteered()
         self.port.save_checkpoint(self.capture())
 
     def generated(self, step):
         self.pending_step = step
         self.port.save_checkpoint(self.capture())
-        self.safe_boundary()
+        if self.safe_boundary():
+            raise StepSteered()
 
     def completed_step(self, final_verification_round, final_answer=None):
+        self.legacy_replay_step = None
         self.pending_step = None
         self.final_verification_round = final_verification_round
         self.completed_output = final_answer
@@ -172,8 +237,24 @@ class HumanInteractionRuntime:
         self.completed_output = output
         self.port.save_checkpoint(self.capture())
 
+    def prepare_completion(self):
+        close = getattr(self.port, "close_steering", None)
+        if close is not None and not close(self.capture()):
+            if self.pending_step is not None:
+                self.pending_step.is_final_answer = False
+            self.safe_boundary()
+            return False
+        return True
+
     def call(self, index, name, args, kwargs, tool):
         inputs = getattr(tool, "inputs", {})
+        if (name == "ask_user" and "questions" not in kwargs
+                and self.legacy_replay_step == self.agent.step_number
+                and ("question" in kwargs or (args and isinstance(args[0], str)))):
+            # Frozen legacy code can resume, but new model output only sees the structured schema.
+            inputs = {"question": {"type": "string"},
+                      "options": {"type": "array", "nullable": True},
+                      "allow_other": {"type": "boolean", "nullable": True}}
         keys = list(inputs)
         if len(args) > len(keys) or any(key not in inputs for key in kwargs):
             raise ValueError("Tool arguments do not match its registered schema")
@@ -205,21 +286,40 @@ class HumanInteractionRuntime:
         arguments = json_copy(arguments)
         interaction = None
         if name == "ask_user":
+            questions = arguments.get("questions")
             question = arguments.get("question")
             options = arguments.get("options") or []
-            if not isinstance(question, str) or not question.strip() or len(question) > 4000:
+            allow_other = arguments.get("allow_other") is not False
+            if questions is not None:
+                if question is not None or arguments.get("options"):
+                    raise ValueError("Use questions only; do not mix structured and legacy clarification fields")
+                form = ClarificationForm.model_validate({"questions": questions})
+                interaction = {"kind": "CLARIFICATION", "schema_version": 2, **form.model_dump(mode="json")}
+            elif not isinstance(question, str) or not question.strip() or len(question) > 4000:
                 raise ValueError("ask_user requires a nonempty question of at most 4000 characters")
             if (not isinstance(options, list) or len(options) > 12
                     or any(not isinstance(item, str) or not item.strip() or len(item) > 300 for item in options)
                     or len(set(options)) != len(options)):
                 raise ValueError("ask_user options must be distinct nonempty strings")
-            interaction = {"kind": "CLARIFICATION", "question": question, "options": options}
+            interaction = interaction or {
+                "kind": "CLARIFICATION",
+                "question": question,
+                "options": options,
+                "allow_other": allow_other,
+            }
         slot = f"{self.agent.step_number}:{index}"
         dispatch = self.port.dispatch(slot, name, arguments, interaction=interaction)
+        if dispatch["status"] == "steered":
+            self.safe_boundary()
+            raise StepSteered()
         if dispatch["status"] == "replay":
             self.block_has_receipts = True
             self.restore_plan()
-            return json_copy(dispatch["result"])
+            result = json_copy(dispatch["result"])
+            if name == "ask_user":
+                title = arguments.get("question") or "\n".join(item["title"] for item in interaction["questions"])
+                self._record_clarification(title, result)
+            return result
         try:
             result = tool(**deepcopy(dispatch["arguments"]))
         except Exception as exc:

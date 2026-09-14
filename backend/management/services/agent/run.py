@@ -383,7 +383,14 @@ async def _stream_agent_chunks(
             (),
         ):
             yield json.dumps(event, ensure_ascii=False)
-        async for agent_chunk in agent_run(agent_run_info):
+        source = agent_run(agent_run_info)
+        interaction = getattr(agent_run_info, "human_interaction", None)
+        port = getattr(interaction, "port", None)
+        if callable(getattr(port, "visible_guidance", None)):
+            from services.human_interaction.stream import stream_with_guidance
+
+            source = stream_with_guidance(source, port)
+        async for agent_chunk in source:
             yield agent_chunk
 
     try:
@@ -1502,7 +1509,9 @@ async def run_agent_stream(
     if agent_request.enable_hitl is True and not resume:
         from services.human_interaction.application import start_run
 
-        return await start_run(agent_request, resolved_tenant_id, resolved_user_id, language)
+        human_response = await start_run(agent_request, resolved_tenant_id, resolved_user_id, language)
+        if human_response is not None:
+            return human_response
 
     # Resume mode: check for existing streaming message
     if resume:

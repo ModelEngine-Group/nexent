@@ -286,7 +286,13 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         agent_run_info.attempt_outcome = "stopped"
     except RecoveryRequired:
         agent_run_info.attempt_outcome = "recovery_required"
-        agent_run_info.observer.add_message("", ProcessType.ERROR, "HITL_RECOVERY_REQUIRED")
+        message = (
+            "执行进程已中断。为避免重复执行操作，本次任务无法自动恢复，请重新发起任务。"
+            if agent_run_info.observer.lang == "zh" else
+            "Execution was interrupted. To avoid repeating actions, this task cannot resume automatically. "
+            "Please start a new task."
+        )
+        agent_run_info.observer.add_message("", ProcessType.ERROR, message)
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
         if "Couldn't connect to the MCP server" in str(e):

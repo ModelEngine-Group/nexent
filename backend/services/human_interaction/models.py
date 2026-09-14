@@ -5,6 +5,7 @@ import json
 import re
 from typing import Literal
 
+from nexent.core.human_interaction.clarification import ClarificationAnswer
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,6 +22,13 @@ class DecisionCommand(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
     decision: Literal["answer", "approve", "reject", "steer"]
     text: str | None = Field(default=None, max_length=8000)
+    answers: list[ClarificationAnswer] | None = Field(default=None, min_length=1, max_length=5)
+
+
+class SteeringCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    message_id: str = Field(min_length=8, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+    text: str = Field(min_length=1, max_length=8000)
 
 
 def digest(value) -> str:

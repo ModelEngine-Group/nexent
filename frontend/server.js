@@ -674,6 +674,7 @@ function handleAllApiProxy(pathname, req, res) {
   const runtimePathPrefixes = [
     "/api/agent/run",
     "/api/agent/nl2agent/run",
+    "/api/agent/human-interactions",
     "/api/skills/nl2skill/run",
     "/api/agent/stop",
     "/api/agent/automations",

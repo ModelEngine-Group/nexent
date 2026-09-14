@@ -17,7 +17,14 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { Chat } from "./assistant-ui/chat";
-import { HumanInteractionPanel } from "@/features/humanInteraction/HumanInteractionPanel";
+import {
+  HumanInteractionCards,
+  useHumanInteractionController,
+} from "@/features/humanInteraction";
+import {
+  RunMessageQueueContext,
+  useRunMessageQueue,
+} from "@/features/humanInteraction/useRunMessageQueue";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
 import {
@@ -541,6 +548,17 @@ const HomeContent: FC<{
     },
     [activeConversationId, runtime, handleGenerationStopped]
   );
+  const hitlController = useHumanInteractionController({
+    conversationId: Number(activeConversationId) || undefined,
+    onEnabledChange: setEnableHitl,
+    isRunning: hitlIsRunning,
+    onContinue: continueHitl,
+  });
+  const runMessageQueue = useRunMessageQueue({
+    scope: activeThreadId || runtimeMainThreadId || "new",
+    runtime,
+    controller: hitlController,
+  });
 
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
@@ -565,6 +583,7 @@ const HomeContent: FC<{
         onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         onGenerationStopped: handleGenerationStopped,
+        onHumanInteractionEvent: hitlController.refresh,
         enablePlan: chatMode === "planning",
         enableHitl,
         ...(activeThreadId
@@ -596,6 +615,7 @@ const HomeContent: FC<{
     handleKnowledgeScopeResolved,
     handleGenerationStopped,
     handleServerConversationId,
+    hitlController.refresh,
     enableHitl,
   ]);
 
@@ -763,37 +783,35 @@ const HomeContent: FC<{
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
-        <HumanInteractionPanel
-          conversationId={Number(activeConversationId) || undefined}
-          enabled={enableHitl}
-          onEnabledChange={setEnableHitl}
-          isRunning={hitlIsRunning}
-          onContinue={continueHitl}
-        />
         <div className="min-h-0 flex-1">
-          <Chat
-            generatedTitle={
-              activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-            }
-            conversationId={
-              activeConversationId && Number(activeConversationId) > 0
-                ? Number(activeConversationId)
-                : undefined
-            }
-            isLoadingAgents={isLoadingAgents}
-            selectedAgent={selectedAgent}
-            onAgentSelected={handleAgentSelectedFromLanding}
-            onBack={handleThreadBack}
-            chatMode={chatMode}
-            onChatModeChange={handleChatModeChange}
-            isDictationConfigured={isDictationConfigured}
-            knowledgeScope={knowledgeScope}
-            knowledgePreview={knowledgePreview}
-            knowledgeCapabilities={knowledgeCapabilities}
-            onKnowledgeScopeChange={handleKnowledgeScopeChange}
-            runtimeMetadata={runtimeMetadata}
-            onRuntimeMetadataChange={handleRuntimeMetadataChange}
-          />
+          <RunMessageQueueContext.Provider value={runMessageQueue}>
+            <Chat
+              generatedTitle={
+                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+              }
+              conversationId={
+                activeConversationId && Number(activeConversationId) > 0
+                  ? Number(activeConversationId)
+                  : undefined
+              }
+              isLoadingAgents={isLoadingAgents}
+              selectedAgent={selectedAgent}
+              interactionContent={
+                <HumanInteractionCards controller={hitlController} />
+              }
+              onAgentSelected={handleAgentSelectedFromLanding}
+              onBack={handleThreadBack}
+              chatMode={chatMode}
+              onChatModeChange={handleChatModeChange}
+              isDictationConfigured={isDictationConfigured}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={handleKnowledgeScopeChange}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={handleRuntimeMetadataChange}
+            />
+          </RunMessageQueueContext.Provider>
         </div>
       </div>
     </div>

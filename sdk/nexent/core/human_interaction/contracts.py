@@ -4,11 +4,15 @@ from typing import Any, Protocol
 
 
 class AttemptSuspended(BaseException):
-    """The attempt has durably yielded; no thread should wait for an answer."""
+    """The attempt durably yielded because live continuation is unavailable."""
 
 
 class RunTerminated(BaseException):
     """The run was terminated or this attempt no longer owns its execution lease."""
+
+
+class StepSteered(BaseException):
+    """The current code suffix was abandoned after in-loop user steering."""
 
 
 class RecoveryRequired(BaseException):

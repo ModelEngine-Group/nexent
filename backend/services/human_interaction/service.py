@@ -1,18 +1,44 @@
 """Owner-scoped request lifecycle; no imports from Agent, NL2Agent or automation services."""
 
+import json
 from datetime import timedelta
 from uuid import uuid4
 
+from database.human_interaction_db import (
+    ACTIVE_STATUSES,
+    HumanInteractionRepository,
+    utcnow,
+)
+from database.human_interaction_models import HumanRequest, HumanRun
+from nexent.core.human_interaction.clarification import (
+    ClarificationAnswer,
+    format_clarification_answers,
+)
 from sqlalchemy.exc import IntegrityError
 
-from database.human_interaction_db import ACTIVE_STATUSES, HumanInteractionRepository, utcnow
-from database.human_interaction_models import HumanRequest, HumanRun
-
 from .crypto import PayloadCipher
-from .models import DecisionCommand, InteractionError, digest, redact
-
+from .models import DecisionCommand, InteractionError, SteeringCommand, digest, redact
 
 TERMINAL_STATUSES = {"COMPLETED", "FAILED", "STOPPED", "EXPIRED", "RECOVERY_REQUIRED"}
+
+
+def validate_interaction_answer(payload: dict, text: str | None) -> None:
+    if not text or not text.strip():
+        raise InteractionError("An answer is required", 422)
+    options = payload.get("options") or []
+    if options and text not in options and payload.get("allow_other") is not True:
+        raise InteractionError("Choose one of the registered options", 422)
+
+
+def clarification_signature(payload: dict) -> str:
+    """Build a stable identity for one clarification within a run."""
+    if "questions" in payload:
+        return digest({"questions": payload["questions"]})
+    return digest({
+        "question": str(payload.get("question") or "").strip(),
+        "options": payload.get("options") or [],
+        "allow_other": payload.get("allow_other") is not False,
+    })
 
 
 class HumanInteractionService:
@@ -83,6 +109,50 @@ class HumanInteractionService:
         tx.emit({"type": "human_interaction", "content": self._project_request(request)})
         return request
 
+    def reusable_clarification_answer(self, tx, payload):
+        """Return the latest answer for an identical clarification in this run."""
+        signature = clarification_signature(payload)
+        decided = sorted(
+            (item for item in tx.requests() if item.kind == "CLARIFICATION" and item.status == "DECIDED"),
+            key=lambda item: item.created_at,
+            reverse=True,
+        )
+        for request in decided:
+            if clarification_signature(self.cipher.open(request.payload)) != signature:
+                continue
+            decision = self.cipher.open(request.decision)
+            if decision and decision.get("decision") == "answer":
+                return self.clarification_result(request, decision)
+        return None
+
+    def clarification_budget_result(self, tx):
+        """One card per run, including cancelled cards, regardless of rewording."""
+        previous = [item for item in tx.requests() if item.kind == "CLARIFICATION"]
+        if not previous:
+            return None
+        answers = []
+        for item in previous:
+            decision = self.cipher.open(item.decision) if item.decision else None
+            if decision and decision.get("decision") == "answer":
+                answers.append(self.clarification_result(item, decision))
+        return json.dumps({
+            "status": "clarification_limit_reached",
+            "previous_answers": answers,
+            "instruction": (
+                "Do not ask more questions in this run, including reworded questions. "
+                "Use the supplied answers and user guidance to finish the task. "
+                "For nonessential gaps use explicit reasonable assumptions. If a critical fact remains "
+                "unknown, explain the limitation without inventing it or opening another card."
+            ),
+        }, ensure_ascii=False)
+
+    def clarification_result(self, request, decision):
+        payload = self.cipher.open(request.payload)
+        if "questions" in payload:
+            answers = [ClarificationAnswer.model_validate(item) for item in decision["answers"]]
+            return format_clarification_answers(payload, answers)
+        return decision["text"]
+
     def decide(self, run_id, request_id, tenant_id, user_id, command: DecisionCommand):
         error = None
         with self.repository.transaction(run_id, tenant_id, user_id) as tx:
@@ -90,7 +160,11 @@ class HumanInteractionService:
             request = next((item for item in tx.requests() if item.request_id == request_id), None)
             if request is None:
                 raise InteractionError("Human interaction request was not found", 404)
-            command_digest = digest(command.model_dump())
+            command_data = command.model_dump()
+            if command.answers is None:
+                # Preserve idempotent retries of decisions saved before structured forms existed.
+                command_data.pop("answers")
+            command_digest = digest(command_data)
             if request.idempotency_key == command.idempotency_key:
                 if request.decision_digest != command_digest:
                     raise InteractionError("Idempotency key was used with a different decision")
@@ -106,11 +180,20 @@ class HumanInteractionService:
                 if command.decision not in allowed:
                     raise InteractionError("Decision is not valid for this request kind", 422)
                 if command.decision in {"answer", "steer"}:
-                    if not command.text or not command.text.strip():
-                        raise InteractionError("An answer is required", 422)
-                    options = self.cipher.open(request.payload).get("options") or []
-                    if options and command.text not in options:
-                        raise InteractionError("Choose one of the registered options", 422)
+                    payload = self.cipher.open(request.payload)
+                    if request.kind == "CLARIFICATION" and "questions" in payload:
+                        if command.text is not None or command.answers is None:
+                            raise InteractionError("Submit structured answers for this clarification", 422)
+                        try:
+                            format_clarification_answers(payload, command.answers)
+                        except ValueError as exc:
+                            raise InteractionError(str(exc), 422) from exc
+                    else:
+                        if command.answers is not None:
+                            raise InteractionError("This request requires a text response", 422)
+                        validate_interaction_answer(payload, command.text)
+                elif command.answers is not None:
+                    raise InteractionError("Structured answers are only valid for clarification", 422)
                 request.status = "DECIDED"
                 request.idempotency_key = command.idempotency_key
                 request.decision_digest = command_digest
@@ -122,6 +205,44 @@ class HumanInteractionService:
         if error:
             raise error
         return {"run_id": run_id, "request_id": request_id, "accepted": True}
+
+    def steer(self, run_id, tenant_id, user_id, command: SteeringCommand):
+        """Deliver each composer message once while allowing successive guidance in the same run."""
+        with self.repository.transaction(run_id, tenant_id, user_id) as tx:
+            run = self.require(tx)
+            fingerprint = digest(command.model_dump())
+            for item in tx.requests():
+                if item.kind != "USER_STEERING" or self.cipher.open(item.payload).get("source") != "composer":
+                    continue
+                if item.idempotency_key == command.message_id:
+                    if item.decision_digest != fingerprint:
+                        raise InteractionError("Idempotency key was used with different guidance")
+                    return {"accepted": True, "run_id": run_id, "request_id": item.request_id}
+            saved = self.cipher.open(run.request_payload)
+            if run.status not in {"READY", "RUNNING", "WAITING_HUMAN"} or saved.get("steering_closed"):
+                raise InteractionError("This run has finished accepting guidance; keep the message queued")
+            if any(item.status == "PENDING" and item.expires_at <= utcnow() for item in tx.requests()):
+                raise InteractionError("The pending interaction has expired", 410)
+            for item in tx.requests():
+                if item.status == "PENDING":
+                    item.status = "CANCELLED"
+            tx.session.flush()
+            request = HumanRequest(
+                request_id=str(uuid4()), run_id=run_id, kind="USER_STEERING", status="DECIDED", version=1,
+                slot=f"composer:{command.message_id}", digest=fingerprint,
+                payload=self.cipher.seal({"source": "composer"}),
+                decision=self.cipher.seal({"decision": "steer", "text": command.text}),
+                idempotency_key=command.message_id, decision_digest=fingerprint,
+                expires_at=utcnow() + timedelta(seconds=self.wait_seconds), created_at=utcnow(),
+            )
+            tx.add(request)
+            run.pause_requested = 0
+            if run.status == "WAITING_HUMAN":
+                run.status = "READY"
+            tx.emit({"type": "human_decision", "content": {
+                "run_id": run_id, "request_id": request.request_id, "status": "DECIDED",
+            }})
+            return {"accepted": True, "run_id": run_id, "request_id": request.request_id}
 
     def _request_steering(self, tx):
         for request in tx.requests():

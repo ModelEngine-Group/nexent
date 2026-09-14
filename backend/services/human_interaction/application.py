@@ -5,18 +5,25 @@ import json
 import time
 from functools import lru_cache
 
-from fastapi.responses import StreamingResponse
-
-from consts.const import HITL_ACCEPT_NEW_RUNS, HITL_ENABLED, HITL_ENCRYPTION_KEY, HITL_MAX_CONCURRENCY, HITL_WAIT_SECONDS
+from consts.const import (
+    HITL_ACCEPT_NEW_RUNS,
+    HITL_ENABLED,
+    HITL_ENCRYPTION_KEY,
+    HITL_MAX_CONCURRENCY,
+    HITL_TOOL_APPROVAL_ENABLED,
+    HITL_WAIT_SECONDS,
+)
 from database.human_interaction_db import HumanInteractionRepository
+from fastapi.responses import StreamingResponse
 from nexent.core.human_interaction.contracts import RecoveryRequired, RunTerminated
+from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
 from nexent.core.human_interaction.runtime import HumanInteractionRuntime
 from nexent.scheduler import ClaimedJob, LeaseScheduler, SchedulerConfig
 
 from .crypto import PayloadCipher
 from .models import InteractionError
 from .runtime_port import RuntimeInteractionPort
-from .service import HumanInteractionService, TERMINAL_STATUSES
+from .service import TERMINAL_STATUSES, HumanInteractionService
 
 
 @lru_cache(maxsize=1)
@@ -40,6 +47,21 @@ def _stable_value(value):
     if isinstance(value, (list, tuple)):
         return [_stable_value(item) for item in value]
     return type(value).__module__ + "." + type(value).__qualname__
+
+
+def _allowed_tool_names(tools, *, approval_enabled=HITL_TOOL_APPROVAL_ENABLED):
+    if not approval_enabled:
+        allowed = {tool.name for tool in tools if tool.name}
+        allowed.add("final_answer")
+        return frozenset(allowed)
+    trusted_plan_classes = {"CreatePlanTool", "UpdatePlanStepTool"}
+    allowed = {
+        tool.name
+        for tool in tools
+        if tool.name and tool.source == "local" and tool.class_name in trusted_plan_classes
+    }
+    allowed.add("final_answer")
+    return frozenset(allowed)
 
 
 async def authorize_run(payload, tenant_id, user_id):
@@ -80,8 +102,10 @@ async def execute_attempt(job, lease):
             except Exception as exc:
                 raise RunTerminated("Run authorization could not be revalidated") from exc
 
-        port = RuntimeInteractionPort(service, identity, lease.owner_id, authorize)
+        port = RuntimeInteractionPort(service, identity, lease.owner_id, authorize, live_resume=True)
         saved = port.request_payload
+        if saved.get("runtime_mode") == "native-live-v1" and port.checkpoint:
+            raise RecoveryRequired("The original native execution is no longer available")
         request = AgentRequest.model_validate(saved["request"])
         request.__dict__["_runtime_metadata_snapshot"] = saved["runtime_metadata"]
         request.__dict__["_runtime_metadata_version"] = saved["runtime_metadata_version"]
@@ -92,46 +116,41 @@ async def execute_attempt(job, lease):
             language=saved["language"], allow_memory_search=True,
         )
         config = run_info.agent_config
-        if config.managed_agents or config.external_a2a_agents or request.minio_files:
-            raise InteractionError("HITL requires a root Agent without sub-agents or attached workspace files", 422)
-        # Execution uses the JSON interpreter; no sandbox or workspace side channels.
-        run_info.sandbox_config = None
-        run_info.workspace_path = None
-        run_info.minio_files = None
+        native = saved.get("runtime_mode") == "native-live-v1"
+        runtime_type = LiveHumanInteractionRuntime if native else HumanInteractionRuntime
+        if not native:
+            if config.managed_agents or config.external_a2a_agents or request.minio_files:
+                # A legacy strict approval policy must never be silently bypassed.
+                raise RecoveryRequired("The frozen approval executor cannot safely execute this configuration")
+            # Legacy durable runs retain their frozen executor contract. New chat
+            # runs preserve the native sandbox, attachment workspace and tool registry.
+            run_info.sandbox_config = None
+            run_info.workspace_path = None
+            run_info.minio_files = None
         from nexent.core.agents.context import ContextItemInput
         from nexent.core.agents.context_input import ContextInput
         prepared_items = [item.model_dump(mode="json") for item in run_info.context_input.items]
         prepared_items.append(ContextItemInput(
             id="system:human_interaction", type="system", source=("runtime",), priority=100,
-            content={"text": (
-                "Durable human interaction is enabled. Registered tool: "
-                "ask_user(question: str, options: list[str] | None = None) -> str. "
-                "Proactively call it when information is missing or the goal is ambiguous. "
-                "The validated human answer is returned to the same call on resume. Never request credentials. "
-                "Code execution supports only linear assignments, JSON values, registered tool calls and print. "
-                "Imports, attributes, loops, nested calls, subprocesses and arbitrary Python are unavailable. "
-                "Split complex work into separate steps. Only registered tool calls can perform external actions."
-            )},
+            content={"text": runtime_type.instructions},
         ).model_dump(mode="json"))
         context_items = await asyncio.to_thread(
             port.context_snapshot, prepared_items,
         )
-        run_info.context_input = ContextInput(items=tuple(ContextItemInput.model_validate(item) for item in context_items))
+        run_info.context_input = ContextInput(
+            items=tuple(ContextItemInput.model_validate(item) for item in context_items)
+        )
         catalog = _stable_value({
             "agent": config.model_dump(),
             "models": [item.model_dump() for item in run_info.model_config_list],
             "metadata": run_info.runtime_metadata,
         })
         await asyncio.to_thread(port.bind_catalog, catalog)
-        # Only built-in control tools are automatically allowed. Third-party annotations
-        # and model-provided names never grant trust. All other tools require approval.
-        allowed = {"final_answer"}
-        trusted_plan_classes = {"CreatePlanTool", "UpdatePlanStepTool"}
-        for tool in config.tools:
-            if tool.source == "local" and tool.class_name in trusted_plan_classes:
-                allowed.add(tool.name)
-        port.allowed_tools = frozenset(allowed)
-        run_info.human_interaction = HumanInteractionRuntime(port)
+        # Clarification and action approval share one suspension mechanism, but
+        # enabling clarification must not silently turn every tool into a high-risk action.
+        # Deployments opt into the conservative approval gate independently.
+        port.allowed_tools = _allowed_tool_names(config.tools)
+        run_info.human_interaction = runtime_type(port)
         buffered_chunks = []
         last_flush = time.monotonic()
         async for chunk in _stream_agent_chunks(
@@ -226,12 +245,13 @@ async def start_run(request, tenant_id, user_id, language):
     from agents.agent_run_manager import agent_run_manager
     from management.services.agent.run import save_messages
 
+    # Optional chat enhancement must not reject debug or deployments draining HITL.
+    # Existing runs still use their owner-scoped resume/decision APIs.
+    if request.is_debug or not HITL_ENABLED or not HITL_ACCEPT_NEW_RUNS:
+        return None
     service = require_enabled()
-    if not HITL_ACCEPT_NEW_RUNS:
-        raise InteractionError("New human interaction runs are disabled; existing runs can still be resolved", 503)
-    if request.is_debug or request.minio_files:
-        raise InteractionError("HITL is available for normal chat without workspace attachments", 422)
     payload = {
+        "runtime_mode": "linear-json-v1" if HITL_TOOL_APPROVAL_ENABLED else "native-live-v1",
         "request": request.model_dump(mode="json"), "language": language,
         "runtime_metadata": getattr(request, "_runtime_metadata_snapshot", {}),
         "runtime_metadata_version": getattr(request, "_runtime_metadata_version", None),
@@ -243,7 +263,14 @@ async def start_run(request, tenant_id, user_id, language):
     reservation = agent_run_manager.reserve_agent_run(request.conversation_id, user_id)
     run_id = None
     try:
-        run_id = await asyncio.to_thread(service.create, tenant_id, user_id, request.conversation_id, payload, ready=False)
+        run_id = await asyncio.to_thread(
+            service.create,
+            tenant_id,
+            user_id,
+            request.conversation_id,
+            payload,
+            ready=False,
+        )
         save_messages(request, "user", user_id, tenant_id)
         await asyncio.to_thread(service.initialized, run_id, tenant_id, user_id, succeeded=True)
     except Exception:

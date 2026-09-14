@@ -8,6 +8,7 @@ import ast
 from types import SimpleNamespace
 
 from .codec import json_copy
+from .contracts import StepSteered
 
 
 class UnsupportedResumableExecution(ValueError):
@@ -107,7 +108,8 @@ class LinearToolExecutor:
                     logs.append(" ".join(str(item) for item in args))
                     output = None
                 else:
-                    self.runtime.safe_boundary()
+                    if self.runtime.safe_boundary():
+                        raise StepSteered()
                     output = self.runtime.call(str(index), name, args, kwargs, self.tools[name])
                     if name == "final_answer":
                         return SimpleNamespace(output=output, logs="\n".join(logs), is_final_answer=True)

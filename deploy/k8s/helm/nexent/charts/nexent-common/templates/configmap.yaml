@@ -50,6 +50,13 @@ data:
   RUNTIME_CANCEL_TTL_SECONDS: {{ .Values.config.runtimeState.cancelTtlSeconds | quote }}
   RUNTIME_COMPLETED_TTL_SECONDS: {{ .Values.config.runtimeState.completedTtlSeconds | quote }}
   RUNTIME_CANCEL_POLL_INTERVAL_SECONDS: {{ .Values.config.runtimeState.cancelPollIntervalSeconds | quote }}
+
+  # Human Interaction
+  HITL_ENABLED: {{ .Values.config.humanInteraction.enabled | quote }}
+  HITL_ACCEPT_NEW_RUNS: {{ .Values.config.humanInteraction.acceptNewRuns | quote }}
+  HITL_TOOL_APPROVAL_ENABLED: {{ .Values.config.humanInteraction.toolApprovalEnabled | quote }}
+  HITL_WAIT_SECONDS: {{ .Values.config.humanInteraction.waitSeconds | quote }}
+  HITL_MAX_CONCURRENCY: {{ .Values.config.humanInteraction.maxConcurrency | quote }}
   NORTHBOUND_IDEMPOTENCY_TTL_SECONDS: {{ .Values.config.northbound.idempotencyTtlSeconds | quote }}
   NORTHBOUND_RATE_LIMIT_ENABLED: {{ .Values.config.northbound.rateLimitEnabled | quote }}
   NORTHBOUND_RATE_LIMIT_PER_MINUTE: {{ .Values.config.northbound.rateLimitPerMinute | quote }}

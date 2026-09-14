@@ -12,6 +12,8 @@ import {
 import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
+import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
+import { UserGuidanceMessage } from "@/features/humanInteraction/UserGuidanceMessage";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
@@ -196,6 +198,7 @@ export interface ThreadProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
   showComposer?: boolean;
+  interactionContent?: ReactNode;
 }
 
 /**
@@ -283,6 +286,7 @@ export const Thread: FC<ThreadProps> = ({
   onRuntimeMetadataChange,
   readOnly = false,
   showComposer = true,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -526,6 +530,7 @@ export const Thread: FC<ThreadProps> = ({
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
         showComposer={showComposer}
+        interactionContent={interactionContent}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -642,6 +647,7 @@ interface ThreadViewProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
   showComposer: boolean;
+  interactionContent?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -684,6 +690,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onRuntimeMetadataChange,
   readOnly,
   showComposer,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
 
@@ -814,6 +821,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               suggestions={welcomeSuggestions}
             />
           )}
+          {interactionContent}
         </ThreadPrimitive.Viewport>
 
         {showComposer && (
@@ -1537,6 +1545,9 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
+                if ((part as typeof part & { name?: string }).name === "user-steering") {
+                  return <UserGuidanceMessage data={(part as typeof part & { data?: unknown }).data} />;
+                }
                 if (
                   (part as typeof part & { name?: string }).name ===
                   "history-summary"
@@ -1738,7 +1749,7 @@ const UserMessage: FC<{
         <UserMessageAttachments />
 
         <div className="aui-user-message-content-wrapper relative self-end inline-block min-w-0">
-          <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
+          <UserMessageBubble>
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}
             </MessagePrimitive.Quote>
@@ -1749,7 +1760,7 @@ const UserMessage: FC<{
                   : DirectiveText,
               }}
             />
-          </div>
+          </UserMessageBubble>
           {!readOnly && (
             <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
               <UserActionBar />

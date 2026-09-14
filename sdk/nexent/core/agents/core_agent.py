@@ -42,7 +42,7 @@ from .verification import (
 )
 from ..utils.token_estimation import msg_token_count
 from .plan_repo import PlanRepo
-from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated
+from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated, StepSteered
 
 
 logger = logging.getLogger(__name__)
@@ -1018,6 +1018,10 @@ Additional Args:
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
             # Guardrail ③ block: end the run with the stashed refusal (no retry loop).
+            if hitl is not None and getattr(hitl, "steering_interrupt", False):
+                hitl.steering_interrupt = False
+                hitl.safe_boundary()
+                raise StepSteered() from e
             if hitl is not None and hitl.block_has_receipts:
                 raise RecoveryRequired("Execution failed after a persisted receipt; automatic block repair is unsafe") from e
             # The executor re-wraps exceptions, so isinstance(e, ToolInputBlockedError) may miss.
@@ -1074,7 +1078,7 @@ Additional Args:
             )
             if not postcheck.passed and postcheck.severity == "blocking":
                 self._append_verification_feedback(memory_step, postcheck)
-                if hitl is not None:
+                if hitl is not None and not hitl.preserves_executor:
                     raise RecoveryRequired("An executed result failed validation; automatic action repair is unsafe")
                 raise AgentExecutionError(
                     postcheck.repair_instruction or postcheck.user_visible_note or "Action result failed verification.",
@@ -1112,7 +1116,7 @@ Additional Args:
         # if the LLM skipped the tool on the final step before final_answer,
         # we still want to flip the current row from in_progress to completed
         # so the UI does not get stuck on a half-finished plan.
-        if self.enable_planning and hitl is None:
+        if self.enable_planning and (hitl is None or hitl.preserves_executor):
             self._implicit_advance_step()
 
         yield ActionOutput(output=code_output.output, is_final_answer=code_output.is_final_answer)
@@ -1195,7 +1199,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         self.memory.steps.append(TaskStep(task=self.task, task_images=images))
 
         if getattr(self, "python_executor", None):
-            if getattr(self, "human_interaction", None) is None:
+            if (getattr(self, "human_interaction", None) is None
+                    or getattr(self.human_interaction, "preserves_executor", False)):
                 self._guardrail_wrap_tools()
             self._wrap_visible_tool_events()
             self.python_executor.send_variables(variables=self.state)
@@ -1205,13 +1210,9 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         hitl = getattr(self, "human_interaction", None)
         if hitl is not None:
             if not hitl.restore():
-                hitl.initial_state = deepcopy(self.python_executor.state)
-                self.memory.steps.append(TaskStep(task=(
-                    "This run supports durable human interaction. Use ask_user proactively for missing information. "
-                    "Executable code must use only linear variable assignments, JSON values, registered tool calls, "
-                    "and print. Do not use imports, attributes, nested calls, loops, or callbacks. "
-                    "Use separate steps for complex work. Human approval never replaces resource permissions."
-                )))
+                if not hitl.preserves_executor:
+                    hitl.initial_state = deepcopy(self.python_executor.state)
+                self.memory.steps.append(TaskStep(task=hitl.instructions))
 
         if stream:
             # The steps are returned as they are executed through a generator to iterate on.
@@ -1387,9 +1388,9 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             action_step = (hitl.pending_step if hitl is not None else None) or ActionStep(
                 step_number=self.step_number, timing=Timing(start_time=step_start_time), observations_images=images
             )
-            if hitl is not None:
-                hitl.start_step(action_step)
             try:
+                if hitl is not None:
+                    hitl.start_step(action_step)
                 for output in self._step_stream(action_step):
                     yield output
 
@@ -1488,6 +1489,9 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                     returned_final_answer = True
                     action_step.is_final_answer = True
 
+            except StepSteered:
+                interrupted = True
+                continue
             except (AttemptSuspended, RecoveryRequired, RunTerminated):
                 interrupted = True
                 raise
@@ -1495,6 +1499,11 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 action_step.error = e
 
             finally:
+                if not interrupted and returned_final_answer and hitl is not None:
+                    if not hitl.prepare_completion():
+                        returned_final_answer = False
+                        final_answer = None
+                        interrupted = True
                 if not interrupted:
                     self._finalize_step(action_step)
                     self._collect_step_metrics(action_step)
