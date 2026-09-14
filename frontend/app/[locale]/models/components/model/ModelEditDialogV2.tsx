@@ -431,6 +431,64 @@ export const ModelEditDialogV2 = ({
     }
   };
 
+  // Fields shared by both update payloads (manage + single). Keys whose value
+  // resolves to undefined are dropped during JSON serialization, so the
+  // conditional spreads below match the previous per-branch ternaries.
+  const buildSharedUpdateFields = () => {
+    const volc = form.modelFactory === "volcengine";
+    const inferencePayload = supportsInferenceParams
+      ? buildInferenceParamsPayload(advanced)
+      : {};
+    return {
+      url: form.url,
+      apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+      // Send chunk size range for embedding models
+      ...(isEmbeddingModel
+        ? {
+            expectedChunkSize: form.chunkSizeRange[0],
+            maximumChunkSize: form.chunkSizeRange[1],
+            chunkingBatchSize: Number.parseInt(form.chunkingBatchSize) || 10,
+          }
+        : {}),
+      // Send voice model fields
+      ...(isVoiceModel
+        ? {
+            modelFactory: form.modelFactory,
+            modelAppid: volc ? form.modelAppid : undefined,
+            accessToken: volc ? form.accessToken : undefined,
+          }
+        : {}),
+      // Send timeout for non-embedding models
+      ...(!isEmbeddingModel && !isRerankModel
+        ? {
+            timeoutSeconds: Number.parseInt(form.timeoutSeconds) || 120,
+            concurrencyLimit: form.concurrencyLimit
+              ? Number.parseInt(form.concurrencyLimit)
+              : undefined,
+          }
+        : {}),
+      ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+      ...(acceptedCapacitySuggestion
+        ? {
+            acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
+            ...(acceptedCapacitySuggestion.capabilityProfileVersion
+              ? {
+                  acceptedCapabilityProfileVersion:
+                    acceptedCapacitySuggestion.capabilityProfileVersion,
+                }
+              : {}),
+          }
+        : {}),
+      ...{
+        temperature: inferencePayload.temperature as number | undefined,
+        topP: inferencePayload.top_p as number | undefined,
+        extraParams: inferencePayload.extra_params as
+          | Record<string, unknown>
+          | undefined,
+      },
+    };
+  };
+
   const handleSave = async () => {
     if (!model) return;
     // Defensive gate: the Save button is already disabled via
@@ -463,20 +521,9 @@ export const ModelEditDialogV2 = ({
         acceptedCapacitySuggestion?.canonicalModelName || form.name;
       // `acceptedCapacitySuggestion?.suggestedProvider` is intentionally NOT
       // used here. See applyCapacitySuggestion above for the rationale.
+      // v2.6.0 inference params are folded into the shared fields below.
 
-      // v2.6.0: build inference params payload (LLM only). Translates the
-      // editing state (temperature / top_p / enable_thinking / __custom__)
-      // into the wire shape consumed by the backend update endpoints.
-      const inferencePayload = supportsInferenceParams
-        ? buildInferenceParamsPayload(advanced)
-        : {};
-      const inferenceUpdate = {
-        temperature: inferencePayload.temperature as number | undefined,
-        topP: inferencePayload.top_p as number | undefined,
-        extraParams: inferencePayload.extra_params as
-          | Record<string, unknown>
-          | undefined,
-      };
+      const sharedFields = buildSharedUpdateFields();
 
       // Use manage interface if tenantId is provided
       if (tenantId) {
@@ -486,49 +533,8 @@ export const ModelEditDialogV2 = ({
           name: acceptedCapacitySuggestion ? acceptedModelName : undefined,
           displayName:
             newDisplayName !== originalDisplayName ? newDisplayName : undefined,
-          url: form.url,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           maxTokens: maxTokensValue !== 0 ? maxTokensValue : undefined,
-          expectedChunkSize: isEmbeddingModel
-            ? form.chunkSizeRange[0]
-            : undefined,
-          maximumChunkSize: isEmbeddingModel
-            ? form.chunkSizeRange[1]
-            : undefined,
-          chunkingBatchSize: isEmbeddingModel
-            ? Number.parseInt(form.chunkingBatchSize) || 10
-            : undefined,
-          modelFactory: isVoiceModel ? form.modelFactory : undefined,
-          modelAppid:
-            isVoiceModel && form.modelFactory === "volcengine"
-              ? form.modelAppid
-              : undefined,
-          accessToken:
-            isVoiceModel && form.modelFactory === "volcengine"
-              ? form.accessToken
-              : undefined,
-          timeoutSeconds:
-            !isEmbeddingModel && !isRerankModel
-              ? Number.parseInt(form.timeoutSeconds) || 120
-              : undefined,
-          concurrencyLimit:
-            !isEmbeddingModel && !isRerankModel && form.concurrencyLimit
-              ? Number.parseInt(form.concurrencyLimit)
-              : undefined,
-          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
-          ...(acceptedCapacitySuggestion
-            ? {
-                acceptedSuggestionMatchKind:
-                  acceptedCapacitySuggestion.matchKind,
-                ...(acceptedCapacitySuggestion.capabilityProfileVersion
-                  ? {
-                      acceptedCapabilityProfileVersion:
-                        acceptedCapacitySuggestion.capabilityProfileVersion,
-                    }
-                  : {}),
-              }
-            : {}),
-          ...inferenceUpdate,
+          ...sharedFields,
         });
       } else {
         await modelService.updateSingleModel({
@@ -538,55 +544,9 @@ export const ModelEditDialogV2 = ({
             ? { displayName: newDisplayName }
             : {}),
           ...(acceptedCapacitySuggestion ? { name: acceptedModelName } : {}),
-          url: form.url,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
           ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
           source: model.source,
-          // Send chunk size range for embedding models
-          ...(isEmbeddingModel
-            ? {
-                expectedChunkSize: form.chunkSizeRange[0],
-                maximumChunkSize: form.chunkSizeRange[1],
-                chunkingBatchSize: Number.parseInt(form.chunkingBatchSize) || 10,
-              }
-            : {}),
-          // Send voice model fields
-          ...(isVoiceModel
-            ? {
-                modelFactory: form.modelFactory,
-                modelAppid:
-                  form.modelFactory === "volcengine"
-                    ? form.modelAppid
-                    : undefined,
-                accessToken:
-                  form.modelFactory === "volcengine"
-                    ? form.accessToken
-                    : undefined,
-              }
-            : {}),
-          // Send timeout for non-embedding models
-          ...(!isEmbeddingModel && !isRerankModel
-            ? {
-                timeoutSeconds: Number.parseInt(form.timeoutSeconds) || 120,
-                concurrencyLimit: form.concurrencyLimit
-                  ? Number.parseInt(form.concurrencyLimit)
-                  : undefined,
-              }
-            : {}),
-          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
-          ...(acceptedCapacitySuggestion
-            ? {
-                acceptedSuggestionMatchKind:
-                  acceptedCapacitySuggestion.matchKind,
-                ...(acceptedCapacitySuggestion.capabilityProfileVersion
-                  ? {
-                      acceptedCapabilityProfileVersion:
-                        acceptedCapacitySuggestion.capabilityProfileVersion,
-                    }
-                  : {}),
-              }
-            : {}),
-          ...inferenceUpdate,
+          ...sharedFields,
         });
       }
 

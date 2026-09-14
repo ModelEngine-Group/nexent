@@ -171,6 +171,36 @@ def _normalize_catalog(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _raw_positive_int(raw: Dict[str, Any], key: str) -> Optional[int]:
+    """Read a positive int from a raw catalog mapping; None when absent/invalid."""
+    value = raw.get(key)
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _raw_bool(raw: Dict[str, Any], key: str, default: bool = False) -> bool:
+    """Read a boolean from a raw catalog mapping, accepting common spellings."""
+    value = raw.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("1", "true", "yes", "y", "on")
+    return default
+
+
+def _raw_nonempty_str(raw: Dict[str, Any], key: str) -> Optional[str]:
+    """Read a stripped non-empty string from a raw catalog mapping."""
+    value = raw.get(key)
+    if not value:
+        return None
+    return str(value).strip()
+
+
 def _build_model_profile(
     *,
     provider_base_url: str,
@@ -204,26 +234,6 @@ def _build_model_profile(
 
     display_name = str(raw.get("display_name") or "").strip() or model_name
 
-    # Int helpers: fall back to None on non-positive / unparsable
-    def _positive_int(key: str) -> Optional[int]:
-        value = raw.get(key)
-        if value is None:
-            return None
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return None
-        return parsed if parsed > 0 else None
-
-    def _bool(key: str, default: bool = False) -> bool:
-        value = raw.get(key)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.lower() in ("1", "true", "yes", "y", "on")
-        return default
-
-    dimension = _positive_int("dimension")
     # Embedding models carry vector dimension in the legacy "max_tokens" column.
     # ``ModelCatalogProfile`` doesn't alias the column directly; the service
     # layer maps ``dimension`` -> ``max_tokens`` for embedding rows.
@@ -233,28 +243,20 @@ def _build_model_profile(
         display_name=display_name,
         base_url=base_url or None,
         model_factory=model_factory or None,
-        context_window_tokens=_positive_int("context_window_tokens"),
-        max_input_tokens=_positive_int("max_input_tokens"),
-        max_output_tokens=_positive_int("max_output_tokens"),
-        default_output_reserve_tokens=_positive_int("default_output_reserve_tokens"),
-        tokenizer_family=(
-            str(raw["tokenizer_family"]).strip()
-            if raw.get("tokenizer_family")
-            else None
-        ),
-        expected_chunk_size=_positive_int("expected_chunk_size"),
-        maximum_chunk_size=_positive_int("maximum_chunk_size"),
-        chunk_batch=_positive_int("chunk_batch"),
-        dimension=dimension,
-        timeout_seconds=_positive_int("timeout_seconds"),
-        concurrency_limit=_positive_int("concurrency_limit"),
-        capability_profile_version=(
-            str(raw["capability_profile_version"]).strip()
-            if raw.get("capability_profile_version")
-            else None
-        ),
-        requires_appid=_bool("requires_appid"),
-        requires_access_token=_bool("requires_access_token"),
+        context_window_tokens=_raw_positive_int(raw, "context_window_tokens"),
+        max_input_tokens=_raw_positive_int(raw, "max_input_tokens"),
+        max_output_tokens=_raw_positive_int(raw, "max_output_tokens"),
+        default_output_reserve_tokens=_raw_positive_int(raw, "default_output_reserve_tokens"),
+        tokenizer_family=_raw_nonempty_str(raw, "tokenizer_family"),
+        expected_chunk_size=_raw_positive_int(raw, "expected_chunk_size"),
+        maximum_chunk_size=_raw_positive_int(raw, "maximum_chunk_size"),
+        chunk_batch=_raw_positive_int(raw, "chunk_batch"),
+        dimension=_raw_positive_int(raw, "dimension"),
+        timeout_seconds=_raw_positive_int(raw, "timeout_seconds"),
+        concurrency_limit=_raw_positive_int(raw, "concurrency_limit"),
+        capability_profile_version=_raw_nonempty_str(raw, "capability_profile_version"),
+        requires_appid=_raw_bool(raw, "requires_appid"),
+        requires_access_token=_raw_bool(raw, "requires_access_token"),
     )
 
 
@@ -480,6 +482,90 @@ def infer_provider_from_base_url(base_url: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
+def _is_empty_value(value: Any) -> bool:
+    """0 / False are allowed for int/bool flags; treat None / "" as empty."""
+    if value is None:
+        return True
+    return isinstance(value, str) and value.strip() == ""
+
+
+# Mapping: target field on model_data -> source field on profile.
+# Rationale: keep ModelCatalogProfile focused; map legacy aliases here so
+# the catalog schema stays stable.
+_CATALOG_DEFAULT_FIELD_MAP: Dict[str, str] = {
+    "model_type": "model_type",
+    "display_name": "display_name",
+    "base_url": "base_url",
+    "model_factory": "model_factory",
+    "context_window_tokens": "context_window_tokens",
+    "max_input_tokens": "max_input_tokens",
+    "max_output_tokens": "max_output_tokens",
+    "default_output_reserve_tokens": "default_output_reserve_tokens",
+    "tokenizer_family": "tokenizer_family",
+    "expected_chunk_size": "expected_chunk_size",
+    "maximum_chunk_size": "maximum_chunk_size",
+    "chunk_batch": "chunk_batch",
+    "timeout_seconds": "timeout_seconds",
+    "concurrency_limit": "concurrency_limit",
+    "capability_profile_version": "capability_profile_version",
+}
+
+
+def _apply_field_defaults(model_data: Dict[str, Any], profile_dict: Dict[str, Any]) -> bool:
+    """Fill every empty target field from the profile; True when any value applied."""
+    applied = False
+    for target, source in _CATALOG_DEFAULT_FIELD_MAP.items():
+        if _is_empty_value(model_data.get(target)):
+            catalog_value = profile_dict.get(source)
+            if catalog_value is not None and catalog_value != "":
+                model_data[target] = catalog_value
+                applied = True
+    return applied
+
+
+def _apply_special_defaults(model_data: Dict[str, Any], profile: ModelCatalogProfile) -> bool:
+    """Apply the non-field-map defaults: embedding dimension and STT/TTS hints."""
+    applied = False
+    # Special: embedding vector dimension -> legacy max_tokens column.
+    # The existing service layer already sets max_tokens from dimension for
+    # embedding records; duplicating here is safe because we only fill when
+    # the target is empty.
+    if profile.dimension and _is_empty_value(model_data.get("max_tokens")):
+        current_type = model_data.get("model_type") or profile.model_type
+        if current_type in ("embedding", "multi_embedding"):
+            model_data["max_tokens"] = profile.dimension
+            applied = True
+
+    # STT/TTS auth-hint fields: when the profile marks them as required,
+    # make sure the form fields exist so the UI can prompt the user.
+    if profile.requires_appid and model_data.get("model_appid") is None:
+        model_data["model_appid"] = ""
+        applied = True
+    if profile.requires_access_token and model_data.get("access_token") is None:
+        model_data["access_token"] = ""
+        applied = True
+    return applied
+
+
+def _resolve_catalog_profile(
+    model_data: Dict[str, Any],
+    provider_hint: Optional[str],
+) -> Optional[ModelCatalogProfile]:
+    """Locate the catalog profile for a model_data row; None when unresolvable."""
+    if not provider_hint:
+        provider_hint = infer_provider_from_base_url(
+            str(model_data.get("base_url") or "")
+        )
+    if not provider_hint:
+        return None
+
+    model_name = str(model_data.get("model_name") or "").strip()
+    if not model_name:
+        return None
+
+    return get_model_profile(provider_hint, model_name)
+
+
 def apply_catalog_defaults(
     model_data: Dict[str, Any],
     provider_hint: Optional[str],
@@ -505,81 +591,14 @@ def apply_catalog_defaults(
     if not isinstance(model_data, dict):
         return False
 
-    if not provider_hint:
-        provider_hint = infer_provider_from_base_url(
-            str(model_data.get("base_url") or "")
-        )
-    if not provider_hint:
-        return False
-
-    model_name = str(model_data.get("model_name") or "").strip()
-    if not model_name:
-        return False
-
-    profile = get_model_profile(provider_hint, model_name)
+    profile = _resolve_catalog_profile(model_data, provider_hint)
     if profile is None:
         return False
 
-    applied = False
-    profile_dict = profile.model_dump()
+    applied = _apply_field_defaults(model_data, profile.model_dump())
+    applied = _apply_special_defaults(model_data, profile) or applied
 
-    # Mapping: target field on model_data -> source field on profile.
-    # Rationale: keep ModelCatalogProfile focused; map legacy aliases here so
-    # the catalog schema stays stable.
-    field_map: Dict[str, str] = {
-        "model_type": "model_type",
-        "display_name": "display_name",
-        "base_url": "base_url",
-        "model_factory": "model_factory",
-        "context_window_tokens": "context_window_tokens",
-        "max_input_tokens": "max_input_tokens",
-        "max_output_tokens": "max_output_tokens",
-        "default_output_reserve_tokens": "default_output_reserve_tokens",
-        "tokenizer_family": "tokenizer_family",
-        "expected_chunk_size": "expected_chunk_size",
-        "maximum_chunk_size": "maximum_chunk_size",
-        "chunk_batch": "chunk_batch",
-        "timeout_seconds": "timeout_seconds",
-        "concurrency_limit": "concurrency_limit",
-        "capability_profile_version": "capability_profile_version",
-    }
-
-    def _is_empty(value: Any) -> bool:
-        # 0 / False are allowed for int/bool flags; treat None / "" as empty.
-        if value is None:
-            return True
-        if isinstance(value, str) and value.strip() == "":
-            return True
-        return False
-
-    for target, source in field_map.items():
-        if _is_empty(model_data.get(target)):
-            catalog_value = profile_dict.get(source)
-            if catalog_value is not None and catalog_value != "":
-                model_data[target] = catalog_value
-                applied = True
-
-    # Special: embedding vector dimension -> legacy max_tokens column.
-    # The existing service layer already sets max_tokens from dimension for
-    # embedding records; duplicating here is safe because we only fill when
-    # the target is empty.
-    if profile.dimension and _is_empty(model_data.get("max_tokens")):
-        current_type = model_data.get("model_type") or profile.model_type
-        if current_type in ("embedding", "multi_embedding"):
-            model_data["max_tokens"] = profile.dimension
-            applied = True
-
-    # STT/TTS auth-hint fields: when the profile marks them as required,
-    # make sure the form fields exist so the UI can prompt the user.
-    if profile.requires_appid and model_data.get("model_appid") is None:
-        model_data["model_appid"] = ""
-        applied = True
-    if profile.requires_access_token and model_data.get("access_token") is None:
-        model_data["access_token"] = ""
-        applied = True
-
-    if applied:
+    if applied and not model_data.get("capacity_source"):
         # Tag capacity_source = "profile" only if the caller didn't already set one.
-        if not model_data.get("capacity_source"):
-            model_data["capacity_source"] = "profile"
+        model_data["capacity_source"] = "profile"
     return applied

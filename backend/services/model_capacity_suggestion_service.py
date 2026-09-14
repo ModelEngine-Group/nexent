@@ -327,6 +327,57 @@ def suggest_capacity(
     return result
 
 
+def _find_normalized_exact_key(
+    clean_model_name: str,
+    provider: str,
+    active_catalog: Mapping[ProfileKey, CapabilityProfileLike],
+) -> Optional[ProfileKey]:
+    """Case/punctuation-insensitive exact match inside one provider's entries."""
+    wanted = _normalize_catalog_exact_name(clean_model_name)
+    for catalog_key in _provider_catalog(active_catalog, provider).keys():
+        if _normalize_catalog_exact_name(catalog_key[1]) == wanted:
+            return catalog_key
+    return None
+
+
+def _catalog_match(
+    clean_model_name: str,
+    provider: str,
+    active_catalog: Mapping[ProfileKey, CapabilityProfileLike],
+) -> Optional[CapacitySuggestionResult]:
+    """Try the catalog match ladder: exact, normalized-exact, then fuzzy."""
+    exact_profile = active_catalog.get((provider, clean_model_name))
+    if exact_profile:
+        return _result_from_profile(
+            provider,
+            clean_model_name,
+            exact_profile,
+            CapacitySuggestionMatchKind.CATALOG_EXACT,
+        )
+
+    normalized_exact_key = _find_normalized_exact_key(
+        clean_model_name, provider, active_catalog
+    )
+    if normalized_exact_key:
+        return _result_from_profile(
+            normalized_exact_key[0],
+            normalized_exact_key[1],
+            active_catalog[normalized_exact_key],
+            CapacitySuggestionMatchKind.CATALOG_EXACT,
+        )
+
+    fuzzy_match = _fuzzy_catalog_match(clean_model_name, active_catalog, provider)
+    if fuzzy_match:
+        fuzzy_key, profile = fuzzy_match
+        return _result_from_profile(
+            fuzzy_key[0],
+            fuzzy_key[1],
+            profile,
+            CapacitySuggestionMatchKind.CATALOG_FUZZY,
+        )
+    return None
+
+
 def _suggest_capacity_inner(
     model_name: str,
     base_url: Optional[str],
@@ -362,39 +413,9 @@ def _suggest_capacity_inner(
             return litellm_result
         return _none_result("No provider candidate could be inferred")
 
-    exact_key = (provider, clean_model_name)
-    exact_profile = active_catalog.get(exact_key)
-    if exact_profile:
-        return _result_from_profile(
-            provider,
-            clean_model_name,
-            exact_profile,
-            CapacitySuggestionMatchKind.CATALOG_EXACT,
-        )
-
-    normalized_exact_key = None
-    for catalog_key in _provider_catalog(active_catalog, provider).keys():
-        if _normalize_catalog_exact_name(catalog_key[1]) == _normalize_catalog_exact_name(clean_model_name):
-            normalized_exact_key = catalog_key
-            break
-
-    if normalized_exact_key:
-        return _result_from_profile(
-            normalized_exact_key[0],
-            normalized_exact_key[1],
-            active_catalog[normalized_exact_key],
-            CapacitySuggestionMatchKind.CATALOG_EXACT,
-        )
-
-    fuzzy_match = _fuzzy_catalog_match(clean_model_name, active_catalog, provider)
-    if fuzzy_match:
-        fuzzy_key, profile = fuzzy_match
-        return _result_from_profile(
-            fuzzy_key[0],
-            fuzzy_key[1],
-            profile,
-            CapacitySuggestionMatchKind.CATALOG_FUZZY,
-        )
+    catalog_result = _catalog_match(clean_model_name, provider, active_catalog)
+    if catalog_result is not None:
+        return catalog_result
 
     litellm_result = _litellm_lookup(clean_model_name, provider)
     if litellm_result is not None:

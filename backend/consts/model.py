@@ -1729,16 +1729,12 @@ class ManageTenantModelListResponse(BaseModel):
     total_pages: int = Field(0, description="Total number of pages")
 
 
-class ManageTenantModelCreateRequest(BaseModel):
-    """Request model for creating a model in a specific tenant (admin/manage operation)"""
-    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create model for")
-    model_repo: Optional[str] = Field('', description="Model repository path")
-    model_name: str = Field(..., description="Model name")
-    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'stt')")
-    api_key: Optional[str] = Field('', description="API key for the model")
-    base_url: Optional[str] = Field('', description="Base URL for the model API")
-    max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
-    display_name: Optional[str] = Field('', description="Display name for the model")
+class _ManageTenantModelCommonFields(BaseModel):
+    """Optional fields shared by the tenant manage create/update requests.
+
+    Kept as a mixin so the two request models cannot drift apart; the wire
+    contract (all Optional, default None) is identical for both operations.
+    """
     model_factory: Optional[str] = Field(None, description="Model factory/vendor for the model")
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
@@ -1771,7 +1767,19 @@ class ManageTenantModelCreateRequest(BaseModel):
     accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
-class ManageTenantModelUpdateRequest(BaseModel):
+class ManageTenantModelCreateRequest(_ManageTenantModelCommonFields):
+    """Request model for creating a model in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create model for")
+    model_repo: Optional[str] = Field('', description="Model repository path")
+    model_name: str = Field(..., description="Model name")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'stt')")
+    api_key: Optional[str] = Field('', description="API key for the model")
+    base_url: Optional[str] = Field('', description="Base URL for the model API")
+    max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
+    display_name: Optional[str] = Field('', description="Display name for the model")
+
+
+class ManageTenantModelUpdateRequest(_ManageTenantModelCommonFields):
     """Request model for updating a model in a specific tenant (admin/manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to update model for")
     current_display_name: str = Field(..., description="Current display name of the model to update")
@@ -1782,32 +1790,6 @@ class ManageTenantModelUpdateRequest(BaseModel):
     base_url: Optional[str] = Field(None, description="Base URL for the model API")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens for the model")
     display_name: Optional[str] = Field(None, description="New display name for the model")
-    model_factory: Optional[str] = Field(None, description="Model factory/vendor for the model")
-    expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
-    maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
-    chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
-    # STT specific fields
-    model_appid: Optional[str] = Field(None, description="Application ID for STT models")
-    access_token: Optional[str] = Field(None, description="Access token for STT models")
-    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
-    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
-    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
-    context_window_tokens: Optional[int] = Field(None, description="Total combined input/output context window in tokens")
-    max_input_tokens: Optional[int] = Field(None, description="Provider hard input-token limit")
-    max_output_tokens: Optional[int] = Field(None, description="Provider-supported completion output cap")
-    default_output_reserve_tokens: Optional[int] = Field(None, description="Default output allowance reserved per request")
-    tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
-    capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
-    capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
-    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
-    temperature: Optional[float] = Field(None, description="Default sampling temperature for LLM/VLM models")
-    top_p: Optional[float] = Field(None, description="Default nucleus sampling probability for LLM/VLM models")
-    extra_params: Optional[Dict[str, Any]] = Field(None, description="Fixed inference params without dedicated columns (constrained by FIXED_INFERENCE_FIELDS_BY_TYPE)")
-    # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
-    # contract. The app layer pops them before calling the service so
-    # update_model_record never sees them.
-    accepted_suggestion_match_kind: Optional[str] = Field(None, description="Audit-only: catalog match_kind the operator accepted")
-    accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):
@@ -2316,6 +2298,29 @@ class FieldSpec(BaseModel):
     )
 
 
+# Shared FieldSpec groups reused across model types. Keeping them as module
+# constants removes the duplicated spec blocks that previously appeared
+# verbatim in the llm/vlm/vlm2/vlm3, embedding/multi_embedding and stt/tts
+# entries below. Each entry below copies the lists so runtime mutation of one
+# model type's spec list cannot leak into another.
+_COMMON_CAPACITY_FIELD_SPECS = [
+    FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
+    FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
+    FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
+    FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
+    FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
+]
+
+_DISPLAY_NAME_FIELD_SPEC = FieldSpec(key="display_name", label="显示名称", type="str")
+
+_EMBEDDING_FIELD_SPECS = [
+    FieldSpec(key="display_name", label="显示名称", type="str"),
+    FieldSpec(key="dimension", label="向量维度", type="int"),
+    FieldSpec(key="expected_chunk_size", label="期望块大小", type="int"),
+    FieldSpec(key="maximum_chunk_size", label="最大块大小", type="int"),
+    FieldSpec(key="chunk_batch", label="块批大小", type="int"),
+]
+
 # Fixed inference field specs by model type. Each model type has its own set of
 # fixed advanced-settings fields. Fields with dedicated DB columns
 # (see _FIELDS_WITH_DEDICATED_COLUMN) are persisted as top-level columns; the
@@ -2325,54 +2330,17 @@ class FieldSpec(BaseModel):
 # (e.g. Qwen3 chat_template_kwargs={"enable_thinking": ...}).
 FIXED_INFERENCE_FIELDS_BY_TYPE: Dict[str, List[FieldSpec]] = {
     "llm": [
-        FieldSpec(key="display_name", label="显示名称", type="str"),
-        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
-        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
-        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
-        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
-        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
+        _DISPLAY_NAME_FIELD_SPEC,
+        *list(_COMMON_CAPACITY_FIELD_SPECS),
         FieldSpec(key="temperature", label="温度", type="float", range=[0.0, 2.0]),
         FieldSpec(key="top_p", label="Top P", type="float", range=[0.0, 1.0]),
         FieldSpec(key="enable_thinking", label="深度思考", type="bool"),
     ],
-    "vlm": [
-        FieldSpec(key="display_name", label="显示名称", type="str"),
-        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
-        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
-        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
-        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
-        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
-    ],
-    "vlm2": [
-        FieldSpec(key="display_name", label="显示名称", type="str"),
-        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
-        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
-        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
-        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
-        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
-    ],
-    "vlm3": [
-        FieldSpec(key="display_name", label="显示名称", type="str"),
-        FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
-        FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
-        FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
-        FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
-        FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
-    ],
-    "embedding": [
-        FieldSpec(key="display_name", label="显示名称", type="str"),
-        FieldSpec(key="dimension", label="向量维度", type="int"),
-        FieldSpec(key="expected_chunk_size", label="期望块大小", type="int"),
-        FieldSpec(key="maximum_chunk_size", label="最大块大小", type="int"),
-        FieldSpec(key="chunk_batch", label="块批大小", type="int"),
-    ],
-    "multi_embedding": [
-        FieldSpec(key="display_name", label="显示名称", type="str"),
-        FieldSpec(key="dimension", label="向量维度", type="int"),
-        FieldSpec(key="expected_chunk_size", label="期望块大小", type="int"),
-        FieldSpec(key="maximum_chunk_size", label="最大块大小", type="int"),
-        FieldSpec(key="chunk_batch", label="块批大小", type="int"),
-    ],
+    "vlm": [_DISPLAY_NAME_FIELD_SPEC, *list(_COMMON_CAPACITY_FIELD_SPECS)],
+    "vlm2": [_DISPLAY_NAME_FIELD_SPEC, *list(_COMMON_CAPACITY_FIELD_SPECS)],
+    "vlm3": [_DISPLAY_NAME_FIELD_SPEC, *list(_COMMON_CAPACITY_FIELD_SPECS)],
+    "embedding": list(_EMBEDDING_FIELD_SPECS),
+    "multi_embedding": list(_EMBEDDING_FIELD_SPECS),
     "rerank": [
         FieldSpec(key="display_name", label="显示名称", type="str"),
         FieldSpec(key="max_tokens", label="最大Token数", type="int"),
@@ -2412,6 +2380,30 @@ def get_extra_param_keys_for_type(model_type: str) -> List[str]:
     return [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
 
 
+def _clean_custom_params(value: Any, logger) -> Optional[Dict[str, Any]]:
+    """Validate the ``__custom__`` payload as string -> primitive.
+
+    Returns the cleaned dict (None when empty); malformed entries are dropped
+    with a warning so a bad payload cannot corrupt the JSONB column.
+    """
+    if not isinstance(value, dict):
+        logger.warning(
+            "__custom__ must be a dict, got %s; dropping",
+            type(value).__name__,
+        )
+        return None
+    clean_custom: Dict[str, Any] = {}
+    for ck, cv in value.items():
+        if not isinstance(ck, str) or not isinstance(cv, (str, int, float, bool)):
+            logger.warning(
+                "__custom__ entry %r must be string -> primitive, dropping",
+                ck,
+            )
+            continue
+        clean_custom[ck] = cv
+    return clean_custom or None
+
+
 def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Filter extra_params to only keep keys allowed for the given model type.
 
@@ -2440,16 +2432,8 @@ def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]])
                 )
                 dropped.append(key)
                 continue
-            clean_custom: Dict[str, Any] = {}
-            for ck, cv in value.items():
-                if not isinstance(ck, str) or not isinstance(cv, (str, int, float, bool)):
-                    logger.warning(
-                        "__custom__ entry %r must be string -> primitive, dropping",
-                        ck,
-                    )
-                    continue
-                clean_custom[ck] = cv
-            if clean_custom:
+            clean_custom = _clean_custom_params(value, logger)
+            if clean_custom is not None:
                 filtered["__custom__"] = clean_custom
             continue
         if key in allowed:

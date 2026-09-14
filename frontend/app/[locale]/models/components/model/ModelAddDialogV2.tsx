@@ -142,6 +142,26 @@ const CUSTOM_CONNECTIVITY_FALLBACK_LABELS: Record<string, string> = {
   checking: "检测中",
 };
 
+/** Resolve the effective type: embedding + multimodal → multi_embedding. */
+const resolveMultimodalEmbeddingType = (
+  type: ModelType,
+  isMultimodal: boolean
+): ModelType =>
+  type === MODEL_TYPES.EMBEDDING && isMultimodal
+    ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+    : type;
+
+/** Embedding chunk fields shared by the custom-tab payloads. */
+const buildEmbeddingChunkFields = (
+  chunkSizeRange: [number, number],
+  chunkingBatchSize: string | undefined
+): Record<string, any> => ({
+  // Vector dimension is fixed at 1024 (not user-editable, matching original)
+  expectedChunkSize: chunkSizeRange[0],
+  maximumChunkSize: chunkSizeRange[1],
+  chunkingBatchSize: Number.parseInt(chunkingBatchSize ?? "", 10) || 10,
+});
+
 const generateRandomSuffix = (length: number = 5): string => {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   const values = new Uint32Array(length);
@@ -175,9 +195,7 @@ interface BatchRowState {
 
 /** Resolve the effective model type for a batch row: embedding + multimodal → multi_embedding. */
 const resolveBatchModelType = (state: BatchRowState): ModelType =>
-  state.modelType === MODEL_TYPES.EMBEDDING && state.isMultimodal
-    ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-    : state.modelType;
+  resolveMultimodalEmbeddingType(state.modelType, state.isMultimodal);
 
 /** Build the create-request params for one enabled batch row (Tab A submit). */
 const buildBatchRowParams = (opts: {
@@ -799,29 +817,48 @@ export const ModelAddDialogV2 = ({
     return true;
   }, [customForm, message, t]);
 
+  // Shared payload/context builder for the custom-tab handlers: the
+  // connectivity probe and the submit paths resolve the same fields from the
+  // custom form + advanced settings + capacity form.
+  const buildCustomRequestContext = useCallback(() => {
+    const inferencePayload = buildInferenceParamsPayload(customAdvanced);
+    const capacityPayload = supportsCapacityFields(customForm.type)
+      ? buildCapacityPayload(customCapacity)
+      : {};
+    // Resolve actual model type: embedding + isMultimodal → multi_embedding
+    const resolvedModelType = resolveMultimodalEmbeddingType(
+      customForm.type,
+      customForm.isMultimodal
+    );
+    const isEmbedding = isEmbeddingType(resolvedModelType);
+    const embeddingPayload = isEmbedding
+      ? {
+          embeddingDim: 1024,
+          ...buildEmbeddingChunkFields(
+            customForm.chunkSizeRange,
+            customForm.chunkingBatchSize
+          ),
+        }
+      : {};
+    return {
+      inferencePayload,
+      capacityPayload,
+      resolvedModelType,
+      isEmbedding,
+      embeddingPayload,
+    };
+  }, [customForm, customAdvanced, customCapacity]);
+
   const handleCustomConnectivity = useCallback(async () => {
     if (!validateCustomForm()) return;
     setVerifyingCustom(true);
     try {
-      const inferencePayload = buildInferenceParamsPayload(customAdvanced);
-      const capacityPayload = supportsCapacityFields(customForm.type)
-        ? buildCapacityPayload(customCapacity)
-        : {};
-      // Resolve actual model type: embedding + isMultimodal → multi_embedding
-      const resolvedModelType: ModelType =
-        customForm.type === MODEL_TYPES.EMBEDDING && customForm.isMultimodal
-          ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-          : customForm.type;
-      const isEmbedding = isEmbeddingType(resolvedModelType);
-      const embeddingPayload = isEmbedding
-        ? {
-            // Vector dimension is fixed at 1024 (not user-editable, matching original)
-            embeddingDim: 1024,
-            expectedChunkSize: customForm.chunkSizeRange[0],
-            maximumChunkSize: customForm.chunkSizeRange[1],
-            chunkingBatchSize: Number.parseInt(customForm.chunkingBatchSize, 10) || 10,
-          }
-        : {};
+      const {
+        inferencePayload,
+        capacityPayload,
+        resolvedModelType,
+        embeddingPayload,
+      } = buildCustomRequestContext();
       const response = await modelService.verifyModelConfigConnectivity({
         modelName: customForm.name,
         modelType: resolvedModelType,
@@ -856,16 +893,17 @@ export const ModelAddDialogV2 = ({
       if (model && onConnectivityChange) {
         onConnectivityChange(
           model.displayName || model.name,
-          customForm.type === MODEL_TYPES.EMBEDDING && customForm.isMultimodal
-            ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-            : customForm.type,
+          resolveMultimodalEmbeddingType(
+            customForm.type,
+            customForm.isMultimodal
+          ),
           "unavailable"
         );
       }
     } finally {
       setVerifyingCustom(false);
     }
-  }, [customForm, customAdvanced, customCapacity, model, onConnectivityChange, message, t, validateCustomForm]);
+  }, [customForm, model, onConnectivityChange, message, t, validateCustomForm, buildCustomRequestContext]);
 
   const handleCustomSubmit = useCallback(async () => {
     if (!validateCustomForm()) return;
@@ -875,16 +913,12 @@ export const ModelAddDialogV2 = ({
     }
     setLoading(true);
     try {
-      const inferencePayload = buildInferenceParamsPayload(customAdvanced);
-      const capacityPayload = supportsCapacityFields(customForm.type)
-        ? buildCapacityPayload(customCapacity)
-        : {};
-      // Resolve actual model type: embedding + isMultimodal → multi_embedding
-      const resolvedModelType: ModelType =
-        customForm.type === MODEL_TYPES.EMBEDDING && customForm.isMultimodal
-          ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-          : customForm.type;
-      const isEmbedding = isEmbeddingType(resolvedModelType);
+      const {
+        inferencePayload,
+        capacityPayload,
+        resolvedModelType,
+        isEmbedding,
+      } = buildCustomRequestContext();
       const maxTokensValue = isEmbedding
         ? 0
         : Number.parseInt(customForm.maxTokens, 10) || 0;
@@ -916,12 +950,10 @@ export const ModelAddDialogV2 = ({
           apiKey:
             customForm.apiKey.trim() === "" ? "sk-no-api-key" : customForm.apiKey,
           ...(isEmbedding
-            ? {
-                expectedChunkSize: customForm.chunkSizeRange[0],
-                maximumChunkSize: customForm.chunkSizeRange[1],
-                chunkingBatchSize:
-                  Number.parseInt(customForm.chunkingBatchSize, 10) || 10,
-              }
+            ? buildEmbeddingChunkFields(
+                customForm.chunkSizeRange,
+                customForm.chunkingBatchSize
+              )
             : {}),
           ...(isVoice
             ? {
@@ -960,9 +992,10 @@ export const ModelAddDialogV2 = ({
             ? {
                 // Vector dimension is fixed at 1024 (not user-editable, matching original)
                 maxTokens: 1024,
-                expectedChunkSize: customForm.chunkSizeRange[0],
-                maximumChunkSize: customForm.chunkSizeRange[1],
-                chunkingBatchSize: Number.parseInt(customForm.chunkingBatchSize, 10) || 10,
+                ...buildEmbeddingChunkFields(
+                  customForm.chunkSizeRange,
+                  customForm.chunkingBatchSize
+                ),
               }
             : {}),
         };
@@ -1014,7 +1047,7 @@ export const ModelAddDialogV2 = ({
     } finally {
       setLoading(false);
     }
-  }, [customForm, customAdvanced, customCapacity, tenantId, model, message, t, updateModelConfig, saveConfig, onClose, onSuccess, validateCustomForm]);
+  }, [customForm, customAdvanced, customCapacity, tenantId, model, message, t, updateModelConfig, saveConfig, onClose, onSuccess, validateCustomForm, buildCustomRequestContext]);
 
   const resetCustomForm = useCallback(() => {
     setCustomForm({

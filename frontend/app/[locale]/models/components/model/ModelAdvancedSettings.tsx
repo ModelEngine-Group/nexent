@@ -151,6 +151,24 @@ const REMOVED_ADVANCED_PARAM_KEYS = new Set<string>([
  *
  * Empty / undefined values are dropped so the backend treats them as "inherit".
  */
+/** Convert the editing-state __custom__ entries array into a clean wire dict.
+
+ * Empty keys are dropped and duplicates collapse (last-wins); numeric strings
+ * are coerced to numbers so provider params like top_k / seed that expect
+ * ints/floats receive a real number, not a string.
+ */
+const buildCustomDict = (raw: unknown): Record<string, unknown> => {
+  const entries = Array.isArray(raw) ? (raw as [string, string][]) : [];
+  const dict: Record<string, unknown> = {};
+  for (const [k, v] of entries) {
+    if (k === "") continue;
+    const trimmed = String(v ?? "").trim();
+    if (trimmed === "") continue;
+    dict[k] = !Number.isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
+  }
+  return dict;
+};
+
 export const buildInferenceParamsPayload = (
   value: ModelAdvancedSettingsValue
 ): {
@@ -166,19 +184,7 @@ export const buildInferenceParamsPayload = (
     if (raw === undefined || raw === null || raw === "") continue;
     if (REMOVED_ADVANCED_PARAM_KEYS.has(key)) continue;
     if (key === "__custom__") {
-      // value.__custom__ is the editing-state entries array ([string, string][]),
-      // which may contain empty/duplicate keys. Convert to a clean dict for the
-      // wire payload: empty keys dropped, duplicates collapse (last-wins).
-      const entries = Array.isArray(raw) ? (raw as [string, string][]) : [];
-      const dict: Record<string, unknown> = {};
-      for (const [k, v] of entries) {
-        if (k === "") continue;
-        // Coerce numeric strings to numbers so provider params like top_k /
-        // seed that expect ints/floats receive a real number, not a string.
-        const trimmed = String(v ?? "").trim();
-        if (trimmed === "") continue;
-        dict[k] = !Number.isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
-      }
+      const dict = buildCustomDict(raw);
       if (Object.keys(dict).length > 0) {
         extraParams["__custom__"] = dict;
       }
