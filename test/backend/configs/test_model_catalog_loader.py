@@ -67,7 +67,13 @@ class TestModelCatalogLoaderSmoke:
             if "models" in provider_block:
                 for model_name, model_cfg in provider_block["models"].items():
                     assert isinstance(model_name, str)
-                    assert "model_type" in model_cfg
+                    # The loader normalizes each model entry into a
+                    # ModelCatalogProfile instance; accept either the raw dict
+                    # form or the normalized Pydantic model.
+                    if isinstance(model_cfg, dict):
+                        assert "model_type" in model_cfg
+                    else:
+                        assert getattr(model_cfg, "model_type", None)
 
     def test_pydantic_models_match_catalog(self):
         from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo
