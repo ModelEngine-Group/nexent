@@ -393,13 +393,31 @@ export const ModelConfigSection = forwardRef<
         dataIndex: "type",
         key: "type",
         width: 110,
-        render: (type: ModelType) => (
-          <Tag color={modelTypeColors[type] || "default"}>
-            {t(`model.type.${type === "multi_embedding" ? "multiEmbedding" : type}`, {
-              defaultValue: type,
-            })}
-          </Tag>
-        ),
+        render: (type: ModelType) => {
+          // Map raw type ids to the semantic i18n keys used across the app
+          // (add dialog / getModelData). Without this, vlm2/vlm3/vlm4 fall
+          // through to the raw id ("vlm3") because no model.type.vlmN keys
+          // exist in the locale files.
+          const typeLabelKeyMap: Record<string, string> = {
+            llm: "llm",
+            embedding: "embedding",
+            multi_embedding: "multiEmbedding",
+            vlm: "imageUnderstanding",
+            vlm2: "imageGeneration",
+            vlm3: "videoUnderstanding",
+            vlm4: "audioUnderstanding",
+            rerank: "rerank",
+            stt: "stt",
+            tts: "tts",
+          };
+          return (
+            <Tag color={modelTypeColors[type] || "default"}>
+              {t(`model.type.${typeLabelKeyMap[type] ?? type}`, {
+                defaultValue: type,
+              })}
+            </Tag>
+          );
+        },
       },
       {
         title: t("modelConfig.table.col.source", { defaultValue: "来源" }),
