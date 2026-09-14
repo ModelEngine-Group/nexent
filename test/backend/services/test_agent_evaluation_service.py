@@ -18,6 +18,60 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+# The service imports a large dependency graph. Keep its test doubles scoped
+# to this module's fixture so they cannot leak into sibling test modules.
+_MODULE_ROOTS = (
+    "adapters",
+    "boto3",
+    "botocore",
+    "consts",
+    "database",
+    "management",
+    "nexent",
+    "openjiuwen",
+    "openpyxl",
+    "services",
+    "sqlalchemy",
+    "utils",
+)
+
+
+def _owns_module(name: str) -> bool:
+    return name in _MODULE_ROOTS or any(
+        name.startswith(f"{root}.") for root in _MODULE_ROOTS
+    )
+
+
+def _capture_module_state():
+    """Capture modules and package attributes under the test-owned roots."""
+    modules = {name: module for name, module in sys.modules.items() if _owns_module(name)}
+    package_attrs = {
+        name: dict(module.__dict__)
+        for name, module in modules.items()
+        if isinstance(module, types.ModuleType) and hasattr(module, "__path__")
+    }
+    return modules, package_attrs
+
+
+def _apply_module_state(state) -> None:
+    """Restore a previously captured module graph."""
+    modules, package_attrs = state
+    current_names = [name for name in sys.modules if _owns_module(name)]
+    for name in current_names:
+        if name not in modules:
+            sys.modules.pop(name, None)
+    sys.modules.update(modules)
+    for name, attrs in package_attrs.items():
+        package = sys.modules.get(name)
+        if not isinstance(package, types.ModuleType):
+            continue
+        for key in set(package.__dict__) - set(attrs):
+            package.__dict__.pop(key, None)
+        package.__dict__.update(attrs)
+
+
+_BASE_MODULE_STATE = _capture_module_state()
+
 # Pre-stub heavy third-party packages that are imported transitively by the
 # SDK / database layers we do not exercise in these unit tests.
 sys.modules["boto3"] = MagicMock()
@@ -490,62 +544,72 @@ def _workbook_factory():
 
 openpyxl_mock.Workbook = _workbook_factory
 
+# Keep the dependency graph available as a snapshot, but restore the process
+# state immediately after collection. The fixture below reinstalls this graph
+# only while an agent-evaluation service test is running.
+_STUB_MODULE_STATE = _capture_module_state()
+_apply_module_state(_BASE_MODULE_STATE)
+
 
 @pytest.fixture
 def service_module(monkeypatch):
     """Import agent_evaluation_service fresh for each test with stubs in place.
 
     The conftest.py already installs a supabase mock at collection time; we do
-    not need to redo that here.
+    not need to redo that here. The service's import-time dependency stubs are
+    restored only for the lifetime of this fixture so sibling test modules keep
+    their real or module-specific imports.
     """
-    if "services.agent_evaluation_service" in sys.modules:
-        del sys.modules["services.agent_evaluation_service"]
-    # Also clear the attribute on the services package so the ``from services``
-    # below triggers a fresh import (and therefore repopulates ``sys.modules``).
-    # Without this, Python's attribute-on-package lookup returns the previous
-    # module object without re-importing it, leaving sys.modules empty and
-    # causing sibling tests' patches to target a stale module.
-    if hasattr(_services_pkg, "agent_evaluation_service"):
-        try:
-            delattr(_services_pkg, "agent_evaluation_service")
-        except AttributeError:
-            pass
+    previous_module_state = _capture_module_state()
+    _apply_module_state(_STUB_MODULE_STATE)
+    try:
+        if "services.agent_evaluation_service" in sys.modules:
+            del sys.modules["services.agent_evaluation_service"]
+        # Also clear the attribute on the services package so the ``from
+        # services`` below triggers a fresh import (and therefore repopulates
+        # ``sys.modules``). Without this, Python's package attribute lookup can
+        # return a stale module object after it has been removed from the cache.
+        if hasattr(_services_pkg, "agent_evaluation_service"):
+            try:
+                delattr(_services_pkg, "agent_evaluation_service")
+            except AttributeError:
+                pass
 
-    from services import agent_evaluation_service  # noqa: E402
+        from services import agent_evaluation_service  # noqa: E402
 
-    # Make sure the freshly imported submodule is also visible as an attribute
-    # of the ``services`` package, so subsequent ``from services.X import Y``
-    # access (and ``getattr(services_pkg, 'X')`` in mocks) does not fall
-    # through to a ModuleNotFoundError on the parent package.
-    _services_pkg.agent_evaluation_service = agent_evaluation_service
-    agent_evaluation_service.openpyxl = openpyxl_mock
-    agent_evaluation_service.agent_run_manager = MagicMock()
-    # ``services.agent_evaluation_service`` may or may not do
-    # ``from openpyxl import Workbook`` at module load depending on the
-    # current code shape; either way we install a patch under the module
-    # attribute so the workbook recorder picks it up when used.
-    _saved_workbook = getattr(agent_evaluation_service, "Workbook", None)
-    agent_evaluation_service.Workbook = _workbook_factory
-    monkeypatch.setattr(
-        agent_evaluation_service, "Workbook", _workbook_factory, raising=False
-    )
+        # Make sure the freshly imported submodule is also visible as an
+        # attribute of the ``services`` package, so subsequent ``from
+        # services.X import Y`` access remains consistent with sys.modules.
+        _services_pkg.agent_evaluation_service = agent_evaluation_service
+        agent_evaluation_service.openpyxl = openpyxl_mock
+        agent_evaluation_service.agent_run_manager = MagicMock()
+        # ``services.agent_evaluation_service`` may or may not do
+        # ``from openpyxl import Workbook`` at module load depending on the
+        # current code shape; either way we install a patch under the module
+        # attribute so the workbook recorder picks it up when used.
+        agent_evaluation_service.Workbook = _workbook_factory
+        monkeypatch.setattr(
+            agent_evaluation_service, "Workbook", _workbook_factory, raising=False
+        )
 
-    agent_evaluation_service.get_agent_evaluation = (
-        _agent_evaluation_db_mock.get_agent_evaluation
-    )
-    agent_evaluation_service.list_agent_evaluation_cases = (
-        _agent_evaluation_db_mock.list_agent_evaluation_cases
-    )
-    agent_evaluation_service.soft_delete_agent_evaluation = (
-        _agent_evaluation_db_mock.soft_delete_agent_evaluation
-    )
+        agent_evaluation_service.get_agent_evaluation = (
+            _agent_evaluation_db_mock.get_agent_evaluation
+        )
+        agent_evaluation_service.list_agent_evaluation_cases = (
+            _agent_evaluation_db_mock.list_agent_evaluation_cases
+        )
+        agent_evaluation_service.soft_delete_agent_evaluation = (
+            _agent_evaluation_db_mock.soft_delete_agent_evaluation
+        )
 
-    _agent_evaluation_db_mock.get_agent_evaluation.reset_mock(side_effect=True)
-    _agent_evaluation_db_mock.list_agent_evaluation_cases.reset_mock(side_effect=True)
-    _agent_evaluation_db_mock.soft_delete_agent_evaluation.reset_mock(side_effect=True)
-    _workbook_holder.clear()
+        _agent_evaluation_db_mock.get_agent_evaluation.reset_mock(side_effect=True)
+        _agent_evaluation_db_mock.list_agent_evaluation_cases.reset_mock(side_effect=True)
+        _agent_evaluation_db_mock.soft_delete_agent_evaluation.reset_mock(side_effect=True)
+        _workbook_holder.clear()
 
-    return agent_evaluation_service
+        yield agent_evaluation_service
+    finally:
+        _apply_module_state(previous_module_state)
 
 
 def _make_case(case_id: int, *, status: str, score, pass_status: str | None):
