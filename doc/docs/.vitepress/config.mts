@@ -87,10 +87,6 @@ export default defineConfig({
                   },
                 ],
               },
-              {
-                text: "Backup, Upgrade & Rollback",
-                link: "/en/quick-start/backup-upgrade-rollback",
-              },
               { text: "FAQ", link: "/en/quick-start/faq" },
             ],
           },
@@ -464,10 +460,6 @@ export default defineConfig({
                     link: "/zh/quick-start/kubernetes-upgrade-guide",
                   },
                 ],
-              },
-              {
-                text: "备份、升级与回滚",
-                link: "/zh/quick-start/backup-upgrade-rollback",
               },
               { text: "常见问题", link: "/zh/quick-start/faq" },
             ],

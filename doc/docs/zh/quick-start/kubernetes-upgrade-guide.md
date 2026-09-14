@@ -1,113 +1,209 @@
-# Nexent Kubernetes 升级指导
+# Nexent Kubernetes 升级指南
 
-生产环境升级前，请先完成 [备份、升级与回滚指导](./backup-upgrade-rollback.md) 中的 Kubernetes 备份与恢复演练。`helm rollback` 只回退资源配置，不会恢复数据库和 PVC 数据。
+本文适用于使用 Helm 部署的 Nexent。建议在无人使用或业务低峰窗口执行，尽量减少备份和升级期间的新请求与数据写入。这是操作建议，不要求检测在线用户、拦截请求、缩容 Deployment 或停止 Pod。
 
-## 🚀 升级流程概览
+> ⚠️ 本文通过 `kubectl cp` 或 `kubectl exec` 从运行中的容器直接复制持久化文件。如果复制期间 PostgreSQL、Elasticsearch、Redis 或 MinIO 仍在写入，副本可能不属于同一时间点，不保证能够直接恢复。
 
-在 Kubernetes 上升级 Nexent 时，建议依次完成以下步骤：
+## 1. 升级前准备
 
-1. 拉取最新代码
-2. 执行 Helm 部署脚本
-3. 打开站点确认服务可用
+### 1.1 记录版本、Helm 和存储状态
 
----
-
-## 🔄 步骤一：更新代码
-
-更新前，先记录当前版本、存储配置和部署选项，并备份 PostgreSQL、MinIO 及其他重要数据。
-
-- 当前部署版本信息的位置：根目录 `VERSION`
-- 本地卷目录信息的位置：各 Helm 子 chart 的 `storage.hostPath`，默认位于 `/var/lib/nexent-data/nexent-*`
-
-**git 方式下载的代码**
-
-确认当前位于用于部署的分支，然后以快进方式拉取代码：
+默认 namespace 为 `nexent`，应按实际环境调整。执行 `kubectl` 的本地机器是备份目标。
 
 ```bash
+set -euo pipefail
+
+CODE_DIR=/opt/nexent
+TARGET_VERSION=X.Y.Z
+NS=nexent
+APP_RELEASE=nexent
+INFRA_RELEASE=nexent-infrastructure
+BACKUP_BASE=/backup/nexent
+STAMP=$(date -u +%Y%m%d-%H%M%S)
+K8S_BACKUP_DIR="$BACKUP_BASE/k8s-$STAMP"
+
+mkdir -p "$K8S_BACKUP_DIR/data"
+cd "$CODE_DIR"
+
+printf 'target_version=%s\n' "$TARGET_VERSION" > "$K8S_BACKUP_DIR/version.txt"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git rev-parse HEAD >> "$K8S_BACKUP_DIR/version.txt"
+  git status --short > "$K8S_BACKUP_DIR/git-status.txt"
+fi
+
+helm history "$INFRA_RELEASE" -n "$NS" > "$K8S_BACKUP_DIR/helm-infrastructure-history.txt"
+helm history "$APP_RELEASE" -n "$NS" > "$K8S_BACKUP_DIR/helm-application-history.txt"
+helm get values "$INFRA_RELEASE" -n "$NS" --all > "$K8S_BACKUP_DIR/helm-infrastructure-values.yaml"
+helm get values "$APP_RELEASE" -n "$NS" --all > "$K8S_BACKUP_DIR/helm-application-values.yaml"
+kubectl get deployment -n "$NS" -o wide > "$K8S_BACKUP_DIR/deployments.txt"
+kubectl get pods -n "$NS" -o wide > "$K8S_BACKUP_DIR/pods.txt"
+kubectl get pvc -n "$NS" -o wide > "$K8S_BACKUP_DIR/pvc.txt"
+kubectl get pv -o wide > "$K8S_BACKUP_DIR/pv.txt"
+```
+
+Helm values 和资源清单可能包含密码或令牌，只能保存在受限的本地目录中。`kubectl get pv` 需要集群级读权限；如果操作账号无此权限，应记录该项未采集，不得忽略其他检查。
+
+### 1.2 检查空间
+
+先查看 PVC 申请容量和本地备份目录的可用空间：
+
+```bash
+kubectl get pvc -n "$NS"
+df -h "$BACKUP_BASE"
+```
+
+使用以下函数查看已启用组件在容器内的实际数据量：
+
+```bash
+show_remote_size() {
+  local app="$1"
+  local container="$2"
+  local source="$3"
+  local pod
+
+  pod=$(kubectl get pods -n "$NS" -l "app=$app" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}')
+  test -n "$pod"
+  kubectl exec -n "$NS" "$pod" -c "$container" -- du -sh "$source"
+}
+
+show_remote_size nexent-postgresql postgresql /var/lib/postgresql/data
+show_remote_size nexent-elasticsearch elasticsearch /usr/share/elasticsearch/data
+show_remote_size nexent-minio minio /data
+show_remote_size nexent-redis redis /data
+show_remote_size nexent-runtime nexent-runtime /mnt/nexent
+show_remote_size nexent-runtime nexent-runtime /mnt/nexent-data/skills
+show_remote_size nexent-runtime nexent-runtime /mnt/nexent-data/memory-provider-plugins
+show_remote_size nexent-runtime nexent-runtime /mnt/nexent-data/logs
+```
+
+如果启用了 Supabase 或监控，还需查看对应容器目录。确认本地可用空间大于所有待复制数据之和，并为 `kubectl cp` 的临时文件预留额外空间。
+
+### 1.3 从运行中的容器复制数据
+
+以下函数根据 `app` label 选择一个运行中的 Pod，将指定目录复制到本地。对未启用的可选组件会输出 `SKIP`。
+
+```bash
+copy_from_app() {
+  local app="$1"
+  local container="$2"
+  local source="$3"
+  local target="$4"
+  local pod
+
+  if ! kubectl get deployment "$app" -n "$NS" >/dev/null 2>&1; then
+    printf 'SKIP: deployment/%s is not enabled\n' "$app"
+    return 0
+  fi
+
+  pod=$(kubectl get pods -n "$NS" -l "app=$app" \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}')
+  test -n "$pod"
+  mkdir -p "$(dirname "$K8S_BACKUP_DIR/data/$target")"
+  kubectl exec -n "$NS" "$pod" -c "$container" -- du -sh "$source"
+  kubectl cp -n "$NS" -c "$container" \
+    "$pod:$source" "$K8S_BACKUP_DIR/data/$target"
+}
+
+copy_from_app nexent-postgresql postgresql \
+  /var/lib/postgresql/data postgresql
+copy_from_app nexent-elasticsearch elasticsearch \
+  /usr/share/elasticsearch/data elasticsearch
+copy_from_app nexent-minio minio /data minio
+copy_from_app nexent-redis redis /data redis
+copy_from_app nexent-supabase-db supabase-db \
+  /var/lib/postgresql/data supabase-postgresql
+copy_from_app nexent-runtime nexent-runtime \
+  /mnt/nexent workspace
+copy_from_app nexent-runtime nexent-runtime \
+  /mnt/nexent-data/skills skills
+copy_from_app nexent-runtime nexent-runtime \
+  /mnt/nexent-data/memory-provider-plugins memory-provider-plugins
+copy_from_app nexent-runtime nexent-runtime \
+  /mnt/nexent-data/logs logs
+```
+
+启用监控时，使用同一函数复制已启用的持久化组件：
+
+```bash
+copy_from_app nexent-phoenix phoenix /mnt/data monitoring/phoenix
+copy_from_app nexent-tempo tempo /var/tempo monitoring/tempo
+copy_from_app nexent-grafana grafana /var/lib/grafana monitoring/grafana
+copy_from_app nexent-langfuse-postgres postgres \
+  /var/lib/postgresql/data monitoring/langfuse-postgresql
+copy_from_app nexent-langfuse-clickhouse clickhouse \
+  /var/lib/clickhouse monitoring/langfuse-clickhouse
+copy_from_app nexent-langfuse-minio minio /data monitoring/langfuse-minio
+copy_from_app nexent-langfuse-redis redis /data monitoring/langfuse-redis
+```
+
+`kubectl cp` 依赖目标容器内的 `tar`。如果复制命令不可用，可将 tar 流直接保存到本地：
+
+```bash
+POD=$(kubectl get pods -n "$NS" -l app=nexent-postgresql \
+  --field-selector=status.phase=Running \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n "$NS" "$POD" -c postgresql -- \
+  tar -C /var/lib/postgresql -cf - data \
+  > "$K8S_BACKUP_DIR/data/postgresql.tar"
+```
+
+如果目标容器没有 `tar`，只能选择另一个已经挂载同一 PVC 且包含 `tar` 的现有容器。本流程不创建临时 Pod，所有数据均从现有容器导出到本地机器。
+
+本流程不生成 SHA-256 文件。通过命令退出状态、目标文件存在性和空间占用核对结果：
+
+```bash
+test -d "$K8S_BACKUP_DIR/data"
+find "$K8S_BACKUP_DIR/data" -mindepth 1 -maxdepth 2 -print
+du -sh "$K8S_BACKUP_DIR/data"/*
+```
+
+## 2. 执行升级
+
+通过 Git 管理部署代码时，先确认当前分支和目标版本，再以快进方式更新。
+
+```bash
+cd "$CODE_DIR"
 git branch --show-current
 git pull --ff-only
+bash deploy.sh --defaults k8s --version X.Y.Z
 ```
 
-**zip 包等方式下载的代码**
+`--defaults` 会复用已保存的 Kubernetes 部署配置并跳过交互界面。升级前应确认 `deploy/k8s/deploy.options` 中的组件、端口策略、镜像源、持久化模式和 namespace 与原环境一致。
 
-1. 从 GitHub 下载目标版本并解压。
-2. 将旧部署目录中的 `deploy/k8s/deploy.options` 复制到新代码的相同位置；如果文件不存在，可跳过。
-3. 也可以在部署时使用 `--reuse-from` 复用旧目录的环境配置和部署选项。
-
-## 🔄 步骤二：执行升级
-
-在更新后的代码仓库根目录执行 Kubernetes 部署入口：
+使用完整离线部署包时，在新包根目录执行：
 
 ```bash
-bash deploy.sh k8s
+bash deploy.sh --load-images --reuse-from /opt/nexent-old-package --defaults k8s
 ```
 
-脚本会自动检测您之前保存的部署设置（组件组合、端口策略、镜像来源等）。如果 `deploy.options` 文件不存在，系统会提示您输入配置信息。
+`--reuse-from` 仅用于离线包入口，会复用旧包的 `.env`、`monitoring.env` 和 Kubernetes 部署选项。
 
-> 💡 提示
-> - 升级时会保留 `deploy/env/.env` 中的已有值、注释、顺序和旧版独有变量，并自动追加当前 `deploy/env/.env.example` 新增的变量。部署前必须存在可读的模板。Helm generated values 会根据合并后的 `.env` 重新生成，请勿直接修改。
-> - v2.5.0 增加了共享运行工作区和沙箱镜像。离线或多节点集群需要确保所有可能运行相关 Pod 的节点都能获取沙箱镜像。
+升级时由 `nexent-config` 执行数据库自动迁移，其他后端服务会等待迁移达到目标状态。已合并的 SQL 文件不可修改、改名或删除。
 
----
+## 3. 升级后检查
 
-## 🌐 步骤三：验证部署
-
-部署完成后：
-
-1. 在浏览器打开 `http://localhost:30000`
-2. 检查已选应用 Pod 是否就绪
-3. 确认 `nexent-workspace` PVC 已绑定，并可被 Config、Runtime、MCP、Northbound 和 Data Process 等相关 Pod 挂载
-4. 参考 [用户指南](../user-guide/home-page) 完成智能体配置与问答验证
-
----
-
-## 🗄️ 数据库迁移
-
-SQL 增量不再手动执行。Kubernetes 中只有 `nexent-config` 启动时会通过 `deploy/common/run-sql-migrations.sh` 自动按文件名顺序检查并执行 `deploy/sql/migrations/` 下的 `*.sql` 文件；其他后端服务只等待迁移记录达到目标状态。部署脚本会将 `deploy/sql` 渲染到共享 SQL ConfigMap，并挂载到 `/opt/nexent/sql`，因此只修改 SQL 时重新执行部署即可，不需要重新构建镜像。
-
-迁移脚本使用 SQL 文件名作为 `nexent.schema_migrations` 中的迁移 ID。已记录且 checksum 相同会跳过；已记录但 checksum 变化时会重新执行同名 SQL，并更新 checksum、执行时间、应用版本和源文件路径。
-
-已经发布的迁移文件不可修改、重命名或删除。数据库结构变化必须通过 `deploy/sql/migrations/` 下的新版本化迁移文件完成。v2.5.0 使用合并迁移文件统一应用本版本的数据库变更。
-
-> 💡 提示
-> - 执行前建议先备份数据库：
-
-   ```bash
-   kubectl exec -n nexent deployment/nexent-postgresql -- sh -c \
-     'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
-     > "nexent-backup-$(date +%F).dump"
-   ```
-
-> - Supabase 初始化 SQL 由部署脚本从 `deploy/sql/supabase/` 渲染到 Helm values，不需要手动复制执行。
-
----
-
-## 🔍 故障排查
-
-### 查看部署状态
+检查 Deployment rollout、Pod 和 PVC：
 
 ```bash
-kubectl get pods -n nexent
-kubectl rollout status deployment/nexent-config -n nexent
-kubectl get pvc nexent-workspace -n nexent
+kubectl get deployment -n "$NS"
+kubectl get pods -n "$NS" -o wide
+kubectl get pvc -n "$NS"
+
+while IFS= read -r deployment; do
+  kubectl rollout status -n "$NS" "$deployment" --timeout=600s
+done < <(kubectl get deployment -n "$NS" -o name)
+
+kubectl logs -n "$NS" deployment/nexent-config --tail=200
 ```
 
-### 查看日志
+升级通过需要满足：
 
-```bash
-kubectl logs -n nexent -l app=nexent-config --tail=100
-kubectl logs -n nexent -l app=nexent-web --tail=100
-```
+- 所有已选组件的 Deployment 都完成 rollout，Pod 为 `Running` 且 READY 数量符合预期。
+- 不存在 `CrashLoopBackOff`、`Error` 或长时间 `Pending` 的 Pod，RESTARTS 没有持续增长。
+- 所有需要的 PVC 都为 `Bound`。
+- `nexent-config` 日志中没有 `[sql-migrations]` 失败、迁移等待超时或持续报错。
 
-### 迁移重试后重启服务
-
-```bash
-kubectl rollout restart deployment/nexent-config -n nexent
-kubectl rollout restart deployment/nexent-runtime -n nexent
-```
-
-### 重新初始化 Elasticsearch（如需要）
-
-```bash
-bash deploy/k8s/init-elasticsearch.sh
-```
+如果不满足上述条件，先保留现场和升级前副本，根据 Pod events 和容器日志定位问题。
