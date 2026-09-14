@@ -124,7 +124,20 @@ def _ensure_v_prefix(version: str) -> str:
 def a2ui_messages_to_operations(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Convert A2UI protocol messages to AG-UI a2ui_operations."""
+    """Convert A2UI protocol messages to AG-UI a2ui_operations.
+
+    Handles two transformations that assistant-ui's converter expects:
+
+    1. **Component flatten** — Nexus nests the full tree inline under
+       ``component``; AG-UI reducer requires a flat list of every node
+       with ``component`` as the type *string*, ``props`` at the sibling
+       level, and ``children`` as ID references.
+    2. **Binding unwrap** — Nexus values use
+       ``{"literalString": "..."}`` / ``{"valueString": "..."}`` wrappers;
+       AG-UI props expect the plain value.  Runtime ``{"path": "..."}``
+       bindings are preserved unchanged so the frontend can resolve them
+       at click time.
+    """
     operations: list[dict[str, Any]] = []
     for msg in messages:
         if not isinstance(msg, dict):
@@ -150,7 +163,16 @@ def a2ui_messages_to_operations(
             surface = msg["surfaceUpdate"]
             if isinstance(surface, dict):
                 components = surface.get("components")
-                if components is not None:
+                flat_components = _flatten_and_resolve_components(components)
+                if flat_components is not None:
+                    operations.append({
+                        "version": version,
+                        "updateComponents": {
+                            "surfaceId": surface.get("surfaceId", ""),
+                            "components": flat_components,
+                        },
+                    })
+                elif components is not None:
                     operations.append({
                         "version": version,
                         "updateComponents": {
@@ -187,6 +209,142 @@ def a2ui_messages_to_operations(
                 })
 
     return operations
+
+
+# ---------------------------------------------------------------------------
+# Nexus component flatten + binding resolution (SDK-side, keeps backend path
+# redundant-safe — if the backend encoder already ran these, re-running on
+# AG-UI-flat input is a no-op).
+# ---------------------------------------------------------------------------
+
+_LITERAL_BINDING_KEYS = frozenset({
+    "literalString", "valueString", "valueNumber", "valueBoolean",
+})
+
+
+def _resolve_nexus_bindings(obj: Any) -> Any:
+    """Walk a dict/list and unfold Nexus literal-value bindings.
+
+    ``{"text": {"literalString": "hello"}}`` → ``{"text": "hello"}``
+    ``{"user": {"path": "/form/user"}}``    → preserved as-is
+    """
+    if isinstance(obj, dict):
+        for key in list(obj.keys()):
+            val = obj[key]
+            if isinstance(val, dict):
+                literal_key = next(
+                    (lk for lk in _LITERAL_BINDING_KEYS
+                     if lk in val and len(val) == 1),
+                    None,
+                )
+                if literal_key is not None:
+                    obj[key] = val[literal_key]
+                elif "path" in val and len(val) == 1:
+                    pass  # Runtime binding — leave untouched
+                else:
+                    _resolve_nexus_bindings(val)
+            elif isinstance(val, list):
+                for i, item in enumerate(val):
+                    obj[key][i] = _resolve_nexus_bindings(item)
+        return obj
+    if isinstance(obj, list):
+        return [_resolve_nexus_bindings(item) for item in obj]
+    return obj
+
+
+def _flatten_and_resolve_components(
+    components: Any,
+) -> list[dict[str, Any]] | None:
+    """Flatten a Nexus nested component list and resolve bindings.
+
+    Returns ``None`` when ``components`` is already a list of flat AG-UI
+    entries (i.e. every entry has ``component`` as a string, not a dict).
+    """
+    if not isinstance(components, list):
+        return None
+
+    collected: list[dict[str, Any]] = []
+
+    def _walk(comp: Any) -> str | None:
+        if not isinstance(comp, dict):
+            return None
+        node_id = comp.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            return None
+
+        inner = comp.get("component")
+        if isinstance(inner, dict):
+            flat_node: dict[str, Any] = {"id": node_id}
+            if "type" in inner:
+                flat_node["component"] = inner["type"]
+            props = inner.get("props")
+            if isinstance(props, dict):
+                flat_node["props"] = _resolve_nexus_bindings(props)
+            # Preserve any other top-level Nexus fields
+            for k, v in comp.items():
+                if k not in ("id", "component"):
+                    flat_node[k] = v
+        else:
+            # Already flat (AG-UI format) — still process bindings + children
+            flat_node: dict[str, Any] = {
+                k: _resolve_nexus_bindings(v) if isinstance(v, (dict, list)) else v
+                for k, v in comp.items()
+            }
+
+        # Extract child refs from Nexus props into top-level children
+        props = flat_node.get("props", {})
+        if isinstance(props, dict):
+            child_ids: list[str] = []
+            singular_child = props.get("child")
+            if isinstance(singular_child, str):
+                child_ids.append(singular_child)
+                props.pop("child", None)
+            elif isinstance(singular_child, dict):
+                child_id = _walk(singular_child)
+                if child_id:
+                    child_ids.append(child_id)
+                props.pop("child", None)
+
+            children_raw = props.get("children")
+            if children_raw is not None:
+                props.pop("children", None)
+                if isinstance(children_raw, dict):
+                    explicit = children_raw.get("explicitList")
+                    if isinstance(explicit, list):
+                        for item in explicit:
+                            if isinstance(item, str):
+                                child_ids.append(item)
+                            elif isinstance(item, dict):
+                                child_id = _walk(item)
+                                if child_id:
+                                    child_ids.append(child_id)
+                elif isinstance(children_raw, list):
+                    for item in children_raw:
+                        if isinstance(item, str):
+                            child_ids.append(item)
+                        elif isinstance(item, dict):
+                            child_id = _walk(item)
+                            if child_id:
+                                child_ids.append(child_id)
+
+            if child_ids:
+                flat_node["children"] = child_ids
+
+        collected.append(flat_node)
+        return node_id
+
+    # Detect: all entries already flat? (component is a string)
+    if all(
+        isinstance(c, dict) and isinstance(c.get("component"), str)
+        for c in components
+    ):
+        # Already flat — just resolve bindings in place
+        _resolve_nexus_bindings(components)
+        return list(components)
+
+    for c in components:
+        _walk(c)
+    return collected
 
 
 def wrap_as_activity_snapshot(content: str) -> dict[str, Any] | None:
