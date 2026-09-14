@@ -928,6 +928,9 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
         skill_resolutions=None,
+        model_ids=None,
+        embedding_model_ids=None,
+        user_id="test_user_id",
     )
 
 

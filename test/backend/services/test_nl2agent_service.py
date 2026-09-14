@@ -14,6 +14,7 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
+from consts.const import TOKEN
 from consts.model import HistoryItem, NL2AgentRunRequest
 from services.nl2agent_service import (
     Nl2AgentCompletionError,
@@ -1444,8 +1445,8 @@ async def test_build_run_info_is_ephemeral(mocker):
         return_value=context_budget_snapshot,
     )
     mocker.patch(
-        "services.nl2agent_service.LOCAL_MCP_SERVER",
-        "http://local-mcp:5011",
+        "services.nl2agent_service.get_tenant_local_mcp_server",
+        return_value="http://local-mcp:5011",
     )
     get_current_user = mocker.patch(
         "services.nl2agent_service.get_current_user_id",
@@ -1517,13 +1518,15 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert history_item.metadata == {"layout_order": 0}
     assert run_info.mcp_host == [
         {
-            "url": "http://local-mcp:5011/sse",
+                "url": "http://local-mcp:5011",
             "transport": "sse",
             "httpx_client_factory": create_httpx_client,
             "bypass_proxy": True,
             "headers": {
                 "Authorization": "Bearer tenant-token",
                 NL2AGENT_AGENT_ID_HEADER: "42",
+                "X-Tenant-ID": "tenant-a",
+                "X-Nexent-Internal-Token": TOKEN,
             },
         }
     ]
@@ -1677,8 +1680,8 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
         return_value=None,
     )
     mocker.patch(
-        "services.nl2agent_service.LOCAL_MCP_SERVER",
-        "http://local-mcp:5011/base/",
+        "services.nl2agent_service.get_tenant_local_mcp_server",
+        return_value="http://local-mcp:5011/base/",
     )
     mocker.patch(
         "services.nl2agent_service.get_current_user_id",
@@ -1719,11 +1722,15 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     assert run_info.context_input.items[1] == verified_context
     assert run_info.mcp_host == [
         {
-            "url": "http://local-mcp:5011/base/sse",
+                "url": "http://local-mcp:5011/base/",
             "transport": "sse",
             "httpx_client_factory": create_httpx_client,
             "bypass_proxy": True,
-            "headers": {NL2AGENT_AGENT_ID_HEADER: "42"},
+            "headers": {
+                NL2AGENT_AGENT_ID_HEADER: "42",
+                "X-Tenant-ID": "tenant-a",
+                "X-Nexent-Internal-Token": TOKEN,
+            },
         }
     ]
 

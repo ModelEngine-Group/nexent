@@ -130,6 +130,19 @@ class _SkillZipEntry(BaseModel):
     skill_zip_base64: str
 
 
+class _SkillResolution(BaseModel):
+    skill_name: str
+    action: str
+    new_name: Optional[str] = None
+
+
+class _AgentRepositorySnapshot(BaseModel):
+    agent_id: int
+    agent_info: Dict[str, _ExportAndImportAgentInfo]
+    mcp_info: List[_MCPInfo]
+    skills: Optional[List[_SkillZipEntry]] = None
+
+
 class _OfficialAgentInstallItem(BaseModel):
     name: str
     status: str
@@ -154,6 +167,8 @@ consts_model.OfficialAgentInstallItem = _OfficialAgentInstallItem
 consts_model.OfficialAgentInstallStep = _OfficialAgentInstallStep
 consts_model.KnowledgeBaseSeedDoc = _KnowledgeBaseSeedDoc
 consts_model.SkillZipEntry = _SkillZipEntry
+consts_model.SkillResolution = _SkillResolution
+consts_model.AgentRepositorySnapshot = _AgentRepositorySnapshot
 consts_model.ProcessParams = _ProcessParams
 sys.modules["consts.model"] = consts_model
 
@@ -212,6 +227,19 @@ def _write_bundle(tmp_path, name, **kwargs):
 
 def _make_bundle(**kwargs) -> _OfficialAgentBundle:
     return _OfficialAgentBundle.model_validate(_bundle_dict(**kwargs))
+
+
+@pytest.fixture(autouse=True)
+def mock_install_agent_lookup():
+    """Keep install-status tests independent from the integration database."""
+    with patch(
+        "database.agent_db.query_all_agent_info_by_tenant_id",
+        return_value=[],
+    ), patch(
+        "database.user_tenant_db.get_user_tenant_by_user_id",
+        return_value={"user_email": "user@example.com"},
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -576,12 +604,23 @@ async def test_install_falls_back_to_default_embedding_model():
     assert mock_install.await_args.kwargs["embedding_model_id"] == 7
 
 
-async def test_install_skips_already_installed():
+async def test_install_creates_unique_copy_for_existing_agent():
     bundle = _make_bundle(name="research")
     with patch.object(
         official_agent_service, "_load_bundle", return_value=bundle
     ), patch.object(
-        official_agent_service, "_is_agent_installed", return_value=True
+        official_agent_service,
+        "_missing_model_types",
+        new_callable=AsyncMock,
+        return_value=[],
+    ), patch.object(
+        official_agent_service,
+        "check_agent_value_duplicate",
+        return_value=True,
+    ), patch.object(
+        official_agent_service,
+        "generate_unique_agent_value",
+        return_value="research_agent copy",
     ), patch.object(
         official_agent_service, "_install_bundle", new_callable=AsyncMock
     ) as mock_install:
@@ -589,8 +628,9 @@ async def test_install_skips_already_installed():
             ["research"], tenant_id="tenant-1", user_id="u", authorization="auth"
         )
 
-    assert results[0].status == "already_installed"
-    mock_install.assert_not_awaited()
+    assert results[0].status == "installed"
+    mock_install.assert_awaited_once()
+    assert mock_install.await_args.args[0].agent_info["1"].name == "research_agent copy"
 
 
 def test_apply_install_options_renames_and_sets_model():
@@ -708,8 +748,9 @@ async def test_install_bundle_with_skills():
     bundle = _make_bundle(name="research", skill_count=1)
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock()
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock()
+    fake_agent.import_agent_with_skills_impl = AsyncMock(return_value={1: 100})
     fake_agent._create_skills_for_install = AsyncMock(
         return_value={"skill-0": 7}
     )
@@ -721,7 +762,7 @@ async def test_install_bundle_with_skills():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         result = await official_agent_service._install_bundle(
@@ -733,18 +774,11 @@ async def test_install_bundle_with_skills():
     fake_tool.update_tool_list.assert_awaited_once_with(
         tenant_id="tenant-1", user_id="u"
     )
-    fake_agent._create_skills_for_install.assert_awaited_once_with(
-        bundle.skills,
-        "tenant-1",
-        "u",
-        reuse_existing_skills=True,
-    )
-    fake_agent._import_agent_with_skill_links.assert_awaited_once_with(
+    fake_agent.import_agent_with_skills_impl.assert_awaited_once_with(
         bundle,
-        {"skill-0": 7},
+        bundle.skills,
         "auth",
-        tenant_id="tenant-1",
-        user_id="u",
+        skill_resolutions=None,
     )
     fake_agent.import_agent_impl.assert_not_awaited()
 
@@ -753,8 +787,9 @@ async def test_install_bundle_without_skills():
     bundle = _make_bundle(name="research", skill_count=0)
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock()
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock(return_value={1: 100})
+    fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent._create_skills_for_install = AsyncMock()
     fake_agent._import_agent_with_skill_links = AsyncMock()
 
@@ -764,7 +799,7 @@ async def test_install_bundle_without_skills():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         result = await official_agent_service._install_bundle(
@@ -843,7 +878,8 @@ async def test_create_knowledge_bases_creates_and_indexes():
     bundle = _make_bundle(name="research", has_knowledge=True)
     fake_kb_db = types.ModuleType("database.knowledge_db")
     fake_kb_db.get_knowledge_record = MagicMock(return_value=None)
-    fake_vdb = types.ModuleType("services.vectordatabase_service")
+    fake_kb_db.update_knowledge_record = MagicMock()
+    fake_vdb = types.ModuleType("management.services.knowledge_base.service")
     fake_vdb.ElasticSearchService = MagicMock()
     fake_vdb.ElasticSearchService.create_knowledge_base.return_value = {
         "id": "42-abc"
@@ -851,12 +887,23 @@ async def test_create_knowledge_bases_creates_and_indexes():
     fake_vdb.ElasticSearchService.index_documents = MagicMock()
     fake_vdb.get_embedding_model_by_id = MagicMock(return_value=(MagicMock(), 5))
     fake_vdb.get_vector_db_core = MagicMock(return_value=MagicMock())
+    fake_kb_common = types.ModuleType("management.services.knowledge_base.common")
+    fake_kb_common.get_vector_db_core = fake_vdb.get_vector_db_core
+    fake_kb_service = types.ModuleType("management.services.knowledge_base.service")
+    fake_kb_service.ElasticSearchService = fake_vdb.ElasticSearchService
+    fake_model_resolver = types.ModuleType("management.services.model.resolver")
+    fake_model_resolver.get_embedding_model_by_id = fake_vdb.get_embedding_model_by_id
+    fake_group_db = types.ModuleType("database.group_db")
+    fake_group_db.query_groups_by_tenant = MagicMock(return_value={"groups": []})
 
     with patch.dict(
         sys.modules,
         {
             "database.knowledge_db": fake_kb_db,
-            "services.vectordatabase_service": fake_vdb,
+            "management.services.knowledge_base.common": fake_kb_common,
+            "management.services.knowledge_base.service": fake_kb_service,
+            "management.services.model.resolver": fake_model_resolver,
+            "database.group_db": fake_group_db,
         },
     ):
         mapping = await official_agent_service._create_knowledge_bases(
@@ -869,9 +916,11 @@ async def test_create_knowledge_bases_creates_and_indexes():
         embedding_dim=None,
         vdb_core=fake_vdb.get_vector_db_core.return_value,
         user_id="u",
-        tenant_id="tenant-1",
-        embedding_model_id=5,
-    )
+            tenant_id="tenant-1",
+            embedding_model_id=5,
+            ingroup_permission="READ_ONLY",
+            group_ids=[],
+        )
     fake_vdb.ElasticSearchService.index_documents.assert_called_once()
     call = fake_vdb.ElasticSearchService.index_documents.call_args
     assert call.kwargs["index_name"] == "42-abc"
@@ -893,16 +942,28 @@ async def test_create_knowledge_bases_reuses_existing():
     fake_kb_db.get_knowledge_record = MagicMock(
         return_value={"knowledge_id": 9, "index_name": "42-abc"}
     )
-    fake_vdb = types.ModuleType("services.vectordatabase_service")
+    fake_kb_db.update_knowledge_record = MagicMock()
+    fake_vdb = types.ModuleType("management.services.knowledge_base.service")
     fake_vdb.ElasticSearchService = MagicMock()
     fake_vdb.get_embedding_model_by_id = MagicMock(return_value=(MagicMock(), 5))
     fake_vdb.get_vector_db_core = MagicMock()
+    fake_kb_common = types.ModuleType("management.services.knowledge_base.common")
+    fake_kb_common.get_vector_db_core = fake_vdb.get_vector_db_core
+    fake_kb_service = types.ModuleType("management.services.knowledge_base.service")
+    fake_kb_service.ElasticSearchService = fake_vdb.ElasticSearchService
+    fake_model_resolver = types.ModuleType("management.services.model.resolver")
+    fake_model_resolver.get_embedding_model_by_id = fake_vdb.get_embedding_model_by_id
+    fake_group_db = types.ModuleType("database.group_db")
+    fake_group_db.query_groups_by_tenant = MagicMock(return_value={"groups": []})
 
     with patch.dict(
         sys.modules,
         {
             "database.knowledge_db": fake_kb_db,
-            "services.vectordatabase_service": fake_vdb,
+            "management.services.knowledge_base.common": fake_kb_common,
+            "management.services.knowledge_base.service": fake_kb_service,
+            "management.services.model.resolver": fake_model_resolver,
+            "database.group_db": fake_group_db,
         },
     ):
         mapping = await official_agent_service._create_knowledge_bases(
@@ -985,8 +1046,9 @@ async def test_install_bundle_creates_kb_and_remaps_refs():
     ]
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock()
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock()
+    fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent._create_skills_for_install = AsyncMock()
     fake_agent._import_agent_with_skill_links = AsyncMock()
@@ -1002,7 +1064,7 @@ async def test_install_bundle_creates_kb_and_remaps_refs():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         await official_agent_service._install_bundle(
@@ -1023,7 +1085,7 @@ async def test_install_bundle_derives_embedding_model_when_not_given():
     bundle = _make_bundle(name="research", has_knowledge=True)
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock()
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock()
     fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent._create_skills_for_install = AsyncMock()
@@ -1045,7 +1107,7 @@ async def test_install_bundle_derives_embedding_model_when_not_given():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         await official_agent_service._install_bundle(bundle, "tenant-1", "u", "auth")
@@ -1059,8 +1121,9 @@ async def test_install_bundle_raises_when_embedding_missing():
     bundle = _make_bundle(name="research", has_knowledge=True)
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock()
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock()
+    fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent._create_skills_for_install = AsyncMock()
     fake_agent._import_agent_with_skill_links = AsyncMock()
 
@@ -1075,7 +1138,7 @@ async def test_install_bundle_raises_when_embedding_missing():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         with pytest.raises(ValueError):
@@ -1212,13 +1275,22 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
     ]
     fake_kb_db = types.ModuleType("database.knowledge_db")
     fake_kb_db.get_knowledge_record = MagicMock(return_value=None)
-    fake_vdb = types.ModuleType("services.vectordatabase_service")
+    fake_kb_db.update_knowledge_record = MagicMock()
+    fake_vdb = types.ModuleType("management.services.knowledge_base.service")
     fake_vdb.ElasticSearchService = MagicMock()
     fake_vdb.ElasticSearchService.create_knowledge_base.return_value = {
         "id": "42-abc"
     }
     fake_vdb.get_embedding_model_by_id = MagicMock(return_value=(MagicMock(), 5))
     fake_vdb.get_vector_db_core = MagicMock()
+    fake_kb_common = types.ModuleType("management.services.knowledge_base.common")
+    fake_kb_common.get_vector_db_core = fake_vdb.get_vector_db_core
+    fake_kb_service = types.ModuleType("management.services.knowledge_base.service")
+    fake_kb_service.ElasticSearchService = fake_vdb.ElasticSearchService
+    fake_model_resolver = types.ModuleType("management.services.model.resolver")
+    fake_model_resolver.get_embedding_model_by_id = fake_vdb.get_embedding_model_by_id
+    fake_group_db = types.ModuleType("database.group_db")
+    fake_group_db.query_groups_by_tenant = MagicMock(return_value={"groups": []})
     fake_file_svc = types.ModuleType("services.file_management_service")
     fake_file_svc.upload_files_impl = AsyncMock(
         return_value=([], ["minio/a.docx"], ["a.docx"])
@@ -1231,7 +1303,10 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
         {
             "consts.model": consts_model,
             "database.knowledge_db": fake_kb_db,
-            "services.vectordatabase_service": fake_vdb,
+            "management.services.knowledge_base.common": fake_kb_common,
+            "management.services.knowledge_base.service": fake_kb_service,
+            "management.services.model.resolver": fake_model_resolver,
+            "database.group_db": fake_group_db,
             "services.file_management_service": fake_file_svc,
             "utils.file_management_utils": fake_utils,
         },
@@ -1265,8 +1340,9 @@ async def test_install_bundle_records_steps():
     bundle = _make_bundle(name="research", skill_count=0)
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock()
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock(return_value={1: 100})
+    fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent._create_skills_for_install = AsyncMock()
     fake_agent._import_agent_with_skill_links = AsyncMock()
     steps = []
@@ -1277,7 +1353,7 @@ async def test_install_bundle_records_steps():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         await official_agent_service._install_bundle(
@@ -1294,8 +1370,9 @@ async def test_install_bundle_records_skill_step():
     bundle = _make_bundle(name="research", skill_count=1)
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock()
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock()
+    fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent._create_skills_for_install = AsyncMock(
         return_value={"skill-0": 7}
     )
@@ -1308,26 +1385,23 @@ async def test_install_bundle_records_skill_step():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         await official_agent_service._install_bundle(
             bundle, "tenant-1", "u", "auth", steps=steps
         )
 
-    assert [(s.name, s.status) for s in steps] == [
-        ("mcp", "ok"),
-        ("skill", "ok"),
-        ("agent", "ok"),
-    ]
+    assert [(s.name, s.status) for s in steps] == [("mcp", "ok"), ("agent", "ok")]
 
 
 async def test_install_bundle_records_failed_step():
     bundle = _make_bundle(name="research")
     fake_tool = types.ModuleType("services.tool_configuration_service")
     fake_tool.update_tool_list = AsyncMock(side_effect=RuntimeError("boom"))
-    fake_agent = types.ModuleType("services.agent_service")
+    fake_agent = types.ModuleType("management.services.agent.service")
     fake_agent.import_agent_impl = AsyncMock()
+    fake_agent.import_agent_with_skills_impl = AsyncMock()
     fake_agent._create_skills_for_install = AsyncMock()
     fake_agent._import_agent_with_skill_links = AsyncMock()
     steps = []
@@ -1338,7 +1412,7 @@ async def test_install_bundle_records_failed_step():
         sys.modules,
         {
             "services.tool_configuration_service": fake_tool,
-            "services.agent_service": fake_agent,
+            "management.services.agent.service": fake_agent,
         },
     ):
         with pytest.raises(RuntimeError):

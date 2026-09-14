@@ -74,6 +74,7 @@ nexent_container.ContainerConnectionError = Exception
 tool_config_mod = types.ModuleType("services.tool_configuration_service")
 tool_config_mod.get_tool_from_remote_mcp_server = AsyncMock()
 tool_config_mod.import_openapi_service = MagicMock()
+tool_config_mod.delete_openapi_service = MagicMock()
 tool_config_mod._refresh_openapi_services_in_mcp = MagicMock()
 tool_config_mod.update_tool_list = AsyncMock()
 tool_config_mod.__spec__ = importlib.machinery.ModuleSpec("services.tool_configuration_service", loader=None)

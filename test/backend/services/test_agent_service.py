@@ -10586,9 +10586,10 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
 @pytest.mark.asyncio
 @patch('management.services.agent.management.get_current_user_info')
 async def test_import_agent_with_skills_impl_reuses_existing_skills(mock_get_user_info):
-    """reuse_existing_skills links existing same-name skills instead of failing."""
+    """A use-existing resolution links the existing skill instead of failing."""
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import management as ag_svc
+    from consts.model import SkillResolution
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
 
@@ -10612,7 +10613,12 @@ async def test_import_agent_with_skills_impl_reuses_existing_skills(mock_get_use
                         agent_info=mock_agent_info,
                         skills=skills,
                         authorization="Bearer token",
-                        reuse_existing_skills=True,
+                        skill_resolutions=[
+                            SkillResolution(
+                                skill_name="ExistingSkill",
+                                action="use_existing",
+                            )
+                        ],
                     )
 
     assert result == {1: 100}
