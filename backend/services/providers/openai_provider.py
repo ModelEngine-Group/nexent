@@ -6,8 +6,10 @@ calls the standard ``GET {base_url}/models`` endpoint and returns the raw
 model list annotated with the canonical fields expected downstream.
 """
 
+import asyncio
 import ipaddress
 import logging
+import socket
 from typing import Dict, List
 from urllib.parse import urlsplit
 
@@ -21,36 +23,13 @@ from services.providers.base import (
 
 logger = logging.getLogger("model_provider")
 
+# Documented local-LLM exemption: operators may point at a local
+# OpenAI-compatible server. Loopback is not a cross-origin target.
+_LOCAL_LLM_EXEMPT_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
-def _validate_provider_base_url(base_url: str) -> str:
-    """Reject URLs that must never be fetched server-side (SSRF guard).
 
-    The base_url comes from operator-supplied provider configuration, so a
-    crafted value could otherwise point the fetch at internal endpoints
-    (cloud metadata, loopback services, link-local routers). Rules:
-    - scheme must be http or https
-    - a host must be present
-    - loopback / link-local / private-network hosts are rejected. Local
-      development against a local LLM is intentionally still allowed for
-      127.0.0.1/localhost via the documented exemption below.
-    """
-    parsed = urlsplit(base_url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"Unsupported provider base_url scheme: {parsed.scheme!r}")
-    if not parsed.hostname:
-        raise ValueError("Provider base_url has no host")
-
-    host = parsed.hostname.lower()
-    if host == "localhost" or host == "127.0.0.1" or host == "::1":
-        # Documented local-LLM exemption: operators may point at a local
-        # OpenAI-compatible server. Loopback is not a cross-origin target.
-        return base_url
-
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return base_url  # plain DNS name — allowed
-
+def _reject_non_public_ip(ip) -> None:
+    """Raise when an address belongs to a non-routable/reserved range."""
     if (
         ip.is_private
         or ip.is_loopback
@@ -62,7 +41,67 @@ def _validate_provider_base_url(base_url: str) -> str:
         raise ValueError(
             "Provider base_url points to a private/reserved network host"
         )
-    return base_url
+
+
+def _validate_provider_base_url(base_url: str) -> str:
+    """Reject URLs that must never be fetched server-side (SSRF guard).
+
+    The base_url comes from operator-supplied provider configuration, so a
+    crafted value could otherwise point the fetch at internal endpoints
+    (cloud metadata, loopback services, link-local routers). Rules:
+    - scheme must be http or https
+    - a host must be present
+    - loopback / link-local / private-network literal IPs are rejected. Local
+      development against a local LLM is intentionally still allowed for
+      127.0.0.1/localhost via the documented exemption below.
+
+    Returns the lower-cased hostname for follow-up DNS resolution checks.
+    """
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported provider base_url scheme: {parsed.scheme!r}")
+    if not parsed.hostname:
+        raise ValueError("Provider base_url has no host")
+
+    host = parsed.hostname.lower()
+    if host in _LOCAL_LLM_EXEMPT_HOSTS:
+        return host
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host  # plain DNS name — resolved and checked separately
+
+    _reject_non_public_ip(ip)
+    return host
+
+
+def _resolve_host_ips(host: str) -> List[str]:
+    """Resolve a hostname to its literal IP addresses (blocking)."""
+    infos = socket.getaddrinfo(host, None)
+    return [info[4][0] for info in infos]
+
+
+async def _assert_resolved_ips_public(host: str) -> None:
+    """Resolve the DNS name and reject any non-public resolved address.
+
+    The hostname-string checks in _validate_provider_base_url cannot see what
+    a DNS name resolves to, so a domain pointing at a cloud-metadata endpoint
+    or an internal 10.x service would otherwise slip through. Resolving here
+    and validating every returned address closes that path. The residual
+    time-of-check/time-of-use window (DNS rebinding) is an accepted trade-off:
+    fully closing it would require pinning the resolved IP into the transport,
+    which httpx does not support.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        addresses = await loop.run_in_executor(None, _resolve_host_ips, host)
+    except socket.gaierror as exc:
+        raise ValueError(
+            f"Provider base_url host cannot be resolved: {host}"
+        ) from exc
+    for address in addresses:
+        _reject_non_public_ip(ipaddress.ip_address(address))
 
 
 class OpenAICompatibleProvider(AbstractModelProvider):
@@ -72,10 +111,18 @@ class OpenAICompatibleProvider(AbstractModelProvider):
         try:
             model_api_key: str = provider_config["api_key"]
             base_url: str = provider_config.get("base_url", "") or ""
+            # TLS verification is on by default. Operators pointing at a
+            # self-signed internal endpoint can opt out explicitly through
+            # the ssl_verify flag instead of silently disabling it for
+            # everyone.
+            ssl_verify: bool = provider_config.get("ssl_verify", True)
 
-            # SSRF guard: reject schemes without a host and non-routable
-            # targets before the operator-supplied URL is fetched.
-            _validate_provider_base_url(base_url)
+            # SSRF guard: reject schemes without a host, non-routable literal
+            # IPs, and DNS names that resolve into private/reserved ranges
+            # before the operator-supplied URL is fetched.
+            host = _validate_provider_base_url(base_url)
+            if host not in _LOCAL_LLM_EXEMPT_HOSTS:
+                await _assert_resolved_ips_public(host)
 
             # Normalise the base URL: strip trailing slashes, ensure it ends
             # with the ``/models`` path.
@@ -85,7 +132,7 @@ class OpenAICompatibleProvider(AbstractModelProvider):
 
             headers = {"Authorization": f"Bearer {model_api_key}"}
 
-            async with httpx.AsyncClient(verify=False, timeout=30) as client:
+            async with httpx.AsyncClient(verify=ssl_verify, timeout=30) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 payload = response.json()

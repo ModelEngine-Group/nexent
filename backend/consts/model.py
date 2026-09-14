@@ -630,6 +630,10 @@ class ProviderModelRequest(BaseModel):
     model_type: Optional[str] = None
     api_key: Optional[str] = ''
     base_url: Optional[str] = ''
+    # TLS certificate verification for the discovery fetch. Defaults to the
+    # safe value; operators pointing at self-signed internal endpoints must
+    # opt out explicitly instead of verification being silently disabled.
+    ssl_verify: bool = True
 
 
 class BatchCreateModelsRequest(BaseModel):
