@@ -129,6 +129,7 @@ const createNewStep = (
 
 type HistorySummaryPayload = {
   covered_through_message_id?: number;
+  status?: "compacting" | "accepted" | "idle";
 };
 
 export const upsertHistorySummaryInMessages = (
@@ -142,8 +143,42 @@ export const upsertHistorySummaryInMessages = (
     return messages;
   }
 
+  const withoutTransient = messages.map((message) => ({
+    ...message,
+    steps: (message.steps || []).filter(
+      (step) => step.id !== "history-summary-compacting"
+    ),
+  }));
+  if (payload.status === "compacting") {
+    let messageIndex = -1;
+    for (let index = withoutTransient.length - 1; index >= 0; index -= 1) {
+      if (withoutTransient[index].role === MESSAGE_ROLES.ASSISTANT) {
+        messageIndex = index;
+        break;
+      }
+    }
+    if (messageIndex < 0) return messages;
+    const updatedMessages = [...withoutTransient];
+    const targetMessage = { ...updatedMessages[messageIndex] };
+    targetMessage.steps = [
+      ...(targetMessage.steps || []),
+      createNewStep(
+        0,
+        0,
+        "history-summary-compacting",
+        "History Summary",
+        content,
+        chatConfig.messageTypes.HISTORY_SUMMARY
+      ),
+    ];
+    updatedMessages[messageIndex] = targetMessage;
+    return updatedMessages;
+  }
+
   const coverage = payload.covered_through_message_id;
-  if (typeof coverage !== "number") return messages;
+  if (payload.status !== "accepted" || typeof coverage !== "number") {
+    return withoutTransient;
+  }
 
   const messageIndex = messages.findIndex(
     (message) =>
@@ -154,7 +189,7 @@ export const upsertHistorySummaryInMessages = (
 
   const stepId = `history-summary-${coverage}`;
   const contentId = `${stepId}-content`;
-  const updatedMessages = [...messages];
+  const updatedMessages = [...withoutTransient];
   const targetMessage = { ...updatedMessages[messageIndex] };
   const steps = [...(targetMessage.steps || [])];
   const existingStepIndex = steps.findIndex((step) => step.id === stepId);

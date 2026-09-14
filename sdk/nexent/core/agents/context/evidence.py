@@ -69,8 +69,13 @@ class ContextEvidenceCollector:
                     representation_cache_misses=sum(
                         call.representation_cache_misses for call in self._calls
                     ),
-                    compact_exhausted=any(call.compact_exhausted for call in self._calls),
-                    over_hard_budget=any(call.over_hard_budget for call in self._calls),
+                    compaction_attempts_exhausted=any(
+                        call.compaction_attempts_exhausted for call in self._calls
+                    ),
+                    exceeds_effective_input_limit=any(
+                        call.exceeds_effective_input_limit for call in self._calls
+                    ),
+                    compaction_attempts=sum(call.compaction_attempts for call in self._calls),
                     model_call_count=len(self._calls),
                     loop_status=status,
                 )

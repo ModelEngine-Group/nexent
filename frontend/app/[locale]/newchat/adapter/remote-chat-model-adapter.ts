@@ -10,6 +10,7 @@ import type {
 
 import { conversationService } from "@/services/conversationService";
 import log from "@/lib/logger";
+import { stripAnsiControlSequences } from "@/lib/ansi";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 
@@ -197,7 +198,9 @@ export interface Nl2aResourceCandidate {
 }
 
 export type Nl2aInstallationFormKind =
-  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
+  | "SKILL_CONFIG"
+  | "MCP_REMOTE"
+  | "MCP_CONTAINER";
 
 export interface Nl2aResourceInstallationOption {
   option_id: string;
@@ -770,6 +773,11 @@ function parseSseChunk(line: string): SseChunk | null {
       return null;
     }
 
+    // ---- Legacy Nexus chunk --------------------------------------------
+    if (typeof parsed.content === "string") {
+      parsed.content = stripAnsiControlSequences(parsed.content);
+    }
+    return parsed as unknown as SseChunk;
     if (typeof parsed.status === "string") {
       return { type: "status", content: parsed.status };
     }
@@ -799,7 +807,8 @@ function parseSseChunk(line: string): SseChunk | null {
  * | subagent_start               | subagent     | Opens a nested sub-agent card      |
  * | subagent_end                 | subagent     | Closes the most recent nested card |
  * | final_answer                 | text         | Final summary answer               |
- * | error                         | text         | Error message                      |
+ * | warning                       | text         | Recoverable step issue             |
+ * | error                         | text         | Terminal error message             |
  * | search_content               | text         | Search results content             |
  * | picture_web                  | text         | Web search image references        |
  * | card                         | text         | Card-rendered content              |
@@ -837,6 +846,7 @@ function mapChunkType(type: string): AssistantPartType | null {
     case "agent_finish":
     case "max_steps_reached":
     case "verification":
+    case "warning":
     case "error":
       return "text";
     case "search_content":
@@ -1581,7 +1591,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const history = historyMessages.map((msg) => {
       const customMetadata = isNl2Agent
         ? (msg.metadata?.custom as
-            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
+            | { nl2agentCardAction?: Nl2AgentCardAction }
+            | undefined)
         : undefined;
       const text = customMetadata?.nl2agentCardAction
         ? JSON.stringify(customMetadata.nl2agentCardAction)
@@ -1677,7 +1688,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (abortHandled) return;
       abortHandled = true;
       const abortReason = abortSignal?.reason as
-        { detach?: boolean } | undefined;
+        | { detach?: boolean }
+        | undefined;
       if (abortReason?.detach) {
         log.log(
           `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
@@ -1705,7 +1717,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     let agentResponse:
-      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
+      | ReadableStreamDefaultReader<Uint8Array>
+      | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
@@ -2119,6 +2132,29 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (verificationPanel) verificationPanel.completed = true;
     };
 
+    const updateHistorySummary = (raw: string): boolean => {
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return false;
+      }
+      const existingIndex = contentParts.findIndex(
+        (part) => part.type === "data" && part.name === "history-summary"
+      );
+      if (payload.status === "idle") {
+        if (existingIndex >= 0) contentParts.splice(existingIndex, 1);
+        return true;
+      }
+      if (payload.status !== "compacting" && payload.status !== "accepted") {
+        return false;
+      }
+      const part = { type: "data", name: "history-summary", data: payload };
+      if (existingIndex >= 0) contentParts[existingIndex] = part;
+      else contentParts.push(part);
+      return true;
+    };
+
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
@@ -2148,6 +2184,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
+
+          if (chunk.type === "history_summary") {
+            flushOpenReasoning();
+            if (updateHistorySummary(chunk.content)) {
+              yield buildStreamResult(contentParts);
+            }
+            continue;
+          }
 
           if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
@@ -2348,6 +2392,24 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             completeVerificationPanel();
           }
 
+          if (chunk.type === "final_answer") {
+            // Backward compatibility for streams produced before the warning
+            // event existed. A later final answer proves those earlier step
+            // errors were recovered, so update their presentation in place.
+            for (const part of contentParts) {
+              if (part?.type === "text" && part.isError) {
+                delete part.isError;
+                part.isWarning = true;
+              }
+            }
+          }
+
+          if (chunk.type === "warning") {
+            // Preserve ordering without treating a recoverable issue as the
+            // end of the verification/run lifecycle.
+            flushOpenReasoning();
+          }
+
           // Sub-agent boundary handling. ``subagent_start`` registers a new
           // invocation in the per-id map (so parallel siblings stay
           // independent) and emits a stamp ``data`` part so the
@@ -2517,6 +2579,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             const textPart: any = {
               type: "text",
               text: chunk.content,
+              ...(chunk.type === "warning" && { isWarning: true }),
               ...(chunk.type === "error" && { isError: true }),
             };
             if (textMeta) {
@@ -2606,7 +2669,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
-          if (chunk.type === "knowledge_scope_resolved") {
+          if (chunk.type === "history_summary") {
+            flushOpenReasoning();
+            if (updateHistorySummary(chunk.content)) {
+              yield buildStreamResult(contentParts);
+            }
+          } else if (chunk.type === "knowledge_scope_resolved") {
             notifyKnowledgeScopeResolved(
               chunk.content as unknown,
               custom?.onKnowledgeScopeResolved
@@ -2698,6 +2766,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               // in front of it.
               flushOpenReasoning();
               completeVerificationPanel();
+              for (const part of contentParts) {
+                if (part?.type === "text" && part.isError) {
+                  delete part.isError;
+                  part.isWarning = true;
+                }
+              }
+            } else if (chunk.type === "warning") {
+              flushOpenReasoning();
             }
             const partType = mapChunkType(chunk.type);
             if (chunk.type === "parse") {
@@ -2766,6 +2842,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               const textPart: any = {
                 type: "text",
                 text: chunk.content,
+                ...(chunk.type === "warning" && { isWarning: true }),
                 ...(chunk.type === "error" && { isError: true }),
               };
               const textMeta = resolveSubAgent(chunk.invocation_id);

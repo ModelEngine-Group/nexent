@@ -94,11 +94,11 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Before every deployment, existing values, comments, ordering, and old-only variables are preserved while assignments newly introduced by the current `deploy/env/.env.example` are appended. If `.env` is missing, the deploy script first reuses legacy `docker/.env`, then falls back to the current template. A readable template is required before deployment starts. Do not edit generated Helm values by hand; they are recreated from the merged `deploy/env/.env` and deployment options.
 
-When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
+When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
 
 Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
 
-Config, Runtime, Northbound, and Data Process are intentionally single-replica workloads and use the Kubernetes `Recreate` deployment strategy. Their startup paths mark in-process work left by the previous container as failed, so an old and a new Pod must never overlap. Helm rendering fails if any of these services is scaled above one replica or configured with another strategy. Upgrading one of these services therefore causes a short interruption while Kubernetes stops the old Pod and starts its replacement; stateless services such as Web keep their existing scaling behavior.
+Config, Runtime, Northbound, and Data Process are intentionally single-replica workloads and use the Kubernetes `Recreate` deployment strategy. Their startup paths mark in-process work left by the previous container as failed, so an old and a new Pod must never overlap. Helm rendering fails if any of these services is scaled above one replica or configured with another strategy. Upgrading one of these services therefore causes a short interruption while Kubernetes stops the old Pod and starts its replacement. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
 
 ## Deploy Options
 
@@ -262,6 +262,7 @@ The following local PersistentVolumes can preserve data:
 
 - `nexent-workspace-pv` - Shared user workspace mounted at `/mnt/nexent`
 - `nexent-skills-pv` - Shared skills data mounted at `/mnt/nexent-data/skills`
+- `nexent-project-config-pv` - Web names, localized customization, and logos mounted at `/mnt/nexent-data/project-config`
 - `nexent-elasticsearch-pv` - Search index data
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
@@ -271,7 +272,7 @@ The following local PersistentVolumes can preserve data:
 
 ### Deleted Data
 
-Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local PV data by default; add `--keep-local-data` to preserve local volume contents.
+Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, `/var/lib/nexent-data/project-config`, and `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local PV data by default; add `--keep-local-data` to preserve local volume contents.
 
 ## Services
 
@@ -383,6 +384,10 @@ helm upgrade --install nexent nexent \
 | `global.sharedStorage.workspace.localPath` | Host path for shared workspace data | `/var/lib/nexent` |
 | `global.sharedStorage.skills.size` | Shared `/mnt/nexent-data/skills` PVC size | `5Gi` |
 | `global.sharedStorage.skills.localPath` | Host path for shared skills data | `/var/lib/nexent-data/skills` |
+| `global.sharedStorage.projectConfig.size` | Web project configuration PVC size | `1Gi` |
+| `global.sharedStorage.projectConfig.localPath` | Host path for Web project configuration | `/var/lib/nexent-data/project-config` |
+| `global.sharedStorage.projectConfig.existingClaim` | Existing project configuration PVC | `nexent-project-config` |
+| `nexent-web.config.fileUploadSizeLimit` | File upload limit synchronized into persisted locale configuration at Web startup | `10` |
 | `deploymentVersion` | Deployment version | `speed` |
 
 #### Images
@@ -459,5 +464,5 @@ bash deploy/k8s/init-elasticsearch.sh
 Released PVs are automatically cleaned during deployment. To manually clean:
 
 ```bash
-kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
+kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-project-config-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```

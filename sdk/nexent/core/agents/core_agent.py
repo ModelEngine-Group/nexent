@@ -522,6 +522,15 @@ class CoreAgent(CodeAgent):
         # The factory injects exactly one independent runtime.  CoreAgent has
         # no legacy/managed fallback branch and cannot assemble context itself.
         self.context_runtime: ContextRuntime = context_runtime or UnconfiguredContextRuntime()
+        context_manager = getattr(self.context_runtime, "context_manager", None)
+        if context_manager is not None:
+            context_manager.config.history_summary_status_sink = lambda payload: (
+                self.observer.add_message(
+                    self.agent_name,
+                    ProcessType.HISTORY_SUMMARY,
+                    json.dumps(payload, ensure_ascii=False),
+                )
+            )
         self.step_metrics: List[dict] = []  # Quantitative metrics per step
         self._last_uncompressed_est = 0
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -789,16 +798,6 @@ Additional Args:
             # Don't let logging errors break the model call
             self.logger.log(f"Failed to log model call parameters: {e}", level=LogLevel.INFO)
 
-    @staticmethod
-    def _ensure_context_within_hard_budget(final_context: Any) -> None:
-        """Stop before the provider call when safe compaction cannot fit input."""
-        evidence = final_context.evidence
-        if evidence.over_hard_budget is True:
-            raise ValueError(
-                "Context input remains over the model hard budget after compaction: "
-                f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
-            )
-
     def _emit_history_summary_event(self) -> None:
         payload = self.context_runtime.consume_history_summary_event()
         if isinstance(payload, dict):
@@ -807,6 +806,13 @@ Additional Args:
                 ProcessType.HISTORY_SUMMARY,
                 json.dumps(payload, ensure_ascii=False),
             )
+
+    def _provider_overflow_recovery_safe(self) -> bool:
+        """Only replay while the current Agent run has produced no tool effect."""
+        return not any(
+            getattr(step, "tool_calls", None)
+            for step in self.memory.steps[self._history_step_count:]
+        )
 
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
@@ -824,7 +830,6 @@ Additional Args:
         )
         get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
-        self._ensure_context_within_hard_budget(final_context)
         input_messages = final_context.messages
         chars_per_token = self.context_runtime.chars_per_token
         # Baseline for the per-step compression ratio. ``final_context.messages``
@@ -869,8 +874,27 @@ Additional Args:
                 self._append_verification_feedback(memory_step, decision.verification_result)
 
         try:
+            def rebuild_after_provider_overflow():
+                rebuilt = self.context_runtime.recover_step(
+                    model=self.model,
+                    memory=self.memory,
+                    current_run_start_idx=self._history_step_count,
+                    tools=self._context_tools(),
+                )
+                get_monitoring_manager().record_final_context_evidence(
+                    rebuilt.evidence, step_number=self.step_number
+                )
+                self._emit_history_summary_event()
+                return rebuilt
+
             chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=stop_sequences, **additional_args)
+                                                   stop_sequences=stop_sequences,
+                                                   context_rebuild=(
+                                                       rebuild_after_provider_overflow
+                                                       if self._provider_overflow_recovery_safe()
+                                                       else None
+                                                   ),
+                                                   **additional_args)
             memory_step.model_output_message = chat_message
             model_output = chat_message.content
             memory_step.token_usage = chat_message.token_usage
@@ -1565,7 +1589,6 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         )
         get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
         self._emit_history_summary_event()
-        self._ensure_context_within_hard_budget(final_context)
         messages = final_context.messages
 
         # Create the final memory step with error
@@ -1585,7 +1608,29 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             # Use streaming call (model.__call__) to generate final answer
             # This will trigger observer.add_model_new_token() and
             # observer.add_model_reasoning_content() in OpenAIModel
-            chat_message: ChatMessage = self.model(messages)
+            def rebuild_final_after_provider_overflow():
+                rebuilt = self.context_runtime.recover_final_answer(
+                    model=self.model,
+                    memory=self.memory,
+                    current_run_start_idx=self._history_step_count,
+                    tools=self._context_tools(),
+                    task=task,
+                    final_answer_templates=self.prompt_templates,
+                )
+                get_monitoring_manager().record_final_context_evidence(
+                    rebuilt.evidence, step_number=self.step_number
+                )
+                self._emit_history_summary_event()
+                return rebuilt
+
+            chat_message: ChatMessage = self.model(
+                messages,
+                context_rebuild=(
+                    rebuild_final_after_provider_overflow
+                    if self._provider_overflow_recovery_safe()
+                    else None
+                ),
+            )
 
             # Update role and content from the completed message
             role = chat_message.role

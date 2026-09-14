@@ -274,6 +274,22 @@ class TestMessageObserver:
         assert message_data["type"] == ProcessType.STEP_COUNT.value
         assert "Step 3" in message_data["content"]
 
+    def test_add_message_strips_terminal_ansi_sequences(self):
+        """Console colour and title sequences must not leak into SSE text."""
+        observer = MessageObserver(lang="en")
+
+        observer.add_message(
+            "test_agent",
+            ProcessType.WARNING,
+            "\x1b[31mHTTPError\x1b[0m \x1b]0;kernel traceback\x07details",
+        )
+
+        message_data = json.loads(observer.get_cached_message()[0])
+        assert message_data == {
+            "type": ProcessType.WARNING.value,
+            "content": "HTTPError details",
+        }
+
     def test_add_message_uses_context_tool_call_id_when_explicit_value_is_none(self):
         """Preserve the active tool ID when a caller passes an empty override."""
         observer = MessageObserver(lang="en")

@@ -98,7 +98,7 @@ system_prompt: |-
   saved = {{ save_tool_name }}(
       agent_id=1042,
       fields={
-          "description": "你是一个研究助手，负责收集可靠信息并生成简洁报告。",
+          "description": "我是一个研究助手，负责收集可靠信息并生成简洁报告。",
       },
   )
   print(saved)
@@ -161,7 +161,7 @@ system_prompt: |-
   <code>
   saved = {{ save_tool_name }}(
       agent_id=1042,
-      fields={"duty_prompt": "你是一个研究助手，负责核验资料并生成清晰报告。"},
+      fields={"duty_prompt": "我是一个研究助手，负责核验资料并生成清晰报告。"},
   )
   print(saved)
   </code>

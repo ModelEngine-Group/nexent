@@ -35,7 +35,7 @@ def test_under_budget_does_not_call_selector():
     model = _Model()
     items = [_item("memory:user", ContextItemType.MEMORY, {"memory": "## P\n\n- concise"},
                    {"version_id": 1, "memory_type": "long_term", "scope": "user"})]
-    result = manager._compact_to_soft_budget(items, [], [], [], model=model)
+    result = manager._compact_to_compaction_target(items, [], [], [], model=model)
     assert result == items
     assert model.calls == 0
 
@@ -50,9 +50,9 @@ def test_tenant_and_user_use_one_call_and_later_action_hits_task_cache():
               {"version_id": 2, "memory_type": "long_term", "scope": "user"}),
     ]
     task = _item("current_task:0", ContextItemType.CURRENT_TASK, {"text": "answer"})
-    first = manager._compact_to_soft_budget([*memories, task], [], [], [], model=model)
+    first = manager._compact_to_compaction_target([*memories, task], [], [], [], model=model)
     action = _item("current_action:0", ContextItemType.CURRENT_ACTION, {"result": "done"})
-    second = manager._compact_to_soft_budget([*memories, task, action], [], [], [], model=model)
+    second = manager._compact_to_compaction_target([*memories, task, action], [], [], [], model=model)
     assert model.calls == 1
     assert any(item.metadata.get("representation") == "selected_blocks" for item in first)
     assert any(item.metadata.get("representation") == "selected_blocks" for item in second)

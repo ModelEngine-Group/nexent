@@ -16,6 +16,7 @@ import threading
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +257,18 @@ def _load_core_agent_module():
     utils_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "utils")]
     sys.modules["sdk.nexent.core.utils"] = utils_pkg
 
+    models_pkg = ModuleType("sdk.nexent.core.models")
+    models_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "models")]
+    sys.modules["sdk.nexent.core.models"] = models_pkg
+
+    capacity_budget_mod = ModuleType("sdk.nexent.core.models.capacity_budget")
+
+    class ContextBudgetSnapshot(BaseModel):
+        pass
+
+    capacity_budget_mod.ContextBudgetSnapshot = ContextBudgetSnapshot
+    sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget_mod
+
     observer_mod = ModuleType("sdk.nexent.core.utils.observer")
     observer_mod.MessageObserver = MagicMock()
     observer_mod.ProcessType = MagicMock()
@@ -364,6 +377,20 @@ def test_get_context_summary_returns_none_when_manager_summary_fails():
 
     assert agent._get_context_summary() is None
     context_manager.get_summary.assert_called_once_with()
+
+
+def test_provider_overflow_recovery_is_disabled_after_a_tool_call():
+    agent = object.__new__(core_agent_module.CoreAgent)
+    agent._history_step_count = 1
+    agent.memory = SimpleNamespace(steps=[
+        SimpleNamespace(tool_calls=["previous-run-tool"]),
+        SimpleNamespace(tool_calls=None),
+    ])
+
+    assert agent._provider_overflow_recovery_safe() is True
+
+    agent.memory.steps.append(SimpleNamespace(tool_calls=["current-run-tool"]))
+    assert agent._provider_overflow_recovery_safe() is False
 
 
 
@@ -2104,15 +2131,9 @@ class TestRunStreamRealExecution:
             for name, module in original_modules.items():
                 sys.modules[name] = module
 
-    def test_rejects_context_over_hard_budget_before_model_call(self):
+    def test_local_context_measurement_does_not_define_a_rejection_hook(self):
         module = self._load_core_agent_in_isolation()
-        final_context = MagicMock()
-        final_context.evidence.over_hard_budget = True
-        final_context.evidence.final_token_estimate = 120
-        final_context.evidence.hard_budget = 100
-
-        with pytest.raises(ValueError, match="120 > 100"):
-            module.CoreAgent._ensure_context_within_hard_budget(final_context)
+        assert not hasattr(module.CoreAgent, "_ensure_context_within_hard_budget")
 
     def test_run_stream_max_steps_path_real_execution(self):
         """Test that actually executes _run_stream and covers max_steps path lines."""
@@ -2301,6 +2322,53 @@ class TestRunStreamRealExecution:
             pass
 
         assert agent._last_uncompressed_est == 5000
+
+    def test_step_stream_provider_overflow_callback_rebuilds_from_runtime(self):
+        """The model receives a callback that records and returns rebuilt context."""
+        module = self._load_core_agent_in_isolation()
+        agent = object.__new__(module.CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 2
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.memory.system_prompt = None
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        agent.context_runtime.chars_per_token = 1.0
+        initial_context = MagicMock(messages=[MagicMock()])
+        rebuilt_context = MagicMock(messages=[MagicMock()])
+        agent.context_runtime.prepare_step.return_value = initial_context
+        agent.context_runtime.recover_step.return_value = rebuilt_context
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent._ephemeral_system_messages = None
+
+        response = MagicMock(content="ok", token_usage=None)
+
+        def invoke_rebuild(messages, **kwargs):
+            assert messages is initial_context.messages
+            assert kwargs["context_rebuild"]() is rebuilt_context
+            return response
+
+        agent.model = MagicMock(side_effect=invoke_rebuild)
+        action_step = MagicMock()
+
+        stream = agent._step_stream(action_step)
+        try:
+            list(stream)
+        except (ValueError, TypeError):
+            # Parsing the synthetic response is outside this callback contract test.
+            pass
+
+        agent.context_runtime.recover_step.assert_called_once_with(
+            model=agent.model,
+            memory=agent.memory,
+            current_run_start_idx=0,
+            tools=[],
+        )
+        assert module.get_monitoring_manager().record_final_context_evidence.call_count >= 2
 
     def test_step_stream_falls_back_without_uncompressed_runtime_count(self):
         """_step_stream estimates messages when the runtime has no raw sample."""
