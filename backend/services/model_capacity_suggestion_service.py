@@ -303,7 +303,6 @@ def suggest_capacity(
     base_url: Optional[str] = None,
     provider_hint: Optional[str] = None,
     model_type: Optional[str] = None,
-    api_key: Optional[str] = None,
     catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]] = None,
     enabled: bool = CAPACITY_SUGGESTION_ENABLED,
 ) -> CapacitySuggestionResult:
@@ -313,7 +312,6 @@ def suggest_capacity(
         base_url=base_url,
         provider_hint=provider_hint,
         model_type=model_type,
-        api_key=api_key,
         catalog=catalog,
         enabled=enabled,
     )
@@ -383,7 +381,6 @@ def _suggest_capacity_inner(
     base_url: Optional[str],
     provider_hint: Optional[str],
     model_type: Optional[str],
-    api_key: Optional[str],
     catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]],
     enabled: bool,
 ) -> CapacitySuggestionResult:

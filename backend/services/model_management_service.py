@@ -52,7 +52,7 @@ except Exception as _exc:  # noqa: BLE001
     logger_catalog_import = logging.getLogger("model_catalog")
     logger_catalog_import.warning("model_catalog_loader import failed: %s. Catalog auto-fill disabled.", _exc)
 
-    def apply_catalog_defaults(model_data: Dict[str, Any], provider_hint: Optional[str]) -> bool:  # type: ignore[no-redef]
+    def apply_catalog_defaults(_model_data: Dict[str, Any], _provider_hint: Optional[str]) -> bool:  # type: ignore[no-redef]
         return False
 
 logger = logging.getLogger("model_management_service")

@@ -298,7 +298,9 @@ def load_model_catalog(force_reload: bool = False) -> Dict[str, Any]:
         )
         logger.info(
             "Model catalog loaded: version=%s, providers=%d, models=%d",
-            _log_safe(normalized.get("version", "?")),
+            # json.dumps escapes control characters (e.g. \n -> \\n) so a
+            # crafted catalog file cannot forge log entries.
+            json.dumps(normalized.get("version", "?")),
             provider_count,
             model_count,
         )

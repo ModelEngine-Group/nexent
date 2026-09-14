@@ -90,7 +90,8 @@ class TestModelCatalogLoaderSmoke:
             assert p.id
             assert p.display_name
             # At least one model per provider (otherwise why list it?)
-            assert p.model_count and p.model_count > 0
+            assert p.model_count
+            assert p.model_count > 0
 
             # Spot-check: get a model profile and validate it
             from configs.model_catalog_loader import list_models_by_provider

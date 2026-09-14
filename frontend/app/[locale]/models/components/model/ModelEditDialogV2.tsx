@@ -434,6 +434,21 @@ export const ModelEditDialogV2 = ({
     }
   };
 
+  // W11 accept-signal fields: forwarded with the update when the operator
+  // accepted a capacity suggestion (audit-only; the app layer pops them off).
+  const buildAcceptSignalFields = () =>
+    acceptedCapacitySuggestion
+      ? {
+          acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
+          ...(acceptedCapacitySuggestion.capabilityProfileVersion
+            ? {
+                acceptedCapabilityProfileVersion:
+                  acceptedCapacitySuggestion.capabilityProfileVersion,
+              }
+            : {}),
+        }
+      : {};
+
   // Fields shared by both update payloads (manage + single). Keys whose value
   // resolves to undefined are dropped during JSON serialization, so the
   // conditional spreads below match the previous per-branch ternaries.
@@ -478,17 +493,7 @@ export const ModelEditDialogV2 = ({
           }
         : {}),
       ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
-      ...(acceptedCapacitySuggestion
-        ? {
-            acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
-            ...(acceptedCapacitySuggestion.capabilityProfileVersion
-              ? {
-                  acceptedCapabilityProfileVersion:
-                    acceptedCapacitySuggestion.capabilityProfileVersion,
-                }
-              : {}),
-          }
-        : {}),
+      ...buildAcceptSignalFields(),
       ...inferenceUpdate,
     };
   };
@@ -536,6 +541,28 @@ export const ModelEditDialogV2 = ({
           : {}),
       },
     });
+  };
+
+  // Map a save error to the matching toast message.
+  const showSaveError = (error: any) => {
+    if (error.code === 409) {
+      message.error(
+        t("model.dialog.error.nameConflict", {
+          name: form.displayName || form.name,
+        })
+      );
+      return;
+    }
+    if (error.code === 404) {
+      message.error(t("model.dialog.error.modelNotFound"));
+      return;
+    }
+    if (error.code === 500) {
+      message.error(t("model.dialog.error.serverError"));
+      return;
+    }
+    message.error(t("model.dialog.error.editFailed"));
+    console.error(error);
   };
 
   const handleSave = async () => {
@@ -602,25 +629,11 @@ export const ModelEditDialogV2 = ({
       // Update local configuration (only when currently edited model is selected in configuration)
       persistLocalModelConfig(modelType, acceptedModelName);
 
-
       await onSuccess();
       message.success(t("model.dialog.editSuccess"));
       onClose();
     } catch (error: any) {
-      if (error.code === 409) {
-        message.error(
-          t("model.dialog.error.nameConflict", {
-            name: form.displayName || form.name,
-          })
-        );
-      } else if (error.code === 404) {
-        message.error(t("model.dialog.error.modelNotFound"));
-      } else if (error.code === 500) {
-        message.error(t("model.dialog.error.serverError"));
-      } else {
-        message.error(t("model.dialog.error.editFailed"));
-        console.error(error);
-      }
+      showSaveError(error);
     } finally {
       setLoading(false);
     }

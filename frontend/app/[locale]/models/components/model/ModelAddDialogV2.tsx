@@ -100,8 +100,8 @@ const translateError = (
   if (!errorMessage) return errorMessage;
   const lower = errorMessage.toLowerCase();
 
-  const nameMatch = errorMessage.match(
-    /Name\s+(?:['"]([^'"]+)['"]|([^\s,]+))\s+is already in use/i
+  const nameMatch = /Name\s+(?:['"]([^'"]+)['"]|([^\s,]+))\s+is already in use/i.exec(
+    errorMessage
   );
   if (nameMatch) {
     return t("model.dialog.error.nameAlreadyInUse", {

@@ -147,7 +147,6 @@ def _suggest_capacity_for_request(request: ModelCapacitySuggestionRequest) -> Mo
         base_url=request.base_url,
         provider_hint=request.provider_hint,
         model_type=request.model_type,
-        api_key=request.api_key,
         enabled=CAPACITY_SUGGESTION_ENABLED,
     )
     return _capacity_suggestion_response_to_model(result)

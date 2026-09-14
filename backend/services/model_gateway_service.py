@@ -97,14 +97,14 @@ def _custom_extra_body(extra_params: Optional[dict]) -> Optional[dict]:
 
 def _llm_construct_kwargs(construct_extras: Dict[str, Any], cfg: dict) -> Dict[str, Any]:
     """Per-call kwargs shared by every LLM-family context subclass."""
-    return dict(
-        temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
-        top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
-        stream=construct_extras.pop("stream", None),
-        max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-        frequency_penalty=cfg.get("frequency_penalty"),
-        extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
-    )
+    return {
+        "temperature": _coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+        "top_p": _coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+        "stream": construct_extras.pop("stream", None),
+        "max_output_tokens": _coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+        "frequency_penalty": cfg.get("frequency_penalty"),
+        "extra_body": cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
+    }
 
 
 def _config_to_context(

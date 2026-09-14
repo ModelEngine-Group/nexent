@@ -308,18 +308,19 @@ export const ModelItemCard = ({
           </Tooltip>
         )}
         <Tooltip title={statusTooltip}>
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             aria-label={t("modelConfig.tag.verify", { defaultValue: "验证连通性" })}
             onClick={() => onVerify(model.displayName || model.name, model.type)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onVerify(model.displayName || model.name, model.type);
-              }
+            style={{
+              ...getStatusDotStyle(status),
+              cursor: "pointer",
+              padding: 0,
+              border: "none",
+              background: "none",
+              font: "inherit",
+              lineHeight: 1,
             }}
-            style={{ ...getStatusDotStyle(status), cursor: "pointer" }}
           />
         </Tooltip>
       </div>
