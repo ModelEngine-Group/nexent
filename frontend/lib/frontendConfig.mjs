@@ -4,7 +4,10 @@ function trimTrailingSlashes(value) {
 
 export function buildPublicFrontendConfig(environment) {
   const config = {
-    shareBaseUrl: environment.SHARE_BASE_URL || environment.NEXT_PUBLIC_SHARE_BASE_URL || "",
+    shareBaseUrl:
+      environment.SHARE_BASE_URL ||
+      environment.NEXT_PUBLIC_SHARE_BASE_URL ||
+      "",
   };
   const northboundBaseUrl = environment.NORTHBOUND_EXTERNAL_URL;
   if (northboundBaseUrl?.trim()) {

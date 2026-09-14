@@ -2,10 +2,7 @@ from pathlib import Path
 
 from database.db_models import AgentShare, AgentShareSession, ConversationRecord
 
-
-AGENT_SHARE_MIGRATION = Path(
-    "deploy/sql/migrations/v2.5.4_agent_share.sql"
-)
+AGENT_SHARE_MIGRATION = Path("deploy/sql/migrations/v2.5.4_agent_share.sql")
 
 
 def test_agent_share_models_preserve_required_identity_boundaries():
@@ -19,9 +16,12 @@ def test_agent_share_models_preserve_required_identity_boundaries():
     assert "expire_time" not in share_columns
 
     session_columns = AgentShareSession.__table__.c
-    assert {"agent_share_id", "visitor_user_id", "conversation_id", "agent_version_no"} <= set(
-        session_columns.keys()
-    )
+    assert {
+        "agent_share_id",
+        "visitor_user_id",
+        "conversation_id",
+        "agent_version_no",
+    } <= set(session_columns.keys())
     assert "visitor_subject_hash" not in session_columns
 
     index_names = {index.name for index in AgentShareSession.__table__.indexes}

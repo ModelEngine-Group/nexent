@@ -2,7 +2,7 @@
 
 import hashlib
 import secrets
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 from consts.const import (
@@ -10,6 +10,7 @@ from consts.const import (
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
     SUPABASE_JWT_SECRET,
 )
+from database.agent_db import search_agent_info_by_agent_id
 from database.agent_share_db import (
     create_agent_share,
     get_active_agent_share,
@@ -17,13 +18,20 @@ from database.agent_share_db import (
     get_agent_share_session,
     get_or_create_agent_share_session,
     revoke_agent_share,
+)
+from database.agent_share_db import (
     rotate_agent_share as rotate_agent_share_record,
 )
-from database.agent_db import search_agent_info_by_agent_id
 from database.agent_version_db import query_current_version_no
-from services.agent_draft_permission_service import AgentDraftEditError, require_agent_draft_edit
+from services.agent_draft_permission_service import (
+    AgentDraftEditError,
+    require_agent_draft_edit,
+)
+from services.agent_share_token_service import (
+    build_agent_share_token,
+    parse_agent_share_token,
+)
 from services.conversation_management_service import get_conversation_history_service
-from services.agent_share_token_service import AgentShareTokenPayload, build_agent_share_token, parse_agent_share_token
 from services.runtime_state_service import runtime_state_service
 
 
@@ -40,10 +48,14 @@ class AgentShareRateLimitUnavailableError(AgentShareError):
 
 
 def _agent_share_rate_digest(*parts: object) -> str:
-    return hashlib.sha256(":".join(str(part) for part in parts).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        ":".join(str(part) for part in parts).encode("utf-8")
+    ).hexdigest()
 
 
-async def consume_agent_share_rate_limits(*, agent_share_id: int, visitor_user_id: str) -> None:
+async def consume_agent_share_rate_limits(
+    *, agent_share_id: int, visitor_user_id: str
+) -> None:
     """Apply global-share and per-visitor limits without exposing credentials in keys."""
     if not NORTHBOUND_RATE_LIMIT_ENABLED:
         return
@@ -58,15 +70,21 @@ async def consume_agent_share_rate_limits(*, agent_share_id: int, visitor_user_i
         )
         await runtime_state_service.consume_scoped_rate_limit_async(
             "agent-share-visitor",
-            _agent_share_rate_digest("agent-share", agent_share_id, "visitor", visitor_user_id),
+            _agent_share_rate_digest(
+                "agent-share", agent_share_id, "visitor", visitor_user_id
+            ),
             NORTHBOUND_RATE_LIMIT_PER_MINUTE,
         )
     except ValueError as exc:
-        raise AgentShareRateLimitExceededError("agent_share_rate_limit_exceeded") from exc
+        raise AgentShareRateLimitExceededError(
+            "agent_share_rate_limit_exceeded"
+        ) from exc
     except AgentShareRateLimitExceededError:
         raise
     except Exception as exc:
-        raise AgentShareRateLimitUnavailableError("agent_share_rate_limit_unavailable") from exc
+        raise AgentShareRateLimitUnavailableError(
+            "agent_share_rate_limit_unavailable"
+        ) from exc
 
 
 def _require_share_signing_secret() -> str:
@@ -76,9 +94,13 @@ def _require_share_signing_secret() -> str:
     return SUPABASE_JWT_SECRET
 
 
-def _require_manageable_published_agent(*, agent_id: int, tenant_id: str, user_id: str) -> int:
+def _require_manageable_published_agent(
+    *, agent_id: int, tenant_id: str, user_id: str
+) -> int:
     try:
-        require_agent_draft_edit(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+        require_agent_draft_edit(
+            agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+        )
     except AgentDraftEditError as exc:
         raise AgentShareError(exc.code) from exc
     version_no = query_current_version_no(agent_id=agent_id, tenant_id=tenant_id)
@@ -87,7 +109,9 @@ def _require_manageable_published_agent(*, agent_id: int, tenant_id: str, user_i
     return version_no
 
 
-def _serialize_share(share: Dict[str, Any], *, agent_id: int, secret: str) -> Dict[str, Any]:
+def _serialize_share(
+    share: dict[str, Any], *, agent_id: int, secret: str
+) -> dict[str, Any]:
     token = build_agent_share_token(
         public_share_id=share["public_share_id"],
         generation=int(share["token_generation"]),
@@ -102,18 +126,30 @@ def _serialize_share(share: Dict[str, Any], *, agent_id: int, secret: str) -> Di
     }
 
 
-def get_agent_share_link(*, agent_id: int, tenant_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+def get_agent_share_link(
+    *, agent_id: int, tenant_id: str, user_id: str
+) -> dict[str, Any] | None:
     """Return the active link only after editable ownership and publish checks."""
     secret = _require_share_signing_secret()
-    _require_manageable_published_agent(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+    _require_manageable_published_agent(
+        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+    )
     share = get_active_agent_share(tenant_id, agent_id)
-    return None if share is None else _serialize_share(share, agent_id=agent_id, secret=secret)
+    return (
+        None
+        if share is None
+        else _serialize_share(share, agent_id=agent_id, secret=secret)
+    )
 
 
-def enable_agent_share(*, agent_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
+def enable_agent_share(
+    *, agent_id: int, tenant_id: str, user_id: str
+) -> dict[str, Any]:
     """Create an active share, or return the one already enabled for this Agent."""
     secret = _require_share_signing_secret()
-    _require_manageable_published_agent(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+    _require_manageable_published_agent(
+        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+    )
     share = get_active_agent_share(tenant_id, agent_id)
     if share is None:
         share = create_agent_share(
@@ -130,32 +166,46 @@ def enable_agent_share(*, agent_id: int, tenant_id: str, user_id: str) -> Dict[s
     return _serialize_share(share, agent_id=agent_id, secret=secret)
 
 
-def rotate_agent_share_link(*, agent_id: int, tenant_id: str, user_id: str) -> Dict[str, Any]:
+def rotate_agent_share_link(
+    *, agent_id: int, tenant_id: str, user_id: str
+) -> dict[str, Any]:
     """Rotate the independent share token while retaining its opaque public id."""
     secret = _require_share_signing_secret()
-    _require_manageable_published_agent(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+    _require_manageable_published_agent(
+        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+    )
     share = get_active_agent_share(tenant_id, agent_id)
     if share is None:
         raise AgentShareError("agent_share_not_found")
 
     nonce = secrets.token_urlsafe(32)
-    if not rotate_agent_share_record(int(share["agent_share_id"]), manager_user_id=user_id, token_nonce=nonce):
+    if not rotate_agent_share_record(
+        int(share["agent_share_id"]), manager_user_id=user_id, token_nonce=nonce
+    ):
         raise AgentShareError("agent_share_not_found")
 
-    rotated = {**share, "token_generation": int(share["token_generation"]) + 1, "token_nonce": nonce}
+    rotated = {
+        **share,
+        "token_generation": int(share["token_generation"]) + 1,
+        "token_nonce": nonce,
+    }
     return _serialize_share(rotated, agent_id=agent_id, secret=secret)
 
 
 def revoke_agent_share_link(*, agent_id: int, tenant_id: str, user_id: str) -> None:
     """Disable the active share link without deleting auditable history."""
     _require_share_signing_secret()
-    _require_manageable_published_agent(agent_id=agent_id, tenant_id=tenant_id, user_id=user_id)
+    _require_manageable_published_agent(
+        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+    )
     share = get_active_agent_share(tenant_id, agent_id)
-    if share is None or not revoke_agent_share(int(share["agent_share_id"]), manager_user_id=user_id):
+    if share is None or not revoke_agent_share(
+        int(share["agent_share_id"]), manager_user_id=user_id
+    ):
         raise AgentShareError("agent_share_not_found")
 
 
-def resolve_agent_share_context(token: str) -> Dict[str, Any]:
+def resolve_agent_share_context(token: str) -> dict[str, Any]:
     """Validate an active share link without reading or creating visitor state."""
     secret = _require_share_signing_secret()
     public_share_id = token.split(".", maxsplit=1)[0]
@@ -176,7 +226,9 @@ def resolve_agent_share_context(token: str) -> Dict[str, Any]:
         )
     except AgentDraftEditError as exc:
         raise AgentShareError("agent_share_unavailable") from exc
-    version_no = query_current_version_no(agent_id=int(share["agent_id"]), tenant_id=share["tenant_id"])
+    version_no = query_current_version_no(
+        agent_id=int(share["agent_id"]), tenant_id=share["tenant_id"]
+    )
     if not version_no:
         raise AgentShareError("agent_share_unavailable")
 
@@ -189,7 +241,7 @@ def resolve_agent_share_context(token: str) -> Dict[str, Any]:
     }
 
 
-def get_agent_share_metadata(token: str, *, visitor_user_id: str) -> Dict[str, Any]:
+def get_agent_share_metadata(token: str, *, visitor_user_id: str) -> dict[str, Any]:
     """Return the small public display projection for an authenticated visitor."""
     context = resolve_agent_share_context(token)
     try:
@@ -213,7 +265,7 @@ def get_agent_share_metadata(token: str, *, visitor_user_id: str) -> Dict[str, A
     }
 
 
-def get_agent_share_history(token: str, *, visitor_user_id: str) -> Dict[str, Any]:
+def get_agent_share_history(token: str, *, visitor_user_id: str) -> dict[str, Any]:
     """Read history through the share/visitor mapping without creating a session."""
     context = resolve_agent_share_context(token)
     session = get_agent_share_session(
@@ -230,7 +282,9 @@ def get_agent_share_history(token: str, *, visitor_user_id: str) -> Dict[str, An
     }
 
 
-def resolve_existing_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str, int]:
+def resolve_existing_agent_share_session(
+    token: str, *, visitor_user_id: str
+) -> dict[str, int]:
     """Resolve an existing visitor-owned session without creating a conversation."""
     context = resolve_agent_share_context(token)
     session = get_agent_share_session(
@@ -245,7 +299,7 @@ def resolve_existing_agent_share_session(token: str, *, visitor_user_id: str) ->
     }
 
 
-def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str, int]:
+def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> dict[str, int]:
     """Create or recover the visitor's isolated, hidden conversation on demand."""
     context = resolve_agent_share_run_context(token, visitor_user_id=visitor_user_id)
     return {
@@ -255,7 +309,9 @@ def resolve_agent_share_session(token: str, *, visitor_user_id: str) -> Dict[str
     }
 
 
-def resolve_agent_share_run_context(token: str, *, visitor_user_id: str) -> Dict[str, Any]:
+def resolve_agent_share_run_context(
+    token: str, *, visitor_user_id: str
+) -> dict[str, Any]:
     """Resolve the share resource and one visitor-owned conversation for a run."""
     context = resolve_agent_share_context(token)
     session = get_or_create_agent_share_session(

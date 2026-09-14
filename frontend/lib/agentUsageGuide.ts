@@ -33,9 +33,7 @@ export function parseAgentUsageGuideParams(
 }
 
 export type AgentUsageGuideTargetState<T> =
-  | { state: "loading" }
-  | { state: "missing" }
-  | { state: "found"; agent: T };
+  { state: "loading" } | { state: "missing" } | { state: "found"; agent: T };
 
 export function resolveAgentUsageGuideTarget<T>({
   agentId,

@@ -1,19 +1,18 @@
 """Persistence helpers for login-gated Agent sharing."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
-
-from sqlalchemy import select, text, update
 
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import AgentShare, AgentShareSession, ConversationRecord
+from sqlalchemy import select, text, update
 
 
 def create_agent_share(
-    share_data: Dict[str, Any],
+    share_data: dict[str, Any],
     *,
     manager_user_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Persist one active Agent share with manager-owned audit fields."""
     with get_db_session() as session:
         payload = filter_property(share_data, AgentShare)
@@ -32,7 +31,7 @@ def create_agent_share(
         return as_dict(record)
 
 
-def get_active_agent_share(tenant_id: str, agent_id: int) -> Optional[Dict[str, Any]]:
+def get_active_agent_share(tenant_id: str, agent_id: int) -> dict[str, Any] | None:
     """Return the single active share owned by a tenant Agent."""
     with get_db_session() as session:
         statement = select(AgentShare).where(
@@ -45,7 +44,7 @@ def get_active_agent_share(tenant_id: str, agent_id: int) -> Optional[Dict[str, 
         return None if record is None else as_dict(record)
 
 
-def get_agent_share_by_public_id(public_share_id: str) -> Optional[Dict[str, Any]]:
+def get_agent_share_by_public_id(public_share_id: str) -> dict[str, Any] | None:
     """Resolve an active share record by its non-secret public id."""
     with get_db_session() as session:
         statement = select(AgentShare).where(
@@ -57,7 +56,9 @@ def get_agent_share_by_public_id(public_share_id: str) -> Optional[Dict[str, Any
         return None if record is None else as_dict(record)
 
 
-def get_agent_share_session(*, agent_share_id: int, visitor_user_id: str) -> Optional[Dict[str, Any]]:
+def get_agent_share_session(
+    *, agent_share_id: int, visitor_user_id: str
+) -> dict[str, Any] | None:
     """Return one visitor's active session without creating a conversation."""
     with get_db_session() as session:
         statement = select(AgentShareSession).where(
@@ -75,11 +76,14 @@ def get_or_create_agent_share_session(
     visitor_user_id: str,
     agent_id: int,
     agent_version_no: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Atomically create one hidden conversation for each share and user pair."""
     with get_db_session() as session:
         lock_key = f"agent-share-session:{agent_share_id}:{visitor_user_id}"
-        session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"), {"lock_key": lock_key})
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": lock_key},
+        )
         existing = session.scalars(
             select(AgentShareSession).where(
                 AgentShareSession.agent_share_id == agent_share_id,
@@ -133,7 +137,9 @@ def revoke_agent_share(agent_share_id: int, manager_user_id: str) -> bool:
         return session.execute(statement).rowcount > 0
 
 
-def rotate_agent_share(agent_share_id: int, *, manager_user_id: str, token_nonce: str) -> bool:
+def rotate_agent_share(
+    agent_share_id: int, *, manager_user_id: str, token_nonce: str
+) -> bool:
     """Invalidate existing links by advancing the generation under owner scope."""
     with get_db_session() as session:
         statement = (

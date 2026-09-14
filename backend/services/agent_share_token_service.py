@@ -6,8 +6,6 @@ import hashlib
 import hmac
 import uuid
 from dataclasses import dataclass
-from typing import Optional
-
 
 _TOKEN_DOMAIN = b"nexent.agent-share.v1"
 
@@ -59,7 +57,7 @@ def parse_agent_share_token(
     *,
     nonce: str,
     secret: str,
-) -> Optional[AgentShareTokenPayload]:
+) -> AgentShareTokenPayload | None:
     """Return a verified Token payload, or ``None`` for any invalid Token."""
     if not secret:
         return None
@@ -72,7 +70,9 @@ def parse_agent_share_token(
     try:
         canonical_public_share_id = str(uuid.UUID(public_share_id))
         generation = int(generation_text)
-        base64.urlsafe_b64decode(supplied_signature + "=" * (-len(supplied_signature) % 4))
+        base64.urlsafe_b64decode(
+            supplied_signature + "=" * (-len(supplied_signature) % 4)
+        )
     except (ValueError, AttributeError, binascii.Error):
         return None
 

@@ -3,7 +3,6 @@ from backend.services.agent_share_token_service import (
     parse_agent_share_token,
 )
 
-
 SECRET = "test-agent-share-secret"
 PUBLIC_SHARE_ID = "f7e76518-4df2-4e10-9f49-48d785342f4f"
 
@@ -38,14 +37,32 @@ def test_share_token_rejects_tampering_wrong_secret_and_northbound_key():
     replacement = "x" if signature[-1] != "x" else "y"
     tampered_token = f"{public_id}.{generation}.{signature[:-1]}{replacement}"
 
-    assert parse_agent_share_token(tampered_token, nonce="server-side-nonce", secret=SECRET) is None
-    assert parse_agent_share_token(token, nonce="server-side-nonce", secret="another-secret") is None
-    assert parse_agent_share_token("nexent-0123456789abcdef01234567", nonce="server-side-nonce", secret=SECRET) is None
+    assert (
+        parse_agent_share_token(
+            tampered_token, nonce="server-side-nonce", secret=SECRET
+        )
+        is None
+    )
+    assert (
+        parse_agent_share_token(
+            token, nonce="server-side-nonce", secret="another-secret"
+        )
+        is None
+    )
+    assert (
+        parse_agent_share_token(
+            "nexent-0123456789abcdef01234567", nonce="server-side-nonce", secret=SECRET
+        )
+        is None
+    )
 
 
 def test_share_token_rejects_non_positive_generation():
-    assert parse_agent_share_token(
-        f"{PUBLIC_SHARE_ID}.0.signature",
-        nonce="server-side-nonce",
-        secret=SECRET,
-    ) is None
+    assert (
+        parse_agent_share_token(
+            f"{PUBLIC_SHARE_ID}.0.signature",
+            nonce="server-side-nonce",
+            secret=SECRET,
+        )
+        is None
+    )

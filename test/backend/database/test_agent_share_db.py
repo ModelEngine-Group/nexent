@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+
 class _ComparableColumn:
     def __init__(self, name):
         self.name = name
@@ -76,13 +77,21 @@ def session(monkeypatch):
     return fake_session
 
 
-def test_create_agent_share_filters_payload_and_sets_manager_audit_fields(monkeypatch, session):
+def test_create_agent_share_filters_payload_and_sets_manager_audit_fields(
+    monkeypatch, session
+):
     monkeypatch.setattr(
         db,
         "filter_property",
         lambda data, model: {
             key: data[key]
-            for key in ("public_share_id", "tenant_id", "agent_id", "owner_user_id", "token_nonce")
+            for key in (
+                "public_share_id",
+                "tenant_id",
+                "agent_id",
+                "owner_user_id",
+                "token_nonce",
+            )
             if key in data
         },
     )
@@ -110,7 +119,9 @@ def test_create_agent_share_filters_payload_and_sets_manager_audit_fields(monkey
     session.refresh.assert_called_once()
 
 
-def test_get_active_agent_share_scopes_the_lookup_to_tenant_and_agent(monkeypatch, session):
+def test_get_active_agent_share_scopes_the_lookup_to_tenant_and_agent(
+    monkeypatch, session
+):
     share = FakeAgentShare(agent_share_id=1, tenant_id="tenant-1", agent_id=10)
     session.scalars.return_value.first.return_value = share
     monkeypatch.setattr(db, "as_dict", lambda record: dict(record.__dict__))
@@ -127,7 +138,9 @@ def test_get_active_agent_share_scopes_the_lookup_to_tenant_and_agent(monkeypatc
     )
 
 
-def test_get_agent_share_session_scopes_the_lookup_to_share_and_visitor(monkeypatch, session):
+def test_get_agent_share_session_scopes_the_lookup_to_share_and_visitor(
+    monkeypatch, session
+):
     share_session = FakeAgentShareSession(
         agent_share_id=1,
         visitor_user_id="visitor-1",
@@ -138,7 +151,11 @@ def test_get_agent_share_session_scopes_the_lookup_to_share_and_visitor(monkeypa
 
     result = db.get_agent_share_session(agent_share_id=1, visitor_user_id="visitor-1")
 
-    assert result == {"agent_share_id": 1, "visitor_user_id": "visitor-1", "conversation_id": 10}
+    assert result == {
+        "agent_share_id": 1,
+        "visitor_user_id": "visitor-1",
+        "conversation_id": 10,
+    }
     statement = session.scalars.call_args.args[0]
     assert statement.conditions == (
         ("session_agent_share_id", "eq", 1),
@@ -164,7 +181,10 @@ def test_revoke_agent_share_is_scoped_to_its_manager(session):
 def test_rotate_agent_share_increments_generation_and_replaces_nonce(session):
     session.execute.return_value.rowcount = 1
 
-    assert db.rotate_agent_share(3, manager_user_id="owner-1", token_nonce="nonce-2") is True
+    assert (
+        db.rotate_agent_share(3, manager_user_id="owner-1", token_nonce="nonce-2")
+        is True
+    )
 
     statement = session.execute.call_args.args[0]
     assert statement.conditions == (
