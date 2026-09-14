@@ -148,10 +148,34 @@ const DIRECT_COMPONENT_MAP: Record<string, string> = {
 };
 
 /**
- * Apply preprocessing to a single component node.
- * Returns either the original node (if already supported), or a replacement
- * composed entirely from supported components (potentially with new children).
+ * Walk a props object and unwrap any Nexus binding form
+ * { literalString: "xxx" } → "xxx", or { path: "/data.xxx" } → resolved value.
+ * Mutates and returns the object in-place.
  */
+function unwrapLiteralStrings(obj: Record<string, unknown>): Record<string, unknown> {
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (
+      v !== null &&
+      typeof v === "object" &&
+      "literalString" in (v as Record<string, unknown>)
+    ) {
+      obj[key] = (v as Record<string, unknown>).literalString;
+    } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      // Recurse into nested prop objects (e.g. Button.action.context values)
+      unwrapLiteralStrings(v as Record<string, unknown>);
+    } else if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) {
+        const item = v[i];
+        if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+          unwrapLiteralStrings(item as Record<string, unknown>);
+        }
+      }
+    }
+  }
+  return obj;
+}
+
 function preprocessComponent(
   node: Record<string, unknown>,
   nextId: () => string
@@ -537,6 +561,12 @@ export function preprocessComponents(
     }
     const node = raw as Record<string, unknown>;
     const preprocessed = preprocessComponent(node, nextId);
+    // Unwrap Nexus literalString bindings in all returned nodes so AG-UI
+    // convertSurfaceToUISpec sees plain values, not {literalString: "..."}.
+    const props = preprocessed.props as Record<string, unknown> | undefined;
+    if (props && typeof props === "object") {
+      unwrapLiteralStrings(props);
+    }
     out.push(preprocessed);
 
     // Composite components (Slider, ChoicePicker, List, Tabs, Table, Chart)
@@ -563,6 +593,10 @@ export function preprocessComponents(
       for (const raw of batch) {
         const node = raw as Record<string, unknown>;
         const pp = preprocessComponent(node, nextId);
+        const ppProps = pp.props as Record<string, unknown> | undefined;
+        if (ppProps && typeof ppProps === "object") {
+          unwrapLiteralStrings(ppProps);
+        }
         subOut.push(pp);
         if (
           pp.__preprocess_children &&
