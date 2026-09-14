@@ -443,12 +443,12 @@ async def test_attempt_coordinator_keeps_waiting_or_queued_decision(service, mon
             await asyncio.to_thread(decide_pending, service, run_id)
         yield 'data: {"type":"model_output","content":"review"}\n\n'
 
-    adapter = types.ModuleType("services.agent_service")
+    adapter = types.ModuleType("management.services.agent.run")
     adapter.prepare_agent_run = prepare
     adapter._stream_agent_chunks = stream
     manager_module = types.ModuleType("agents.agent_run_manager")
     manager_module.agent_run_manager = types.SimpleNamespace(unregister_agent_run=lambda *_, **__: None)
-    monkeypatch.setitem(sys.modules, "services.agent_service", adapter)
+    monkeypatch.setitem(sys.modules, "management.services.agent.run", adapter)
     monkeypatch.setitem(sys.modules, "agents.agent_run_manager", manager_module)
     monkeypatch.setattr(application, "get_service", lambda: service)
     monkeypatch.setattr(application, "authorize_run", authorize)

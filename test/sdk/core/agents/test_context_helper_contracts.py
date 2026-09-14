@@ -107,7 +107,7 @@ def test_context_contract_defaults_and_unconfigured_runtime_guards():
     assert runtime.chars_per_token == pytest.approx(1.5)
     assert runtime.token_threshold is None
     assert runtime.context_window_tokens is None
-    assert runtime.hard_input_budget_tokens is None
+    assert runtime.effective_input_limit_tokens is None
     assert runtime.processing_mode is None
     assert runtime.token_counts() == {"uncompressed": None, "compressed": None}
     assert runtime.global_compression_stats() == {"calls": 0, "records": []}
@@ -521,7 +521,7 @@ def test_context_manager_management_and_diagnostic_helpers():
     item_input = ContextItemInput(id="system", type="system", content={"text": "policy"})
     normalized = ContextItem.from_input(item_input)
 
-    assert manager.hard_input_budget_tokens == 110
+    assert manager.effective_input_limit_tokens == 0
     assert manager.processing_mode == "passthrough"
     assert manager.get_step_compression_stats() == {"calls": 0, "records": []}
     assert manager.get_all_compression_stats() == {"calls": 0, "records": []}

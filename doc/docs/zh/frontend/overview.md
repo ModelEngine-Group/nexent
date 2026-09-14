@@ -4,12 +4,12 @@ Nexent 的前端采用现代 React 技术构建，为 AI 智能体交互提供�
 
 ## 技术栈
 
-- **框架**: Next.js 14 (App Router)
+- **框架**: Next.js 15 (App Router)
 - **语言**: TypeScript
-- **UI库**: React + Tailwind CSS
-- **状态管理**: React Hooks
+- **UI库**: React 18 + Ant Design 6 + Assistant UI + Tailwind CSS
+- **状态管理**: React Hooks + zustand + TanStack Query
 - **国际化**: react-i18next
-- **HTTP客户端**: Fetch API
+- **HTTP客户端**: Fetch API（服务端经 Node.js http-proxy 转发）
 
 ## 目录结构
 
@@ -17,29 +17,62 @@ Nexent 的前端采用现代 React 技术构建，为 AI 智能体交互提供�
 frontend/
 ├── app/                          # Next.js App Router
 │   └── [locale]/                 # 国际化路由 (zh/en)
-│       ├── chat/                 # 聊天界面
+│       ├── newchat/              # 聊天界面 (assistant-ui)
+│       ├── chat/                 # 聊天界面（旧版）
+│       │   ├── components/       # 聊天界面组件
 │       │   ├── internal/         # 聊天核心逻辑
-│       │   ├── layout/           # 聊天界面布局组件
 │       │   └── streaming/        # 流式响应处理
-│       ├── setup/                # 系统设置页面
-│       │   ├── agentSetup/       # 代理配置
-│       │   ├── knowledgeBaseSetup/ # 知识库配置
-│       │   └── modelSetup/       # 模型配置
-│       └── layout.tsx            # 全局布局
+│       ├── agents/               # 智能体配置与调试
+│       ├── agent-repository/     # 智能体仓库（发布/审核）
+│       ├── agent-space/          # 智能体空间
+│       ├── agent-tasks/          # 智能体自动化任务
+│       ├── aidp-knowledges/      # AIDP 知识库
+│       ├── evaluation/           # 智能体评测
+│       ├── knowledges/           # 知识库管理
+│       ├── models/               # 模型配置
+│       ├── memory/               # 记忆管理
+│       ├── market/               # 智能体市场
+│       ├── mcp-space/            # MCP 工具空间
+│       ├── skill-space/          # 技能空间
+│       ├── oauth/                # OAuth 回调页
+│       ├── owner-manage/         # 平台所有者管理
+│       ├── resource-manage/      # 资源管理
+│       ├── share/                # 分享页
+│       ├── space/                # 空间
+│       ├── users/                # 用户中心
+│       ├── layout.tsx            # 全局布局
+│       └── layout.client.tsx     # 客户端布局
 ├── components/                    # 可复用UI组件
+│   ├── agent/                    # 智能体相关组件
+│   ├── auth/                     # 认证相关组件
+│   ├── navigation/               # 导航组件
+│   ├── permission/               # 权限控制组件
 │   ├── providers/                # 上下文提供者
+│   ├── settings/                 # 设置组件
 │   └── ui/                       # 基础UI组件库
+├── const/                        # 常量定义（错误码、页面配置等）
+├── contexts/                     # React Context 定义
+├── ext_components/               # 外部集成组件（AIDP 等）
+├── features/                     # 业务功能模块（智能体自动化等）
 ├── services/                     # API服务层
-│   ├── api.ts                    # API基础配置
+│   ├── api.ts                    # API基础配置（端点与请求封装）
+│   ├── authService.ts            # 认证服务
 │   ├── conversationService.ts    # 对话服务
 │   ├── agentConfigService.ts     # 代理配置服务
 │   ├── knowledgeBaseService.ts   # 知识库服务
-│   └── modelService.ts           # 模型服务
+│   ├── modelService.ts           # 模型服务
+│   ├── mcpService.ts             # MCP 工具服务
+│   ├── skillService.ts           # 技能服务
+│   └── uploadService.ts          # 文件上传服务（等 30+ 个服务）
 ├── hooks/                        # 自定义React Hooks
+├── stores/                       # zustand 全局状态
 ├── lib/                          # 工具库
 ├── types/                        # TypeScript类型定义
+├── styles/                       # 全局样式（CSS）
+├── tests/                        # 单元测试
+├── utils/                        # 工具函数
 ├── public/                       # 静态资源
-│   └── locales/                  # 国际化文件
+│   └── locales/                  # 国际化文件 (zh/en)
 └── middleware.ts                 # Next.js中间件
 ```
 
@@ -108,11 +141,15 @@ npm run build
 npm start
 ```
 
+- 支持 base url 构建（运行时经 `base-path.mjs` 读取 `NEXT_PUBLIC_BASE_PATH` 适配 BASE_PATH），可部署在反向代理子路径下
+- 应用 logo 与描述支持自定义（管理端配置）
+- 生产端口统一为 3000
+
 ### 代码质量
-- ESLint 代码检查
-- Prettier 代码格式化
-- TypeScript 类型安全
-- Husky 预提交钩子
+- ESLint 代码检查（`npm run lint`）
+- Prettier 代码格式化（`npm run format`）
+- TypeScript 类型安全（`npm run type-check`）
+- 一键检查：`npm run check-all`（type-check + lint + format:check + build）
 
 ## 集成点
 

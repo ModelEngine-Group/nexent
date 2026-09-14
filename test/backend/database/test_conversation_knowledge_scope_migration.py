@@ -1,7 +1,8 @@
 from pathlib import Path
 
 
-MERGED_MIGRATION = Path("deploy/sql/migrations/v2.5.0_merged_migrations.sql")
+ROOT = Path(__file__).resolve().parents[3]
+MERGED_MIGRATION = ROOT / "deploy/sql/migrations/v2.5.0_merged_migrations.sql"
 KNOWLEDGE_SCOPE_SOURCE_MARKER = (
     "-- Source migration: v2.5.0_0806_add_conversation_knowledge_scope.sql"
 )
@@ -25,6 +26,6 @@ def test_conversation_knowledge_scope_migration_is_repeatable():
 
 
 def test_init_sql_is_not_used_for_conversation_knowledge_scope():
-    init_sql = Path("deploy/sql/init.sql").read_text(encoding="utf-8")
+    init_sql = (ROOT / "deploy/sql/init.sql").read_text(encoding="utf-8")
 
     assert "knowledge_scope" not in init_sql

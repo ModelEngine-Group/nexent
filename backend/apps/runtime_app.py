@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from apps.app_factory import create_app
 from apps.agent_app import agent_runtime_router as agent_router
@@ -12,13 +14,46 @@ from apps.skill_app import skill_creator_router
 from apps.human_interaction_app import router as human_interaction_router
 from middleware.exception_handler import ExceptionHandlerMiddleware
 
-# Create logger instance
 logger = logging.getLogger("runtime_app")
 
-# Create FastAPI app with common configurations
-app = create_app(title="Nexent Runtime API", description="Runtime APIs")
+async def start_agent_automation_scheduler():
+    from consts.const import HITL_ENABLED
+    from services.agent_automation.scheduler import agent_automation_scheduler
+    from services.human_interaction.application import get_service, human_run_scheduler
+    from services.startup_recovery_service import recover_runtime_tasks
+    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
-# Add global exception handler middleware
+    await asyncio.to_thread(recover_runtime_tasks)
+    cleanup_orphaned_agent_workspaces()
+    await agent_automation_scheduler.start()
+    if HITL_ENABLED:
+        get_service()
+        await human_run_scheduler.start()
+
+
+async def stop_agent_automation_scheduler():
+    from services.agent_automation.scheduler import agent_automation_scheduler
+    from services.human_interaction.application import human_run_scheduler
+
+    await agent_automation_scheduler.stop()
+    await human_run_scheduler.stop()
+
+
+@asynccontextmanager
+async def runtime_lifespan(_app):
+    await start_agent_automation_scheduler()
+    try:
+        yield
+    finally:
+        await stop_agent_automation_scheduler()
+
+
+app = create_app(
+    title="Nexent Runtime API",
+    description="Runtime APIs",
+    lifespan=runtime_lifespan,
+)
+
 app.add_middleware(ExceptionHandlerMiddleware)
 
 app.include_router(agent_router)
@@ -31,26 +66,3 @@ app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)
 app.include_router(human_interaction_router)
-
-
-@app.on_event("startup")
-async def start_agent_automation_scheduler():
-    from consts.const import HITL_ENABLED
-    from services.human_interaction.application import get_service, human_run_scheduler
-    from services.agent_automation.scheduler import agent_automation_scheduler
-    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
-
-    cleanup_orphaned_agent_workspaces()
-    await agent_automation_scheduler.start()
-    if HITL_ENABLED:
-        get_service()
-        await human_run_scheduler.start()
-
-
-@app.on_event("shutdown")
-async def stop_agent_automation_scheduler():
-    from services.human_interaction.application import human_run_scheduler
-    from services.agent_automation.scheduler import agent_automation_scheduler
-
-    await agent_automation_scheduler.stop()
-    await human_run_scheduler.stop()

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
 from ..utils.observer import MessageObserver
+from ..models.capacity_budget import ContextBudgetSnapshot
 from .context.models import ContextItemInput
 
 
@@ -295,8 +296,8 @@ class AgentConfig(BaseModel):
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
         default=None,
     )
     verification_config: AgentVerificationConfig = Field(
@@ -386,8 +387,8 @@ class AgentRunInfo(BaseModel):
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
         default=None,
     )
     enable_planning: bool = Field(
@@ -450,6 +451,7 @@ class MemoryUserConfig(BaseModel):
     agent_share_option: str = Field(description="Agent share option")
     disable_agent_ids: List[str] = Field(description="Disable agent ids")
     disable_user_agent_ids: List[str] = Field(description="Disable user agent ids")
+    external_provider_top_k: int = Field(default=20, description="Max results per external provider")
 
     def __str__(self) -> str:  # pragma: no cover
         return self.model_dump_json(indent=2, ensure_ascii=False)

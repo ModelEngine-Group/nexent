@@ -45,6 +45,9 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 import SkillDraftPanel from "./SkillDraftPanel";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { Nl2SkillChatPanel } from "../../../newchat/assistant-ui/nl2skill-chat-panel";
 import type { Nl2SkillStreamEvent } from "../../../newchat/adapter/remote-chat-model-adapter";
 
@@ -200,6 +203,17 @@ export default function SkillBuildModal({
   const [uploadExtractedSkillName, setUploadExtractedSkillName] =
     useState<string>("");
   const [uploadExtractingName, setUploadExtractingName] = useState(false);
+  const [assignTagsOpen, setAssignTagsOpen] = useState(false);
+  const [tagPreviewRefreshKey, setTagPreviewRefreshKey] = useState(0);
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find((library) => library.bucket_key === "default_resource") ??
+    null;
+  const {
+    data: tagDefinitions,
+    refresh: refreshTagDefinitions,
+  } = useTagDefinitions(defaultTagLibrary?.bucket_id ?? null);
 
   const [interactiveSkillName, setInteractiveSkillName] = useState<string>("");
 
@@ -483,6 +497,9 @@ export default function SkillBuildModal({
       await submitSkillForm(
         {
           ...values,
+          // Legacy flat tags are compatibility-only. Existing values are
+          // preserved on edit; new assignments use the structured modal.
+          tags: isEditMode ? editingSkill?.tags ?? [] : [],
           content,
           files: extraFiles.length > 0 ? extraFiles : undefined,
         } as SkillData,
@@ -886,6 +903,14 @@ export default function SkillBuildModal({
       groupSelectOptions={groupSelectOptions}
       groupNamesById={groupNamesById}
       canEditGroupSettings={canEditGroupSettings}
+      tagResourceId={
+        isEditMode && editingSkill?.skill_id
+          ? String(editingSkill.skill_id)
+          : undefined
+      }
+      tagPreviewRefreshKey={tagPreviewRefreshKey}
+      onAssignTags={() => setAssignTagsOpen(true)}
+      canAssignTags={editingSkill?.permission !== "READ_ONLY"}
     />
   );
 
@@ -922,6 +947,7 @@ export default function SkillBuildModal({
   };
 
   return (
+    <>
     <Modal
       title={
         <div>
@@ -1040,5 +1066,30 @@ export default function SkillBuildModal({
         }
       `}</style>
     </Modal>
+    <ResourceTagAssignmentModal
+      open={assignTagsOpen}
+      onClose={() => {
+        setAssignTagsOpen(false);
+        setTagPreviewRefreshKey((current) => current + 1);
+      }}
+      resourceType="skill"
+      resourceId={String(editingSkill?.skill_id ?? "")}
+      definitions={tagDefinitions ?? []}
+      canEdit={editingSkill?.permission !== "READ_ONLY"}
+      onManageDefinitions={() => {
+        setTagManagementOpen(true);
+      }}
+    />
+    <TagDefinitionManagementModal
+      open={tagManagementOpen}
+      onClose={() => {
+        setTagManagementOpen(false);
+        void refreshTagDefinitions();
+      }}
+      bucketId={defaultTagLibrary?.bucket_id ?? 0}
+      bucketName={defaultTagLibrary?.bucket_name ?? ""}
+      canManage={editingSkill?.permission !== "READ_ONLY"}
+    />
+    </>
   );
 }

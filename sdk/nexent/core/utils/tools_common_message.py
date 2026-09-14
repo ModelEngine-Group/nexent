@@ -93,4 +93,10 @@ class SearchResultTextMessage:
 
     def to_model_dict(self) -> Dict[str, Any]:
         """Format for input to the large model summary."""
-        return {"title": self.title, "text": self.text, "index": f"{self.tool_sign}{self.cite_index}"}
+        index = f"{self.tool_sign}{self.cite_index}"
+        return {
+            "title": self.title,
+            "text": self.text,
+            "index": index,
+            "reference_mark": f"[[{index}]]",
+        }

@@ -196,7 +196,7 @@ _utils_pkg.prompt_template_utils = _utils_prompt_mock
 
 # Function-body imports used by the KB / LLM / export helpers.
 sys.modules["utils.evaluation_set_excel_utils"] = MagicMock()
-sys.modules["services.vectordatabase_service"] = MagicMock()
+sys.modules["management.services.knowledge_base.service"] = MagicMock()
 sys.modules["utils.agent_profile_utils"] = MagicMock()
 
 
@@ -1027,7 +1027,7 @@ class TestExecuteKbSearches:
     def test_searches_all_kbs(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["services.vectordatabase_service"],
+            sys.modules["management.services.knowledge_base.service"],
             "get_vector_db_core",
             MagicMock(return_value="es_core"),
         )
@@ -1046,7 +1046,7 @@ class TestExecuteKbSearches:
     def test_skips_kb_without_embedding_model(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["services.vectordatabase_service"],
+            sys.modules["management.services.knowledge_base.service"],
             "get_vector_db_core",
             MagicMock(return_value="es_core"),
         )
@@ -1061,7 +1061,7 @@ class TestGetKbEmbeddingModel:
     def test_returns_model(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["services.vectordatabase_service"],
+            sys.modules["management.services.knowledge_base.service"],
             "get_embedding_model_by_index_name",
             MagicMock(return_value=("m", None, None)),
         )
@@ -1070,7 +1070,7 @@ class TestGetKbEmbeddingModel:
     def test_returns_none_when_model_missing(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["services.vectordatabase_service"],
+            sys.modules["management.services.knowledge_base.service"],
             "get_embedding_model_by_index_name",
             MagicMock(return_value=(None, None, None)),
         )
@@ -1079,7 +1079,7 @@ class TestGetKbEmbeddingModel:
     def test_returns_none_on_error(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            sys.modules["services.vectordatabase_service"],
+            sys.modules["management.services.knowledge_base.service"],
             "get_embedding_model_by_index_name",
             MagicMock(side_effect=RuntimeError("x")),
         )

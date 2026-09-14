@@ -10,7 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch, Tag, Tour } from "antd";
+import { Button, Spin, Switch, Tag, Tour } from "antd";
 import {
   History,
   Maximize2,
@@ -35,7 +35,7 @@ import {
   useNl2AgentFlow,
   type Nl2AgentConfigFocusTarget,
 } from "@/contexts/nl2AgentFlow";
-import { useAgentStore, type AgentDraft } from "@/stores/agentStore";
+import { useAgentStore } from "@/stores/agentStore";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
@@ -68,30 +68,6 @@ function resolveDraftFocusTarget(
     return { section: "display_info" };
   }
   return null;
-}
-
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === "string" && value.trim().length > 0;
-
-function isNl2AgentDraftComplete(draft: AgentDraft | null): boolean {
-  if (
-    !draft ||
-    !isNonEmptyString(draft.description) ||
-    !isNonEmptyString(draft.duty_prompt) ||
-    !isNonEmptyString(draft.greeting_message) ||
-    !Array.isArray(draft.example_questions) ||
-    draft.example_questions.length === 0 ||
-    draft.example_questions.some((question) => !isNonEmptyString(question))
-  ) {
-    return false;
-  }
-
-  const hasBoundResources = draft.tools.length > 0 || draft.skills.length > 0;
-  return (
-    !hasBoundResources ||
-    (isNonEmptyString(draft.constraint_prompt) &&
-      isNonEmptyString(draft.few_shots_prompt))
-  );
 }
 
 const AGENT_TOUR_SEEN_STORAGE_KEY = "nexent.agent-tour.seen";
@@ -152,16 +128,22 @@ function AgentSetupContent() {
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
     useState(false);
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const requestedAgentId = Number(searchParams.get("agent_id"));
+  const isRequestedAgentLoading =
+    Number.isInteger(requestedAgentId) &&
+    requestedAgentId > 0 &&
+    requestedAgentId !== currentAgentId;
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
     currentAgentId
   );
   const { total } = useAgentVersionList(currentAgentId);
+  const shouldFetchVersionDetail = !isRequestedAgentLoading && total > 0;
   const { agentVersionDetail } = useAgentVersionDetail(
     currentAgentId,
-    agentInfo?.current_version_no ?? null
+    agentInfo?.current_version_no ?? null,
+    shouldFetchVersionDetail
   );
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
-  const savedAgent = useAgentStore((state) => state.savedAgent);
   const {
     agentId: flowAgentId,
     completionSyncFailed,
@@ -176,11 +158,6 @@ function AgentSetupContent() {
     resetFlow,
     sessionGeneration,
   } = useNl2AgentFlow();
-  const requestedAgentId = Number(searchParams.get("agent_id"));
-  const isRequestedAgentLoading =
-    Number.isInteger(requestedAgentId) &&
-    requestedAgentId > 0 &&
-    requestedAgentId !== currentAgentId;
   const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
   const canManualUnlock =
     !isNl2AgentUnavailable &&
@@ -188,9 +165,7 @@ function AgentSetupContent() {
     !isRequestedAgentLoading &&
     (isFormLocked || isComposerDisabled);
   const showOptimizationSuggestions =
-    !isRequestedAgentLoading &&
-    !isNl2AgentUnavailable &&
-    isNl2AgentDraftComplete(savedAgent);
+    !isRequestedAgentLoading && !isNl2AgentUnavailable;
 
   useEffect(() => {
     resetFlow(currentAgentId);
@@ -237,9 +212,7 @@ function AgentSetupContent() {
 
   const synchronizeCompletion = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId, {
-        section: "conversation_guide",
-      }).then((synchronized) => {
+      void enqueueSnapshotRefresh(agentId).then((synchronized) => {
         if (synchronized) markCompletionSynced(agentId);
         else markCompletionSyncFailed(agentId);
       });
@@ -345,8 +318,11 @@ function AgentSetupContent() {
         />
       </div>
 
-      <main className="flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
-        <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
+      <main className="relative flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
+        <div
+          className="flex min-w-0 min-h-0 flex-1 flex-row gap-4"
+          style={{ visibility: isRequestedAgentLoading ? "hidden" : "visible" }}
+        >
           <PanelCard
             panelRef={generationPanelRef}
             title={t("agent.page.panel.nl2agent")}
@@ -552,6 +528,15 @@ function AgentSetupContent() {
             </PanelCard>
           )}
         </div>
+        {isRequestedAgentLoading ? (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-gray-50"
+            role="status"
+          >
+            <Spin size="large" />
+            <span className="text-sm text-gray-500">{t("common.loading")}</span>
+          </div>
+        ) : null}
       </main>
       <Tour
         open={isAgentTourOpen}

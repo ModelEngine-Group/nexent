@@ -23,6 +23,7 @@ export type AgentDraft = Pick<
   | "model"
   | "model_ids"
   | "model_names"
+  | "unavailable_reasons"
   | "max_step"
   | "requested_output_tokens"
   | "is_main_agent"
@@ -111,6 +112,7 @@ const toDraft = (agent: Agent): AgentDraft => ({
   model: agent.model || "",
   model_ids: agent.model_ids || [],
   model_names: agent.model_names || [],
+  unavailable_reasons: agent.unavailable_reasons || [],
   max_step: agent.max_step,
   requested_output_tokens: agent.requested_output_tokens ?? null,
   is_main_agent: agent.is_main_agent ?? true,

@@ -53,15 +53,13 @@ from database.agent_evaluation_db import (
     update_agent_evaluation_status,
 )
 from database.client import get_db_session
-from database.db_models import AgentEvaluation, ModelRecord
+from database.db_models import ModelRecord
 from database.evaluation_set_db import (
-    create_evaluation_set,
     get_evaluation_set_cases_all,
-    insert_evaluation_set_cases,
-    update_evaluation_set_case_count,
+    materialize_virtual_evaluation_set_for_run,
 )
 from database.evaluator_db import get_evaluator
-from services.agent_service import prepare_agent_run
+from management.services.agent.service import prepare_agent_run
 from services.evaluation_set_service import resolve_latest_published_version_no
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template
@@ -1636,28 +1634,16 @@ def _setup_no_set_and_execute(
         # Create virtual evaluation set
         timestamp = datetime.now().strftime("%m-%d %H:%M")
         set_name = f"[No-Set] {timestamp}-{uuid.uuid4().hex[:4]}"
-        set_meta = create_evaluation_set(
-            tenant_id=tenant_id,
-            name=set_name,
-            description=None,
-            source_filename="__no_set_virtual__",
-            created_by=user_id,
-        )
-        evaluation_set_id = set_meta["evaluation_set_id"]
-
-        # Insert cases
         cases = [
             {"inputs": {"query": q.strip()}, "label": {"answer": ""}, "order_no": i}
             for i, q in enumerate(queries)
         ]
-        insert_evaluation_set_cases(
+        evaluation_set_id = materialize_virtual_evaluation_set_for_run(
             tenant_id=tenant_id,
-            evaluation_set_id=evaluation_set_id,
+            name=set_name,
             cases=cases,
             created_by=user_id,
-        )
-        update_evaluation_set_case_count(
-            evaluation_set_id, len(cases), updated_by=user_id
+            agent_evaluation_id=agent_evaluation_id,
         )
         set_cases = get_evaluation_set_cases_all(
             evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
@@ -1670,21 +1656,6 @@ def _setup_no_set_and_execute(
             set_cases=set_cases,
             created_by=user_id,
         )
-
-        # Update the run with correct evaluation_set_id and total
-        with get_db_session() as session:
-            session.query(AgentEvaluation).filter(
-                AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
-                AgentEvaluation.tenant_id == tenant_id,
-            ).update(
-                {
-                    "evaluation_set_id": evaluation_set_id,
-                    "progress_total": len(cases),
-                    "status": EvalRunStatus.PENDING,
-                },
-                synchronize_session=False,
-            )
-            session.commit()
 
         # Execute in the runtime process, which owns the shared workspace
         # volume mounted by the sandbox container.

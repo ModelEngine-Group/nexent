@@ -43,8 +43,9 @@ def _stable_value(value):
 
 
 async def authorize_run(payload, tenant_id, user_id):
-    from services.agent_service import get_conversation_service, list_all_agent_info_impl
     from database.user_tenant_db import get_user_tenant_by_user_id
+    from management.services.agent.management import list_all_agent_info_impl
+    from services.conversation_management_service import get_conversation_service
 
     membership = await asyncio.to_thread(get_user_tenant_by_user_id, user_id)
     if not membership or str(membership.get("tenant_id")) != tenant_id:
@@ -62,7 +63,7 @@ async def authorize_run(payload, tenant_id, user_id):
 async def execute_attempt(job, lease):
     from agents.agent_run_manager import agent_run_manager
     from consts.model import AgentRequest
-    from services.agent_service import _stream_agent_chunks, prepare_agent_run
+    from management.services.agent.run import _stream_agent_chunks, prepare_agent_run
 
     service = get_service()
     identity = job.payload
@@ -223,7 +224,7 @@ async def stream_run(run_id, tenant_id, user_id, *, after=0):
 
 async def start_run(request, tenant_id, user_id, language):
     from agents.agent_run_manager import agent_run_manager
-    from services.agent_service import save_messages
+    from management.services.agent.run import save_messages
 
     service = require_enabled()
     if not HITL_ACCEPT_NEW_RUNS:

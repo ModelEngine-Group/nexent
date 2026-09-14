@@ -36,7 +36,10 @@ import { USER_ROLES } from "@/const/auth";
  * compatibility.
  */
 type RcFileLike = File & { uid: string; lastModifiedDate: Date };
-import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
+import {
+  AIDP_ACCEPT_STRING,
+  AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
+} from "@/const/knowledgeBase";
 import {
   partitionAidpFiles,
   validateAidpFiles,
@@ -444,6 +447,10 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           label={t("aidpKnowledge.kbName")}
           rules={[
             { required: true, message: t("aidpKnowledge.kbNameRequired") },
+            {
+              pattern: AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
+              message: t("aidpKnowledge.kbNameInvalid"),
+            },
           ]}
         >
           <Input placeholder={t("aidpKnowledge.kbNamePlaceholder")} />

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+
+from utils.time_context_utils import strip_current_time_prefix
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -191,6 +193,11 @@ def persist_history_summary_candidate(
         covered_through_message_id=field("covered_through_message_id"),
         previous_summary_unit_id=field("previous_summary_unit_id"),
         trigger=field("trigger"),
+        history_tokens_before=field("history_tokens_before"),
+        history_tokens_after=field("history_tokens_after"),
+        compaction_attempts=field("compaction_attempts"),
+        compaction_trigger_threshold_tokens=field("compaction_trigger_threshold_tokens"),
+        compaction_target_tokens=field("compaction_target_tokens"),
     )
 
 
@@ -271,11 +278,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     # Strip the [Current time: ...] prefix before persisting so historical
     # messages do not show the time marker. The prefix is injected by
     # run_agent_stream for the LLM call only.
-    raw_query = request.query
-    if raw_query and raw_query.startswith("[Current time:"):
-        close_idx = raw_query.find("]", len("[Current time:"))
-        if close_idx >= 0:
-            raw_query = raw_query[close_idx + 1:].lstrip("\n").strip()
+    raw_query = strip_current_time_prefix(request.query)
 
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
@@ -737,6 +740,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                 search_item["score_details"]["accuracy"] = record["score_accuracy"]
             if record["score_semantic"] is not None:
                 search_item["score_details"]["semantic"] = record["score_semantic"]
+            if record.get("retrieval_highlight_terms"):
+                search_item["score_details"]["retrieval_highlight_terms"] = record[
+                    "retrieval_highlight_terms"
+                ]
 
             # Group by unit_id (for frontend matching by unit_id)
             if unit_id is not None:
@@ -995,6 +1002,10 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
                     search_item["score_details"]["accuracy"] = record["score_accuracy"]
                 if record["score_semantic"] is not None:
                     search_item["score_details"]["semantic"] = record["score_semantic"]
+                if record.get("retrieval_highlight_terms"):
+                    search_item["score_details"]["retrieval_highlight_terms"] = record[
+                        "retrieval_highlight_terms"
+                    ]
 
                 if conversation_id and not message_id:
                     search_item["message_id"] = record["message_id"]

@@ -13,6 +13,8 @@ Covers:
 The docker-level integration tests are skipped when the docker daemon is not
 reachable so the suite remains runnable on developer machines without docker.
 """
+import builtins
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -56,6 +58,133 @@ build_python_executor = sandbox_module.build_python_executor
 release_python_executor = sandbox_module.release_python_executor
 ShellPolicy = sandbox_module.ShellPolicy
 SandboxSkillScriptRunner = sandbox_module.SandboxSkillScriptRunner
+seed_pnpm_offline_store = sandbox_module._seed_pnpm_offline_store
+
+
+def test_docker_bridge_gateway_returns_concrete_ipv4_address():
+    network = MagicMock(
+        attrs={
+            "IPAM": {
+                "Config": [
+                    {},
+                    {"Gateway": "not-an-ip"},
+                    {"Gateway": "fd00::1"},
+                    {"Gateway": "172.17.0.1"},
+                ]
+            }
+        }
+    )
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    assert sandbox_module._docker_bridge_gateway(client) == "172.17.0.1"
+    client.networks.get.assert_called_once_with("bridge")
+    network.reload.assert_called_once_with()
+
+
+def test_docker_bridge_gateway_rejects_missing_ipv4_address():
+    network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "fd00::1"}]}})
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    with pytest.raises(RuntimeError, match="does not expose an IPv4 gateway"):
+        sandbox_module._docker_bridge_gateway(client)
+
+
+@pytest.mark.parametrize("server_version", ["18.09.9", "19.03.15", "20.10.9-ce"])
+def test_legacy_docker_disables_seccomp_for_clone3_compatibility(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(
+        client,
+        run_kwargs,
+        MagicMock(),
+    )
+
+    assert run_kwargs["security_opt"] == ["seccomp=unconfined"]
+
+
+@pytest.mark.parametrize("server_version", ["20.10.10", "20.10.24", "23.0.0", "29.1.0"])
+def test_modern_docker_preserves_default_seccomp_profile(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(
+        client,
+        run_kwargs,
+        MagicMock(),
+    )
+
+    assert "security_opt" not in run_kwargs
+
+
+def test_unknown_docker_version_preserves_default_seccomp_profile():
+    client = SimpleNamespace(version=lambda: {"Version": "vendor-build"})
+    run_kwargs = {}
+    logger = MagicMock()
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(
+        client,
+        run_kwargs,
+        logger,
+    )
+
+    assert "security_opt" not in run_kwargs
+    logger.warning.assert_called_once()
+
+
+def test_seed_pnpm_offline_store_creates_read_only_workspace_store():
+    container = MagicMock()
+    container.exec_run.side_effect = [
+        SimpleNamespace(exit_code=0),
+        SimpleNamespace(exit_code=1),
+        SimpleNamespace(exit_code=0),
+        SimpleNamespace(exit_code=0),
+        SimpleNamespace(exit_code=0),
+    ]
+
+    seed_pnpm_offline_store(container)
+
+    assert container.exec_run.call_args_list[-3:] == [
+        call(["mkdir", "-p", sandbox_module.SANDBOX_PNPM_STORE_PATH], user="root"),
+        call(
+            [
+                "cp",
+                "-a",
+                f"{sandbox_module.SANDBOX_PNPM_STORE_SOURCE}/.",
+                sandbox_module.SANDBOX_PNPM_STORE_PATH,
+            ],
+            user="root",
+        ),
+        call(
+            ["chmod", "-R", "a-w", sandbox_module.SANDBOX_PNPM_STORE_PATH],
+            user="root",
+        ),
+    ]
+
+
+def test_seed_pnpm_offline_store_reuses_existing_store():
+    container = MagicMock()
+    container.exec_run.side_effect = [
+        SimpleNamespace(exit_code=0),
+        SimpleNamespace(exit_code=0),
+    ]
+
+    seed_pnpm_offline_store(container)
+
+    assert container.exec_run.call_count == 2
+
+
+def test_seed_pnpm_offline_store_reports_preparation_failure():
+    container = MagicMock()
+    container.exec_run.side_effect = [
+        SimpleNamespace(exit_code=0),
+        SimpleNamespace(exit_code=1),
+        SimpleNamespace(exit_code=0),
+        SimpleNamespace(exit_code=9),
+    ]
+
+    with pytest.raises(RuntimeError, match="Failed to prepare pnpm offline store with cp"):
+        seed_pnpm_offline_store(container)
 
 
 def _docker_available() -> bool:
@@ -110,6 +239,55 @@ class TestSandboxSkillScriptRunner:
     def test_output_text_handles_non_bytes_values(self):
         assert SandboxSkillScriptRunner._output_text("plain output") == "plain output"
         assert SandboxSkillScriptRunner._output_text(None) == ""
+    def test_requires_internal_network(self, monkeypatch):
+        network = MagicMock()
+        network.attrs = {"Internal": False, "Containers": {}}
+        client = MagicMock()
+        client.networks.get.return_value = network
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+
+        with pytest.raises(RuntimeError, match="must be internal"):
+            sandbox_module._ensure_sandbox_control_network(client)
+
+    def test_reuses_internal_network_without_runtime_attachment_on_host(self, monkeypatch):
+        network = MagicMock()
+        network.attrs = {"Internal": True, "Containers": {}}
+        client = MagicMock()
+        client.networks.get.return_value = network
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+
+        assert sandbox_module._ensure_sandbox_control_network(client) is network
+        network.connect.assert_not_called()
+
+    def test_internal_network_attaches_containerized_runtime_when_missing(self, monkeypatch):
+        network = MagicMock(attrs={"Internal": True, "Containers": {}})
+        runtime_container = SimpleNamespace(id="runtime-id")
+        client = MagicMock()
+        client.networks.get.return_value = network
+        client.containers.get.return_value = runtime_container
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
+        monkeypatch.setattr(sandbox_module.socket, "gethostname", lambda: "runtime-host")
+
+        assert sandbox_module._ensure_sandbox_control_network(client) is network
+
+        client.containers.get.assert_called_once_with("runtime-host")
+        network.connect.assert_called_once_with(runtime_container)
+        assert network.reload.call_count == 2
+
+    def test_attach_sandbox_reuses_existing_control_network_membership(self, monkeypatch):
+        container = MagicMock(id="sandbox-id")
+        network = MagicMock(attrs={"Internal": True, "Containers": {"sandbox-id": {}}})
+        ensure_network = MagicMock(return_value=network)
+        monkeypatch.setattr(sandbox_module, "_ensure_sandbox_control_network", ensure_network)
+
+        assert sandbox_module._attach_sandbox_to_control_network(
+            MagicMock(),
+            container,
+            alias="sandbox",
+        ) is network
+
+        container.reload.assert_called_once_with()
+        network.connect.assert_not_called()
 
     def test_preparation_command_failure_includes_container_output(self):
         container = MagicMock()
@@ -135,6 +313,56 @@ class TestSandboxSkillScriptRunner:
         assert runner._resolve_skills_root("/workspace/run-1") == "/workspace/run-1/skills"
         with pytest.raises(RuntimeError, match="does not match"):
             runner._resolve_skills_root("/workspace/run-2")
+
+    def test_resolve_workspace_script_requires_workspace_and_rejects_drift(self):
+        no_workspace = SandboxSkillScriptRunner(
+            SimpleNamespace(container=MagicMock(), _nexent_backend="docker")
+        )
+        with pytest.raises(RuntimeError, match="run-scoped workspace"):
+            no_workspace._resolve_workspace_script("outputs/build.py", None)
+
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=MagicMock(), _nexent_backend="docker"),
+            workspace_path="/workspace/run-1",
+        )
+        with pytest.raises(RuntimeError, match="does not match"):
+            runner._resolve_workspace_script(
+                "outputs/build.py",
+                "/workspace/run-2",
+            )
+
+    def test_resolve_workspace_script_normalizes_dot_prefix_and_reports_missing(self):
+        workspace = "/workspace/run"
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(exit_code=1, output=b"")
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+
+        with pytest.raises(FileNotFoundError, match="outputs/build.py"):
+            runner._resolve_workspace_script("././outputs/build.py", workspace)
+
+        container.exec_run.assert_called_once_with(
+            ["realpath", "-e", "--", f"{workspace}/outputs/build.py"],
+            user="sandbox",
+        )
+
+    def test_resolve_workspace_script_rejects_non_regular_file(self):
+        workspace = "/workspace/run"
+        script = f"{workspace}/outputs/build.py"
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=f"{script}\n".encode()),
+            SimpleNamespace(exit_code=1, output=b""),
+        ]
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+
+        with pytest.raises(ValueError, match="regular file"):
+            runner._resolve_workspace_script("outputs/build.py", workspace)
 
     def test_stage_skill_raises_when_archive_copy_fails(self, tmp_path):
         skill_dir = tmp_path / "skills" / "report"
@@ -163,6 +391,47 @@ class TestSandboxSkillScriptRunner:
                 "/workspace/skills",
             )
 
+    def test_stage_skill_refreshes_cached_copy_when_script_changes(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "report"
+        script = skill_dir / "scripts" / "generate.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("print('first')", encoding="utf-8")
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(exit_code=0, output=b"")
+        container.put_archive.return_value = True
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker")
+        )
+        manager = MagicMock()
+        manager.resolve_skill_script.return_value = (
+            str(skill_dir),
+            str(script),
+            "scripts/generate.py",
+        )
+
+        first_path, _ = runner._stage_skill(
+            manager,
+            "report",
+            "scripts/generate.py",
+            "tenant-1",
+            "/workspace/skills",
+        )
+        script.write_text("print('second version')", encoding="utf-8")
+        second_path, _ = runner._stage_skill(
+            manager,
+            "report",
+            "scripts/generate.py",
+            "tenant-1",
+            "/workspace/skills",
+        )
+
+        assert second_path == first_path
+        assert call(
+            ["rm", "-rf", "--", first_path.split("/scripts/", 1)[0]],
+            user="0",
+        ) in container.exec_run.call_args_list
+        assert container.put_archive.call_count == 2
+
     def test_nonzero_script_with_combined_output_returns_error_json(self, tmp_path):
         skill_dir = tmp_path / "skills" / "report"
         script = skill_dir / "scripts" / "generate.py"
@@ -171,6 +440,8 @@ class TestSandboxSkillScriptRunner:
         container = MagicMock()
         container.put_archive.return_value = True
         container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
@@ -238,6 +509,8 @@ class TestSandboxSkillScriptRunner:
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=(b"sandbox\n", b"warning\n")),
         ]
         executor = SimpleNamespace(container=container, _nexent_backend="docker")
@@ -270,18 +543,79 @@ class TestSandboxSkillScriptRunner:
         assert container.exec_run.call_args_list[0] == call(
             ["mkdir", "-p", f"{workspace}/skills"], user="0"
         )
+        assert container.exec_run.call_args_list[-3:-1] == [
+            call(["mkdir", "-p", "--", f"{workspace}/outputs"], user="0"),
+            call(
+                ["chown", "sandbox:sandbox", "--", f"{workspace}/outputs"],
+                user="0",
+            ),
+        ]
         command = container.exec_run.call_args_list[-1].args[0]
         assert command[:5] == ["timeout", "--signal=KILL", "17", "python", ANY]
         assert command[-2:] == ["--title", "Quarterly report"]
         assert container.exec_run.call_args_list[-1].kwargs == {
             "user": "sandbox",
-            "workdir": workspace,
+            "workdir": f"{workspace}/outputs",
             "environment": {
                 "NEXENT_WORKSPACE": workspace,
                 "NEXENT_OUTPUT_DIR": f"{workspace}/outputs",
+                "NODE_PATH": "/opt/nexent/node_modules:/usr/local/lib/node_modules",
+                "PNPM_CONFIG_OFFLINE": "true",
+                "npm_config_offline": "true",
+                "COREPACK_ENABLE_NETWORK": "0",
+                "PNPM_CONFIG_STORE_DIR": sandbox_module.SANDBOX_PNPM_STORE_PATH,
+                "npm_config_store_dir": sandbox_module.SANDBOX_PNPM_STORE_PATH,
+                "PIP_USER": "1",
+                "PYTHONPATH": (
+                    f"{workspace}/skills/report-"
+                    f"{hashlib.sha256(str(skill_dir.resolve()).encode('utf-8')).hexdigest()[:16]}:"
+                    "/home/sandbox/.local/lib/python3.11/site-packages"
+                ),
             },
             "demux": True,
         }
+
+    def test_online_skill_shell_script_prepares_writable_pnpm_store(self, tmp_path):
+        skill_dir = tmp_path / "web-artifacts-builder"
+        script = skill_dir / "scripts" / "build.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("echo built", encoding="utf-8")
+        container = MagicMock()
+        container.put_archive.return_value = True
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=(b"built\n", b"")),
+        ]
+        manager = MagicMock()
+        manager.resolve_skill_script.return_value = (
+            str(skill_dir),
+            str(script),
+            "scripts/build.sh",
+        )
+        workspace = "/workspace/run"
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+            network_enabled=True,
+        )
+        runner._ensure_network_pnpm_store = MagicMock()
+
+        result = runner(
+            manager=manager,
+            skill_name="web-artifacts-builder",
+            script_path="scripts/build.sh",
+            params=None,
+            tenant_id="tenant-1",
+            working_directory=workspace,
+        )
+
+        assert result == "built\n"
+        runner._ensure_network_pnpm_store.assert_called_once_with(workspace)
 
     def test_refuses_to_fall_back_to_host_when_docker_is_unavailable(self):
         runner = SandboxSkillScriptRunner(
@@ -309,6 +643,9 @@ class TestSandboxSkillScriptRunner:
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
             SimpleNamespace(exit_code=124, output=(b"", b"")),
         ]
         workspace = "/mnt/nexent/workdir/user/run"
@@ -332,6 +669,17 @@ class TestSandboxSkillScriptRunner:
                 working_directory=workspace,
             )
 
+        sed_call = next(
+            recorded_call
+            for recorded_call in container.exec_run.call_args_list
+            if recorded_call.args[0][:2] == ["sed", "-i"]
+        )
+        normalized_script = sed_call.args[0][-1]
+        assert sed_call == call(
+            ["sed", "-i", "s/\\r$//", normalized_script],
+            user="0",
+        )
+
     def test_cleanup_uses_root_for_docker_archive_owned_files(self):
         container = MagicMock()
         container.exec_run.return_value = SimpleNamespace(exit_code=0, output=b"")
@@ -346,6 +694,116 @@ class TestSandboxSkillScriptRunner:
             ["rm", "-rf", "--", runner._root],
             user="0",
         )
+
+    def test_cleanup_removes_container_private_network_pnpm_store(self):
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(exit_code=0, output=b"")
+        workspace = "/mnt/nexent/workdir/user/run"
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+            network_enabled=True,
+        )
+        store_path = runner._resolve_network_pnpm_store(workspace)
+
+        runner.cleanup()
+
+        assert container.exec_run.call_args_list == [
+            call(["rm", "-rf", "--", runner._root], user="0"),
+            call(["rm", "-rf", "--", store_path], user="0"),
+        ]
+
+    def test_network_pnpm_store_rejects_workspace_drift(self):
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=MagicMock(), _nexent_backend="docker"),
+            workspace_path="/workspace/run-1",
+            network_enabled=True,
+        )
+        runner._resolve_network_pnpm_store("/workspace/run-1")
+
+        with pytest.raises(RuntimeError, match="does not match"):
+            runner._resolve_network_pnpm_store("/workspace/run-2")
+
+    def test_network_pnpm_store_is_seeded_from_image_cache_once(self):
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(exit_code=0, output=b"")
+        workspace = "/mnt/nexent/workdir/user/run"
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+            network_enabled=True,
+        )
+
+        runner._ensure_network_pnpm_store(workspace)
+        runner._ensure_network_pnpm_store(workspace)
+
+        store_path = runner._resolve_network_pnpm_store(workspace)
+        assert container.exec_run.call_args_list == [
+            call(["mkdir", "-p", "/tmp/nexent-pnpm-stores"], user="0"),
+            call(
+                ["test", "-d", f"{sandbox_module.SANDBOX_PNPM_STORE_SOURCE}/v3"],
+                user="0",
+            ),
+            call(
+                [
+                    "cp",
+                    "-a",
+                    "--reflink=auto",
+                    f"{sandbox_module.SANDBOX_PNPM_STORE_SOURCE}/.",
+                    store_path,
+                ],
+                user="0",
+            ),
+            call(["chown", "-R", "sandbox:sandbox", store_path], user="0"),
+        ]
+
+    def test_network_pnpm_store_uses_empty_store_when_image_cache_is_missing(self):
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=1, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+        ]
+        workspace = "/workspace/run"
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+            network_enabled=True,
+        )
+
+        runner._ensure_network_pnpm_store(workspace)
+
+        store_path = runner._resolve_network_pnpm_store(workspace)
+        assert call(["mkdir", "-p", store_path], user="0") in container.exec_run.call_args_list
+
+    @pytest.mark.parametrize("failure_kind", ["status", "exception"])
+    def test_cleanup_logs_network_pnpm_store_removal_failures(
+        self,
+        caplog,
+        failure_kind,
+    ):
+        container = MagicMock()
+        failure = (
+            SimpleNamespace(exit_code=5, output=b"store busy")
+            if failure_kind == "status"
+            else RuntimeError("container unavailable")
+        )
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=b""),
+            failure,
+        ]
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path="/workspace/run",
+            network_enabled=True,
+        )
+        runner._pnpm_store_path = "/tmp/nexent-pnpm-stores/run"
+
+        with caplog.at_level(logging.WARNING, logger="sandbox_under_test"):
+            runner.cleanup()
+
+        assert "Failed to remove sandbox pnpm store" in caplog.text
 
     def test_cleanup_logs_nonzero_exit(self, caplog):
         container = MagicMock()
@@ -363,6 +821,255 @@ class TestSandboxSkillScriptRunner:
 
         assert "permission denied" in caplog.text
         assert runner._root in caplog.text
+
+    def test_executes_workspace_node_script_with_permission_model(self):
+        workspace = "/mnt/nexent/workdir/user/run"
+        script = f"{workspace}/outputs/build.js"
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=f"{script}\n".encode()),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=(b"built\n", b"")),
+        ]
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            timeout_seconds=45,
+            workspace_path=workspace,
+            network_enabled=True,
+        )
+
+        result = runner(
+            manager=MagicMock(),
+            skill_name="docx",
+            script_path="outputs/build.js",
+            params='--title "Quarterly report"',
+            tenant_id="tenant-1",
+            working_directory=workspace,
+            source="workspace",
+        )
+
+        assert result == "built\n"
+        command = container.exec_run.call_args_list[-1].args[0]
+        assert command[:4] == ["timeout", "--signal=KILL", "45", "node"]
+        assert "--experimental-permission" in command
+        assert "--allow-addons" in command
+        assert f"--allow-fs-write={workspace}" in command
+        assert script in command
+        assert command[-2:] == ["--title", "Quarterly report"]
+        environment = container.exec_run.call_args_list[-1].kwargs["environment"]
+        assert environment["PNPM_CONFIG_OFFLINE"] == "false"
+        assert environment["npm_config_offline"] == "false"
+        assert environment["COREPACK_ENABLE_NETWORK"] == "1"
+        assert environment["PIP_USER"] == "1"
+        expected_store = (
+            "/tmp/nexent-pnpm-stores/"
+            + hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:24]
+        )
+        assert environment["PNPM_CONFIG_STORE_DIR"] == expected_store
+        assert environment["npm_config_store_dir"] == expected_store
+
+    @pytest.mark.parametrize(
+        "script_path",
+        ["/tmp/build.js", "../build.js", "outputs/../../build.js", "outputs/build.sh", ""],
+    )
+    def test_workspace_script_rejects_unsafe_paths_and_extensions(self, script_path):
+        container = MagicMock()
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path="/mnt/nexent/workdir/user/run",
+        )
+
+        with pytest.raises(ValueError):
+            runner(
+                manager=MagicMock(),
+                skill_name="docx",
+                script_path=script_path,
+                params=None,
+                tenant_id="tenant-1",
+                working_directory="/mnt/nexent/workdir/user/run",
+                source="workspace",
+            )
+
+        container.exec_run.assert_not_called()
+
+    def test_workspace_script_rejects_symlink_escape(self):
+        workspace = "/mnt/nexent/workdir/user/run"
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(
+            exit_code=0,
+            output=b"/etc/passwd\n",
+        )
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+
+        with pytest.raises(PermissionError, match="outside"):
+            runner(
+                manager=MagicMock(),
+                skill_name="docx",
+                script_path="outputs/build.js",
+                params=None,
+                tenant_id="tenant-1",
+                working_directory=workspace,
+                source="workspace",
+            )
+
+    def test_workspace_python_reuses_shell_call_guard(self):
+        workspace = "/mnt/nexent/workdir/user/run"
+        script = f"{workspace}/outputs/build.py"
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=f"{script}\n".encode()),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b"import subprocess\nsubprocess.run(['id'])\n"),
+        ]
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+
+        with pytest.raises(PermissionError, match="subprocess.run"):
+            runner(
+                manager=MagicMock(),
+                skill_name="pdf",
+                script_path="outputs/build.py",
+                params=None,
+                tenant_id="tenant-1",
+                working_directory=workspace,
+                source="workspace",
+            )
+
+    def test_online_workspace_python_allows_subprocess(self):
+        container = MagicMock()
+        container.exec_run.return_value = SimpleNamespace(
+            exit_code=0,
+            output=b"import subprocess\nsubprocess.run(['python', '-m', 'pip', 'install', 'humanize'])\n",
+        )
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path="/mnt/nexent/workdir/user/run",
+            network_enabled=True,
+        )
+
+        runner._validate_workspace_python(
+            "/mnt/nexent/workdir/user/run/outputs/install.py"
+        )
+
+    @pytest.mark.parametrize(
+        ("result", "expected_error"),
+        [
+            (SimpleNamespace(exit_code=1, output=b""), "Failed to read"),
+            (
+                SimpleNamespace(exit_code=0, output=b"x" * (1024 * 1024 + 1)),
+                "cannot exceed 1 MiB",
+            ),
+        ],
+    )
+    def test_workspace_python_validation_reports_read_and_size_errors(
+        self,
+        result,
+        expected_error,
+    ):
+        container = MagicMock()
+        container.exec_run.return_value = result
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path="/workspace/run",
+        )
+
+        with pytest.raises((RuntimeError, ValueError), match=expected_error):
+            runner._validate_workspace_python("/workspace/run/outputs/build.py")
+
+    def test_workspace_python_requires_enabled_skill_directory(self):
+        workspace = "/workspace/run"
+        script = f"{workspace}/outputs/build.py"
+        container = MagicMock()
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=f"{script}\n".encode()),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b"print('safe')\n"),
+        ]
+        manager = MagicMock()
+        manager.resolve_skill_dir.return_value = "/missing/pdf"
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+
+        with pytest.raises(FileNotFoundError, match="Skill not found: pdf"):
+            runner(
+                manager=manager,
+                skill_name="pdf",
+                script_path="outputs/build.py",
+                params=None,
+                tenant_id="tenant-1",
+                working_directory=workspace,
+                source="workspace",
+            )
+
+    def test_workspace_python_executes_with_enabled_skill_import_path(self, tmp_path):
+        workspace = "/workspace/run"
+        script = f"{workspace}/outputs/build.py"
+        skill_dir = tmp_path / "pdf"
+        skill_dir.mkdir()
+        (skill_dir / "helper.py").write_text("VALUE = 1", encoding="utf-8")
+        container = MagicMock()
+        container.put_archive.return_value = True
+        container.exec_run.side_effect = [
+            SimpleNamespace(exit_code=0, output=f"{script}\n".encode()),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b"print('created')\n"),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=b""),
+            SimpleNamespace(exit_code=0, output=(b"created\n", b"")),
+        ]
+        manager = MagicMock()
+        manager.resolve_skill_dir.return_value = str(skill_dir)
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=container, _nexent_backend="docker"),
+            workspace_path=workspace,
+        )
+
+        result = runner(
+            manager=manager,
+            skill_name="pdf",
+            script_path="outputs/build.py",
+            params=None,
+            tenant_id="tenant-1",
+            working_directory=workspace,
+            source="workspace",
+        )
+
+        assert result == "created\n"
+        manager.resolve_skill_dir.assert_called_once_with(
+            "pdf",
+            tenant_id="tenant-1",
+        )
+        environment = container.exec_run.call_args_list[-1].kwargs["environment"]
+        assert environment["PYTHONPATH"].startswith(f"{workspace}/skills/pdf-")
+
+    def test_workspace_script_rejects_unknown_source(self):
+        runner = SandboxSkillScriptRunner(
+            SimpleNamespace(container=MagicMock(), _nexent_backend="docker"),
+            workspace_path="/mnt/nexent/workdir/user/run",
+        )
+
+        with pytest.raises(ValueError, match="source must be"):
+            runner(
+                manager=MagicMock(),
+                skill_name="docx",
+                script_path="outputs/build.js",
+                params=None,
+                tenant_id="tenant-1",
+                working_directory="/mnt/nexent/workdir/user/run",
+                source="host",
+            )
 
 
 class TestSandboxConfig:
@@ -850,6 +1557,7 @@ class TestPoolManagerLogic:
         )
         bridge_installer = MagicMock(side_effect=AssertionError("owner bridge installation"))
         monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
         monkeypatch.setattr(pm, "_build_system_docker_executor", lambda *args: owner)
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", bridge_installer)
 
@@ -945,7 +1653,7 @@ class TestPoolManagerLogic:
         assert ex1 is not ex2
         assert leased_executors == [ex1, ex2]
         assert bridge_timeouts == [600, 600]
-        assert lease_timeouts == [30, 30]
+        assert lease_timeouts == [120, 120]
         assert pm._system_containers["img:latest"] is owner
         pm.release(ex1, logger)
         pm.release(ex2, logger)
@@ -1273,11 +1981,80 @@ class TestScanShellCalls:
         violations = sandbox_module._scan_shell_calls(code)
         assert violations == []
 
-    def test_syntax_error_returns_empty(self):
-        """Code with syntax errors should return empty (fail open)."""
+    def test_syntax_error_without_shell_escape_returns_empty(self):
+        """Ordinary syntax errors should not be misclassified as shell calls."""
         code = "import os(\nthis is not valid python"
         violations = sandbox_module._scan_shell_calls(code)
         assert violations == []
+
+    def test_allows_ipython_pip_install_magic(self):
+        code = "%pip install --user humanize"
+        assert sandbox_module._scan_shell_calls(code) == []
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import sys, subprocess\nsubprocess.run([sys.executable, '-m', 'pip', 'install', 'humanize'])",
+            "import subprocess\nsubprocess.check_call(['pip', 'install', 'humanize'])",
+            "import subprocess\nsubprocess.run(['python3', '-m', 'pip', 'install', 'humanize'], check=True)",
+        ],
+    )
+    def test_online_mode_allows_shell_free_pip_install_subprocess(self, code):
+        assert sandbox_module._scan_shell_calls(
+            code,
+            allow_package_installs=True,
+        ) == []
+
+    def test_online_mode_allows_explicit_shell_false_for_pip_install(self):
+        code = (
+            "import subprocess\n"
+            "subprocess.run(['pip', 'install', 'humanize'], shell=False)"
+        )
+        assert sandbox_module._scan_shell_calls(
+            code,
+            allow_package_installs=True,
+        ) == []
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import subprocess\nsubprocess.run(['curl', 'https://example.com'])",
+            "import subprocess\nsubprocess.run('pip install humanize', shell=True)",
+            "import subprocess\npackage = 'humanize'\nsubprocess.run(['pip', 'install', package])",
+            "import os\nos.system('pip install humanize')",
+        ],
+    )
+    def test_online_mode_still_blocks_non_allowlisted_shell_calls(self, code):
+        assert sandbox_module._scan_shell_calls(
+            code,
+            allow_package_installs=True,
+        )
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import subprocess\nsubprocess.run(['pip', 'install', 'humanize'], cwd='/tmp')",
+            "import subprocess\nsubprocess.run([])",
+        ],
+    )
+    def test_online_mode_rejects_unsafe_pip_call_shapes(self, code):
+        assert sandbox_module._scan_shell_calls(
+            code,
+            allow_package_installs=True,
+        )
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "!curl https://example.com",
+            "%system curl https://example.com",
+            "%%bash\ncurl https://example.com",
+            "get_ipython().system('curl https://example.com')",
+            "get_ipython().getoutput('curl https://example.com')",
+        ],
+    )
+    def test_detects_ipython_shell_escape_paths(self, code):
+        assert sandbox_module._scan_shell_calls(code)
 
     def test_multiple_violations(self):
         """Should detect multiple violations in same code."""
@@ -1293,6 +2070,24 @@ class TestInstallShellGuard:
     def test_install_shell_guard_function_exists(self):
         """Verify the shell guard installation function exists and is callable."""
         assert callable(sandbox_module._install_shell_guard)
+
+    def test_make_code_output_falls_back_without_smolagents(self, monkeypatch):
+        real_import = builtins.__import__
+
+        def guarded_import(name, *args, **kwargs):
+            if name == "smolagents.remote_executors":
+                raise ImportError("smolagents unavailable")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+        result = sandbox_module._make_code_output("blocked")
+
+        assert result == SimpleNamespace(
+            output=None,
+            logs="blocked",
+            is_final_answer=False,
+        )
 
     def test_shell_guard_has_expected_behavior(self):
         """Test that shell guard blocks subprocess calls through AST analysis."""
@@ -2015,6 +2810,126 @@ class TestWrapExecutor:
 
         assert result is mock_executor
 
+    def test_online_docker_executor_bootstraps_user_site_before_user_code(self):
+        original_call = MagicMock(return_value="ok")
+        executor = SimpleNamespace(__call__=original_call)
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            network_disabled=False,
+        )
+
+        wrapped = sandbox_module._wrap_executor(
+            executor,
+            cfg,
+            sandbox_module.logging.getLogger("test"),
+        )
+
+        assert wrapped.__call__("print('ready')") == "ok"
+        sent_code = original_call.call_args.args[0]
+        assert sent_code.startswith("import importlib as _nexent_importlib")
+        assert "getusersitepackages()" in sent_code
+        assert "path_importer_cache.pop" in sent_code
+        assert "invalidate_caches()" in sent_code
+        assert sent_code.endswith("print('ready')")
+        assert sandbox_module._install_online_user_site(wrapped) is wrapped
+
+    def test_offline_docker_executor_does_not_bootstrap_user_site(self):
+        original_call = MagicMock(return_value="ok")
+        executor = SimpleNamespace(__call__=original_call)
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            network_disabled=True,
+        )
+
+        wrapped = sandbox_module._wrap_executor(
+            executor,
+            cfg,
+            sandbox_module.logging.getLogger("test"),
+        )
+
+        assert wrapped.__call__("print('ready')") == "ok"
+        original_call.assert_called_once_with("print('ready')")
+
+    def test_kernel_lease_real_call_applies_online_bootstrap(self):
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease._logger = MagicMock()
+        lease.run_code_raise_errors = MagicMock(return_value="ok")
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            network_disabled=False,
+        )
+
+        wrapped = sandbox_module._wrap_executor(
+            lease,
+            cfg,
+            sandbox_module.logging.getLogger("test"),
+        )
+
+        assert wrapped("print('ready')") == "ok"
+        sent_code = lease.run_code_raise_errors.call_args.args[0]
+        assert sent_code.startswith("import importlib as _nexent_importlib")
+        assert "path_importer_cache.pop" in sent_code
+        assert "invalidate_caches()" in sent_code
+        assert sent_code.endswith("print('ready')")
+
+    def test_boxed_kernel_lease_delegates_without_shell_scanning(self):
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease._logger = MagicMock()
+        lease._nexent_shell_policy = ShellPolicy.BOXED
+        lease.run_code_raise_errors = MagicMock(return_value="executed")
+
+        result = lease("import os; os.system('handled by boxed executor')")
+
+        assert result == "executed"
+        lease.run_code_raise_errors.assert_called_once_with(
+            "import os; os.system('handled by boxed executor')"
+        )
+        lease._logger.warning.assert_not_called()
+
+    def test_online_kernel_lease_allows_subprocess_and_shell_escape(self):
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease._logger = MagicMock()
+        lease.run_code_raise_errors = MagicMock(return_value="executed")
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            network_disabled=False,
+            shell_policy=ShellPolicy.DISABLED,
+        )
+        sandbox_module._wrap_executor(
+            lease,
+            cfg,
+            sandbox_module.logging.getLogger("test"),
+        )
+
+        code = "import subprocess\nsubprocess.run(['python', '-m', 'pip', 'install', 'humanize'])"
+        result = lease(code)
+
+        assert result == "executed"
+        sent_code = lease.run_code_raise_errors.call_args.args[0]
+        assert sent_code.endswith(code)
+
+    def test_offline_kernel_lease_blocks_shell_with_code_output(self):
+        lease = object.__new__(sandbox_module._DockerKernelLease)
+        lease._logger = MagicMock()
+        lease.run_code_raise_errors = MagicMock(return_value="not-called")
+        cfg = SandboxConfig(
+            level=SandboxLevel.DOCKER,
+            network_disabled=True,
+            shell_policy=ShellPolicy.DISABLED,
+        )
+        sandbox_module._wrap_executor(
+            lease,
+            cfg,
+            sandbox_module.logging.getLogger("test"),
+        )
+
+        result = lease("!curl https://example.com")
+
+        assert "SecurityError" in result.logs
+        assert result.output is None
+        assert result.is_final_answer is False
+        lease.run_code_raise_errors.assert_not_called()
+
 
 class TestBuildPythonExecutor:
     """Test the main factory function."""
@@ -2559,7 +3474,8 @@ class TestBuildSystemDockerExecutor:
         run = MagicMock(return_value=container)
         docker_module = SimpleNamespace(
             from_env=lambda: SimpleNamespace(
-                containers=SimpleNamespace(run=run)
+                containers=SimpleNamespace(run=run),
+                version=lambda: {"Version": "18.09.9"},
             )
         )
         monkeypatch.setitem(sys.modules, "docker", docker_module)
@@ -2571,6 +3487,7 @@ class TestBuildSystemDockerExecutor:
 
         assert executor.base_url == "http://127.0.0.1:8888"
         assert call_count[0] >= 2
+        assert run.call_args.kwargs["security_opt"] == ["seccomp=unconfined"]
 
     def test_removes_container_on_failure(self, monkeypatch):
         """Should remove container when kernel never becomes ready."""
@@ -2651,7 +3568,10 @@ class TestBuildSessionDockerExecutor:
         )
         run = MagicMock(return_value=container)
         docker_module = SimpleNamespace(
-            from_env=lambda: SimpleNamespace(containers=SimpleNamespace(run=run))
+            from_env=lambda: SimpleNamespace(
+                containers=SimpleNamespace(run=run),
+                version=lambda: {"Version": "18.09.9"},
+            )
         )
         response = SimpleNamespace(
             raise_for_status=lambda: None,
@@ -2668,6 +3588,7 @@ class TestBuildSessionDockerExecutor:
 
         assert run.call_args.kwargs["ports"] == {"8888/tcp": ("127.0.0.1", None)}
         assert run.call_args.kwargs["network_disabled"] is False
+        assert run.call_args.kwargs["security_opt"] == ["seccomp=unconfined"]
         assert captured["owner"].base_url == "http://127.0.0.1:49152"
         assert captured["installed"] == ["numpy"]
         assert executor.installed_packages == ["numpy"]
@@ -2691,12 +3612,20 @@ class TestBuildSessionDockerExecutor:
         class NotFound(Exception):
             pass
 
+        control_network = MagicMock(
+            attrs={"Internal": True, "Containers": {"runtime-id": {}}}
+        )
+        runtime_container = SimpleNamespace(id="runtime-id")
         networks = SimpleNamespace(
-            get=MagicMock(side_effect=NotFound()),
-            create=MagicMock(),
+            get=MagicMock(side_effect=[NotFound(), control_network]),
+            create=MagicMock(return_value=control_network),
+        )
+        containers = SimpleNamespace(
+            run=run,
+            get=MagicMock(return_value=runtime_container),
         )
         docker_module = SimpleNamespace(
-            from_env=lambda: SimpleNamespace(containers=SimpleNamespace(run=run), networks=networks),
+            from_env=lambda: SimpleNamespace(containers=containers, networks=networks),
             errors=SimpleNamespace(NotFound=NotFound),
         )
         response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: [])
@@ -2711,11 +3640,16 @@ class TestBuildSessionDockerExecutor:
 
         kwargs = run.call_args.kwargs
         assert kwargs["name"] == "nexent-runtime-sandbox-session-unique"
-        assert kwargs["network"] == sandbox_module.SANDBOX_NETWORK_NAME
+        assert "network" not in kwargs
         assert "ports" not in kwargs
         networks.create.assert_called_once_with(
             sandbox_module.SANDBOX_NETWORK_NAME,
             driver="bridge",
+            internal=True,
+        )
+        control_network.connect.assert_called_once_with(
+            container,
+            aliases=["nexent-runtime-sandbox-session-unique"],
         )
         assert captured["owner"].base_url == (
             "http://nexent-runtime-sandbox-session-unique:8888"
@@ -3058,10 +3992,10 @@ class TestSandboxConfigDataclass:
         assert cfg.level == sandbox_module.SandboxLevel.LOCAL
         assert cfg.scope == sandbox_module.SandboxScope.SESSION
         assert cfg.docker_image == "nexent/nexent-sandbox:latest"
-        assert cfg.memory_limit_mb == 512
+        assert cfg.memory_limit_mb == 2048
         assert cfg.cpu_quota == 1.0
         assert cfg.network_disabled is True
-        assert cfg.timeout_seconds == 30
+        assert cfg.timeout_seconds == 120
         assert cfg.host_tool_timeout_seconds is None
         assert cfg.shell_policy == sandbox_module.ShellPolicy.DISABLED
         assert cfg.output_dir == "/home/sandbox/workdir/output"
@@ -3124,7 +4058,7 @@ class TestPoolManagerConstants:
 
     def test_sandbox_network_name_defined(self):
         """SANDBOX_NETWORK_NAME should be defined."""
-        assert sandbox_module.SANDBOX_NETWORK_NAME == "nexent_network"
+        assert sandbox_module.SANDBOX_NETWORK_NAME == "nexent_sandbox_control"
 
     def test_sandbox_jupyter_port_defined(self):
         """SANDBOX_JUPYTER_PORT should be defined."""
@@ -3549,6 +4483,73 @@ class TestReleaseImmedateWithSharedContainer:
 class TestBuildDockerExecutorNetworkModes:
     """Test Docker network mode configurations."""
 
+    def test_host_runtime_uses_concrete_bridge_gateway_for_host_tools(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        captured = {}
+        bridge_network = MagicMock(
+            attrs={"IPAM": {"Config": [{"Gateway": "172.18.0.1"}]}}
+        )
+        docker_client = SimpleNamespace(
+            networks=SimpleNamespace(get=MagicMock(return_value=bridge_network))
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "docker",
+            SimpleNamespace(from_env=MagicMock(return_value=docker_client)),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+        monkeypatch.setattr(
+            pool,
+            "_build_session_docker_executor",
+            lambda config, logger_, kwargs: captured.update(kwargs) or executor,
+        )
+        monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda item, *args, **kwargs: item)
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda item, config, logger_: item)
+
+        result = pool._build_docker_executor(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+            MagicMock(),
+            host_tools_exist=True,
+        )
+
+        assert result is executor
+        assert captured["extra_hosts"] == {
+            "host.docker.internal": "172.18.0.1"
+        }
+
+    def test_containerized_runtime_omits_unneeded_host_gateway_mapping(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        captured = {}
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
+        monkeypatch.setattr(
+            pool,
+            "_build_session_docker_executor",
+            lambda config, logger_, kwargs: captured.update(kwargs) or executor,
+        )
+        monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", lambda item, *args, **kwargs: item)
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda item, config, logger_: item)
+
+        result = pool._build_docker_executor(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
+            MagicMock(),
+            host_tools_exist=True,
+        )
+
+        assert result is executor
+        assert "extra_hosts" not in captured
+
     def test_network_disabled_but_host_tools_enables_bridge(self):
         """Network should be enabled when host_tools_exist but network_disabled is True."""
         pm = SandboxPoolManager.get_instance()
@@ -3907,7 +4908,9 @@ class TestTargetedSandboxCoverage:
         assert not hasattr(executor, "_nexent_shell_guard_installed")
 
         sandbox_module._install_shell_guard(executor, ShellPolicy.DISABLED, logger)
-        assert "SecurityError" in executor.__call__("import os; os.system('id')")
+        blocked = executor.__call__("import os; os.system('id')")
+        assert "SecurityError" in blocked.logs
+        assert blocked.output is None
         logger.warning.assert_called_once()
         assert executor.__call__("print('safe')") == "ok"
         assert sandbox_module._install_shell_guard(executor, ShellPolicy.DISABLED, logger) is executor
@@ -4286,7 +5289,7 @@ class TestTargetedSandboxCoverage:
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=MagicMock(side_effect=RuntimeError("not ready"))))
         monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["host"])
-        monotonic = iter([0, 31])
+        monotonic = iter([0, 121])
         monkeypatch.setattr(sandbox_module.time, "monotonic", lambda: next(monotonic))
 
         with pytest.raises(RuntimeError, match="did not become ready"):
@@ -4301,6 +5304,7 @@ class TestTargetedSandboxCoverage:
         docker_module = SimpleNamespace(from_env=MagicMock(side_effect=RuntimeError("network unavailable")))
         monkeypatch.setitem(sys.modules, "smolagents.remote_executors", remote_module)
         monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: True)
         bridge_installer = MagicMock(return_value=executor)
         monkeypatch.setattr(sandbox_module, "_install_host_tool_bridge", bridge_installer)
         config = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM)
@@ -4370,7 +5374,51 @@ class TestTargetedSandboxCoverage:
         )
 
         assert result is executor
-        networks.create.assert_called_once_with(sandbox_module.SANDBOX_NETWORK_NAME, driver="bridge")
+        networks.create.assert_called_once_with(
+            sandbox_module.SANDBOX_NETWORK_NAME,
+            driver="bridge",
+            internal=True,
+        )
+
+    def test_online_system_sandbox_uses_bridge_and_package_install_environment(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        executor = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        network = MagicMock(attrs={"Internal": True, "Containers": {}})
+        docker_module = SimpleNamespace(
+            from_env=lambda: SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network))),
+            errors=SimpleNamespace(NotFound=KeyError),
+        )
+        builder = MagicMock(return_value=executor)
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        monkeypatch.setattr(sandbox_module, "_is_containerized_runtime", lambda: False)
+        monkeypatch.setattr(pool, "_build_system_docker_executor", builder)
+        monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda item, config, logger_: item)
+
+        result = pool._build_docker_executor(
+            SandboxConfig(
+                level=SandboxLevel.DOCKER,
+                scope=SandboxScope.SYSTEM,
+                network_disabled=False,
+            ),
+            MagicMock(),
+        )
+
+        assert result is executor
+        run_kwargs = builder.call_args.args[2]
+        assert "network" not in run_kwargs
+        assert run_kwargs["network_disabled"] is False
+        assert run_kwargs["environment"] == sandbox_module._ONLINE_PACKAGE_ENV
+        assert run_kwargs["environment"]["PYTHONPATH"] == (
+            "/home/sandbox/.local/lib/python3.11/site-packages"
+        )
+        assert run_kwargs["environment"]["PATH"].startswith(
+            "/home/sandbox/.local/bin:"
+        )
 
     def test_evictor_loop_runs_maintenance_once(self, monkeypatch):
         pool = SandboxPoolManager()

@@ -15,9 +15,17 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/skills"
       existingClaim: "nexent-skills"
+    memoryPlugins:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/memory-provider-plugins"
+      existingClaim: "nexent-memory-plugins"
+    logs:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/logs"
+      existingClaim: "nexent-logs"
   deploymentVersion: "full"
   deploymentComponents:
-    infrastructure: true
+    infrastructure: false
     application: true
     data-process: true
     supabase: true
@@ -85,14 +93,6 @@ nexent-common:
       sslVerify: "true"
       caBundle: ""
 
-nexent-elasticsearch:
-  enabled: true
-nexent-postgresql:
-  enabled: true
-nexent-redis:
-  enabled: true
-nexent-minio:
-  enabled: true
 nexent-config:
   enabled: true
   replicaCount: 1

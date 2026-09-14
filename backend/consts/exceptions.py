@@ -340,6 +340,20 @@ class PlatformQuotaConflictError(Exception):
         self.details = details
 
 
+class TagManagementConflictError(Exception):
+    """Raised when tag management would violate an active binding or capacity rule."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+class TagManagementNotFoundError(NotFoundException):
+    """Raised for absent or cross-tenant tag-management identifiers."""
+
+    pass
+
+
 class OAuthProviderError(Exception):
     """Raised when OAuth provider configuration is invalid or provider returns an error."""
 

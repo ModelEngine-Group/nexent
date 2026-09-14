@@ -70,7 +70,7 @@ export default function AgentSelectorHeader({
   // Dropdown open state
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [agentSearch, setAgentSearch] = useState("");
-  const initialUrlAgentIdRef = useRef<number | null>(null);
+  const requestedAgentIdRef = useRef<number | null>(null);
 
   // Import wizard state
   const [importWizardVisible, setImportWizardVisible] = useState(false);
@@ -97,17 +97,14 @@ export default function AgentSelectorHeader({
     });
   };
 
-  // Handle select agent from dropdown
-  const handleSelectAgent = useCallback(
-    async (agentId: number | null) => {
+  const loadAgent = useCallback(
+    async (agentId: number) => {
       if (agentId === null) return;
 
       const agent = agents.find((a: Agent) => String(a.id) === String(agentId));
       if (!agent || currentAgentId === Number(agent.id)) return;
 
-      const nextSearchParams = new URLSearchParams(searchParams.toString());
-      nextSearchParams.set("agent_id", String(agent.id));
-      router.replace(`${pathname}?${nextSearchParams.toString()}`);
+      const selectedAgentId = Number(agent.id);
 
       // Clear NEW mark when agent is selected for editing
       if (agent.is_new === true) {
@@ -128,7 +125,10 @@ export default function AgentSelectorHeader({
 
       // Load and set agent
       try {
-        const result = await searchAgentInfo(Number(agent.id));
+        const result = await searchAgentInfo(selectedAgentId);
+        if (requestedAgentIdRef.current !== selectedAgentId) {
+          return;
+        }
         if (result.success && result.data) {
           initialize(result.data);
         } else {
@@ -148,13 +148,26 @@ export default function AgentSelectorHeader({
       initialize,
       log,
       message,
-      pathname,
       queryClient,
-      router,
-      searchParams,
       t,
       waitForAutosave,
     ]
+  );
+
+  // The URL is the single source of truth for selection. Loading the Agent is
+  // handled by the synchronization effect below after navigation completes.
+  const handleSelectAgent = useCallback(
+    (agentId: number | null) => {
+      if (agentId === null) return;
+
+      const agent = agents.find((a: Agent) => String(a.id) === String(agentId));
+      if (!agent || currentAgentId === Number(agent.id)) return;
+
+      const nextSearchParams = new URLSearchParams(searchParams.toString());
+      nextSearchParams.set("agent_id", String(agent.id));
+      router.replace(`${pathname}?${nextSearchParams.toString()}`);
+    },
+    [agents, currentAgentId, pathname, router, searchParams]
   );
 
   useEffect(() => {
@@ -165,13 +178,13 @@ export default function AgentSelectorHeader({
     // This also prevents an Agent loaded under a previous account from remaining
     // in the store after the account switch clears or invalidates agent_id.
     if (parsedAgentId === null) {
-      initialUrlAgentIdRef.current = null;
+      requestedAgentIdRef.current = null;
       if (currentAgentId !== null) reset();
       return;
     }
 
     if (!Number.isInteger(parsedAgentId) || parsedAgentId <= 0) {
-      initialUrlAgentIdRef.current = null;
+      requestedAgentIdRef.current = null;
       if (currentAgentId !== null) reset();
 
       const nextSearchParams = new URLSearchParams(searchParams.toString());
@@ -189,7 +202,7 @@ export default function AgentSelectorHeader({
     if (!hasLoadedAgents) return;
 
     if (!agents.some((agent: Agent) => Number(agent.id) === parsedAgentId)) {
-      initialUrlAgentIdRef.current = null;
+      requestedAgentIdRef.current = null;
       if (currentAgentId !== null) reset();
 
       const nextSearchParams = new URLSearchParams(searchParams.toString());
@@ -202,20 +215,19 @@ export default function AgentSelectorHeader({
       return;
     }
 
-    if (
-      initialUrlAgentIdRef.current !== null ||
-      currentAgentId !== null
-    ) {
+    if (requestedAgentIdRef.current === parsedAgentId) {
       return;
     }
 
-    initialUrlAgentIdRef.current = parsedAgentId;
-    void handleSelectAgent(parsedAgentId);
+    requestedAgentIdRef.current = parsedAgentId;
+    if (currentAgentId !== parsedAgentId) {
+      void loadAgent(parsedAgentId);
+    }
   }, [
     agents,
     currentAgentId,
-    handleSelectAgent,
     hasLoadedAgents,
+    loadAgent,
     pathname,
     reset,
     router,

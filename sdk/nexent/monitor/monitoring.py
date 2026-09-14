@@ -74,8 +74,8 @@ _monitoring_display_name: ContextVar[Optional[str]] = ContextVar(
     "_monitoring_display_name", default=None)
 _monitoring_capacity_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     "_monitoring_capacity_snapshot", default=None)
-_monitoring_safe_input_budget_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
-    "_monitoring_safe_input_budget_snapshot", default=None)
+_monitoring_context_budget_snapshot: ContextVar[Optional[Any]] = ContextVar(
+    "_monitoring_context_budget_snapshot", default=None)
 
 
 def set_monitoring_context(
@@ -125,14 +125,14 @@ def get_monitoring_capacity_snapshot() -> Optional[Dict[str, Any]]:
     return _monitoring_capacity_snapshot.get()
 
 
-def set_monitoring_safe_input_budget_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
-    """Bind resolved W2 safe-input budget metadata for the current request."""
-    _monitoring_safe_input_budget_snapshot.set(snapshot)
+def set_monitoring_context_budget_snapshot(snapshot: Optional[Any]) -> None:
+    """Bind the canonical W2 context-budget snapshot for the current request."""
+    _monitoring_context_budget_snapshot.set(snapshot)
 
 
-def get_monitoring_safe_input_budget_snapshot() -> Optional[Dict[str, Any]]:
-    """Return the resolved W2 safe-input budget metadata bound to the current request."""
-    return _monitoring_safe_input_budget_snapshot.get()
+def get_monitoring_context_budget_snapshot() -> Optional[Any]:
+    """Return the canonical W2 context-budget snapshot bound to the request."""
+    return _monitoring_context_budget_snapshot.get()
 
 
 F = TypeVar('F', bound=Callable[..., Any])
@@ -1382,11 +1382,20 @@ class MonitoringManager:
                 list(getattr(evidence, "prefix_change_reasons", ()) or ()),
                 ensure_ascii=False,
             ),
-            "context.budget.soft": getattr(evidence, "soft_budget", 0),
-            "context.budget.hard": getattr(evidence, "hard_budget", 0),
+            "context.effective_input_limit_tokens": getattr(
+                evidence, "effective_input_limit_tokens", 0
+            ),
+            "context.compaction_trigger_threshold_tokens": getattr(
+                evidence, "compaction_trigger_threshold_tokens", 0
+            ),
+            "context.compaction_target_tokens": getattr(
+                evidence, "compaction_target_tokens", 0
+            ),
             "context.tokens.pre_compression": getattr(evidence, "raw_token_estimate", 0),
             "context.tokens.post_compression": getattr(evidence, "final_token_estimate", 0),
-            "context.budget.hard_exceeded": bool(getattr(evidence, "over_hard_budget", False)),
+            "context.compaction.exceeds_effective_input_limit": bool(
+                getattr(evidence, "exceeds_effective_input_limit", False)
+            ),
             "context.compression.attempted": bool(getattr(evidence, "compression_attempted", False)),
             "context.compression.fallback_compaction": bool(getattr(evidence, "fallback_compaction_used", False)),
             "context.compression.records": json.dumps(compression_records, ensure_ascii=False, sort_keys=True),
@@ -1998,7 +2007,7 @@ _CAPACITY_MONITORING_FIELDS = (
     "capability_profile_version",
     "capacity_source",
     "requested_output_tokens",
-    "provider_input_limit_tokens",
+    "effective_input_limit_tokens",
     "tokenizer_family",
     "counting_mode",
     "unknown_capabilities",
@@ -2033,7 +2042,8 @@ def _normalize_capacity_snapshot(snapshot: Any) -> Dict[str, Any]:
         "capacity_source": snapshot.get("capacity_source")
         or _dominant_capacity_source(snapshot.get("field_sources")),
         "requested_output_tokens": snapshot.get("requested_output_tokens"),
-        "provider_input_limit_tokens": snapshot.get("provider_input_limit_tokens"),
+        "effective_input_limit_tokens": snapshot.get("effective_input_limit_tokens")
+        or snapshot.get("provider_input_limit_tokens"),
         "tokenizer_family": snapshot.get("tokenizer_family"),
         "counting_mode": snapshot.get("counting_mode"),
         "unknown_capabilities": snapshot.get("unknown_capabilities"),
@@ -2059,18 +2069,22 @@ _BUDGET_MONITORING_FIELDS = frozenset(
         "budget_w1_fingerprint",
         "budget_requested_output_tokens",
         "budget_output_reserve_source",
-        "budget_provider_input_limit_tokens",
+        "budget_schema_version",
+        "budget_effective_input_limit_tokens",
         "budget_uncertainty_reserve_tokens",
         "budget_uncertainty_reserve_basis",
-        "budget_soft_limit_ratio",
-        "budget_soft_input_budget_tokens",
-        "budget_hard_input_budget_tokens",
+        "budget_compaction_trigger_ratio",
+        "budget_compaction_trigger_ratio_source",
+        "budget_compaction_trigger_threshold_tokens",
+        "budget_compaction_target_ratio",
+        "budget_compaction_target_ratio_source",
+        "budget_compaction_target_tokens",
         "budget_warnings",
     }
 )
 
 
-def _normalize_safe_input_budget_snapshot(snapshot: Any) -> Dict[str, Any]:
+def _normalize_context_budget_snapshot(snapshot: Any) -> Dict[str, Any]:
     if snapshot is None:
         return {}
     if hasattr(snapshot, "model_dump"):
@@ -2084,12 +2098,18 @@ def _normalize_safe_input_budget_snapshot(snapshot: Any) -> Dict[str, Any]:
         "budget_w1_fingerprint": snapshot.get("w1_fingerprint"),
         "budget_requested_output_tokens": snapshot.get("requested_output_tokens"),
         "budget_output_reserve_source": snapshot.get("output_reserve_source"),
-        "budget_provider_input_limit_tokens": snapshot.get("provider_input_limit_tokens"),
+        "budget_schema_version": snapshot.get("schema_version"),
+        "budget_effective_input_limit_tokens": snapshot.get("effective_input_limit_tokens"),
         "budget_uncertainty_reserve_tokens": snapshot.get("uncertainty_reserve_tokens"),
         "budget_uncertainty_reserve_basis": snapshot.get("uncertainty_reserve_basis"),
-        "budget_soft_limit_ratio": snapshot.get("soft_limit_ratio"),
-        "budget_soft_input_budget_tokens": snapshot.get("soft_input_budget_tokens"),
-        "budget_hard_input_budget_tokens": snapshot.get("hard_input_budget_tokens"),
+        "budget_compaction_trigger_ratio": snapshot.get("compaction_trigger_ratio"),
+        "budget_compaction_trigger_ratio_source": snapshot.get("compaction_trigger_ratio_source"),
+        "budget_compaction_trigger_threshold_tokens": snapshot.get(
+            "compaction_trigger_threshold_tokens"
+        ),
+        "budget_compaction_target_ratio": snapshot.get("compaction_target_ratio"),
+        "budget_compaction_target_ratio_source": snapshot.get("compaction_target_ratio_source"),
+        "budget_compaction_target_tokens": snapshot.get("compaction_target_tokens"),
         "budget_warnings": snapshot.get("warnings"),
     }
     return {
@@ -2099,9 +2119,9 @@ def _normalize_safe_input_budget_snapshot(snapshot: Any) -> Dict[str, Any]:
     }
 
 
-def _enrich_record_with_safe_input_budget_snapshot(record: Dict[str, Any]) -> None:
-    budget_fields = _normalize_safe_input_budget_snapshot(
-        get_monitoring_safe_input_budget_snapshot()
+def _enrich_record_with_context_budget_snapshot(record: Dict[str, Any]) -> None:
+    budget_fields = _normalize_context_budget_snapshot(
+        get_monitoring_context_budget_snapshot()
     )
     if budget_fields:
         record.update(budget_fields)
@@ -2190,7 +2210,7 @@ class RecordModelCallContext:
                 record["display_name"] = self.display_name
 
             _enrich_record_with_capacity_snapshot(record)
-            _enrich_record_with_safe_input_budget_snapshot(record)
+            _enrich_record_with_context_budget_snapshot(record)
 
             buffer = get_monitoring_buffer()
             if buffer and buffer.is_enabled:
@@ -2421,7 +2441,7 @@ def _enqueue_client_monitoring_record(
             record["display_name"] = display_name
 
         _enrich_record_with_capacity_snapshot(record)
-        _enrich_record_with_safe_input_budget_snapshot(record)
+        _enrich_record_with_context_budget_snapshot(record)
 
         buffer.add_record(record)
     except Exception:
@@ -2509,7 +2529,7 @@ def _enrich_record_with_context(record, tracker, kwargs):
         record["display_name"] = display_name
 
     _enrich_record_with_capacity_snapshot(record)
-    _enrich_record_with_safe_input_budget_snapshot(record)
+    _enrich_record_with_context_budget_snapshot(record)
 
     return tenant_id
 
@@ -2754,8 +2774,8 @@ __all__ = [
     'get_monitoring_context',
     'set_monitoring_capacity_snapshot',
     'get_monitoring_capacity_snapshot',
-    'set_monitoring_safe_input_budget_snapshot',
-    'get_monitoring_safe_input_budget_snapshot',
+    'set_monitoring_context_budget_snapshot',
+    'get_monitoring_context_budget_snapshot',
     'set_agent_monitoring_context',
     'get_agent_monitoring_context',
     'agent_monitoring_context',

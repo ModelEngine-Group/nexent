@@ -24,6 +24,7 @@ import {
 import { ErrorCode } from "@/const/errorCode";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
+import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
 import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
@@ -662,7 +663,13 @@ function DataConfig({ isActive }: DataConfigProps) {
             message.success(t("knowledgeBase.message.deleteSuccess"));
           }, 1000);
         } catch (error) {
-          message.error(t("knowledgeBase.message.deleteError"));
+          message.error(
+            formatKnowledgeBaseDeleteError(
+              error,
+              t,
+              "knowledgeBase.message.deleteError"
+            )
+          );
         }
       },
     });
