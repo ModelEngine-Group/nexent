@@ -1238,7 +1238,8 @@ def test_native_continuation_never_replays_after_worker_loss(service):
 
 
 @pytest.mark.asyncio
-async def test_attachment_request_starts_native_run_without_losing_files(service, monkeypatch):
+@pytest.mark.parametrize("skip_user_save", [False, True])
+async def test_attachment_request_starts_native_run_without_losing_files(service, monkeypatch, skip_user_save):
     from consts.model import AgentRequest
     from services.human_interaction import application
 
@@ -1266,9 +1267,9 @@ async def test_attachment_request_starts_native_run_without_losing_files(service
 
     monkeypatch.setattr(application, "authorize_run", authorize)
     monkeypatch.setattr(application, "stream_run", stream)
-    result = await application.start_run(request, "tenant-a", "owner", "en")
+    result = await application.start_run(request, "tenant-a", "owner", "en", skip_user_save=skip_user_save)
     assert result["status"] == "READY"
-    assert saved_messages == [request]
+    assert saved_messages == ([] if skip_user_save else [request])
     with service.repository.transaction(result["run_id"]) as tx:
         saved = service.cipher.open(tx.run.request_payload)
         assert saved["runtime_mode"] == "native-live-v1"
@@ -1363,3 +1364,95 @@ def test_native_guidance_interrupts_the_waiting_code_suffix(service):
     assert str(outcome["steps"][-1].output) == "guided"
     assert effects == []
     assert model.calls == 2
+
+
+def test_northbound_card_decision_and_replay_through_runtime_http(service, monkeypatch):
+    """Exercise both HTTP boundaries and real PostgreSQL lifecycle with internal JWTs."""
+    from unittest.mock import MagicMock
+
+    import httpx
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from nexent.core.human_interaction.contracts import AttemptSuspended
+    from services.human_interaction import application
+
+    with monkeypatch.context() as imports:
+        # Load HTTP dependencies against the complete client module; the HITL
+        # repository already retains the isolated fixture's session factory.
+        imports.delitem(sys.modules, "database.client")
+        imports.setitem(sys.modules, "management.services.agent.service", MagicMock())
+        from utils import auth_utils
+        from apps import northbound_app, northbound_human_interaction_app, human_interaction_app
+    from services import runtime_proxy_service
+
+    monkeypatch.setattr(application, "require_enabled", lambda: service)
+    monkeypatch.setattr(human_interaction_app, "require_enabled", lambda: service)
+    monkeypatch.setattr(auth_utils, "SUPABASE_JWT_SECRET", "test-only-internal-signing-key-for-hitl")
+    identities = {
+        "owner-key": {"user_id": "owner", "tenant_id": "tenant-a", "token_id": 0},
+        "other-user-key": {"user_id": "other", "tenant_id": "tenant-a", "token_id": 0},
+        "other-tenant-key": {"user_id": "owner", "tenant_id": "tenant-b", "token_id": 0},
+    }
+    monkeypatch.setattr(northbound_app, "validate_bearer_token", lambda header: (
+        bool(header and header.removeprefix("Bearer ") in identities), {"valid": True},
+    ))
+    monkeypatch.setattr(northbound_app, "get_user_and_tenant_by_access_key", lambda key: identities[key])
+    runtime = FastAPI(root_path="/api")
+    runtime.include_router(human_interaction_app.internal_router)
+    monkeypatch.setattr(runtime_proxy_service, "create_httpx_client", lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=runtime), headers=kwargs["headers"],
+    ))
+    northbound = FastAPI()
+    northbound.include_router(northbound_human_interaction_app.router)
+    client = TestClient(northbound)
+    headers = {"Authorization": "Bearer owner-key"}
+    base = "/nb/v1/chat/human-interactions"
+
+    run_id = create_run(service)
+    port = port_for(service, run_id)
+    interaction = {"kind": "CLARIFICATION", "schema_version": 2, "questions": FORM}
+    arguments = {"questions": FORM}
+    with pytest.raises(AttemptSuspended):
+        port.dispatch("ask:0", "ask_user", arguments, interaction=interaction)
+    service.repository.release(run_id, "worker")
+    snapshot = client.get(base + "/conversation/7", headers=headers).json()["data"]
+    assert snapshot["status"] == "WAITING_HUMAN"
+    card = snapshot["requests"][0]
+    stream = client.get(base + f"/{run_id}/events", headers=headers)
+    assert stream.status_code == 200
+    assert '"type": "human_interaction"' in stream.text
+    assert f'id: {snapshot["event_seq"]}\n' in stream.text
+    decision_url = base + f'/{run_id}/requests/{card["request_id"]}/decisions'
+    command = {
+        "version": card["version"], "digest": card["digest"], "idempotency_key": "northbound-answer-0001",
+        "decision": "answer", "answers": form_answers("Prepare a notice"),
+    }
+    for key in ("other-user-key", "other-tenant-key"):
+        unauthorized_headers = {"Authorization": f"Bearer {key}"}
+        assert client.get(base + f"/{run_id}", headers=unauthorized_headers).status_code == 404
+        assert client.get(base + f"/{run_id}/events", headers=unauthorized_headers).status_code == 404
+        assert client.post(decision_url, json=command, headers=unauthorized_headers).status_code == 404
+    accepted = client.post(decision_url, json=command, headers=headers)
+    assert accepted.status_code == 200 and accepted.json()["data"]["accepted"] is True
+    decided = service.snapshot(run_id, "tenant-a", "owner")
+    assert decided["status"] == "READY"
+    assert client.post(decision_url, json=command, headers=headers).status_code == 200
+    assert service.snapshot(run_id, "tenant-a", "owner")["event_seq"] == decided["event_seq"]
+    changed = {**command, "answers": form_answers("Different request")}
+    assert client.post(decision_url, json=changed, headers=headers).status_code == 409
+
+    resumed = port_for(service, run_id)
+    result = resumed.dispatch("ask:0", "ask_user", arguments, interaction=interaction)
+    assert "Prepare a notice" in result["result"]
+    resumed.emit_chunk('data: {"type":"final_answer","content":"Notice prepared"}\n\n')
+    resumed.finish("completed")
+    service.repository.release(run_id, "worker")
+    continuation = client.get(
+        base + f"/{run_id}/events", headers={**headers, "Last-Event-ID": str(snapshot["event_seq"])},
+    )
+    assert continuation.status_code == 200
+    assert '"type": "human_decision"' in continuation.text
+    assert '"type":"final_answer"' in continuation.text
+    assert '"type": "human_interaction"' not in continuation.text
+    assert '"status": "COMPLETED"' in continuation.text
+    assert service.snapshot(run_id, "tenant-a", "owner")["conversation_id"] == 7

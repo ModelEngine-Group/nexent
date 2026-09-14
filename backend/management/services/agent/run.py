@@ -1509,7 +1509,9 @@ async def run_agent_stream(
     if agent_request.enable_hitl is True and not resume:
         from services.human_interaction.application import start_run
 
-        human_response = await start_run(agent_request, resolved_tenant_id, resolved_user_id, language)
+        human_response = await start_run(
+            agent_request, resolved_tenant_id, resolved_user_id, language, skip_user_save=skip_user_save,
+        )
         if human_response is not None:
             return human_response
 

@@ -12,6 +12,7 @@ from apps.conversation_share_app import router as conversation_share_router
 from apps.file_management_app import file_management_runtime_router as file_management_router
 from apps.skill_app import skill_creator_router
 from apps.human_interaction_app import router as human_interaction_router
+from apps.human_interaction_app import internal_router as internal_human_interaction_router
 from middleware.exception_handler import ExceptionHandlerMiddleware
 
 logger = logging.getLogger("runtime_app")
@@ -66,3 +67,4 @@ app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)
 app.include_router(human_interaction_router)
+app.include_router(internal_human_interaction_router)

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from http import HTTPStatus
@@ -172,6 +173,8 @@ async def northbound_agent_run_api(
             tenant_id=tenant_id,
             skip_user_save=True,
         )
+    except InteractionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
@@ -275,8 +278,19 @@ async def northbound_agent_stop_api(
 ):
     """Stop a northbound agent run inside the runtime service."""
     try:
-        user_id, _ = verify_internal_runtime_jwt(authorization)
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+        from consts.const import HITL_ENABLED
+        if HITL_ENABLED:
+            from services.human_interaction.application import get_service
+            service = get_service()
+            durable_id = await asyncio.to_thread(
+                service.repository.latest, tenant_id, user_id, conversation_id, active_only=True,
+            )
+            if durable_id:
+                await asyncio.to_thread(service.control, durable_id, tenant_id, user_id, "terminate")
         return stop_agent_tasks(conversation_id, user_id)
+    except InteractionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,

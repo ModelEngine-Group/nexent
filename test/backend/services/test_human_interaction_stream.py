@@ -78,3 +78,43 @@ async def test_closing_guidance_stream_closes_its_pending_iterator():
     with pytest.raises(asyncio.CancelledError):
         await pending
     assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_durable_event_ids_allow_replay_without_skipping_snapshot_backlog(monkeypatch):
+    from unittest.mock import MagicMock
+    from services.human_interaction import application
+
+    snapshot = {"run_id": "run", "conversation_id": 7, "status": "COMPLETED", "event_seq": 3}
+    service = MagicMock()
+    service.snapshot.return_value = snapshot
+    service.repository.events.return_value = [
+        {"seq": 2, "payload": {"type": "human_decision", "content": {"status": "DECIDED"}}},
+        {"seq": 3, "payload": {"chunk_cipher": "encrypted"}},
+    ]
+    service.cipher.open.return_value = 'data: {"type":"final_answer","content":"done"}\n\n'
+    monkeypatch.setattr(application, "require_enabled", lambda: service)
+    response = await application.stream_run("run", "tenant", "owner", after=1)
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert chunks[0].startswith("data: ")
+    assert not chunks[0].startswith("id:")
+    assert chunks[1].startswith("id: 2\ndata: ")
+    assert chunks[2] == 'id: 3\ndata: {"type":"final_answer","content":"done"}\n\n'
+    assert chunks[-1].startswith("data: ")
+    service.repository.events.assert_called_once_with("run", 1)
+    assert all(call.args == ("run", "tenant", "owner") for call in service.snapshot.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_future_event_cursor_is_rejected_before_streaming(monkeypatch):
+    from unittest.mock import MagicMock
+    from services.human_interaction import application
+    from services.human_interaction.models import InteractionError
+
+    service = MagicMock()
+    service.snapshot.return_value = {"event_seq": 3}
+    monkeypatch.setattr(application, "require_enabled", lambda: service)
+    with pytest.raises(InteractionError) as error:
+        await application.stream_run("run", "tenant", "owner", after=4)
+    assert error.value.status_code == 422
+    service.repository.events.assert_not_called()

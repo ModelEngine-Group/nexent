@@ -20,6 +20,7 @@ from apps.app_factory import create_app
 from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from .northbound_app import router as northbound_router
 from .northbound_knowledge_app import router as northbound_knowledge_router
+from .northbound_human_interaction_app import router as northbound_human_interaction_router
 
 
 class A2AServerSettings(BaseModel):
@@ -70,6 +71,7 @@ northbound_app = create_app(
 
 northbound_app.include_router(northbound_router)
 northbound_app.include_router(northbound_knowledge_router)
+northbound_app.include_router(northbound_human_interaction_router)
 
 
 # =============================================================================

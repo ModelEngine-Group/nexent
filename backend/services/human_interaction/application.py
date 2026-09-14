@@ -212,6 +212,8 @@ human_run_scheduler = LeaseScheduler(HumanRunLeaseStore(), execute_attempt, Sche
 async def stream_run(run_id, tenant_id, user_id, *, after=0):
     service = require_enabled()
     snapshot = await asyncio.to_thread(service.snapshot, run_id, tenant_id, user_id)
+    if after > snapshot["event_seq"]:
+        raise InteractionError("Event cursor is ahead of the run", 422)
 
     async def events():
         cursor = after
@@ -224,9 +226,9 @@ async def stream_run(run_id, tenant_id, user_id, *, after=0):
                 cursor = row["seq"]
                 payload = row["payload"]
                 if "chunk_cipher" in payload:
-                    yield service.cipher.open(payload["chunk_cipher"])
+                    yield f"id: {cursor}\n" + service.cipher.open(payload["chunk_cipher"])
                 else:
-                    yield "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+                    yield f"id: {cursor}\ndata: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
             if cursor >= current["event_seq"] and (current["status"] in TERMINAL_STATUSES or (
                     current["status"] == "WAITING_HUMAN" and not current["attempt_active"] and not rows)):
                 yield "data: " + json.dumps({"type": "human_run", "content": current}) + "\n\n"
@@ -241,7 +243,7 @@ async def stream_run(run_id, tenant_id, user_id, *, after=0):
     })
 
 
-async def start_run(request, tenant_id, user_id, language):
+async def start_run(request, tenant_id, user_id, language, *, skip_user_save=False):
     from agents.agent_run_manager import agent_run_manager
     from management.services.agent.run import save_messages
 
@@ -271,7 +273,8 @@ async def start_run(request, tenant_id, user_id, language):
             payload,
             ready=False,
         )
-        save_messages(request, "user", user_id, tenant_id)
+        if not skip_user_save:
+            save_messages(request, "user", user_id, tenant_id)
         await asyncio.to_thread(service.initialized, run_id, tenant_id, user_id, succeeded=True)
     except Exception:
         if run_id:

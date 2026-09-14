@@ -2735,3 +2735,27 @@ def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Agent icon retrieval error."
+
+
+@pytest.mark.parametrize("status", [404, 409, 410, 422, 503])
+def test_northbound_run_preserves_hitl_errors(mocker, status):
+    from services.human_interaction.models import InteractionError
+
+    mocker.patch("apps.agent_app.verify_internal_runtime_jwt", return_value=("owner", "tenant"))
+    mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock, side_effect=InteractionError("HITL", status))
+    response = runtime_client.post("/agent/internal/northbound/run", json={"query": "hello", "enable_hitl": True})
+    assert response.status_code == status
+
+
+def test_northbound_stop_terminates_waiting_durable_run(mocker):
+    mocker.patch("consts.const.HITL_ENABLED", True)
+    mocker.patch("apps.agent_app.verify_internal_runtime_jwt", return_value=("owner", "tenant"))
+    service = MagicMock()
+    service.repository.latest.return_value = "durable-run"
+    mocker.patch("services.human_interaction.application.get_service", return_value=service)
+    stop = mocker.patch("apps.agent_app.stop_agent_tasks", return_value={"message": "stopped"})
+    response = runtime_client.post("/agent/internal/northbound/stop/7")
+    assert response.status_code == 200
+    service.repository.latest.assert_called_once_with("tenant", "owner", 7, active_only=True)
+    service.control.assert_called_once_with("durable-run", "tenant", "owner", "terminate")
+    stop.assert_called_once_with(7, "owner")
