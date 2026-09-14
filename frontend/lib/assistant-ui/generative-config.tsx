@@ -1,0 +1,926 @@
+/**
+ * A2UI over AG-UI bridge — generative-ui renderer + A2UI surface state management.
+ *
+ * This module provides the **client-side bridge** between AG-UI ACTIVITY_SNAPSHOT
+ * events (emitted by the backend as ``ProcessType.A2UI`` SSE chunks) and
+ * assistant-ui's native generative UI rendering pipeline.
+ *
+ * Architecture:
+ *   Backend SSE (ACTIVITY_SNAPSHOT)
+ *     → mapChunkType("a2ui") → "text"
+ *     → messageTransformer.ts detects isAguiActivitySnapshot
+ *     → A2uiBridgeSurface receives operations
+ *     → applyA2uiOperations (reducer) → per-surface state
+ *     → convertSurfaceToUISpec (official converter) → { $type, ...props } spec tree
+ *     → renderGenerativeUI (or legacy A2UIRenderer fallback) → React nodes
+ *
+ * Custom A2UI components (Chart, ChoicePicker, Slider, DateTimeInput, List, Tabs)
+ * that are **not** in convertSurfaceToUISpec's hardcoded SUPPORTED_COMPONENTS set
+ * will appear as warnings. When warnings contain unknown components, the bridge
+ * automatically falls back to the legacy ``A2UIRenderer`` for that surface.
+ *
+ * Action channel: Button clicks currently route through the existing
+ * ``setGlobalA2UIActionHandler`` (which posts the action as a text query
+ * to the backend for a new run). The AG-UI ``$action`` → ``useAgUiSendA2uiAction``
+ * path is gated on a future runtime migration (see Layer 4 of the migration plan).
+ */
+
+"use client";
+
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  applyA2uiOperations,
+  convertSurfaceToUISpec,
+  type A2uiOperation,
+  type A2uiState,
+  type A2uiSurfaceState,
+  type A2uiOperationResult,
+} from "@assistant-ui/react-generative-ui/a2ui";
+import {
+  createActionRegistry,
+  defaultGenerativeUILibrary,
+  renderGenerativeUI,
+  type ActionRegistry,
+} from "@assistant-ui/react-generative-ui";
+import { customLibrary } from "./a2ui-toolkit";
+
+// ---------------------------------------------------------------------------
+// DataModel lookup — collected from updateDataModel operations BEFORE
+// preprocessComponents runs, so the Chart transformer can resolve Nexus
+// path bindings (xAxis: "quarter", series[].key → column in dataModel).
+// ---------------------------------------------------------------------------
+
+interface DataModelColumn {
+  /** columnName → array of values */
+  columns: Record<string, unknown[]>;
+  /** array of row objects */
+  rows: Record<string, unknown>[];
+}
+
+/** Module-level cache — set by preprocessOperations, read by Chart preprocess. */
+let _dataModelColumn: DataModelColumn | null = null;
+
+/**
+ * Walk every `updateDataModel` operation and build a column-oriented lookup.
+ * Nexus emits dataModel as a flat valueList where each row is a consecutive
+ * group of {key, value} entries. Row boundaries detected by first-key recurrence.
+ */
+function buildDataModelColumn(operations: unknown[]): DataModelColumn {
+  const columns: Record<string, unknown[]> = {};
+  const rows: Record<string, unknown>[] = [];
+
+  for (const op of operations) {
+    if (typeof op !== "object" || op === null) continue;
+    const contents = (op as Record<string, unknown>).updateDataModel
+      ?.contents;
+    if (!Array.isArray(contents)) continue;
+
+    for (const content of contents) {
+      const valueList = (content as Record<string, unknown>)
+        .valueList as Array<Record<string, unknown>> | undefined;
+      if (!Array.isArray(valueList) || valueList.length === 0) continue;
+
+      // Detect row structure: collect unique keys in order
+      const orderedKeys: string[] = [];
+      for (const item of valueList) {
+        const k = String(item.key ?? "");
+        if (k && !orderedKeys.includes(k)) orderedKeys.push(k);
+      }
+      if (orderedKeys.length === 0) continue;
+
+      let currentRow: Record<string, unknown> = {};
+      for (const item of valueList) {
+        const k = String(item.key ?? "");
+        if (!k) continue;
+        const v =
+          item.valueString !== undefined
+            ? item.valueString
+            : item.valueNumber !== undefined
+              ? item.valueNumber
+              : item.valueBoolean !== undefined
+                ? item.valueBoolean
+                : item.value;
+        // Row boundary: first key recurring
+        if (
+          k === orderedKeys[0] &&
+          Object.keys(currentRow).length > 0
+        ) {
+          rows.push(currentRow);
+          currentRow = {};
+        }
+        currentRow[k] = v;
+        if (!columns[k]) columns[k] = [];
+        columns[k].push(v);
+      }
+      if (Object.keys(currentRow).length > 0) rows.push(currentRow);
+    }
+  }
+
+  return { columns, rows };
+}
+
+// ---------------------------------------------------------------------------
+// Custom component preprocessor
+// ---------------------------------------------------------------------------
+
+const SUPPORTED_COMPONENTS = new Set([
+  "Text",
+  "Image",
+  "Row",
+  "Column",
+  "Card",
+  "Divider",
+  "Button",
+  "TextField",
+  "CheckBox",
+  "TodoList", // custom client-side interactive component (must NOT fall through to default)
+]);
+
+/** Mapping for components that have a direct 1:1 equivalent in the generative-ui library. */
+const DIRECT_COMPONENT_MAP: Record<string, string> = {
+  /** A2UI Container is functionally the same as Column. */
+  Container: "Column",
+};
+
+/**
+ * Walk a props object and unwrap any Nexus binding form
+ * { literalString: "xxx" } → "xxx", or { path: "/data.xxx" } → resolved value.
+ * Mutates and returns the object in-place.
+ */
+function unwrapLiteralStrings(obj: Record<string, unknown>): Record<string, unknown> {
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (
+      v !== null &&
+      typeof v === "object" &&
+      "literalString" in (v as Record<string, unknown>)
+    ) {
+      // eslint-disable-next-line no-console
+      console.debug("[unwrap]", key, "literalString →", (v as Record<string, unknown>).literalString);
+      obj[key] = (v as Record<string, unknown>).literalString;
+    } else if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      // Recurse into nested prop objects (e.g. Button.action.context values)
+      unwrapLiteralStrings(v as Record<string, unknown>);
+    } else if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) {
+        const item = v[i];
+        if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+          unwrapLiteralStrings(item as Record<string, unknown>);
+        }
+      }
+    }
+  }
+  return obj;
+}
+
+function preprocessComponent(
+  node: Record<string, unknown>,
+  nextId: () => string
+): Record<string, unknown> {
+  const component = String(node.component ?? "");
+
+  // Already supported — recurse into children, leave alone
+  if (SUPPORTED_COMPONENTS.has(component)) {
+    return node;
+  }
+
+  // Direct mapping
+  if (DIRECT_COMPONENT_MAP[component]) {
+    return { ...node, component: DIRECT_COMPONENT_MAP[component] };
+  }
+
+  // ---- Custom transformations ----
+  switch (component) {
+    case "Heading": {
+      // Heading → Text with bold/title semantics.
+      const level = Number((node.level as number) ?? 2);
+      const text = String((node.text as string) ?? "");
+      const prefix = level === 1 ? "# " : level === 2 ? "## " : "### ";
+      return {
+        ...node,
+        component: "Text",
+        text: `${prefix}${text}`,
+      };
+    }
+
+    case "Badge": {
+      // Badge → inline Text with color label.
+      const label = String((node.label as string) ?? "");
+      const color = String((node.color as string) ?? "gray");
+      return {
+        ...node,
+        component: "Text",
+        text: `【${label}】`,
+      };
+    }
+
+    case "Code": {
+      // Code → Text (markdown code block via triple backticks).
+      const code = String((node.code as string) ?? (node.text as string) ?? "");
+      const lang = String((node.language as string) ?? "");
+      return {
+        ...node,
+        component: "Text",
+        text: `\n\`\`\`${lang}\n${code}\n\`\`\`\n`,
+      };
+    }
+
+    case "DateTimeInput": {
+      // DateTimeInput → TextField with a date-oriented label.
+      const label = String((node.label as string) ?? "选择日期");
+      return {
+        ...node,
+        component: "TextField",
+        label,
+        placeholder: (node.placeholder as string) ?? "YYYY-MM-DD HH:mm",
+      };
+    }
+
+    case "Select": {
+      // Select → TextField showing current value (options visible in label).
+      const label = String((node.label as string) ?? "");
+      const options = Array.isArray(node.options)
+        ? (node.options as Array<Record<string, unknown>>)
+            .map((o) => String(o.label ?? o.value ?? ""))
+            .join(", ")
+        : "";
+      return {
+        ...node,
+        component: "TextField",
+        label: options ? `${label} (选项: ${options})` : label,
+      };
+    }
+
+    case "Slider": {
+      // Slider → Column(TextField + Button).  Button triggers reset/default.
+      const label = String((node.label as string) ?? "调节");
+      const min = String((node.min as number) ?? 0);
+      const max = String((node.max as number) ?? 100);
+      const value = String((node.value as number) ?? "");
+      const id = String((node.id as string) ?? `slider-${nextId()}`);
+      const textId = `${id}-value`;
+      const btnId = `${id}-reset`;
+      return {
+        id,
+        component: "Column",
+        children: [textId, btnId],
+        // Injected children — caller must merge these into the flat list
+        __preprocess_children: [
+          {
+            id: textId,
+            component: "TextField",
+            label: `${label} (${min}–${max})`,
+            value,
+          },
+          {
+            id: btnId,
+            component: "Button",
+            label: "重置",
+          },
+        ],
+      } as Record<string, unknown>;
+    }
+
+    case "ChoicePicker": {
+      // ChoicePicker → Column of CheckBox items, one per option.
+      const label = String((node.label as string) ?? "选择");
+      const options = Array.isArray(node.options)
+        ? (node.options as Array<Record<string, unknown>>)
+        : [];
+      const id = String((node.id as string) ?? `picker-${nextId()}`);
+      const childIds: string[] = [];
+      const childNodes: Record<string, unknown>[] = [];
+      for (let i = 0; i < options.length; i++) {
+        const opt = options[i];
+        const childId = `${id}-opt-${i}`;
+        childIds.push(childId);
+        childNodes.push({
+          id: childId,
+          component: "CheckBox",
+          label: String(opt.label ?? opt.value ?? ""),
+        });
+      }
+      // Header text + checkbox column
+      const headerId = `${id}-hdr`;
+      const headerNode: Record<string, unknown> = {
+        id: headerId,
+        component: "Text",
+        text: `**${label}**`,
+      };
+      return {
+        id,
+        component: "Column",
+        children: [headerId, ...childIds],
+        __preprocess_children: [headerNode, ...childNodes],
+      } as Record<string, unknown>;
+    }
+
+    case "List": {
+      // List → Column of Card items or Text items, one per list entry.
+      const id = String((node.id as string) ?? `list-${nextId()}`);
+      const items = Array.isArray(node.items) ? (node.items as unknown[]) : [];
+      const childIds: string[] = [];
+      const childNodes: Record<string, unknown>[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const childId = `${id}-item-${i}`;
+        childIds.push(childId);
+        // Each list item becomes a Text bullet with the item stringified
+        const textContent =
+          typeof item === "string"
+            ? item
+            : typeof item === "number" || typeof item === "boolean"
+              ? String(item)
+              : JSON.stringify(item);
+        childNodes.push({
+          id: childId,
+          component: "Text",
+          text: `• ${textContent}`,
+        });
+      }
+      return {
+        id,
+        component: "Column",
+        children: childIds,
+        __preprocess_children: childNodes,
+      } as Record<string, unknown>;
+    }
+
+    case "Tabs": {
+      // Tabs → Button row (Row of Buttons) + Column of Tab contents.
+      const id = String((node.id as string) ?? `tabs-${nextId()}`);
+      const tabs = Array.isArray(node.tabs)
+        ? (node.tabs as Array<Record<string, unknown>>)
+        : [];
+      const headerIds: string[] = [];
+      const headerNodes: Record<string, unknown>[] = [];
+      for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
+        const btnId = `${id}-tab-${i}`;
+        headerIds.push(btnId);
+        headerNodes.push({
+          id: btnId,
+          component: "Button",
+          label: String(tab.label ?? tab.title ?? `Tab ${i + 1}`),
+        });
+      }
+      return {
+        id,
+        component: "Column",
+        children: headerIds,
+        __preprocess_children: headerNodes,
+      } as Record<string, unknown>;
+    }
+
+    case "Chart": {
+      // Nexus Chart props → assistant-ui Chart props.
+      // assistant-ui expects: { variant, data, series }
+      // Nexus model emits:     { chartType, xAxis: fieldName, series: [{key: fieldName, ...}] }
+      const props = (node.props as Record<string, unknown>) ?? {};
+
+      // Resolve a literalString binding or plain value
+      const resolveBinding = (v: unknown): unknown => {
+        if (
+          v !== null &&
+          typeof v === "object" &&
+          "literalString" in (v as Record<string, unknown>)
+        ) {
+          return (v as Record<string, unknown>).literalString;
+        }
+        return v;
+      };
+
+      const chartType = String(
+        resolveBinding(props.chartType ?? node.chartType) ?? "line"
+      );
+      // Map Nexus chartType → assistant-ui variant (same names mostly)
+      const variantMap: Record<string, string> = {
+        bar: "bar",
+        line: "line",
+        pie: "pie",
+        column: "bar",
+        area: "line",
+      };
+      const variant = variantMap[chartType] ?? chartType;
+
+      // Resolve data: prefer inline props.data, else build from dataModel
+      let data: unknown[] = [];
+      const inlineData = Array.isArray(props.data)
+        ? (props.data as unknown[])
+        : Array.isArray(node.chartData)
+          ? (node.chartData as unknown[])
+          : [];
+      if (inlineData.length > 0) {
+        data = inlineData;
+      } else if (_dataModelColumn) {
+        // Build from dataModel rows — map xAxis + series keys to columns
+        const rows = _dataModelColumn.rows;
+        const xAxisField =
+          typeof props.xAxis === "string" ? props.xAxis : undefined;
+        const seriesArr = Array.isArray(props.series)
+          ? (props.series as Array<Record<string, unknown>>)
+          : [];
+
+        if (xAxisField && rows.length > 0) {
+          data = rows.map((row) => {
+            // Pivot row: Nexus uses key→value; assistant-ui Chart needs column key→value
+            const out: Record<string, unknown> = {};
+            out[xAxisField] = row[xAxisField];
+            for (const s of seriesArr) {
+              const k = String(s.key ?? "");
+              if (k) out[k] = row[k];
+            }
+            return out;
+          });
+        } else {
+          // Fallback: use all dataModel rows as-is
+          data = rows;
+        }
+      }
+
+      // Strip raw props assistant-ui won't understand, keep data-friendly ones
+      const transformedProps: Record<string, unknown> = {
+        ...props,
+        variant,
+        data,
+      };
+      // Remove Nexus-specific props that would confuse assistant-ui
+      delete transformedProps.chartType;
+      delete transformedProps.xAxis;
+      // Keep series as-is — assistant-ui understands it
+
+      return { ...node, props: transformedProps };
+    }
+
+    case "Table": {
+      // Table → Card with a markdown data table rendered as Text.
+      const id = String((node.id as string) ?? `table-${nextId()}`);
+      const props = (node.props as Record<string, unknown>) ?? {};
+      const rawTitle = props.title ?? node.title;
+      const title =
+        typeof rawTitle === "object" && rawTitle !== null && "literalString" in rawTitle
+          ? String((rawTitle as Record<string, unknown>).literalString ?? "")
+          : String(rawTitle ?? "表格");
+      const markdownText = buildDataMarkdown(node, "Table");
+      const contentId = `${id}-content`;
+      return {
+        id,
+        component: "Card",
+        title,
+        children: [contentId],
+        __preprocess_children: [
+          {
+            id: contentId,
+            component: "Text",
+            text: markdownText,
+          },
+        ],
+      } as Record<string, unknown>;
+    }
+
+    default: {
+      // Completely unknown — best-effort: preserve node but wrap in
+      // a Card so at least the data surfaces as text.
+      const id = String((node.id as string) ?? `unknown-${nextId()}`);
+      return {
+        id,
+        component: "Card",
+        title: `组件: ${component}`,
+        children: [],
+      };
+    }
+  }
+}
+
+/** Convert a Table node's structured data into a markdown table string. */
+function buildDataMarkdown(
+  node: Record<string, unknown>,
+  _kind: "Table" | "Chart"
+): string {
+  // AG-UI flat format: all visual properties live in node.props.
+  const props = (node.props as Record<string, unknown>) ?? {};
+
+  // Resolve a value that may be a literalString binding object or plain value
+  const resolveBinding = (v: unknown): unknown => {
+    if (
+      v !== null &&
+      typeof v === "object" &&
+      "literalString" in (v as Record<string, unknown>)
+    ) {
+      return (v as Record<string, unknown>).literalString;
+    }
+    return v;
+  };
+
+  const headers = Array.isArray(props.headers)
+    ? (props.headers as string[])
+    : props.headers !== undefined
+      ? [String(resolveBinding(props.headers))]
+      : [];
+  const rows = Array.isArray(props.rows)
+    ? (props.rows as Array<unknown[]>)
+    : [];
+  if (headers.length === 0 && rows.length === 0) {
+    return "_暂无数据_";
+  }
+  const esc = (v: unknown) => String(v).replace(/\|/g, "\\|");
+  const headerLine = headers.map(esc).join(" | ");
+  const sepLine = headers.map(() => "---").join(" | ");
+  const rowLines = rows.map((r) =>
+    (Array.isArray(r) ? r : [r]).map(esc).join(" | ")
+  );
+  return `\n| ${headerLine} |\n| ${sepLine} |\n${rowLines
+    .map((r) => `| ${r} |`)
+    .join("\n")}\n`;
+}
+
+/**
+ * Preprocess the components array of an `updateComponents` operation.
+ * Mutates the array in place and also returns it for convenience.
+ * Injected child nodes (from composite transformations like Slider → Column + TextField + Button)
+ * are appended to the components array.
+ */
+export function preprocessComponents(
+  components: unknown[]
+): unknown[] {
+  if (!Array.isArray(components)) return components;
+
+  let idCounter = 0;
+  const nextId = () => `__pp_${++idCounter}`;
+
+  const out: unknown[] = [];
+  const injected: Record<string, unknown>[] = [];
+
+  for (const raw of components) {
+    if (typeof raw !== "object" || raw === null) {
+      out.push(raw);
+      continue;
+    }
+    const node = raw as Record<string, unknown>;
+    const preprocessed = preprocessComponent(node, nextId);
+    // Unwrap Nexus literalString bindings in all returned nodes so AG-UI
+    // convertSurfaceToUISpec sees plain values, not {literalString: "..."}.
+    const props = preprocessed.props as Record<string, unknown> | undefined;
+    if (props && typeof props === "object") {
+      unwrapLiteralStrings(props);
+    }
+    out.push(preprocessed);
+
+    // Composite components (Slider, ChoicePicker, List, Tabs, Table, Chart)
+    // carry __preprocess_children that must be flattened into the array.
+    if (
+      preprocessed.__preprocess_children &&
+      Array.isArray(preprocessed.__preprocess_children)
+    ) {
+      injected.push(
+        ...(preprocessed.__preprocess_children as Record<string, unknown>[])
+      );
+      delete preprocessed.__preprocess_children;
+    }
+  }
+
+  // Recurse into the injected children — they might also be composite
+  if (injected.length > 0) {
+    // Run preprocessing recursively on injected nodes, appending any deeper
+    // injections.  Repeat until no new injections appear.
+    let batch = injected;
+    while (batch.length > 0) {
+      const subOut: Record<string, unknown>[] = [];
+      const subInjected: Record<string, unknown>[] = [];
+      for (const raw of batch) {
+        const node = raw as Record<string, unknown>;
+        const pp = preprocessComponent(node, nextId);
+        const ppProps = pp.props as Record<string, unknown> | undefined;
+        if (ppProps && typeof ppProps === "object") {
+          unwrapLiteralStrings(ppProps);
+        }
+        subOut.push(pp);
+        if (
+          pp.__preprocess_children &&
+          Array.isArray(pp.__preprocess_children)
+        ) {
+          subInjected.push(
+            ...(pp.__preprocess_children as Record<string, unknown>[])
+          );
+          delete pp.__preprocess_children;
+        }
+      }
+      out.push(...subOut);
+      batch = subInjected;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Run preprocessComponents on every `updateComponents` operation in an
+ * operations array.  Operations with other types (createSurface / updateDataModel /
+ * deleteSurface) are left untouched.
+ * Returns a NEW operations array — does not mutate the input.
+ */
+export function preprocessOperations(
+  operations: unknown[]
+): unknown[] {
+  // Collect dataModel FIRST — Chart preprocess needs it to resolve Nexus
+  // path bindings (xAxis + series[].key → columns in dataModel).
+  _dataModelColumn = buildDataModelColumn(operations);
+
+  const result = operations.map((op) => {
+    if (typeof op !== "object" || op === null) return op;
+    const o = op as Record<string, unknown>;
+    const uc = o.updateComponents;
+    if (uc && typeof uc === "object") {
+      const ucObj = uc as Record<string, unknown>;
+      if (Array.isArray(ucObj.components)) {
+        return {
+          ...o,
+          updateComponents: {
+            ...ucObj,
+            components: preprocessComponents(ucObj.components),
+          },
+        };
+      }
+    }
+    return op;
+  });
+
+  // Clear after use to avoid stale data across unrelated surfaces
+  _dataModelColumn = null;
+  return result;
+}
+
+/** Type guard: is a decoded SSE content payload an AG-UI ACTIVITY_SNAPSHOT? */
+export function isActivitySnapshot(obj: unknown): obj is {
+  type: "ACTIVITY_SNAPSHOT";
+  messageId: string;
+  activityType: string;
+  replace: boolean;
+  content: { a2ui_operations: A2uiOperation[] };
+} {
+  if (typeof obj !== "object" || obj === null) return false;
+  const o = obj as Record<string, unknown>;
+  return (
+    o.type === "ACTIVITY_SNAPSHOT" &&
+    o.activityType === "a2ui-surface" &&
+    typeof o.content === "object" &&
+    o.content !== null &&
+    Array.isArray((o.content as Record<string, unknown>).a2ui_operations)
+  );
+}
+
+/** Extract A2UI operations from an ACTIVITY_SNAPSHOT payload (string or object). */
+export function extractOperations(
+  payload: unknown
+): A2uiOperation[] | null {
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  }
+  if (isActivitySnapshot(payload)) {
+    return payload.content.a2ui_operations;
+  }
+  // Tolerate raw { a2ui_operations: [...] } shape too
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    Array.isArray((payload as Record<string, unknown>).a2ui_operations)
+  ) {
+    return (payload as Record<string, unknown>).a2ui_operations as A2uiOperation[];
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Surface state reducer hook
+// ---------------------------------------------------------------------------
+
+export function useA2uiSurfaceState() {
+  // useRef survives closure captures; forceUpdate counter drives re-renders.
+  // ACTIVITY_SNAPSHOT operations are replace=true (full snapshots), so apply is idempotent.
+  const stateRef = React.useRef<A2uiState>(new Map());
+  const [, forceUpdate] = useState(0);
+
+  const apply = useCallback((operations: unknown[]) => {
+    const pped = preprocessOperations(operations);
+    const result: A2uiOperationResult = applyA2uiOperations(stateRef.current, pped);
+    stateRef.current = result.state;
+    forceUpdate((n) => n + 1);
+  }, []);
+
+  const reset = useCallback(() => {
+    stateRef.current = new Map();
+    forceUpdate((n) => n + 1);
+  }, []);
+
+  return { state: stateRef.current, apply, reset };
+}
+
+// ---------------------------------------------------------------------------
+// Surface → generative-ui spec conversion
+// ---------------------------------------------------------------------------
+
+export interface ConvertedSurface {
+  spec: unknown | null;
+  warnings: string[];
+  /** True if any custom (non-standard) component was skipped during conversion. */
+  hasCustomComponents: boolean;
+}
+
+export function convertSurface(
+  surface: A2uiSurfaceState | undefined
+): ConvertedSurface {
+  if (!surface) {
+    return { spec: null, warnings: ["surface not found"], hasCustomComponents: false };
+  }
+  const result = convertSurfaceToUISpec(surface);
+  // DEBUG: log warnings and spec root — browser console.log is always visible
+  // eslint-disable-next-line no-console
+  console.log("[convertSurfaceToUISpec]",
+    "warnings:", result.warnings.slice(0, 10),
+    "componentCount:", Object.keys(surface.components || {}).length,
+    "rootType:", (surface.components as any)?.root?.component,
+    "rootSpec:", result.spec ? { $type: (result.spec as any).$type, $$typeof: (result.spec as any).$$typeof } : null,
+  );
+  const unknownWarnings = result.warnings.filter((w) =>
+    w.includes("Unknown A2UI component") || w.includes("was skipped")
+  );
+  return {
+    spec: result.spec,
+    warnings: result.warnings,
+    hasCustomComponents: unknownWarnings.length > 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Bridge surface component
+// ---------------------------------------------------------------------------
+
+export interface A2uiBridgeSurfaceProps {
+  /** AG-UI ACTIVITY_SNAPSHOT content — raw JSON string or parsed object. */
+  snapshot: unknown;
+  /** Fallback renderer for surfaces with custom (non-standard) components. */
+  children?: React.ReactNode;
+  className?: string;
+  /**
+   * Optional handler for A2UI button actions. When provided, "a2ui:action"
+   * events (from convertSurfaceToUISpec) are dispatched through this handler.
+   * Pass `(action) => sendA2uiAction(action)` from `useAgUiSendA2uiAction()`
+   * when inside an AG-UI runtime context. If omitted, interactive components
+   * render but do nothing on click.
+   */
+  onAction?: (action: Record<string, unknown>) => void;
+}
+
+/**
+ * Renders A2UI content through assistant-ui's native generative UI path.
+ *
+ * Flow:
+ *  1. Parse snapshot → extract operations
+ *  2. applyA2uiOperations → accumulate surface state
+ *  3. convertSurfaceToUISpec → spec tree + warnings
+ *  4a. If no unknown components → renderGenerativeUI(spec, library)
+ *  4b. If unknown components (Chart, Slider, etc.) → render children (legacy A2UIRenderer)
+ */
+export function A2uiBridgeSurface({
+  snapshot,
+  children,
+  className = "",
+  onAction,
+}: A2uiBridgeSurfaceProps) {
+  const rawOps = useMemo(() => extractOperations(snapshot), [snapshot]);
+  // Preprocess before applying so Nexus binding syntax
+  // ({literalString: "xxx"}) is unwrapped and composite components
+  // (Slider, Table, Chart, etc.) are expanded into supported primitives.
+  const ops = useMemo(() => {
+    if (!rawOps) return null;
+    const result = preprocessOperations(rawOps) as A2uiOperation[];
+    // eslint-disable-next-line no-console
+    console.debug("[A2uiBridgeSurface] preprocess done, ops count:", result.length,
+      "first components:", JSON.stringify(
+        (result[0] as any)?.updateComponents?.components?.map(
+          (c: any) => ({ id: c.id, component: c.component, props: c.props })
+        ) ?? null
+      )
+    );
+    return result;
+  }, [rawOps]);
+  const { state, apply } = useA2uiSurfaceState();
+
+  // Apply new ops whenever they arrive
+  useEffect(() => {
+    if (!ops || ops.length === 0) return;
+    apply(ops);
+  }, [ops, apply]);
+
+  // Find the latest surface
+  const surfaceId = useMemo(() => {
+    if (!ops || ops.length === 0) return null;
+    // Last operation's surfaceId wins
+    for (let i = ops.length - 1; i >= 0; i--) {
+      const op = ops[i] as Record<string, unknown>;
+      const inner =
+        op.createSurface ||
+        op.updateComponents ||
+        op.updateDataModel ||
+        op.deleteSurface;
+      if (inner && typeof inner === "object" && "surfaceId" in inner) {
+        return (inner as Record<string, unknown>).surfaceId as string;
+      }
+    }
+    return null;
+  }, [ops]);
+
+  // Convert
+  const converted = useMemo<ConvertedSurface>(() => {
+    if (!surfaceId) return { spec: null, warnings: [], hasCustomComponents: false };
+    return convertSurface(state.get(surfaceId));
+  }, [state, surfaceId]);
+
+  // Action registry: routes "a2ui:action" (from convertSurfaceToUISpec) through
+  // the provided onAction handler. If no handler, no dispatch is wired up.
+  const actionRegistry: ActionRegistry | undefined = useMemo(() => {
+    if (!onAction) return undefined;
+
+    // Action names that MUST be handled client-side — never forward to backend.
+    // These correspond to model-emitted UI patterns that should be interactive
+    // without triggering new chat messages (e.g. model uses List+Button instead
+    // of TodoList).  Prefer the model emitting TodoList; this is a safety net.
+    const CLIENT_ONLY_ACTIONS = new Set<string>([
+      "add_todo",
+      "delete_todo",
+      "toggle_todo",
+      "mark_done",
+      "mark_undone",
+      "complete_task",
+      "add_task",
+      "delete_task",
+    ]);
+
+    return createActionRegistry({
+      "a2ui:action": ({ payload }) => {
+        // payload = { type: "a2ui:action", name, surfaceId, sourceComponentId, context? }
+        const actionName = String(payload.name ?? "");
+        // Block client-only actions — do NOT forward to backend (no new chat)
+        if (CLIENT_ONLY_ACTIONS.has(actionName)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[A2uiBridgeSurface] Blocking client-only action "${actionName}" — ` +
+              `this action must not generate a new chat message. Consider using ` +
+              `the TodoList component instead of List+Button+action for interactive lists.`
+          );
+          return;
+        }
+        // Convert to generic action shape and forward to caller.
+        const action: Record<string, unknown> = {
+          label: actionName,
+          name: actionName,
+        };
+        if (payload.context !== undefined) {
+          action.context = payload.context;
+        }
+        onAction(action);
+      },
+    });
+  }, [onAction]);
+
+  if (!ops || ops.length === 0) {
+    return <div className={className}>{children}</div>;
+  }
+
+  // Fallback path: surface uses custom components not supported by native converter
+  if (converted.hasCustomComponents) {
+    // Log warnings once (dev only)
+    if (process.env.NODE_ENV === "development") {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[A2uiBridgeSurface] falling back to legacy renderer due to:",
+        converted.warnings
+      );
+    }
+    return <div className={className}>{children}</div>;
+  }
+
+  if (!converted.spec) {
+    return <div className={className}>{children}</div>;
+  }
+
+  // Native generative-ui render path, optionally with wired action dispatch
+  return (
+    <div className={`a2ui-generative-surface ${className}`}>
+      {renderGenerativeUI(converted.spec, customLibrary, actionRegistry
+        ? { status: "done", dispatch: actionRegistry.dispatch.bind(actionRegistry) }
+        : { status: "done" })}
+    </div>
+  );
+}
+
+

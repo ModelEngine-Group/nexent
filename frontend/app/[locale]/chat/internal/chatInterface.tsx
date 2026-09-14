@@ -38,6 +38,7 @@ import { FilePreview } from "@/types/chat";
 import { ChatHeader } from "../components/chatHeader";
 import { ChatRightPanel } from "../components/chatRightPanel";
 import { ChatStreamMain } from "../streaming/chatStreamMain";
+import { setGlobalA2UIActionHandler, type A2UIAction } from "@/lib/a2ui";
 
 import {
   preprocessAttachments,
@@ -155,6 +156,7 @@ function getSelectableAgentModels(
 
 export function ChatInterface() {
   const [input, setInput] = useState("");
+  const handleSendRef = useRef<() => Promise<void>>(async () => {});
   // Replace the original messages state
   const [sessionMessages, setSessionMessages] = useState<{
     [conversationId: number]: ChatMessageType[];
@@ -1131,6 +1133,34 @@ export function ChatInterface() {
       }
     }
   };
+
+  handleSendRef.current = handleSend;
+
+  // Set global A2UI action handler for form submission from A2UI cards
+  useEffect(() => {
+    setGlobalA2UIActionHandler((action: A2UIAction) => {
+      if (action.type === 'submit' || action.type === 'click') {
+        const formData = action.path ? (() => { try { return JSON.parse(action.path); } catch { return {}; } })() : {};
+        const formEntries = Object.entries(formData as Record<string, unknown>);
+        const actionLabel = action.label || '';
+        const actionValue = typeof action.value === 'string' ? action.value : '';
+
+        const lines = [`[用户操作: ${actionLabel}]`];
+        if (actionValue) {
+          lines.push(`操作名称: ${actionValue}`);
+        }
+        if (formEntries.length > 0) {
+          lines.push('表单数据:');
+          formEntries.forEach(([k, v]) => lines.push(`  ${k}: ${v}`));
+        }
+        const messageText = lines.join('\n');
+
+        setInput(messageText);
+        setTimeout(() => handleSendRef.current(), 100);
+      }
+    });
+    return () => setGlobalA2UIActionHandler(null);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

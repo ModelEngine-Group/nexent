@@ -1,0 +1,405 @@
+"""Convert A2UI JSON content to AG-UI ACTIVITY_SNAPSHOT wire format.
+
+This module bridges the A2UI protocol (agent-emitted beginRendering /
+surfaceUpdate / dataModelUpdate / deleteSurface messages) with the AG-UI
+wire contract that assistant-ui's JSONGenerativeUI expects on the stream:
+
+    {
+        "type": "ACTIVITY_SNAPSHOT",
+        "messageId": "a2ui-surface-call_<surfaceId>",
+        "activityType": "a2ui-surface",
+        "replace": true,
+        "content": { "a2ui_operations": [...] }
+    }
+
+The conversion is lossless for v0.9 A2UI surfaces. Components remain in
+their A2UI adjacency-list form (id + component + children references);
+assistant-ui's useAgUiRuntime performs the A2UI -> generative-ui
+conversion on the client side.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import uuid
+from typing import Any
+
+from .constants import (
+    A2UI_CLOSE_TAG,
+    A2UI_MESSAGE_KEYS,
+    A2UI_OPEN_TAG,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def extract_surface_id(operations: list[dict[str, Any]]) -> str:
+    """Deterministically pick a surface id from the operations list.
+
+    Prefers explicit surfaceId fields; falls back to a uuid4-derived id.
+    """
+    for op in operations:
+        if not isinstance(op, dict):
+            continue
+        for key in ("createSurface", "updateSurface", "updateComponents",
+                    "updateDataModel", "deleteSurface"):
+            target = op.get(key)
+            if isinstance(target, dict):
+                sid = target.get("surfaceId")
+                if isinstance(sid, str) and sid:
+                    return sid
+    return uuid.uuid4().hex[:12]
+
+
+def _strip_tags(text: str) -> str:
+    """Remove <a2ui-json> and </a2ui-json> wrappers if present."""
+    if A2UI_OPEN_TAG in text:
+        text = text[text.find(A2UI_OPEN_TAG) + len(A2UI_OPEN_TAG):]
+    if A2UI_CLOSE_TAG in text:
+        text = text[:text.find(A2UI_CLOSE_TAG)]
+    return text.strip()
+
+
+def parse_a2ui_content(content: str) -> list[dict[str, Any]] | None:
+    """Parse raw content (text, tagged block, JSON, or JSONL) into A2UI messages.
+
+    Supports JSONL, multi-line JSON objects, JSON array, and single JSON object.
+    Uses json.JSONDecoder().raw_decode() for robust multi-object extraction,
+    matching the strategy used by the validator so both paths give the same result.
+
+    Returns None when content is not parseable A2UI at all.
+    """
+    text = _strip_tags(content) if content else ""
+    if not text:
+        return None
+
+    # 1. Try raw_decode for multiple concatenated JSON objects (most common for A2UI)
+    decoder = json.JSONDecoder()
+    messages: list[dict[str, Any]] = []
+    idx = 0
+    text_len = len(text)
+
+    while idx < text_len:
+        while idx < text_len and text[idx] in " \t\n\r":
+            idx += 1
+        if idx >= text_len:
+            break
+        try:
+            obj, end_idx = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            break
+        if isinstance(obj, dict) and A2UI_MESSAGE_KEYS.intersection(obj):
+            messages.append(obj)
+        elif isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, dict) and A2UI_MESSAGE_KEYS.intersection(item):
+                    messages.append(item)
+        idx = end_idx
+
+    if messages:
+        return messages
+
+    # 2. Fallback: try single JSON object or array
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict) and A2UI_MESSAGE_KEYS.intersection(item)] or None
+    if isinstance(data, dict) and A2UI_MESSAGE_KEYS.intersection(data):
+        return [data]
+    return None
+
+
+def _ensure_v_prefix(version: str) -> str:
+    """Normalize version strings: '0.9' → 'v0.9', 'v0.9' → 'v0.9'."""
+    if not version:
+        return "v0.9"
+    return version if version.startswith("v") else f"v{version}"
+
+
+def a2ui_messages_to_operations(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Convert A2UI protocol messages to AG-UI a2ui_operations.
+
+    Handles two transformations that assistant-ui's converter expects:
+
+    1. **Component flatten** — Nexus nests the full tree inline under
+       ``component``; AG-UI reducer requires a flat list of every node
+       with ``component`` as the type *string*, ``props`` at the sibling
+       level, and ``children`` as ID references.
+    2. **Binding unwrap** — Nexus values use
+       ``{"literalString": "..."}`` / ``{"valueString": "..."}`` wrappers;
+       AG-UI props expect the plain value.  Runtime ``{"path": "..."}``
+       bindings are preserved unchanged so the frontend can resolve them
+       at click time.
+    """
+    operations: list[dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        version = _ensure_v_prefix(str(msg.get("version", "0.9")))
+
+        if "beginRendering" in msg:
+            begin = msg["beginRendering"]
+            if isinstance(begin, dict):
+                schema = begin.get("schema", {})
+                schema_version = version
+                if isinstance(schema, dict):
+                    raw = schema.get("version", "0.9")
+                    schema_version = _ensure_v_prefix(str(raw))
+                operations.append({
+                    "version": schema_version,
+                    "createSurface": {
+                        "surfaceId": begin.get("surfaceId", ""),
+                    },
+                })
+
+        elif "surfaceUpdate" in msg:
+            surface = msg["surfaceUpdate"]
+            if isinstance(surface, dict):
+                components = surface.get("components")
+                flat_components = _flatten_and_resolve_components(components)
+                if flat_components is not None:
+                    # DEBUG: confirm SDK-side flatten+resolve is running
+                    if flat_components:
+                        sample_props = flat_components[0].get("props", {}) if flat_components else {}
+                        logger.info(
+                            "[A2UI SDK] flatten+resolve produced %d components. "
+                            "first_props=%s (literalString unwrapped: %s)",
+                            len(flat_components),
+                            sample_props,
+                            not any(
+                                isinstance(v, dict) and set(v.keys()) <= _LITERAL_BINDING_KEYS
+                                for v in sample_props.values()
+                            ),
+                        )
+                    operations.append({
+                        "version": version,
+                        "updateComponents": {
+                            "surfaceId": surface.get("surfaceId", ""),
+                            "components": flat_components,
+                        },
+                    })
+                elif components is not None:
+                    operations.append({
+                        "version": version,
+                        "updateComponents": {
+                            "surfaceId": surface.get("surfaceId", ""),
+                            "components": components,
+                        },
+                    })
+                else:
+                    operations.append({
+                        "version": version,
+                        "updateSurface": surface,
+                    })
+
+        elif "dataModelUpdate" in msg:
+            data = msg["dataModelUpdate"]
+            if isinstance(data, dict):
+                operations.append({
+                    "version": version,
+                    "updateDataModel": {
+                        "surfaceId": data.get("surfaceId", ""),
+                        "path": data.get("path", "/"),
+                        "contents": data.get("contents", []),
+                    },
+                })
+
+        elif "deleteSurface" in msg:
+            delete = msg["deleteSurface"]
+            if isinstance(delete, dict):
+                operations.append({
+                    "version": version,
+                    "deleteSurface": {
+                        "surfaceId": delete.get("surfaceId", ""),
+                    },
+                })
+
+    return operations
+
+
+# ---------------------------------------------------------------------------
+# Nexus component flatten + binding resolution (SDK-side, keeps backend path
+# redundant-safe — if the backend encoder already ran these, re-running on
+# AG-UI-flat input is a no-op).
+# ---------------------------------------------------------------------------
+
+_LITERAL_BINDING_KEYS = frozenset({
+    "literalString", "valueString", "valueNumber", "valueBoolean",
+})
+
+
+def _resolve_nexus_bindings(obj: Any) -> Any:
+    """Walk a dict/list and unfold Nexus literal-value bindings.
+
+    ``{"text": {"literalString": "hello"}}`` → ``{"text": "hello"}``
+    ``{"user": {"path": "/form/user"}}``    → preserved as-is
+    """
+    if isinstance(obj, dict):
+        for key in list(obj.keys()):
+            val = obj[key]
+            if isinstance(val, dict):
+                literal_key = next(
+                    (lk for lk in _LITERAL_BINDING_KEYS
+                     if lk in val and len(val) == 1),
+                    None,
+                )
+                if literal_key is not None:
+                    obj[key] = val[literal_key]
+                elif "path" in val and len(val) == 1:
+                    pass  # Runtime binding — leave untouched
+                else:
+                    _resolve_nexus_bindings(val)
+            elif isinstance(val, list):
+                for i, item in enumerate(val):
+                    obj[key][i] = _resolve_nexus_bindings(item)
+        return obj
+    if isinstance(obj, list):
+        return [_resolve_nexus_bindings(item) for item in obj]
+    return obj
+
+
+def _flatten_and_resolve_components(
+    components: Any,
+) -> list[dict[str, Any]] | None:
+    """Flatten a Nexus nested component list and resolve bindings.
+
+    Returns ``None`` when ``components`` is already a list of flat AG-UI
+    entries (i.e. every entry has ``component`` as a string, not a dict).
+    """
+    if not isinstance(components, list):
+        return None
+
+    collected: list[dict[str, Any]] = []
+
+    def _walk(comp: Any) -> str | None:
+        if not isinstance(comp, dict):
+            return None
+        node_id = comp.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            return None
+
+        inner = comp.get("component")
+        if isinstance(inner, dict):
+            flat_node: dict[str, Any] = {"id": node_id}
+            if "type" in inner:
+                flat_node["component"] = inner["type"]
+            props = inner.get("props")
+            if isinstance(props, dict):
+                flat_node["props"] = _resolve_nexus_bindings(props)
+            # Preserve any other top-level Nexus fields
+            for k, v in comp.items():
+                if k not in ("id", "component"):
+                    flat_node[k] = v
+        else:
+            # Already flat (AG-UI format) — still process bindings + children
+            flat_node: dict[str, Any] = {
+                k: _resolve_nexus_bindings(v) if isinstance(v, (dict, list)) else v
+                for k, v in comp.items()
+            }
+
+        # Extract child refs from Nexus props into top-level children
+        props = flat_node.get("props", {})
+        if isinstance(props, dict):
+            child_ids: list[str] = []
+            singular_child = props.get("child")
+            if isinstance(singular_child, str):
+                child_ids.append(singular_child)
+                props.pop("child", None)
+            elif isinstance(singular_child, dict):
+                child_id = _walk(singular_child)
+                if child_id:
+                    child_ids.append(child_id)
+                props.pop("child", None)
+
+            children_raw = props.get("children")
+            if children_raw is not None:
+                props.pop("children", None)
+                if isinstance(children_raw, dict):
+                    explicit = children_raw.get("explicitList")
+                    if isinstance(explicit, list):
+                        for item in explicit:
+                            if isinstance(item, str):
+                                child_ids.append(item)
+                            elif isinstance(item, dict):
+                                child_id = _walk(item)
+                                if child_id:
+                                    child_ids.append(child_id)
+                elif isinstance(children_raw, list):
+                    for item in children_raw:
+                        if isinstance(item, str):
+                            child_ids.append(item)
+                        elif isinstance(item, dict):
+                            child_id = _walk(item)
+                            if child_id:
+                                child_ids.append(child_id)
+
+            if child_ids:
+                flat_node["children"] = child_ids
+
+        collected.append(flat_node)
+        return node_id
+
+    # Detect: all entries already flat? (component is a string)
+    if all(
+        isinstance(c, dict) and isinstance(c.get("component"), str)
+        for c in components
+    ):
+        # Already flat — just resolve bindings in place
+        _resolve_nexus_bindings(components)
+        return list(components)
+
+    for c in components:
+        _walk(c)
+    return collected
+
+
+def wrap_as_activity_snapshot(content: str) -> dict[str, Any] | None:
+    """Wrap A2UI JSON content into an AG-UI ACTIVITY_SNAPSHOT event.
+
+    Returns None when the content is not A2UI or cannot be parsed.
+    The returned dict is ready for JSON serialization as an SSE ``data:`` line.
+    """
+    messages = parse_a2ui_content(content)
+    if messages is None:
+        return None
+
+    operations = a2ui_messages_to_operations(messages)
+    if not operations:
+        return None
+
+    surface_id = extract_surface_id(operations)
+    result = {
+        "type": "ACTIVITY_SNAPSHOT",
+        "messageId": f"a2ui-surface-call_{surface_id}",
+        "activityType": "a2ui-surface",
+        "replace": True,
+        "content": {"a2ui_operations": operations},
+    }
+    return result
+
+
+def is_activity_snapshot(obj: Any) -> bool:
+    """Return True when ``obj`` is a parsed ACTIVITY_SNAPSHOT dict."""
+    return (
+        isinstance(obj, dict)
+        and obj.get("type") == "ACTIVITY_SNAPSHOT"
+        and obj.get("activityType") == "a2ui-surface"
+        and isinstance(obj.get("content"), dict)
+        and "a2ui_operations" in obj["content"]
+    )
+
+
+__all__ = [
+    "a2ui_messages_to_operations",
+    "extract_surface_id",
+    "is_activity_snapshot",
+    "parse_a2ui_content",
+    "wrap_as_activity_snapshot",
+]

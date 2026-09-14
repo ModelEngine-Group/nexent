@@ -3,10 +3,12 @@
 import type { FC } from "react";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { useAgUiSendA2uiAction } from "@assistant-ui/react-ag-ui";
 import { Thread, type WelcomeSuggestion } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
+import { A2UIRenderer, mightContainA2UI } from '@/lib/a2ui';
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -90,6 +92,14 @@ export const Chat: FC<ChatProps> = ({
     [onAgentSelected]
   );
 
+  // AG-UI runtime hook: sendA2uiAction to pass user actions through forwardedProps.
+  // All pages using Chat now wrap it with useAgUiRuntime, so this hook is safe.
+  const sendA2uiAction = useAgUiSendA2uiAction();
+  const onA2uiAction = useCallback(
+    (action: Record<string, unknown>) => sendA2uiAction?.(action),
+    [sendA2uiAction]
+  );
+
   if (!selectedAgent) {
     if (isLoadingAgents) {
       return <AgentsLoadingState />;
@@ -124,6 +134,7 @@ export const Chat: FC<ChatProps> = ({
       runtimeMetadata={runtimeMetadata}
       onRuntimeMetadataChange={onRuntimeMetadataChange}
       readOnly={readOnly}
+      a2uiOnAction={onA2uiAction}
     />
   );
 };

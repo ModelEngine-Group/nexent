@@ -1,3 +1,16 @@
+# Override assistant-ui transitive dependency versions.
+# pnpm 11 silently ignores package.json#pnpm.overrides — must live here.
+# Context: @assistant-ui/react-ai-sdk@1.3.41 pulls @assistant-ui/core@0.2.21
+# (store@0.2.20) while @assistant-ui/react@0.15.0 pulls core@0.3.17
+# (store@0.3.12). Two different @assistant-ui/store versions means two
+# separate React Context references → useAui() fails with
+# "requires an AuiProvider" even though AssistantRuntimeProvider wraps AuiProvider.
+overrides:
+  "@assistant-ui/store": "0.3.12"
+  "@assistant-ui/core": "0.3.17"
+  "@assistant-ui/tap": "0.9.16"
+  "assistant-cloud": "0.1.43"
+
 allowBuilds:
   core-js: true
   sharp: true

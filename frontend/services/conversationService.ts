@@ -1095,7 +1095,13 @@ export const conversationService = {
 
       const response = await fetch(url, {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          // Request AG-UI protocol events from the backend.  When set,
+          // the backend wraps every ProcessType chunk into a standard
+          // AG-UI event (RUN_STARTED / TEXT_MESSAGE_CONTENT / ACTIVITY_SNAPSHOT / etc.)
+          "x-agui-format": "true",
+        },
         body: JSON.stringify(requestParams),
         signal,
       });
