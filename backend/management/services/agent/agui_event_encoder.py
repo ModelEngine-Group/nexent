@@ -718,12 +718,13 @@ class AgUiEventEncoder:
         if not isinstance(inner, dict):
             # Already flat — still process children to convert to ID refs
             flat_node: Dict[str, Any] = {k: v for k, v in comp.items()}
+            self._resolve_nexus_bindings(flat_node.get("props"))
         else:
             flat_node = {"id": node_id}
             if "type" in inner:
                 flat_node["component"] = inner["type"]
             if "props" in inner:
-                flat_node["props"] = inner["props"]
+                flat_node["props"] = self._resolve_nexus_bindings(inner["props"])
             # Preserve any other top-level fields (explicitList, gap, etc.)
             for k, v in comp.items():
                 if k not in ("id", "component"):
@@ -793,6 +794,62 @@ class AgUiEventEncoder:
 
         collected.append(flat_node)
         return node_id
+
+    # ------------------------------------------------------------------
+    # Nexus binding resolution: convert {literalString: "xxx"} → "xxx",
+    # but preserve {path: "..."} runtime bindings for the frontend.
+    # ------------------------------------------------------------------
+
+    _BINDING_UNWRAP_KEYS = frozenset({
+        "literalString", "valueString", "valueNumber", "valueBoolean",
+    })
+
+    def _resolve_nexus_bindings(
+        self, obj: Any
+    ) -> Any:
+        """Walk a props dict (arbitrarily nested) and unfold Nexus binding
+        objects that carry a literal value, while leaving runtime ``path``
+        bindings intact so the frontend converter can resolve them.
+
+        Input::
+
+            {"text": {"literalString": "r101 标准间"},
+             "user": {"path": "/form/user_name"},
+             "action": {"name": "submit", "context": {"a": {"literalString": "x"}}}}
+
+        Output::
+
+            {"text": "r101 标准间",
+             "user": {"path": "/form/user_name"},
+             "action": {"name": "submit", "context": {"a": "x"}}}
+
+        Mutates the dict in place and returns it for chaining.
+        """
+        if isinstance(obj, dict):
+            for key in list(obj.keys()):
+                val = obj[key]
+                if isinstance(val, dict):
+                    # Is this a Nexus binding with a literal value?
+                    literal_key = None
+                    for lk in self._BINDING_UNWRAP_KEYS:
+                        if lk in val and len(val) == 1:
+                            literal_key = lk
+                            break
+                    if literal_key is not None:
+                        obj[key] = val[literal_key]
+                    elif "path" in val and len(val) == 1:
+                        # Runtime binding — leave as-is for frontend to resolve
+                        pass
+                    else:
+                        # Nested object (e.g. Button action.context) — recurse
+                        self._resolve_nexus_bindings(val)
+                elif isinstance(val, list):
+                    for i, item in enumerate(val):
+                        obj[key][i] = self._resolve_nexus_bindings(item)
+            return obj
+        if isinstance(obj, list):
+            return [self._resolve_nexus_bindings(item) for item in obj]
+        return obj
 
     # ------------------------------------------------------------------
     # P2: Button action context auto-completion (fallback for models that
