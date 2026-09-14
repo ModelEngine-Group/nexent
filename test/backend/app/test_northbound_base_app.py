@@ -190,6 +190,13 @@ class _NorthboundThreadManager:
     async def shutdown(self, timeout):
         self.state = _ManagerState.CLOSED
 
+    def snapshot(self):
+        return {
+            "service_name": "northbound",
+            "active_count": 0,
+            "queued_count": 0,
+        }
+
 
 concurrency_module = types.ModuleType("nexent.core.concurrency")
 concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
@@ -405,6 +412,20 @@ class TestNorthboundBaseApp(unittest.TestCase):
         """The main northbound router should be included."""
         paths = app.openapi()["paths"]
         self.assertIn("/dummy", paths)
+
+    def test_thread_capacity_is_process_local_and_hidden_from_openapi(self):
+        response = self.client.get("/internal/thread-capacity")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "service_name": "northbound",
+                "active_count": 0,
+                "queued_count": 0,
+            },
+        )
+        self.assertNotIn("/internal/thread-capacity", app.openapi()["paths"])
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""

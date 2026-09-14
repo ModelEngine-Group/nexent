@@ -99,6 +99,12 @@ if hasattr(app, "state"):
     app.state.thread_manager = runtime_thread_manager
 
 
+@app.get("/internal/thread-capacity", include_in_schema=False)
+async def thread_capacity():
+    """Return the Runtime process-local thread capacity snapshot."""
+    return runtime_thread_manager.snapshot()
+
+
 app.add_middleware(ExceptionHandlerMiddleware)
 
 app.include_router(agent_router)

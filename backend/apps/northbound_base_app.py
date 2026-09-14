@@ -101,6 +101,13 @@ northbound_app = create_app(
 if hasattr(northbound_app, "state"):
     northbound_app.state.thread_manager = northbound_thread_manager
 
+
+@northbound_app.get("/internal/thread-capacity", include_in_schema=False)
+async def thread_capacity():
+    """Return the Northbound process-local thread capacity snapshot."""
+    return northbound_thread_manager.snapshot()
+
+
 northbound_app.include_router(northbound_router)
 northbound_app.include_router(northbound_knowledge_router)
 
