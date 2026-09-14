@@ -227,12 +227,6 @@ export const buildModelOverrideEntry = (
   return entry;
 };
 
-/** Convert a spec value (could be number / string / boolean / string[]) into a form-state value. */
-const normalizeInitialValue = (raw: unknown): unknown => {
-  if (Array.isArray(raw)) return raw;
-  return raw;
-};
-
 /**
  * Initialize a form-state object from an existing model / override record.
  * Pass in the model record (for "default" mode) or the per-model override
@@ -257,10 +251,11 @@ export const advancedSettingsValueFromRecord = (
 
   for (const spec of specList) {
     if (REMOVED_ADVANCED_PARAM_KEYS.has(spec.key)) continue;
+    // Spec values (number / string / boolean / string[]) pass through as-is.
     if (spec.key in record) {
-      value[spec.key] = normalizeInitialValue(record[spec.key]);
+      value[spec.key] = record[spec.key];
     } else if (spec.key in extra) {
-      value[spec.key] = normalizeInitialValue(extra[spec.key]);
+      value[spec.key] = extra[spec.key];
     }
   }
 
@@ -491,7 +486,7 @@ const renderCustomParamsSection = ({
               k !== "" &&
               customEntries.filter(([ek]) => ek === k).length > 1;
             return (
-              <div key={idx} className="flex items-center gap-2">
+                <div key={`${k || "empty"}-${idx}`} className="flex items-center gap-2">
                 <Input
                   className="flex-1"
                   size="small"

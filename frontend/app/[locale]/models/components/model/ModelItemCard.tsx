@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Card, Tag, Tooltip, Button, Space, Empty } from "antd";
+import { Card, Tag, Tooltip, Button, Space } from "antd";
 import { PenLine, Trash2 } from "lucide-react";
 
 import { MODEL_TYPES, MODEL_STATUS, MODEL_SOURCES } from "@/const/modelConfig";
@@ -309,8 +309,17 @@ export const ModelItemCard = ({
         )}
         <Tooltip title={statusTooltip}>
           <span
+            role="button"
+            tabIndex={0}
+            aria-label={t("modelConfig.tag.verify", { defaultValue: "验证连通性" })}
             onClick={() => onVerify(model.displayName || model.name, model.type)}
-            style={getStatusDotStyle(status)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onVerify(model.displayName || model.name, model.type);
+              }
+            }}
+            style={{ ...getStatusDotStyle(status), cursor: "pointer" }}
           />
         </Tooltip>
       </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Modal, Select, Input, Button, Switch, App, Tag } from "antd";
+import { Modal, Select, Input, Button, Switch, App, Tag } from "antd";
 import { Settings2 } from "lucide-react";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
@@ -14,6 +14,7 @@ import {
   InferenceFieldSpecsByType,
 } from "@/types/modelConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
+import log from "@/lib/logger";
 import {
   ModelChunkSizeSlider,
   DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -30,7 +31,6 @@ import {
   capacityFormFromModel,
   emptyCapacityForm,
   ModelCapacityFields,
-  ModelCapacityFormState,
   validateCapacityForm,
 } from "./ModelCapacityFields";
 import {
@@ -422,6 +422,9 @@ export const ModelEditDialogV2 = ({
         message: connectivityMessage,
       });
     } catch (error) {
+      // The probe's error detail is surfaced through the connectivity status
+      // itself; logging here keeps the failure diagnosable without a toast.
+      log.warn("Connectivity check failed:", error);
       setConnectivityStatus({
         status: "unavailable",
         message: t("model.dialog.connectivity.status.unavailable"),
@@ -439,6 +442,13 @@ export const ModelEditDialogV2 = ({
     const inferencePayload = supportsInferenceParams
       ? buildInferenceParamsPayload(advanced)
       : {};
+    const inferenceUpdate = {
+      temperature: inferencePayload.temperature as number | undefined,
+      topP: inferencePayload.top_p as number | undefined,
+      extraParams: inferencePayload.extra_params as
+        | Record<string, unknown>
+        | undefined,
+    };
     return {
       url: form.url,
       apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
@@ -479,14 +489,53 @@ export const ModelEditDialogV2 = ({
               : {}),
           }
         : {}),
-      ...{
-        temperature: inferencePayload.temperature as number | undefined,
-        topP: inferencePayload.top_p as number | undefined,
-        extraParams: inferencePayload.extra_params as
-          | Record<string, unknown>
-          | undefined,
-      },
+      ...inferenceUpdate,
     };
+  };
+
+  // Update local configuration (only when the edited model is the one
+  // selected in the local config). Extracted from handleSave so the save
+  // handler stays flat.
+  const persistLocalModelConfig = (
+    modelType: ModelType,
+    acceptedModelName: string
+  ) => {
+    const modelConfigKeyMap: Record<ModelType, string> = {
+      llm: MODEL_TYPES.LLM,
+      embedding: MODEL_TYPES.EMBEDDING,
+      multi_embedding: MODEL_TYPES.MULTI_EMBEDDING,
+      vlm: MODEL_TYPES.VLM,
+      vlm2: MODEL_TYPES.VLM2,
+      vlm3: MODEL_TYPES.VLM3,
+      vlm4: MODEL_TYPES.VLM4,
+      rerank: MODEL_TYPES.RERANK,
+      tts: MODEL_TYPES.TTS,
+      stt: MODEL_TYPES.STT,
+    };
+    const configKey = modelConfigKeyMap[modelType];
+    updateModelConfig({
+      [configKey]: {
+        modelName: acceptedModelName,
+        displayName: form.displayName || form.name,
+        apiConfig: {
+          apiKey: form.apiKey,
+          modelUrl: form.url,
+        },
+        ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
+        ...(isEmbeddingModel
+          ? { dimension: Number.parseInt(form.vectorDimension) }
+          : {}),
+        ...(isVoiceModel
+          ? {
+              modelFactory: form.modelFactory,
+              modelAppid:
+                form.modelFactory === "volcengine" ? form.modelAppid : "",
+              accessToken:
+                form.modelFactory === "volcengine" ? form.accessToken : "",
+            }
+          : {}),
+      },
+    });
   };
 
   const handleSave = async () => {
@@ -551,42 +600,8 @@ export const ModelEditDialogV2 = ({
       }
 
       // Update local configuration (only when currently edited model is selected in configuration)
-      const modelConfigKeyMap: Record<ModelType, string> = {
-        llm: MODEL_TYPES.LLM,
-        embedding: MODEL_TYPES.EMBEDDING,
-        multi_embedding: MODEL_TYPES.MULTI_EMBEDDING,
-        vlm: MODEL_TYPES.VLM,
-        vlm2: MODEL_TYPES.VLM2,
-        vlm3: MODEL_TYPES.VLM3,
-        vlm4: MODEL_TYPES.VLM4,
-        rerank: MODEL_TYPES.RERANK,
-        tts: MODEL_TYPES.TTS,
-        stt: MODEL_TYPES.STT,
-      };
-      const configKey = modelConfigKeyMap[modelType];
-      updateModelConfig({
-        [configKey]: {
-          modelName: acceptedModelName,
-          displayName: form.displayName || form.name,
-          apiConfig: {
-            apiKey: form.apiKey,
-            modelUrl: form.url,
-          },
-          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
-          ...(isEmbeddingModel
-            ? { dimension: Number.parseInt(form.vectorDimension) }
-            : {}),
-          ...(isVoiceModel
-            ? {
-                modelFactory: form.modelFactory,
-                modelAppid:
-                  form.modelFactory === "volcengine" ? form.modelAppid : "",
-                accessToken:
-                  form.modelFactory === "volcengine" ? form.accessToken : "",
-              }
-            : {}),
-        },
-      });
+      persistLocalModelConfig(modelType, acceptedModelName);
+
 
       await onSuccess();
       message.success(t("model.dialog.editSuccess"));

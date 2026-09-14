@@ -129,19 +129,19 @@ def _config_to_context(
         observer = MessageObserver()
 
     # ---- common kwargs (base class fields) ----
-    common: Dict[str, Any] = dict(
-        model_name=construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
-        base_url=cfg.get("base_url", ""),
-        api_key=cfg.get("api_key", ""),
-        modality=modality,
-        factory=factory,
-        tenant_id=tenant_id,
-        slot=slot,
-        ssl_verify=cfg.get("ssl_verify", True),
-        observer=observer,
-        display_name=_coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
-        timeout_seconds=_coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
-    )
+    common: Dict[str, Any] = {
+        "model_name": construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
+        "base_url": cfg.get("base_url", ""),
+        "api_key": cfg.get("api_key", ""),
+        "modality": modality,
+        "factory": factory,
+        "tenant_id": tenant_id,
+        "slot": slot,
+        "ssl_verify": cfg.get("ssl_verify", True),
+        "observer": observer,
+        "display_name": _coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
+        "timeout_seconds": _coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
+    }
 
     # ---- modality-specific subclass construction ----
     if modality == "llm":

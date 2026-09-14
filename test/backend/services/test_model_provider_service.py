@@ -3112,7 +3112,8 @@ async def test_openai_provider_rejects_domain_resolving_to_private_ip():
             {"api_key": "test-key", "base_url": "https://internal.example.com/v1"}
         )
 
-    assert result and "_error" in result[0]
+    assert result
+    assert "_error" in result[0]
     mock_resolve.assert_called_once()
     client_instance.get.assert_not_awaited()
 
@@ -3134,7 +3135,8 @@ async def test_openai_provider_rejects_domain_resolving_to_metadata_ip():
             {"api_key": "test-key", "base_url": "https://metadata-stealer.example.com/v1"}
         )
 
-    assert result and "_error" in result[0]
+    assert result
+    assert "_error" in result[0]
     client_instance.get.assert_not_awaited()
 
 
@@ -3157,7 +3159,8 @@ async def test_openai_provider_rejects_unresolvable_host():
             {"api_key": "test-key", "base_url": "https://does-not-resolve.example.com/v1"}
         )
 
-    assert result and "_error" in result[0]
+    assert result
+    assert "_error" in result[0]
     client_instance.get.assert_not_awaited()
 
 
@@ -3225,7 +3228,8 @@ async def test_openai_provider_rejects_private_literal_ip():
             {"api_key": "test-key", "base_url": "http://10.1.2.3:8080/v1"}
         )
 
-    assert result and "_error" in result[0]
+    assert result
+    assert "_error" in result[0]
     mock_resolve.assert_not_called()
     client_instance.get.assert_not_awaited()
 

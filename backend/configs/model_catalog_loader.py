@@ -265,6 +265,11 @@ def _build_model_profile(
 # =============================================================================
 
 
+def _log_safe(value: Any) -> str:
+    """Strip control characters so file/user-derived values cannot forge log lines."""
+    return "".join(ch for ch in str(value) if ch.isprintable())
+
+
 def load_model_catalog(force_reload: bool = False) -> Dict[str, Any]:
     """Load and normalize the catalog, using an in-memory cache.
 
@@ -293,7 +298,7 @@ def load_model_catalog(force_reload: bool = False) -> Dict[str, Any]:
         )
         logger.info(
             "Model catalog loaded: version=%s, providers=%d, models=%d",
-            normalized.get("version", "?"),
+            _log_safe(normalized.get("version", "?")),
             provider_count,
             model_count,
         )

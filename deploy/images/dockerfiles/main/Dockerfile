@@ -72,8 +72,10 @@ RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start
 # up context/max_output for models not in capability_profiles.py. Fetched at
 # build time so it works offline / without VPN at runtime. If the build host
 # has no network, this fails soft (empty file) and suggest_capacity falls back
-# to the catalog / defaults.
-RUN curl -fsSL -o /opt/nexent/litellm_models.json \
+# to the catalog / defaults. --proto '=https' forbids any redirection to an
+# insecure scheme; curl (not ADD) is used deliberately so the soft-fail
+# fallback stays possible on offline build hosts.
+RUN curl -fsSL --proto '=https' -o /opt/nexent/litellm_models.json \
     https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json \
     || echo '{}' > /opt/nexent/litellm_models.json
 

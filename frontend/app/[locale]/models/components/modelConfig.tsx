@@ -42,7 +42,7 @@ import {
   MODEL_SOURCES,
 } from "@/const/modelConfig";
 import { useConfig } from "@/hooks/useConfig";
-import { modelService } from "@/services/modelService";
+import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
   CapacityCoverage,
@@ -58,7 +58,6 @@ import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
 import { DefaultModelDialog } from "./model/DefaultModelDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
-import { ModelError } from "@/services/modelService";
 import { useModelList } from "@/hooks/model/useModelList";
 
 // Fallback labels (zh-CN) for connect statuses missing a translation entry.
