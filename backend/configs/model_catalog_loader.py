@@ -78,6 +78,59 @@ def _safe_load_json(path: str) -> Dict[str, Any]:
     return data
 
 
+def _normalize_provider_models(
+    provider_id_str: str,
+    base_url: str,
+    raw_models: Any,
+) -> Dict[str, ModelCatalogProfile]:
+    """Normalize the raw ``models`` mapping of one provider into profiles."""
+    normalized_models: Dict[str, ModelCatalogProfile] = {}
+    if not isinstance(raw_models, dict):
+        return normalized_models
+    for model_name, model_raw in raw_models.items():
+        if not isinstance(model_raw, dict):
+            continue
+        model_name_str = str(model_name).strip()
+        if not model_name_str:
+            continue
+        try:
+            profile = _build_model_profile(
+                provider_base_url=base_url,
+                provider_factory=None,
+                model_name=model_name_str,
+                raw=model_raw,
+            )
+            normalized_models[model_name_str] = profile
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Skipping catalog model %s/%s: %s",
+                provider_id_str,
+                model_name_str,
+                exc,
+            )
+    return normalized_models
+
+
+def _normalize_provider(provider_id: Any, provider_raw: Any) -> Optional[Dict[str, Any]]:
+    """Normalize one raw provider entry; returns None when it must be skipped."""
+    if not isinstance(provider_raw, dict):
+        return None
+    provider_id_str = str(provider_id).strip()
+    if not provider_id_str:
+        return None
+
+    display_name = str(provider_raw.get("display_name") or provider_id_str)
+    base_url = str(provider_raw.get("base_url") or "").strip()
+
+    return {
+        "display_name": display_name,
+        "base_url": base_url,
+        "models": _normalize_provider_models(
+            provider_id_str, base_url, provider_raw.get("models")
+        ),
+    }
+
+
 def _normalize_catalog(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize the raw JSON dict into predictable internal structure.
 
@@ -107,53 +160,9 @@ def _normalize_catalog(raw: Dict[str, Any]) -> Dict[str, Any]:
 
     normalized_providers: Dict[str, Any] = {}
     for provider_id, provider_raw in raw_providers.items():
-        if not isinstance(provider_raw, dict):
-            continue
-        provider_id_str = str(provider_id).strip()
-        if not provider_id_str:
-            continue
-
-        display_name = str(provider_raw.get("display_name") or provider_id_str)
-        base_url = str(provider_raw.get("base_url") or "").strip()
-
-        raw_models = provider_raw.get("models")
-        if not isinstance(raw_models, dict):
-            # Provider with no models - still record it so metadata lookup works.
-            normalized_providers[provider_id_str] = {
-                "display_name": display_name,
-                "base_url": base_url,
-                "models": {},
-            }
-            continue
-
-        normalized_models: Dict[str, ModelCatalogProfile] = {}
-        for model_name, model_raw in raw_models.items():
-            if not isinstance(model_raw, dict):
-                continue
-            model_name_str = str(model_name).strip()
-            if not model_name_str:
-                continue
-            try:
-                profile = _build_model_profile(
-                    provider_base_url=base_url,
-                    provider_factory=None,
-                    model_name=model_name_str,
-                    raw=model_raw,
-                )
-                normalized_models[model_name_str] = profile
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Skipping catalog model %s/%s: %s",
-                    provider_id_str,
-                    model_name_str,
-                    exc,
-                )
-
-        normalized_providers[provider_id_str] = {
-            "display_name": display_name,
-            "base_url": base_url,
-            "models": normalized_models,
-        }
+        normalized = _normalize_provider(provider_id, provider_raw)
+        if normalized is not None:
+            normalized_providers[str(provider_id).strip()] = normalized
 
     return {
         "version": version,

@@ -177,7 +177,7 @@ export const buildInferenceParamsPayload = (
         // seed that expect ints/floats receive a real number, not a string.
         const trimmed = String(v ?? "").trim();
         if (trimmed === "") continue;
-        dict[k] = !isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
+        dict[k] = !Number.isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
       }
       if (Object.keys(dict).length > 0) {
         extraParams["__custom__"] = dict;
@@ -672,8 +672,8 @@ export const ModelAdvancedSettings = ({
         {specList.map((spec) => {
           const fieldValue = value[spec.key];
           const rangeHint =
-            spec.range && spec.range.length === 2
-              ? `(${spec.range[0]} – ${spec.range[1]})`
+            spec.range?.length === 2
+              ? `(${spec.range[0]} ~ ${spec.range[1]})`
               : null;
           return (
             <div key={spec.key}>

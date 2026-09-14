@@ -61,6 +61,14 @@ import { Can } from "@/components/permission/Can";
 import { ModelError } from "@/services/modelService";
 import { useModelList } from "@/hooks/model/useModelList";
 
+// Fallback labels (zh-CN) for connect statuses missing a translation entry.
+const CONNECT_STATUS_FALLBACK_LABELS: Record<string, string> = {
+  available: "可用",
+  unavailable: "不可用",
+  detecting: "检测中",
+  not_detected: "未检测",
+};
+
 // Model data structure
 const getModelData = (t: any) => ({
   llm: {
@@ -439,16 +447,7 @@ export const ModelConfigSection = forwardRef<
           if (!status) return <span className="text-gray-400">—</span>;
           const meta = getConnectivityMeta(status as ConnectivityStatusType);
           const text = t(`model.connectivity.${status}`, {
-            defaultValue:
-              status === "available"
-                ? "可用"
-                : status === "unavailable"
-                  ? "不可用"
-                  : status === "detecting"
-                    ? "检测中"
-                    : status === "not_detected"
-                      ? "未检测"
-                      : status,
+            defaultValue: CONNECT_STATUS_FALLBACK_LABELS[status] ?? status,
           });
           return (
             <Tooltip title={text}>
@@ -752,7 +751,7 @@ export const ModelConfigSection = forwardRef<
     if (isVerifying) return;
     if (allModels.length === 0) return;
     const currentSelectedModels: Record<string, Record<string, string>> =
-      modelsToCheck || JSON.parse(JSON.stringify(selectedModels));
+      modelsToCheck || structuredClone(selectedModels);
 
     let hasSelectedModels = false;
     outer: for (const cat in currentSelectedModels) {

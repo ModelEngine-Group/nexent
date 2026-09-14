@@ -2469,6 +2469,50 @@ def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]])
 # =============================================================================
 
 
+def _name_matches(name: str, final_segment: str, *prefixes: str) -> bool:
+    """True when the full name or its final path segment starts with any prefix."""
+    return name.startswith(prefixes) or final_segment.startswith(prefixes)
+
+
+def _name_contains_any(name: str, final_segment: str, *tokens: str) -> bool:
+    """True when any token is a substring of the full name or its final path segment."""
+    return any(tok in name or tok in final_segment for tok in tokens)
+
+
+def _infer_visual_model_type(name: str, final_segment: str) -> Optional[str]:
+    """Classify the multimodal families from a lower-cased model name.
+
+    Returns "vlm3" / "vlm2" / "vlm" or None when the name does not look
+    multimodal. Evaluation order matters:
+    - Video understanding (vlm3) — keywords aligned with develop's TokenPony
+      provider classification (TOKENPONY_VIDEO_UNDERSTANDING_KEYWORDS).
+    - Image generation (vlm2) — keywords aligned with develop's TokenPony
+      provider classification (TOKENPONY_IMAGE_GENERATION_KEYWORDS): catches
+      Tongyi-MAI/Z-Image-Turbo, baidu/ERNIE-Image-Turbo, flux/sdxl/wanx/
+      seedream/ideogram/recraft families. Checked BEFORE image understanding
+      because develop's classifier gives generation keywords priority.
+    - Image understanding (vlm) — keywords aligned with develop's TokenPony
+      provider (TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS) plus the legacy
+      prefix rules: qwen-vl-*, glm-v*, internvl-*, llava-*, gpt-4o-*.
+      "vl" as a standalone dash-segment covers Qwen/Qwen3-VL-* naming.
+    """
+    if _name_contains_any(name, final_segment, "omni", "video"):
+        return "vlm3"
+    if _name_contains_any(
+        name, final_segment,
+        "image", "dall", "flux", "stable-diffusion", "sdxl",
+        "midjourney", "wanx", "kolors", "seedream", "ideogram", "recraft",
+    ):
+        return "vlm2"
+    if (
+        _name_matches(name, final_segment, "qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
+        or "vl" in final_segment.split("-")
+        or _name_contains_any(name, final_segment, "vision", "visual", "ocr")
+    ):
+        return "vlm"
+    return None
+
+
 def _infer_model_type_from_name(model_name: str) -> str:
     """Infer a model's type from its name prefix.
 
@@ -2499,64 +2543,31 @@ def _infer_model_type_from_name(model_name: str) -> str:
     # full name so repo prefixes on aggregators don't break prefix rules.
     final_segment = name.rsplit("/", 1)[-1]
 
-    def _matches(*prefixes: str) -> bool:
-        return name.startswith(prefixes) or final_segment.startswith(prefixes)
-
-    def _contains(token: str) -> bool:
-        return token in name or token in final_segment
-
-    def _contains_any(*tokens: str) -> bool:
-        return any(tok in name or tok in final_segment for tok in tokens)
-
     # Embedding (check before generic patterns). Besides prefix rules, also
     # match names that merely CONTAIN "embedding" — covers Qwen3-Embedding-*,
     # text-embedding-* variants and similar mid-name conventions on
     # aggregators. "reranker" wins over "embedding" when both appear
     # (bge-reranker-v2-m3 style names).
-    if not _contains("reranker") and (
-        _matches("text-embedding-", "embedding-", "bge-") or _contains("embedding")
+    if not _name_contains_any(name, final_segment, "reranker") and (
+        _name_matches(name, final_segment, "text-embedding-", "embedding-", "bge-")
+        or _name_contains_any(name, final_segment, "embedding")
     ):
         return "embedding"
-    # Rerank. Also catch names containing "rerank" (Qwen3-Reranker-0.6B style).
-    if _matches("rerank-", "bge-reranker-", "jina-reranker-") or _contains("reranker") or _contains("rerank"):
+    # Rerank. Also catch names containing "rerank" (Qwen3-Reranker-0.6B style);
+    # any name containing "reranker" also contains "rerank", so one token covers both.
+    if _name_matches(name, final_segment, "rerank-", "bge-reranker-", "jina-reranker-") or _name_contains_any(name, final_segment, "rerank"):
         return "rerank"
     # STT. Also catch "sensevoice" mid-name (FunAudioLLM/SenseVoiceSmall).
-    if _matches("whisper-", "paraformer-", "sensevoice-") or _contains("sensevoice"):
+    if _name_matches(name, final_segment, "whisper-", "paraformer-", "sensevoice-") or _name_contains_any(name, final_segment, "sensevoice"):
         return "stt"
     # TTS. Also catch "tts" / "cosyvoice" mid-name (IndexTeam/IndexTTS-2,
     # FunAudioLLM/CosyVoice2-0.5B style aggregator names).
-    if _matches("tts-", "cosyvoice-", "speech-") or _contains("cosyvoice"):
+    if _name_matches(name, final_segment, "tts-", "cosyvoice-", "speech-") or _name_contains_any(name, final_segment, "cosyvoice"):
         return "tts"
-    # Video understanding (vlm3) — keywords aligned with develop's TokenPony
-    # provider classification (TOKENPONY_VIDEO_UNDERSTANDING_KEYWORDS).
-    if _contains_any("omni", "video"):
-        return "vlm3"
-    # Image generation (vlm2) — keywords aligned with develop's TokenPony
-    # provider classification (TOKENPONY_IMAGE_GENERATION_KEYWORDS): catches
-    # Tongyi-MAI/Z-Image-Turbo, baidu/ERNIE-Image-Turbo, flux/sdxl/wanx/
-    # seedream/ideogram/recraft families. Checked BEFORE image understanding
-    # because develop's classifier gives generation keywords priority.
-    if _contains_any(
-        "image", "dall", "flux", "stable-diffusion", "sdxl",
-        "midjourney", "wanx", "kolors", "seedream", "ideogram", "recraft",
-    ):
-        return "vlm2"
-    # Image understanding (vlm) — keywords aligned with develop's TokenPony
-    # provider (TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS) plus the legacy
-    # prefix rules: qwen-vl-*, glm-v*, internvl-*, llava-*, gpt-4o-*.
-    # "vl" as a standalone dash-segment covers Qwen/Qwen3-VL-* naming.
-    if (
-        _matches("qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
-        or "vl" in final_segment.split("-")
-        or _contains_any("vision", "visual", "ocr")
-    ):
-        return "vlm"
-    # LLM
-    if _matches(
-        "gpt-", "o1-", "o3-", "o4-", "claude-", "glm-", "qwen-",
-        "deepseek-", "llama-", "mistral-", "yi-", "moonshot-", "gemini-",
-        "kimi-", "doubao-", "ernie-", "spark-",
-    ):
-        return "llm"
-    # Default fallback
+
+    visual = _infer_visual_model_type(name, final_segment)
+    if visual:
+        return visual
+    # LLM prefixes and the fallback both resolve to "llm" — unmatched names
+    # default to llm so the user can manually correct the type in the UI.
     return "llm"

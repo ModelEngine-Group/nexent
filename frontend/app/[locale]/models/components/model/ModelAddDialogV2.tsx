@@ -135,11 +135,20 @@ const isEmbeddingType = (type: ModelType | undefined): boolean =>
 const isVoiceType = (type: ModelType | undefined): boolean =>
   type === MODEL_TYPES.STT || type === MODEL_TYPES.TTS;
 
+// Fallback labels (zh-CN) for the custom-tab connectivity probe statuses.
+const CUSTOM_CONNECTIVITY_FALLBACK_LABELS: Record<string, string> = {
+  available: "可用",
+  unavailable: "不可用",
+  checking: "检测中",
+};
+
 const generateRandomSuffix = (length: number = 5): string => {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const values = new Uint32Array(length);
+  crypto.getRandomValues(values);
   let result = "";
   for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(values[i] % chars.length);
   }
   return result;
 };
@@ -163,6 +172,70 @@ interface BatchRowState {
   isMultimodal: boolean;
   chunkSizeRange: [number, number];
 }
+
+/** Resolve the effective model type for a batch row: embedding + multimodal → multi_embedding. */
+const resolveBatchModelType = (state: BatchRowState): ModelType =>
+  state.modelType === MODEL_TYPES.EMBEDDING && state.isMultimodal
+    ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
+    : state.modelType;
+
+/** Build the create-request params for one enabled batch row (Tab A submit). */
+const buildBatchRowParams = (opts: {
+  row: any;
+  state: BatchRowState;
+  baseUrl: string;
+  apiKey: string;
+  providerKey: string;
+}): Record<string, any> => {
+  const { row, state, baseUrl, apiKey, providerKey } = opts;
+  const resolvedModelType = resolveBatchModelType(state);
+  const capacityPayload: Record<string, any> = supportsCapacityFields(state.modelType)
+    ? buildCapacityPayload(state.capacity)
+    : {};
+
+  const singleParams: Record<string, any> = {
+    name: row.model_name,
+    type: resolvedModelType,
+    url: baseUrl,
+    apiKey,
+    maxTokens: row.max_tokens || (isEmbeddingType(resolvedModelType) ? 0 : 4096),
+    displayName: (state.advanced.display_name as string) || defaultDisplayName(row.model_name),
+    modelFactory: providerKey === "__custom__" ? "OpenAI-API-Compatible" : providerKey,
+    // Batch submit requires every enabled row to have passed the probe
+    // (hasUnchecked gate in handleBatchSubmit), so the verified result is
+    // carried into the created record instead of resetting to not_detected.
+    connectStatus: state.connectivityStatus === "available" ? "available" : undefined,
+    contextWindowTokens: capacityPayload.contextWindowTokens,
+    maxInputTokens: capacityPayload.maxInputTokens,
+    maxOutputTokens: capacityPayload.maxOutputTokens,
+    defaultOutputReserveTokens: capacityPayload.defaultOutputReserveTokens,
+    tokenizerFamily: capacityPayload.tokenizerFamily,
+    capacitySource: capacityPayload.capacitySource,
+    // v2.6.0 inference params (temperature / top_p / extra_params incl. __custom__)
+    // buildInferenceParamsPayload returns snake_case keys; buildInferenceParamsRequestBody
+    // in modelService accepts both snake_case and camelCase.
+    ...buildInferenceParamsPayload(state.advanced),
+  };
+
+  // Embedding-specific fields (aligned with original ModelAddDialog):
+  // chunk size range from slider, batch size from dedicated input.
+  // Vector dimension is fixed at 1024 (not user-editable, matching original).
+  if (isEmbeddingType(resolvedModelType)) {
+    singleParams.expectedChunkSize = state.chunkSizeRange[0];
+    singleParams.maximumChunkSize = state.chunkSizeRange[1];
+    singleParams.chunkingBatchSize = state.advanced.chunk_batch as number | undefined;
+    singleParams.maxTokens = 1024;
+  }
+
+  // STT/TTS-specific fields (aligned with original ModelAddDialog)
+  if (state.modelType === MODEL_TYPES.STT || state.modelType === MODEL_TYPES.TTS) {
+    singleParams.modelFactory = (state.advanced.model_factory as string) || singleParams.modelFactory;
+    singleParams.modelAppid = state.advanced.model_appid as string | undefined;
+    singleParams.accessToken = state.advanced.access_token as string | undefined;
+  }
+
+  return singleParams;
+};
 
 const makeInitialRowState = (
   modelType: ModelType,
@@ -597,10 +670,20 @@ export const ModelAddDialogV2 = ({
 
   // ---------- Tab A: batch connectivity check (enabled rows only) ----------
   const [batchChecking, setBatchChecking] = useState(false);
-  const handleBatchConnectivity = useCallback(async () => {
+  // Shared guard for the batch actions: the enabled rows, or null when none
+  // are selected (the caller then shows the no-selection warning).
+  const getEnabledRows = useCallback((): any[] | null => {
     const enabledRows = fetchedModels.filter((row) => rowStates[row.id]?.enabled);
     if (enabledRows.length === 0) {
       message.warning(t("model.dialog.v2.warn.noSelection", { defaultValue: "请至少启用一个模型" }));
+      return null;
+    }
+    return enabledRows;
+  }, [fetchedModels, rowStates, message, t]);
+
+  const handleBatchConnectivity = useCallback(async () => {
+    const enabledRows = getEnabledRows();
+    if (!enabledRows) {
       return;
     }
     setBatchChecking(true);
@@ -613,13 +696,12 @@ export const ModelAddDialogV2 = ({
     } finally {
       setBatchChecking(false);
     }
-  }, [fetchedModels, rowStates, handleRowConnectivity, message, t]);
+  }, [getEnabledRows, handleRowConnectivity]);
 
   // ---------- Tab A: submit batch ----------
   const handleBatchSubmit = useCallback(async () => {
-    const enabledRows = fetchedModels.filter((row) => rowStates[row.id]?.enabled);
-    if (enabledRows.length === 0) {
-      message.warning(t("model.dialog.v2.warn.noSelection", { defaultValue: "请至少启用一个模型" }));
+    const enabledRows = getEnabledRows();
+    if (!enabledRows) {
       return;
     }
     // Require all enabled models to have passed connectivity testing before submit.
@@ -639,56 +721,13 @@ export const ModelAddDialogV2 = ({
       let createdCount = 0;
       for (const row of enabledRows) {
         const state = rowStates[row.id];
-        const capacityPayload: Record<string, any> = supportsCapacityFields(state.modelType)
-          ? buildCapacityPayload(state.capacity)
-          : {};
-
-        // Resolve actual model type: embedding + isMultimodal → multi_embedding
-        const resolvedModelType: ModelType =
-          state.modelType === MODEL_TYPES.EMBEDDING && state.isMultimodal
-            ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-            : state.modelType;
-
-        const singleParams: Record<string, any> = {
-          name: row.model_name,
-          type: resolvedModelType,
-          url: baseUrl,
+        const singleParams = buildBatchRowParams({
+          row,
+          state,
+          baseUrl,
           apiKey,
-          maxTokens: row.max_tokens || (isEmbeddingType(resolvedModelType) ? 0 : 4096),
-          displayName: (state.advanced.display_name as string) || defaultDisplayName(row.model_name),
-          modelFactory: providerKey === "__custom__" ? "OpenAI-API-Compatible" : providerKey,
-          // Batch submit requires every enabled row to have passed the probe
-          // (hasUnchecked gate above), so the verified result is carried into
-          // the created record instead of resetting to not_detected.
-          connectStatus: state.connectivityStatus === "available" ? "available" : undefined,
-          contextWindowTokens: capacityPayload.contextWindowTokens,
-          maxInputTokens: capacityPayload.maxInputTokens,
-          maxOutputTokens: capacityPayload.maxOutputTokens,
-          defaultOutputReserveTokens: capacityPayload.defaultOutputReserveTokens,
-          tokenizerFamily: capacityPayload.tokenizerFamily,
-          capacitySource: capacityPayload.capacitySource,
-          // v2.6.0 inference params (temperature / top_p / extra_params incl. __custom__)
-          // buildInferenceParamsPayload returns snake_case keys; buildInferenceParamsRequestBody
-          // in modelService accepts both snake_case and camelCase.
-          ...buildInferenceParamsPayload(state.advanced),
-        };
-
-        // Embedding-specific fields (aligned with original ModelAddDialog):
-        // chunk size range from slider, batch size from dedicated input.
-        // Vector dimension is fixed at 1024 (not user-editable, matching original).
-        if (isEmbeddingType(resolvedModelType)) {
-          singleParams.expectedChunkSize = state.chunkSizeRange[0];
-          singleParams.maximumChunkSize = state.chunkSizeRange[1];
-          singleParams.chunkingBatchSize = state.advanced.chunk_batch as number | undefined;
-          singleParams.maxTokens = 1024;
-        }
-
-        // STT/TTS-specific fields (aligned with original ModelAddDialog)
-        if (state.modelType === MODEL_TYPES.STT || state.modelType === MODEL_TYPES.TTS) {
-          singleParams.modelFactory = (state.advanced.model_factory as string) || singleParams.modelFactory;
-          singleParams.modelAppid = state.advanced.model_appid as string | undefined;
-          singleParams.accessToken = state.advanced.access_token as string | undefined;
-        }
+          providerKey,
+        });
 
         try {
           if (tenantId) {
@@ -714,17 +753,12 @@ export const ModelAddDialogV2 = ({
       // Use resolved model type for the success callback (embedding + isMultimodal → multi_embedding)
       const firstRow = enabledRows[0];
       const firstState = firstRow ? rowStates[firstRow.id] : null;
-      const firstResolvedType: ModelType | undefined = firstState
-        ? (firstState.modelType === MODEL_TYPES.EMBEDDING && firstState.isMultimodal
-            ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-            : firstState.modelType)
-        : undefined;
       await onSuccess(
-        firstRow
+        firstRow && firstState
           ? {
-              name: (firstState!.advanced.display_name as string) ||
+              name: (firstState.advanced.display_name as string) ||
                 defaultDisplayName(firstRow.model_name),
-              type: firstResolvedType as ModelType,
+              type: resolveBatchModelType(firstState),
             }
           : undefined
       );
@@ -738,7 +772,7 @@ export const ModelAddDialogV2 = ({
     } finally {
       setLoading(false);
     }
-  }, [fetchedModels, rowStates, apiKey, baseUrl, providerKey, tenantId, message, t, onClose, onSuccess]);
+  }, [getEnabledRows, rowStates, apiKey, baseUrl, providerKey, tenantId, message, t, onClose, onSuccess]);
 
   const resetBatchState = useCallback(() => {
     setFetchedModels([]);
@@ -1414,13 +1448,9 @@ export const ModelAddDialogV2 = ({
                     <Tag color={getConnectivityMeta(customConnectivity.status).color}>
                       {t(`model.connectivity.${customConnectivity.status}`, {
                         defaultValue:
-                          customConnectivity.status === "available"
-                            ? "可用"
-                            : customConnectivity.status === "unavailable"
-                              ? "不可用"
-                              : customConnectivity.status === "checking"
-                                ? "检测中"
-                                : "",
+                          CUSTOM_CONNECTIVITY_FALLBACK_LABELS[
+                            customConnectivity.status
+                          ] ?? "",
                       })}
                     </Tag>
                   )}

@@ -93,27 +93,33 @@ const buildCapacityRequestBody = (model: {
  * and snake_case (top_p / extra_params, from buildInferenceParamsPayload output)
  * so callers don't need to convert between the two.
  */
+/** First defined value among the arguments, or undefined. */
+const firstDefined = <T,>(...values: (T | undefined)[]): T | undefined => {
+  for (const value of values) {
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 const buildInferenceParamsRequestBody = (model: {
   temperature?: number;
   topP?: number;
   top_p?: number;
   extraParams?: Record<string, unknown>;
   extra_params?: Record<string, unknown>;
-}) => ({
-  ...(model.temperature !== undefined
-    ? { temperature: model.temperature }
-    : {}),
-  ...(model.topP !== undefined
-    ? { top_p: model.topP }
-    : model.top_p !== undefined
-    ? { top_p: model.top_p }
-    : {}),
-  ...(model.extraParams !== undefined
-    ? { extra_params: model.extraParams }
-    : model.extra_params !== undefined
-    ? { extra_params: model.extra_params }
-    : {}),
-});
+}) => {
+  const topP = firstDefined(model.topP, model.top_p);
+  const extraParams = firstDefined(model.extraParams, model.extra_params);
+  return {
+    ...(model.temperature !== undefined
+      ? { temperature: model.temperature }
+      : {}),
+    ...(topP !== undefined ? { top_p: topP } : {}),
+    ...(extraParams !== undefined ? { extra_params: extraParams } : {}),
+  };
+};
 
 /**
  * Map v2.6.0 inference params (temperature / top_p / extra_params) from

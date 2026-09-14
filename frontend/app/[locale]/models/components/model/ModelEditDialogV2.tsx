@@ -366,20 +366,26 @@ export const ModelEditDialogV2 = ({
       const inferencePayload = supportsInferenceParams
         ? buildInferenceParamsPayload(advanced)
         : {};
+      // Probe budget per model type: embedding carries its dimension, rerank
+      // has no token budget, everything else uses the capacity-panel budget.
+      const resolveProbeMaxTokens = (): number | undefined => {
+        if (form.type === MODEL_TYPES.EMBEDDING) {
+          return Number.parseInt(form.vectorDimension);
+        }
+        if (form.type === MODEL_TYPES.RERANK) {
+          return 0;
+        }
+        return llmProbeMaxTokens;
+      };
       const config: any = {
         modelName: form.name,
         modelType: connectivityModelType,
         baseUrl: form.url,
         apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : form.type === MODEL_TYPES.RERANK
-              ? 0
-              : llmProbeMaxTokens,
+        maxTokens: resolveProbeMaxTokens(),
         embeddingDim:
           form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
+            ? Number.parseInt(form.vectorDimension)
             : undefined,
         ...inferencePayload,
       };
@@ -490,7 +496,7 @@ export const ModelEditDialogV2 = ({
             ? form.chunkSizeRange[1]
             : undefined,
           chunkingBatchSize: isEmbeddingModel
-            ? parseInt(form.chunkingBatchSize) || 10
+            ? Number.parseInt(form.chunkingBatchSize) || 10
             : undefined,
           modelFactory: isVoiceModel ? form.modelFactory : undefined,
           modelAppid:
@@ -503,13 +509,11 @@ export const ModelEditDialogV2 = ({
               : undefined,
           timeoutSeconds:
             !isEmbeddingModel && !isRerankModel
-              ? parseInt(form.timeoutSeconds) || 120
+              ? Number.parseInt(form.timeoutSeconds) || 120
               : undefined,
           concurrencyLimit:
-            !isEmbeddingModel && !isRerankModel
-              ? form.concurrencyLimit
-                ? parseInt(form.concurrencyLimit)
-                : undefined
+            !isEmbeddingModel && !isRerankModel && form.concurrencyLimit
+              ? Number.parseInt(form.concurrencyLimit)
               : undefined,
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
           ...(acceptedCapacitySuggestion
@@ -543,7 +547,7 @@ export const ModelEditDialogV2 = ({
             ? {
                 expectedChunkSize: form.chunkSizeRange[0],
                 maximumChunkSize: form.chunkSizeRange[1],
-                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
+                chunkingBatchSize: Number.parseInt(form.chunkingBatchSize) || 10,
               }
             : {}),
           // Send voice model fields
@@ -563,9 +567,9 @@ export const ModelEditDialogV2 = ({
           // Send timeout for non-embedding models
           ...(!isEmbeddingModel && !isRerankModel
             ? {
-                timeoutSeconds: parseInt(form.timeoutSeconds) || 120,
+                timeoutSeconds: Number.parseInt(form.timeoutSeconds) || 120,
                 concurrencyLimit: form.concurrencyLimit
-                  ? parseInt(form.concurrencyLimit)
+                  ? Number.parseInt(form.concurrencyLimit)
                   : undefined,
               }
             : {}),
@@ -610,7 +614,7 @@ export const ModelEditDialogV2 = ({
           },
           ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
           ...(isEmbeddingModel
-            ? { dimension: parseInt(form.vectorDimension) }
+            ? { dimension: Number.parseInt(form.vectorDimension) }
             : {}),
           ...(isVoiceModel
             ? {

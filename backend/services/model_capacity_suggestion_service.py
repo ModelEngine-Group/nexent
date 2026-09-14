@@ -433,6 +433,48 @@ def _litellm_cache() -> Optional[dict]:
     return _LITELLM_CACHE
 
 
+def _litellm_exact_entry(cache: dict, target: str, provider: Optional[str]) -> Optional[dict]:
+    """Find the first cache entry whose key is one of the exact candidates."""
+    candidates = []
+    if provider:
+        candidates.append(f"{provider}/{target}")
+    candidates.append(target)
+    # try matching by final segment (handles "org/model" naming)
+    final_segment = target.split("/")[-1]
+    if final_segment != target:
+        candidates.append(final_segment)
+
+    for cand in candidates:
+        if cand in cache:
+            return cache[cand]
+    return None
+
+
+def _litellm_cross_provider_entry(cache: dict, final_segment: str) -> Optional[dict]:
+    """Find an entry across all providers whose final segment matches.
+
+    Collects all case-insensitive matches and prefers one that has BOTH
+    context and max_output (some providers leave max_output as null).
+    """
+    lowered = final_segment.lower()
+    matches = [v for k, v in cache.items() if k.split("/")[-1].lower() == lowered]
+    return next(
+        (m for m in matches if m.get("max_input_tokens") and m.get("max_output_tokens")),
+        matches[0] if matches else None,
+    )
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    """Coerce to a positive int; None for missing/invalid/non-positive values."""
+    if value is None:
+        return None
+    try:
+        n = int(value)
+    except (ValueError, TypeError):
+        return None
+    return n if n > 0 else None
+
+
 def _litellm_lookup(
     model_name: str,
     provider: Optional[str],
@@ -452,50 +494,16 @@ def _litellm_lookup(
     if not target:
         return None
 
-    # Candidate keys to try, in priority order.
-    candidates = []
-    if provider:
-        candidates.append(f"{provider}/{target}")
-    candidates.append(target)
-    # try matching by final segment (handles "org/model" naming)
-    final_segment = target.split("/")[-1]
-    if final_segment != target:
-        candidates.append(final_segment)
-
-    entry = None
-    for cand in candidates:
-        if cand in cache:
-            entry = cache[cand]
-            break
+    entry = _litellm_exact_entry(cache, target, provider)
     if entry is None:
-        # cross-provider match by final segment, case-insensitive. Collect all
-        # matches and prefer one that has BOTH context and max_output (some
-        # providers leave max_output as null).
-        lowered = final_segment.lower()
-        matches = [
-            v for k, v in cache.items()
-            if k.split("/")[-1].lower() == lowered
-        ]
-        entry = next(
-            (m for m in matches if m.get("max_input_tokens") and m.get("max_output_tokens")),
-            matches[0] if matches else None,
-        )
+        entry = _litellm_cross_provider_entry(cache, target.split("/")[-1])
     if not entry or not isinstance(entry, dict):
         return None
 
-    def _pos_int(v: Any) -> Optional[int]:
-        if v is None:
-            return None
-        try:
-            n = int(v)
-        except (ValueError, TypeError):
-            return None
-        return n if n > 0 else None
-
     # LiteLLM's max_input_tokens is the total context window (input+output);
     # max_output_tokens is the output cap. Map accordingly.
-    context = _pos_int(entry.get("max_input_tokens"))
-    max_output = _pos_int(entry.get("max_output_tokens"))
+    context = _positive_int(entry.get("max_input_tokens"))
+    max_output = _positive_int(entry.get("max_output_tokens"))
     if context is None and max_output is None:
         return None
 

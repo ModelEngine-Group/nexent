@@ -14,6 +14,7 @@ and `tenant_id` to services/database helpers.
 
 import asyncio
 import logging
+import re
 
 from consts.model import (
     BatchCreateModelsRequest,
@@ -39,7 +40,7 @@ from fastapi import APIRouter, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 from services.model_health_service import (
     check_model_connectivity,
     verify_model_config_connectivity,
@@ -93,6 +94,28 @@ except Exception as _exc:  # noqa: BLE001
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
+
+# Shared response message for every catalog endpoint's failure branch.
+_CATALOG_UNAVAILABLE_MESSAGE = "catalog unavailable"
+
+# Control characters (including newlines/tabs) that must never reach a log
+# line: catalog lookups interpolate user-supplied provider/model names.
+_LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _log_safe(value: Any) -> str:
+    """Strip control characters so user input cannot forge log entries."""
+    return _LOG_UNSAFE_CHARS.sub("", str(value))
+
+
+def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSONResponse:
+    """Uniform failure response shared by every catalog endpoint."""
+    content: Dict[str, Any] = {
+        "message": _CATALOG_UNAVAILABLE_MESSAGE,
+        "catalog_available": False,
+    }
+    content.update(extra)
+    return JSONResponse(status_code=status_code, content=content)
 
 
 def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionResponse:
@@ -975,13 +998,9 @@ async def get_model_catalog_all(
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Dumping full catalog failed: %s", e)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={
-                "message": "catalog unavailable",
-                "catalog_available": False,
-                "data": {"version": "0.0.0", "metadata": {}, "providers": []},
-            },
+        return _catalog_unavailable_response(
+            HTTPStatus.OK,
+            data={"version": "0.0.0", "metadata": {}, "providers": []},
         )
 
 
@@ -1020,14 +1039,7 @@ async def list_model_catalog_providers(
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Listing catalog providers failed: %s", e)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={
-                "message": "catalog unavailable",
-                "catalog_available": False,
-                "data": [],
-            },
-        )
+        return _catalog_unavailable_response(HTTPStatus.OK, data=[])
 
 
 @router.get("/catalog/inference_field_specs")
@@ -1097,16 +1109,12 @@ async def list_model_catalog_models(
             },
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("Listing catalog models for %s failed: %s", provider, e)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={
-                "message": "catalog unavailable",
-                "catalog_available": False,
-                "provider": provider,
-                "filter_model_type": model_type,
-                "data": [],
-            },
+        logger.warning("Listing catalog models for %s failed: %s", _log_safe(provider), e)
+        return _catalog_unavailable_response(
+            HTTPStatus.OK,
+            provider=provider,
+            filter_model_type=model_type,
+            data=[],
         )
 
 
@@ -1154,14 +1162,10 @@ async def get_model_catalog_profile(
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Get catalog profile for %s/%s failed: %s",
-                       provider, model_name, e)
-        return JSONResponse(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            content={
-                "message": "catalog unavailable",
-                "catalog_available": False,
-                "provider": provider,
-                "model_name": model_name,
-                "data": None,
-            },
+                       _log_safe(provider), _log_safe(model_name), e)
+        return _catalog_unavailable_response(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            provider=provider,
+            model_name=model_name,
+            data=None,
         )

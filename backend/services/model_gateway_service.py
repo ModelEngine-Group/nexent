@@ -95,6 +95,18 @@ def _custom_extra_body(extra_params: Optional[dict]) -> Optional[dict]:
     return custom if isinstance(custom, dict) and custom else None
 
 
+def _llm_construct_kwargs(construct_extras: Dict[str, Any], cfg: dict) -> Dict[str, Any]:
+    """Per-call kwargs shared by every LLM-family context subclass."""
+    return dict(
+        temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+        top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+        stream=construct_extras.pop("stream", None),
+        max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+        frequency_penalty=cfg.get("frequency_penalty"),
+        extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
+    )
+
+
 def _config_to_context(
     cfg: Optional[dict],
     modality: str,
@@ -133,52 +145,33 @@ def _config_to_context(
 
     # ---- modality-specific subclass construction ----
     if modality == "llm":
-        return LLMContext(
-            **common,
-            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
-            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
-            stream=construct_extras.pop("stream", None),
-            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-            frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
-        )
-    elif modality == "llm_long_context":
+        return LLMContext(**common, **_llm_construct_kwargs(construct_extras, cfg))
+    if modality == "llm_long_context":
         return LongContextLLMContext(
             **common,
-            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
-            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
-            stream=construct_extras.pop("stream", None),
-            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-            frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
+            **_llm_construct_kwargs(construct_extras, cfg),
             max_tokens=cfg.get("max_tokens"),
             truncation_strategy=cfg.get("truncation_strategy"),
         )
-    elif modality == "vlm":
+    if modality == "vlm":
         explicit_caps = construct_extras.pop("capabilities", None) or {}
         caps = {"audio": True, "video": False, "image": False} if slot == "vlm4" else {}
         caps.update(explicit_caps)
         return VLMContext(
             **common,
-            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
-            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
-            stream=construct_extras.pop("stream", None),
-            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-            frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
+            **_llm_construct_kwargs(construct_extras, cfg),
             max_tokens=cfg.get("max_tokens"),
             capabilities=caps,
         )
-    elif modality in ("embedding", "multi_embedding"):
+    if modality in ("embedding", "multi_embedding"):
         return EmbeddingContext(
             **common,
             embedding_dim=cfg.get("max_tokens", 1024),
             model_type=cfg.get("model_type"),
         )
-    elif modality == "rerank":
+    if modality == "rerank":
         return ModelContext(**common)
-    else:
-        raise ValueError(f"Unknown modality: {modality}")
+    raise ValueError(f"Unknown modality: {modality}")
 
 
 def get_adapter_from_config(

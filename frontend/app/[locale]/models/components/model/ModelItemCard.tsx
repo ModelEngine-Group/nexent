@@ -41,6 +41,19 @@ const CONNECT_STATUS_COLORS: Record<ModelConnectStatus | "default", string> = {
   default: "#17202a",
 };
 
+/* ---------- Type tag colors ---------- */
+const MODEL_TYPE_TAG_COLORS: Record<string, string> = {
+  [MODEL_TYPES.LLM]: "blue",
+  [MODEL_TYPES.EMBEDDING]: "green",
+  [MODEL_TYPES.MULTI_EMBEDDING]: "teal",
+  [MODEL_TYPES.RERANK]: "purple",
+  [MODEL_TYPES.VLM]: "gold",
+  [MODEL_TYPES.VLM2]: "gold",
+  [MODEL_TYPES.VLM3]: "gold",
+  [MODEL_TYPES.STT]: "red",
+  [MODEL_TYPES.TTS]: "magenta",
+};
+
 const getStatusDotStyle = (
   status?: ModelConnectStatus
 ): React.CSSProperties => {
@@ -334,25 +347,7 @@ export const ModelItemCard = ({
       {/* Tags: model type + source */}
       <div style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 4 }}>
         <Tag
-          color={
-            MODEL_TYPES.LLM === model.type
-              ? "blue"
-              : MODEL_TYPES.EMBEDDING === model.type
-                ? "green"
-                : MODEL_TYPES.MULTI_EMBEDDING === model.type
-                  ? "teal"
-                  : MODEL_TYPES.RERANK === model.type
-                    ? "purple"
-                    : MODEL_TYPES.VLM === model.type ||
-                        MODEL_TYPES.VLM2 === model.type ||
-                        MODEL_TYPES.VLM3 === model.type
-                      ? "gold"
-                      : MODEL_TYPES.STT === model.type
-                        ? "red"
-                        : MODEL_TYPES.TTS === model.type
-                          ? "magenta"
-                          : "default"
-          }
+          color={MODEL_TYPE_TAG_COLORS[model.type] ?? "default"}
           style={{ margin: 0 }}
         >
           {typeLabel}
