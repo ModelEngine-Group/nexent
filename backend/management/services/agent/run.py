@@ -18,7 +18,11 @@ from nexent.core.concurrency import (
 from nexent.memory.models import MemoryIngestUnit
 from nexent.core.models import OpenAIModel
 
-from agents.agent_run_manager import AgentRunAlreadyActiveError, agent_run_manager
+from agents.agent_run_manager import (
+    AgentRunAlreadyActiveError,
+    AgentRunConcurrencyExceededError,
+    agent_run_manager,
+)
 from agents.create_agent_info import create_agent_run_info
 from agents.preprocess_manager import preprocess_manager
 from consts.const import (
@@ -27,6 +31,7 @@ from consts.const import (
     LANGUAGE,
     MESSAGE_ROLE,
     MODEL_CONFIG_MAPPING,
+    RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
     RUNTIME_CANCEL_POLL_INTERVAL_SECONDS,
     STREAM_STATUS_EVENT,
 )
@@ -1896,7 +1901,12 @@ async def run_agent_stream(
     deferred_run = DeferredAgentRun()
     run_identifier = _agent_run_identifier(agent_request)
     execution = None
+    agent_capacity_token = None
     try:
+        agent_capacity_token = agent_run_manager.reserve_agent_capacity(
+            agent_request.agent_id,
+            RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
+        )
         execution = runtime_thread_manager.submit(
             "agent-run",
             ManagedTaskSpec(
@@ -1908,8 +1918,17 @@ async def run_agent_stream(
             ),
             deferred_run.run,
         )
+        execution.future.add_done_callback(
+            lambda _future: agent_run_manager.release_agent_capacity(
+                agent_capacity_token
+            )
+        )
         await runtime_thread_manager.wait_until_started(execution)
+    except AgentRunConcurrencyExceededError as exc:
+        raise RuntimeCapacityExceededError() from exc
     except ThreadCapacityExceeded as exc:
+        if execution is None and agent_capacity_token is not None:
+            agent_run_manager.release_agent_capacity(agent_capacity_token)
         raise RuntimeCapacityExceededError() from exc
     except ThreadQueueTimedOut as exc:
         deferred_run.cancel()
@@ -1923,6 +1942,8 @@ async def run_agent_stream(
                 wait_timeout=0,
                 mark_stuck_on_timeout=False,
             )
+        elif agent_capacity_token is not None:
+            agent_run_manager.release_agent_capacity(agent_capacity_token)
         raise
 
     try:

@@ -13,6 +13,10 @@ class AgentRunAlreadyActiveError(RuntimeError):
     """Raised when a conversation already has an active agent run."""
 
 
+class AgentRunConcurrencyExceededError(RuntimeError):
+    """Raised when one agent id has reached its admitted run limit."""
+
+
 class AgentRunManager:
     _instance = None
     _lock = threading.Lock()
@@ -30,6 +34,8 @@ class AgentRunManager:
             # user_id:conversation_id -> agent_run_info
             self.agent_runs: Dict[str, AgentRunInfo] = {}
             self._reservations: Dict[str, str] = {}
+            self._agent_capacity_counts: dict[str, int] = {}
+            self._agent_capacity_tokens: dict[str, str] = {}
             self._initialized = True
 
     def _get_run_key(self, conversation_id: Union[int, str], user_id: str) -> str:
@@ -47,6 +53,44 @@ class AgentRunManager:
             token = uuid.uuid4().hex
             self._reservations[run_key] = token
             return token
+
+    def reserve_agent_capacity(
+        self,
+        agent_id: int | str,
+        max_concurrent_runs: int,
+    ) -> str:
+        """Atomically reserve one admitted run slot for an agent id."""
+        if max_concurrent_runs <= 0:
+            raise ValueError("max_concurrent_runs must be greater than zero")
+        agent_key = str(agent_id)
+        with self._lock:
+            current = self._agent_capacity_counts.get(agent_key, 0)
+            if current >= max_concurrent_runs:
+                raise AgentRunConcurrencyExceededError(
+                    f"Agent {agent_key} has reached its concurrent run limit"
+                )
+            token = uuid.uuid4().hex
+            self._agent_capacity_counts[agent_key] = current + 1
+            self._agent_capacity_tokens[token] = agent_key
+            return token
+
+    def release_agent_capacity(self, capacity_token: str) -> bool:
+        """Release an agent admission slot exactly once."""
+        with self._lock:
+            agent_key = self._agent_capacity_tokens.pop(capacity_token, None)
+            if agent_key is None:
+                return False
+            remaining = self._agent_capacity_counts[agent_key] - 1
+            if remaining > 0:
+                self._agent_capacity_counts[agent_key] = remaining
+            else:
+                del self._agent_capacity_counts[agent_key]
+            return True
+
+    def get_agent_capacity_count(self, agent_id: int | str) -> int:
+        """Return the current admitted run count for one agent id."""
+        with self._lock:
+            return self._agent_capacity_counts.get(str(agent_id), 0)
 
     def release_agent_run_reservation(
         self,

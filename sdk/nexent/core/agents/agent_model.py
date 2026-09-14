@@ -361,7 +361,7 @@ class AgentRunInfo(BaseModel):
     )
     mcp_tool_timeout_seconds: float = Field(
         description="Hard timeout for one MCP tool invocation",
-        default=120.0,
+        default=60.0,
         gt=0,
     )
     mcp_close_timeout_seconds: float = Field(

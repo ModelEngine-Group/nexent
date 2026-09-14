@@ -5,6 +5,7 @@ import pytest
 
 from backend.agents.agent_run_manager import (
     AgentRunAlreadyActiveError,
+    AgentRunConcurrencyExceededError,
     AgentRunManager,
     agent_run_manager,
 )
@@ -18,6 +19,8 @@ class TestAgentRunManager:
         # Clear any existing state
         self.manager.agent_runs.clear()
         self.manager._reservations.clear()
+        self.manager._agent_capacity_counts.clear()
+        self.manager._agent_capacity_tokens.clear()
 
     def test_singleton_pattern(self):
         """Test that AgentRunManager is a singleton"""
@@ -416,3 +419,27 @@ class TestAgentRunManager:
         assert not hasattr(self.manager, "clear_conversation_context_manager")
         assert not hasattr(self.manager, "_conversation_context_managers")
         assert not hasattr(self.manager, "_conversation_run_counts")
+
+    def test_ut_be_tlm_033_agent_capacity_isolated_and_released(self):
+        """UT-BE-TLM-033 limits admitted runs independently per agent id."""
+        first = self.manager.reserve_agent_capacity(agent_id=7, max_concurrent_runs=2)
+        second = self.manager.reserve_agent_capacity(agent_id=7, max_concurrent_runs=2)
+
+        with pytest.raises(AgentRunConcurrencyExceededError):
+            self.manager.reserve_agent_capacity(agent_id=7, max_concurrent_runs=2)
+
+        other = self.manager.reserve_agent_capacity(agent_id=8, max_concurrent_runs=2)
+        assert self.manager.release_agent_capacity(first) is True
+        replacement = self.manager.reserve_agent_capacity(agent_id=7, max_concurrent_runs=2)
+        assert self.manager.release_agent_capacity(first) is False
+
+        assert self.manager.release_agent_capacity(second) is True
+        assert self.manager.release_agent_capacity(other) is True
+        assert self.manager.release_agent_capacity(replacement) is True
+        assert self.manager.get_agent_capacity_count(7) == 0
+        assert self.manager.get_agent_capacity_count(8) == 0
+
+    def test_ut_be_tlm_033_agent_capacity_requires_positive_limit(self):
+        """UT-BE-TLM-033 rejects an invalid per-agent capacity policy."""
+        with pytest.raises(ValueError, match="max_concurrent_runs"):
+            self.manager.reserve_agent_capacity(agent_id=7, max_concurrent_runs=0)

@@ -343,7 +343,26 @@ setattr(services_module, "asset_owner_visibility", _asset_owner_mod)
 # Mock agents submodules
 sys.modules["agents"] = MagicMock()
 sys.modules["agents.create_agent_info"] = MagicMock()
-sys.modules["agents.agent_run_manager"] = MagicMock()
+agent_run_manager_module = types.ModuleType("agents.agent_run_manager")
+
+
+class _AgentRunAlreadyActiveError(RuntimeError):
+    pass
+
+
+class _AgentRunConcurrencyExceededError(RuntimeError):
+    pass
+
+
+agent_run_manager_module.AgentRunAlreadyActiveError = _AgentRunAlreadyActiveError
+agent_run_manager_module.AgentRunConcurrencyExceededError = (
+    _AgentRunConcurrencyExceededError
+)
+agent_run_manager_module.agent_run_manager = MagicMock()
+agent_run_manager_module.agent_run_manager.reserve_agent_capacity.return_value = (
+    "agent-capacity-test"
+)
+sys.modules["agents.agent_run_manager"] = agent_run_manager_module
 sys.modules["agents.preprocess_manager"] = MagicMock()
 
 # Need to set up create_tool_config_list as an async mock
@@ -634,7 +653,11 @@ from consts.model import (
 @pytest.fixture(autouse=True)
 def reset_mocks():
     """Reset all mocks before each test to ensure a clean test environment."""
+    agent_run_service.agent_run_manager._agent_capacity_counts.clear()
+    agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
     yield
+    agent_run_service.agent_run_manager._agent_capacity_counts.clear()
+    agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
 
 
 def apply_default_prompt_template_request_fields(request, prompt_template_id=None):
@@ -4790,6 +4813,39 @@ async def test_ut_be_tlm_027_runtime_overload_precedes_run_side_effects(
 
 
 @pytest.mark.asyncio
+async def test_ut_be_tlm_033_agent_id_capacity_rejects_before_managed_execution(
+    monkeypatch,
+    mock_agent_request,
+    mock_http_request,
+):
+    """UT-BE-TLM-033 rejects a full agent id before global lane submission."""
+    monkeypatch.setattr(
+        agent_run_service,
+        "_resolve_user_tenant_language",
+        lambda **kwargs: ("user-a", "tenant-a", "en"),
+    )
+    reserve_capacity = MagicMock(
+        side_effect=agent_run_service.AgentRunConcurrencyExceededError()
+    )
+    submit = MagicMock()
+    monkeypatch.setattr(
+        agent_run_service.agent_run_manager,
+        "reserve_agent_capacity",
+        reserve_capacity,
+    )
+    monkeypatch.setattr(agent_run_service.runtime_thread_manager, "submit", submit)
+
+    with pytest.raises(agent_run_service.RuntimeCapacityExceededError):
+        await run_agent_stream(mock_agent_request, mock_http_request, "Bearer token")
+
+    reserve_capacity.assert_called_once_with(
+        mock_agent_request.agent_id,
+        agent_run_service.RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
+    )
+    submit.assert_not_called()
+
+
+@pytest.mark.asyncio
 @patch(
     "management.services.agent.run._resolve_user_tenant_language",
     return_value=(None, None, "en"),
@@ -4806,6 +4862,15 @@ async def test_run_agent_stream(
     mock_http_request,
 ):
     """Test run_agent_stream function."""
+
+    capacity_manager = agent_run_service.agent_run_manager
+    capacity_manager.reserve_agent_capacity.reset_mock()
+    capacity_manager.release_agent_capacity.reset_mock()
+    capacity_manager.reserve_agent_capacity.return_value = "agent-capacity-test"
+    execution_future = (
+        agent_run_service.runtime_thread_manager.submit.return_value.future
+    )
+    execution_future.add_done_callback.reset_mock()
 
     # Setup
     async def mock_streamer():
@@ -4840,6 +4905,11 @@ async def test_run_agent_stream(
         execution=ANY,
         deferred_run=ANY,
         channel=streaming_channel_manager_mock._latest_channel,
+    )
+    completion_callback = execution_future.add_done_callback.call_args.args[0]
+    completion_callback(execution_future)
+    capacity_manager.release_agent_capacity.assert_called_once_with(
+        "agent-capacity-test"
     )
 
     # Test debug mode
