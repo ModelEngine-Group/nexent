@@ -594,6 +594,7 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_reasoning_content(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with reasoning_content"""
+        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
         mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
         mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
 
@@ -603,6 +604,7 @@ class TestAdditionalLLMUtilsTests:
         mock_chunk = MagicMock()
         mock_chunk.choices = [MagicMock()]
         mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_chunk.choices[0].delta.reasoning = None
         mock_chunk.choices[0].delta.reasoning_content = "Some reasoning"
 
         mock_llm_instance.client = MagicMock()
@@ -616,6 +618,39 @@ class TestAdditionalLLMUtilsTests:
         )
 
         assert result == "Generated prompt"
+        mock_logger.debug.assert_any_call(
+            "Received reasoning_content (metadata only, not filtering content)"
+        )
+
+    def test_call_llm_for_system_prompt_with_reasoning(self, mocker: MockFixture):
+        """Test call_llm_for_system_prompt with the alternate reasoning field."""
+        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
+        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
+        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+
+        mock_llm_instance = mock_adapter.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_chunk.choices[0].delta.reasoning = "Some reasoning"
+        mock_chunk.choices[0].delta.reasoning_content = None
+
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_llm_instance._prepare_completion_kwargs.return_value = {}
+
+        result = call_llm_for_system_prompt(
+            1,
+            "user prompt",
+            "system prompt",
+        )
+
+        assert result == "Generated prompt"
+        mock_logger.debug.assert_any_call(
+            "Received reasoning_content (metadata only, not filtering content)"
+        )
 
     def test_call_llm_for_system_prompt_multiple_chunks(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with multiple chunks"""

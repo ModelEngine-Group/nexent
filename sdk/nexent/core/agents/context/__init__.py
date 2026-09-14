@@ -31,6 +31,7 @@ _EXPORTS = {
     "ManagedRunContext": (".run_context", "ManagedRunContext"),
     "HistoryCompressor": (".history_compression", "HistoryCompressor"),
     "HistorySummaryCandidate": (".history_compression", "HistorySummaryCandidate"),
+    "HistorySummaryInput": (".history_compression", "HistorySummaryInput"),
     "format_summary_output": (".budget", "format_summary_output"),
     "_is_context_length_error": (".budget", "_is_context_length_error"),
     "ContextProcessingMode": (".policy", "ContextProcessingMode"),

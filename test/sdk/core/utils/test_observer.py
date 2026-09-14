@@ -150,7 +150,7 @@ class TestParseTransformer:
         code_content = "print('Hello World')"
 
         result = transformer.transform(content=code_content, lang="zh")
-        expected = "\n🛠️ 使用Python解释器执行代码\n```python\nprint('Hello World')\n```\n"
+        expected = "print('Hello World')"
         assert result == expected
 
     def test_parse_transformer_en(self):
@@ -159,7 +159,7 @@ class TestParseTransformer:
         code_content = "x = 42"
 
         result = transformer.transform(content=code_content, lang="en")
-        expected = "\n🛠️ Used tool python_interpreter\n```python\nx = 42\n```\n"
+        expected = "x = 42"
         assert result == expected
 
     def test_parse_transformer_default_lang(self):
@@ -168,7 +168,7 @@ class TestParseTransformer:
         code_content = "def test(): pass"
 
         result = transformer.transform(content=code_content)
-        expected = "\n🛠️ Used tool python_interpreter\n```python\ndef test(): pass\n```\n"
+        expected = "def test(): pass"
         assert result == expected
 
 

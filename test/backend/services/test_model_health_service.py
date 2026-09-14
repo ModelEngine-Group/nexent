@@ -792,7 +792,7 @@ async def test_embedding_dimension_check_embedding_success():
         )
         assert dimension == 3
         mock_build.assert_called_once_with(
-            {"base_url": "http://test.com/embeddings", "api_key": "test-key",
+            {"base_url": "http://test.com", "api_key": "test-key",
              "ssl_verify": True, "model_type": "embedding"},
             "embedding", "embedding", None, model_name="test-embedding",
         )
@@ -812,7 +812,7 @@ async def test_embedding_dimension_check_multi_embedding_success():
         )
         assert dimension == 4
         mock_build.assert_called_once_with(
-            {"model_factory": None, "base_url": "http://test.com/embeddings",
+            {"model_factory": None, "base_url": "http://test.com",
              "api_key": "test-key", "ssl_verify": True, "model_type": "multi_embedding"},
             "multi_embedding", "multiEmbedding", None, model_name="test-multi-embedding",
         )
@@ -1341,3 +1341,78 @@ async def test_verify_model_config_connectivity_ssl_verify_fallback():
             "gpt-4", "llm", "https://api.openai.com", "test-key", False,
             "openai", None, None, None, None,
         )
+
+
+def test_embedding_url_candidates_empty_base_url():
+    """_embedding_url_candidates has no probe target when base_url is empty."""
+    from backend.services.model_health_service import _embedding_url_candidates
+
+    assert _embedding_url_candidates("") == []
+
+
+def test_embedding_url_candidates_orders_endpoint_first():
+    """_embedding_url_candidates probes the /embeddings endpoint before the URL as given."""
+    from backend.services.model_health_service import _embedding_url_candidates
+
+    assert _embedding_url_candidates("https://api.openai.com/v1") == [
+        "https://api.openai.com/v1/embeddings",
+        "https://api.openai.com/v1",
+    ]
+    assert _embedding_url_candidates("https://api.openai.com/v1/embeddings") == [
+        "https://api.openai.com/v1/embeddings",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_embedding_falls_back_to_given_url():
+    """Connectivity succeeds on the given URL when the /embeddings endpoint does not answer."""
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(side_effect=[[], [[0.1, 0.2]]])
+        mock_build.return_value = mock_adapter
+
+        result = await _perform_connectivity_check(
+            "text-embedding-ada-002",
+            "embedding",
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        assert result is True
+        assert mock_build.call_count == 2
+        assert mock_build.call_args_list[0][0][0]["base_url"] == "https://api.openai.com/v1/embeddings"
+        assert mock_build.call_args_list[1][0][0]["base_url"] == "https://api.openai.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_embedding_all_candidates_fail():
+    """Connectivity is False when no candidate URL serves embeddings."""
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[])
+        mock_build.return_value = mock_adapter
+
+        result = await _perform_connectivity_check(
+            "text-embedding-ada-002",
+            "embedding",
+            "https://api.openai.com/v1",
+            "test-key",
+        )
+
+        assert result is False
+        assert mock_build.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_perform_connectivity_check_embedding_empty_base_url():
+    """Connectivity is False without probing when base_url is empty."""
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        result = await _perform_connectivity_check(
+            "text-embedding-ada-002",
+            "embedding",
+            "",
+            "test-key",
+        )
+
+        assert result is False
+        mock_build.assert_not_called()

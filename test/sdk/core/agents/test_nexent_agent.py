@@ -1754,7 +1754,7 @@ def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instanc
         context_manager=context_manager,
         token_threshold=24576,
         context_window_tokens=32768,
-        hard_input_budget_tokens=28672,
+        effective_input_limit_tokens=28672,
         processing_mode="adaptive_compact",
     )
 
