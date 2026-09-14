@@ -786,7 +786,14 @@ export function A2uiBridgeSurface({
   className = "",
   onAction,
 }: A2uiBridgeSurfaceProps) {
-  const ops = useMemo(() => extractOperations(snapshot), [snapshot]);
+  const rawOps = useMemo(() => extractOperations(snapshot), [snapshot]);
+  // Preprocess before applying so Nexus binding syntax
+  // ({literalString: "xxx"}) is unwrapped and composite components
+  // (Slider, Table, Chart, etc.) are expanded into supported primitives.
+  const ops = useMemo(
+    () => (rawOps ? (preprocessOperations(rawOps) as A2uiOperation[]) : null),
+    [rawOps]
+  );
   const { state, apply } = useA2uiSurfaceState();
 
   // Apply new ops whenever they arrive
