@@ -30,7 +30,10 @@ from agents.create_agent_info import (
 from agents.nl2agent_agent import create_nl2agent_agent_config
 from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import update_agent_draft_fields
+from database.agent_db import (
+    query_all_agent_info_by_tenant_id,
+    update_agent_draft_fields,
+)
 from database.skill_db import query_enabled_skill_instances
 from database.tool_db import query_all_enabled_tool_instances, query_all_tools
 from services.agent_draft_permission_service import (
@@ -146,7 +149,7 @@ def _update_agent_draft_from_fields(
     user_id: str,
 ) -> dict[str, Any]:
     try:
-        require_agent_draft_edit(
+        draft = require_agent_draft_edit(
             agent_id=agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -155,6 +158,16 @@ def _update_agent_draft_from_fields(
         raise Nl2AgentDraftSaveError(exc.code) from exc
 
     patch = fields.model_dump(mode="python", exclude_unset=True)
+    generated_name = patch.get("name")
+    if generated_name is not None:
+        if str(draft.get("name") or "").strip():
+            raise Nl2AgentDraftSaveError("agent_name_already_set")
+        if any(
+            agent.get("agent_id") != agent_id
+            and agent.get("name") == generated_name
+            for agent in query_all_agent_info_by_tenant_id(tenant_id)
+        ):
+            raise Nl2AgentDraftSaveError("agent_name_duplicate", retryable=True)
     try:
         rowcount = update_agent_draft_fields(
             agent_id=agent_id,
@@ -1234,6 +1247,12 @@ async def validate_agent_generation_complete_impl(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    name = draft.get("name")
+    if (
+        not isinstance(name, str)
+        or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,59}", name)
+    ):
+        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"])
     description = draft.get("description")
     if not isinstance(description, str) or not description.strip():
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])

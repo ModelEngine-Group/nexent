@@ -192,6 +192,106 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
     )
 
 
+def test_update_agent_draft_initializes_generated_name_once(mocker):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+                "name": None,
+                "display_name": "Research Helper",
+            }
+        ],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=[{"agent_id": 22, "name": None}],
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields",
+        return_value=1,
+    )
+
+    result = save_agent_draft_fields_impl(
+        agent_id=22,
+        fields=AgentDraftFields(name="research_assistant"),
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["updated_fields"] == ["name"]
+    update_fields.assert_called_once_with(
+        agent_id=22,
+        tenant_id="tenant-a",
+        fields={"name": "research_assistant"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("draft_name", "existing_agents", "expected_code", "retryable"),
+    [
+        ("existing_assistant", [], "agent_name_already_set", False),
+        (
+            None,
+            [{"agent_id": 99, "name": "research_assistant"}],
+            "agent_name_duplicate",
+            True,
+        ),
+    ],
+)
+def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
+    mocker,
+    draft_name,
+    existing_agents,
+    expected_code,
+    retryable,
+):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+                "name": draft_name,
+            }
+        ],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=existing_agents,
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields"
+    )
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            22,
+            AgentDraftFields(name="research_assistant"),
+            "tenant-a",
+            "user-a",
+        )
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.retryable is retryable
+    update_fields.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("records", "role", "expected_code"),
     [
@@ -345,6 +445,15 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
 def test_agent_draft_fields_reject_empty_null_and_extra_patches(fields):
     with pytest.raises(ValidationError):
         AgentDraftFields.model_validate(fields)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["9invalid_assistant", "invalid-name_assistant", "中文助手", "researcher"],
+)
+def test_agent_draft_fields_reject_invalid_generated_name(name):
+    with pytest.raises(ValidationError):
+        AgentDraftFields(name=name)
 
 
 def test_search_filters_catalog_and_returns_safe_metadata(mocker):
@@ -1397,7 +1506,7 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
         new_callable=AsyncMock,
-        return_value=({"description": " "}, []),
+        return_value=({"name": "draft_assistant", "description": " "}, []),
     )
 
     with pytest.raises(Nl2AgentCompletionError) as exc_info:
@@ -1409,6 +1518,25 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
 
     assert exc_info.value.code == "draft_fields_incomplete"
     assert exc_info.value.failed_fields == ["description"]
+
+
+@pytest.mark.asyncio
+async def test_validate_agent_generation_complete_requires_generated_name(mocker):
+    mocker.patch(
+        "services.nl2agent_service._load_verified_nl2agent_state",
+        new_callable=AsyncMock,
+        return_value=({"display_name": "Draft", "description": "Ready"}, []),
+    )
+
+    with pytest.raises(Nl2AgentCompletionError) as exc_info:
+        await validate_agent_generation_complete_impl(
+            agent_id=42,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "draft_fields_incomplete"
+    assert exc_info.value.failed_fields == ["name"]
 
 
 @pytest.mark.asyncio
