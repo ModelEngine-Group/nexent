@@ -1334,6 +1334,25 @@ class AgUiEventEncoder:
                 # P2: Auto-complete Button action context from dataModel
                 event["content"]["a2ui_operations"] = self._ensure_button_action_context(ops)
 
+                # DEBUG: confirm ACTIVITY_SNAPSHOT ops that hit the frontend
+                for op in event["content"]["a2ui_operations"]:
+                    if isinstance(op, dict):
+                        for key in ("updateComponents",):
+                            comps = op.get(key, {}).get("components") if isinstance(op.get(key), dict) else None
+                            if isinstance(comps, list) and comps:
+                                first = comps[0]
+                                props = first.get("props", {}) if isinstance(first, dict) else {}
+                                logger.info(
+                                    "[AgUiEncoder] ACTIVITY_SNAPSHOT op=%s component=%s props=%s (has_literalString=%s)",
+                                    key,
+                                    first.get("component") if isinstance(first, dict) else None,
+                                    props,
+                                    any(
+                                        isinstance(v, dict) and "literalString" in v
+                                        for v in (props.values() if isinstance(props, dict) else [])
+                                    ),
+                                )
+
             return [event]
 
         # 2. Raw A2UI surface payload — wrap into ACTIVITY_SNAPSHOT
