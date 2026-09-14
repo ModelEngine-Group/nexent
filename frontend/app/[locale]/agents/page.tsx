@@ -133,13 +133,20 @@ function AgentSetupContent() {
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
   const previousTenantIdRef = useRef<string | null | undefined>(undefined);
+  const requestedAgentId = Number(searchParams.get("agent_id"));
+  const isRequestedAgentLoading =
+    Number.isInteger(requestedAgentId) &&
+    requestedAgentId > 0 &&
+    requestedAgentId !== currentAgentId;
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(
     currentAgentId
   );
   const { total } = useAgentVersionList(currentAgentId);
+  const shouldFetchVersionDetail = !isRequestedAgentLoading && total > 0;
   const { agentVersionDetail } = useAgentVersionDetail(
     currentAgentId,
-    agentInfo?.current_version_no ?? null
+    agentInfo?.current_version_no ?? null,
+    shouldFetchVersionDetail
   );
   const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
   const {
@@ -156,11 +163,6 @@ function AgentSetupContent() {
     resetFlow,
     sessionGeneration,
   } = useNl2AgentFlow();
-  const requestedAgentId = Number(searchParams.get("agent_id"));
-  const isRequestedAgentLoading =
-    Number.isInteger(requestedAgentId) &&
-    requestedAgentId > 0 &&
-    requestedAgentId !== currentAgentId;
   const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
   const canManualUnlock =
     !isNl2AgentUnavailable &&

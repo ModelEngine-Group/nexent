@@ -694,9 +694,9 @@ class NexentAgent:
 
         try:
             model = self.create_model(agent_config.model_name)
-            model.safe_input_budget_snapshot = getattr(
+            model.context_budget_snapshot = getattr(
                 agent_config,
-                "safe_input_budget_snapshot",
+                "context_budget_snapshot",
                 None,
             )
             model.capacity_snapshot = getattr(
@@ -1067,13 +1067,13 @@ class NexentAgent:
 
                         token_threshold = None
                         context_window_tokens = None
-                        hard_input_budget_tokens = None
+                        effective_input_limit_tokens = None
                         context_processing_mode = None
                         context_runtime = getattr(self.agent, "context_runtime", None)
                         if context_runtime is not None:
                             token_threshold = context_runtime.token_threshold
                             context_window_tokens = context_runtime.context_window_tokens
-                            hard_input_budget_tokens = context_runtime.hard_input_budget_tokens
+                            effective_input_limit_tokens = context_runtime.effective_input_limit_tokens
                             context_processing_mode = context_runtime.processing_mode
 
                         token_data = {
@@ -1085,7 +1085,7 @@ class NexentAgent:
                             "estimated_context_tokens": estimated_context,
                             "token_threshold": token_threshold,
                             "context_window_tokens": context_window_tokens,
-                            "hard_input_budget_tokens": hard_input_budget_tokens,
+                            "effective_input_limit_tokens": effective_input_limit_tokens,
                             "context_processing_mode": context_processing_mode,
                             "output_finish_reason": getattr(
                                 getattr(self.agent, "model", None),
@@ -1129,7 +1129,11 @@ class NexentAgent:
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
                         if hasattr(step_log, "error") and step_log.error is not None:
-                            observer.add_message("", ProcessType.ERROR, str(step_log.error))
+                            # Action-step failures are observations in the ReAct loop:
+                            # the model receives them and can repair/retry on the next
+                            # step. Surface them as warnings so the UI does not imply
+                            # that the whole run has already failed.
+                            observer.add_message("", ProcessType.WARNING, str(step_log.error))
 
                     if step_log is None:
                         raise ValueError("Agent run produced no output")
@@ -1157,7 +1161,7 @@ class NexentAgent:
 
                     # Check if we need to stop from external stop_event
                     if self.agent.stop_event.is_set():
-                        observer.add_message(self.agent.agent_name, ProcessType.ERROR,
+                        observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
                 except Exception as e:
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
@@ -1448,7 +1452,11 @@ class NexentAgent:
                 upload_tool.forward(str(path), relative.as_posix())
             except Exception as exc:
                 logger.error("Failed to upload workspace output %s: %s", path, exc)
-                self.observer.add_message("", ProcessType.ERROR, f"Failed to upload output file {relative}: {exc}")
+                self.observer.add_message(
+                    "",
+                    ProcessType.WARNING,
+                    f"Failed to upload output file {relative}: {exc}",
+                )
 
         if self._workspace_uploads:
             self.observer.add_message(

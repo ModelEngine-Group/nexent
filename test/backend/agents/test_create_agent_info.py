@@ -373,12 +373,13 @@ class MockRequestBudgetOverrides:
         self.requested_output_tokens = requested_output_tokens
 
 
-class MockSafeInputBudgetSnapshot:
+class MockContextBudgetSnapshot:
     def __init__(self, capacity_snapshot, requested_output_tokens=None):
         self.model_name = capacity_snapshot.model_name
         self.requested_output_tokens = requested_output_tokens or 4096
-        self.soft_input_budget_tokens = 24576
-        self.hard_input_budget_tokens = 28672
+        self.effective_input_limit_tokens = 28672
+        self.compaction_trigger_threshold_tokens = 24576
+        self.compaction_target_tokens = 17203
         self.fingerprint = "safe-budget-fingerprint"
         self.warnings = []
 
@@ -386,8 +387,8 @@ class MockSafeInputBudgetSnapshot:
         return self.__dict__.copy()
 
 
-class MockSafeInputBudgetCalculator:
-    def calculate_safe_input_budget(
+class MockContextBudgetCalculator:
+    def calculate_context_budget(
         self,
         capacity_snapshot,
         reserve_policy=None,
@@ -396,7 +397,7 @@ class MockSafeInputBudgetCalculator:
         output_reserve_source="model_default",
     ):
         override_tokens = getattr(request_overrides, "requested_output_tokens", None)
-        return MockSafeInputBudgetSnapshot(
+        return MockContextBudgetSnapshot(
             capacity_snapshot,
             requested_output_tokens=override_tokens or requested_output_tokens,
         )
@@ -416,7 +417,8 @@ sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
 sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
     "nexent.core.models.capacity_budget",
     RequestBudgetOverrides=MockRequestBudgetOverrides,
-    SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
+    ContextBudgetCalculator=MockContextBudgetCalculator,
+    ContextBudgetSnapshot=MockContextBudgetSnapshot,
     UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
 )
 
@@ -543,7 +545,7 @@ from backend.agents.create_agent_info import (
     _merge_tool_params,
     _resolve_runtime_tool_records,
     _resolve_input_budget,
-    _resolve_safe_input_budget,
+    _resolve_context_budget,
     _get_external_provider_service_for_search,
 )
 
@@ -602,7 +604,7 @@ class TestResolveInputBudget:
         }
 
         input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
-        safe_budget_snapshot = _resolve_safe_input_budget(
+        context_budget_snapshot = _resolve_context_budget(
             capacity_snapshot=resolved_capacity_snapshot,
             tenant_id="tenant_1",
             agent_requested_output_tokens=None,
@@ -613,7 +615,7 @@ class TestResolveInputBudget:
         assert isinstance(capacity_snapshot, dict)
         assert capacity_snapshot["capacity_fingerprint"] == resolved_capacity_snapshot.fingerprint
         assert isinstance(resolved_capacity_snapshot, MockModelCapacitySnapshot)
-        assert safe_budget_snapshot["model_name"] == resolved_capacity_snapshot.model_name
+        assert context_budget_snapshot.model_name == resolved_capacity_snapshot.model_name
 
 
 class TestGetSkillsForTemplate:
@@ -2379,7 +2381,7 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=ANY,
-                safe_input_budget_snapshot=ANY,
+                context_budget_snapshot=ANY,
                 verification_config=ANY,
                 enable_planning=ANY
             )
@@ -2464,7 +2466,7 @@ class TestCreateAgentConfig:
                     context_items=ANY,
                     pre_run_tool_events=ANY,
                     capacity_snapshot=ANY,
-                    safe_input_budget_snapshot=ANY,
+                    context_budget_snapshot=ANY,
                     verification_config=ANY,
                     enable_planning=ANY
                 )
@@ -2750,7 +2752,7 @@ class TestCreateAgentConfig:
                 context_items=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None,
+                context_budget_snapshot=None,
                 verification_config=ANY,
                 enable_planning=ANY
             )
@@ -3271,6 +3273,7 @@ class TestCreateAgentConfig:
             kb_tool_1.name = "kb_tool_1"
             kb_tool_1.params = {"index_names": ["idx_a", "idx_b"]}
             kb_tool_1.metadata = {
+                "allowed_index_names": ["idx_a", "idx_b"],
                 "index_name_to_display_map": {"idx_a": "idx_a", "idx_b": "idx_b"}
             }
 
@@ -3284,6 +3287,7 @@ class TestCreateAgentConfig:
             kb_tool_2.name = "kb_tool_2"
             kb_tool_2.params = {"index_names": ["idx_c"]}
             kb_tool_2.metadata = {
+                "allowed_index_names": ["idx_c"],
                 "index_name_to_display_map": {"idx_c": "idx_c"}
             }
 
@@ -3350,6 +3354,7 @@ class TestCreateAgentConfig:
             class_name="KnowledgeBaseSearchTool",
             params={"index_names": ["selected-index"]},
             metadata={
+                "allowed_index_names": ["selected-index"],
                 "index_name_to_display_map": {
                     "selected-index": "Selected Knowledge Base"
                 }
@@ -3378,12 +3383,46 @@ class TestCreateAgentConfig:
             index_name="selected-index"
         )
 
+    def test_scoped_summary_excludes_configured_but_denied_indices(self):
+        """Permission-filtered indices must not enter the routing summary."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": ["allowed-index", "denied-index"]},
+            metadata={
+                "allowed_index_names": ["allowed-index"],
+                "index_name_to_display_map": {
+                    "allowed-index": "Allowed Knowledge Base",
+                    "denied-index": "Denied Knowledge Base",
+                },
+            },
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            mock_es_service.return_value.get_summary.return_value = {
+                "summary": "Allowed summary"
+            }
+            summary, kb_ids = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    "en",
+                    include_empty_message=False,
+                )
+            )
+
+        assert summary == "**Allowed Knowledge Base**: Allowed summary\n\n"
+        assert kb_ids == ["allowed-index"]
+        mock_es_service.return_value.get_summary.assert_called_once_with(
+            index_name="allowed-index"
+        )
+
     def test_scoped_empty_summary_does_not_restore_agent_defaults(self):
         """An empty effective scope stays empty instead of adding legacy text."""
         kb_tool = Mock(
             class_name="KnowledgeBaseSearchTool",
             params={"index_names": []},
-            metadata={},
+            metadata={"allowed_index_names": []},
         )
 
         with patch(
@@ -3466,6 +3505,7 @@ class TestCreateAgentConfig:
             kb_tool.params = {"index_names": ["idx1", "idx2"]}
             # The tool.metadata contains the index_name -> display_name mapping
             kb_tool.metadata = {
+                "allowed_index_names": ["idx1", "idx2"],
                 "index_name_to_display_map": {
                     "idx1": "Custom Name 1",
                     "idx2": "Custom Name 2"
@@ -3577,7 +3617,7 @@ class TestCreateAgentConfig:
             kb_tool.class_name = "KnowledgeBaseSearchTool"
             kb_tool.name = "kb_tool"
             kb_tool.params = {"index_names": ["idx1", "idx2"]}
-            kb_tool.metadata = {}  # Empty metadata
+            kb_tool.metadata = {"allowed_index_names": ["idx1", "idx2"]}
 
             mock_create_tools.return_value = [kb_tool]
             mock_get_template.return_value = {"system_prompt": "{{ knowledge_base_summary }}"}
@@ -4095,7 +4135,7 @@ class TestCreateAgentRunInfo:
                 history=[],
                 stop_event="stop_event",
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None,
+                context_budget_snapshot=None,
                 redis_client=ANY,
                 sandbox_config=None,
                 minio_client=None,
@@ -5180,15 +5220,15 @@ class TestAdditionalAgentInfoCoverage:
         assert result == (32768, None, None)
         mock_logger.warning.assert_called_once()
 
-    def test_resolve_safe_input_budget_returns_none_for_uncertain_basis(self):
+    def test_resolve_context_budget_returns_none_for_uncertain_basis(self):
         capacity = MockModelCapacitySnapshot(model_name="legacy-model")
         calculator = MagicMock()
-        calculator.calculate_safe_input_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
+        calculator.calculate_context_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
         with patch(
-            "backend.agents.create_agent_info.SafeInputBudgetCalculator",
+            "backend.agents.create_agent_info.ContextBudgetCalculator",
             return_value=calculator,
         ):
-            result = _resolve_safe_input_budget(
+            result = _resolve_context_budget(
                 capacity_snapshot=capacity,
                 tenant_id="tenant-1",
                 agent_requested_output_tokens=None,
@@ -6842,10 +6882,18 @@ class TestKBPermissionFilteringInCreateToolConfigList:
                 user_id="user_789",
             )
 
-            # Tool should be included (2 accessible KBs remain)
+            # Tool should retain the full configured scope while enforcing the ACL
+            # through metadata.
             assert len(result) == 1
-            # Verify params.index_names was updated to filtered list
-            assert mock_tc_instance.params["index_names"] == ["kb_allowed", "kb_creator"]
+            assert mock_tc_instance.params["index_names"] == [
+                "kb_allowed",
+                "kb_forbidden",
+                "kb_creator",
+            ]
+            assert mock_tc_instance.metadata["allowed_index_names"] == [
+                "kb_allowed",
+                "kb_creator",
+            ]
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_keeps_tool_when_no_accessible_kbs(self):
@@ -6902,6 +6950,8 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             # Tool should be kept in the list (not skipped) so the LLM can call it
             # and receive a clear permission-denial message from the SDK forward()
             assert len(result) == 1
+            assert mock_tc_instance.params["index_names"] == ["kb1", "kb2"]
+            assert mock_tc_instance.metadata["allowed_index_names"] == []
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_preserves_order_after_filtering(self):
@@ -6962,8 +7012,16 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             )
 
             assert len(result) == 1
-            # Order should be preserved from original index_names list
-            assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
+            assert mock_tc_instance.params["index_names"] == [
+                "kb_a",
+                "kb_b",
+                "kb_c",
+                "kb_d",
+            ]
+            assert mock_tc_instance.metadata["allowed_index_names"] == [
+                "kb_b",
+                "kb_d",
+            ]
 
 
 
@@ -7312,6 +7370,10 @@ class TestCreateToolConfigListAidpSearch:
                 "Allowed 2": "kb_allowed_2",
                 "Not selected": "kb_not_selected",
             },
+            tenant_name_to_id={
+                "Allowed 2": "kb_allowed_2",
+                "Denied configured": "kb_not_accessible",
+            },
         )
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
@@ -7358,15 +7420,19 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert mock_tc_instance.params["kds_list"] == ["kb_allowed_2"]
+            assert mock_tc_instance.params["kds_list"] == [
+                "kb_allowed_2",
+                "kb_not_accessible",
+            ]
             assert mock_tc_instance.metadata["allowed_kds_set"] == ["kb_allowed_2"]
             assert mock_tc_instance.metadata["kds_name_to_id_map"] == {
                 "Allowed 2": "kb_allowed_2",
+                "Denied configured": "kb_not_accessible",
             }
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
-        """When get_allowed_kds_list raises, a warning is logged and allowed_kds_set stays empty."""
+        """Snapshot failure keeps configured scope but leaves execution denied."""
         access_module = MagicMock()
         access_module.resolve_current_aidp_access.side_effect = Exception("AIDP down")
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
@@ -7409,10 +7475,11 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # Snapshot failure is fail-closed even when the tool requested a KB.
-            assert mock_tc_instance.params["kds_list"] == []
+            # The configured scope is independent from permission resolution.
+            assert mock_tc_instance.params["kds_list"] == ["kb_requested"]
             assert mock_tc_instance.metadata is not None
             assert mock_tc_instance.metadata["allowed_kds_set"] == []
+            assert mock_tc_instance.metadata["kds_name_to_id_map"] == {}
 
     @pytest.mark.asyncio
     async def test_aidp_search_metadata_merges_langchain_tool(self):
@@ -7605,3 +7672,20 @@ class TestBuildSecurityHeaders:
             "security_credentials": {"k": "v"},
         }
         assert _build_security_headers(agent) == {}
+
+    def test_select_agent_model_id_prefers_first_available_model(self):
+        """Runtime model selection skips unavailable configured models."""
+        from backend.agents.create_agent_info import _select_agent_model_id
+        records = {
+            7: {"connect_status": "unavailable"},
+            8: {"connect_status": "available"},
+        }
+        with patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            side_effect=lambda model_id, **kwargs: records[model_id],
+        ), patch(
+            "backend.agents.create_agent_info.is_model_available",
+            side_effect=lambda record: bool(record) and record.get("connect_status") == "available",
+        ):
+            assert _select_agent_model_id([7, 8], None, "tenant") == 8
+            assert _select_agent_model_id([7, 8], 9, "tenant") == 9

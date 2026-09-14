@@ -300,6 +300,10 @@ render_shared_storage_persistence_values() {
     printf '      size: "5Gi"\n'
     printf '      localPath: "%s/logs"\n' "$LOCAL_PATH"
     printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-logs")"
+    printf '    projectConfig:\n'
+    printf '      size: "1Gi"\n'
+    printf '      localPath: "%s/project-config"\n' "$LOCAL_PATH"
+    printf '      existingClaim: "%s"\n' "$(persistence_existing_claim "nexent-project-config")"
   } >> "$output_file"
 }
 
@@ -575,6 +579,9 @@ render_k8s_runtime_config_values() {
     printf '      logoutUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_LOGOUT_URL "")")"
     printf '      sslVerify: %s\n' "$(yaml_quote "$(env_or_default CAS_SSL_VERIFY "true")")"
     printf '      caBundle: %s\n' "$(yaml_quote "$(env_or_default CAS_CA_BUNDLE "")")"
+    echo "nexent-web:"
+    echo "  config:"
+    printf '    fileUploadSizeLimit: %s\n' "$(yaml_quote "$(env_or_default FILE_UPLOAD_SIZE_LIMIT "10")")"
 
   } > "$output_file"
 }
@@ -1425,7 +1432,7 @@ apply() {
         stale_pvs="nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv"
     fi
     if release_scope_includes_nexent; then
-        stale_pvs="$stale_pvs nexent-workspace-pv nexent-skills-pv"
+        stale_pvs="$stale_pvs nexent-workspace-pv nexent-skills-pv nexent-project-config-pv"
         if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
             stale_pvs="$stale_pvs nexent-supabase-db-pv"
         fi

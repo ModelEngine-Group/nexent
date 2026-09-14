@@ -20,10 +20,9 @@ from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from .capacity_budget import (
     CallerMaxTokensOverrideForbidden,
-    SafeInputBudgetCapacityMismatch,
-    SafeInputBudgetFingerprintMismatch,
-    SafeInputBudgetSnapshot,
-    compute_w2_fingerprint,
+    ContextBudgetCapacityMismatch,
+    ContextBudgetSnapshot,
+    parse_context_budget_snapshot,
 )
 from ..utils.observer import MessageObserver, ProcessType
 from .prompt_cache import (
@@ -34,6 +33,11 @@ from .prompt_cache import (
 )
 from .message_utils import content_has_multimodal_blocks, prepare_messages_for_smolagents_text_flattening
 from .retry import DEFAULT_MODEL_RETRY, ModelRetryConfig, classify_model_error
+from .context_overflow import (
+    ProviderContextOverflowRetryExhausted,
+    ProviderContextOverflowRetryUnsafe,
+    is_provider_context_overflow,
+)
 
 logger = logging.getLogger("openai_llm")
 
@@ -57,7 +61,7 @@ class OpenAIModel(OpenAIServerModel):
                  max_output_tokens: Optional[int] = None,
                  max_tokens: Optional[int] = None,
                  flatten_messages_as_text: Optional[bool] = None,
-                 safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
+                 context_budget_snapshot: Optional[ContextBudgetSnapshot | Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None,
                  retry_config: Optional["ModelRetryConfig"] = None,
                  *args, **kwargs):
@@ -113,7 +117,7 @@ class OpenAIModel(OpenAIServerModel):
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
         self.last_response_diagnostics = None
-        self.safe_input_budget_snapshot = safe_input_budget_snapshot
+        self.context_budget_snapshot = context_budget_snapshot
         self.capacity_snapshot = capacity_snapshot
         if max_output_tokens is None and max_tokens is not None:
             logger.debug(
@@ -125,6 +129,7 @@ class OpenAIModel(OpenAIServerModel):
         self.max_output_tokens = max_output_tokens
         # Legacy alias kept readable for any caller still reading .max_tokens.
         self.max_tokens = max_output_tokens
+
         self.retry_config = retry_config or DEFAULT_MODEL_RETRY
         self.last_retry_count = 0
 
@@ -157,15 +162,30 @@ class OpenAIModel(OpenAIServerModel):
         if self.display_name:
             _monitoring_display_name.set(self.display_name)
 
+    @property
+    def context_budget_snapshot(self) -> Optional[ContextBudgetSnapshot]:
+        return self._context_budget_snapshot
+
+    @context_budget_snapshot.setter
+    def context_budget_snapshot(
+        self,
+        value: Optional[ContextBudgetSnapshot | Dict[str, Any]],
+    ) -> None:
+        """Validate the complete V2 contract at every runtime assignment."""
+        self._context_budget_snapshot = (
+            parse_context_budget_snapshot(value) if value is not None else None
+        )
+
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
-                 _token_tracker=None, safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
+                 _token_tracker=None, context_budget_snapshot: Optional[ContextBudgetSnapshot] = None,
+                 context_rebuild=None, _overflow_recovery_ordinal: int = 0,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
         if _token_tracker is None:
             trusted_budget_snapshot = (
-                safe_input_budget_snapshot or self.safe_input_budget_snapshot
+                context_budget_snapshot or self.context_budget_snapshot
             )
             invocation_parameters = {
                 "temperature": self.temperature,
@@ -183,7 +203,7 @@ class OpenAIModel(OpenAIServerModel):
             )
             trace_attributes[input_attr_key] = messages or []
             trace_attributes.update(
-                self._safe_input_budget_trace_attributes(trusted_budget_snapshot)
+                self._context_budget_trace_attributes(trusted_budget_snapshot)
             )
 
             with self._monitoring.trace_llm_request(
@@ -199,7 +219,9 @@ class OpenAIModel(OpenAIServerModel):
                     response_format=response_format,
                     tools_to_call_from=tools_to_call_from,
                     _token_tracker=token_tracker,
-                    safe_input_budget_snapshot=safe_input_budget_snapshot,
+                    context_budget_snapshot=context_budget_snapshot,
+                    context_rebuild=context_rebuild,
+                    _overflow_recovery_ordinal=_overflow_recovery_ordinal,
                     **kwargs,
                 )
 
@@ -270,7 +292,7 @@ class OpenAIModel(OpenAIServerModel):
             completion_kwargs["extra_body"] = self.extra_body
 
         trusted_budget_snapshot = (
-            safe_input_budget_snapshot or self.safe_input_budget_snapshot
+            context_budget_snapshot or self.context_budget_snapshot
         )
 
         # Bound completion length unless the caller passed their own override
@@ -330,6 +352,7 @@ class OpenAIModel(OpenAIServerModel):
             )
 
         for attempt in range(1, self.retry_config.max_attempts + 1):
+            first_token_received = False
             if self.stop_event.is_set():
                 if token_tracker:
                     self._monitoring.add_span_event("model_stopped", {
@@ -337,7 +360,7 @@ class OpenAIModel(OpenAIServerModel):
                 raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
             try:
                 current_request = self._dispatch_chat_completion(
-                    safe_input_budget_snapshot=trusted_budget_snapshot,
+                    context_budget_snapshot=trusted_budget_snapshot,
                     capacity_snapshot=self.capacity_snapshot,
                     stream=True,
                     **dispatch_kwargs,
@@ -367,7 +390,6 @@ class OpenAIModel(OpenAIServerModel):
 
                 # Track streaming metrics
                 stream_start_time = time.time()
-                first_token_received = False
 
                 try:
                     for chunk in current_request:
@@ -566,8 +588,6 @@ class OpenAIModel(OpenAIServerModel):
                         self._monitoring.add_span_event("error_occurred", {"error_type": type(
                             e).__name__, "error_message": str(e)})
 
-                    if "context_length_exceeded" in str(e):
-                        raise ValueError(f"Token limit exceeded: {str(e)}")
                     raise e
             except EmptyModelResponseError:
                 # Some reasoning-capable OpenAI-compatible providers
@@ -594,6 +614,47 @@ class OpenAIModel(OpenAIServerModel):
                 self.stop_event.wait(backoff)
                 continue
             except Exception as e:
+                if token_tracker:
+                    self._monitoring.add_span_event("error_occurred", {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    })
+                if is_provider_context_overflow(e):
+                    if first_token_received or context_rebuild is None:
+                        raise ProviderContextOverflowRetryUnsafe(
+                            "Provider context overflow cannot be safely rebuilt: "
+                            f"{e}"
+                        ) from e
+                    if _overflow_recovery_ordinal >= 2:
+                        raise ProviderContextOverflowRetryExhausted(
+                            "Provider context overflow persisted after two recovery dispatches"
+                        ) from e
+                    rebuilt = context_rebuild()
+                    rebuilt_messages = getattr(rebuilt, "messages", rebuilt)
+                    if not isinstance(rebuilt_messages, list):
+                        raise TypeError(
+                            "context_rebuild must return FinalContext or a message list"
+                        )
+                    rebuilt_evidence = getattr(rebuilt, "evidence", None)
+                    if rebuilt_evidence is not None:
+                        self.last_context_evidence = rebuilt_evidence
+                    self._monitoring.add_span_event("provider_context_overflow", {
+                        "recovery_dispatch": _overflow_recovery_ordinal + 1,
+                        "compaction_attempts": getattr(
+                            rebuilt_evidence, "compaction_attempts", None
+                        ),
+                    })
+                    return self.__call__(
+                        messages=rebuilt_messages,
+                        stop_sequences=stop_sequences,
+                        response_format=response_format,
+                        tools_to_call_from=tools_to_call_from,
+                        _token_tracker=token_tracker,
+                        context_budget_snapshot=trusted_budget_snapshot,
+                        context_rebuild=context_rebuild,
+                        _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
+                        **kwargs,
+                    )
                 if classify_model_error(e) != "retryable":
                     raise
                 if attempt >= self.retry_config.max_attempts:
@@ -617,7 +678,7 @@ class OpenAIModel(OpenAIServerModel):
     def _dispatch_chat_completion(
         self,
         *,
-        safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]] = None,
+        context_budget_snapshot: Optional[ContextBudgetSnapshot | Dict[str, Any]] = None,
         capacity_snapshot: Optional[Dict[str, Any]] = None,
         **completion_kwargs: Any,
     ) -> Any:
@@ -632,7 +693,7 @@ class OpenAIModel(OpenAIServerModel):
         identity to catch a stale or cross-model W2 snapshot before the
         provider call.
         """
-        snapshot = self._coerce_safe_input_budget_snapshot(safe_input_budget_snapshot)
+        snapshot = self._coerce_context_budget_snapshot(context_budget_snapshot)
         if snapshot is not None:
             self._verify_w1_w2_consistency(
                 budget_snapshot=snapshot,
@@ -660,7 +721,7 @@ class OpenAIModel(OpenAIServerModel):
     @staticmethod
     def _verify_w1_w2_consistency(
         *,
-        budget_snapshot: SafeInputBudgetSnapshot,
+        budget_snapshot: ContextBudgetSnapshot,
         capacity_snapshot: Optional[Dict[str, Any]],
     ) -> None:
         """Reject a W2 snapshot whose W1 identity disagrees with the active W1.
@@ -683,68 +744,42 @@ class OpenAIModel(OpenAIServerModel):
         if not w1_fingerprint and not provider and not model_name:
             return
         if w1_fingerprint and w1_fingerprint != budget_snapshot.w1_fingerprint:
-            raise SafeInputBudgetCapacityMismatch(
+            raise ContextBudgetCapacityMismatch(
                 field="w1_fingerprint",
                 expected=w1_fingerprint,
                 actual=budget_snapshot.w1_fingerprint,
             )
         if provider and provider != budget_snapshot.provider:
-            raise SafeInputBudgetCapacityMismatch(
+            raise ContextBudgetCapacityMismatch(
                 field="provider",
                 expected=provider,
                 actual=budget_snapshot.provider,
             )
         if model_name and model_name != budget_snapshot.model_name:
-            raise SafeInputBudgetCapacityMismatch(
+            raise ContextBudgetCapacityMismatch(
                 field="model_name",
                 expected=model_name,
                 actual=budget_snapshot.model_name,
             )
 
     @staticmethod
-    def _coerce_safe_input_budget_snapshot(
-        snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
-    ) -> Optional[SafeInputBudgetSnapshot]:
+    def _coerce_context_budget_snapshot(
+        snapshot: Optional[ContextBudgetSnapshot | Dict[str, Any]],
+    ) -> Optional[ContextBudgetSnapshot]:
         if snapshot is None:
             return None
-        if isinstance(snapshot, SafeInputBudgetSnapshot):
-            resolved = snapshot
-        elif isinstance(snapshot, dict):
-            resolved = SafeInputBudgetSnapshot.model_validate(snapshot)
-        else:
+        if not isinstance(snapshot, (ContextBudgetSnapshot, dict)):
             raise TypeError(
-                "safe_input_budget_snapshot must be a SafeInputBudgetSnapshot or dict"
+                "context_budget_snapshot must be a ContextBudgetSnapshot or dict"
             )
-        expected = compute_w2_fingerprint(
-            w2_resolver_version=resolved.resolver_version,
-            w1_fingerprint=resolved.w1_fingerprint,
-            provider=resolved.provider,
-            model_name=resolved.model_name,
-            requested_output_tokens=resolved.requested_output_tokens,
-            output_reserve_source=resolved.output_reserve_source,
-            uncertainty_reserve_tokens=resolved.uncertainty_reserve_tokens,
-            uncertainty_reserve_basis=resolved.uncertainty_reserve_basis,
-            approved_profile_reserve_tokens=resolved.approved_profile_reserve_tokens,
-            soft_limit_ratio=resolved.soft_limit_ratio,
-            soft_limit_ratio_source=resolved.soft_limit_ratio_source,
-            soft_input_budget_tokens=resolved.soft_input_budget_tokens,
-            hard_input_budget_tokens=resolved.hard_input_budget_tokens,
-            field_sources=resolved.field_sources,
-            warnings=resolved.warnings,
-        )
-        if resolved.fingerprint != expected:
-            raise SafeInputBudgetFingerprintMismatch(
-                expected=expected,
-                actual=resolved.fingerprint,
-            )
-        return resolved
+        return parse_context_budget_snapshot(snapshot)
 
     @classmethod
-    def _safe_input_budget_trace_attributes(
+    def _context_budget_trace_attributes(
         cls,
-        snapshot: Optional[SafeInputBudgetSnapshot | Dict[str, Any]],
+        snapshot: Optional[ContextBudgetSnapshot | Dict[str, Any]],
     ) -> Dict[str, Any]:
-        snapshot = cls._coerce_safe_input_budget_snapshot(snapshot)
+        snapshot = cls._coerce_context_budget_snapshot(snapshot)
         if snapshot is None:
             return {}
         return {
@@ -752,9 +787,11 @@ class OpenAIModel(OpenAIServerModel):
             "w2.w1_fingerprint": snapshot.w1_fingerprint,
             "w2.requested_output_tokens": snapshot.requested_output_tokens,
             "w2.output_reserve_source": snapshot.output_reserve_source,
-            "w2.provider_input_limit_tokens": snapshot.provider_input_limit_tokens,
-            "w2.soft_input_budget_tokens": snapshot.soft_input_budget_tokens,
-            "w2.hard_input_budget_tokens": snapshot.hard_input_budget_tokens,
+            "context.effective_input_limit_tokens": snapshot.effective_input_limit_tokens,
+            "context.compaction_trigger_threshold_tokens": (
+                snapshot.compaction_trigger_threshold_tokens
+            ),
+            "context.compaction_target_tokens": snapshot.compaction_target_tokens,
             "w2.uncertainty_reserve_tokens": snapshot.uncertainty_reserve_tokens,
             "w2.uncertainty_reserve_basis": snapshot.uncertainty_reserve_basis,
         }

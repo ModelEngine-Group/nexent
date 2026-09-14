@@ -697,6 +697,82 @@ def test_call_context_length_exceeded_error(openai_model_instance):
             openai_model_instance.__call__(messages)
 
 
+def test_provider_context_overflow_rebuilds_and_retries(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    rebuilt_messages = [{"role": "user", "content": [{"text": "smaller"}]}]
+    success_chunk = make_chunk("recovered", role="assistant")
+    success_chunk.usage = None
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        Exception("context_length_exceeded: maximum context length"),
+        [success_chunk],
+    ]
+    rebuild = MagicMock(return_value=rebuilt_messages)
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=MagicMock()):
+        openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_called_once_with()
+    assert openai_model_instance.client.chat.completions.create.call_count == 2
+
+
+def test_provider_context_overflow_rejects_non_list_rebuild(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(TypeError, match="must return FinalContext or a message list"):
+            openai_model_instance.__call__(messages, context_rebuild=lambda: object())
+
+
+def test_provider_context_overflow_stops_after_two_recovery_dispatches(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "still too large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryExhausted,
+            match="persisted after two recovery dispatches",
+        ):
+            openai_model_instance.__call__(
+                messages,
+                context_rebuild=lambda: messages,
+                _overflow_recovery_ordinal=2,
+            )
+
+
+def test_provider_context_overflow_without_rebuild_is_retry_unsafe(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryUnsafe,
+            match="cannot be safely rebuilt",
+        ):
+            openai_model_instance.__call__(messages, context_rebuild=None)
+
+
+def test_provider_context_overflow_does_not_recover_unrelated_error(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "hello"}]}]
+    rebuild = MagicMock()
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "authentication failed"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(Exception, match="authentication failed"):
+            openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_not_called()
+
+
 def test_call_general_exception(openai_model_instance):
     """Test __call__ method re-raises general exceptions"""
 
@@ -1508,27 +1584,32 @@ def test_call_with_token_tracker_uses_provided_tracker(openai_model_instance):
     mock_tracker.record_token.assert_called()
 
 
-def _safe_input_budget_snapshot(requested_output_tokens=128):
+def _context_budget_snapshot(requested_output_tokens=128):
+    from nexent.core.models.capacity_budget import compute_context_budget_fingerprint
+
     payload = {
         "w1_fingerprint": "w1fingerprint",
         "provider": "openai",
         "model_name": "gpt-test",
         "requested_output_tokens": requested_output_tokens,
         "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000,
+        "effective_input_limit_tokens": 1000,
         "uncertainty_reserve_tokens": 0,
         "uncertainty_reserve_basis": "none",
         "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8,
-        "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800,
-        "hard_input_budget_tokens": 1000,
+        "compaction_trigger_ratio": 0.8,
+        "compaction_trigger_ratio_source": "code_default",
+        "compaction_trigger_threshold_tokens": 800,
+        "compaction_target_ratio": 0.6,
+        "compaction_target_ratio_source": "code_default",
+        "compaction_target_tokens": 600,
         "field_sources": {},
         "warnings": [],
-        "resolver_version": "1.0.0",
+        "schema_version": 2,
+        "resolver_version": "2.0.0",
     }
-    payload["fingerprint"] = openai_llm_module.compute_w2_fingerprint(
-        w2_resolver_version=payload["resolver_version"],
+    payload["fingerprint"] = compute_context_budget_fingerprint(
+        resolver_version=payload["resolver_version"],
         w1_fingerprint=payload["w1_fingerprint"],
         provider=payload["provider"],
         model_name=payload["model_name"],
@@ -1537,14 +1618,33 @@ def _safe_input_budget_snapshot(requested_output_tokens=128):
         uncertainty_reserve_tokens=payload["uncertainty_reserve_tokens"],
         uncertainty_reserve_basis=payload["uncertainty_reserve_basis"],
         approved_profile_reserve_tokens=payload["approved_profile_reserve_tokens"],
-        soft_limit_ratio=payload["soft_limit_ratio"],
-        soft_limit_ratio_source=payload["soft_limit_ratio_source"],
-        soft_input_budget_tokens=payload["soft_input_budget_tokens"],
-        hard_input_budget_tokens=payload["hard_input_budget_tokens"],
+        effective_input_limit_tokens=payload["effective_input_limit_tokens"],
+        compaction_trigger_ratio=payload["compaction_trigger_ratio"],
+        compaction_trigger_ratio_source=payload["compaction_trigger_ratio_source"],
+        compaction_trigger_threshold_tokens=payload["compaction_trigger_threshold_tokens"],
+        compaction_target_ratio=payload["compaction_target_ratio"],
+        compaction_target_ratio_source=payload["compaction_target_ratio_source"],
+        compaction_target_tokens=payload["compaction_target_tokens"],
         field_sources=payload["field_sources"],
         warnings=payload["warnings"],
     )
     return payload
+
+
+def test_monitoring_projection_cannot_be_assigned_to_dispatch_model(
+    openai_model_instance,
+):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        openai_model_instance.context_budget_snapshot = {
+            "provider": "openai",
+            "effective_input_limit_tokens": 1000,
+            "compaction_trigger_threshold_tokens": 800,
+            "compaction_target_tokens": 600,
+        }
+
+    openai_model_instance.client.chat.completions.create.assert_not_called()
 
 
 def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
@@ -1556,9 +1656,9 @@ def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
     CallerMaxTokensOverrideForbidden, so the pre-W2 auto-fill must be gated
     on the snapshot being absent.
     """
-    snapshot = _safe_input_budget_snapshot(requested_output_tokens=8192)
+    snapshot = _context_budget_snapshot(requested_output_tokens=8192)
     openai_model_instance.max_output_tokens = 131072
-    openai_model_instance.safe_input_budget_snapshot = snapshot
+    openai_model_instance.context_budget_snapshot = snapshot
 
     messages = [{"role": "user", "content": [{"text": "Hi"}]}]
 
@@ -1604,7 +1704,7 @@ def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model
 
 def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_instance):
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        context_budget_snapshot=_context_budget_snapshot(256),
         stream=True,
         messages=[],
     )
@@ -1618,7 +1718,7 @@ def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_ins
 
 def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instance):
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        context_budget_snapshot=_context_budget_snapshot(256),
         stream=True,
         messages=[],
         max_tokens=256,
@@ -1634,7 +1734,7 @@ def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instan
 def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
     with pytest.raises(openai_llm_module.CallerMaxTokensOverrideForbidden):
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+            context_budget_snapshot=_context_budget_snapshot(256),
             stream=True,
             messages=[],
             max_tokens=128,
@@ -1644,12 +1744,14 @@ def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
 
 
 def test_dispatch_rejects_tampered_w2_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
-    snapshot["hard_input_budget_tokens"] = 999
+    snapshot = _context_budget_snapshot(256)
+    snapshot["compaction_target_tokens"] = 999
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetFingerprintMismatch):
+    from nexent.core.models.capacity_budget import ContextBudgetFingerprintMismatch
+
+    with pytest.raises(ContextBudgetFingerprintMismatch):
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             stream=True,
             messages=[],
         )
@@ -1666,9 +1768,9 @@ def _matching_capacity_snapshot(budget_snapshot):
 
 
 def test_dispatch_accepts_matching_w1_capacity_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=snapshot,
+        context_budget_snapshot=snapshot,
         capacity_snapshot=_matching_capacity_snapshot(snapshot),
         stream=True,
         messages=[],
@@ -1682,13 +1784,13 @@ def test_dispatch_accepts_matching_w1_capacity_snapshot(openai_model_instance):
 
 
 def test_dispatch_rejects_stale_w1_fingerprint(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     capacity = _matching_capacity_snapshot(snapshot)
     capacity["capacity_fingerprint"] = "different-w1-fingerprint"
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+    with pytest.raises(openai_llm_module.ContextBudgetCapacityMismatch) as exc_info:
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             capacity_snapshot=capacity,
             stream=True,
             messages=[],
@@ -1699,13 +1801,13 @@ def test_dispatch_rejects_stale_w1_fingerprint(openai_model_instance):
 
 
 def test_dispatch_rejects_cross_provider_w2_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     capacity = _matching_capacity_snapshot(snapshot)
     capacity["provider"] = "dashscope"
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+    with pytest.raises(openai_llm_module.ContextBudgetCapacityMismatch) as exc_info:
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             capacity_snapshot=capacity,
             stream=True,
             messages=[],
@@ -1716,13 +1818,13 @@ def test_dispatch_rejects_cross_provider_w2_snapshot(openai_model_instance):
 
 
 def test_dispatch_rejects_cross_model_w2_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     capacity = _matching_capacity_snapshot(snapshot)
     capacity["model_name"] = "gpt-other"
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+    with pytest.raises(openai_llm_module.ContextBudgetCapacityMismatch) as exc_info:
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             capacity_snapshot=capacity,
             stream=True,
             messages=[],
@@ -1733,10 +1835,10 @@ def test_dispatch_rejects_cross_model_w2_snapshot(openai_model_instance):
 
 
 def test_dispatch_skips_w1_w2_consistency_when_capacity_snapshot_absent(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
 
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=snapshot,
+        context_budget_snapshot=snapshot,
         capacity_snapshot=None,
         stream=True,
         messages=[],
@@ -1749,16 +1851,18 @@ def test_dispatch_skips_w1_w2_consistency_when_capacity_snapshot_absent(openai_m
     )
 
 
-def test_safe_input_budget_trace_attributes_are_prefixed():
-    attrs = ImportedOpenAIModel._safe_input_budget_trace_attributes(
-        _safe_input_budget_snapshot(256)
+def test_context_budget_trace_attributes_are_prefixed():
+    attrs = ImportedOpenAIModel._context_budget_trace_attributes(
+        _context_budget_snapshot(256)
     )
 
     assert len(attrs["w2.budget_fingerprint"]) == 32
     assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
     assert attrs["w2.requested_output_tokens"] == 256
-    assert attrs["w2.soft_input_budget_tokens"] == 800
-    assert attrs["w2.hard_input_budget_tokens"] == 1000
+    assert attrs["context.effective_input_limit_tokens"] == 1000
+    assert attrs["context.compaction_trigger_threshold_tokens"] == 800
+    assert attrs["context.compaction_target_tokens"] == 600
+    assert "context.compaction_target_tokens" in attrs
 
 
 def test_call_without_tracker_creates_tracker(openai_model_instance):
@@ -1819,8 +1923,8 @@ def test_call_token_estimation_with_list_content(openai_model_instance):
         assert openai_model_instance.last_output_token_count >= 0
 
 
-def test_call_context_length_exceeded_during_iteration(openai_model_instance):
-    """Test __call__ method raises ValueError when context_length_exceeded occurs during iteration (line 264)."""
+def test_call_context_length_exceeded_during_iteration_is_not_replayed(openai_model_instance):
+    """An iteration-time overflow is unsafe because a response may have started."""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
@@ -1832,8 +1936,7 @@ def test_call_context_length_exceeded_during_iteration(openai_model_instance):
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
         openai_model_instance.client.chat.completions.create.return_value = iter_that_raises()
 
-        # Should raise ValueError wrapping the context_length_exceeded error
-        with pytest.raises(ValueError, match="Token limit exceeded"):
+        with pytest.raises(Exception, match="cannot be safely rebuilt"):
             openai_model_instance.__call__(messages)
 
 
@@ -2096,7 +2199,7 @@ def test_reasoning_only_retry_is_interrupted_by_stop_event(openai_model_instance
 #   L460      string content path in input_text extraction
 #   L590      stop_event check during retry backoff wait
 #   L652      all-None capacity_snapshot early return in _check_capacity_consistency
-#   L679      _resolve_budget_snapshot SafeInputBudgetSnapshot passthrough
+#   L679      canonical ContextBudgetSnapshot passthrough
 #   L683      _resolve_budget_snapshot TypeError for invalid type
 # ---------------------------------------------------------------------------
 
@@ -2141,7 +2244,7 @@ def test_dispatch_extra_body_forwarded(openai_model_instance):
 def test_dispatch_max_output_tokens_autofill_when_budget_none(openai_model_instance):
     """max_output_tokens is set into completion_kwargs when not already there and budget is None (L288)."""
     openai_model_instance.max_output_tokens = 256
-    openai_model_instance.safe_input_budget_snapshot = None
+    openai_model_instance.context_budget_snapshot = None
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs",
                       return_value={}) as mock_prep:
@@ -2227,89 +2330,41 @@ def test_retry_backoff_interrupted_by_stop_event(openai_model_instance):
 
 
 def test_verify_w1_w2_consistency_all_none_returns_early():
-    """All-None capacity_snapshot fields causes _verify_w1_w2_consistency to return immediately (L652).
-
-    Note: empty dict {} would be caught by L646 (`if not capacity_snapshot`).
-    To reach L652 we need a truthy snapshot where all three fields are None/absent.
-    """
-    from nexent.core.models.openai_llm import OpenAIModel, SafeInputBudgetSnapshot
-    # Truthy dict with irrelevant key → passes L646, hits L652 where all W1 fields are None
-    partial_snap = {"irrelevant": "data"}
-    budget = SafeInputBudgetSnapshot.model_validate({
-        "w1_fingerprint": "fp", "provider": "p", "model_name": "m",
-        "requested_output_tokens": 128, "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
-        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
-        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
-        "fingerprint": "w2-fp-test",
-    })
-    OpenAIModel._verify_w1_w2_consistency(budget_snapshot=budget, capacity_snapshot=partial_snap)
-
-
-def test_coerce_budget_snapshot_passes_safeinput_instance():
-    """_coerce_safe_input_budget_snapshot returns SafeInputBudgetSnapshot unchanged (L679)."""
-    from nexent.core.models.openai_llm import (
-        OpenAIModel, SafeInputBudgetSnapshot, compute_w2_fingerprint,
-    )
-    fp = compute_w2_fingerprint(
-        w2_resolver_version="1.0.0", w1_fingerprint="fp", provider="p",
-        model_name="m", requested_output_tokens=128,
-        output_reserve_source="model_default", uncertainty_reserve_tokens=0,
-        uncertainty_reserve_basis="none", approved_profile_reserve_tokens=None,
-        soft_limit_ratio=0.8, soft_limit_ratio_source="code_default",
-        soft_input_budget_tokens=800, hard_input_budget_tokens=1000,
-        field_sources={}, warnings=[],
-    )
-    snapshot = SafeInputBudgetSnapshot.model_validate({
-        "w1_fingerprint": "fp", "provider": "p", "model_name": "m",
-        "requested_output_tokens": 128, "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
-        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
-        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
-        "fingerprint": fp,
-    })
-    result = OpenAIModel._coerce_safe_input_budget_snapshot(snapshot)
-    assert result is snapshot
-
-
-def test_coerce_budget_snapshot_raises_type_error():
-    """_coerce_safe_input_budget_snapshot raises TypeError for invalid type (L683)."""
     from nexent.core.models.openai_llm import OpenAIModel
-    with pytest.raises(TypeError, match="safe_input_budget_snapshot must be"):
-        OpenAIModel._coerce_safe_input_budget_snapshot("not_a_dict_or_snapshot")
+
+    budget_snapshot = OpenAIModel._coerce_context_budget_snapshot(
+        _context_budget_snapshot()
+    )
+    OpenAIModel._verify_w1_w2_consistency(
+        budget_snapshot=budget_snapshot,
+        capacity_snapshot={"irrelevant": "data"},
+    )
 
 
-def test_coerce_budget_snapshot_from_dict():
-    """_coerce_safe_input_budget_snapshot validates dict into SafeInputBudgetSnapshot (L681)."""
-    from nexent.core.models.openai_llm import (
-        OpenAIModel, compute_w2_fingerprint,
+def test_coerce_context_budget_snapshot_passes_v2_instance():
+    from nexent.core.models.openai_llm import OpenAIModel
+
+    snapshot = OpenAIModel._coerce_context_budget_snapshot(
+        _context_budget_snapshot()
     )
-    fp = compute_w2_fingerprint(
-        w2_resolver_version="1.0.0", w1_fingerprint="fp1", provider="openai",
-        model_name="gpt4", requested_output_tokens=128,
-        output_reserve_source="model_default", uncertainty_reserve_tokens=0,
-        uncertainty_reserve_basis="none", approved_profile_reserve_tokens=None,
-        soft_limit_ratio=0.8, soft_limit_ratio_source="code_default",
-        soft_input_budget_tokens=800, hard_input_budget_tokens=1000,
-        field_sources={}, warnings=[],
+    assert OpenAIModel._coerce_context_budget_snapshot(snapshot) is snapshot
+
+
+def test_coerce_context_budget_snapshot_raises_type_error():
+    from nexent.core.models.openai_llm import OpenAIModel
+
+    with pytest.raises(TypeError, match="context_budget_snapshot must be"):
+        OpenAIModel._coerce_context_budget_snapshot("not_a_dict_or_snapshot")
+
+
+def test_coerce_context_budget_snapshot_from_dict():
+    from nexent.core.models.openai_llm import OpenAIModel
+
+    result = OpenAIModel._coerce_context_budget_snapshot(
+        _context_budget_snapshot()
     )
-    snap_dict = {
-        "w1_fingerprint": "fp1", "provider": "openai", "model_name": "gpt4",
-        "requested_output_tokens": 128, "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
-        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
-        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
-        "fingerprint": fp,
-    }
-    result = OpenAIModel._coerce_safe_input_budget_snapshot(snap_dict)
     assert result is not None
-    assert result.w1_fingerprint == "fp1"
+    assert result.w1_fingerprint == "w1fingerprint"
 
 
 def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance):

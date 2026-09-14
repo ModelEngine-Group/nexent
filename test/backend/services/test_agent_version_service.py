@@ -1625,7 +1625,11 @@ def test_list_published_agents_impl_success(monkeypatch):
     )
     agent_read_mock.apply_duplicate_name_availability_rules = MagicMock()
     model_management_db_mock.get_model_by_model_id = MagicMock(
-        return_value={"display_name": "Test Model", "model_name": "test_model"}
+        return_value={
+            "display_name": "Test Model",
+            "model_name": "test_model",
+            "connect_status": "available",
+        }
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
@@ -1782,7 +1786,11 @@ def test_list_published_agents_impl_user_with_groups(monkeypatch):
     )
     agent_read_mock.apply_duplicate_name_availability_rules = MagicMock()
     model_management_db_mock.get_model_by_model_id = MagicMock(
-        return_value={"display_name": "Test Model", "model_name": "test_model"}
+        return_value={
+            "display_name": "Test Model",
+            "model_name": "test_model",
+            "connect_status": "available",
+        }
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
@@ -1832,7 +1840,11 @@ def test_list_published_agents_impl_model_cache(monkeypatch):
     )
     agent_read_mock.apply_duplicate_name_availability_rules = MagicMock()
     model_management_db_mock.get_model_by_model_id = MagicMock(
-        return_value={"display_name": "Test Model", "model_name": "test_model"}
+        return_value={
+            "display_name": "Test Model",
+            "model_name": "test_model",
+            "connect_status": "available",
+        }
     )
 
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
@@ -3137,7 +3149,10 @@ def test_list_published_agents_impl_multiple_models(monkeypatch):
     agent_read_mock.apply_duplicate_name_availability_rules = MagicMock()
 
     def mock_get_model(model_id, tenant_id=None):
-        return {"display_name": f"Model-{model_id}"}
+        return {
+            "display_name": f"Model-{model_id}",
+            "connect_status": "available",
+        }
 
     model_management_db_mock.get_model_by_model_id = MagicMock(side_effect=mock_get_model)
 
@@ -3148,6 +3163,52 @@ def test_list_published_agents_impl_multiple_models(monkeypatch):
     assert result[0]["model_ids"] == [1, 2]
     assert result[0]["model_names"] == ["Model-1", "Model-2"]
     assert result[0]["model_name"] == "Model-1"
+
+
+def test_list_published_agents_impl_filters_unavailable_models(monkeypatch):
+    """Published agent responses expose only available bound models."""
+    agent_db_mock.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {
+                "agent_id": 1,
+                "enabled": True,
+                "current_version_no": 1,
+                "group_ids": "1,2",
+                "created_by": "user1",
+                "name": "Test Agent",
+                "display_name": "Test Agent",
+            }
+        ]
+    )
+    user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(
+        return_value={"user_role": "ADMIN"}
+    )
+    agent_version_db_mock.query_agent_snapshot = MagicMock(
+        return_value=({"agent_id": 1, "name": "Test Agent", "model_ids": [1, 2]}, [], [])
+    )
+
+    def mock_get_model(model_id, tenant_id=None):
+        return {
+            "display_name": f"Model-{model_id}",
+            "connect_status": "available" if model_id == 1 else "unavailable",
+        }
+
+    model_management_db_mock.get_model_by_model_id = MagicMock(side_effect=mock_get_model)
+    availability_model_ids = []
+
+    def check_availability(**kwargs):
+        availability_model_ids.append(list(kwargs["agent_info"]["model_ids"]))
+        return True, []
+
+    agent_read_mock.check_agent_availability = MagicMock(side_effect=check_availability)
+    agent_read_mock.apply_duplicate_name_availability_rules = MagicMock()
+
+    result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
+
+    assert result[0]["model_ids"] == [1]
+    assert result[0]["model_names"] == ["Model-1"]
+    assert result[0]["model_name"] == "Model-1"
+    assert availability_model_ids == [[1, 2]]
 
 
 def test_list_published_agents_impl_model_ids_empty(monkeypatch):
@@ -3261,9 +3322,17 @@ def test_list_published_agents_impl_filters_deleted_models(monkeypatch):
     # Mock model info for valid models
     def get_model_side_effect(model_id, tenant_id=None):
         if model_id == 1:
-            return {"display_name": "Model 1", "model_id": 1}
+            return {
+                "display_name": "Model 1",
+                "model_id": 1,
+                "connect_status": "available",
+            }
         elif model_id == 3:
-            return {"display_name": "Model 3", "model_id": 3}
+            return {
+                "display_name": "Model 3",
+                "model_id": 3,
+                "connect_status": "available",
+            }
         return None
     model_management_db_mock.get_model_by_model_id = MagicMock(side_effect=get_model_side_effect)
 
@@ -3509,7 +3578,11 @@ def test_list_published_agents_impl_with_sub_agent_relations(monkeypatch):
     )
     agent_read_mock.apply_duplicate_name_availability_rules = MagicMock()
     model_management_db_mock.get_model_by_model_id = MagicMock(
-        return_value={"display_name": "Test Model", "model_name": "test_model"}
+        return_value={
+            "display_name": "Test Model",
+            "model_name": "test_model",
+            "connect_status": "available",
+        }
     )
 
     # Spy on _build_sub_agent_relations to verify it's called with the right relations
@@ -3707,6 +3780,6 @@ def test_list_published_agents_impl_model_not_found(monkeypatch):
     result = asyncio.run(list_published_agents_impl(tenant_id="tenant1", user_id="user1"))
 
     assert len(result) == 1
-    # When model is not found, model_names should contain str(mid) as fallback
-    assert result[0]["model_names"] == ["99"]
-    assert result[0]["model_name"] == "99"
+    assert result[0]["model_ids"] == []
+    assert result[0]["model_names"] == []
+    assert result[0]["model_name"] is None
