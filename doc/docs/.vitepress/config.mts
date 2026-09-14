@@ -87,6 +87,10 @@ export default defineConfig({
                   },
                 ],
               },
+              {
+                text: "Backup, Upgrade & Rollback",
+                link: "/en/quick-start/backup-upgrade-rollback",
+              },
               { text: "FAQ", link: "/en/quick-start/faq" },
             ],
           },

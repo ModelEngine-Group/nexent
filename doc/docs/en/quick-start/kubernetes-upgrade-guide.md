@@ -1,5 +1,7 @@
 # Nexent Kubernetes Upgrade Guide
 
+Before upgrading a production environment, complete the Kubernetes backup and recovery drill in the [Backup, Upgrade, and Rollback Guide](./backup-upgrade-rollback.md). `helm rollback` only restores resource configuration; it does not restore database or PVC data.
+
 ## 🚀 Upgrade Overview
 
 Follow these steps to upgrade Nexent on Kubernetes safely:
@@ -71,8 +73,9 @@ Published migration files must not be modified, renamed, or deleted. Database sc
 > - Create a backup before running migrations:
 
    ```bash
-   POSTGRES_POD=$(kubectl get pods -n nexent -l app=nexent-postgresql -o jsonpath='{.items[0].metadata.name}')
-   kubectl exec nexent/$POSTGRES_POD -n nexent -- pg_dump -U root nexent > backup_$(date +%F).sql
+   kubectl exec -n nexent deployment/nexent-postgresql -- sh -c \
+     'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+     > "nexent-backup-$(date +%F).dump"
    ```
 
 > - Supabase initialization SQL is rendered from `deploy/sql/supabase/` into Helm values by the deploy script. It does not need to be copied or executed manually.

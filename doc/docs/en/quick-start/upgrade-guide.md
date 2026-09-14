@@ -1,5 +1,7 @@
 # Nexent Upgrade Guide
 
+Before upgrading a production environment, complete the backup and recovery drill in the [Backup, Upgrade, and Rollback Guide](./backup-upgrade-rollback.md) and confirm the rollback window. This page only covers the basic deployment entrypoint.
+
 ## 🚀 Upgrade Overview
 
 Follow these steps to upgrade Nexent safely:
@@ -59,29 +61,9 @@ After deployment:
 
 ### 🧹 Clean Up Old Version Images
 
-If images were not updated correctly, you can clean up old containers and images before upgrading:
+Only after upgrade validation succeeds, the rollback observation period ends, and old images have been archived separately should you remove images that are no longer needed by their specific image IDs. If an image did not update, first verify the image source, version, actual image ID, and `local-latest` setting; do not prepare an upgrade by deleting images in bulk.
 
-```bash
-# Stop and remove existing containers
-docker compose down
-
-# Inspect Nexent images
-docker images --filter "reference=nexent/*"
-
-# Remove Nexent images
-# Windows PowerShell:
-docker images -q --filter "reference=nexent/*" | ForEach-Object { docker rmi -f $_ }
-# Linux/WSL:
-docker images -q --filter "reference=nexent/*" | xargs -r docker rmi -f
-
-# (Optional) prune unused images and caches
-docker system prune -af
-```
-
-> ⚠️ Notes
-> - Deleting images does not back up business data. Back up the database and object storage separately before upgrading.
-> - To preserve database data, do not delete the mounted database volume (`/nexent/docker/volumes` or your custom path).
-> - `docker system prune -af` removes all unused images and build cache on the current Docker host, not only Nexent resources. Do not run it on a shared host.
+Keep old images and persistent volumes throughout upgrade and rollback. Do not run `docker system prune -af`, `down -v`, or volume prune. See the [Backup, Upgrade, and Rollback Guide](./backup-upgrade-rollback.md) for the complete recovery procedure.
 
 ---
 
