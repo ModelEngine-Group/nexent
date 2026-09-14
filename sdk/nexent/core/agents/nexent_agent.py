@@ -1203,17 +1203,28 @@ class NexentAgent:
                                     snapshot if snapshot is not None else final_answer_str,
                                     ensure_ascii=False,
                                 )
-                                print(f"[SDK-A2UI] snapshot.type={snapshot.get('type') if snapshot else None}, activityType={snapshot.get('activityType') if snapshot else None}, ops_count={len(snapshot.get('content', {}).get('a2ui_operations', [])) if snapshot else 0}", flush=True)
+                                logger.debug(
+                                    "A2UI snapshot: type=%s, activityType=%s, ops_count=%d",
+                                    snapshot.get("type") if snapshot else None,
+                                    snapshot.get("activityType") if snapshot else None,
+                                    len(snapshot.get("content", {}).get("a2ui_operations", [])) if snapshot else 0,
+                                )
                                 observer.add_message(
                                     self.agent.agent_name,
                                     ProcessType.A2UI,
                                     a2ui_payload,
                                 )
-                                print(f"[SDK-A2UI] sent ProcessType.A2UI payload={len(a2ui_payload)} chars", flush=True)
+                                logger.debug(
+                                    "Sent ProcessType.A2UI payload=%d chars",
+                                    len(a2ui_payload),
+                                )
                                 # Strip <a2ui-json> tags from FINAL_ANSWER text —
                                 # A2UI was already sent natively via ProcessType.A2UI.
                                 final_answer_str = strip_tagged_a2ui_blocks(final_answer_str)
-                                print(f"[SDK-A2UI] FINAL_ANSWER stripped, remaining={len(final_answer_str)} chars", flush=True)
+                                logger.debug(
+                                    "FINAL_ANSWER stripped of A2UI tags, remaining=%d chars",
+                                    len(final_answer_str),
+                                )
                             else:
                                 # Validation failed - degrade by stripping A2UI tags
                                 stripped = strip_tagged_a2ui_blocks(final_answer_str)
