@@ -774,12 +774,11 @@ function parseSseChunk(line: string): SseChunk | null {
     }
 
     // ---- Legacy Nexus chunk --------------------------------------------
-    if (typeof parsed.content === "string") {
-      parsed.content = stripAnsiControlSequences(parsed.content);
-    }
-    return parsed as unknown as SseChunk;
     if (typeof parsed.status === "string") {
       return { type: "status", content: parsed.status };
+    }
+    if (typeof parsed.content === "string") {
+      parsed.content = stripAnsiControlSequences(parsed.content);
     }
     return parsed as unknown as SseChunk;
   } catch {
