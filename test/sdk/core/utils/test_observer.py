@@ -656,6 +656,28 @@ class TestMessageObserver:
         }
         assert messages[0]["content"] == messages[2]["content"]
 
+    def test_execution_logs_emit_generated_agent_name_state(self):
+        observer = MessageObserver(lang="en", enable_nl2a_wrapper=True)
+        content = (
+            '{"status":"success"}\n'
+            '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":1042,'
+            '"updated_fields":["name"]}</nl2a_state>'
+        )
+
+        observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
+
+        messages = [json.loads(item) for item in observer.get_cached_message()]
+        assert [item["type"] for item in messages] == [
+            ProcessType.NL2A_STATE.value,
+            ProcessType.EXECUTION_LOGS.value,
+        ]
+        assert json.loads(messages[0]["content"]) == {
+            "event": "agent_draft_fields_saved",
+            "agent_id": 1042,
+            "updated_fields": ["name"],
+        }
+        assert messages[1]["content"] == '{"status":"success"}'
+
     @pytest.mark.parametrize(
         "state_payload",
         [

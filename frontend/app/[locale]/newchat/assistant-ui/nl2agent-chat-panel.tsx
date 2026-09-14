@@ -42,6 +42,8 @@ export interface Nl2AgentChatPanelProps {
   showOptimizationSuggestions?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
   onStopped?: (agentId: number) => void;
+  onRunStart?: (agentId: number) => void;
+  onRunEnd?: (agentId: number) => void;
 }
 
 export interface Nl2AgentChatPanelHandle {
@@ -58,6 +60,8 @@ export const Nl2AgentChatPanel = forwardRef<
     showOptimizationSuggestions = false,
     onStateEvent,
     onStopped,
+    onRunStart,
+    onRunEnd,
   },
   ref
 ) {
@@ -72,22 +76,32 @@ export const Nl2AgentChatPanel = forwardRef<
   );
   const chatModelAdapter = useMemo<ChatModelAdapter>(
     () => ({
-      run(options) {
-        return remoteChatModelAdapter.run({
-          ...options,
-          runConfig: {
-            custom: {
-              ...options.runConfig?.custom,
-              runtimeMode: "nl2agent",
-              agentId,
-              onNl2AgentState: onStateEvent,
-              onNl2AgentStopped: onStopped,
+      async *run(options) {
+        if (agentId !== null) onRunStart?.(agentId);
+        try {
+          const runResult = remoteChatModelAdapter.run({
+            ...options,
+            runConfig: {
+              custom: {
+                ...options.runConfig?.custom,
+                runtimeMode: "nl2agent",
+                agentId,
+                onNl2AgentState: onStateEvent,
+                onNl2AgentStopped: onStopped,
+              },
             },
-          },
-        });
+          });
+          if ("then" in runResult) {
+            yield await runResult;
+          } else {
+            yield* runResult;
+          }
+        } finally {
+          if (agentId !== null) onRunEnd?.(agentId);
+        }
       },
     }),
-    [agentId, onStateEvent, onStopped]
+    [agentId, onRunEnd, onRunStart, onStateEvent, onStopped]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
   useImperativeHandle(
