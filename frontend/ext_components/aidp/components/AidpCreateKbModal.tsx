@@ -3,12 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import type { TFunction } from "i18next";
 
 import {
-  Button,
   Collapse,
   Form,
-  Input,
   InputNumber,
   Modal,
   Select,
@@ -25,23 +24,30 @@ import {
 } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
-import type { AidpModelItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
+import type {
+  AidpModelItem,
+  AidpUploadResponse,
+} from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
-import { USER_ROLES } from "@/const/auth";
-import {
-  AIDP_ACCEPT_STRING,
-  AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
-} from "@/const/knowledgeBase";
+import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
 import {
   partitionAidpFiles,
   validateAidpFiles,
 } from "@/services/uploadService";
-import { useGroupList } from "@/hooks/group/useGroupList";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { getAidpUploadFailureDetails } from "@/ext_components/aidp/services/aidpUploadUtils";
+import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
+import {
+  AIDP_MODAL_STYLES,
+  AidpKnowledgeBaseBasicFields,
+  AidpKnowledgeBaseModalFooter,
+  AidpKnowledgeBaseModalHeader,
+  AidpKnowledgeBasePermissionFields,
+} from "./AidpKnowledgeBaseModalParts";
 
 const { Dragger } = Upload;
 
 const PREFERRED_VLM_MODEL = "Qwen3-VL-8B-Instruct";
+type AidpPermission = "EDIT" | "READ_ONLY" | "PRIVATE";
 
 const AIDP_CREATE_DEFAULTS = {
   chunk_token_num: 1024,
@@ -52,6 +58,105 @@ const AIDP_CREATE_DEFAULTS = {
   similarity: 0.0,
   smartsplit: 1,
   caption_enable: 0,
+};
+
+const validateAidpCreateFiles = (
+  files: File[],
+  t: TFunction,
+  notify: typeof message
+) => {
+  if (files.length === 0) return true;
+  const validation = validateAidpFiles(files);
+  if (validation.valid.length === files.length) return true;
+  partitionAidpFiles(files, t, notify);
+  return false;
+};
+
+const getAidpCreatePermissionValues = (
+  isUser: boolean,
+  values: { ingroup_permission?: string; group_ids?: unknown }
+) => {
+  const configuredPermission = values.ingroup_permission;
+  let permission: AidpPermission = "READ_ONLY";
+  if (isUser) {
+    permission = "PRIVATE";
+  } else if (
+    configuredPermission === "EDIT" ||
+    configuredPermission === "READ_ONLY" ||
+    configuredPermission === "PRIVATE"
+  ) {
+    permission = configuredPermission;
+  }
+  const groupIds =
+    isUser || permission === "PRIVATE"
+      ? []
+      : Array.isArray(values.group_ids)
+        ? values.group_ids
+        : [];
+  return { permission, groupIds };
+};
+
+const showAidpCreateUploadResult = (
+  result: AidpUploadResponse,
+  language: string,
+  t: TFunction
+) => {
+  const failureDetails = getAidpUploadFailureDetails(
+    result.failed_list,
+    language,
+    t("aidpKnowledge.uploadFailed")
+  );
+  const failureLines = failureDetails.map((detail, index) => (
+    <div key={`${index}-${detail}`}>{detail}</div>
+  ));
+  const allFailedContent =
+    failureLines.length > 0 ? (
+      failureLines
+    ) : (
+      <div>{t("aidpKnowledge.uploadFailed")}</div>
+    );
+
+  if (result.summary.failed > 0 && result.summary.success === 0) {
+    message.warning(
+      <div className="text-left">
+        <div>{t("aidpKnowledge.createKbSuccess")}</div>
+        {allFailedContent}
+      </div>
+    );
+    return;
+  }
+  if (result.summary.failed > 0) {
+    message.info(
+      <div className="text-left">
+        <div>{t("aidpKnowledge.createKbSuccess")}</div>
+        <div>
+          {t("aidpKnowledge.uploadPartial", {
+            success: result.summary.success,
+            failed: result.summary.failed,
+          })}
+        </div>
+        {failureLines}
+      </div>
+    );
+    return;
+  }
+  message.success(
+    `${t("aidpKnowledge.createKbSuccess")} | ${t(
+      "aidpKnowledge.uploadSuccess",
+      { count: result.summary.success }
+    )}`
+  );
+};
+
+const getAidpCreateErrorReason = (
+  error: unknown,
+  knowledgeBaseCreated: boolean,
+  t: TFunction
+) => {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return knowledgeBaseCreated
+    ? t("aidpKnowledge.uploadFailed")
+    : t("aidpKnowledge.createKbFailed");
 };
 
 interface AidpCreateKbModalProps {
@@ -79,21 +184,8 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
     fileListRef.current = fileList;
   }, [fileList]);
 
-  const { user } = useAuthorizationContext();
-  const isUser = user?.role === USER_ROLES.USER;
-  const canConfigureGroupPermissions = !!user && !isUser;
-  const tenantId = user?.tenantId ?? null;
-  const { data: groupListData } = useGroupList(
-    canConfigureGroupPermissions ? tenantId : null
-  );
-  const groupOptions = useMemo(
-    () =>
-      (groupListData?.groups ?? []).map((group) => ({
-        value: group.group_id,
-        label: group.group_name,
-      })),
-    [groupListData]
-  );
+  const { isUser, canConfigureGroupPermissions, groupOptions } =
+    useAidpGroupOptions();
 
   const captionEnabled = Form.useWatch("caption_enable", form);
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
@@ -161,24 +253,13 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
         return;
       }
 
-      if (fileList.length > 0) {
-        const validation = validateAidpFiles(fileList);
-        if (validation.valid.length !== fileList.length) {
-          partitionAidpFiles(fileList, t, message);
-          return;
-        }
-      }
+      if (!validateAidpCreateFiles(fileList, t, message)) return;
 
       setLoading(true);
-      const permission = isUser
-        ? "PRIVATE"
-        : values.ingroup_permission || "READ_ONLY";
-      const groupIds =
-        isUser || permission === "PRIVATE"
-          ? []
-          : Array.isArray(values.group_ids)
-            ? values.group_ids
-            : [];
+      const { permission, groupIds } = getAidpCreatePermissionValues(
+        isUser,
+        values
+      );
       const captionEnable = values.caption_enable ? 1 : 0;
 
       const created = await aidpKnowledgeService.createKb({
@@ -218,48 +299,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           created.kds_id,
           fileList
         );
-        const failureDetails = result.failed_list.map((item) => {
-          const reason = i18n.language.startsWith("zh")
-            ? item.reason_zh || item.reason_en
-            : item.reason_en || item.reason_zh;
-          return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
-        });
-        const failureLines = failureDetails.map((detail, index) => (
-          <div key={`${index}-${detail}`}>{detail}</div>
-        ));
-
-        if (result.summary.failed > 0 && result.summary.success === 0) {
-          message.warning(
-            <div className="text-left">
-              <div>{t("aidpKnowledge.createKbSuccess")}</div>
-              {failureLines.length > 0 ? (
-                failureLines
-              ) : (
-                <div>{t("aidpKnowledge.uploadFailed")}</div>
-              )}
-            </div>
-          );
-        } else if (result.summary.failed > 0) {
-          message.info(
-            <div className="text-left">
-              <div>{t("aidpKnowledge.createKbSuccess")}</div>
-              <div>
-                {t("aidpKnowledge.uploadPartial", {
-                  success: result.summary.success,
-                  failed: result.summary.failed,
-                })}
-              </div>
-              {failureLines}
-            </div>
-          );
-        } else {
-          message.success(
-            `${t("aidpKnowledge.createKbSuccess")} | ${t(
-              "aidpKnowledge.uploadSuccess",
-              { count: result.summary.success }
-            )}`
-          );
-        }
+        showAidpCreateUploadResult(result, i18n.language, t);
       } else {
         message.success(t("aidpKnowledge.createKbSuccess"));
       }
@@ -267,12 +307,7 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       handleReset();
       if (createdKnowledgeBase) onSuccess(createdKnowledgeBase);
     } catch (error) {
-      const reason =
-        error instanceof Error && error.message.trim()
-          ? error.message
-          : knowledgeBaseCreated
-            ? t("aidpKnowledge.uploadFailed")
-            : t("aidpKnowledge.createKbFailed");
+      const reason = getAidpCreateErrorReason(error, knowledgeBaseCreated, t);
       message.error(
         knowledgeBaseCreated
           ? `${t("aidpKnowledge.createKbSuccess")} | ${reason}`
@@ -337,73 +372,33 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       width={640}
       maskClosable={false}
       destroyOnHidden
-      styles={{
-        container: { overflow: "hidden", borderRadius: 16, padding: 0 },
-        body: { padding: 0 },
-        footer: {
-          margin: 0,
-          padding: "12px 20px 16px",
-          borderTop: "1px solid #f0f0f0",
-        },
-      }}
+      styles={AIDP_MODAL_STYLES}
       footer={
-        <div className="flex justify-end gap-3">
-          <Button onClick={handleCancel} disabled={loading}>
-            {t("common.cancel")}
-          </Button>
-          <Button
-            type="primary"
-            loading={loading}
-            onClick={() => void handleSubmit()}
-          >
-            {fileList.length > 0
+        <AidpKnowledgeBaseModalFooter
+          onCancel={handleCancel}
+          onSubmit={() => void handleSubmit()}
+          loading={loading}
+          cancelText={t("common.cancel")}
+          submitText={
+            fileList.length > 0
               ? t("aidpKnowledge.createSubmit")
-              : t("aidpKnowledge.createKb")}
-          </Button>
-        </div>
+              : t("aidpKnowledge.createKb")
+          }
+        />
       }
     >
       <div>
-        <div
-          className="border-b border-gray-200"
-          style={{ padding: "24px 24px 20px" }}
-        >
-          <h2 className="text-xl font-semibold tracking-tight text-gray-900">
-            {t("aidpKnowledge.createKb")}
-          </h2>
-          <p className="mt-1 text-sm text-gray-500">
-            {t("knowledgeBase.create.subtitle")}
-          </p>
-        </div>
+        <AidpKnowledgeBaseModalHeader
+          title={t("aidpKnowledge.createKb")}
+          subtitle={t("knowledgeBase.create.subtitle")}
+        />
 
         <Form
           form={form}
           layout="vertical"
           style={{ padding: "20px 24px 8px" }}
         >
-          <Form.Item
-            name="name"
-            label={t("aidpKnowledge.kbName")}
-            rules={[
-              { required: true, message: t("aidpKnowledge.kbNameRequired") },
-              {
-                pattern: AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
-                message: t("aidpKnowledge.kbNameInvalid"),
-              },
-            ]}
-          >
-            <Input placeholder={t("aidpKnowledge.kbNamePlaceholder")} />
-          </Form.Item>
-
-          <Form.Item
-            name="description"
-            label={t("aidpKnowledge.kbDescription")}
-          >
-            <Input.TextArea
-              rows={3}
-              placeholder={t("aidpKnowledge.kbDescriptionPlaceholder")}
-            />
-          </Form.Item>
+          <AidpKnowledgeBaseBasicFields t={t} />
 
           <div className="mb-5">
             <Dragger
@@ -522,79 +517,11 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
                     </Form.Item>
 
                     {canConfigureGroupPermissions && (
-                      <>
-                        <Form.Item
-                          name="ingroup_permission"
-                          label={t("aidpKnowledge.createIngroupPermission")}
-                          rules={[
-                            {
-                              required: true,
-                              message: t(
-                                "aidpKnowledge.createIngroupPermissionRequired"
-                              ),
-                            },
-                          ]}
-                        >
-                          <Select
-                            options={[
-                              {
-                                value: "EDIT",
-                                label: t(
-                                  "aidpKnowledge.createIngroupPermissionEdit"
-                                ),
-                              },
-                              {
-                                value: "READ_ONLY",
-                                label: t(
-                                  "aidpKnowledge.createIngroupPermissionRead"
-                                ),
-                              },
-                              {
-                                value: "PRIVATE",
-                                label: t(
-                                  "aidpKnowledge.createIngroupPermissionPrivate"
-                                ),
-                              },
-                            ]}
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name="group_ids"
-                          label={t("aidpKnowledge.createAccessGroups")}
-                          required={ingroupPermission !== "PRIVATE"}
-                          dependencies={["ingroup_permission"]}
-                          rules={[
-                            ({ getFieldValue }) => ({
-                              validator(_rule, value) {
-                                const level =
-                                  getFieldValue("ingroup_permission") ||
-                                  "READ_ONLY";
-                                if (level === "PRIVATE")
-                                  return Promise.resolve();
-                                if (Array.isArray(value) && value.length > 0) {
-                                  return Promise.resolve();
-                                }
-                                return Promise.reject(
-                                  new Error(
-                                    t(
-                                      "aidpKnowledge.createAccessGroupsRequired"
-                                    )
-                                  )
-                                );
-                              },
-                            }),
-                          ]}
-                        >
-                          <Select
-                            mode="multiple"
-                            placeholder={t(
-                              "aidpKnowledge.createAccessGroupsPlaceholder"
-                            )}
-                            disabled={ingroupPermission === "PRIVATE"}
-                            options={groupOptions}
-                          />
-                        </Form.Item>
-                      </>
+                      <AidpKnowledgeBasePermissionFields
+                        t={t}
+                        groupOptions={groupOptions}
+                        ingroupPermission={ingroupPermission}
+                      />
                     )}
 
                     <Form.Item

@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import type { TFunction } from "i18next";
 import {
   useState,
   useEffect,
@@ -59,6 +60,39 @@ const isApiErrorCode = (error: unknown, code: string | number): boolean =>
   error !== null &&
   "code" in error &&
   String((error as { code?: unknown }).code) === String(code);
+
+const getKnowledgeBaseCreateErrorMessage = (
+  error: unknown,
+  name: string,
+  t: TFunction
+) => {
+  if (isApiErrorCode(error, 409)) {
+    return t("knowledgeBase.message.nameExists", { name });
+  }
+  if (isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)) {
+    return t("quota.personalKbUploadBlocked");
+  }
+  if (isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE)) {
+    return t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`);
+  }
+  if (isApiErrorCode(error, 413)) {
+    return t("quota.uploadBlocked");
+  }
+  return t("knowledgeBase.message.createUploadError");
+};
+
+const getKnowledgeBaseUploadErrorMessage = (error: unknown, t: TFunction) => {
+  if (isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)) {
+    return t("quota.personalKbUploadBlocked");
+  }
+  if (isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE)) {
+    return t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`);
+  }
+  if (isApiErrorCode(error, 413)) {
+    return t("quota.uploadBlocked");
+  }
+  return t("document.message.uploadError");
+};
 
 const toEmbeddingModelOptionValue = (displayName: string, type: string) =>
   `${displayName}${EMBEDDING_MODEL_OPTION_DELIMITER}${type}`;
@@ -926,22 +960,7 @@ function DataConfig({ isActive }: DataConfigProps) {
           });
       } catch (error) {
         message.error(
-          isApiErrorCode(error, 409)
-            ? t("knowledgeBase.message.nameExists", {
-                name: newKbName.trim(),
-              })
-            : isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
-              ? t("quota.personalKbUploadBlocked")
-              : isApiErrorCode(
-                    error,
-                    ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
-                  )
-                ? t(
-                    `errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`
-                  )
-                : isApiErrorCode(error, 413)
-                  ? t("quota.uploadBlocked")
-                  : t("knowledgeBase.message.createUploadError")
+          getKnowledgeBaseCreateErrorMessage(error, newKbName.trim(), t)
         );
         setHasClickedUpload(false);
         // Clear the waiting flag so a failed upload cannot leave the page
@@ -983,18 +1002,7 @@ function DataConfig({ isActive }: DataConfigProps) {
         }
       );
     } catch (error) {
-      message.error(
-        isApiErrorCode(error, ErrorCode.TENANT_PERSONAL_KB_QUOTA_EXCEEDED)
-          ? t("quota.personalKbUploadBlocked")
-          : isApiErrorCode(
-                error,
-                ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
-              )
-            ? t(`errorCode.${ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE}`)
-            : isApiErrorCode(error, 413)
-              ? t("quota.uploadBlocked")
-              : t("document.message.uploadError")
-      );
+      message.error(getKnowledgeBaseUploadErrorMessage(error, t));
       throw error;
     }
   };

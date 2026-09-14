@@ -63,6 +63,7 @@ import type {
 } from "@/types/tagManagement";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
+import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
 import log from "@/lib/logger";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
@@ -397,38 +398,18 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     );
     const { t } = useTranslation();
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
-    const hasQuota = quotaStatus?.soft_quota_bytes != null;
-    const quotaAvailable = quotaStatus
-      ? hasQuota
-        ? formatFileSize(
-            Math.max(
-              quotaStatus.soft_quota_bytes! - quotaStatus.actual_bytes,
-              0
-            )
-          )
-        : t("knowledgeBase.capacity.unlimited")
-      : "-";
-    const quotaTotal = quotaStatus
-      ? hasQuota
-        ? quotaStatus.soft_quota_readable ||
-          formatFileSize(quotaStatus.soft_quota_bytes!)
-        : t("knowledgeBase.capacity.unlimited")
-      : "-";
-    const quotaUsagePercent = quotaStatus
-      ? Math.min(
-          100,
-          Math.max(
-            0,
-            quotaStatus.usage_pct ??
-              (hasQuota && quotaStatus.soft_quota_bytes! > 0
-                ? (quotaStatus.actual_bytes / quotaStatus.soft_quota_bytes!) *
-                  100
-                : quotaStatus.actual_bytes > 0
-                  ? 100
-                  : 0)
-          )
-        )
-      : 0;
+    const {
+      hasQuota,
+      availableCapacity: quotaAvailable,
+      totalCapacity: quotaTotal,
+      usagePercent: quotaUsagePercent,
+    } = getKnowledgeBaseQuotaDisplay(quotaStatus, t);
+    let documentListClassName = "flex-grow min-h-0 overflow-auto px-6 py-5";
+    if (isCreatingMode) {
+      documentListClassName = "w-full bg-white p-2";
+    } else if (showChunk) {
+      documentListClassName = "flex-grow min-h-0 overflow-hidden px-6 pt-5";
+    }
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
@@ -909,13 +890,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         {/* Document list */}
 
         <div
-          className={
-            isCreatingMode
-              ? "w-full bg-white p-2"
-              : showChunk
-                ? "flex-grow min-h-0 overflow-hidden px-6 pt-5"
-                : "flex-grow min-h-0 overflow-auto px-6 py-5"
-          }
+          className={documentListClassName}
           onDragOver={(e) => {
             if (!isCreatingMode && knowledgeBaseName) {
               return;

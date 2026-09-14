@@ -46,13 +46,19 @@ export default function TagChips({
     const label = isNoValue
       ? definitionName
       : `${definitionName}: ${valueName}`;
+    let chipText = valueName;
+    if (detailed) {
+      chipText = label;
+    } else if (isNoValue) {
+      chipText = definitionName;
+    }
     return (
       <Tooltip
         key={`${assignment.definition_id}:${assignment.value_id}`}
         title={label}
       >
         <Tag aria-label={label} className="inline-block max-w-[120px] truncate">
-          {detailed ? label : isNoValue ? definitionName : valueName}
+          {chipText}
         </Tag>
       </Tooltip>
     );

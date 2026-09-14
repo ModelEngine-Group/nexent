@@ -46,7 +46,7 @@ import { KnowledgeBase } from "@/types/knowledgeBase";
 import { KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { formatDateOrFallback } from "@/lib/date";
-import { formatFileSize } from "@/lib/utils";
+import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
 import { USER_ROLES } from "@/const/auth";
 import { calculateKnowledgeBaseInitialLimit } from "@/lib/knowledgeBaseViewport";
 import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
@@ -708,39 +708,12 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
             );
             const groupNames = getGroupNames(kb.group_ids);
             const quotaData = quotaMap.get(kb.index_name || kb.id);
-            const hasQuota = quotaData?.soft_quota_bytes != null;
-            const availableCapacity = quotaData
-              ? hasQuota
-                ? formatFileSize(
-                    Math.max(
-                      quotaData.soft_quota_bytes! - quotaData.actual_bytes,
-                      0
-                    )
-                  )
-                : t("knowledgeBase.capacity.unlimited")
-              : "-";
-            const totalCapacity = quotaData
-              ? hasQuota
-                ? quotaData.soft_quota_readable ||
-                  formatFileSize(quotaData.soft_quota_bytes!)
-                : t("knowledgeBase.capacity.unlimited")
-              : "-";
-            const quotaUsagePercent = quotaData
-              ? Math.min(
-                  100,
-                  Math.max(
-                    0,
-                    quotaData.usage_pct ??
-                      (hasQuota && quotaData.soft_quota_bytes! > 0
-                        ? (quotaData.actual_bytes /
-                            quotaData.soft_quota_bytes!) *
-                          100
-                        : quotaData.actual_bytes > 0
-                          ? 100
-                          : 0)
-                  )
-                )
-              : 0;
+            const {
+              hasQuota,
+              availableCapacity,
+              totalCapacity,
+              usagePercent: quotaUsagePercent,
+            } = getKnowledgeBaseQuotaDisplay(quotaData, t);
 
             return (
               <article

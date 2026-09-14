@@ -42,9 +42,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const [selectedKb, setSelectedKb] = useState<AidpKnowledgeBaseItem | null>(
     null
   );
-  const [activeKbDetail, setActiveKbDetail] = useState<AidpKbDetail | null>(
-    null
-  );
+  const [, setActiveKbDetail] = useState<AidpKbDetail | null>(null);
   const [documents, setDocuments] = useState<AidpDocumentItem[]>([]);
   const [totalDocs, setTotalDocs] = useState(0);
   const [docHasMore, setDocHasMore] = useState(false);
@@ -183,7 +181,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
             // Refresh list
             fetchKbs(kbPage);
-          } catch (error) {
+          } catch {
             appMessage.error(t("aidpKnowledge.deleteKbFailed"));
           }
         },

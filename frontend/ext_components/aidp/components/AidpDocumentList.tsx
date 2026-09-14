@@ -13,6 +13,7 @@ import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowle
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
 import { partitionAidpFiles } from "@/services/uploadService";
+import { getAidpUploadFailureDetails } from "@/ext_components/aidp/services/aidpUploadUtils";
 
 const { Dragger } = Upload;
 
@@ -60,12 +61,11 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           fileList
         );
 
-        const failureDetails = result.failed_list.map((item) => {
-          const reason = i18n.language.startsWith("zh")
-            ? item.reason_zh || item.reason_en
-            : item.reason_en || item.reason_zh;
-          return `${item.file_name}: ${reason || t("aidpKnowledge.uploadFailed")}`;
-        });
+        const failureDetails = getAidpUploadFailureDetails(
+          result.failed_list,
+          i18n.language,
+          t("aidpKnowledge.uploadFailed")
+        );
         const failureLines = failureDetails.map((detail, index) => (
           <div key={`${index}-${detail}`}>{detail}</div>
         ));

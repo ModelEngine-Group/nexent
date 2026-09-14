@@ -1,17 +1,21 @@
 "use client";
 
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Collapse, Modal, Form, Input, Select, message } from "antd";
+import { Collapse, Modal, Form, message } from "antd";
 import { SettingOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
-import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/const/knowledgeBase";
-import { useGroupList } from "@/hooks/group/useGroupList";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { USER_ROLES } from "@/const/auth";
+import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
+import {
+  AIDP_MODAL_STYLES,
+  AidpKnowledgeBaseBasicFields,
+  AidpKnowledgeBaseModalFooter,
+  AidpKnowledgeBaseModalHeader,
+  AidpKnowledgeBasePermissionFields,
+} from "./AidpKnowledgeBaseModalParts";
 
 interface AidpUpdateKbModalProps {
   open: boolean;
@@ -30,25 +34,9 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
 
-  // Mirror the create-modal wiring: the authorization context exposes
-  // ``user.tenantId``, which we feed into ``useGroupList`` to enumerate
-  // the tenant's groups for the access-group picker below.
-  const { user } = useAuthorizationContext();
-  const isUser = user?.role === USER_ROLES.USER;
-  const canConfigureGroupPermissions = !!user && !isUser;
-  const tenantId = user?.tenantId ?? null;
-  const { data: groupListData } = useGroupList(
-    canConfigureGroupPermissions ? tenantId : null
-  );
+  const { isUser, canConfigureGroupPermissions, groupOptions } =
+    useAidpGroupOptions();
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
-  const groupOptions = useMemo(
-    () =>
-      (groupListData?.groups ?? []).map((g) => ({
-        value: g.group_id,
-        label: g.group_name,
-      })),
-    [groupListData]
-  );
 
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
 
@@ -162,65 +150,28 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       width={640}
       maskClosable={false}
       destroyOnHidden
-      styles={{
-        container: { overflow: "hidden", borderRadius: 16, padding: 0 },
-        body: { padding: 0 },
-        footer: {
-          margin: 0,
-          padding: "12px 20px 16px",
-          borderTop: "1px solid #f0f0f0",
-        },
-      }}
+      styles={AIDP_MODAL_STYLES}
       footer={
-        <div className="flex justify-end gap-3">
-          <Button onClick={handleCancel} disabled={loading}>
-            {t("common.cancel")}
-          </Button>
-          <Button type="primary" onClick={handleOk} loading={loading}>
-            {t("common.confirm")}
-          </Button>
-        </div>
+        <AidpKnowledgeBaseModalFooter
+          onCancel={handleCancel}
+          onSubmit={handleOk}
+          loading={loading}
+          cancelText={t("common.cancel")}
+          submitText={t("common.confirm")}
+        />
       }
     >
       <div>
-        <div
-          className="border-b border-gray-200"
-          style={{ padding: "24px 24px 20px" }}
-        >
-          <h2 className="text-xl font-semibold tracking-tight text-gray-900">
-            {t("aidpKnowledge.updateKb")}
-          </h2>
-          <p className="mt-1 text-sm text-gray-500">
-            {t("knowledgeBase.create.subtitle")}
-          </p>
-        </div>
+        <AidpKnowledgeBaseModalHeader
+          title={t("aidpKnowledge.updateKb")}
+          subtitle={t("knowledgeBase.create.subtitle")}
+        />
         <Form
           form={form}
           layout="vertical"
           style={{ padding: "20px 24px 8px" }}
         >
-          <Form.Item
-            name="name"
-            label={t("aidpKnowledge.kbName")}
-            rules={[
-              { required: true, message: t("aidpKnowledge.kbNameRequired") },
-              {
-                pattern: AIDP_KNOWLEDGE_BASE_NAME_PATTERN,
-                message: t("aidpKnowledge.kbNameInvalid"),
-              },
-            ]}
-          >
-            <Input placeholder={t("aidpKnowledge.kbNamePlaceholder")} />
-          </Form.Item>
-          <Form.Item
-            name="description"
-            label={t("aidpKnowledge.kbDescription")}
-          >
-            <Input.TextArea
-              rows={3}
-              placeholder={t("aidpKnowledge.kbDescriptionPlaceholder")}
-            />
-          </Form.Item>
+          <AidpKnowledgeBaseBasicFields t={t} />
           {canConfigureGroupPermissions && (
             <Collapse
               className="!rounded-xl !border-gray-200"
@@ -243,75 +194,12 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
                   ),
                   children: (
                     <div className="pt-1">
-                      <Form.Item
-                        name="ingroup_permission"
-                        label={t("aidpKnowledge.createIngroupPermission")}
-                        rules={[
-                          {
-                            required: true,
-                            message: t(
-                              "aidpKnowledge.createIngroupPermissionRequired"
-                            ),
-                          },
-                        ]}
-                      >
-                        <Select
-                          options={[
-                            {
-                              value: "EDIT",
-                              label: t(
-                                "aidpKnowledge.createIngroupPermissionEdit"
-                              ),
-                            },
-                            {
-                              value: "READ_ONLY",
-                              label: t(
-                                "aidpKnowledge.createIngroupPermissionRead"
-                              ),
-                            },
-                            {
-                              value: "PRIVATE",
-                              label: t(
-                                "aidpKnowledge.createIngroupPermissionPrivate"
-                              ),
-                            },
-                          ]}
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name="group_ids"
-                        label={t("aidpKnowledge.createAccessGroups")}
-                        required={ingroupPermission !== "PRIVATE"}
-                        dependencies={["ingroup_permission"]}
-                        rules={[
-                          ({ getFieldValue }) => ({
-                            validator(_rule, value) {
-                              const level =
-                                getFieldValue("ingroup_permission") ||
-                                "READ_ONLY";
-                              if (level === "PRIVATE") return Promise.resolve();
-                              if (Array.isArray(value) && value.length > 0) {
-                                return Promise.resolve();
-                              }
-                              return Promise.reject(
-                                new Error(
-                                  t("aidpKnowledge.createAccessGroupsRequired")
-                                )
-                              );
-                            },
-                          }),
-                        ]}
-                      >
-                        <Select
-                          mode="multiple"
-                          showSearch={{ optionFilterProp: "label" }}
-                          placeholder={t(
-                            "aidpKnowledge.createAccessGroupsPlaceholder"
-                          )}
-                          disabled={ingroupPermission === "PRIVATE"}
-                          options={groupOptions}
-                        />
-                      </Form.Item>
+                      <AidpKnowledgeBasePermissionFields
+                        t={t}
+                        groupOptions={groupOptions}
+                        ingroupPermission={ingroupPermission}
+                        showSearch
+                      />
                     </div>
                   ),
                 },

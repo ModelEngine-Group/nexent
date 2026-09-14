@@ -271,11 +271,12 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     );
   };
 
-  const effectiveTotal = totalReliable
-    ? total
-    : hasMore
-      ? currentPage * pageSize + 1
-      : currentPage * pageSize;
+  let effectiveTotal = currentPage * pageSize;
+  if (totalReliable) {
+    effectiveTotal = total;
+  } else if (hasMore) {
+    effectiveTotal += 1;
+  }
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl bg-white">
