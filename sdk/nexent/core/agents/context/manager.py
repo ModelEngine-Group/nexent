@@ -49,7 +49,7 @@ class ContextManager:
         self._llm = LLMSummary(self.config, self._renderer)
         self._history_compressor = HistoryCompressor(self._llm)
         self._history_candidate: HistorySummaryCandidate | None = None
-        self._current_item_cache: dict[int, ContextItem] = {}
+        self._current_item_cache: dict[tuple[int, str], ContextItem] = {}
         self._step_local_log: list[CompressionCallRecord] = []
         self.compression_calls_log: list[CompressionCallRecord] = []
         self._last_uncompressed_token_count: int | None = None
@@ -115,6 +115,7 @@ class ContextManager:
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[Any] | None = None,
+        action_protocol: str = "code",
         purpose: str = "step",
         task: str | None = None,
         final_answer_templates: Optional[Dict[str, Any]] = None,
@@ -122,7 +123,9 @@ class ContextManager:
     ) -> FinalContext:
         run_context = run_context or self.prepare_run_context(memory, "")
         policy = resolve_policy(self.config.policy_layers)
-        persisted_items = list(run_context.items)
+        if action_protocol not in {"code", "native"}:
+            raise ValueError(f"unsupported action protocol: {action_protocol!r}")
+        persisted_items = self._items_for_action_protocol(run_context.items, action_protocol)
         if self._history_candidate is not None:
             persisted_items = [
                 item
@@ -134,7 +137,9 @@ class ContextManager:
                 }
             ]
             persisted_items.append(self._history_candidate.as_item())
-        current_items = self._project_current_run(memory, current_run_start_idx)
+        current_items = self._project_current_run(
+            memory, current_run_start_idx, action_protocol=action_protocol
+        )
         items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
         purpose_stable, purpose_dynamic = self._purpose_messages(
             purpose=purpose,
@@ -379,11 +384,78 @@ class ContextManager:
             "result": self._to_json_value(getattr(step, "action_output", None)),
         }
 
-    def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:
+    @staticmethod
+    def _native_action_content(step: ActionStep) -> dict[str, Any]:
+        """Return a provider-native assistant/tool message pair for a completed action."""
+        calls = []
+        model_message = getattr(step, "model_output_message", None)
+        source_calls = getattr(model_message, "tool_calls", None) or getattr(step, "tool_calls", None) or []
+        for call in source_calls:
+            function = getattr(call, "function", None)
+            if function is not None:
+                name = str(getattr(function, "name", ""))
+                arguments = getattr(function, "arguments", {})
+                call_id = str(getattr(call, "id", ""))
+                call_type = str(getattr(call, "type", "function") or "function")
+            else:
+                name = str(getattr(call, "name", ""))
+                arguments = getattr(call, "arguments", {})
+                call_id = str(getattr(call, "id", ""))
+                call_type = "function"
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False, default=str)
+            calls.append({
+                "id": call_id,
+                "type": call_type,
+                "function": {"name": name, "arguments": arguments},
+            })
+
+        content = getattr(model_message, "content", None)
+        if content is None:
+            content = getattr(step, "model_output", None)
+        messages: list[dict[str, Any]] = [{
+            "role": "tool-call",
+            "content": content,
+            "tool_calls": calls,
+        }]
+        outcome_parts = []
+        if getattr(step, "observations", None) is not None:
+            outcome_parts.append(str(step.observations))
+        if getattr(step, "error", None) is not None:
+            outcome_parts.append(f"Error:\n{step.error}")
+        if not outcome_parts and getattr(step, "action_output", None) is not None:
+            outcome_parts.append(str(step.action_output))
+        messages.append({
+            "role": "tool-response",
+            "content": [{"type": "text", "text": "\n".join(outcome_parts)}],
+        })
+        return {"messages": messages}
+
+    @staticmethod
+    def _items_for_action_protocol(items: Sequence[ContextItem], action_protocol: str) -> list[ContextItem]:
+        """Re-render protocol-sensitive prompt items for the active request protocol."""
+        projected = []
+        for item in items:
+            content = deepcopy(item.content)
+            metadata = deepcopy(item.metadata)
+            protocol_texts = metadata.get("protocol_texts")
+            if isinstance(protocol_texts, dict):
+                content = {"text": str(protocol_texts.get(action_protocol, ""))}
+            if content.get("template") == "skills_usage":
+                content["action_protocol"] = action_protocol
+            if item.type == ContextItemType.SKILL:
+                metadata["action_protocol"] = action_protocol
+            projected.append(item.model_copy(update={"content": content, "metadata": metadata}))
+        return projected
+
+    def _project_current_run(
+        self, memory: AgentMemory, start: int, *, action_protocol: str = "code"
+    ) -> list[ContextItem]:
         projected: list[ContextItem] = []
         action_index = planning_index = 0
         for index, step in enumerate(memory.steps[start:]):
-            cached = self._current_item_cache.get(id(step))
+            cache_key = (id(step), action_protocol)
+            cached = self._current_item_cache.get(cache_key)
             if cached is not None:
                 projected.append(cached)
                 if cached.type == ContextItemType.CURRENT_ACTION:
@@ -402,15 +474,15 @@ class ContextManager:
                 )
                 projected.append(item)
             elif isinstance(step, ActionStep):
-                content = self._neutral_action_content(step, action_index)
-                # Render completed actions from structured fields instead of
-                # smolagents ActionStep.to_messages(). The upstream rendering
-                # injects protocol labels such as "Calling tools:" and
-                # "Observation:" into the next model request, which can prime
-                # reasoning models to emit a configured stop sequence. The
-                # neutral representation preserves the executable action,
-                # outcome, error, result, and ordering without changing how
-                # the live ReAct step is parsed or executed.
+                content = (
+                    self._native_action_content(step)
+                    if action_protocol == "native" and getattr(step, "tool_calls", None)
+                    else self._neutral_action_content(step, action_index)
+                )
+                # Native requests retain the provider's assistant/tool
+                # sequence. Code requests use a neutral record because the
+                # upstream ActionStep renderer injects "Calling tools:" and
+                # "Observation:" labels that collide with CodeAgent stops.
                 item = ContextItem.from_input(
                     ContextItemInput(
                         id=f"current_action:{action_index}",
@@ -434,7 +506,7 @@ class ContextManager:
                 planning_index += 1
             else:
                 continue
-            self._current_item_cache[id(step)] = item
+            self._current_item_cache[cache_key] = item
         return projected
 
     def _persist_candidate(self, candidate: HistorySummaryCandidate) -> str:

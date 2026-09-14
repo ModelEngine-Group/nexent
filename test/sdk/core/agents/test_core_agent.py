@@ -2445,6 +2445,55 @@ class TestRunStreamRealExecution:
 
         assert action_step.model_output == "   \n\t"
 
+    def test_native_no_tool_response_rebuilds_code_context_before_retry(self, monkeypatch):
+        module = core_agent_module
+        CoreAgent = module.CoreAgent
+        monkeypatch.setattr(module, "AgentExecutionError", type("AgentExecutionError", (Exception,), {}))
+        monkeypatch.setattr(module, "AgentGenerationError", type("AgentGenerationError", (Exception,), {}))
+
+        agent = object.__new__(CoreAgent)
+        agent.agent_name = "test"
+        agent.observer = MagicMock()
+        agent.step_number = 1
+        agent.memory = MagicMock()
+        agent.memory.steps = []
+        agent.logger = MagicMock()
+        agent.context_runtime = self._context_runtime_mock()
+        native_context = MagicMock()
+        native_context.messages = [{"role": "system", "content": "native prompt"}]
+        native_context.evidence.over_hard_budget = False
+        code_context = MagicMock()
+        code_context.messages = [{"role": "system", "content": "code prompt"}]
+        code_context.evidence.over_hard_budget = False
+        agent.context_runtime.prepare_step.side_effect = [native_context, code_context]
+        agent._history_step_count = 0
+        agent._context_tools = MagicMock(return_value=[])
+        agent._use_structured_outputs_internally = False
+        agent.action_protocol = "native"
+        agent._active_action_protocol = "native"
+        agent.native_tool_choice = "auto"
+
+        first = MagicMock(content="This gateway ignored tools", tool_calls=[], token_usage=None)
+        second = MagicMock(content="A complete fallback answer", tool_calls=[], token_usage=None)
+        agent.model = MagicMock(side_effect=[first, second])
+        agent.model.last_native_tool_call_unsupported = False
+
+        action_step = MagicMock()
+        stream = agent._step_stream(action_step)
+        with pytest.raises(module.FinalAnswerError):
+            next(stream)
+
+        protocols = [
+            call.kwargs["action_protocol"]
+            for call in agent.context_runtime.prepare_step.call_args_list
+        ]
+        assert protocols == ["native", "code"]
+        assert action_step.model_input_messages == code_context.messages
+        assert agent._active_action_protocol == "code"
+        assert agent.model.call_args_list[1].kwargs["stop_sequences"] == [
+            "Observation:", "Calling tools:"
+        ]
+
     def test_run_stream_stop_event_path_real_execution(self):
         """Test _run_stream with stop_event set (user break)."""
         import threading

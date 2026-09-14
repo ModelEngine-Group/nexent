@@ -68,12 +68,14 @@ class ManagedContextRuntime:
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        action_protocol: str = "code",
     ) -> FinalContext:
         final_context = self.context_manager.assemble_final_context(
             model=model,
             memory=memory,
             current_run_start_idx=current_run_start_idx,
             tools=tools,
+            action_protocol=action_protocol,
             purpose="step",
             run_context=self._ensure_run_context(memory),
         )

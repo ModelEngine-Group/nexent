@@ -927,33 +927,37 @@ Additional Args:
         self.observer.add_message(
             self.agent_name, ProcessType.STEP_COUNT, self.step_number)
 
-        final_context = self.context_runtime.prepare_step(
-            model=self.model,
-            memory=self.memory,
-            current_run_start_idx=self._history_step_count,
-            tools=self._context_tools(),
-        )
-        get_monitoring_manager().record_final_context_evidence(final_context.evidence, step_number=self.step_number)
-        self._emit_history_summary_event()
-        self._ensure_context_within_hard_budget(final_context)
-        input_messages = final_context.messages
-        chars_per_token = self.context_runtime.chars_per_token
-        # Baseline for the per-step compression ratio. ``final_context.messages``
-        # is already the compressed payload, so use the ContextManager's raw
-        # memory token count when compression produced one. When compression is
-        # disabled, the final input size is the correct zero-savings baseline.
-        uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
-        if uncompressed_tokens:
-            self._last_uncompressed_est = uncompressed_tokens
-        else:
-            self._last_uncompressed_est = msg_token_count(input_messages, chars_per_token)
-        # Add new step in logs
-        memory_step.model_input_messages = input_messages
         action_protocol = getattr(
             self,
             "_active_action_protocol",
             getattr(self, "action_protocol", "code"),
         )
+
+        def prepare_input(protocol: str):
+            final_context = self.context_runtime.prepare_step(
+                model=self.model,
+                memory=self.memory,
+                current_run_start_idx=self._history_step_count,
+                tools=self._context_tools() if protocol == "native" else [],
+                action_protocol=protocol,
+            )
+            get_monitoring_manager().record_final_context_evidence(
+                final_context.evidence, step_number=self.step_number
+            )
+            self._emit_history_summary_event()
+            self._ensure_context_within_hard_budget(final_context)
+            input_messages = final_context.messages
+            uncompressed_tokens = self.context_runtime.token_counts().get("uncompressed")
+            if uncompressed_tokens:
+                self._last_uncompressed_est = uncompressed_tokens
+            else:
+                self._last_uncompressed_est = msg_token_count(
+                    input_messages, self.context_runtime.chars_per_token
+                )
+            memory_step.model_input_messages = input_messages
+            return input_messages
+
+        input_messages = prepare_input(action_protocol)
         stop_sequences = [] if action_protocol == "native" else ["Observation:", "Calling tools:"]
 
         # Prepare additional arguments
@@ -988,13 +992,50 @@ Additional Args:
             if action_protocol == "native":
                 additional_args["tools_to_call_from"] = self._context_tools()
                 additional_args["tool_choice"] = getattr(self, "native_tool_choice", "auto")
-            chat_message: ChatMessage = self.model(input_messages,
-                                                   stop_sequences=stop_sequences, **additional_args)
-            if action_protocol == "native" and getattr(
-                self.model, "last_native_tool_call_unsupported", False
+                if hasattr(self.model, "last_native_tool_call_unsupported"):
+                    additional_args["_defer_native_tool_fallback"] = True
+            try:
+                chat_message: ChatMessage = self.model(
+                    input_messages, stop_sequences=stop_sequences, **additional_args
+                )
+            except Exception:
+                if action_protocol == "native" and getattr(
+                    self.model, "last_native_tool_call_unsupported", False
+                ):
+                    chat_message = None
+                else:
+                    raise
+
+            if action_protocol == "native" and (
+                chat_message is None or not (chat_message.tool_calls or [])
             ):
+                # Rebuild the whole request before retrying. Reusing a native
+                # system prompt/history without tool schemas is not a valid
+                # CodeAgent fallback and causes smaller models to emit prose or
+                # repeat stale calls.
                 self._active_action_protocol = "code"
                 action_protocol = "code"
+                input_messages = prepare_input("code")
+                stop_sequences = ["Observation:", "Calling tools:"]
+                additional_args.pop("tools_to_call_from", None)
+                additional_args.pop("tool_choice", None)
+                additional_args.pop("_defer_native_tool_fallback", None)
+                self._log_model_call_parameters(input_messages, stop_sequences, additional_args)
+                if guardrail_engine:
+                    decision = guardrail_engine.check_input(input_messages=input_messages)
+                    self.verification_controller.emit(
+                        decision.verification_result, message=decision.message
+                    )
+                    if decision.effective_action == "terminate":
+                        self._append_verification_feedback(memory_step, decision.verification_result)
+                        memory_step.model_output = render_guardrail_refusal(decision, input_messages)
+                        raise FinalAnswerError()
+                    if decision.effective_action == "mask" and decision.masked_messages is not None:
+                        input_messages = decision.masked_messages
+                        self._append_verification_feedback(memory_step, decision.verification_result)
+                chat_message = self.model(
+                    input_messages, stop_sequences=stop_sequences, **additional_args
+                )
             memory_step.model_output_message = chat_message
             model_output = chat_message.content or ""
             memory_step.token_usage = chat_message.token_usage
@@ -1002,6 +1043,8 @@ Additional Args:
 
             self.logger.log_markdown(
                 content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
+        except FinalAnswerError:
+            raise
         except Exception as e:
             raise AgentGenerationError(
                 f"Error in generating model output:\n{e}", self.logger) from e
@@ -1016,12 +1059,6 @@ Additional Args:
             native_tool_name: str | None = None
             native_call_key: str | None = None
             duplicate_native_result: Dict[str, Any] | None = None
-            if action_protocol == "native" and not (chat_message.tool_calls or []):
-                # Some OpenAI-compatible gateways accept the tools fields but
-                # silently ignore them. Parse this response with the legacy
-                # protocol and keep the rest of the run on that protocol.
-                self._active_action_protocol = "code"
-                action_protocol = "code"
             if action_protocol == "native":
                 code_action, native_arguments, native_call_id = parse_native_tool_call(
                     chat_message,

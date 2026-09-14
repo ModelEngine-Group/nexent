@@ -519,6 +519,23 @@ def build_context_inputs(
                 metadata={"authority": authority},
             ))
 
+    def add_protocol_system(
+        item_id: str,
+        code_text: str,
+        native_text: str,
+        priority: int,
+        authority: str = "platform",
+    ) -> None:
+        texts = {"code": code_text, "native": native_text}
+        inputs.append(ContextItemInput(
+            id=f"system:{item_id}",
+            type=ContextItemType.SYSTEM,
+            content={"text": texts[action_protocol]},
+            source=(f"agent_prompt:{item_id}",),
+            priority=priority,
+            metadata={"authority": authority, "protocol_texts": texts},
+        ))
+
     if include_app_context:
         add_system("header", _build_header_text(language), 100, "platform")
 
@@ -574,9 +591,12 @@ def build_context_inputs(
                 },
             ))
 
-    add_system("execution_flow", _build_execution_flow_text(
-        None, language, is_manager, enable_planning, action_protocol=action_protocol
-    ), 60, "platform")
+    add_protocol_system(
+        "execution_flow",
+        _build_execution_flow_text(None, language, is_manager, enable_planning, action_protocol="code"),
+        _build_execution_flow_text(None, language, is_manager, enable_planning, action_protocol="native"),
+        60,
+    )
     add_system("available_resources_header", _build_available_resources_header_text(
         is_manager, language
     ), 55, "platform")
@@ -695,12 +715,11 @@ def build_context_inputs(
             25,
             "platform",
         )
-    add_system(
+    add_protocol_system(
         "code_norms",
-        _build_code_norms_text(language, is_manager, action_protocol=action_protocol),
+        _build_code_norms_text(language, is_manager, action_protocol="code")
+        + (f"\n\n{_build_footer_text(few_shots, language)}" if few_shots else ""),
+        _build_code_norms_text(language, is_manager, action_protocol="native"),
         20,
-        "platform",
     )
-    if few_shots and action_protocol == "code":
-        add_system("footer", _build_footer_text(few_shots, language), 10)
     return inputs

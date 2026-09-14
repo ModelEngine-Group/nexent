@@ -13,6 +13,7 @@ import threading
 import asyncio
 import time
 import json
+from copy import deepcopy
 from typing import List, Optional, Dict, Any
 
 from smolagents import Tool
@@ -20,8 +21,10 @@ from smolagents.models import (
     ChatMessage,
     ChatMessageToolCall,
     ChatMessageToolCallFunction,
+    get_clean_message_list,
     MessageRole,
     OpenAIServerModel,
+    tool_role_conversions,
 )
 
 from .capacity_budget import (
@@ -51,6 +54,65 @@ STOP_EVENT_INTERRUPTED_MESSAGE = "Model is interrupted by stop event"
 
 class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
+
+
+class NativeToolCallingUnsupportedError(RuntimeError):
+    """Tell the agent runtime to rebuild the request with its code protocol."""
+
+
+def _message_role_value(message: Dict[str, Any]) -> str:
+    role = message.get("role", "")
+    return str(getattr(role, "value", role))
+
+
+def _merge_message_content(left: Any, right: Any) -> Any:
+    """Merge adjacent message content using smolagents' text-block semantics."""
+    if left in (None, "", []):
+        return deepcopy(right)
+    if right in (None, "", []):
+        return deepcopy(left)
+    if isinstance(left, str) and isinstance(right, str):
+        return f"{left}\n{right}"
+
+    def as_blocks(content: Any) -> list[dict[str, Any]]:
+        if isinstance(content, list):
+            return deepcopy(content)
+        return [{"type": "text", "text": str(content)}]
+
+    blocks = as_blocks(left)
+    incoming = as_blocks(right)
+    if (
+        blocks
+        and incoming
+        and blocks[-1].get("type") == "text"
+        and incoming[0].get("type") == "text"
+    ):
+        blocks[-1]["text"] = f"{blocks[-1].get('text', '')}\n{incoming[0].get('text', '')}"
+        incoming = incoming[1:]
+    return [*blocks, *incoming]
+
+
+def _normalize_native_history_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse the system prefix and reject system messages appearing later."""
+    normalized: List[Dict[str, Any]] = []
+    system_message: Dict[str, Any] | None = None
+    seen_non_system = False
+    for raw_message in messages:
+        message = deepcopy(raw_message)
+        if _message_role_value(message) == "system":
+            if seen_non_system:
+                raise ValueError("System messages must form one contiguous prefix before conversation history.")
+            if system_message is None:
+                system_message = message
+                normalized.append(system_message)
+            else:
+                system_message["content"] = _merge_message_content(
+                    system_message.get("content"), message.get("content")
+                )
+            continue
+        seen_non_system = True
+        normalized.append(message)
+    return normalized
 
 
 _NATIVE_TOOL_PARAMETER_PATTERN = re.compile(
@@ -260,10 +322,58 @@ class OpenAIModel(OpenAIServerModel):
         if self.display_name:
             _monitoring_display_name.set(self.display_name)
 
+    def _prepare_completion_kwargs(self, messages, *args, **kwargs):
+        """Preserve provider-native assistant/tool history for OpenAI APIs."""
+        completion_kwargs = super()._prepare_completion_kwargs(messages, *args, **kwargs)
+        if not any(getattr(message, "tool_calls", None) for message in messages or []):
+            return completion_kwargs
+
+        role_conversions = kwargs.get("custom_role_conversions") or tool_role_conversions
+        convert_images = bool(kwargs.get("convert_images_to_image_urls", False))
+        flatten = bool(kwargs.get("flatten_messages_as_text", self.flatten_messages_as_text))
+        cleaned_messages = []
+        pending_calls: list[tuple[str, str]] = []
+        for message in messages:
+            cleaned = get_clean_message_list(
+                [message],
+                role_conversions=role_conversions,
+                convert_images_to_image_urls=convert_images,
+                flatten_messages_as_text=flatten,
+            )[0]
+            tool_calls = getattr(message, "tool_calls", None) or []
+            if tool_calls:
+                serialized_calls = []
+                for call in tool_calls:
+                    arguments = call.function.arguments
+                    if not isinstance(arguments, str):
+                        arguments = json.dumps(arguments, ensure_ascii=False, default=str)
+                    serialized_calls.append({
+                        "id": str(call.id),
+                        "type": str(call.type or "function"),
+                        "function": {
+                            "name": str(call.function.name),
+                            "arguments": arguments,
+                        },
+                    })
+                    pending_calls.append((str(call.id), str(call.function.name)))
+                cleaned["role"] = "assistant"
+                cleaned["tool_calls"] = serialized_calls
+            message_role = getattr(message, "role", None)
+            original_role = getattr(message_role, "value", message_role)
+            if original_role == MessageRole.TOOL_RESPONSE.value and pending_calls:
+                call_id, tool_name = pending_calls.pop(0)
+                cleaned["role"] = "tool"
+                cleaned["tool_call_id"] = call_id
+                cleaned["name"] = tool_name
+            cleaned_messages.append(cleaned)
+        completion_kwargs["messages"] = _normalize_native_history_messages(cleaned_messages)
+        return completion_kwargs
+
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
                  _token_tracker=None, safe_input_budget_snapshot: Optional[SafeInputBudgetSnapshot] = None,
                  _allow_native_tool_fallback: bool = True,
+                 _defer_native_tool_fallback: bool = False,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -306,6 +416,7 @@ class OpenAIModel(OpenAIServerModel):
                     _token_tracker=token_tracker,
                     safe_input_budget_snapshot=safe_input_budget_snapshot,
                     _allow_native_tool_fallback=_allow_native_tool_fallback,
+                    _defer_native_tool_fallback=_defer_native_tool_fallback,
                     **kwargs,
                 )
 
@@ -805,6 +916,8 @@ class OpenAIModel(OpenAIServerModel):
                         e,
                     )
                     self.last_native_tool_call_unsupported = True
+                    if _defer_native_tool_fallback:
+                        raise NativeToolCallingUnsupportedError(str(e)) from e
                     fallback_kwargs = dict(kwargs)
                     fallback_kwargs.pop("tool_choice", None)
                     fallback_kwargs.pop("tools", None)

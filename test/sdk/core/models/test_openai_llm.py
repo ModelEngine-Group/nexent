@@ -1532,6 +1532,66 @@ def test_native_tool_rejection_retries_once_without_tools(openai_model_instance)
     assert openai_model_instance._dispatch_chat_completion.call_count == 2
 
 
+def test_native_tool_rejection_can_defer_fallback_to_agent(openai_model_instance):
+    openai_model_instance._dispatch_chat_completion = MagicMock(
+        side_effect=ValueError("400 unknown parameter tool_choice: not supported")
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(openai_llm_module.NativeToolCallingUnsupportedError):
+            openai_model_instance.__call__(
+                [{"role": "user", "content": "run it"}],
+                tools_to_call_from=[MagicMock()],
+                tool_choice="auto",
+                _defer_native_tool_fallback=True,
+            )
+
+    assert openai_model_instance.last_native_tool_call_unsupported is True
+    assert openai_model_instance._dispatch_chat_completion.call_count == 1
+
+
+def test_native_history_normalizer_collapses_system_prefix_and_preserves_tool_pair():
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": "identity"}]},
+        {"role": "system", "content": [{"type": "text", "text": "tool policy"}]},
+        {"role": "user", "content": [{"type": "text", "text": "create a document"}]},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_skill_md", "arguments": '{"skill_name":"docx"}'},
+            }],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "read_skill_md",
+            "content": [{"type": "text", "text": "guide"}],
+        },
+    ]
+
+    normalized = openai_llm_module._normalize_native_history_messages(messages)
+
+    assert [message["role"] for message in normalized] == [
+        "system", "user", "assistant", "tool"
+    ]
+    assert normalized[0]["content"] == [{
+        "type": "text", "text": "identity\ntool policy"
+    }]
+    assert normalized[2]["tool_calls"] == messages[3]["tool_calls"]
+    assert normalized[3]["tool_call_id"] == "call_1"
+
+
+def test_native_history_normalizer_rejects_late_system_message():
+    with pytest.raises(ValueError, match="contiguous prefix"):
+        openai_llm_module._normalize_native_history_messages([
+            {"role": "user", "content": "hello"},
+            {"role": "system", "content": "late policy"},
+        ])
+
+
 @pytest.mark.parametrize(
     "message",
     [

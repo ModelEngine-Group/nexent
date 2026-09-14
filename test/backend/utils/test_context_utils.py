@@ -48,6 +48,21 @@ def test_native_action_context_has_no_executable_code_protocol():
     assert "每轮只调用一个技能工具" in rendered
 
 
+def test_native_context_keeps_code_prompt_variant_for_runtime_fallback():
+    items = build_context_inputs(
+        language="en",
+        action_protocol="native",
+        few_shots="<code>legacy_example()</code>",
+    )
+    execution_flow = next(item for item in items if item.id == "system:execution_flow")
+    code_norms = next(item for item in items if item.id == "system:code_norms")
+
+    assert set(execution_flow.metadata["protocol_texts"]) == {"code", "native"}
+    assert "legacy_example" not in code_norms.content["text"]
+    assert "legacy_example" in code_norms.metadata["protocol_texts"]["code"]
+    assert "legacy_example" not in code_norms.metadata["protocol_texts"]["native"]
+
+
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_runtime_system_context_does_not_guide_observation_markers(language):
     rendered = str(_messages(language=language))

@@ -96,6 +96,7 @@ class ContextRuntime(Protocol):
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        action_protocol: str = "code",
     ) -> FinalContext:
         """Return all model messages for the current step."""
 
@@ -168,6 +169,7 @@ class UnconfiguredContextRuntime:
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        action_protocol: str = "code",
     ) -> FinalContext:
         raise RuntimeError(_UNCONFIGURED_RUNTIME_ERROR)
 

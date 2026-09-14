@@ -2,6 +2,7 @@ import json
 import logging
 
 from smolagents.memory import ActionStep, TaskStep, ToolCall
+from smolagents.models import ChatMessage, ChatMessageToolCall, ChatMessageToolCallFunction, MessageRole
 from smolagents.monitoring import Timing
 
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
@@ -265,6 +266,85 @@ def test_projects_tool_calls_as_json_serializable_payloads(monkeypatch):
     assert "Calling tools:" not in summary_rendered
     assert "Observation:" not in summary_rendered
 
+
+def test_native_protocol_projects_standard_tool_history():
+    native_call = ChatMessageToolCall(
+        function=ChatMessageToolCallFunction(
+            name="read_skill_md", arguments='{"skill_name":"docx"}'
+        ),
+        id="call_native_1",
+        type="function",
+    )
+    action = ActionStep(
+        step_number=1,
+        timing=Timing(start_time=0),
+        tool_calls=[ToolCall(
+            name="read_skill_md",
+            arguments={"skill_name": "docx"},
+            id="call_native_1",
+        )],
+        model_output_message=ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="I will read the guide.",
+            tool_calls=[native_call],
+        ),
+        observations="guide contents",
+    )
+    memory = _Memory([TaskStep(task="create a document"), action])
+    manager = ContextManager(ContextManagerConfig(
+        soft_input_budget_tokens=10000,
+        policy_layers={"request": {"processing_mode": "passthrough"}},
+    ))
+    run = manager.prepare_run_context(memory, "", [])
+
+    result = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        action_protocol="native",
+        run_context=run,
+    )
+
+    assert [message["role"] for message in result.messages] == [
+        "user", "tool-call", "tool-response"
+    ]
+    assert result.messages[1]["tool_calls"] == [{
+        "id": "call_native_1",
+        "type": "function",
+        "function": {
+            "name": "read_skill_md",
+            "arguments": '{"skill_name":"docx"}',
+        },
+    }]
+    assert result.messages[2]["content"][0]["text"] == "guide contents"
+
+
+def test_code_fallback_reprojects_native_history_as_neutral_records():
+    action = ActionStep(
+        step_number=1,
+        timing=Timing(start_time=0),
+        tool_calls=[ToolCall(name="read_skill_md", arguments={"skill_name": "docx"}, id="call_1")],
+        observations="guide contents",
+    )
+    memory = _Memory([TaskStep(task="create a document"), action])
+    manager = ContextManager(ContextManagerConfig(
+        soft_input_budget_tokens=10000,
+        policy_layers={"request": {"processing_mode": "passthrough"}},
+    ))
+    run = manager.prepare_run_context(memory, "", [])
+
+    native = manager.assemble_final_context(
+        model=None, memory=memory, current_run_start_idx=0,
+        action_protocol="native", run_context=run,
+    )
+    code = manager.assemble_final_context(
+        model=None, memory=memory, current_run_start_idx=0,
+        action_protocol="code", run_context=run,
+    )
+
+    assert any(message["role"] == "tool-call" for message in native.messages)
+    assert not any(message["role"] in {"tool-call", "tool-response"} for message in code.messages)
+    assert '<completed_action_history read_only="true">' in _rendered_text(code.messages)
 
 def test_summary_failure_and_plaintext_fallback_are_not_persisted(monkeypatch):
     monkeypatch.setattr("smolagents.memory.SystemPromptStep", _SystemPrompt)
