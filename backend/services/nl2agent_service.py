@@ -40,6 +40,7 @@ from services.agent_draft_permission_service import (
     AgentDraftEditError,
     require_agent_draft_edit,
 )
+from services.thread_lifecycle_service import runtime_thread_manager
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
@@ -1414,7 +1415,10 @@ async def create_nl2agent_stream(
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
-            async for chunk in agent_run(run_info):
+            async for chunk in agent_run(
+                run_info,
+                thread_manager=runtime_thread_manager,
+            ):
                 if boundary_delivered:
                     continue
                 yield f"data: {chunk}\n\n"

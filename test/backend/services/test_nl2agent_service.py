@@ -1866,8 +1866,9 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def fake_agent_run(received_run_info):
+    async def fake_agent_run(received_run_info, *, thread_manager):
         assert received_run_info is run_info
+        assert thread_manager is not None
         yield json.dumps({"type": "tool", "content": "call"})
         yield json.dumps(
             {
@@ -1957,7 +1958,8 @@ async def test_create_stream_yields_process_chunks_without_waiting_for_later_out
     ]
     release_next = [asyncio.Event() for _ in process_chunks]
 
-    async def gated_agent_run(_run_info):
+    async def gated_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         for payload, gate in zip(process_chunks, release_next, strict=True):
             yield json.dumps(payload)
             await gate.wait()
@@ -2000,7 +2002,8 @@ async def test_create_stream_preserves_final_answers_without_fallback(mocker, co
         return_value=run_info,
     )
 
-    async def final_answer_agent_run(_run_info):
+    async def final_answer_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         yield json.dumps({"type": "final_answer", "content": content})
 
     mocker.patch(
@@ -2033,7 +2036,8 @@ async def test_create_stream_ends_without_synthesizing_nl2a_fallback(mocker):
         return_value=run_info,
     )
 
-    async def no_action_agent_run(_run_info):
+    async def no_action_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         yield json.dumps({"type": "model_output_thinking", "content": "reason"})
 
     mocker.patch(
@@ -2064,7 +2068,8 @@ async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def failing_agent_run(_run_info):
+    async def failing_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         if False:
             yield "unreachable"
         raise RuntimeError("private provider credentials")
@@ -2103,7 +2108,8 @@ async def test_create_stream_propagates_cancellation_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def cancelled_agent_run(_run_info):
+    async def cancelled_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         if False:
             yield "unreachable"
         raise asyncio.CancelledError

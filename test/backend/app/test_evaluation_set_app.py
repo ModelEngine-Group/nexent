@@ -970,7 +970,7 @@ class TestGenerateCasesAsync:
             None, create_empty_evaluation_set=MagicMock(return_value={"evaluation_set_id": 5})
         )
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
+        evaluation_set_app.config_thread_manager = MagicMock()
 
         response = client.post(
             "/evaluation-sets/generate-cases-async",
@@ -981,29 +981,31 @@ class TestGenerateCasesAsync:
         evaluation_set_app._update_generation_status.assert_called_once_with(
             5, "t1", "GENERATING", 0
         )
-        evaluation_set_app.pool.submit.assert_called_once()
-        args = evaluation_set_app.pool.submit.call_args.args
-        assert args[0] is evaluation_set_app._generate_cases_async
-        assert args[1:] == (5, "t1", "u1", "gen", 5, 3, None, None, None, True, None)
+        evaluation_set_app.config_thread_manager.submit.assert_called_once()
+        args = evaluation_set_app.config_thread_manager.submit.call_args.args
+        assert args[0] == "evaluation"
+        assert args[1].task_name == "evaluation-set-generation"
+        assert args[2] is evaluation_set_app._generate_cases_async
+        assert args[3:] == (5, "t1", "u1", "gen", 5, 3, None, None, None, True, None)
 
     def test_json_target_set_id(self, client):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
+        evaluation_set_app.config_thread_manager = MagicMock()
 
         response = client.post(
             "/evaluation-sets/generate-cases-async",
             json={"description": "gen", "count": 5, "model_id": 3, "target_set_id": 9},
         )
         assert response.status_code == 200
-        args = evaluation_set_app.pool.submit.call_args.args
-        assert args[1] == 9
-        assert args[10] is False  # is_new=False
+        args = evaluation_set_app.config_thread_manager.submit.call_args.args
+        assert args[3] == 9
+        assert args[12] is False  # is_new=False
 
     def test_multipart_with_docx(self, client):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
+        evaluation_set_app.config_thread_manager = MagicMock()
         # fastapi 0.139 ships its own fastapi.datastructures.UploadFile while
         # Request.form() returns starlette.datastructures.UploadFile, so the
         # endpoint's isinstance guard is False in this environment.  Align the
@@ -1022,10 +1024,10 @@ class TestGenerateCasesAsync:
             headers={"Authorization": "Bearer x"},
         )
         assert response.status_code == 200, response.text
-        args = evaluation_set_app.pool.submit.call_args.args
-        assert args[1] == 9
-        assert args[7] == "hello"  # file_content extracted from docx
-        assert args[8] == "cases.docx"
+        args = evaluation_set_app.config_thread_manager.submit.call_args.args
+        assert args[3] == 9
+        assert args[9] == "hello"  # file_content extracted from docx
+        assert args[10] == "cases.docx"
 
     def test_target_set_in_use_409(self, client):
         evaluation_set_app = _mock_service_impl(
@@ -1069,8 +1071,8 @@ class TestGenerateCasesAsync:
     def test_500_on_exception(self, client):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
-        evaluation_set_app.pool.submit.side_effect = RuntimeError("boom")
+        evaluation_set_app.config_thread_manager = MagicMock()
+        evaluation_set_app.config_thread_manager.submit.side_effect = RuntimeError("boom")
 
         response = client.post(
             "/evaluation-sets/generate-cases-async",

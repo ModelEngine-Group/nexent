@@ -6,6 +6,7 @@ import unittest
 import json
 import sys
 import atexit
+from concurrent.futures import Future
 from unittest.mock import patch, MagicMock
 
 _MODULE_PATCH_SENTINEL = object()
@@ -32,12 +33,14 @@ _MODULE_PATCH_NAMES = [
     'nexent.core',
     'nexent.core.agents',
     'nexent.core.agents.agent_model',
+    'nexent.core.concurrency',
     'nexent.storage',
     'nexent.storage.storage_client_factory',
     'nexent.storage.minio_config',
     'nexent.vector_database',
     'nexent.memory',
     'nexent.monitor',
+    'services.thread_lifecycle_service',
 ]
 _MODULE_PATCH_ORIGINALS = {
     name: sys.modules.get(name, _MODULE_PATCH_SENTINEL)
@@ -87,6 +90,24 @@ sys.modules['nexent.storage.minio_config'] = nexent_storage_minio_config_mock
 sys.modules['nexent.vector_database'] = nexent_vector_database_mock
 sys.modules['nexent.memory'] = nexent_memory_mock
 sys.modules['nexent.monitor'] = nexent_monitor_mock
+
+concurrency_stub = types.ModuleType("nexent.core.concurrency")
+
+
+class _ManagedExecution:
+    def __init__(self, execution_id="prompt-test"):
+        self.execution_id = execution_id
+        self.future = Future()
+
+
+class _ManagedTaskSpec:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+concurrency_stub.ManagedExecution = _ManagedExecution
+concurrency_stub.ManagedTaskSpec = _ManagedTaskSpec
+sys.modules['nexent.core.concurrency'] = concurrency_stub
 
 # Stub parallel_executor so that prompt_service can import ParallelExecutorTool
 _parallel_executor_stub = types.ModuleType("nexent.core.tools.parallel_executor")
@@ -161,6 +182,21 @@ sys.modules['utils.prompt_template_utils'] = MagicMock()
 # Mock services
 sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['services.prompt_template_service'] = MagicMock()
+thread_lifecycle_stub = types.ModuleType('services.thread_lifecycle_service')
+thread_lifecycle_stub.config_thread_manager = MagicMock()
+
+
+def _submit_prompt(_lane, _spec, fn, *args, **kwargs):
+    execution = _ManagedExecution()
+    try:
+        execution.future.set_result(fn(*args, **kwargs))
+    except BaseException as exc:
+        execution.future.set_exception(exc)
+    return execution
+
+
+thread_lifecycle_stub.config_thread_manager.submit.side_effect = _submit_prompt
+sys.modules['services.thread_lifecycle_service'] = thread_lifecycle_stub
 
 from backend.services.prompt_service import (
     generate_and_save_system_prompt_impl,

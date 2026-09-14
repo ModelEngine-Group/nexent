@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -9,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from jinja2 import StrictUndefined, Template
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from consts.const import (
@@ -261,7 +261,13 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         if not context.force_llm and not has_automation_schedule_signal(context.message):
             return fallback
         try:
-            content = await asyncio.to_thread(self._generate_sync, context)
+            content = await run_blocking(
+                "automation-intent-analysis",
+                self._generate_sync,
+                context,
+                lane="model-tool-io",
+                owner="config",
+            )
             payload = _LLMIntentPayload.model_validate(_extract_json_object(content))
             return _payload_to_result(payload, context, fallback)
         except (ValidationError, ValueError, KeyError, json.JSONDecodeError) as exc:

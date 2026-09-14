@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 import yaml
 from consts.const import MODEL_CONFIG_MAPPING
+from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.models import OpenAIModel
 from nexent.memory.dreaming import (
     DreamingSummarizationOutput,
@@ -20,6 +21,7 @@ from nexent.monitor import (
     set_monitoring_operation,
 )
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from services.thread_lifecycle_service import config_thread_manager
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +89,26 @@ class TenantDreamingSummarizer:
 
             chunks = self._chunk_units(request, self.max_summarization_input_chars)
             summaries: list[str | None] = [None] * len(chunks)
-            with ThreadPoolExecutor(max_workers=DREAMING_SUMMARIZATION_MAX_WORKERS) as executor:
-                futures = {
-                    executor.submit(self._generate, chunk, request, "dreaming_summarization_map", index): index
-                    for index, chunk in enumerate(chunks)
-                }
-                for future in as_completed(futures):
-                    index = futures[future]
-                    summaries[index] = future.result()
+            futures = {
+                config_thread_manager.submit(
+                    "model-tool-io",
+                    ManagedTaskSpec(
+                        task_name="dreaming-summarization-map",
+                        owner="config",
+                        run_id=request.run_id,
+                        attempt_id=str(request.attempt),
+                    ),
+                    self._generate,
+                    chunk,
+                    request,
+                    "dreaming_summarization_map",
+                    index,
+                ).future: index
+                for index, chunk in enumerate(chunks)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                summaries[index] = future.result()
             reduce_source = "\n\n".join(f"## Map Summary {i + 1}\n\n{value}" for i, value in enumerate(summaries))
             markdown = self._generate(reduce_source, request, operation="dreaming_summarization_reduce")
             return DreamingSummarizationOutput(
