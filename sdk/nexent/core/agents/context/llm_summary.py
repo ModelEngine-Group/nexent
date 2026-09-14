@@ -22,15 +22,15 @@ logger = logging.getLogger("agent_context.llm_summary")
 def _summary_model_call_context(model, *, has_output_override: bool):
     """Isolate summary streaming and its request-specific output budget."""
     observer = getattr(model, "observer", None)
-    budget_snapshot = getattr(model, "safe_input_budget_snapshot", None)
+    budget_snapshot = getattr(model, "context_budget_snapshot", None)
     extra_body = getattr(model, "extra_body", None)
     if observer is not None:
         model.observer = MessageObserver(lang=getattr(observer, "lang", "en"))
     # The Agent snapshot is immutable and describes the main request's output
     # reserve. A summary call has its own dynamically bounded max_tokens, so it
     # must not be validated against the unrelated main-request reserve.
-    if has_output_override and hasattr(model, "safe_input_budget_snapshot"):
-        model.safe_input_budget_snapshot = None
+    if has_output_override and hasattr(model, "context_budget_snapshot"):
+        model.context_budget_snapshot = None
     if hasattr(model, "extra_body"):
         summary_extra_body = dict(extra_body or {})
         chat_template_kwargs = dict(summary_extra_body.get("chat_template_kwargs") or {})
@@ -42,8 +42,8 @@ def _summary_model_call_context(model, *, has_output_override: bool):
     finally:
         if observer is not None:
             model.observer = observer
-        if hasattr(model, "safe_input_budget_snapshot"):
-            model.safe_input_budget_snapshot = budget_snapshot
+        if hasattr(model, "context_budget_snapshot"):
+            model.context_budget_snapshot = budget_snapshot
         if hasattr(model, "extra_body"):
             model.extra_body = extra_body
 
@@ -148,7 +148,11 @@ class LLMSummary:
         contract_instruction = (
             "Use each heading below exactly once, in this exact order and spelling. "
             "Put summary prose or bullet lists beneath each section. Do not add any "
-            "other heading, preamble, epilogue, word count, or meta commentary:\n"
+            "other heading, preamble, epilogue, word count, or meta commentary. "
+            "Preserve every explicit fact identifier and every associated literal "
+            "value exactly. Never replace enumerated facts with ranges, selected "
+            "examples, inferred patterns, or formulas; use a compact identifier-to-value "
+            "ledger when necessary:\n"
             f"{exact_headings}"
         )
         if prompt_type == "incremental":

@@ -27,7 +27,7 @@ from sdk.nexent.monitor.monitoring import (
     set_monitoring_context,
     get_monitoring_context,
     set_monitoring_capacity_snapshot,
-    set_monitoring_safe_input_budget_snapshot,
+    set_monitoring_context_budget_snapshot,
     get_agent_monitoring_context,
     agent_monitoring_context,
     _monitoring_buffer,
@@ -1437,7 +1437,7 @@ class TestWriteBatchIsolation:
             "capability_profile_version": "openai/gpt-4o@1",
             "capacity_source": "profile",
             "requested_output_tokens": 1024,
-            "provider_input_limit_tokens": 126976,
+            "effective_input_limit_tokens": 126976,
             "tokenizer_family": "o200k_base",
             "counting_mode": "exact",
             "unknown_capabilities": ["prompt_cache"],
@@ -1446,12 +1446,13 @@ class TestWriteBatchIsolation:
             "budget_w1_fingerprint": "abc123",
             "budget_requested_output_tokens": 1024,
             "budget_output_reserve_source": "model_default",
-            "budget_provider_input_limit_tokens": 126976,
+            "budget_effective_input_limit_tokens": 126976,
             "budget_uncertainty_reserve_tokens": 0,
             "budget_uncertainty_reserve_basis": "none",
-            "budget_soft_limit_ratio": 0.8,
-            "budget_soft_input_budget_tokens": 101580,
-            "budget_hard_input_budget_tokens": 126976,
+            "budget_compaction_trigger_ratio": 0.8,
+            "budget_compaction_trigger_threshold_tokens": 101580,
+            "budget_compaction_target_ratio": 0.6,
+            "budget_compaction_target_tokens": 76185,
             "budget_warnings": [],
         }
         buf._write_batch([record])
@@ -1486,7 +1487,7 @@ class TestEnqueueMonitoringRecord:
         _mod._monitoring_agent_id.set(None)
         _mod._monitoring_conversation_id.set(None)
         _mod._monitoring_capacity_snapshot.set(None)
-        _mod._monitoring_safe_input_budget_snapshot.set(None)
+        _mod._monitoring_context_budget_snapshot.set(None)
 
     def test_enqueue_with_tenant_id(self):
         """Record is added to buffer when tenant_id is present."""
@@ -1592,7 +1593,7 @@ class TestEnqueueMonitoringRecord:
                 "max_output_tokens": "operator",
             },
             "requested_output_tokens": 1024,
-            "provider_input_limit_tokens": 127000,
+            "effective_input_limit_tokens": 127000,
             "tokenizer_family": "o200k_base",
             "counting_mode": "exact",
             "unknown_capabilities": ["prompt_cache"],
@@ -1611,13 +1612,13 @@ class TestEnqueueMonitoringRecord:
         assert record["capability_profile_version"] == "openai/gpt-4o@1"
         assert record["capacity_source"] == "operator"
         assert record["requested_output_tokens"] == 1024
-        assert record["provider_input_limit_tokens"] == 127000
+        assert record["effective_input_limit_tokens"] == 127000
         assert record["tokenizer_family"] == "o200k_base"
         assert record["counting_mode"] == "exact"
         assert record["unknown_capabilities"] == ["prompt_cache"]
         assert record["capacity_fingerprint"] == "abc123"
 
-    def test_safe_input_budget_snapshot_fields_are_enqueued(self):
+    def test_context_budget_snapshot_fields_are_enqueued(self):
         """Resolved W2 budget snapshot fields are copied to LLM monitoring rows."""
         mock_buffer = MagicMock()
         mock_buffer.is_enabled = True
@@ -1631,17 +1632,21 @@ class TestEnqueueMonitoringRecord:
         tracker._context_snapshot = {"tenant_id": "t-1"}
         tracker._display_name = None
 
-        set_monitoring_safe_input_budget_snapshot({
+        set_monitoring_context_budget_snapshot({
             "fingerprint": "w2abc",
             "w1_fingerprint": "w1abc",
             "requested_output_tokens": 1024,
             "output_reserve_source": "model_default",
-            "provider_input_limit_tokens": 127000,
+            "effective_input_limit_tokens": 127000,
             "uncertainty_reserve_tokens": 12800,
             "uncertainty_reserve_basis": "context_window_10pct",
-            "soft_limit_ratio": 0.8,
-            "soft_input_budget_tokens": 91360,
-            "hard_input_budget_tokens": 114200,
+            "schema_version": 2,
+            "compaction_trigger_ratio": 0.8,
+            "compaction_trigger_ratio_source": "code_default",
+            "compaction_trigger_threshold_tokens": 101600,
+            "compaction_target_ratio": 0.6,
+            "compaction_target_ratio_source": "code_default",
+            "compaction_target_tokens": 76200,
             "warnings": ["uncertainty_reserve_active"],
         })
 
@@ -1656,12 +1661,12 @@ class TestEnqueueMonitoringRecord:
         assert record["budget_w1_fingerprint"] == "w1abc"
         assert record["budget_requested_output_tokens"] == 1024
         assert record["budget_output_reserve_source"] == "model_default"
-        assert record["budget_provider_input_limit_tokens"] == 127000
+        assert record["budget_effective_input_limit_tokens"] == 127000
         assert record["budget_uncertainty_reserve_tokens"] == 12800
         assert record["budget_uncertainty_reserve_basis"] == "context_window_10pct"
-        assert record["budget_soft_limit_ratio"] == 0.8
-        assert record["budget_soft_input_budget_tokens"] == 91360
-        assert record["budget_hard_input_budget_tokens"] == 114200
+        assert record["budget_compaction_trigger_ratio"] == 0.8
+        assert record["budget_compaction_trigger_threshold_tokens"] == 101600
+        assert record["budget_compaction_target_tokens"] == 76200
         assert record["budget_warnings"] == ["uncertainty_reserve_active"]
 
     def test_absent_capacity_snapshot_does_not_add_fields(self):
@@ -1688,7 +1693,7 @@ class TestEnqueueMonitoringRecord:
 
         record = mock_buffer.add_record.call_args[0][0]
         assert "capacity_fingerprint" not in record
-        assert "provider_input_limit_tokens" not in record
+        assert "effective_input_limit_tokens" not in record
         assert "budget_fingerprint" not in record
 
 
@@ -1876,7 +1881,7 @@ class TestMonitoredClientWrapper:
         _mod._monitoring_operation.set("unknown")
         _mod._monitoring_display_name.set("TestModel")
         _mod._monitoring_capacity_snapshot.set(None)
-        _mod._monitoring_safe_input_budget_snapshot.set(None)
+        _mod._monitoring_context_budget_snapshot.set(None)
 
     def _make_monitored_client(self):
         mock_original = MagicMock()
@@ -2056,7 +2061,7 @@ class TestEnqueueClientMonitoringRecord:
         set_monitoring_capacity_snapshot({
             "capacity_source": "profile",
             "requested_output_tokens": 2048,
-            "provider_input_limit_tokens": 30000,
+            "effective_input_limit_tokens": 30000,
             "counting_mode": "estimated",
             "capacity_fingerprint": "def456",
         })
@@ -2077,24 +2082,28 @@ class TestEnqueueClientMonitoringRecord:
         record = mock_buffer.add_record.call_args[0][0]
         assert record["capacity_source"] == "profile"
         assert record["requested_output_tokens"] == 2048
-        assert record["provider_input_limit_tokens"] == 30000
+        assert record["effective_input_limit_tokens"] == 30000
         assert record["counting_mode"] == "estimated"
         assert record["capacity_fingerprint"] == "def456"
 
-    def test_client_record_includes_safe_input_budget_snapshot_fields(self):
+    def test_client_record_includes_context_budget_snapshot_fields(self):
         mock_buffer = MagicMock()
         mock_buffer.is_enabled = True
-        set_monitoring_safe_input_budget_snapshot({
+        set_monitoring_context_budget_snapshot({
             "fingerprint": "w2def",
             "w1_fingerprint": "def456",
             "requested_output_tokens": 2048,
             "output_reserve_source": "agent",
-            "provider_input_limit_tokens": 30000,
+            "effective_input_limit_tokens": 30000,
             "uncertainty_reserve_tokens": 0,
             "uncertainty_reserve_basis": "none",
-            "soft_limit_ratio": 0.75,
-            "soft_input_budget_tokens": 22500,
-            "hard_input_budget_tokens": 30000,
+            "schema_version": 2,
+            "compaction_trigger_ratio": 0.75,
+            "compaction_trigger_ratio_source": "tenant_config",
+            "compaction_trigger_threshold_tokens": 22500,
+            "compaction_target_ratio": 0.6,
+            "compaction_target_ratio_source": "code_default",
+            "compaction_target_tokens": 18000,
         })
 
         with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
@@ -2115,8 +2124,8 @@ class TestEnqueueClientMonitoringRecord:
         assert record["budget_w1_fingerprint"] == "def456"
         assert record["budget_requested_output_tokens"] == 2048
         assert record["budget_output_reserve_source"] == "agent"
-        assert record["budget_soft_input_budget_tokens"] == 22500
-        assert record["budget_hard_input_budget_tokens"] == 30000
+        assert record["budget_compaction_trigger_threshold_tokens"] == 22500
+        assert record["budget_compaction_target_tokens"] == 18000
 
     def test_error_record(self):
         mock_buffer = MagicMock()

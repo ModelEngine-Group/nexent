@@ -148,6 +148,8 @@ OAUTH_LOGIN_MODE = os.getenv("OAUTH_LOGIN_MODE", "button").lower()
 # CAS SSO Configuration
 CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", "on")
 CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", "").rstrip("/")
+# Optional backend-only URL for CAS servers reachable through an internal container network.
+CAS_INTERNAL_SERVER_URL = os.getenv("CAS_INTERNAL_SERVER_URL", "").rstrip("/")
 CAS_VALIDATE_PATH = os.getenv("CAS_VALIDATE_PATH", "/p3/serviceValidate")
 CAS_CALLBACK_BASE_URL = os.getenv("CAS_CALLBACK_BASE_URL", OAUTH_CALLBACK_BASE_URL).rstrip("/")
 # CAS login mode:

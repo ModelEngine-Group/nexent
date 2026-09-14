@@ -16,6 +16,7 @@ import threading
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 from threading import Event
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +256,18 @@ def _load_core_agent_module():
     utils_pkg = ModuleType("sdk.nexent.core.utils")
     utils_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "utils")]
     sys.modules["sdk.nexent.core.utils"] = utils_pkg
+
+    models_pkg = ModuleType("sdk.nexent.core.models")
+    models_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "models")]
+    sys.modules["sdk.nexent.core.models"] = models_pkg
+
+    capacity_budget_mod = ModuleType("sdk.nexent.core.models.capacity_budget")
+
+    class ContextBudgetSnapshot(BaseModel):
+        pass
+
+    capacity_budget_mod.ContextBudgetSnapshot = ContextBudgetSnapshot
+    sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget_mod
 
     observer_mod = ModuleType("sdk.nexent.core.utils.observer")
     observer_mod.MessageObserver = MagicMock()
