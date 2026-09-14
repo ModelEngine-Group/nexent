@@ -55,6 +55,7 @@ import {
   MoreHorizontalIcon,
   RefreshCwIcon,
   ArrowLeft,
+  AlertTriangleIcon,
   SparklesIcon,
   type LucideIcon,
   PencilIcon,
@@ -148,6 +149,7 @@ import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
+import { formatWarningText } from "@/lib/warningText";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
 import type {
@@ -1476,6 +1478,7 @@ const AssistantMessage: FC<{
               case "text": {
                 const textPart = part as typeof part & {
                   isError?: boolean;
+                  isWarning?: boolean;
                   text?: string;
                   isSearchImage?: boolean;
                   imageSource?: SourcePartLike;
@@ -1488,6 +1491,17 @@ const AssistantMessage: FC<{
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
                       <span className="break-all">{textPart.text}</span>
+                    </div>
+                  );
+                }
+                if (textPart.isWarning) {
+                  const warningText = formatWarningText(textPart.text ?? "");
+                  return (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
+                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
+                      <span className="line-clamp-3 min-w-0 break-all">
+                        {warningText}
+                      </span>
                     </div>
                   );
                 }
