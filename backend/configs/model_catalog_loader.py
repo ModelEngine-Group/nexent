@@ -265,11 +265,6 @@ def _build_model_profile(
 # =============================================================================
 
 
-def _log_safe(value: Any) -> str:
-    """Strip control characters so file/user-derived values cannot forge log lines."""
-    return "".join(ch for ch in str(value) if ch.isprintable())
-
-
 def load_model_catalog(force_reload: bool = False) -> Dict[str, Any]:
     """Load and normalize the catalog, using an in-memory cache.
 
@@ -296,11 +291,12 @@ def load_model_catalog(force_reload: bool = False) -> Dict[str, Any]:
             len(p.get("models", {}))
             for p in normalized.get("providers", {}).values()
         )
+        # The catalog version is intentionally NOT logged here: it is read
+        # from an operator-supplied file and logging it verbatim would allow
+        # forged log entries (S5144). The version is still observable through
+        # the /catalog endpoints' JSON response.
         logger.info(
-            "Model catalog loaded: version=%s, providers=%d, models=%d",
-            # json.dumps escapes control characters (e.g. \n -> \\n) so a
-            # crafted catalog file cannot forge log entries.
-            json.dumps(normalized.get("version", "?")),
+            "Model catalog loaded: providers=%d, models=%d",
             provider_count,
             model_count,
         )

@@ -565,6 +565,18 @@ export const ModelEditDialogV2 = ({
     console.error(error);
   };
 
+  // Legacy max_tokens value for the update payloads.
+  // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens input is
+  // hidden and must not be read per the W1/W2 plan ("Never use legacy
+  // max_tokens"); buildCapacityPayload(form) spreads max_tokens :=
+  // max_output_tokens instead, keeping the deprecated NOT NULL column aligned
+  // with the W2 source of truth.
+  const resolveMaxTokensValue = (): number => {
+    if (supportsCapacityFields) return 0;
+    if (isEmbeddingModel || isRerankModel) return 0;
+    return parseMaxTokens(form.maxTokens) || 0;
+  };
+
   const handleSave = async () => {
     if (!model) return;
     // Defensive gate: the Save button is already disabled via
@@ -578,17 +590,7 @@ export const ModelEditDialogV2 = ({
     try {
       // Use update interface instead of delete + add
       const modelType = form.type as ModelType;
-      // Determine max tokens.
-      // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
-      // input is hidden and must not be read here per the W1/W2 plan
-      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
-      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
-      // a few lines below, keeping the deprecated NOT NULL column aligned
-      // with the W2 source of truth.
-      let maxTokensValue = supportsCapacityFields
-        ? 0
-        : parseMaxTokens(form.maxTokens) || 0;
-      if (isEmbeddingModel || isRerankModel) maxTokensValue = 0;
+      const maxTokensValue = resolveMaxTokensValue();
 
       // Use original displayName for lookup, pass new displayName in body if changed
       const originalDisplayName = model.displayName || model.name;
