@@ -23,7 +23,7 @@ from services.cas_service import build_logout_url, CasAuthenticationError
 from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
-    update_password
+    update_password, get_provider_username
 from services.user_service import delete_user_and_cleanup
 from utils.auth_utils import (
     extract_session_id_from_authorization,
@@ -235,9 +235,10 @@ async def get_user_information(request: Request):
         if not user_info:
             raise UnauthorizedError("User information not found")
 
-        user_info["user"]["auth_provider"] = (
-            "cas" if extract_session_id_from_authorization(authorization) else "local"
-        )
+        is_cas_user = bool(extract_session_id_from_authorization(authorization))
+        user_info["user"]["auth_provider"] = "cas" if is_cas_user else "local"
+        if is_cas_user:
+            user_info["user"]["username"] = get_provider_username(user_id, "cas")
 
         return JSONResponse(status_code=HTTPStatus.OK,
                             content={"message": "Success",
