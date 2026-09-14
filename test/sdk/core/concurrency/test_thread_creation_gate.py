@@ -21,6 +21,7 @@ DEFERRED_PREFIXES = (
 # that process's behavior.
 ALLOWED_CALLS = {
     ("backend/services/startup_recovery_service.py", "asyncio.to_thread"),
+    ("backend/ext_components/aidp/apps/aidp_mgmt_app.py", "asyncio.to_thread"),
     (
         "sdk/nexent/core/concurrency/bounded_executor.py",
         "ThreadPoolExecutor",
