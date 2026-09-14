@@ -94,7 +94,7 @@
   "name": "admission_quality_assistant",
   "display_name": "住院病历内涵质控助手",
   "icon": "🤖",
-  "tags": ["quality"],
+  "tags": [],
   "version_label": "V1",
   "knowledge_bases": [
     {

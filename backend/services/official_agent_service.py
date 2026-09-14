@@ -405,85 +405,6 @@ def _kb_needs_rerank(bundle: OfficialAgentBundle) -> bool:
     return False
 
 
-def _apply_official_agent_tags(
-    bundle: OfficialAgentBundle,
-    agent_id: int | None,
-    tenant_id: str,
-    user_id: str,
-) -> None:
-    """Apply Bundle category tags to the newly imported tenant Agent.
-
-    Bundle tags are stable tag values (for example ``office``), while the
-    tenant-specific tag tables use generated IDs. Resolve the values in the
-    tenant's ``default_resource``/``agent_category`` definition before creating
-    the resource assignments. Unknown values are ignored so a missing optional
-    tag never prevents Agent installation.
-    """
-    if agent_id is None or not bundle.tags:
-        return
-
-    from database.tag_management_db import TagManagementDB
-
-    library = next(
-        (
-            item
-            for item in TagManagementDB.list_libraries(tenant_id)
-            if item.get("bucket_key") == "default_resource"
-        ),
-        None,
-    )
-    if not library:
-        logger.warning(
-            "Skip official Agent tags: default_resource library not found for tenant %s",
-            tenant_id,
-        )
-        return
-
-    definition = next(
-        (
-            item
-            for item in TagManagementDB.list_definitions(
-                tenant_id, library["bucket_id"]
-            )
-            if item.get("definition_key") == "agent_category"
-            and item.get("status") == "active"
-        ),
-        None,
-    )
-    if not definition:
-        logger.warning(
-            "Skip official Agent tags: agent_category definition not found for tenant %s",
-            tenant_id,
-        )
-        return
-
-    requested = {str(tag).strip().lower() for tag in bundle.tags if str(tag).strip()}
-    value_ids = [
-        value["value_id"]
-        for value in definition.get("values", [])
-        if value.get("status") == "active"
-        and (
-            str(value.get("normalized_value", "")).lower() in requested
-            or str(value.get("display_value", "")).strip().lower() in requested
-        )
-    ]
-    if not value_ids:
-        logger.warning(
-            "No tenant tag values matched official Agent tags %s for tenant %s",
-            sorted(requested),
-        )
-        return
-
-    TagManagementDB.replace_resource_assignments(
-        tenant_id=tenant_id,
-        resource_type="agent",
-        resource_id=str(agent_id),
-        library_code="default_resource",
-        value_ids=value_ids,
-        actor_id=user_id,
-    )
-
-
 def _agent_infos(bundle: OfficialAgentBundle) -> List[OfficialAgentAgentInfo]:
     """Return the bundle's agent name/display_name list (root + sub-agents)."""
     infos: List[OfficialAgentAgentInfo] = []
@@ -1021,14 +942,7 @@ async def _install_bundle(
             ),
         )
 
-    agent_id = agent_id_mapping.get(bundle.agent_id)
-    try:
-        _apply_official_agent_tags(bundle, agent_id, tenant_id, user_id)
-    except Exception:
-        logger.exception(
-            "Failed to apply default tags for official Agent '%s'", bundle.name
-        )
-    return agent_id
+    return agent_id_mapping.get(bundle.agent_id)
 
 
 def _apply_install_options(

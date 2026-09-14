@@ -79,7 +79,7 @@
   "name": "document_writing_assistant",
   "display_name": "党政机关公文助手",
   "icon": "🤖",
-  "tags": ["office"],
+  "tags": [],
   "version_label": "V1",
   "knowledge_bases": [
     {
