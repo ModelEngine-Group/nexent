@@ -102,6 +102,30 @@ sys.modules["nexent.core.models"] = models_mod
 nexent_core_pkg = types.ModuleType("nexent.core")
 nexent_core_pkg.__path__ = []
 sys.modules["nexent.core"] = nexent_core_pkg
+# Stub nexent.core.agents.agent_model: backend/consts/model.py (reached via
+# database.model_management_db) imports AgentVerificationConfig/ToolConfig from
+# it at module level, and the empty __path__ above blocks the real SDK package.
+agents_pkg = types.ModuleType("nexent.core.agents")
+agents_pkg.__path__ = []
+sys.modules["nexent.core.agents"] = agents_pkg
+nexent_core_pkg.agents = agents_pkg
+agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+
+
+class _StubAgentVerificationConfig:  # pylint: disable=too-few-public-methods
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class _StubToolConfig:  # pylint: disable=too-few-public-methods
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+agent_model_mod.AgentVerificationConfig = _StubAgentVerificationConfig
+agent_model_mod.ToolConfig = _StubToolConfig
+sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+agents_pkg.agent_model = agent_model_mod
 gateway_mod = types.ModuleType("nexent.core.gateway")
 for _name in ("EmbeddingContext", "LLMContext", "LongContextLLMContext", "ModelContext", "VLMContext", "get_gateway"):
     setattr(gateway_mod, _name, MagicMock(name=f"nexent.core.gateway.{_name}"))
