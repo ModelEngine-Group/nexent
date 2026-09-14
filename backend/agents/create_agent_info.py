@@ -1,4 +1,3 @@
-import asyncio
 import copy
 import json
 import logging
@@ -11,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
@@ -82,6 +82,8 @@ from consts.const import (
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
+    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
@@ -1322,10 +1324,13 @@ async def create_agent_config(
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
                 fixed_search_tool.external_results = external_results
-                fixed_search_result = await asyncio.to_thread(
+                fixed_search_result = await run_blocking(
+                    "memory-presearch",
                     fixed_search_tool.forward,
                     last_user_query or "",
                     5,
+                    lane="model-tool-io",
+                    owner="runtime",
                 )
             else:
                 fixed_search_result = (
@@ -2387,6 +2392,8 @@ async def create_agent_run_info(
         mcp_host=mcp_host,
         history=converted_history,
         stop_event=threading.Event(),
+        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
         context_budget_snapshot=getattr(
             agent_config,

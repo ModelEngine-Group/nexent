@@ -757,7 +757,7 @@ def cleanup_aged_evaluations(tenant_id: str, retention_days: int = 30) -> int:
 def reap_stale_runs(tenant_id: str, timeout_minutes: int = 10) -> int:
     """Mark RUNNING evaluations as FAILED if they haven't been updated recently.
 
-    Handles the case where a server restart loses in-flight ``pool.submit()``
+    Handles the case where a server restart loses an in-flight managed task
     tasks, leaving zombie RUNNING records.  Called on startup and periodically.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)

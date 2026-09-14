@@ -4,16 +4,19 @@ External A2A Agent Proxy Tool.
 This tool allows Nexent agents to call external A2A agents as sub-agents.
 It provides a unified interface for invoking remote A2A endpoints.
 """
+import asyncio
 import json
 import logging
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass
-from threading import Event
+from threading import Event, Lock
 from typing import Any, AsyncIterator, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
+
+from ..concurrency import ManagedTaskSpec, RunCancellationScope, get_current_thread_manager
 
 # Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
@@ -21,6 +24,39 @@ PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
 logger = logging.getLogger("a2a_agent_proxy")
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    return isinstance(exc, (TimeoutError, httpx.TimeoutException)) or (
+        "timeout" in type(exc).__name__.lower()
+    )
+
+
+def _log_timeout_once(
+    exc: BaseException,
+    *,
+    event: str,
+    agent_info: "A2AAgentInfo",
+    phase: str,
+    event_count: int = 0,
+) -> None:
+    if getattr(exc, "_nexent_timeout_warning_logged", False):
+        return
+    logger.warning(
+        "event=%s agent_id=%s protocol=%s timeout_seconds=%.3f "
+        "phase=%s event_count=%d error_type=%s",
+        event,
+        agent_info.agent_id,
+        agent_info.protocol_type,
+        agent_info.timeout,
+        phase,
+        event_count,
+        type(exc).__name__,
+    )
+    try:
+        setattr(exc, "_nexent_timeout_warning_logged", True)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -83,7 +119,8 @@ class ExternalA2AAgentProxy:
     def __init__(
         self,
         agent_info: A2AAgentInfo,
-        stop_event: Optional[Event] = None
+        stop_event: Optional[Event] = None,
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ):
         """Initialize the A2A agent proxy.
 
@@ -92,8 +129,18 @@ class ExternalA2AAgentProxy:
             stop_event: Optional stop event for cancellation.
         """
         self.agent_info = agent_info
-        self.stop_event = stop_event or Event()
+        self.cancellation_scope = cancellation_scope
+        self.stop_event = (
+            cancellation_scope.stop_event
+            if cancellation_scope is not None
+            else stop_event or Event()
+        )
         self._client: Optional[httpx.AsyncClient] = None
+        self._active_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._active_task: Optional[asyncio.Task] = None
+        self._active_token = None
+        self._client_closed = True
+        self._state_lock = Lock()
 
     async def __aenter__(self):
         # Configure httpx explicitly to match curl behavior
@@ -107,11 +154,60 @@ class ExternalA2AAgentProxy:
             trust_env=False,  # Ignore HTTP_PROXY env vars
             follow_redirects=True,
         )
+        with self._state_lock:
+            self._client_closed = False
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self._client:
-            await self._client.aclose()
+        await self._close_client_once()
+
+    async def _close_client_once(self) -> None:
+        with self._state_lock:
+            if self._client_closed:
+                return
+            self._client_closed = True
+            client = self._client
+        if client is not None:
+            await client.aclose()
+
+    def _activate_call(self):
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        with self._state_lock:
+            self._active_loop = loop
+            self._active_task = task
+        if self.cancellation_scope is None:
+            return None
+        token = self.cancellation_scope.register_closer(self.cancel_active)
+        with self._state_lock:
+            self._active_token = token
+        return token
+
+    def _deactivate_call(self, token) -> None:
+        if token is not None and self.cancellation_scope is not None:
+            self.cancellation_scope.unregister_closer(token)
+        with self._state_lock:
+            if self._active_token is token:
+                self._active_token = None
+            self._active_loop = None
+            self._active_task = None
+
+    def cancel_active(self) -> None:
+        self.stop_event.set()
+        with self._state_lock:
+            loop = self._active_loop
+            task = self._active_task
+        if loop is None or loop.is_closed():
+            return
+        if task is not None:
+            loop.call_soon_threadsafe(task.cancel)
+        close_coro = self._close_client_once()
+        try:
+            asyncio.run_coroutine_threadsafe(close_coro, loop)
+        except RuntimeError:
+            # The event loop may close between the state check and submission.
+            # Explicitly close the coroutine to avoid leaking it in that race.
+            close_coro.close()
 
     def _build_headers(self) -> Dict[str, str]:
         """Build HTTP headers for A2A requests."""
@@ -227,27 +323,34 @@ class ExternalA2AAgentProxy:
 
         headers = self._build_headers()
 
+        token = self._activate_call()
         try:
-            parsed_url = urlparse(endpoint_url)
-            logger.info(f"[A2A-SDK] Connecting to host={parsed_url}, port={parsed_url.port or 80}")
-            logger.info(
-                "[A2A-SDK] Sending non-streaming request: protocol=%s, url=%s",
-                protocol_type,
-                endpoint_url,
-            )
-            response = await self._client.post(
-                endpoint_url,
-                json=request_body,
-                headers=headers,
-                timeout=self.agent_info.timeout
-            )
-            logger.info(f"[A2A-SDK] Response status: {response.status_code}")
-            logger.info(f"[A2A-SDK] Response headers: {dict(response.headers)}")
-            response.raise_for_status()
-            return response.json()
+            async with asyncio.timeout(self.agent_info.timeout):
+                parsed_url = urlparse(endpoint_url)
+                logger.info(f"[A2A-SDK] Connecting to host={parsed_url}, port={parsed_url.port or 80}")
+                logger.info(
+                    "[A2A-SDK] Sending non-streaming request: protocol=%s, url=%s",
+                    protocol_type,
+                    endpoint_url,
+                )
+                response = await self._client.post(
+                    endpoint_url,
+                    json=request_body,
+                    headers=headers,
+                    timeout=self.agent_info.timeout
+                )
+                logger.info(f"[A2A-SDK] Response status: {response.status_code}")
+                logger.info(f"[A2A-SDK] Response headers: {dict(response.headers)}")
+                response.raise_for_status()
+                return response.json()
 
-        except httpx.TimeoutException as e:
-            logger.error(f"A2A request timeout for {self.agent_info.name}: {e}")
+        except (httpx.TimeoutException, TimeoutError) as e:
+            _log_timeout_once(
+                e,
+                event="a2a_request_timeout",
+                agent_info=self.agent_info,
+                phase="initial_response",
+            )
             raise
         except httpx.HTTPStatusError as e:
             logger.error(f"A2A HTTP error for {self.agent_info.name}: status={e.response.status_code}, response_body={e.response.text[:500]}")
@@ -255,6 +358,8 @@ class ExternalA2AAgentProxy:
         except Exception as e:
             logger.error(f"A2A request failed for {self.agent_info.name}: {e}")
             raise
+        finally:
+            self._deactivate_call(token)
 
     def sync_call(
         self,
@@ -274,9 +379,6 @@ class ExternalA2AAgentProxy:
         Returns:
             Extracted text response from the external agent.
         """
-        import asyncio
-        import threading
-
         async def execute():
             async with self as proxy:
                 response = await proxy.call(query, history, context)
@@ -291,28 +393,28 @@ class ExternalA2AAgentProxy:
                 loop.close()
 
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             # No running loop, create and use new one directly
             return run_in_new_loop()
         else:
-            # Already in async context, run in a separate thread
-            result_container = [None]
-            exception_container = [None]
+            # A synchronous tool call can run inside the Agent event loop.
+            # Route the private event loop through the isolated tool lane.
+            manager = get_current_thread_manager()
+            if manager is None:
+                from .run_agent import _get_default_agent_thread_manager
 
-            def thread_target():
-                try:
-                    result_container[0] = run_in_new_loop()
-                except Exception as e:
-                    exception_container[0] = e
-
-            thread = threading.Thread(target=thread_target)
-            thread.start()
-            thread.join()
-
-            if exception_container[0]:
-                raise exception_container[0]
-            return result_container[0]
+                manager = _get_default_agent_thread_manager()
+            return manager.run_sync(
+                "model-tool-io",
+                ManagedTaskSpec(
+                    task_name="a2a-sync-call",
+                    owner="nexent.core.agents.a2a_agent_proxy",
+                    close_hook=self.cancel_active,
+                ),
+                run_in_new_loop,
+                timeout=self.agent_info.timeout,
+            )
 
     TERMINAL_STATE_KEYWORDS = frozenset(("COMPLETED", "FAILED", "CANCELED"))
 
@@ -376,6 +478,7 @@ class ExternalA2AAgentProxy:
         endpoint_url = self._get_endpoint_url(protocol_type, streaming=True)
         request_body = self._build_request_body(protocol_type, query, history, context)
         headers = self._build_headers()
+        received_event_count = 0
 
         logger.info(
             f"[A2A-SDK] === Calling external A2A agent (streaming) === "
@@ -383,24 +486,42 @@ class ExternalA2AAgentProxy:
             f"url={endpoint_url}"
         )
 
+        token = self._activate_call()
         try:
-            async with self._client.stream(
-                "POST",
-                endpoint_url,
-                json=request_body,
-                headers=headers,
-                timeout=self.agent_info.timeout
-            ) as response:
-                response.raise_for_status()
-                async for event in self._iter_sse_events(response):
-                    yield event
+            async with asyncio.timeout(self.agent_info.timeout):
+                async with self._client.stream(
+                    "POST",
+                    endpoint_url,
+                    json=request_body,
+                    headers=headers,
+                    timeout=self.agent_info.timeout
+                ) as response:
+                    response.raise_for_status()
+                    async for event in self._iter_sse_events(response):
+                        received_event_count += 1
+                        yield event
 
-        except httpx.TimeoutException as e:
-            logger.error(f"A2A streaming timeout for {self.agent_info.name}: {e}")
-            yield {"statusUpdate": {"status": {"state": "TASK_STATE_FAILED", "message": f"Timeout: {str(e)}"}}}
+        except (httpx.TimeoutException, TimeoutError) as e:
+            _log_timeout_once(
+                e,
+                event="a2a_stream_timeout",
+                agent_info=self.agent_info,
+                phase="initial_chunk" if received_event_count == 0 else "next_chunk",
+                event_count=received_event_count,
+            )
+            yield {
+                "statusUpdate": {
+                    "status": {
+                        "state": "TASK_STATE_FAILED",
+                        "message": f"Timeout after {self.agent_info.timeout:.3f} seconds",
+                    }
+                }
+            }
         except httpx.HTTPStatusError as e:
             logger.error(f"A2A streaming HTTP error for {self.agent_info.name}: {e.response.status_code}")
             yield {"statusUpdate": {"status": {"state": "TASK_STATE_FAILED", "message": f"HTTP {e.response.status_code}"}}}
+        finally:
+            self._deactivate_call(token)
 
     def _find_agent_text_in_messages(self, result: Dict[str, Any]) -> Optional[str]:
         """Extract text from result.messages where role is ROLE_AGENT."""
@@ -575,7 +696,8 @@ Returns the external agent's response."""
         self,
         agent_configs: List[A2AAgentInfo],
         stop_event: Optional[Event] = None,
-        observer: Optional[Any] = None
+        observer: Optional[Any] = None,
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ):
         """Initialize the A2A agent proxy tool.
 
@@ -585,7 +707,12 @@ Returns the external agent's response."""
             observer: Optional message observer for logging.
         """
         self.agent_configs = {agent.agent_id: agent for agent in agent_configs}
-        self.stop_event = stop_event or Event()
+        self.cancellation_scope = cancellation_scope
+        self.stop_event = (
+            cancellation_scope.stop_event
+            if cancellation_scope is not None
+            else stop_event or Event()
+        )
         self.observer = observer
 
     def _parse_forward_input(self, input_str: str) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -626,7 +753,11 @@ Returns the external agent's response."""
         use_stream: bool
     ) -> str:
         """Execute A2A call and return accumulated text response."""
-        async with ExternalA2AAgentProxy(agent_info, self.stop_event) as proxy:
+        async with ExternalA2AAgentProxy(
+            agent_info,
+            self.stop_event,
+            cancellation_scope=self.cancellation_scope,
+        ) as proxy:
             if use_stream:
                 result_parts = []
                 async for text in proxy.extract_text_from_events(proxy.call_streaming(query, history)):
@@ -647,8 +778,6 @@ Returns the external agent's response."""
         Returns:
             External agent's response as string.
         """
-        import asyncio
-
         input_data, err = self._parse_forward_input(input_str)
         if err:
             logger.error(f"Failed to parse input JSON: {err}")
@@ -670,7 +799,15 @@ Returns the external agent's response."""
             finally:
                 loop.close()
         except Exception as e:
-            logger.error(f"A2A agent call failed: {e}", exc_info=True)
+            if _is_timeout_error(e):
+                _log_timeout_once(
+                    e,
+                    event="a2a_request_timeout",
+                    agent_info=agent_info,
+                    phase="sync_bridge",
+                )
+            else:
+                logger.error(f"A2A agent call failed: {e}", exc_info=True)
             return json.dumps({"error": f"Call failed: {str(e)}"})
 
     def add_agent(self, agent_info: A2AAgentInfo) -> None:
@@ -726,7 +863,8 @@ class ExternalA2AAgentWrapper:
         self,
         agent_info: A2AAgentInfo,
         stop_event: Optional[Event] = None,
-        observer: Optional[Any] = None
+        observer: Optional[Any] = None,
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ):
         """Initialize the external A2A agent wrapper.
 
@@ -739,7 +877,12 @@ class ExternalA2AAgentWrapper:
         # Use skills description if available
         self.description = agent_info.get_skills_description()
         self.agent_info = agent_info
-        self.stop_event = stop_event or Event()
+        self.cancellation_scope = cancellation_scope
+        self.stop_event = (
+            cancellation_scope.stop_event
+            if cancellation_scope is not None
+            else stop_event or Event()
+        )
         self.observer = observer
         self._proxy: Optional[ExternalA2AAgentProxy] = None
         self._runtime_metadata: Dict[str, Any] = {}
@@ -780,7 +923,8 @@ class ExternalA2AAgentWrapper:
         if not self._proxy:
             self._proxy = ExternalA2AAgentProxy(
                 self.agent_info,
-                stop_event=self.stop_event
+                stop_event=self.stop_event,
+                cancellation_scope=self.cancellation_scope,
             )
 
         history = kwargs.get("history", [])
@@ -797,7 +941,15 @@ class ExternalA2AAgentWrapper:
             )
             return result
         except Exception as e:
-            logger.error(f"External A2A agent '{self.name}' call failed: {e}")
+            if _is_timeout_error(e):
+                _log_timeout_once(
+                    e,
+                    event="a2a_request_timeout",
+                    agent_info=self.agent_info,
+                    phase="sync_bridge",
+                )
+            else:
+                logger.error(f"External A2A agent '{self.name}' call failed: {e}")
             return f"Error: {str(e)}"
 
     def run(self, task: str = None, **kwargs) -> str:

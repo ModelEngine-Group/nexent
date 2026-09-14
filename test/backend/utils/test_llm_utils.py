@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 import pytest
@@ -13,7 +14,10 @@ sys.modules['elasticsearch'] = elasticsearch_mock
 
 # Create placeholder nexent package hierarchy for patching
 nexent_module = types.ModuleType("nexent")
-nexent_module.__path__ = []
+_sdk_nexent_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent")
+)
+nexent_module.__path__ = [_sdk_nexent_path]
 sys.modules['nexent'] = nexent_module
 
 sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
@@ -83,6 +87,7 @@ sys.modules["nexent.core.utils.observer"] = observer_mod
 
 # Minimal nexent.core.models.OpenAIModel stub to satisfy imports (tests will patch behavior)
 models_mod = types.ModuleType("nexent.core.models")
+models_mod.__path__ = [os.path.join(_sdk_nexent_path, "core", "models")]
 
 
 class _SimpleOpenAIModel:
@@ -100,7 +105,7 @@ sys.modules["nexent.core.models"] = models_mod
 # Stub the gateway bridge modules so importing model_gateway_service via
 # llm_utils does not pull the real gateway registry (heavy + vendor imports).
 nexent_core_pkg = types.ModuleType("nexent.core")
-nexent_core_pkg.__path__ = []
+nexent_core_pkg.__path__ = [os.path.join(_sdk_nexent_path, "core")]
 sys.modules["nexent.core"] = nexent_core_pkg
 # Stub nexent.core.agents.agent_model: backend/consts/model.py (reached via
 # database.model_management_db) imports AgentVerificationConfig/ToolConfig from

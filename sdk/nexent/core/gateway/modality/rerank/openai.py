@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from nexent.core.concurrency import run_blocking
+
 from ...model_context import ModelContext
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
 from ...registry import register_adapter
@@ -169,7 +171,9 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         Returns:
             A list of rerank result dicts (see :meth:`rerank`).
         """
-        return await asyncio.to_thread(self.rerank, query, documents, top_n)
+        return await run_blocking(
+            "gateway-rerank-call", self.rerank, query, documents, top_n
+        )
 
     async def connectivity_check(self, timeout: float = 5.0) -> bool:
         """Verify the rerank endpoint is reachable with a probe rerank call.
@@ -181,7 +185,8 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
             True if the probe succeeds, False on timeout/connection/other error.
         """
         try:
-            await asyncio.to_thread(
+            await run_blocking(
+                "gateway-rerank-connectivity",
                 self.rerank, "test query", ["test document"], top_n=1
             )
             return True
@@ -199,7 +204,8 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
 
     async def invoke(self, request: RerankRequest) -> List[Dict[str, Any]]:
         """Rerank ``request.documents`` offloaded to a worker thread."""
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "gateway-rerank-invoke",
             self.rerank, request.query, request.documents, request.top_n
         )
 

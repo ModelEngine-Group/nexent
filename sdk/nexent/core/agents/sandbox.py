@@ -31,7 +31,6 @@ import socket
 import tarfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -41,8 +40,24 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
+from nexent.core.concurrency import (
+    ManagedTaskSpec,
+    ManagedThreadSpec,
+    get_current_thread_manager,
+    get_default_thread_manager,
+)
+
 
 logger = logging.getLogger(__name__)
+
+
+def _get_sandbox_thread_manager():
+    manager = get_current_thread_manager() or get_default_thread_manager()
+    if manager is None:
+        from nexent.core.agents.run_agent import _get_default_agent_thread_manager
+
+        manager = _get_default_agent_thread_manager()
+    return manager
 
 
 _TOOL_BRIDGE_VALUE_MARKER = "__nexent_tool_bridge_value__"
@@ -1023,12 +1038,18 @@ class _ToolBridge:
 
         self._server = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
         self.port = self._server.server_port
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            daemon=True,
-            name="NexentToolBridge",
+        self._thread_manager = _get_sandbox_thread_manager()
+        self._execution = self._thread_manager.register_service(
+            ManagedThreadSpec(
+                task_name="sandbox-tool-bridge",
+                owner="runtime",
+                lane="background-service",
+                close_hook=self._close_server,
+            ),
+            lambda cancel_event: self._server.serve_forever(),
         )
-        self._thread.start()
+        self._thread_manager.start_service(self._execution.execution_id)
+        self._thread = self._execution.thread_ref()
 
     def register(self, tools: dict[str, Any]) -> None:
         self._tools = dict(tools)
@@ -1122,9 +1143,15 @@ class _ToolBridge:
         )
 
     def close(self) -> None:
+        self._thread_manager.cancel(
+            self._execution.execution_id,
+            reason="sandbox tool bridge closing",
+            wait_timeout=5,
+        )
+
+    def _close_server(self) -> None:
         self._server.shutdown()
         self._server.server_close()
-        self._thread.join(timeout=5)
 
 
 def _install_host_tool_bridge(
@@ -1327,9 +1354,15 @@ def cleanup_executor(executor: Any, logger_: logging.Logger, timeout: float = 5.
         return
 
     try:
-        with ThreadPoolExecutor(max_workers=1) as tp:
-            future = tp.submit(cleanup_fn)
-            future.result(timeout=timeout)
+        _get_sandbox_thread_manager().run_sync(
+            "sandbox",
+            ManagedTaskSpec(
+                task_name="sandbox-cleanup",
+                owner="runtime",
+            ),
+            cleanup_fn,
+            timeout=timeout,
+        )
         logger_.debug("Sandbox cleanup succeeded (graceful)")
         return
     except FuturesTimeoutError:
@@ -2064,6 +2097,7 @@ class SandboxPoolManager:
         self._container_build_lock = threading.Lock()
         self._idle_ttl_seconds: float = 300.0            # legacy pool setting
         self._evict_thread: Optional[threading.Thread] = None
+        self._evict_execution = None
         self._stop_evict = threading.Event()
 
     @classmethod
@@ -2313,8 +2347,12 @@ class SandboxPoolManager:
         Call this during application shutdown.
         """
         self._stop_evict.set()
-        if self._evict_thread:
-            self._evict_thread.join(timeout=10)
+        if self._evict_execution is not None:
+            _get_sandbox_thread_manager().cancel(
+                self._evict_execution.execution_id,
+                reason="sandbox pool shutting down",
+                wait_timeout=10,
+            )
 
         with self._lock:
             all_executors: list[Any] = []
@@ -2909,13 +2947,26 @@ class SandboxPoolManager:
 
     def _start_evictor(self) -> None:
         """Launch the background idle-eviction thread."""
-        def _evict_loop() -> None:
-            while not self._stop_evict.wait(timeout=self._idle_ttl_seconds / 2):
+        def _evict_loop(cancel_event) -> None:
+            while (
+                not cancel_event.is_set()
+                and not self._stop_evict.wait(timeout=self._idle_ttl_seconds / 2)
+            ):
                 self._evict_idle(logger)
                 self._clean_stale(logger)
 
-        self._evict_thread = threading.Thread(target=_evict_loop, daemon=True, name="SandboxPoolEvictor")
-        self._evict_thread.start()
+        manager = _get_sandbox_thread_manager()
+        self._evict_execution = manager.register_service(
+            ManagedThreadSpec(
+                task_name="sandbox-pool-evictor",
+                owner="runtime",
+                lane="background-service",
+                close_hook=self._stop_evict.set,
+            ),
+            _evict_loop,
+        )
+        manager.start_service(self._evict_execution.execution_id)
+        self._evict_thread = self._evict_execution.thread_ref()
 
     def _evict_idle(self, logger_: logging.Logger) -> None:
         """Remove containers idle for longer than idle_ttl_seconds."""

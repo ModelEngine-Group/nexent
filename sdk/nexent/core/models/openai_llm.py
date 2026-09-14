@@ -7,11 +7,13 @@ from ...monitor.monitoring import (
     OPENINFERENCE_INPUT_VALUE,
 )
 from ..utils.token_estimation import estimate_tokens_text
+from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
 import asyncio
 import time
 import json
+import httpx
 from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -32,11 +34,17 @@ from .prompt_cache import (
     resolve_prompt_cache_profile,
 )
 from .message_utils import content_has_multimodal_blocks, prepare_messages_for_smolagents_text_flattening
-from .retry import DEFAULT_MODEL_RETRY, ModelRetryConfig, classify_model_error
 from .context_overflow import (
     ProviderContextOverflowRetryExhausted,
     ProviderContextOverflowRetryUnsafe,
     is_provider_context_overflow,
+)
+from .model_concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
+from .retry import (
+    DEFAULT_MODEL_RETRY,
+    ModelRetryConfig,
+    classify_model_error,
+    get_retry_after_seconds,
 )
 
 logger = logging.getLogger("openai_llm")
@@ -49,6 +57,20 @@ STOP_EVENT_INTERRUPTED_MESSAGE = "Model is interrupted by stop event"
 
 class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    """Return whether an exception chain represents a network or caller timeout."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (TimeoutError, httpx.TimeoutException)):
+            return True
+        if "timeout" in type(current).__name__.lower():
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 class OpenAIModel(OpenAIServerModel):
@@ -64,6 +86,14 @@ class OpenAIModel(OpenAIServerModel):
                  context_budget_snapshot: Optional[ContextBudgetSnapshot | Dict[str, Any]] = None,
                  timeout_seconds: Optional[float] = None,
                  retry_config: Optional["ModelRetryConfig"] = None,
+                 cancellation_scope: Optional[RunCancellationScope] = None,
+                 concurrency_limit: Optional[int] = None,
+                 concurrency_key: Optional[tuple[str, str, str]] = None,
+                 concurrency_wait_timeout_seconds: float = 30.0,
+                 connect_timeout_seconds: float = 10.0,
+                 read_timeout_seconds: Optional[float] = None,
+                 write_timeout_seconds: float = 30.0,
+                 pool_timeout_seconds: float = 10.0,
                  *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -106,7 +136,13 @@ class OpenAIModel(OpenAIServerModel):
         self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
-        self.stop_event = threading.Event()
+        self.stop_event = (
+            cancellation_scope.stop_event if cancellation_scope else threading.Event()
+        )
+        self.cancellation_scope = cancellation_scope or RunCancellationScope(self.stop_event)
+        self.concurrency_limit = concurrency_limit
+        self.concurrency_key = concurrency_key
+        self.concurrency_wait_timeout_seconds = concurrency_wait_timeout_seconds
         self._monitoring = get_monitoring_manager()
         self.model_factory = (model_factory or "").lower()
         self.flatten_messages_as_text = flatten_messages_as_text
@@ -132,17 +168,24 @@ class OpenAIModel(OpenAIServerModel):
 
         self.retry_config = retry_config or DEFAULT_MODEL_RETRY
         self.last_retry_count = 0
+        self.read_timeout_seconds = read_timeout_seconds or timeout_seconds or 60.0
 
-        # Create http_client based on ssl_verify parameter and timeout
-        if not ssl_verify or timeout_seconds is not None:
+        # Keep every streaming HTTP phase finite. Callers can still inject a
+        # custom client through client_kwargs when they own its lifecycle.
+        client_kwargs = kwargs.get("client_kwargs", {})
+        if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
-            client_config = {"verify": ssl_verify}
-            if timeout_seconds is not None:
-                client_config["timeout"] = timeout_seconds
-            http_client = DefaultHttpxClient(**client_config)
-            client_kwargs = kwargs.get('client_kwargs', {})
-            client_kwargs['http_client'] = http_client
-            kwargs['client_kwargs'] = client_kwargs
+            http_client = DefaultHttpxClient(
+                verify=ssl_verify,
+                timeout=httpx.Timeout(
+                    connect=connect_timeout_seconds,
+                    read=self.read_timeout_seconds,
+                    write=write_timeout_seconds,
+                    pool=pool_timeout_seconds,
+                ),
+            )
+            client_kwargs["http_client"] = http_client
+            kwargs["client_kwargs"] = client_kwargs
 
         super().__init__(*args, **kwargs)
 
@@ -358,7 +401,20 @@ class OpenAIModel(OpenAIServerModel):
                     self._monitoring.add_span_event("model_stopped", {
                         "reason": "stop_event_set"})
                 raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+            current_request = None
+            stream_token = None
+            close_stream_once = None
+            concurrency_permit = None
+            received_chunk_count = 0
             try:
+                if self.concurrency_limit is not None:
+                    concurrency_permit = model_concurrency_limiter.acquire(
+                        self.concurrency_key
+                        or ("default", self.model_factory or "unknown", str(self.model_id)),
+                        self.concurrency_limit,
+                        self.concurrency_wait_timeout_seconds,
+                        self.stop_event,
+                    )
                 current_request = self._dispatch_chat_completion(
                     context_budget_snapshot=trusted_budget_snapshot,
                     capacity_snapshot=self.capacity_snapshot,
@@ -373,6 +429,22 @@ class OpenAIModel(OpenAIServerModel):
                 if isinstance(current_request, dict):
                     error_msg = current_request.get("error") or current_request.get("message") or str(current_request)
                     raise ValueError(f"LLM API returned error: {error_msg}")
+
+                close_stream = getattr(current_request, "close", None)
+                if callable(close_stream):
+                    close_lock = threading.Lock()
+                    stream_closed = False
+
+                    def _close_stream_once():
+                        nonlocal stream_closed
+                        with close_lock:
+                            if stream_closed:
+                                return
+                            stream_closed = True
+                        close_stream()
+
+                    close_stream_once = _close_stream_once
+                    stream_token = self.cancellation_scope.register_closer(close_stream_once)
 
                 chunk_list = []
                 token_join = []
@@ -393,6 +465,7 @@ class OpenAIModel(OpenAIServerModel):
 
                 try:
                     for chunk in current_request:
+                        received_chunk_count += 1
                         # Safety check: skip non-standard chunks that lack expected attributes
                         # This handles edge cases where API returns error responses as chunks
                         if not hasattr(chunk, 'choices'):
@@ -614,6 +687,10 @@ class OpenAIModel(OpenAIServerModel):
                 self.stop_event.wait(backoff)
                 continue
             except Exception as e:
+                if self.stop_event.is_set() or self.cancellation_scope.cancelled:
+                    raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE) from e
+                if isinstance(e, ModelConcurrencyExceeded):
+                    raise
                 if token_tracker:
                     self._monitoring.add_span_event("error_occurred", {
                         "error_type": type(e).__name__,
@@ -644,6 +721,9 @@ class OpenAIModel(OpenAIServerModel):
                             rebuilt_evidence, "compaction_attempts", None
                         ),
                     })
+                    if concurrency_permit is not None:
+                        concurrency_permit.release()
+                        concurrency_permit = None
                     return self.__call__(
                         messages=rebuilt_messages,
                         stop_sequences=stop_sequences,
@@ -655,25 +735,72 @@ class OpenAIModel(OpenAIServerModel):
                         _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
                         **kwargs,
                     )
+                is_timeout = _is_timeout_error(e)
+                if is_timeout:
+                    logger.warning(
+                        "event=model_stream_timeout model_id=%s provider=%s "
+                        "attempt=%d max_attempts=%d timeout_seconds=%.3f "
+                        "phase=%s chunk_count=%d error_type=%s",
+                        self.model_id,
+                        self.model_factory or "unknown",
+                        attempt,
+                        self.retry_config.max_attempts,
+                        self.read_timeout_seconds,
+                        "initial_chunk" if received_chunk_count == 0 else "next_chunk",
+                        received_chunk_count,
+                        type(e).__name__,
+                    )
                 if classify_model_error(e) != "retryable":
                     raise
                 if attempt >= self.retry_config.max_attempts:
-                    logging.exception(
-                        "Model call failed after %d attempts: %s",
-                        attempt, str(e),
-                    )
+                    if not is_timeout:
+                        logging.exception(
+                            "Model call failed after %d attempts: %s",
+                            attempt, str(e),
+                        )
                     raise
                 backoff = self.retry_config.calculate_backoff(attempt)
-                logger.warning(
-                    "Model call attempt %d/%d failed with retryable error (%s); "
-                    "retrying after %.2fs",
-                    attempt, self.retry_config.max_attempts, str(e), backoff,
-                )
+                retry_after = get_retry_after_seconds(e)
+                if retry_after is not None:
+                    backoff = max(backoff, retry_after)
+                if is_timeout:
+                    logger.warning(
+                        "event=model_stream_timeout_retry model_id=%s provider=%s "
+                        "attempt=%d max_attempts=%d retrying_after_seconds=%.2f "
+                        "error_type=%s",
+                        self.model_id,
+                        self.model_factory or "unknown",
+                        attempt,
+                        self.retry_config.max_attempts,
+                        backoff,
+                        type(e).__name__,
+                    )
+                else:
+                    logger.warning(
+                        "Model call attempt %d/%d failed with retryable error (%s); "
+                        "retrying after %.2fs",
+                        attempt, self.retry_config.max_attempts, str(e), backoff,
+                    )
                 self.last_retry_count = attempt
                 if self.stop_event.is_set():
                     raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
                 self.stop_event.wait(backoff)
                 continue
+            finally:
+                if stream_token is not None:
+                    self.cancellation_scope.unregister_closer(stream_token)
+                if close_stream_once is not None:
+                    try:
+                        close_stream_once()
+                    except Exception:
+                        if not self.stop_event.is_set():
+                            logger.warning(
+                                "event=model_stream_close_failed model_id=%s",
+                                self.model_id,
+                                exc_info=True,
+                            )
+                if concurrency_permit is not None:
+                    concurrency_permit.release()
 
     def _dispatch_chat_completion(
         self,
@@ -822,7 +949,8 @@ class OpenAIModel(OpenAIServerModel):
                 completion_kwargs["extra_body"] = self.extra_body
 
             # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
-            await asyncio.to_thread(
+            await run_blocking(
+                "openai-llm-connectivity",
                 self.client.chat.completions.create,
                 stream=False,
                 **completion_kwargs,

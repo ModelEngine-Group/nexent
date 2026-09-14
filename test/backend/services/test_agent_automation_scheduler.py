@@ -23,7 +23,15 @@ def _load_scheduler_with_runner_stub(monkeypatch):
     runner_module.agent_automation_runner = _Runner()
     monkeypatch.setitem(sys.modules, "services.agent_automation.runner", runner_module)
     sys.modules.pop("services.agent_automation.scheduler", None)
-    return importlib.import_module("services.agent_automation.scheduler")
+    module = importlib.import_module("services.agent_automation.scheduler")
+
+    async def run_inline(_task_name, func, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(module, "run_blocking", run_inline)
+    return module
 
 
 @pytest.mark.asyncio
