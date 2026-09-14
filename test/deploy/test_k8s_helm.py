@@ -56,6 +56,7 @@ APPLICATION_PVCS = {
     "nexent-skills",
     "nexent-memory-plugins",
     "nexent-logs",
+    "nexent-project-config",
     "nexent-supabase-db",
 }
 INFRASTRUCTURE_PVCS = {
@@ -280,6 +281,8 @@ def _application_existing_args() -> list[str]:
         "global.sharedStorage.workspace.existingClaim=prod-nexent-workspace",
         "--set",
         "global.sharedStorage.skills.existingClaim=prod-nexent-skills",
+        "--set",
+        "global.sharedStorage.projectConfig.existingClaim=prod-nexent-project-config",
         "--set",
         "nexent-supabase-db.persistence.mode=existing",
         "--set",
@@ -650,6 +653,73 @@ def test_web_chart_declares_delayed_startup_probe() -> None:
     }
 
 
+def test_web_mounts_persistent_project_configuration(chart_dirs: dict[str, Path]) -> None:
+    dynamic = _template(
+        chart_dirs["application"],
+        "nexent",
+        _application_dynamic_args(),
+    )
+    assert dynamic.returncode == 0, dynamic.stderr
+    web = next(
+        document
+        for document in _documents(dynamic.stdout)
+        if document.get("kind") == "Deployment"
+        and document["metadata"]["name"] == "nexent-web"
+    )
+    container = web["spec"]["template"]["spec"]["containers"][0]
+    env = {item["name"]: item["value"] for item in container["env"]}
+    mounts = {item["name"]: item["mountPath"] for item in container["volumeMounts"]}
+    volumes = {
+        item["name"]: item["persistentVolumeClaim"]["claimName"]
+        for item in web["spec"]["template"]["spec"]["volumes"]
+    }
+    assert env["PROJECT_CONFIG_DIR"] == "/mnt/nexent-data/project-config"
+    assert env["FILE_UPLOAD_SIZE_LIMIT"] == "10"
+    assert mounts["nexent-project-config"] == "/mnt/nexent-data/project-config"
+    assert volumes["nexent-project-config"] == "nexent-project-config"
+    project_config_pvc = next(
+        document
+        for document in _documents(dynamic.stdout)
+        if document.get("kind") == "PersistentVolumeClaim"
+        and document["metadata"]["name"] == "nexent-project-config"
+    )
+    assert project_config_pvc["spec"]["resources"]["requests"]["storage"] == "1Gi"
+
+    local = _template(chart_dirs["application"], "nexent", [])
+    assert local.returncode == 0, local.stderr
+    project_config_pv = next(
+        document
+        for document in _documents(local.stdout)
+        if document.get("kind") == "PersistentVolume"
+        and document["metadata"]["name"] == "nexent-project-config-pv"
+    )
+    assert project_config_pv["spec"]["hostPath"]["path"] == (
+        "/var/lib/nexent-data/project-config"
+    )
+
+    existing = _template(
+        chart_dirs["application"],
+        "nexent",
+        _application_existing_args(),
+    )
+    assert existing.returncode == 0, existing.stderr
+    existing_web = next(
+        document
+        for document in _documents(existing.stdout)
+        if document.get("kind") == "Deployment"
+        and document["metadata"]["name"] == "nexent-web"
+    )
+    existing_volume = next(
+        item
+        for item in existing_web["spec"]["template"]["spec"]["volumes"]
+        if item["name"] == "nexent-project-config"
+    )
+    assert (
+        existing_volume["persistentVolumeClaim"]["claimName"]
+        == "prod-nexent-project-config"
+    )
+
+
 def test_deploy_renders_generated_values_once_after_summary(
     isolated_k8s_project: tuple[Path, dict[str, str], Path],
 ) -> None:
@@ -700,8 +770,11 @@ def test_deploy_renders_generated_values_once_after_summary(
         assert (infrastructure_chart / output_name).stat().st_size > 0
     assert 'imageSource: "local-latest"' in generated_values
     assert "sqlFileNames:" in runtime_values
+    assert 'fileUploadSizeLimit: "100"' in runtime_values
     assert 'mode: "dynamic"' in persistence_values
     assert 'storageClassName: "rwx-storage"' in persistence_values
+    assert "projectConfig:" in persistence_values
+    assert 'localPath: "/var/lib/nexent-data/project-config"' in persistence_values
 
 
 def test_invalid_persistence_mode_fails_before_render_or_config_persistence(

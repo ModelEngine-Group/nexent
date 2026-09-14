@@ -32,6 +32,7 @@ config:
   proxyTimeoutMs: "600000"
   proxyWsTimeoutMs: "600000"
   sseProxyTimeoutMs: "600000"
+  fileUploadSizeLimit: "10"
   modelEngine:
     enabled: "false"
 
