@@ -365,8 +365,13 @@ def add_tool_field(tool_info):
         query = session.query(ToolInfo).filter(
             ToolInfo.tool_id == tool_info["tool_id"])
         tool = query.first()
+        if tool is None:
+            # tool_id has no FK constraint, so a stale ToolInstance can outlive its ToolInfo row
+            logger.warning("add_tool_field: no ToolInfo found for tool_id=%s, skipping",
+                           tool_info.get("tool_id"))
+            return None
         # add tool params
-        tool_params = tool.params
+        tool_params = tool.params or []
         for ele in tool_params:
             param_name = ele["name"]
             instance_value = tool_info["params"].get(param_name)
@@ -440,6 +445,8 @@ def search_tools_for_sub_agent(agent_id, tenant_id, version_no: int = 0):
         for tool_instance in tool_instances:
             tool_instance_dict = as_dict(tool_instance)
             new_tool_instance_dict = add_tool_field(tool_instance_dict)
+            if new_tool_instance_dict is None:
+                continue
 
             tools_list.append(new_tool_instance_dict)
         return tools_list

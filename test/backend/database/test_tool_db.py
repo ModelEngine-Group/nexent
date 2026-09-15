@@ -1190,6 +1190,77 @@ def test_add_tool_field(monkeypatch, mock_session):
     assert result["source"] == "test_source"
 
 
+def test_add_tool_field_missing_tool_info_returns_none(monkeypatch, mock_session):
+    """A ToolInstance whose tool_id has no matching ToolInfo row must not crash."""
+    session, query = mock_session
+
+    mock_first = MagicMock(return_value=None)
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    tool_info = {"tool_id": 999, "params": {}}
+    result = add_tool_field(tool_info)
+
+    assert result is None
+
+
+def test_add_tool_field_null_params_defaults_to_empty_list(monkeypatch, mock_session):
+    """A ToolInfo row with params=NULL must not crash the default-value merge loop."""
+    session, query = mock_session
+    mock_tool_info = MockToolInfo()
+    mock_tool_info.params = None
+
+    mock_first = MagicMock(return_value=mock_tool_info)
+    mock_filter = MagicMock()
+    mock_filter.first = mock_first
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.as_dict",
+                        lambda obj: obj.__dict__)
+
+    tool_info = {"tool_id": 1, "params": {"param1": "value1"}}
+    result = add_tool_field(tool_info)
+
+    assert result["params"] == []
+
+
+def test_search_tools_for_sub_agent_skips_orphaned_tool(monkeypatch, mock_session):
+    """An orphaned ToolInstance (add_tool_field returns None) must be skipped, not appended."""
+    session, query = mock_session
+    mock_tool_instance = MockToolInstance()
+
+    mock_all = MagicMock(return_value=[mock_tool_instance])
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(
+        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("backend.database.tool_db.as_dict",
+                        lambda obj: obj.__dict__)
+    monkeypatch.setattr(
+        "backend.database.tool_db.add_tool_field", lambda data: None)
+
+    result = search_tools_for_sub_agent(1, "tenant1")
+
+    assert result == []
+
+
 def test_search_tools_for_sub_agent(monkeypatch, mock_session):
     """Test searching tools for sub-agent"""
     session, query = mock_session
