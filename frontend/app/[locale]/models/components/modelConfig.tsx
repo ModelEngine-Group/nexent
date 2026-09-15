@@ -41,7 +41,7 @@ import {
   LAYOUT_CONFIG,
   MODEL_SOURCES,
 } from "@/const/modelConfig";
-import { useConfig } from "@/hooks/useConfig";
+import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
@@ -602,7 +602,13 @@ export const ModelConfigSection = forwardRef<
     skipVerify: boolean = false,
     refreshAgentQueries: boolean = false
   ) => {
-    if (!modelConfig) return;
+    // Prefer the freshest cached config over the render-time closure value:
+    // callers may have just invalidated CONFIG_QUERY_KEY (e.g. a model create
+    // auto-configured default-model slots) and this component's cfg
+    // still points at the previous render's snapshot.
+    const cachedConfig = queryClient.getQueryData<any>(CONFIG_QUERY_KEY);
+    const cfg = cachedConfig?.models ?? modelConfig;
+    if (!cfg) return;
     try {
       await invalidate();
       const [allModels, coverage] = await Promise.all([
@@ -625,29 +631,29 @@ export const ModelConfigSection = forwardRef<
       }
 
       // Load selected models from configuration and check if models still exist
-      const llmMain = modelConfig.llm.displayName;
+      const llmMain = cfg.llm.displayName;
       const llmMainExists = exists(llmMain, (m) => m.type === MODEL_TYPES.LLM);
-      const embedding = modelConfig.embedding.displayName;
+      const embedding = cfg.embedding.displayName;
       const embeddingExists = exists(embedding, (m) =>
         m.type === MODEL_TYPES.EMBEDDING
       );
-      const multiEmbedding = modelConfig.multiEmbedding.displayName;
+      const multiEmbedding = cfg.multiEmbedding.displayName;
       const multiEmbeddingExists = exists(multiEmbedding, (m) =>
         m.type === MODEL_TYPES.MULTI_EMBEDDING
       );
-      const rerank = modelConfig.rerank.displayName;
+      const rerank = cfg.rerank.displayName;
       const rerankExists = exists(rerank, (m) => m.type === MODEL_TYPES.RERANK);
-      const vlm = modelConfig.vlm.displayName;
-      const vlm2 = modelConfig.vlm2?.displayName || "";
-      const vlm3 = modelConfig.vlm3?.displayName || "";
-      const vlm4 = modelConfig.vlm4?.displayName || "";
+      const vlm = cfg.vlm.displayName;
+      const vlm2 = cfg.vlm2?.displayName || "";
+      const vlm3 = cfg.vlm3?.displayName || "";
+      const vlm4 = cfg.vlm4?.displayName || "";
       const vlmExists = exists(vlm, (m) => m.type === MODEL_TYPES.VLM);
       const vlm2Exists = exists(vlm2, (m) => m.type === MODEL_TYPES.VLM2);
       const vlm3Exists = exists(vlm3, (m) => m.type === MODEL_TYPES.VLM3);
       const vlm4Exists = exists(vlm4, (m) => m.type === MODEL_TYPES.VLM4);
-      const stt = modelConfig.stt.displayName;
+      const stt = cfg.stt.displayName;
       const sttExists = exists(stt, (m) => m.type === MODEL_TYPES.STT);
-      const tts = modelConfig.tts.displayName;
+      const tts = cfg.tts.displayName;
       const ttsExists = exists(tts, (m) => m.type === MODEL_TYPES.TTS);
 
       const updatedSelectedModels = {
@@ -722,23 +728,23 @@ export const ModelConfigSection = forwardRef<
       }
 
       const hasConfiguredModels =
-        !!modelConfig.llm.modelName ||
-        !!modelConfig.embedding.modelName ||
-        !!modelConfig.multiEmbedding.modelName ||
-        !!modelConfig.rerank.modelName ||
-        !!modelConfig.vlm.modelName ||
-        !!modelConfig.vlm2?.modelName ||
-        !!modelConfig.vlm3?.modelName ||
-        !!modelConfig.vlm4?.modelName ||
-        !!modelConfig.tts.modelName ||
-        !!modelConfig.stt.modelName;
+        !!cfg.llm.modelName ||
+        !!cfg.embedding.modelName ||
+        !!cfg.multiEmbedding.modelName ||
+        !!cfg.rerank.modelName ||
+        !!cfg.vlm.modelName ||
+        !!cfg.vlm2?.modelName ||
+        !!cfg.vlm3?.modelName ||
+        !!cfg.vlm4?.modelName ||
+        !!cfg.tts.modelName ||
+        !!cfg.stt.modelName;
 
       if (allModels.length > 0 && hasConfiguredModels && !skipVerify) {
         verifyModelsInternal(allModels, updatedSelectedModels);
       }
     } catch (error) {
-      log.error(t("modelConfig.error.loadList"), error);
-      message.error(t("modelConfig.error.loadListFailed"));
+      log.error(t("cfg.error.loadList"), error);
+      message.error(t("cfg.error.loadListFailed"));
     }
   };
 
@@ -1427,6 +1433,10 @@ export const ModelConfigSection = forwardRef<
           isOpen={isAddModalV2Open}
           onClose={() => setIsAddModalV2Open(false)}
           onSuccess={async (newModel) => {
+            // Invalidate FIRST so the refetch completes before loadModelLists
+            // reads the cache (a model create may have auto-configured
+            // default-model slots that must be reflected immediately).
+            await queryClient.invalidateQueries({ queryKey: CONFIG_QUERY_KEY });
             await loadModelLists(true);
             message.success(t("modelConfig.message.addSuccess"));
             if (newModel && newModel.name && newModel.type) {

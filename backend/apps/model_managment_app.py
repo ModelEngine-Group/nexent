@@ -194,12 +194,13 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         accept_signal = pop_capacity_accept_signal(model_data)
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        await create_model_for_tenant(user_id, tenant_id, model_data)
+        create_result = await create_model_for_tenant(user_id, tenant_id, model_data)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
         return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully"
         })
     except ValueError as e:
@@ -325,12 +326,13 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
             for model in batch_model_config.get("models", [])
             if (signal := pop_capacity_accept_signal(model)) is not None
         ]
-        await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
+        batch_result = await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
         provider = batch_model_config.get("provider")
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
-            "message": "Batch create models successfully"
+            "message": "Batch create models successfully",
+            "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -670,12 +672,13 @@ async def manage_create_model(
         # operator-accepted suggestions saved by SU/asset-owner via
         # /manage/* would silently miss the accept_total SLO numerator.
         accept_signal = pop_capacity_accept_signal(model_data)
-        await create_model_for_tenant(user_id, request.tenant_id, model_data)
+        create_result = await create_model_for_tenant(user_id, request.tenant_id, model_data)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
         return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully",
             "data": {"tenant_id": request.tenant_id}
         })
@@ -819,11 +822,12 @@ async def manage_batch_create_models(
             for model in batch_model_config.get("models", [])
             if (signal := pop_capacity_accept_signal(model)) is not None
         ]
-        await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
+        batch_result = await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], request.provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
+            "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
             "data": {
                 "tenant_id": request.tenant_id,
                 "provider": request.provider,
