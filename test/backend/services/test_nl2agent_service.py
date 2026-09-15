@@ -123,7 +123,7 @@ def test_boundary_observer_stops_after_queuing_valid_nl2a_payload():
     observer.add_message("nl2agent", ProcessType.FINAL_ANSWER, "<user_break>")
     observer.add_message(
         "nl2agent",
-        ProcessType.ERROR,
+        ProcessType.WARNING,
         "Agent execution interrupted by external stop signal",
     )
     observer.add_message("nl2agent", ProcessType.ERROR, "real runtime failure")
@@ -190,6 +190,106 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
         tenant_id="tenant-a",
         fields={"duty_prompt": "Updated duty", "example_questions": []},
     )
+
+
+def test_update_agent_draft_initializes_generated_name_once(mocker):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+                "name": None,
+                "display_name": "Research Helper",
+            }
+        ],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=[{"agent_id": 22, "name": None}],
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields",
+        return_value=1,
+    )
+
+    result = save_agent_draft_fields_impl(
+        agent_id=22,
+        fields=AgentDraftFields(name="research_assistant"),
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+    assert result["updated_fields"] == ["name"]
+    update_fields.assert_called_once_with(
+        agent_id=22,
+        tenant_id="tenant-a",
+        fields={"name": "research_assistant"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("draft_name", "existing_agents", "expected_code", "retryable"),
+    [
+        ("existing_assistant", [], "agent_name_already_set", False),
+        (
+            None,
+            [{"agent_id": 99, "name": "research_assistant"}],
+            "agent_name_duplicate",
+            True,
+        ),
+    ],
+)
+def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
+    mocker,
+    draft_name,
+    existing_agents,
+    expected_code,
+    retryable,
+):
+    mocker.patch(
+        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        return_value=[
+            {
+                "agent_id": 22,
+                "tenant_id": "tenant-a",
+                "version_no": 0,
+                "delete_flag": "N",
+                "created_by": "user-a",
+                "name": draft_name,
+            }
+        ],
+    )
+    mocker.patch(
+        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        return_value="MEMBER",
+    )
+    mocker.patch(
+        "services.nl2agent_service.query_all_agent_info_by_tenant_id",
+        return_value=existing_agents,
+    )
+    update_fields = mocker.patch(
+        "services.nl2agent_service.update_agent_draft_fields"
+    )
+
+    with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
+        save_agent_draft_fields_impl(
+            22,
+            AgentDraftFields(name="research_assistant"),
+            "tenant-a",
+            "user-a",
+        )
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.retryable is retryable
+    update_fields.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -345,6 +445,15 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
 def test_agent_draft_fields_reject_empty_null_and_extra_patches(fields):
     with pytest.raises(ValidationError):
         AgentDraftFields.model_validate(fields)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["9invalid_assistant", "invalid-name_assistant", "中文助手", "researcher"],
+)
+def test_agent_draft_fields_reject_invalid_generated_name(name):
+    with pytest.raises(ValidationError):
+        AgentDraftFields(name=name)
 
 
 def test_search_filters_catalog_and_returns_safe_metadata(mocker):
@@ -1451,7 +1560,7 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
         new_callable=AsyncMock,
-        return_value=({"description": " "}, []),
+        return_value=({"name": "draft_assistant", "description": " "}, []),
     )
 
     with pytest.raises(Nl2AgentCompletionError) as exc_info:
@@ -1463,6 +1572,25 @@ async def test_validate_agent_generation_complete_requires_description(mocker):
 
     assert exc_info.value.code == "draft_fields_incomplete"
     assert exc_info.value.failed_fields == ["description"]
+
+
+@pytest.mark.asyncio
+async def test_validate_agent_generation_complete_requires_generated_name(mocker):
+    mocker.patch(
+        "services.nl2agent_service._load_verified_nl2agent_state",
+        new_callable=AsyncMock,
+        return_value=({"display_name": "Draft", "description": "Ready"}, []),
+    )
+
+    with pytest.raises(Nl2AgentCompletionError) as exc_info:
+        await validate_agent_generation_complete_impl(
+            agent_id=42,
+            tenant_id="tenant-a",
+            user_id="user-a",
+        )
+
+    assert exc_info.value.code == "draft_fields_incomplete"
+    assert exc_info.value.failed_fields == ["name"]
 
 
 @pytest.mark.asyncio
@@ -1792,8 +1920,9 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def fake_agent_run(received_run_info):
+    async def fake_agent_run(received_run_info, *, thread_manager):
         assert received_run_info is run_info
+        assert thread_manager is not None
         yield json.dumps({"type": "tool", "content": "call"})
         yield json.dumps(
             {
@@ -1883,7 +2012,8 @@ async def test_create_stream_yields_process_chunks_without_waiting_for_later_out
     ]
     release_next = [asyncio.Event() for _ in process_chunks]
 
-    async def gated_agent_run(_run_info):
+    async def gated_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         for payload, gate in zip(process_chunks, release_next, strict=True):
             yield json.dumps(payload)
             await gate.wait()
@@ -1926,7 +2056,8 @@ async def test_create_stream_preserves_final_answers_without_fallback(mocker, co
         return_value=run_info,
     )
 
-    async def final_answer_agent_run(_run_info):
+    async def final_answer_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         yield json.dumps({"type": "final_answer", "content": content})
 
     mocker.patch(
@@ -1959,7 +2090,8 @@ async def test_create_stream_ends_without_synthesizing_nl2a_fallback(mocker):
         return_value=run_info,
     )
 
-    async def no_action_agent_run(_run_info):
+    async def no_action_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         yield json.dumps({"type": "model_output_thinking", "content": "reason"})
 
     mocker.patch(
@@ -1990,7 +2122,8 @@ async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def failing_agent_run(_run_info):
+    async def failing_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         if False:
             yield "unreachable"
         raise RuntimeError("private provider credentials")
@@ -2029,7 +2162,8 @@ async def test_create_stream_propagates_cancellation_and_stops_run(mocker):
         return_value=run_info,
     )
 
-    async def cancelled_agent_run(_run_info):
+    async def cancelled_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is not None
         if False:
             yield "unreachable"
         raise asyncio.CancelledError

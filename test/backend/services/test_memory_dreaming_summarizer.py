@@ -8,6 +8,7 @@ from nexent.memory.dreaming import (
     DreamingMemoryUnit,
     DreamingSummarizationRequest,
 )
+from nexent.core.concurrency import LanePolicy, ThreadManager
 from services.memory_dreaming_summarizer import (
     TenantDreamingSummarizer,
     _load_prompt,
@@ -96,7 +97,7 @@ def test_ac057_under_limit_uses_exactly_one_model_call():
     assert "Task mode: single" in model.calls[0][1]["content"]
 
 
-def test_ac058_large_input_map_reduce_is_bounded_parallel_and_ordered():
+def test_ac058_large_input_map_reduce_is_bounded_parallel_and_ordered(monkeypatch):
     lock = threading.Lock()
     active = maximum = 0
     reduce_prompt = ""
@@ -118,9 +119,24 @@ def test_ac058_large_input_map_reduce_is_bounded_parallel_and_ordered():
             marker = "".join(code for text, code in (("alpha", "A"), ("beta", "B"), ("charlie", "C")) if text in prompt) or "P"
             return SimpleNamespace(content=f"<summary>## Topic {marker}\n\n- {marker}</summary>")
 
+    manager = ThreadManager(
+        service_name="dreaming-test",
+        lane_policies={
+            "model-tool-io": LanePolicy(
+                name="model-tool-io", max_workers=3, max_queue_size=3
+            )
+        },
+    )
+    manager.start()
+    monkeypatch.setattr(memory_dreaming_summarizer, "config_thread_manager", manager)
     units = [DreamingMemoryUnit(unit_id=str(i), content=text * 20, is_new=True)
              for i, text in enumerate(("alpha", "beta", "charlie"), 1)]
-    result = _summarizer(Model(), limit=100)(_request(units))
+    try:
+        result = _summarizer(Model(), limit=100)(_request(units))
+    finally:
+        import asyncio
+
+        asyncio.run(manager.shutdown(timeout=1))
     assert result.metadata["mode"] == "map_reduce"
     assert result.metadata["chunk_count"] == 3
     assert maximum <= 3

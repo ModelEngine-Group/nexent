@@ -44,6 +44,7 @@ import {
   loadMemoryConfig,
   setExternalProviderTopK,
   setMemorySwitch,
+  subscribeMemorySwitch,
   type MemoryConfig,
 } from "@/services/memoryService";
 import {
@@ -263,6 +264,12 @@ export function MemoryManager() {
       ...Array.from(options, ([value, label]) => ({ value, label })),
     ];
   }, [recordsByScope.agent]);
+
+  useEffect(() => {
+    return subscribeMemorySwitch((enabled) => {
+      setConfig((current) => ({ ...current, memoryEnabled: enabled }));
+    });
+  }, []);
 
   const updateMemoryEnabled = async (enabled: boolean) => {
     const previous = config.memoryEnabled;

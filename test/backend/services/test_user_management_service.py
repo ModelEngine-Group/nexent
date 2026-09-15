@@ -94,8 +94,48 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         refresh_user_token,
         get_session_by_authorization,
         get_user_info,
-        format_role_permissions
+        format_role_permissions,
+        get_provider_username,
     )
+
+
+class TestGetProviderUsername(unittest.TestCase):
+    """Test provider username lookup for linked OAuth accounts."""
+
+    @patch('backend.services.user_management_service.list_oauth_accounts_by_user_id')
+    def test_returns_trimmed_username_for_matching_provider(self, mock_list_accounts):
+        """Return the stored username after trimming surrounding whitespace."""
+        mock_list_accounts.return_value = [
+            {"provider": "github", "provider_username": "github-user"},
+            {"provider": "cas", "provider_username": "  CAS User  "},
+        ]
+
+        result = get_provider_username("user123", "cas")
+
+        self.assertEqual(result, "CAS User")
+        mock_list_accounts.assert_called_once_with("user123")
+
+    @patch('backend.services.user_management_service.list_oauth_accounts_by_user_id')
+    def test_returns_none_when_username_is_missing_or_provider_does_not_match(self, mock_list_accounts):
+        """Return None when no linked account has a non-empty matching username."""
+        mock_list_accounts.return_value = [
+            {"provider": "github", "provider_username": "github-user"},
+            {"provider": "cas", "provider_username": "   "},
+        ]
+
+        result = get_provider_username("user123", "cas")
+
+        self.assertIsNone(result)
+
+    @patch('backend.services.user_management_service.list_oauth_accounts_by_user_id')
+    def test_returns_none_when_accounts_cannot_be_loaded(self, mock_list_accounts):
+        """Return None when the linked account lookup fails."""
+        mock_list_accounts.side_effect = RuntimeError("database unavailable")
+
+        result = get_provider_username("user123", "cas")
+
+        self.assertIsNone(result)
+        mock_list_accounts.assert_called_once_with("user123")
 
 
 class TestSetAuthTokenToClient(unittest.TestCase):

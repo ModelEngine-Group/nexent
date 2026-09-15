@@ -23,6 +23,7 @@ from consts.const import (
     CAS_HEARTBEAT_COOKIE_NAME,
     CAS_HEARTBEAT_INTERVAL_SECONDS,
     CAS_HEARTBEAT_URL,
+    CAS_INTERNAL_SERVER_URL,
     CAS_LOGIN_MODE,
     CAS_LOGOUT_URL,
     CAS_RENEW_BEFORE_SECONDS,
@@ -143,7 +144,8 @@ def validate_service_ticket(ticket: str, service_url: str) -> CasPrincipal:
         raise CasAuthenticationError("CAS ticket is missing")
 
     validate_path = CAS_VALIDATE_PATH if CAS_VALIDATE_PATH.startswith("/") else f"/{CAS_VALIDATE_PATH}"
-    validate_url = f"{CAS_SERVER_URL}{validate_path}"
+    validation_server_url = CAS_INTERNAL_SERVER_URL or CAS_SERVER_URL
+    validate_url = f"{validation_server_url}{validate_path}"
     xml_text = _http_get_text(f"{validate_url}?service={service_url}&ticket={ticket}")
     logger.info("CAS serviceValidate response: %s", xml_text)
     return parse_service_validate_response(xml_text, fallback_session_index=ticket)

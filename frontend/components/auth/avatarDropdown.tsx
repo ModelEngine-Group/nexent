@@ -115,7 +115,9 @@ export function AvatarDropdown() {
       key: "user-info",
       label: (
         <div className="py-1">
-          <div className="font-medium">{user.email}</div>
+          <div className="font-medium">
+            {user.username?.trim() || user.email?.trim() || "-"}
+          </div>
           <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>
               {getRoleDisplayName(user.role)}

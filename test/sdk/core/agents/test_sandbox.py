@@ -4294,7 +4294,8 @@ class TestEvictorThread:
         pm = SandboxPoolManager.get_instance()
 
         assert pm._evict_thread is not None
-        assert pm._evict_thread.daemon is True
+        assert pm._evict_thread.daemon is False
+        assert pm._evict_execution is not None
 
 
 class TestForbiddeShellCallsConstant:
@@ -5289,7 +5290,9 @@ class TestTargetedSandboxCoverage:
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=MagicMock(side_effect=RuntimeError("not ready"))))
         monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["host"])
-        monotonic = iter([0, 121])
+        import itertools
+
+        monotonic = itertools.count(0, 121)
         monkeypatch.setattr(sandbox_module.time, "monotonic", lambda: next(monotonic))
 
         with pytest.raises(RuntimeError, match="did not become ready"):

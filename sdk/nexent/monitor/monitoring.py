@@ -570,6 +570,7 @@ class MonitoringManager:
             }
             if self._config.project_name:
                 resource_attributes["project.name"] = self._config.project_name
+                resource_attributes["openinference.project.name"] = self._config.project_name
             resource = Resource.create(resource_attributes)
 
             # Initialize TracerProvider with OTLP exporter
@@ -2230,9 +2231,36 @@ class _MonitoredStreamIterator:
         self._first_chunk_time: Optional[float] = None
         self._input_tokens: int = 0
         self._output_tokens: int = 0
+        self._state_lock = threading.Lock()
+        self._closed = False
+        self._finalized = False
 
     def __iter__(self):
         return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_value is not None and isinstance(exc_value, Exception):
+            self._error = exc_value
+        self.close()
+        return False
+
+    def close(self):
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+        try:
+            close = getattr(self._stream, "close", None)
+            if callable(close):
+                close()
+        except Exception as exc:
+            self._error = self._error or exc
+            raise
+        finally:
+            self._finalize()
 
     def __next__(self):
         try:
@@ -2254,6 +2282,10 @@ class _MonitoredStreamIterator:
             raise
 
     def _finalize(self):
+        with self._state_lock:
+            if self._finalized:
+                return
+            self._finalized = True
         try:
             request_duration_ms = int((time.time() - self._start_time) * 1000)
 
@@ -2576,6 +2608,11 @@ class MonitoringRecordBuffer:
     """
 
     def __init__(self):
+        from ..core.concurrency import (
+            get_current_thread_manager,
+            get_default_thread_manager,
+        )
+
         self._buffer: deque = deque(maxlen=5000)
         self._enabled: bool = os.getenv(
             "ENABLE_MODEL_MONITORING", "true").lower() == "true"
@@ -2588,32 +2625,56 @@ class MonitoringRecordBuffer:
         self._degraded_until: float = 0.0
         self._last_flush_time: float = time.time()
         self._running: bool = False
-        self._flush_thread: Optional[threading.Thread] = None
+        self._thread_manager = (
+            get_current_thread_manager() or get_default_thread_manager()
+        )
+        self._execution = None
         self._lock = threading.Lock()
 
         if self._enabled:
             self._start_flush_thread()
 
     def _start_flush_thread(self) -> None:
+        from ..core.concurrency import (
+            ManagedThreadSpec,
+            get_current_thread_manager,
+            get_default_thread_manager,
+        )
+
         with self._lock:
             if self._running:
                 return
-            self._running = True
-            self._flush_thread = threading.Thread(
-                target=self._flush_loop,
-                name="monitoring-buffer-flush",
-                daemon=True,
+            manager = (
+                self._thread_manager
+                or get_current_thread_manager()
+                or get_default_thread_manager()
             )
-            self._flush_thread.start()
-            logger.info("Monitoring buffer flush thread started")
+            if manager is None:
+                logger.warning(
+                    "Monitoring buffer is waiting for a managed execution context"
+                )
+                return
+            self._thread_manager = manager
+            self._running = True
+            self._execution = manager.register_service(
+                ManagedThreadSpec(
+                    task_name="monitoring-buffer-flush",
+                    owner="nexent.monitor.monitoring",
+                    close_hook=self._request_stop,
+                ),
+                self._flush_loop,
+            )
+            manager.start_service(self._execution.execution_id)
 
     def add_record(self, record: dict) -> None:
         if not self._enabled:
             return
+        if not self._running:
+            self._start_flush_thread()
         self._buffer.append(record)
 
-    def _flush_loop(self) -> None:
-        while self._running:
+    def _flush_loop(self, cancel_event) -> None:
+        while self._running and not cancel_event.is_set():
             try:
                 now = time.time()
                 buffer_size = len(self._buffer)
@@ -2627,10 +2688,8 @@ class MonitoringRecordBuffer:
             except Exception as e:
                 logger.error(f"Error in monitoring flush loop: {e}")
 
-            for _ in range(10):
-                if not self._running:
-                    return
-                time.sleep(self._flush_interval / 10)
+            if cancel_event.wait(self._flush_interval):
+                return
 
     def _flush_to_db(self) -> None:
         now = time.time()
@@ -2709,10 +2768,16 @@ class MonitoringRecordBuffer:
             )
 
     def stop(self) -> None:
+        self._request_stop()
+        if self._thread_manager is not None and self._execution is not None:
+            self._thread_manager.cancel(
+                self._execution.execution_id,
+                reason="monitoring buffer shutdown",
+            )
+        self._execution = None
+
+    def _request_stop(self) -> None:
         self._running = False
-        if self._flush_thread and self._flush_thread.is_alive():
-            self._flush_thread.join(timeout=5)
-        logger.info("Monitoring buffer flush thread stopped")
 
     @property
     def buffer_size(self) -> int:
