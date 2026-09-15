@@ -393,6 +393,7 @@ PATH="$BIN_DIR:$PATH" FAKE_DOCKER_LOG="$latest_pull_log" \
     --output-dir "$latest_package_dir" >/tmp/nexent-offline-package-latest.log
 
 assert_common_package_files "$latest_package_dir"
+[ -f "$latest_package_dir/deploy/docker/backup.sh" ] || fail "Docker offline package should include the backup script"
 [ "$(cat "$latest_package_dir/VERSION")" = "latest" ] || fail "root VERSION should match requested latest package version"
 grep -q '^DEPLOY_WRAPPER_DEFAULT_CONFIG_MODE="defaults"$' "$latest_package_dir/deploy.sh" || fail "offline deploy.sh should reuse the root entrypoint with defaults mode enabled"
 offline_help="$(DEPLOYMENT_LANG=en bash "$latest_package_dir/deploy.sh" --help)"

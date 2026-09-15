@@ -1,120 +1,34 @@
 # Nexent Docker Upgrade Guide
 
-This guide applies to Nexent deployments managed with Docker Compose. Run the upgrade during an idle or low-traffic window whenever possible so fewer requests and writes occur while data is copied and services are upgraded. This is operational guidance, not a hard requirement: the procedure does not detect active users, block requests, or stop containers.
+This guide applies to Nexent deployments managed with Docker Compose. Run the upgrade during an idle or low-traffic window whenever possible. Business writes must stop before the backup starts, but the containers do not need to be stopped.
 
-> ⚠️ This procedure creates a pre-upgrade copy by reading persistent files while containers remain running. If PostgreSQL, Elasticsearch, Redis, or MinIO writes occur during the copy, the files may not represent one point in time and are not guaranteed to be directly recoverable.
+> ⚠️ If business writes continue during the copy, data from PostgreSQL, Elasticsearch, Redis, MinIO, and other components may not represent the same point in time, and the backup may not be recoverable.
 
 ## 1. Pre-upgrade Preparation
 
-### 1.1 Record the Version and Deployment Configuration
+### 1.1 Pre-upgrade Check
 
-Start in the root of the Nexent repository currently used for deployment. For an offline deployment, start in the root of the previously extracted deployment package. The commands do not require the repository to be installed at any fixed system path. `BACKUP_BASE` must be outside `ROOT_DIR`.
-
-```bash
-set -euo pipefail
-
-TARGET_VERSION=X.Y.Z
-BACKUP_BASE=/backup/nexent
-STAMP=$(date -u +%Y%m%d-%H%M%S)
-BACKUP_DIR="$BACKUP_BASE/docker-$STAMP"
-
-mkdir -p "$BACKUP_DIR/config"
-
-set -a
-source deploy/env/.env
-set +a
-: "${ROOT_DIR:?ROOT_DIR is not set in deploy/env/.env}"
-ROOT_DIR=$(cd "$ROOT_DIR" && pwd)
-
-printf 'target_version=%s\n' "$TARGET_VERSION" > "$BACKUP_DIR/version.txt"
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git rev-parse HEAD >> "$BACKUP_DIR/version.txt"
-  git status --short > "$BACKUP_DIR/git-status.txt"
-fi
-cp -p deploy/env/.env "$BACKUP_DIR/config/deploy.env"
-if test -f deploy/env/monitoring.env; then
-  cp -p deploy/env/monitoring.env "$BACKUP_DIR/config/monitoring.env"
-fi
-if test -f deploy/docker/deploy.options; then
-  cp -p deploy/docker/deploy.options "$BACKUP_DIR/config/docker-deploy.options"
-fi
-```
-
-These files and inventories can contain passwords or tokens. Store them only in a restricted directory, and never commit them to Git or attach them to a public ticket.
-
-### 1.2 Check Available Space
+Start in the root of the Nexent repository currently used for deployment. For an offline deployment, start in the root of the previously extracted deployment package. Run the backup script with a local backup directory outside `ROOT_DIR`:
 
 ```bash
-du -sh "$ROOT_DIR"
-df -h "$ROOT_DIR" "$BACKUP_BASE"
-docker system df -v
+bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 ```
 
-The backup destination must have more free space than the persistent data to be copied, and the Docker data filesystem must also have room for the target-version images. Do not free upgrade space by deleting old images, volumes, or running containers.
+The script first prints `ROOT_DIR`, the named volumes used by this deployment, the total uncompressed data size, and the available space under the backup directory. `[PASS] Pre-upgrade space check passed.` means the destination has enough space. If space is insufficient, the script prints `[ERROR]` and exits before copying. Files are not compressed, so the check uses their original size.
 
-### 1.3 Copy Persistent Data
+### 1.2 Backup
 
-First record the containers and mounts actually used by this deployment. Include the `monitor` Compose project when monitoring is enabled.
+After the space check passes, the script asks you to confirm that business writes have stopped. Stop writes from user operations, API requests, scheduled jobs, and similar sources before confirming. Keep the containers running; do not run `docker stop` or `docker compose down`.
+
+Enter `y` at the interactive prompt. For non-interactive execution, provide explicit confirmation only after business writes have stopped:
 
 ```bash
-{
-  docker ps -q --filter label=com.docker.compose.project=nexent
-  docker ps -q --filter label=com.docker.compose.project=monitor
-} | sort -u > "$BACKUP_DIR/container-ids.txt"
-
-mapfile -t CONTAINERS < "$BACKUP_DIR/container-ids.txt"
-test "${#CONTAINERS[@]}" -gt 0
-docker inspect "${CONTAINERS[@]}" > "$BACKUP_DIR/containers.inspect.json"
-docker inspect --format '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' \
-  "${CONTAINERS[@]}" | sed '/^$/d' | sort -u > "$BACKUP_DIR/bind-mounts.txt"
-docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' \
-  "${CONTAINERS[@]}" | sed '/^$/d' | sort -u > "$BACKUP_DIR/volumes.txt"
+bash deploy/docker/backup.sh \
+  --backup-dir /mnt/backup/nexent \
+  --confirm-writes-stopped
 ```
 
-Keep the containers running and archive `ROOT_DIR` directly:
-
-```bash
-sudo tar --numeric-owner --acls --xattrs \
-  -cpf "$BACKUP_DIR/root-dir.tar" -C "$ROOT_DIR" .
-```
-
-Review `bind-mounts.txt` and copy each persistent user directory, terminal directory, custom configuration directory, or other bind mount outside `ROOT_DIR`. Do not copy runtime interfaces such as `/var/run/docker.sock`.
-
-```bash
-EXTERNAL_SOURCE=/actual/persistent/path
-EXTERNAL_NAME=external-data
-sudo tar --numeric-owner --acls --xattrs \
-  -cpf "$BACKUP_DIR/$EXTERNAL_NAME.tar" \
-  -C "$(dirname "$EXTERNAL_SOURCE")" "$(basename "$EXTERNAL_SOURCE")"
-```
-
-Then archive every Docker named volume in the inventory. Prepare a trusted helper image containing GNU tar in advance; do not wait until the upgrade window to download it in an offline environment.
-
-```bash
-BACKUP_HELPER_IMAGE=ubuntu:24.04
-docker image inspect "$BACKUP_HELPER_IMAGE" >/dev/null
-mkdir -p "$BACKUP_DIR/volumes"
-
-while IFS= read -r volume; do
-  test -n "$volume" || continue
-  docker run --rm --network none --user 0 \
-    -v "$volume:/source:ro" "$BACKUP_HELPER_IMAGE" \
-    tar --numeric-owner --acls --xattrs -cpf - -C /source . \
-    > "$BACKUP_DIR/volumes/$volume.tar"
-done < "$BACKUP_DIR/volumes.txt"
-```
-
-This procedure does not create SHA-256 files. Check the command exit status, archive readability, and space usage instead:
-
-```bash
-test -s "$BACKUP_DIR/root-dir.tar"
-tar -tf "$BACKUP_DIR/root-dir.tar" >/dev/null
-for archive in "$BACKUP_DIR"/volumes/*.tar; do
-  test -f "$archive" || continue
-  tar -tf "$archive" >/dev/null
-done
-du -sh "$ROOT_DIR" "$BACKUP_DIR"
-```
+The script directly copies files from `ROOT_DIR` and the Docker named volumes. It does not use `sudo` and does not create compressed archives or SHA-256 files. Follow progress through `[INFO]` messages. The backup is complete only when `[PASS] Backup complete: <path>` appears; `<path>` is the actual backup directory. If `[ERROR]` appears, do not use the incomplete directory printed by the script.
 
 ## 2. Perform the Upgrade
 

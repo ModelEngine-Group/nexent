@@ -1,120 +1,34 @@
 # Nexent Docker 升级指南
 
-本文适用于使用 Docker Compose 部署的 Nexent。建议在无人使用或业务低峰窗口执行，尽量减少备份和升级期间的新请求与数据写入。这是操作建议，不要求检测在线用户、拦截请求或停止容器。
+本文适用于使用 Docker Compose 部署的 Nexent。建议在无人使用或业务低峰窗口执行。备份前必须停止业务写入，但不需要停止容器。
 
-> ⚠️ 本文按照“容器保持运行，直接复制持久化文件”的方式生成升级前副本。如果复制期间 PostgreSQL、Elasticsearch、Redis 或 MinIO 仍在写入，副本可能不属于同一时间点，不保证能够直接恢复。
+> ⚠️ 如果复制期间仍有业务写入，PostgreSQL、Elasticsearch、Redis 和 MinIO 等组件的数据可能不属于同一时间点，备份可能无法恢复。
 
 ## 1. 升级前准备
 
-### 1.1 记录版本与部署配置
+### 1.1 升级前检查
 
-先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。以下命令不要求仓库位于某个固定系统路径。`BACKUP_BASE` 必须位于 `ROOT_DIR` 之外。
-
-```bash
-set -euo pipefail
-
-TARGET_VERSION=X.Y.Z
-BACKUP_BASE=/backup/nexent
-STAMP=$(date -u +%Y%m%d-%H%M%S)
-BACKUP_DIR="$BACKUP_BASE/docker-$STAMP"
-
-mkdir -p "$BACKUP_DIR/config"
-
-set -a
-source deploy/env/.env
-set +a
-: "${ROOT_DIR:?ROOT_DIR is not set in deploy/env/.env}"
-ROOT_DIR=$(cd "$ROOT_DIR" && pwd)
-
-printf 'target_version=%s\n' "$TARGET_VERSION" > "$BACKUP_DIR/version.txt"
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git rev-parse HEAD >> "$BACKUP_DIR/version.txt"
-  git status --short > "$BACKUP_DIR/git-status.txt"
-fi
-cp -p deploy/env/.env "$BACKUP_DIR/config/deploy.env"
-if test -f deploy/env/monitoring.env; then
-  cp -p deploy/env/monitoring.env "$BACKUP_DIR/config/monitoring.env"
-fi
-if test -f deploy/docker/deploy.options; then
-  cp -p deploy/docker/deploy.options "$BACKUP_DIR/config/docker-deploy.options"
-fi
-```
-
-这些配置和清单可能包含密码或令牌，只应保存到受限目录，不能提交到 Git 或公开工单。
-
-### 1.2 检查空间
+先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。调用备份脚本并指定 `ROOT_DIR` 之外的本地备份目录：
 
 ```bash
-du -sh "$ROOT_DIR"
-df -h "$ROOT_DIR" "$BACKUP_BASE"
-docker system df -v
+bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 ```
 
-确认备份目录可用空间大于待复制的持久化数据，Docker 数据盘还能容纳目标版本镜像。不要通过删除旧镜像、volume 或运行中容器来腾出升级空间。
+脚本会先回显 `ROOT_DIR`、本次部署使用的 named volumes、未压缩数据总量以及备份目录可用空间。出现 `[PASS] Pre-upgrade space check passed.` 表示空间充足；空间不足时脚本会在复制前输出 `[ERROR]` 并退出。数据不会压缩，因此空间检查按文件原始大小计算。
 
-### 1.3 复制持久化数据
+### 1.2 备份
 
-先保存本次部署实际使用的容器和挂载清单。已启用监控时，同时纳入 `monitor` Compose 项目。
+空间检查通过后，脚本会要求确认业务写入已经停止。确认前应停止用户操作、接口请求和定时任务等业务写入；容器保持运行，不需要执行 `docker stop` 或 `docker compose down`。
+
+交互执行时按提示输入 `y`。非交互执行时，只有在已经停止业务写入后才能显式确认：
 
 ```bash
-{
-  docker ps -q --filter label=com.docker.compose.project=nexent
-  docker ps -q --filter label=com.docker.compose.project=monitor
-} | sort -u > "$BACKUP_DIR/container-ids.txt"
-
-mapfile -t CONTAINERS < "$BACKUP_DIR/container-ids.txt"
-test "${#CONTAINERS[@]}" -gt 0
-docker inspect "${CONTAINERS[@]}" > "$BACKUP_DIR/containers.inspect.json"
-docker inspect --format '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' \
-  "${CONTAINERS[@]}" | sed '/^$/d' | sort -u > "$BACKUP_DIR/bind-mounts.txt"
-docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' \
-  "${CONTAINERS[@]}" | sed '/^$/d' | sort -u > "$BACKUP_DIR/volumes.txt"
+bash deploy/docker/backup.sh \
+  --backup-dir /mnt/backup/nexent \
+  --confirm-writes-stopped
 ```
 
-容器保持运行，直接归档 `ROOT_DIR`：
-
-```bash
-sudo tar --numeric-owner --acls --xattrs \
-  -cpf "$BACKUP_DIR/root-dir.tar" -C "$ROOT_DIR" .
-```
-
-检查 `bind-mounts.txt`，将不在 `ROOT_DIR` 内的用户目录、终端目录、自定义配置和其他持久化 bind mount 分别复制。不要复制 `/var/run/docker.sock` 等运行时接口。
-
-```bash
-EXTERNAL_SOURCE=/actual/persistent/path
-EXTERNAL_NAME=external-data
-sudo tar --numeric-owner --acls --xattrs \
-  -cpf "$BACKUP_DIR/$EXTERNAL_NAME.tar" \
-  -C "$(dirname "$EXTERNAL_SOURCE")" "$(basename "$EXTERNAL_SOURCE")"
-```
-
-再归档清单中的 Docker named volumes。提前准备可信且包含 GNU tar 的辅助镜像；离线环境不要等到升级窗口再下载。
-
-```bash
-BACKUP_HELPER_IMAGE=ubuntu:24.04
-docker image inspect "$BACKUP_HELPER_IMAGE" >/dev/null
-mkdir -p "$BACKUP_DIR/volumes"
-
-while IFS= read -r volume; do
-  test -n "$volume" || continue
-  docker run --rm --network none --user 0 \
-    -v "$volume:/source:ro" "$BACKUP_HELPER_IMAGE" \
-    tar --numeric-owner --acls --xattrs -cpf - -C /source . \
-    > "$BACKUP_DIR/volumes/$volume.tar"
-done < "$BACKUP_DIR/volumes.txt"
-```
-
-本流程不生成 SHA-256 文件。通过命令退出状态、归档可读性和空间占用核对复制结果：
-
-```bash
-test -s "$BACKUP_DIR/root-dir.tar"
-tar -tf "$BACKUP_DIR/root-dir.tar" >/dev/null
-for archive in "$BACKUP_DIR"/volumes/*.tar; do
-  test -f "$archive" || continue
-  tar -tf "$archive" >/dev/null
-done
-du -sh "$ROOT_DIR" "$BACKUP_DIR"
-```
+脚本会直接复制 `ROOT_DIR` 和 Docker named volumes 中的文件，不使用 `sudo`，不生成压缩包或 SHA-256 文件。通过 `[INFO]` 查看复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的未完成目录。
 
 ## 2. 执行升级
 
