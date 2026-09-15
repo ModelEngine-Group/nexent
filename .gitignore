@@ -96,3 +96,5 @@ agent_repository_frontend
 # Added by code-review-graph
 .code-review-graph/
 .agents/
+
+.codex/skills/openspec-*
