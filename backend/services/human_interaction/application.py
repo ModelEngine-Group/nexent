@@ -5,6 +5,12 @@ import json
 import time
 from functools import lru_cache
 
+from fastapi.responses import StreamingResponse
+from nexent.core.concurrency import run_blocking
+from nexent.core.human_interaction.contracts import RecoveryRequired, RunTerminated
+from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
+from nexent.core.human_interaction.runtime import HumanInteractionRuntime
+
 from consts.const import (
     HITL_ACCEPT_NEW_RUNS,
     HITL_ENABLED,
@@ -14,10 +20,6 @@ from consts.const import (
     HITL_WAIT_SECONDS,
 )
 from database.human_interaction_db import HumanInteractionRepository
-from fastapi.responses import StreamingResponse
-from nexent.core.human_interaction.contracts import RecoveryRequired, RunTerminated
-from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
-from nexent.core.human_interaction.runtime import HumanInteractionRuntime
 from nexent.scheduler import ClaimedJob, LeaseScheduler, SchedulerConfig
 
 from .crypto import PayloadCipher
@@ -69,11 +71,15 @@ async def authorize_run(payload, tenant_id, user_id):
     from management.services.agent.management import list_all_agent_info_impl
     from services.conversation_management_service import get_conversation_service
 
-    membership = await asyncio.to_thread(get_user_tenant_by_user_id, user_id)
+    membership = await run_blocking(
+        "hitl-get_user_tenant_by_user_id", get_user_tenant_by_user_id, user_id, lane="control-io",
+        owner=__name__,
+    )
     if not membership or str(membership.get("tenant_id")) != tenant_id:
         raise InteractionError("The run owner no longer belongs to this tenant", 403)
-    conversation = await asyncio.to_thread(
-        get_conversation_service, payload["conversation_id"], user_id, tenant_id,
+    conversation = await run_blocking(
+        "hitl-get_conversation_service", get_conversation_service, payload["conversation_id"], user_id,
+        tenant_id, lane="control-io", owner=__name__,
     )
     if conversation is None:
         raise InteractionError("Conversation is no longer accessible", 403)
@@ -83,9 +89,12 @@ async def authorize_run(payload, tenant_id, user_id):
 
 
 async def execute_attempt(job, lease):
-    from agents.agent_run_manager import agent_run_manager
     from consts.model import AgentRequest
-    from management.services.agent.run import _stream_agent_chunks, prepare_agent_run
+    from management.services.agent.run import (
+        _stream_agent_chunks,
+        _unregister_agent_run_after_execution,
+        prepare_agent_run,
+    )
 
     service = get_service()
     identity = job.payload
@@ -115,6 +124,7 @@ async def execute_attempt(job, lease):
             agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
             language=saved["language"], allow_memory_search=True,
         )
+        port.stop_event = getattr(run_info, "stop_event", None)
         config = run_info.agent_config
         native = saved.get("runtime_mode") == "native-live-v1"
         runtime_type = LiveHumanInteractionRuntime if native else HumanInteractionRuntime
@@ -134,8 +144,9 @@ async def execute_attempt(job, lease):
             id="system:human_interaction", type="system", source=("runtime",), priority=100,
             content={"text": runtime_type.instructions},
         ).model_dump(mode="json"))
-        context_items = await asyncio.to_thread(
-            port.context_snapshot, prepared_items,
+        context_items = await run_blocking(
+            "hitl-port-context_snapshot", port.context_snapshot, prepared_items, lane="control-io",
+            owner=__name__,
         )
         run_info.context_input = ContextInput(
             items=tuple(ContextItemInput.model_validate(item) for item in context_items)
@@ -145,7 +156,7 @@ async def execute_attempt(job, lease):
             "models": [item.model_dump() for item in run_info.model_config_list],
             "metadata": run_info.runtime_metadata,
         })
-        await asyncio.to_thread(port.bind_catalog, catalog)
+        await run_blocking("hitl-port-bind_catalog", port.bind_catalog, catalog, lane="control-io", owner=__name__)
         # Clarification and action approval share one suspension mechanism, but
         # enabling clarification must not silently turn every tool into a high-risk action.
         # Deployments opt into the conservative approval gate independently.
@@ -159,49 +170,90 @@ async def execute_attempt(job, lease):
         ):
             buffered_chunks.append(chunk)
             if len(buffered_chunks) >= 32 or time.monotonic() - last_flush >= 0.25:
-                await asyncio.to_thread(port.emit_chunks, buffered_chunks)
+                await run_blocking(
+                    "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks, lane="control-io",
+                    owner=__name__,
+                )
                 buffered_chunks = []
                 last_flush = time.monotonic()
         if buffered_chunks:
-            await asyncio.to_thread(port.emit_chunks, buffered_chunks)
-        await asyncio.to_thread(port.finish, run_info.attempt_outcome or "failed")
+            await run_blocking(
+                "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks, lane="control-io",
+                owner=__name__,
+            )
+        await run_blocking(
+            "hitl-port-finish", port.finish, run_info.attempt_outcome or "failed", lane="control-io",
+            owner=__name__,
+        )
     except asyncio.CancelledError:
         if run_info is not None:
-            run_info.stop_event.set()
+            if run_info.cancellation_scope is not None:
+                run_info.cancellation_scope.cancel()
+            else:
+                run_info.stop_event.set()
         raise
     except RunTerminated:
         if port is not None:
             try:
-                await asyncio.to_thread(port.finish, "stopped")
+                await run_blocking("hitl-port-finish", port.finish, "stopped", lane="control-io", owner=__name__)
             except RunTerminated:
                 pass
     except RecoveryRequired:
         if port is not None:
-            await asyncio.to_thread(port.finish, "recovery_required")
+            await run_blocking(
+                "hitl-port-finish", port.finish, "recovery_required", lane="control-io", owner=__name__,
+            )
     except Exception:
         if port is not None:
-            await asyncio.to_thread(port.finish, "failed")
+            await run_blocking("hitl-port-finish", port.finish, "failed", lane="control-io", owner=__name__)
         raise
     finally:
         if run_info is not None:
-            agent_run_manager.unregister_agent_run(identity["conversation_id"], identity["user_id"],
-                                                   agent_run_info=run_info)
+            _unregister_agent_run_after_execution(
+                identity["conversation_id"], identity["user_id"],
+                run_info.attempt_outcome or "failed", agent_run_info=run_info,
+            )
+
+
+def is_conversation_running(conversation_id, user_id):
+    """Return whether an owner has an active durable run in this conversation."""
+    from database.user_tenant_db import get_user_tenant_by_user_id
+
+    if not HITL_ENABLED:
+        return False
+    membership = get_user_tenant_by_user_id(user_id) or {}
+    tenant_id = membership.get("tenant_id")
+    return bool(tenant_id) and get_service().repository.latest(
+        str(tenant_id), user_id, conversation_id, active_only=True,
+    ) is not None
 
 
 class HumanRunLeaseStore:
     async def recover(self):
-        await asyncio.to_thread(get_service().expire_waiting)
+        await run_blocking(
+            "hitl-get_service-expire_waiting", get_service().expire_waiting, lane="control-io",
+            owner=__name__,
+        )
 
     async def claim_due(self, owner_id, limit, lease_seconds):
         await self.recover()
-        rows = await asyncio.to_thread(get_service().repository.claim, owner_id, limit, lease_seconds)
+        rows = await run_blocking(
+            "hitl-get_service-repository-claim", get_service().repository.claim, owner_id, limit,
+            lease_seconds, lane="control-io", owner=__name__,
+        )
         return [ClaimedJob(job_id=row["run_id"], payload=row) for row in rows]
 
     async def renew(self, job_id, owner_id, lease_seconds):
-        return await asyncio.to_thread(get_service().repository.renew, job_id, owner_id, lease_seconds)
+        return await run_blocking(
+            "hitl-get_service-repository-renew", get_service().repository.renew, job_id, owner_id,
+            lease_seconds, lane="control-io", owner=__name__,
+        )
 
     async def release(self, job_id, owner_id):
-        return await asyncio.to_thread(get_service().repository.release, job_id, owner_id)
+        return await run_blocking(
+            "hitl-get_service-repository-release", get_service().repository.release, job_id, owner_id,
+            lane="control-io", owner=__name__,
+        )
 
 
 human_run_scheduler = LeaseScheduler(HumanRunLeaseStore(), execute_attempt, SchedulerConfig(
@@ -211,7 +263,10 @@ human_run_scheduler = LeaseScheduler(HumanRunLeaseStore(), execute_attempt, Sche
 
 async def stream_run(run_id, tenant_id, user_id, *, after=0):
     service = require_enabled()
-    snapshot = await asyncio.to_thread(service.snapshot, run_id, tenant_id, user_id)
+    snapshot = await run_blocking(
+        "hitl-service-snapshot", service.snapshot, run_id, tenant_id, user_id, lane="control-io",
+        owner=__name__,
+    )
     if after > snapshot["event_seq"]:
         raise InteractionError("Event cursor is ahead of the run", 422)
 
@@ -220,8 +275,14 @@ async def stream_run(run_id, tenant_id, user_id, *, after=0):
         yield "data: " + json.dumps({"type": "human_run", "content": snapshot}) + "\n\n"
         while True:
             # Re-check ownership and deadlines for reconnecting subscribers.
-            current = await asyncio.to_thread(service.snapshot, run_id, tenant_id, user_id)
-            rows = await asyncio.to_thread(service.repository.events, run_id, cursor)
+            current = await run_blocking(
+                "hitl-service-snapshot", service.snapshot, run_id, tenant_id, user_id, lane="control-io",
+                owner=__name__,
+            )
+            rows = await run_blocking(
+                "hitl-service-repository-events", service.repository.events, run_id, cursor,
+                lane="control-io", owner=__name__,
+            )
             for row in rows:
                 cursor = row["seq"]
                 payload = row["payload"]
@@ -265,20 +326,22 @@ async def start_run(request, tenant_id, user_id, language, *, skip_user_save=Fal
     reservation = agent_run_manager.reserve_agent_run(request.conversation_id, user_id)
     run_id = None
     try:
-        run_id = await asyncio.to_thread(
-            service.create,
-            tenant_id,
-            user_id,
-            request.conversation_id,
-            payload,
-            ready=False,
+        run_id = await run_blocking(
+            "hitl-service-create", service.create, tenant_id, user_id, request.conversation_id, payload,
+            ready=False, lane="control-io", owner=__name__,
         )
         if not skip_user_save:
             save_messages(request, "user", user_id, tenant_id)
-        await asyncio.to_thread(service.initialized, run_id, tenant_id, user_id, succeeded=True)
+        await run_blocking(
+            "hitl-service-initialized", service.initialized, run_id, tenant_id, user_id, succeeded=True,
+            lane="control-io", owner=__name__,
+        )
     except Exception:
         if run_id:
-            await asyncio.to_thread(service.initialized, run_id, tenant_id, user_id, succeeded=False)
+            await run_blocking(
+                "hitl-service-initialized", service.initialized, run_id, tenant_id, user_id, succeeded=False,
+                lane="control-io", owner=__name__,
+            )
         raise
     finally:
         agent_run_manager.release_agent_run_reservation(request.conversation_id, user_id, reservation)

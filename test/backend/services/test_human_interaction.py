@@ -660,6 +660,7 @@ async def test_attempt_coordinator_keeps_waiting_or_queued_decision(service, mon
     adapter = types.ModuleType("management.services.agent.run")
     adapter.prepare_agent_run = prepare
     adapter._stream_agent_chunks = stream
+    adapter._unregister_agent_run_after_execution = lambda *_, **__: None
     manager_module = types.ModuleType("agents.agent_run_manager")
     manager_module.agent_run_manager = types.SimpleNamespace(unregister_agent_run=lambda *_, **__: None)
     monkeypatch.setitem(sys.modules, "management.services.agent.run", adapter)
@@ -1277,7 +1278,8 @@ async def test_attachment_request_starts_native_run_without_losing_files(service
 
 
 @pytest.mark.asyncio
-async def test_native_attempt_preserves_sandbox_workspace_and_subagents(service, monkeypatch):
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_native_attempt_preserves_sandbox_workspace_and_subagents(service, monkeypatch, cancelled):
     from consts.model import AgentRequest
     from nexent.core.agents.context_input import ContextInput
     from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
@@ -1292,10 +1294,13 @@ async def test_native_attempt_preserves_sandbox_workspace_and_subagents(service,
     identity = service.repository.claim("worker", 1, 120)[0]
     config = types.SimpleNamespace(managed_agents=[object()], external_a2a_agents=[object()], tools=[],
                                    model_dump=lambda: {})
+    cancellations = []
+    unregisters = []
     sandbox = object()
     info = types.SimpleNamespace(agent_config=config, context_input=ContextInput(), model_config_list=[],
                                  runtime_metadata={}, sandbox_config=sandbox, workspace_path="/workspace/test",
-                                 minio_files=request.minio_files, attempt_outcome=None)
+                                 minio_files=request.minio_files, attempt_outcome=None,
+                                 cancellation_scope=types.SimpleNamespace(cancel=lambda: cancellations.append(True)))
 
     async def authorize(*_):
         pass
@@ -1310,21 +1315,34 @@ async def test_native_attempt_preserves_sandbox_workspace_and_subagents(service,
         assert info.workspace_path == "/workspace/test"
         assert info.minio_files == request.minio_files
         assert info.agent_config is config
+        if cancelled:
+            raise asyncio.CancelledError
         info.attempt_outcome = "completed"
         yield 'data: {"type":"final_answer","content":"Analyzed"}\n\n'
 
     adapter = types.ModuleType("management.services.agent.run")
     adapter.prepare_agent_run = prepare
     adapter._stream_agent_chunks = stream
+    adapter._unregister_agent_run_after_execution = lambda *args, **kwargs: unregisters.append((args, kwargs))
     manager_module = types.ModuleType("agents.agent_run_manager")
     manager_module.agent_run_manager = types.SimpleNamespace(unregister_agent_run=lambda *_, **__: None)
     monkeypatch.setitem(sys.modules, "management.services.agent.run", adapter)
     monkeypatch.setitem(sys.modules, "agents.agent_run_manager", manager_module)
     monkeypatch.setattr(application, "get_service", lambda: service)
     monkeypatch.setattr(application, "authorize_run", authorize)
-    await application.execute_attempt(ClaimedJob(job_id=run_id, payload=identity),
-                                      types.SimpleNamespace(owner_id="worker"))
-    assert service.snapshot(run_id, "tenant-a", "owner")["status"] == "COMPLETED"
+    attempt = application.execute_attempt(ClaimedJob(job_id=run_id, payload=identity),
+                                          types.SimpleNamespace(owner_id="worker"))
+    if cancelled:
+        with pytest.raises(asyncio.CancelledError):
+            await attempt
+        assert cancellations == [True]
+    else:
+        await attempt
+        assert cancellations == []
+        assert service.snapshot(run_id, "tenant-a", "owner")["status"] == "COMPLETED"
+    assert len(unregisters) == 1
+    assert unregisters[0][0][:2] == (7, "owner")
+    assert unregisters[0][1]["agent_run_info"] is info
 
 
 def test_native_guidance_interrupts_the_waiting_code_suffix(service):
@@ -1456,3 +1474,23 @@ def test_northbound_card_decision_and_replay_through_runtime_http(service, monke
     assert '"type": "human_interaction"' not in continuation.text
     assert '"status": "COMPLETED"' in continuation.text
     assert service.snapshot(run_id, "tenant-a", "owner")["conversation_id"] == 7
+
+
+@pytest.mark.parametrize("ready", [False, True])
+def test_managed_cancellation_exits_live_wait_without_executing_pending_action(service, ready):
+    from threading import Event
+    from nexent.core.human_interaction.contracts import AttemptSuspended, RunTerminated
+
+    run_id = create_run(service)
+    port = port_for(service, run_id)
+    with pytest.raises(AttemptSuspended):
+        port.dispatch("1:0", "send", {"value": "must-not-run"})
+    if ready:
+        decide_pending(service, run_id)
+    port.live_resume = True
+    port.stop_event = Event()
+    port.stop_event.set()
+    with pytest.raises(RunTerminated, match="managed execution was cancelled"):
+        port._wait_until_ready()
+    with service.repository.transaction(run_id) as tx:
+        assert tx.execution("1:0").status == "PREPARED"

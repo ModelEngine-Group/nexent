@@ -107,7 +107,7 @@ export interface Nl2AgentCardAction {
   result: Record<string, unknown>;
 }
 
-export type Nl2AgentDraftField = "description" | Nl2aPromptField;
+export type Nl2AgentDraftField = "name" | "description" | Nl2aPromptField;
 
 export type Nl2AgentStateEvent =
   | {
@@ -927,6 +927,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
     }
 
     const draftFields = new Set<Nl2AgentDraftField>([
+      "name",
       "description",
       ...promptFields,
     ]);

@@ -18,7 +18,6 @@ the new Memory architecture it is not exposed for model-directed calls:
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import logging
 from typing import Any
 
@@ -27,6 +26,7 @@ from pydantic import Field
 
 from ..utils.observer import MessageObserver
 from ..utils.tools_common_message import ToolSign, ToolCategory
+from ..concurrency import ManagedTaskSpec, get_current_thread_manager
 
 
 logger = logging.getLogger("search_memory_tool")
@@ -37,8 +37,20 @@ def _run_coroutine(coro):
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    manager = get_current_thread_manager()
+    if manager is None:
+        from ..agents.run_agent import _get_default_agent_thread_manager
+
+        manager = _get_default_agent_thread_manager()
+    return manager.run_sync(
+        "model-tool-io",
+        ManagedTaskSpec(
+            task_name="search-memory-coroutine",
+            owner="sdk-agent",
+        ),
+        asyncio.run,
+        coro,
+    )
 
 
 class SearchMemoryTool(Tool):

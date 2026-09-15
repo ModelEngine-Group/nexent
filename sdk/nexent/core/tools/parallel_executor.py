@@ -1,8 +1,10 @@
-import concurrent.futures
-import contextvars
+from concurrent.futures import TimeoutError as FutureTimeoutError
+import threading
 from typing import Any, Dict
 
 from smolagents.tools import Tool
+
+from ..concurrency import ManagedTaskSpec, get_current_thread_manager
 
 
 class ParallelExecutorTool(Tool):
@@ -128,34 +130,57 @@ def _execute_tasks(tasks, names, timeout, max_workers):
     n = len(tasks)
     results = [None] * n
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        future_to_idx: Dict[concurrent.futures.Future, int] = {}
-        for idx, t in enumerate(tasks):
-            func, kwargs = t[0], t[1]
-            label = names[idx] or f"task-{idx}"
-            if not isinstance(kwargs, dict):
-                results[idx] = (
-                    f"[{label}] Invalid: "
-                    f"kwargs must be a dict, got {type(kwargs).__name__}"
-                )
-                continue
-            if not callable(func):
-                results[idx] = (
-                    f"[{label}] Not callable: {type(func).__name__}"
-                )
-                continue
-            task_context = contextvars.copy_context()
-            future_to_idx[pool.submit(task_context.run, func, **kwargs)] = idx
+    manager = get_current_thread_manager()
+    if manager is None:
+        from ..agents.run_agent import _get_default_agent_thread_manager
 
-        for future, idx in future_to_idx.items():
-            label = names[idx] or f"task-{idx}"
-            try:
-                results[idx] = future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                results[idx] = f"[{label}] Timed out after {timeout}s."
-            except Exception:
-                import traceback as _tb
-                results[idx] = f"[{label}] Failed: {_tb.format_exc(limit=1)}"
+        manager = _get_default_agent_thread_manager()
+    requested_limit = max(1, int(max_workers))
+    admission = threading.BoundedSemaphore(requested_limit)
+    executions: Dict[str, tuple[Any, int]] = {}
+
+    def run_admitted(func, kwargs):
+        with admission:
+            return func(**kwargs)
+
+    for idx, t in enumerate(tasks):
+        func, kwargs = t[0], t[1]
+        label = names[idx] or f"task-{idx}"
+        if not isinstance(kwargs, dict):
+            results[idx] = (
+                f"[{label}] Invalid: "
+                f"kwargs must be a dict, got {type(kwargs).__name__}"
+            )
+            continue
+        if not callable(func):
+            results[idx] = f"[{label}] Not callable: {type(func).__name__}"
+            continue
+        execution = manager.submit(
+            "model-tool-io",
+            ManagedTaskSpec(
+                task_name="parallel-tool-call",
+                owner="sdk-agent",
+            ),
+            run_admitted,
+            func,
+            kwargs,
+        )
+        executions[execution.execution_id] = (execution, idx)
+
+    for execution, idx in executions.values():
+        label = names[idx] or f"task-{idx}"
+        try:
+            results[idx] = execution.future.result(timeout=timeout)
+        except FutureTimeoutError:
+            manager.cancel(
+                execution.execution_id,
+                reason="parallel tool deadline exceeded",
+                wait_timeout=0,
+            )
+            results[idx] = f"[{label}] Timed out after {timeout}s."
+        except Exception:
+            import traceback as _tb
+            results[idx] = f"[{label}] Failed: {_tb.format_exc(limit=1)}"
 
     return results
 

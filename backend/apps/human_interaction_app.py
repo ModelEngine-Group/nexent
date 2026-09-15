@@ -1,8 +1,7 @@
 """HTTP boundary for owner-scoped human decisions and independent run controls."""
 
-import asyncio
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from nexent.core.concurrency import run_blocking
 
 from consts.const import HITL_ACCEPT_NEW_RUNS, HITL_ENABLED, HITL_TOOL_APPROVAL_ENABLED
 from consts.exceptions import UnauthorizedError
@@ -27,7 +26,10 @@ async def _internal_identity(authorization: str = Header(None)):
 async def _call(identity, callback):
     user_id, tenant_id = identity
     try:
-        return await asyncio.to_thread(callback, require_enabled(), tenant_id, user_id)
+        return await run_blocking(
+            "hitl-callback", callback, require_enabled(), tenant_id, user_id, lane="control-io",
+            owner=__name__,
+        )
     except InteractionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 

@@ -15,7 +15,7 @@ from .models import digest, redact
 
 
 class RuntimeInteractionPort:
-    def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False):
+    def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False, stop_event=None):
         self.service = service
         self.repository = service.repository
         self.cipher = service.cipher
@@ -27,6 +27,7 @@ class RuntimeInteractionPort:
         self.authorize = authorize
         self.allowed_tools = frozenset(allowed_tools)
         self.live_resume = live_resume
+        self.stop_event = stop_event
         with self.transaction() as tx:
             self.checkpoint = self.cipher.open(tx.run.checkpoint)
             self.request_payload = self.cipher.open(tx.run.request_payload)
@@ -125,6 +126,8 @@ class RuntimeInteractionPort:
         """Park this worker while retaining the current Python continuation."""
         next_authorization_check = 0.0
         while True:
+            if self.stop_event is not None and self.stop_event.is_set():
+                raise RunTerminated("The managed execution was cancelled")
             now = time.monotonic()
             if now >= next_authorization_check:
                 self.authorize()
@@ -142,7 +145,10 @@ class RuntimeInteractionPort:
                     return
                 if tx.run.status != "WAITING_HUMAN":
                     raise RunTerminated("Run no longer permits live continuation")
-            time.sleep(0.2)
+            if self.stop_event is not None:
+                self.stop_event.wait(0.2)
+            else:
+                time.sleep(0.2)
 
     def dispatch(self, slot, tool, arguments, *, interaction=None):
         self.authorize()

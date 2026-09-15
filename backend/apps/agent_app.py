@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 from http import HTTPStatus
@@ -6,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
+from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID
@@ -34,6 +34,8 @@ from consts.exceptions import (
     AppException,
     UnauthorizedError,
     ValidationError,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
 )
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 
@@ -86,6 +88,22 @@ from utils.auth_utils import (
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
 logger = logging.getLogger("agent_app")
+
+
+def _runtime_overload_response(exc: Exception) -> JSONResponse:
+    if isinstance(exc, RuntimeQueueTimeoutError):
+        code = "RUNTIME_QUEUE_TIMEOUT"
+        retry_after = exc.retry_after_seconds
+        message = "Agent runtime queue wait timed out."
+    else:
+        code = "RUNTIME_CAPACITY_FULL"
+        retry_after = 1
+        message = "Agent runtime is at capacity."
+    return JSONResponse(
+        status_code=HTTPStatus.TOO_MANY_REQUESTS,
+        content={"code": code, "message": message, "retryable": True},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")
@@ -145,6 +163,8 @@ async def agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -190,6 +210,8 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
+        return _runtime_overload_response(exc)
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
         raise HTTPException(
@@ -283,11 +305,15 @@ async def northbound_agent_stop_api(
         if HITL_ENABLED:
             from services.human_interaction.application import get_service
             service = get_service()
-            durable_id = await asyncio.to_thread(
-                service.repository.latest, tenant_id, user_id, conversation_id, active_only=True,
+            durable_id = await run_blocking(
+                "hitl-service-repository-latest", service.repository.latest, tenant_id, user_id,
+                conversation_id, active_only=True, lane="control-io", owner=__name__,
             )
             if durable_id:
-                await asyncio.to_thread(service.control, durable_id, tenant_id, user_id, "terminate")
+                await run_blocking(
+                    "hitl-service-control", service.control, durable_id, tenant_id, user_id, "terminate",
+                    lane="control-io", owner=__name__,
+                )
         return stop_agent_tasks(conversation_id, user_id)
     except InteractionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

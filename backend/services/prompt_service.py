@@ -9,6 +9,7 @@ from typing import Optional, List
 from jinja2 import StrictUndefined, Template
 
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
+from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec
 
 from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
 from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
@@ -29,6 +30,7 @@ from management.services.agent.naming import (
 )
 from database.agent_db import update_agent
 from services.prompt_template_service import resolve_prompt_generate_template
+from services.thread_lifecycle_service import config_thread_manager
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
     get_prompt_optimize_prompt_template,
@@ -728,7 +730,7 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
         finally:
             stop_flags[tag] = True
 
-    threads = []
+    executions = []
     logger.info("Generating system prompt")
 
     # Base sections always generated
@@ -758,15 +760,50 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
         latest["few_shots"] = ""
 
     for tag, sys_prompt in prompt_configs:
-        thread = threading.Thread(target=run_and_flag, args=(tag, sys_prompt))
-        thread.start()
-        threads.append(thread)
+        execution = config_thread_manager.submit(
+            "evaluation",
+            ManagedTaskSpec(
+                task_name=f"prompt-generation-{tag}",
+                owner="config",
+            ),
+            run_and_flag,
+            tag,
+            sys_prompt,
+        )
+        executions.append(execution)
 
-    return threads, error_holder
+    return executions, error_holder
 
 
 def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
     """Stream prompt generation results"""
+
+    try:
+        yield from _stream_results_impl(
+            produce_queue, latest, stop_flags, threads, error_holder
+        )
+    finally:
+        for execution in threads:
+            if isinstance(execution, ManagedExecution):
+                config_thread_manager.cancel(
+                    execution.execution_id,
+                    reason="prompt result stream closed",
+                    wait_timeout=0,
+                )
+
+
+def _wait_prompt_execution(execution, timeout):
+    if isinstance(execution, ManagedExecution):
+        try:
+            execution.future.result(timeout=timeout)
+        except Exception:
+            return
+    else:
+        execution.join(timeout=timeout)
+
+
+def _stream_results_impl(produce_queue, latest, stop_flags, threads, error_holder):
+    """Yield prompt fragments while managed executions are active."""
 
     # Real-time streaming output for the first three sections
     last_results = {"duty": "", "constraint": "", "few_shots": "",
@@ -777,7 +814,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
         if error_holder.get("error"):
             # Wait for threads to finish
             for thread in threads:
-                thread.join(timeout=5)
+                _wait_prompt_execution(thread, timeout=5)
             raise error_holder["error"]
 
         try:
@@ -802,7 +839,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
 
     # Wait for all threads to complete
     for thread in threads:
-        thread.join(timeout=5)
+        _wait_prompt_execution(thread, timeout=5)
 
     # Output final results
     all_tags = ["duty", "constraint", "few_shots",

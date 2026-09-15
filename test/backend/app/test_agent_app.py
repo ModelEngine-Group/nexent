@@ -19,7 +19,13 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
+from consts.exceptions import (
+    ForbiddenError,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
+    UnauthorizedError,
+    ValidationError,
+)
 from consts.model import NL2AgentRunRequest
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
@@ -197,10 +203,45 @@ async def test_agent_run_api(mocker, mock_auth_header):
     mock_run_agent_stream.assert_called_once()
     assert "text/event-stream" in response.headers["content-type"]
 
-    # Check streamed content
     content = response.content.decode()
     assert "data: chunk1" in content
     assert "data: chunk2" in content
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code", "expected_retry_after"),
+    [
+        (RuntimeCapacityExceededError(), "RUNTIME_CAPACITY_FULL", "1"),
+        (RuntimeQueueTimeoutError(2.2), "RUNTIME_QUEUE_TIMEOUT", "3"),
+    ],
+)
+def test_ut_be_tlm_027_agent_run_overload_is_json_before_sse(
+    mocker,
+    mock_auth_header,
+    error,
+    expected_code,
+    expected_retry_after,
+):
+    mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock, side_effect=error)
+
+    response = runtime_client.post(
+        "/agent/run",
+        json={"agent_id": 1, "query": "test", "is_debug": True},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == expected_retry_after
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {
+        "code": expected_code,
+        "message": (
+            "Agent runtime is at capacity."
+            if expected_code == "RUNTIME_CAPACITY_FULL"
+            else "Agent runtime queue wait timed out."
+        ),
+        "retryable": True,
+    }
 
 
 @pytest.mark.asyncio
