@@ -201,6 +201,14 @@ def _raw_nonempty_str(raw: Dict[str, Any], key: str) -> Optional[str]:
     return str(value).strip()
 
 
+def _raw_forced_temperature(raw: Dict[str, Any]) -> Optional[float]:
+    """Read the provider-enforced sampling temperature from a raw catalog mapping."""
+    value = raw.get("forced_temperature")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _build_model_profile(
     *,
     provider_base_url: str,
@@ -257,6 +265,7 @@ def _build_model_profile(
         capability_profile_version=_raw_nonempty_str(raw, "capability_profile_version"),
         requires_appid=_raw_bool(raw, "requires_appid"),
         requires_access_token=_raw_bool(raw, "requires_access_token"),
+        forced_temperature=_raw_forced_temperature(raw),
     )
 
 
@@ -511,6 +520,9 @@ _CATALOG_DEFAULT_FIELD_MAP: Dict[str, str] = {
     "timeout_seconds": "timeout_seconds",
     "concurrency_limit": "concurrency_limit",
     "capability_profile_version": "capability_profile_version",
+    # Provider-enforced sampling temperature (reasoning-only models). Only
+    # fills when the user has not set a temperature themselves.
+    "temperature": "forced_temperature",
 }
 
 

@@ -2261,6 +2261,14 @@ class ModelCatalogProfile(BaseModel):
     capability_profile_version: Optional[str] = Field(None, description="Approved provider/model capability profile version")
     requires_appid: bool = Field(False, description="Whether the model requires model_appid auth (STT/TTS)")
     requires_access_token: bool = Field(False, description="Whether the model requires access_token auth (STT/TTS)")
+    forced_temperature: Optional[float] = Field(
+        None,
+        description=(
+            "Sampling temperature the provider enforces for this model "
+            "(reasoning-only models like kimi-k3 reject any other value). "
+            "Auto-filled into model records as the default temperature."
+        ),
+    )
 
 
 class ModelCatalogProviderInfo(BaseModel):

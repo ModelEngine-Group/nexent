@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict
 from unittest import mock
 
+import json
 import pytest
 
 
@@ -159,3 +160,64 @@ class TestModelCatalogLoaderDegradation:
         with mock.patch.object(loader, "MODEL_CATALOG_JSON_PATH", str(bad)):
             cat = loader.load_model_catalog(force_reload=True)
             assert cat["providers"] == {}
+
+class TestForcedTemperature:
+    """forced_temperature: provider-enforced sampling default for reasoning models."""
+
+    def _profile_via_loader(self, tmp_path: Path, forced_raw):
+        import configs.model_catalog_loader as loader
+
+        catalog = {
+            "version": "9.9.9",
+            "providers": {
+                "prov": {
+                    "display_name": "Prov",
+                    "base_url": "https://prov.example.com/v1",
+                    "models": {
+                        "kimi-k3": {
+                            "model_type": "llm",
+                            "context_window_tokens": 1048576,
+                            "max_output_tokens": 131072,
+                            **({"forced_temperature": forced_raw} if forced_raw is not None else {}),
+                        },
+                    },
+                },
+            },
+        }
+        path = tmp_path / "catalog.json"
+        path.write_text(json.dumps(catalog), encoding="utf-8")
+        with mock.patch.object(loader, "MODEL_CATALOG_JSON_PATH", str(path)):
+            loader.load_model_catalog(force_reload=True)
+            return loader.get_model_profile("prov", "kimi-k3")
+
+    def test_profile_parses_forced_temperature(self, tmp_path: Path):
+        profile = self._profile_via_loader(tmp_path, 1)
+        assert profile is not None
+        assert profile.forced_temperature == 1.0
+
+    def test_profile_rejects_non_numeric_forced_temperature(self, tmp_path: Path):
+        profile = self._profile_via_loader(tmp_path, "hot")
+        assert profile is not None
+        assert profile.forced_temperature is None
+
+    def test_apply_catalog_defaults_fills_temperature(self, tmp_path: Path):
+        import configs.model_catalog_loader as loader
+
+        profile = self._profile_via_loader(tmp_path, 1)
+        assert profile is not None
+
+        user_data = {"model_name": "kimi-k3", "model_type": "llm"}
+        applied = loader.apply_catalog_defaults(user_data, "prov")
+        assert applied is True
+        assert user_data["temperature"] == 1.0
+
+    def test_apply_catalog_defaults_keeps_user_temperature(self, tmp_path: Path):
+        import configs.model_catalog_loader as loader
+
+        profile = self._profile_via_loader(tmp_path, 1)
+        assert profile is not None
+
+        user_data = {"model_name": "kimi-k3", "model_type": "llm", "temperature": 0.3}
+        loader.apply_catalog_defaults(user_data, "prov")
+        # A temperature the user explicitly set is never overridden.
+        assert user_data["temperature"] == 0.3
