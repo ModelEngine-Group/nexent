@@ -146,6 +146,91 @@ def _native_tool_call_key(name: str, arguments: Dict[str, Any]) -> str:
     )
 
 
+def _code_action_key(code: str) -> str:
+    """Build a stable identity for an executable code action.
+
+    ``ast.dump`` ignores formatting-only differences while preserving names,
+    literals, call order, and arguments.  Fall back to stripped source for the
+    rare action that the executor accepts but Python's parser cannot normalize.
+    """
+    try:
+        return ast.dump(ast.parse(code), annotate_fields=True, include_attributes=False)
+    except (SyntaxError, ValueError, TypeError):
+        return str(code).strip()
+
+
+def _code_tool_call_keys(code: str, tool_names: set[str]) -> list[str]:
+    """Return stable identities for known tool calls embedded in code."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, TypeError):
+        return []
+    keys: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in tool_names:
+            keys.append(ast.dump(node, annotate_fields=True, include_attributes=False))
+    return keys
+
+
+def _extract_markdown_tool_action(text: str, tool_names: set[str]) -> str | None:
+    """Accept one Markdown Python fence only when it is clearly an action.
+
+    This narrow compatibility path avoids executing Python examples copied from
+    retrieved content. A registered tool call still requires action intent. A
+    plain Python action (for example, writing a workspace script) is accepted
+    only when the immediately preceding line is an explicit ``Code:`` marker.
+    """
+    matches = list(
+        re.finditer(
+            r"(?is)```[ \t]*(?:(?:python|py)[ \t]*)?\n(.*?)```",
+            text or "",
+        )
+    )
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    candidate = match.group(1).strip()
+    try:
+        ast.parse(candidate)
+    except (SyntaxError, ValueError, TypeError):
+        return None
+    preceding_line = (text or "")[:match.start()].rstrip().split("\n")[-1]
+    marker_before_fence = re.search(
+        r"(?i)^\s*(?:代码|code)\s*[:：]\s*$",
+        preceding_line,
+    )
+    has_tool_action = bool(_code_tool_call_keys(candidate, tool_names))
+    direct_calls = {
+        node.func.id
+        for node in ast.walk(ast.parse(candidate))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    safe_local_calls = {"open", "print", "len", "str", "bytes", "dict", "list", "set", "tuple"}
+    has_unknown_direct_call = bool(direct_calls - tool_names - safe_local_calls)
+    if marker_before_fence and not has_tool_action and has_unknown_direct_call:
+        return None
+    if not marker_before_fence and not (has_tool_action and _ACTION_INTENT_RE.search(text)):
+        return None
+    return candidate
+
+
+def _extract_plain_tool_action(text: str, tool_names: set[str]) -> str | None:
+    """Extract an unfenced action introduced by an explicit ``Code:`` marker."""
+    matches = list(re.finditer(r"(?im)^\s*(?:代码|code)\s*[:：]\s*", text or ""))
+    if not matches:
+        return None
+    candidate = text[matches[-1].end():].strip()
+    if not candidate or "```" in candidate or "<code>" in candidate.casefold():
+        return None
+    try:
+        ast.parse(candidate)
+    except (SyntaxError, ValueError, TypeError):
+        return None
+    if not _code_tool_call_keys(candidate, tool_names):
+        return None
+    return candidate
+
+
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
 
@@ -369,6 +454,11 @@ def _looks_like_incomplete_action_output(
         for tool_name in available_tool_names or ()
         if tool_name
     )
+    # Markdown Python fences are display-only in this protocol.  When such a
+    # fence contains a known tool call, it is a malformed action—not a final
+    # answer—even if the model prefaced it with prose.
+    if mentioned_tool and re.search(r"(?i)```\s*(?:python|py)\b", text):
+        return True
     return mentioned_tool and bool(_ACTION_INTENT_RE.search(text))
 
 
@@ -621,6 +711,10 @@ class CoreAgent(CodeAgent):
         self._native_executed_call_keys: set[str] = set()
         self._native_call_results: Dict[str, Dict[str, Any]] = {}
         self._consecutive_duplicate_native_calls = 0
+        self._code_executed_action_keys: set[str] = set()
+        self._code_action_results: Dict[str, Dict[str, Any]] = {}
+        self._code_executed_tool_call_keys: set[str] = set()
+        self._code_tool_call_results: Dict[str, Dict[str, Any]] = {}
         self._active_action_protocol = self.action_protocol
         self._native_python_interpreter_tool = NativePythonInterpreterTool()
         # Override smolagent default to prevent extracting ```python blocks from KB content.
@@ -1059,6 +1153,9 @@ Additional Args:
             native_tool_name: str | None = None
             native_call_key: str | None = None
             duplicate_native_result: Dict[str, Any] | None = None
+            code_action_key: str | None = None
+            code_tool_call_keys: list[str] = []
+            duplicate_code_result: Dict[str, Any] | None = None
             if action_protocol == "native":
                 code_action, native_arguments, native_call_id = parse_native_tool_call(
                     chat_message,
@@ -1091,12 +1188,41 @@ Additional Args:
                 code_action = json.loads(model_output)["code"]
                 code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
             else:
-                code_action = parse_code_blobs(model_output)
+                try:
+                    code_action = parse_code_blobs(model_output)
+                except ValueError:
+                    code_action = _extract_markdown_tool_action(
+                        model_output,
+                        self._known_tool_names(),
+                    )
+                    if code_action is None:
+                        code_action = _extract_plain_tool_action(
+                            model_output,
+                            self._known_tool_names(),
+                        )
+                    if code_action is None:
+                        raise
             code_action = fix_final_answer_code(code_action)
             code_action = _remove_parallel_executor_import(code_action)
+            if action_protocol == "code":
+                code_action_key = _code_action_key(code_action)
+                executed_code_keys = getattr(self, "_code_executed_action_keys", set())
+                if code_action_key in executed_code_keys:
+                    duplicate_code_result = getattr(self, "_code_action_results", {}).get(code_action_key, {})
+                code_tool_call_keys = _code_tool_call_keys(code_action, self._known_tool_names())
+                executed_tool_keys = getattr(self, "_code_executed_tool_call_keys", set())
+                repeated_tool_key = next(
+                    (key for key in code_tool_call_keys if key in executed_tool_keys),
+                    None,
+                )
+                if repeated_tool_key is not None:
+                    duplicate_code_result = getattr(self, "_code_tool_call_results", {}).get(
+                        repeated_tool_key,
+                        duplicate_code_result or {},
+                    )
             memory_step.code_action = code_action
             # Record parsing results
-            if action_protocol == "code" or native_tool_name != "final_answer":
+            if duplicate_code_result is None and (action_protocol == "code" or native_tool_name != "final_answer"):
                 self.observer.add_message(
                     self.agent_name,
                     ProcessType.PARSE,
@@ -1155,6 +1281,28 @@ Additional Args:
             id=native_call_id or f"call_{len(self.memory.steps)}",
         )
         memory_step.tool_calls = [tool_call]
+        if duplicate_code_result is not None:
+            previous_observation = str(
+                duplicate_code_result.get("observation")
+                or "The earlier action completed without textual output."
+            )
+            memory_step.observations = (
+                "Duplicate code action skipped; it was not executed again. "
+                "At least one tool call in this action already ran. Reuse its result, remove every completed "
+                "tool call, and submit only the next uncompleted workflow step. Do not repeat or merely describe "
+                "an action. If a workspace script is needed, "
+                "create it now with executable Python inside <code>...</code> and a bare filename; otherwise "
+                "call a different tool or final_answer.\n"
+                f"Previous result:\n{previous_observation}"
+            )
+            memory_step.action_output = duplicate_code_result.get("output")
+            self.observer.add_message(
+                self.agent_name,
+                ProcessType.EXECUTION_LOGS,
+                memory_step.observations,
+            )
+            yield ActionOutput(output=memory_step.action_output, is_final_answer=False)
+            return
         if duplicate_native_result is not None:
             previous_observation = str(
                 duplicate_native_result.get("observation")
@@ -1191,6 +1339,10 @@ Additional Args:
             return
         if native_call_key is not None:
             self._native_executed_call_keys.add(native_call_key)
+        if code_action_key is not None:
+            getattr(self, "_code_executed_action_keys", set()).add(code_action_key)
+        for key in code_tool_call_keys:
+            getattr(self, "_code_executed_tool_call_keys", set()).add(key)
 
         # Execute
         self.logger.log_code(title="Executing parsed code:",
@@ -1262,6 +1414,16 @@ Additional Args:
                     "observation": memory_step.observations,
                     "output": None,
                 }
+            if code_action_key is not None:
+                getattr(self, "_code_action_results", {})[code_action_key] = {
+                    "observation": memory_step.observations,
+                    "output": None,
+                }
+            for key in code_tool_call_keys:
+                getattr(self, "_code_tool_call_results", {})[key] = {
+                    "observation": memory_step.observations,
+                    "output": None,
+                }
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,
@@ -1326,6 +1488,16 @@ Additional Args:
         memory_step.action_output = code_output.output
         if native_call_key is not None:
             self._native_call_results[native_call_key] = {
+                "observation": memory_step.observations,
+                "output": code_output.output,
+            }
+        if code_action_key is not None:
+            getattr(self, "_code_action_results", {})[code_action_key] = {
+                "observation": memory_step.observations,
+                "output": code_output.output,
+            }
+        for key in code_tool_call_keys:
+            getattr(self, "_code_tool_call_results", {})[key] = {
                 "observation": memory_step.observations,
                 "output": code_output.output,
             }
@@ -1405,6 +1577,10 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             getattr(self, "_native_executed_call_keys", set()).clear()
             getattr(self, "_native_call_results", {}).clear()
             self._consecutive_duplicate_native_calls = 0
+            getattr(self, "_code_executed_action_keys", set()).clear()
+            getattr(self, "_code_action_results", {}).clear()
+            getattr(self, "_code_executed_tool_call_keys", set()).clear()
+            getattr(self, "_code_tool_call_results", {}).clear()
             self._active_action_protocol = getattr(self, "action_protocol", "code")
         self.context_runtime.prepare_run(
             memory=self.memory,

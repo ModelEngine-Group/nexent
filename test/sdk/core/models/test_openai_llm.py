@@ -54,6 +54,13 @@ openai_llm_module = importlib.util.module_from_spec(spec)
 sys.modules[MODULE_NAME] = openai_llm_module
 assert spec and spec.loader
 
+
+def test_strip_leading_think_artifact_keeps_only_visible_answer():
+    assert openai_llm_module._strip_leading_think_artifact(
+        "ink.\n</think>\n\nVisible answer"
+    ) == "Visible answer"
+    assert openai_llm_module._strip_leading_think_artifact("Visible answer") == "Visible answer"
+
 def _setup_stubs():
     # Stub openai ChatCompletionMessage
     chat_mod = types.ModuleType("openai.types.chat.chat_completion_message")
@@ -1420,10 +1427,11 @@ def test_call_emits_trailing_reasoning_before_tool_boundary(openai_model_instanc
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
         openai_model_instance.client.chat.completions.create.return_value = [chunk]
-        openai_model_instance.__call__([{"role": "user", "content": "go"}])
+        result = openai_model_instance.__call__([{"role": "user", "content": "go"}])
 
     event_names = [event[0] for event in ordered_events.mock_calls]
     assert event_names.index("reasoning") < event_names.index("tool_start")
+    assert result.reasoning_content == "I have read the guide."
 
 
 @pytest.mark.parametrize(

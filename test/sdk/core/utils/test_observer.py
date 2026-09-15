@@ -1275,7 +1275,7 @@ class TestObserverThinkTagFragmentation:
         assert not observer.in_think_mode
 
     def test_think_end_tag_only(self):
-        """Test when </think> appears without preceding <think>"""
+        """An orphan reasoning terminator is not exposed as visible output."""
         observer = MessageObserver()
 
         # Only end tag, no start
@@ -1284,10 +1284,22 @@ class TestObserverThinkTagFragmentation:
         # Should not be in think mode
         assert not observer.in_think_mode
 
-        # Flush should process normally
+        # Flush must not leak the provider artifact.
         observer.flush_remaining_tokens()
         messages = observer.get_cached_message()
-        assert len(messages) >= 1
+        assert messages == []
+
+    def test_orphan_think_tail_keeps_only_following_visible_content(self):
+        observer = MessageObserver()
+
+        observer.add_model_new_token("ink.\n</think>\nVisible answer")
+        observer.flush_remaining_tokens()
+
+        messages = observer.get_cached_message()
+        combined = "".join(str(message) for message in messages)
+        assert "ink." not in combined
+        assert "</think>" not in combined
+        assert "Visible answer" in combined
 
     def test_think_content_only(self):
         """Test when only <think> content is received"""

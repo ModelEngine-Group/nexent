@@ -76,6 +76,85 @@ def test_native_call_identity_includes_canonical_arguments():
     assert first != different
 
 
+def test_code_action_identity_ignores_formatting_only_differences():
+    first = core_agent_module._code_action_key(
+        'result = read_skill_md("docx")\nprint(result)'
+    )
+    same = core_agent_module._code_action_key(
+        "result=read_skill_md( 'docx' )\nprint( result )"
+    )
+    different = core_agent_module._code_action_key(
+        'result = read_skill_md("pdf")\nprint(result)'
+    )
+
+    assert first == same
+    assert first != different
+
+
+def test_code_tool_call_identity_finds_repeated_call_inside_larger_action():
+    first = core_agent_module._code_tool_call_keys(
+        'result = read_skill_md("docx")\nprint(result)',
+        {"read_skill_md", "run_skill_script"},
+    )
+    larger = core_agent_module._code_tool_call_keys(
+        'result = read_skill_md("docx")\nprint(result)\nopen("build.js", "w").write("x")',
+        {"read_skill_md", "run_skill_script"},
+    )
+
+    assert len(first) == 1
+    assert first[0] in larger
+
+
+def test_extract_markdown_tool_action_requires_registered_tool_and_action_marker():
+    output = (
+        "思考：我将读取技能。\n代码：\n"
+        '```python\nresult = read_skill_md("docx")\nprint(result)\n```'
+    )
+
+    assert core_agent_module._extract_markdown_tool_action(
+        output, {"read_skill_md"}
+    ) == 'result = read_skill_md("docx")\nprint(result)'
+    assert core_agent_module._extract_markdown_tool_action(
+        output.replace("```python", "```"), {"read_skill_md"}
+    ) == 'result = read_skill_md("docx")\nprint(result)'
+    assert core_agent_module._extract_markdown_tool_action(
+        output, {"upload_to_s3"}
+    ) is None
+    assert core_agent_module._extract_markdown_tool_action(
+        'Example:\n```python\nread_skill_md("docx")\n```', {"read_skill_md"}
+    ) is None
+
+
+def test_extract_markdown_action_accepts_workspace_file_write_after_exact_marker():
+    action = "with open('build_docx.js', 'w') as f:\n    f.write('source')"
+
+    assert core_agent_module._extract_markdown_tool_action(
+        f"思考：现在保存脚本。\n代码：\n```python\n{action}\n```",
+        {"run_skill_script"},
+    ) == action
+    assert core_agent_module._extract_markdown_tool_action(
+        f"Here is an example:\n```python\n{action}\n```",
+        {"run_skill_script"},
+    ) is None
+
+
+def test_extract_plain_tool_action_requires_code_marker_and_registered_tool():
+    output = (
+        "思考：文件已生成，现在上传。\n\n代码：\n"
+        'upload_result = upload_to_s3(file_path="document.docx")\nprint(upload_result)'
+    )
+
+    assert core_agent_module._extract_plain_tool_action(
+        output, {"upload_to_s3"}
+    ) == 'upload_result = upload_to_s3(file_path="document.docx")\nprint(upload_result)'
+    assert core_agent_module._extract_plain_tool_action(
+        output, {"read_skill_md"}
+    ) is None
+    assert core_agent_module._extract_plain_tool_action(
+        'Example:\nupload_to_s3(file_path="document.docx")', {"upload_to_s3"}
+    ) is None
+
+
 @pytest.mark.parametrize("tool_calls", [[], [object(), object()]])
 def test_parse_native_tool_call_requires_exactly_one_call(tool_calls):
     with pytest.raises(ValueError, match="exactly one native tool call"):

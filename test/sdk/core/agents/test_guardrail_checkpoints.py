@@ -289,6 +289,8 @@ def test_step_stream_rejects_non_executable_action_record(model_output):
     """Action-shaped parse failures must retry through AgentError, not terminate as final answers."""
     rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
     agent = _make_step_agent(rule, messages=[_msg("user", "solve this")], model_output=model_output)
+    agent.tools = {"read_skill_md": MagicMock()}
+    agent.managed_agents = {}
     action_step = MagicMock()
     action_step.is_final_answer = False
 
@@ -364,6 +366,40 @@ def test_step_stream_checkpoint2_mask():
     obs = str(action_step.observations)
     assert "机密信息" not in obs
     assert "***" in obs
+
+
+def test_step_stream_skips_duplicate_code_action_without_reexecuting():
+    rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
+    agent = _make_step_agent(
+        rule,
+        messages=[_msg("user", "create a document")],
+        model_output='<code>result = read_skill_md("docx")\nprint(result)</code>',
+    )
+    agent._code_executed_action_keys = set()
+    agent._code_action_results = {}
+    agent._code_executed_tool_call_keys = set()
+    agent._code_tool_call_results = {}
+    agent.tools = {"read_skill_md": MagicMock()}
+    agent.managed_agents = {}
+    agent.verification_controller.config.step_verification_enabled = False
+    agent.verification_controller.config.final_verification_enabled = False
+    code_output = MagicMock(output="docx instructions", logs="", is_final_answer=False)
+    agent.python_executor.return_value = code_output
+
+    first_step = MagicMock()
+    list(agent._step_stream(first_step))
+    agent.model.return_value.content = (
+        '<code>result = read_skill_md("docx")\nprint(result)\n'
+        'open("build_docx.js", "w").write("script")</code>'
+    )
+    second_step = MagicMock()
+    duplicate_outputs = list(agent._step_stream(second_step))
+
+    assert agent.python_executor.call_count == 1
+    assert len(duplicate_outputs) == 1
+    assert duplicate_outputs[0].is_final_answer is False
+    assert "Duplicate code action skipped" in second_step.observations
+    assert "docx instructions" in second_step.observations
 
 
 def test_step_stream_checkpoint3_except_block():

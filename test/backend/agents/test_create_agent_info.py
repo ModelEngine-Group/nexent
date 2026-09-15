@@ -550,19 +550,32 @@ from backend.agents.create_agent_info import (
 )
 
 
-@pytest.mark.parametrize("model_name", ["deepseek-v4-flash", "QWEN3.8-MAX", "repo/deepseek-v4-flash"])
+@pytest.mark.parametrize(
+    "model_name",
+    ["deepseek-v4-flash", "QWEN3.8-MAX", "qwen3.7-plus", "repo/deepseek-v4-flash", "doubao-seed-1.8"],
+)
 def test_resolve_action_protocol_enables_validated_native_models(model_name):
     assert resolve_action_protocol({"model_name": model_name}) == "native"
 
 
-def test_resolve_action_protocol_prefers_native_for_unknown_models():
-    assert resolve_action_protocol({"model_name": "gpt-compatible-unknown"}) == "native"
-    assert resolve_action_protocol(None) == "native"
+@pytest.mark.parametrize(
+    "model_name",
+    ["gpt-compatible-unknown", "Qwen/Qwen2.5-32B-Instruct", "Qwen/Qwen3.6-27B"],
+)
+def test_resolve_action_protocol_uses_code_for_unvalidated_models(model_name):
+    assert resolve_action_protocol({"model_name": model_name}) == "code"
 
 
-def test_resolve_native_tool_choice_defaults_to_auto_for_every_model():
+def test_resolve_action_protocol_uses_code_without_model_metadata():
+    assert resolve_action_protocol(None) == "code"
+
+
+def test_resolve_native_tool_choice_uses_model_specific_policy():
     assert resolve_native_tool_choice({"model_name": "qwen3.8-max"}) == "auto"
-    assert resolve_native_tool_choice({"model_name": "deepseek-v4-flash"}) == "auto"
+    assert resolve_native_tool_choice({"model_name": "qwen3.7-plus"}) == "auto"
+    assert resolve_native_tool_choice({"model_name": "deepseek-v4-flash"}) == "required"
+    assert resolve_native_tool_choice({"display_name": "deepseek-ai/DeepSeek-V4-Pro"}) == "required"
+    assert resolve_native_tool_choice({"model_name": "doubao-seed-2-1-pro"}) == "required"
     assert resolve_native_tool_choice(None) == "auto"
 
 

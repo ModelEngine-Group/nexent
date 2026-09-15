@@ -177,6 +177,7 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \
+        fonts-noto-cjk \
         libgomp1 \
         libreoffice-calc \
         libreoffice-impress \

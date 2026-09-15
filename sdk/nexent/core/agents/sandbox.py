@@ -1586,6 +1586,12 @@ class _DockerKernelLease:
         self.host = container_executor.host
         self.port = container_executor.port
         self.kernel_id = _create_kernel_http(f"{self.base_url}/api/kernels", self.logger)
+        # A lease opens a short-lived WebSocket for every execution.  Reusing a
+        # Kernel Gateway session id makes the gateway enter its reconnect /
+        # buffered-message path between calls.  After a Runtime restart this
+        # can strand a completed execution in the gateway buffer: the kernel is
+        # idle, but the client never receives its stream or terminal status.
+        # Keep the last id for diagnostics, but mint a new one per connection.
         self._channel_session_id = secrets.token_hex(16)
         self.ws_url = self._build_channels_url(self.kernel_id)
         self._receive_timeout_seconds = float(receive_timeout_seconds)
@@ -1637,6 +1643,9 @@ class _DockerKernelLease:
             raise RuntimeError("Sandbox kernel lease is already closed")
         if self._unhealthy:
             self._replace_unhealthy_kernel()
+
+        self._channel_session_id = secrets.token_hex(16)
+        self.ws_url = self._build_channels_url(self.kernel_id)
 
         with closing(
             create_connection(self.ws_url, timeout=self._receive_timeout_seconds)
@@ -2831,16 +2840,50 @@ class SandboxPoolManager:
                 network_mode,
             )
         except Exception as exc:
-            logger_.error(
-                "DockerExecutor construction failed: %s. "
-                "Falling back to LocalPythonExecutor.",
-                exc,
+            # A Runtime restart can leave the stable system container alive while
+            # its control-network DNS is still converging.  If creation races that
+            # container, recover the reserved owner instead of silently losing the
+            # Docker skill runtime and falling back to the host interpreter.
+            is_reserved_name_conflict = (
+                config.scope == SandboxScope.SYSTEM
+                and "409" in str(exc)
+                and SANDBOX_CONTAINER_NAME in str(exc)
             )
-            return _wrap_executor(
-                _make_local_executor(config.extra_kwargs.get("additional_authorized_imports", [])),
-                config,
-                logger_,
-            )
+            if is_reserved_name_conflict:
+                logger_.warning(
+                    "System sandbox creation found an existing reserved container; "
+                    "retrying persisted-container recovery"
+                )
+                executor = self._recover_docker_container(
+                    config,
+                    logger_,
+                    host_tools_exist,
+                )
+                if executor is not None:
+                    executor._nexent_sandbox_config = config
+                    executor._nexent_backend = "docker"
+                else:
+                    logger_.error(
+                        "DockerExecutor construction failed after conflict recovery: %s. "
+                        "Falling back to LocalPythonExecutor.",
+                        exc,
+                    )
+                    return _wrap_executor(
+                        _make_local_executor(config.extra_kwargs.get("additional_authorized_imports", [])),
+                        config,
+                        logger_,
+                    )
+            else:
+                logger_.error(
+                    "DockerExecutor construction failed: %s. "
+                    "Falling back to LocalPythonExecutor.",
+                    exc,
+                )
+                return _wrap_executor(
+                    _make_local_executor(config.extra_kwargs.get("additional_authorized_imports", [])),
+                    config,
+                    logger_,
+                )
 
         if config.scope == SandboxScope.SYSTEM:
             return executor

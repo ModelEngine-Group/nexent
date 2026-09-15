@@ -2502,7 +2502,7 @@ class TestDockerKernelLease:
         create_connection.assert_called_once_with(lease.ws_url, timeout=0.25)
         websocket.close.assert_called_once_with()
 
-    def test_kernel_lease_uses_stable_gateway_session_id(self, monkeypatch):
+    def test_kernel_lease_has_gateway_session_id(self, monkeypatch):
         container_executor = SimpleNamespace(
             logger=MagicMock(),
             additional_imports=[],
@@ -2525,6 +2525,45 @@ class TestDockerKernelLease:
             "?session_id=stable-session"
         )
         assert lease._build_channels_url("kernel-1") == lease.ws_url
+
+    def test_each_execution_uses_a_fresh_gateway_session_id(self, monkeypatch):
+        from websocket import ABNF
+
+        lease = self._lease()
+        session_ids = iter(["fresh-session-1", "fresh-session-2"])
+        monkeypatch.setattr(
+            sandbox_module.secrets,
+            "token_hex",
+            lambda _size: next(session_ids),
+        )
+        websocket = MagicMock()
+        websocket.recv_data.return_value = (
+            ABNF.OPCODE_TEXT,
+            json.dumps(
+                {
+                    "parent_header": {"msg_id": "request-1"},
+                    "msg_type": "status",
+                    "content": {"execution_state": "idle"},
+                }
+            ),
+        )
+        create_connection = MagicMock(return_value=websocket)
+        monkeypatch.setattr("websocket.create_connection", create_connection)
+        monkeypatch.setattr(
+            "smolagents.remote_executors._websocket_send_execute_request",
+            lambda code, ws: "request-1",
+        )
+
+        lease.run_code_raise_errors("print('first')")
+        first_url = lease.ws_url
+        lease.run_code_raise_errors("print('second')")
+
+        assert first_url.endswith("session_id=fresh-session-1")
+        assert lease.ws_url.endswith("session_id=fresh-session-2")
+        assert create_connection.call_args_list == [
+            call(first_url, timeout=0.25),
+            call(lease.ws_url, timeout=0.25),
+        ]
 
     def test_idle_kernel_without_terminal_message_fails_and_marks_lease_unhealthy(
         self,
@@ -5379,6 +5418,40 @@ class TestTargetedSandboxCoverage:
             driver="bridge",
             internal=True,
         )
+
+    def test_system_docker_recovers_reserved_container_after_create_conflict(self, monkeypatch):
+        pool = SandboxPoolManager.get_instance()
+        recovered = SimpleNamespace(__call__=MagicMock(return_value="ok"))
+        network = MagicMock(attrs={"Internal": True, "Containers": {}})
+        docker_module = SimpleNamespace(
+            from_env=lambda: SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network))),
+            errors=SimpleNamespace(NotFound=KeyError),
+        )
+        conflict = RuntimeError(
+            f"409 Conflict: container name /{sandbox_module.SANDBOX_CONTAINER_NAME} is already in use"
+        )
+        monkeypatch.setitem(sys.modules, "docker", docker_module)
+        monkeypatch.setitem(
+            sys.modules,
+            "smolagents.remote_executors",
+            SimpleNamespace(DockerExecutor=MagicMock()),
+        )
+        monkeypatch.setattr(
+            pool,
+            "_build_system_docker_executor",
+            MagicMock(side_effect=conflict),
+        )
+        recover = MagicMock(return_value=recovered)
+        monkeypatch.setattr(pool, "_recover_docker_container", recover)
+
+        result = pool._build_docker_executor(
+            SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM),
+            MagicMock(),
+        )
+
+        assert result is recovered
+        assert recovered._nexent_backend == "docker"
+        recover.assert_called_once()
 
     def test_online_system_sandbox_uses_bridge_and_package_install_environment(self, monkeypatch):
         pool = SandboxPoolManager.get_instance()

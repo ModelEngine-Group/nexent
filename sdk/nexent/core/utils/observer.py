@@ -332,6 +332,19 @@ class MessageObserver:
                 if think_content:
                     self.think_buffer.append(think_content)
 
+        # Some OpenAI-compatible reasoning models expose the main reasoning in
+        # ``reasoning_content`` but still prefix ``content`` with a few trailing
+        # characters plus an orphan </think>. Discard that duplicate tail so it
+        # never leaks into the user-visible answer stream.
+        if not self.in_think_mode:
+            orphan_end_match = self.think_end_pattern.search(buffer_text)
+            if orphan_end_match:
+                after_think = buffer_text[orphan_end_match.end():]
+                self.think_buffer.clear()
+                if after_think:
+                    self._process_normal_content(after_think)
+                return
+
         # Check for think end tag
         if self.in_think_mode:
             end_match = self.think_end_pattern.search(buffer_text)

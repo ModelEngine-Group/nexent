@@ -60,6 +60,13 @@ class NativeToolCallingUnsupportedError(RuntimeError):
     """Tell the agent runtime to rebuild the request with its code protocol."""
 
 
+def _strip_leading_think_artifact(text: str) -> str:
+    """Remove a provider-emitted reasoning tail ending in an orphan ``</think>``."""
+    if not text or "</think>" not in text.casefold():
+        return text
+    return re.sub(r"(?is)^.*?</think>\s*", "", text, count=1)
+
+
 def _message_role_value(message: Dict[str, Any]) -> str:
     role = message.get("role", "")
     return str(getattr(role, "value", role))
@@ -357,7 +364,14 @@ class OpenAIModel(OpenAIServerModel):
                     })
                     pending_calls.append((str(call.id), str(call.function.name)))
                 cleaned["role"] = "assistant"
+                # DeepSeek thinking-mode tool history requires an explicit
+                # assistant content field even when the call had no prose.
+                if cleaned.get("content") is None:
+                    cleaned["content"] = ""
                 cleaned["tool_calls"] = serialized_calls
+                reasoning_content = getattr(message, "reasoning_content", None)
+                if reasoning_content:
+                    cleaned["reasoning_content"] = reasoning_content
             message_role = getattr(message, "role", None)
             original_role = getattr(message_role, "value", message_role)
             if original_role == MessageRole.TOOL_RESPONSE.value and pending_calls:
@@ -576,6 +590,7 @@ class OpenAIModel(OpenAIServerModel):
                 content_chunk_count = 0
                 reasoning_chunk_count = 0
                 reasoning_char_count = 0
+                reasoning_join = []
                 empty_choices_chunk_count = 0
                 nonstandard_chunk_count = 0
                 tool_call_parts: Dict[int, Dict[str, Any]] = {}
@@ -622,6 +637,7 @@ class OpenAIModel(OpenAIServerModel):
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
                             reasoning_char_count += len(str(reasoning_content))
+                            reasoning_join.append(str(reasoning_content))
                             self.observer.add_model_reasoning_content(
                                 reasoning_content)
                             if token_tracker and not first_token_received:
@@ -718,7 +734,7 @@ class OpenAIModel(OpenAIServerModel):
 
                     # Send end marker
                     self.observer.flush_remaining_tokens()
-                    model_output = "".join(token_join)
+                    model_output = _strip_leading_think_artifact("".join(token_join))
                     native_tool_calls = [
                         ChatMessageToolCall(
                             function=ChatMessageToolCallFunction(
@@ -871,6 +887,12 @@ class OpenAIModel(OpenAIServerModel):
                         )
                     message.raw = current_request
                     message.role = MessageRole.ASSISTANT
+                    # ChatMessage has no provider-specific reasoning field,
+                    # but it is an ordinary dataclass and may carry one for
+                    # the next native tool-call turn.  DeepSeek V4 requires
+                    # this replay in thinking mode.
+                    if reasoning_join:
+                        message.reasoning_content = "".join(reasoning_join)
                     return message
 
                 except Exception as e:

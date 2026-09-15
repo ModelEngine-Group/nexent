@@ -90,12 +90,45 @@ logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
 
 def resolve_action_protocol(model_info: Optional[Dict[str, Any]]) -> str:
-    """Prefer provider-native actions; runtime negotiation owns fallback."""
-    return "native"
+    """Use native actions only for model families validated with that protocol.
+
+    Older open-weight Qwen checkpoints can emit syntactically valid but
+    semantically premature tool calls (for example, executing a workspace
+    script before creating it).  Keep those models on the code protocol,
+    whose single-action grammar they follow reliably, while newer Qwen and
+    the provider-native DeepSeek/Doubao families use streamed tool calls.
+    """
+    if model_info:
+        for candidate in (
+            model_info.get("model_name"),
+            model_info.get("display_name"),
+        ):
+            normalized = str(candidate or "").strip().casefold().rsplit("/", 1)[-1]
+            if normalized in {"qwen3.8-max", "qwen3.7-plus"} or normalized.startswith(
+                ("deepseek-v4-", "doubao-seed-")
+            ):
+                return "native"
+    return "code"
 
 
 def resolve_native_tool_choice(model_info: Optional[Dict[str, Any]]) -> str:
-    """Let every provider-capable model choose whether it needs a tool."""
+    """Force native actions for models that otherwise answer in plain text.
+
+    Qwen's validated native models reliably follow the platform protocol with
+    ``auto``.  DeepSeek V4 and Doubao Seed, however, may legally choose a
+    normal assistant message under ``auto`` even though every agent turn must
+    be an executable action.  Use the API-level guarantee for those models so
+    their terminal response is a streamed ``final_answer`` tool call instead
+    of falling back to the legacy code protocol.
+    """
+    if model_info:
+        for candidate in (
+            model_info.get("model_name"),
+            model_info.get("display_name"),
+        ):
+            normalized = str(candidate or "").strip().casefold().rsplit("/", 1)[-1]
+            if normalized.startswith(("deepseek-v4-", "doubao-seed-")):
+                return "required"
     return "auto"
 
 def _create_fixed_search_memory_tool():
