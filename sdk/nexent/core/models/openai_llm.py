@@ -175,9 +175,11 @@ class OpenAIModel(OpenAIServerModel):
         client_kwargs = kwargs.get("client_kwargs", {})
         if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
+            from openai._base_client import httpx2
+
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=httpx.Timeout(
+                timeout=httpx2.Timeout(
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
