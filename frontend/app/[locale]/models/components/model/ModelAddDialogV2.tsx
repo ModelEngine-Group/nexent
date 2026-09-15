@@ -203,6 +203,29 @@ interface BatchRowState {
 const resolveBatchModelType = (state: BatchRowState): ModelType =>
   resolveMultimodalEmbeddingType(state.modelType, state.isMultimodal);
 
+/** Show the backend's auto-configured default models as a toast.
+
+ * The backend fills default-model slots the tenant never configured on the
+ * first create; surface that to the user so the implicit change is visible.
+ */
+const notifyAutoConfiguredDefaults = (
+  autoConfigured: any[] | undefined,
+  t: (key: string, params?: any) => string,
+  message: { info: (content: string) => void }
+) => {
+  if (!autoConfigured?.length) return;
+  const names = autoConfigured
+    .map((entry) => entry?.display_name)
+    .filter(Boolean)
+    .join("、");
+  if (!names) return;
+  message.info(
+    t("model.dialog.v2.autoConfiguredDefaults", {
+      defaultValue: `已自动设为默认模型：${names}`,
+    })
+  );
+};
+
 /** Build the create-request params for one enabled batch row (Tab A submit). */
 const buildBatchRowParams = (opts: {
   row: any;
@@ -743,6 +766,7 @@ export const ModelAddDialogV2 = ({
     setLoading(true);
     try {
       let createdCount = 0;
+      let autoConfiguredDefaults: any[] = [];
       for (const row of enabledRows) {
         const state = rowStates[row.id];
         const singleParams = buildBatchRowParams({
@@ -754,10 +778,11 @@ export const ModelAddDialogV2 = ({
         });
 
         try {
-          if (tenantId) {
-            await modelService.createManageTenantModel({ tenantId, ...singleParams } as any);
-          } else {
-            await modelService.addCustomModel(singleParams as any);
+          const createResult = tenantId
+            ? await modelService.createManageTenantModel({ tenantId, ...singleParams } as any)
+            : await modelService.addCustomModel(singleParams as any);
+          if (createResult?.auto_configured_defaults?.length) {
+            autoConfiguredDefaults = createResult.auto_configured_defaults;
           }
           createdCount++;
         } catch (error: any) {
@@ -772,6 +797,7 @@ export const ModelAddDialogV2 = ({
         }
       }
       message.success(t("model.dialog.v2.batchSuccess", { defaultValue: "批量入库成功" }));
+      notifyAutoConfiguredDefaults(autoConfiguredDefaults, t, message);
       resetBatchState();
       onClose();
       // Use resolved model type for the success callback (embedding + isMultimodal → multi_embedding)
@@ -1001,11 +1027,18 @@ export const ModelAddDialogV2 = ({
       };
 
       if (tenantId) {
-        await modelService.createManageTenantModel({ tenantId, ...modelParams });
+        const createResult = await modelService.createManageTenantModel({ tenantId, ...modelParams });
+        return {
+          resolvedModelType,
+          autoConfiguredDefaults: createResult?.auto_configured_defaults ?? [],
+        };
       } else {
-        await modelService.addCustomModel(modelParams);
+        const createResult = await modelService.addCustomModel(modelParams);
+        return {
+          resolvedModelType,
+          autoConfiguredDefaults: createResult?.auto_configured_defaults ?? [],
+        };
       }
-      return resolvedModelType;
     },
     [tenantId, customForm, buildCustomRequestContext]
   );
@@ -1047,12 +1080,13 @@ export const ModelAddDialogV2 = ({
         (customAdvanced.display_name as string) || defaultDisplayName(customForm.name);
       const isVoice = isVoiceType(resolvedModelType);
 
+      let createResult: { resolvedModelType: ModelType; autoConfiguredDefaults: any[] } | null = null;
       if (model) {
         // ---------- edit (update) path ----------
         await submitCustomEditPath(ctx, displayNameValue, isVoice);
       } else {
         // ---------- add (create) path ----------
-        await submitCustomCreatePath(ctx, displayNameValue, maxTokensValue);
+        createResult = await submitCustomCreatePath(ctx, displayNameValue, maxTokensValue);
       }
 
       await persistCustomLocalConfig(ctx, displayNameValue);
@@ -1062,6 +1096,7 @@ export const ModelAddDialogV2 = ({
           ? t("model.dialog.editSuccess", { defaultValue: "模型更新成功" })
           : t("model.dialog.v2.customSuccess", { defaultValue: "模型添加成功" })
       );
+      notifyAutoConfiguredDefaults(createResult?.autoConfiguredDefaults, t, message);
       resetCustomForm();
       onClose();
       await onSuccess({

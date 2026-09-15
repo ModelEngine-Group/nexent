@@ -73,6 +73,7 @@ class _EnumItem:
 
 
 class _ModelConnectStatusEnum:
+    AVAILABLE = _EnumItem("available")
     OPERATIONAL = _EnumItem("operational")
     NOT_DETECTED = _EnumItem("not_detected")
     DETECTING = _EnumItem("detecting")
@@ -172,7 +173,10 @@ consts_const_mod.DEBUG_JWT_EXPIRE_SECONDS = 3600
 consts_const_mod.LANGUAGE = "zh"
 # Fields required by utils.memory_utils and management.services.knowledge_base.service
 consts_const_mod.MODEL_CONFIG_MAPPING = {
-    "llm": "LLM_ID", "embedding": "EMBEDDING_ID"}
+    "llm": "LLM_ID", "embedding": "EMBEDDING_ID", "multiEmbedding": "MULTI_EMBEDDING_ID",
+    "rerank": "RERANK_ID", "vlm": "VLM_ID", "vlm2": "VLM2_ID", "vlm3": "VLM3_ID",
+    "vlm4": "VLM4_ID", "stt": "STT_ID", "tts": "TTS_ID",
+}
 consts_const_mod.ES_HOST = "http://localhost:9200"
 consts_const_mod.ES_API_KEY = ""
 consts_const_mod.ES_USERNAME = ""
@@ -2501,3 +2505,116 @@ async def test_usm_embedding_localhost_replaced_before_url_resolution():
 
         assert mock_dim.call_args[0][0]["base_url"] == "http://host.docker.internal:11434/v1/embeddings"
         assert mock_update.call_args[0][1]["base_url"] == "http://host.docker.internal:11434/v1/embeddings"
+
+
+# ============================================================================
+# Tests for default-model slot backfill after create/import
+# ============================================================================
+
+
+def _model_row(model_id, model_type, display_name, connect_status="available", context=None):
+    return {
+        "model_id": model_id,
+        "model_type": model_type,
+        "display_name": display_name,
+        "connect_status": connect_status,
+        "context_window_tokens": context,
+    }
+
+
+def _run_backfill(svc, existing_rows, existing_config):
+    inserted = []
+
+    def fake_get_records(filters, tenant_id):
+        return [m for m in existing_rows if filters.get("model_type") == m["model_type"]]
+
+    def fake_get_single_config(tenant_id, key):
+        return existing_config.get(key)
+
+    def fake_insert_config(data):
+        inserted.append(data)
+        return True
+
+    with mock.patch.object(svc, "get_model_records", side_effect=fake_get_records), \
+            mock.patch.object(svc, "get_single_config_info", side_effect=fake_get_single_config), \
+            mock.patch.object(svc, "insert_config", side_effect=fake_insert_config):
+        result = svc._backfill_default_model_slots("u1", "t1")
+    return result, inserted
+
+
+def test_backfill_fills_empty_slots_with_best_candidate():
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "small-ctx", context=32000),
+        _model_row(2, "llm", "big-ctx", context=1048576),
+        _model_row(3, "embedding", "bge-m3"),
+    ]
+    result, inserted = _run_backfill(svc, rows, {})
+
+    assert {e["config_key"] for e in result} == {"LLM_ID", "EMBEDDING_ID"}
+    # The larger-context llm wins over the smaller one.
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 2
+    assert {d["config_key"] for d in inserted} == {"LLM_ID", "EMBEDDING_ID"}
+
+
+def test_backfill_prefers_available_models():
+    svc = import_svc()
+    rows = [
+        _model_row(1, "rerank", "unavailable-rerank", connect_status="unavailable"),
+        _model_row(2, "rerank", "available-rerank"),
+    ]
+    result, _ = _run_backfill(svc, rows, {})
+
+    rerank_entry = next(e for e in result if e["config_key"] == "RERANK_ID")
+    assert rerank_entry["model_id"] == 2
+
+
+def test_backfill_never_touches_configured_slots():
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "llm-one"), _model_row(2, "embedding", "emb-one")]
+    # LLM_ID row exists (user configured it) -- must not be overwritten even
+    # though a "better" candidate exists.
+    result, inserted = _run_backfill(svc, rows, {"LLM_ID": {"config_value": "99"}})
+
+    assert {e["config_key"] for e in result} == {"EMBEDDING_ID"}
+    assert all(d["config_key"] != "LLM_ID" for d in inserted)
+
+
+def test_backfill_skips_slots_without_candidates():
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "only-llm")]
+    result, inserted = _run_backfill(svc, rows, {})
+
+    assert {e["config_key"] for e in result} == {"LLM_ID"}
+    assert len(inserted) == 1
+
+
+def test_backfill_survives_insert_failure():
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "llm-one"), _model_row(2, "embedding", "emb-one")]
+
+    def fail_insert(data):
+        return False
+
+    with mock.patch.object(svc, "get_model_records", side_effect=lambda f, t: [m for m in rows if f.get("model_type") == m["model_type"]]), \
+            mock.patch.object(svc, "get_single_config_info", return_value=None), \
+            mock.patch.object(svc, "insert_config", side_effect=fail_insert):
+        result = svc._backfill_default_model_slots("u1", "t1")
+
+    assert result == []
+
+
+def test_create_model_for_tenant_returns_backfill_result():
+    svc = import_svc()
+    model_data = {
+        "display_name": "m1", "model_name": "m1", "model_type": "llm",
+        "api_key": "k", "base_url": "http://x", "connect_status": "available",
+        "model_repo": "",
+    }
+    backfill_result = [{"config_key": "LLM_ID", "model_id": 7, "display_name": "m1", "model_type": "llm"}]
+    with mock.patch.object(svc, "create_model_record", return_value=True), \
+            mock.patch.object(svc, "_backfill_default_model_slots", return_value=backfill_result):
+        result = __import__("asyncio").run(
+            svc.create_model_for_tenant("u1", "t1", model_data))
+    assert result == {"auto_configured_defaults": backfill_result}
