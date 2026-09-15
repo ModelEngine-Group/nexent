@@ -41,6 +41,8 @@ spec:
               value: "ws://nexent-runtime:5014"
             - name: RUNTIME_HTTP_BACKEND
               value: "http://nexent-runtime:5014"
+            - name: NORTHBOUND_HTTP_BACKEND
+              value: "http://nexent-northbound:5013"
             - name: MINIO_ENDPOINT
               value: "http://nexent-minio:9000"
             - name: DEPLOYMENT_VERSION

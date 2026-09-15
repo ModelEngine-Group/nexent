@@ -33,7 +33,9 @@ export function parseAgentUsageGuideParams(
 }
 
 export type AgentUsageGuideTargetState<T> =
-  { state: "loading" } | { state: "missing" } | { state: "found"; agent: T };
+  | { state: "loading" }
+  | { state: "missing" }
+  | { state: "found"; agent: T };
 
 export function resolveAgentUsageGuideTarget<T>({
   agentId,
@@ -142,8 +144,11 @@ export function isAnonymousConversationSharePath(pathname: string): boolean {
   return pathname.startsWith("/share/") && !isAgentSharePath(pathname);
 }
 
-export function buildNorthboundRunUrl(northboundBaseUrl?: string): string {
-  const baseUrl = northboundBaseUrl?.trim().replace(/\/+$/, "");
+export function buildNorthboundRunUrl(
+  northboundBaseUrl?: string,
+  siteOrigin?: string
+): string {
+  const baseUrl = (northboundBaseUrl || siteOrigin)?.trim().replace(/\/+$/, "");
   return `${baseUrl || "<NEXENT_BASE_URL>"}/nb/v1/chat/run`;
 }
 

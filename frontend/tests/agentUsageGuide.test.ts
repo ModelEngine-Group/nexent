@@ -186,8 +186,8 @@ test("builds safe share and northbound API examples", () => {
     "https://api.example.com/root/nb/v1/chat/run"
   );
   assert.equal(
-    buildNorthboundRunUrl(undefined),
-    "<NEXENT_BASE_URL>/nb/v1/chat/run"
+    buildNorthboundRunUrl(undefined, "https://nexent.example/"),
+    "https://nexent.example/nb/v1/chat/run"
   );
   assert.match(
     buildNorthboundCurl("demo-agent", "https://api.example.com/nb/v1/chat/run"),

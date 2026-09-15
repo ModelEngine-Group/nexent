@@ -10,8 +10,12 @@ import path from "node:path";
 import multiparty from "multiparty";
 import dotenv from "dotenv";
 import { BASE_PATH } from "./base-path.mjs";
-import { ensureDir, readLocaleConfig, saveLocaleConfig } from "./build-config.js";
-import { buildPublicFrontendConfig } from "./lib/frontendConfig.mjs";
+import {
+  ensureDir,
+  readLocaleConfig,
+  saveLocaleConfig,
+} from "./build-config.js";
+import { buildPublicFrontendConfig } from "./runtime-frontend-config.mjs";
 
 const { createProxyServer } = httpProxy;
 const __filename = fileURLToPath(import.meta.url);
@@ -21,7 +25,10 @@ let nextConfig;
 
 if (!dev) {
   nextConfig = JSON.parse(
-    fs.readFileSync(path.join(__dirname, ".next", "required-server-files.json"), "utf8")
+    fs.readFileSync(
+      path.join(__dirname, ".next", "required-server-files.json"),
+      "utf8"
+    )
   ).config;
   process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
 }
@@ -47,6 +54,8 @@ const HTTP_BACKEND = process.env.HTTP_BACKEND || "http://localhost:5010"; // con
 const WS_BACKEND = process.env.WS_BACKEND || "ws://localhost:5014"; // runtime
 const RUNTIME_HTTP_BACKEND =
   process.env.RUNTIME_HTTP_BACKEND || "http://localhost:5014"; // runtime
+const NORTHBOUND_HTTP_BACKEND =
+  process.env.NORTHBOUND_HTTP_BACKEND || "http://localhost:5013"; // northbound
 const MINIO_BACKEND = process.env.MINIO_ENDPOINT || "http://localhost:9010";
 
 const ICON_UPLOAD_DIR = path.resolve(__dirname, "./public/");
@@ -237,7 +246,10 @@ async function isSuperAdminRequest(req) {
     const userRole = data?.data?.user?.user_role;
     return SUPER_ADMIN_ROLES.has(userRole);
   } catch (error) {
-    console.error("[isSuperAdminRequest] Error checking super admin:", error.message);
+    console.error(
+      "[isSuperAdminRequest] Error checking super admin:",
+      error.message
+    );
     return false;
   }
 }
@@ -400,7 +412,9 @@ function forwardAuthRequest(req, res, targetUrl) {
               ) {
                 setPendingOAuthCookie(res, data.data.pending_token);
                 const locale = getPreferredLocale(cookies);
-                res.writeHead(302, { Location: withBasePath(`/${locale}/oauth/complete`) });
+                res.writeHead(302, {
+                  Location: withBasePath(`/${locale}/oauth/complete`),
+                });
                 res.end();
                 return;
               } else if (data.data && data.data.session) {
@@ -467,7 +481,9 @@ window.parent && window.parent.postMessage({ type: "cas-renew-success" }, window
                   oauth_error_description:
                     data.data.oauth_error_description || "",
                 });
-                res.writeHead(302, { Location: `${withBasePath("/")}?${errorParams.toString()}` });
+                res.writeHead(302, {
+                  Location: `${withBasePath("/")}?${errorParams.toString()}`,
+                });
                 res.end();
                 return;
               }
@@ -549,6 +565,7 @@ app.prepare().then(() => {
 
     const isProxyRequest =
       internalPathname.startsWith("/api/") ||
+      internalPathname.startsWith("/nb/") ||
       (internalPathname.includes("/attachments/") &&
         !internalPathname.startsWith("/api/"));
     if (isProxyRequest && BASE_PATH) {
@@ -559,6 +576,7 @@ app.prepare().then(() => {
     if (handleFrontendConfigApi(internalPathname, req, res)) return;
     if (await handleProjectConfigApi(internalPathname, req, res)) return;
     if (handleAttachmentProxy(internalPathname, req, res)) return;
+    if (handleNorthboundProxy(internalPathname, req, res)) return;
     if (handleAllApiProxy(internalPathname, req, res)) return;
 
     // Fallback: let Next.js render pages and framework resources with basePath intact.
@@ -650,10 +668,26 @@ async function handleProjectConfigApi(pathname, req, res) {
  * 静态附件代理 /attachments/
  */
 function handleAttachmentProxy(pathname, req, res) {
-  const isAttachmentRoute = pathname.includes("/attachments/") && !pathname.startsWith("/api/");
+  const isAttachmentRoute =
+    pathname.includes("/attachments/") && !pathname.startsWith("/api/");
   if (!isAttachmentRoute) return false;
 
   proxy.web(req, res, { target: MINIO_BACKEND });
+  return true;
+}
+
+/**
+ * Keep northbound calls on the same public origin as the web application.
+ */
+function handleNorthboundProxy(pathname, req, res) {
+  if (!pathname.startsWith("/nb/")) return false;
+
+  proxy.web(req, res, {
+    target: NORTHBOUND_HTTP_BACKEND,
+    changeOrigin: true,
+    proxyTimeout: SSE_PROXY_TIMEOUT_MS,
+    timeout: SSE_PROXY_TIMEOUT_MS,
+  });
   return true;
 }
 
@@ -681,7 +715,9 @@ function handleAllApiProxy(pathname, req, res) {
     "/api/file/storage",
     "/api/file/preprocess",
   ];
-  const isRuntime = runtimePathPrefixes.some(prefix => pathname.startsWith(prefix));
+  const isRuntime = runtimePathPrefixes.some((prefix) =>
+    pathname.startsWith(prefix)
+  );
 
   // 3. skills 特殊接口
   // 分发代理目标
