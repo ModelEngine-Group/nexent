@@ -1,9 +1,12 @@
 """Real PostgreSQL regression tests for HITL schema, locks and audit contracts.
 
-Reuse the opt-in hitl_test fixture; never point it at a business database.
+Use the standalone test schema snapshot and opt-in hitl_test fixture.
+These tests validate the persistence contract, not versioned deployment SQL.
+Never point the fixture at a business database.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Barrier
 
 import pytest
@@ -365,3 +368,38 @@ def test_invalid_execution_state_is_rejected_without_losing_started_receipt(serv
         tx.execution("slot").status = "INVALID"
     with service.repository.transaction(run_id) as tx:
         assert tx.execution("slot").status == "STARTED"
+
+
+def test_repeated_schema_creation_preserves_existing_objects_and_rows(service):
+    run_id = create_run(service)
+    schema_sql = (Path(__file__).parent / "fixtures/human_interaction_schema.sql").read_text()
+    catalog_queries = [
+        "SELECT oid, relname, relkind FROM pg_class WHERE relnamespace = 'nexent'::regnamespace ORDER BY oid",
+        ("SELECT oid, prosrc FROM pg_proc WHERE oid = to_regprocedure('nexent.human_interaction_audit_timestamp()')"),
+        (
+            "SELECT oid, tgrelid, tgname, tgenabled, pg_get_triggerdef(oid) FROM pg_trigger "
+            "WHERE tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'nexent'::regnamespace) ORDER BY oid"
+        ),
+        "SELECT last_value, is_called FROM nexent.human_run_t_run_record_id_seq",
+        "SELECT * FROM nexent.human_run_t ORDER BY run_record_id",
+    ]
+    with service.repository.session_factory() as session:
+        # An existing function body and trigger state must survive a repeated run.
+        session.execute(
+            text("""
+            CREATE OR REPLACE FUNCTION nexent.human_interaction_audit_timestamp()
+            RETURNS TRIGGER LANGUAGE plpgsql AS $$
+            BEGIN
+                -- Existing function definition must be preserved.
+                RETURN NEW;
+            END;
+            $$;
+            ALTER TABLE nexent.human_run_t DISABLE TRIGGER human_audit_timestamp;
+        """)
+        )
+        before = [session.execute(text(query)).all() for query in catalog_queries]
+        session.execute(text(schema_sql))
+        session.execute(text(schema_sql))
+        after = [session.execute(text(query)).all() for query in catalog_queries]
+        assert after == before
+    assert service.snapshot(run_id, "tenant-a", "owner")["status"] == "READY"

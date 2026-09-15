@@ -97,11 +97,11 @@ def service(monkeypatch):
     from services.human_interaction.crypto import PayloadCipher
     from services.human_interaction.service import HumanInteractionService
 
-    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.5.1_001_human_interaction.sql"
+    schema_fixture = Path(__file__).resolve().parents[1] / "database/fixtures/human_interaction_schema.sql"
     with engine.begin() as connection:
         connection.execute(text("DROP SCHEMA IF EXISTS nexent CASCADE"))
         connection.execute(text("CREATE SCHEMA nexent"))
-        connection.execute(text(migration.read_text()))
+        connection.execute(text(schema_fixture.read_text()))
         connection.exec_driver_sql("CREATE TABLE nexent.conversation_record_t "
                                    "(conversation_id INT PRIMARY KEY, created_by VARCHAR(100), delete_flag VARCHAR(1))")
         connection.exec_driver_sql("INSERT INTO nexent.conversation_record_t VALUES (7, 'owner', 'N')")

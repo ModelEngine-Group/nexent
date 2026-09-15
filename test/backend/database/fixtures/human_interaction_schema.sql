@@ -1,4 +1,5 @@
--- Human interaction schema for a new database.
+-- Standalone HITL schema fixture for PostgreSQL integration tests.
+-- Keep this test snapshot independent of versioned deployment scripts.
 -- Technical keys and internal references use INT4; public identifiers use UUID strings.
 -- Services validate business states, references and uniqueness under transaction locks.
 
