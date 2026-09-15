@@ -733,11 +733,12 @@ export const ModelAddDialogV2 = ({
     }
     setBatchChecking(true);
     try {
-      // Run sequentially so per-row checking state is visible and we don't
-      // hammer the provider API with parallel requests.
-      for (const row of enabledRows) {
-        await handleRowConnectivity(row.id);
-      }
+      // Probe all enabled rows in parallel (mirrors the model-config page's
+      // batch verify): row state updates are functional, so concurrent
+      // completions land independently as they arrive.
+      await Promise.all(
+        enabledRows.map((row) => handleRowConnectivity(row.id))
+      );
     } finally {
       setBatchChecking(false);
     }
