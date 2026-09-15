@@ -4240,6 +4240,7 @@ class TestSandboxWarmUp:
             managed_agents_exist=False,
             host_tools_exist=False,
             session_container_group=None,
+            cancellation_scope=None,
         )
 
 
