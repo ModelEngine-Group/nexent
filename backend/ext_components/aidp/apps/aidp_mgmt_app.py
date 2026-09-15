@@ -49,6 +49,7 @@ from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
     PRIVATE,
     READ_ONLY,
+    _validate_group_ids_strict,  # noqa: F401 - retained as a module-level compatibility symbol
 )
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
