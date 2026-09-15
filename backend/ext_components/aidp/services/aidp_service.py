@@ -2,18 +2,21 @@
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
+import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, NoReturn
 from urllib.parse import urljoin
 
 import httpx
+from nexent.utils.http_client_manager import http_client_manager
 
 from consts.const import AIDP_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from nexent.utils.http_client_manager import http_client_manager
+
 
 logger = logging.getLogger("aidp_service")
 
@@ -64,6 +67,39 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
     if not reason:
         return None
     return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
+
+
+def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
+    """Map an AIDP HTTP error to the common application exception format."""
+    response = error.response
+    upstream_reason = _extract_upstream_error(response)
+    logger.exception(
+        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
+        operation,
+        response.status_code,
+        upstream_reason or "unavailable",
+    )
+    details = {
+        "upstream_status": response.status_code,
+        "upstream_reason": upstream_reason,
+    }
+    error_code = {
+        401: ErrorCode.AIDP_AUTH_ERROR,
+        403: ErrorCode.AIDP_AUTH_ERROR,
+        429: ErrorCode.AIDP_RATE_LIMIT,
+    }.get(response.status_code, ErrorCode.AIDP_SERVICE_ERROR)
+    fallback_message = {
+        ErrorCode.AIDP_AUTH_ERROR: f"AIDP authentication failed: {str(error)}",
+        ErrorCode.AIDP_RATE_LIMIT: f"AIDP rate limit exceeded: {str(error)}",
+    }.get(
+        error_code,
+        f"AIDP API HTTP error {response.status_code}: {str(error)}",
+    )
+    raise AppException(
+        error_code,
+        upstream_reason or fallback_message,
+        details=details,
+    )
 
 
 def _extract_upload_failures(response: httpx.Response) -> List[Dict[str, str]]:
@@ -236,6 +272,56 @@ def _request_with_retry(
                 break
 
     # All retries exhausted on RequestError — let caller translate to AppException.
+    assert last_exception is not None
+    raise last_exception
+
+
+async def _request_stream_with_retry(
+    request_fn: Callable[[], Awaitable[httpx.Response]],
+    context: str,
+    max_attempts: int = _AIDP_RETRY_MAX_ATTEMPTS,
+) -> httpx.Response:
+    """Open a streaming response with the same transient retry policy as sync requests."""
+    last_exception: Exception | None = None
+
+    for attempt in range(max_attempts):
+        try:
+            response = await request_fn()
+            if 200 <= response.status_code < 300:
+                return response
+            if response.status_code not in _AIDP_RETRYABLE_STATUS_CODES:
+                return response
+            if attempt < max_attempts - 1:
+                wait_time = _compute_retry_wait(response, attempt)
+                logger.warning(
+                    "HTTP %d for %s, retrying in %ss (attempt %d/%d)",
+                    response.status_code,
+                    context,
+                    wait_time,
+                    attempt + 1,
+                    max_attempts,
+                )
+                await response.aclose()
+                await asyncio.sleep(wait_time)
+                continue
+            return response
+        except httpx.RequestError as error:
+            last_exception = error
+            if attempt < max_attempts - 1:
+                wait_time = _AIDP_RETRY_BACKOFF_FACTOR * (2 ** attempt)
+                logger.warning(
+                    "AIDP request error for %s: [%s] %s, retrying in %ss (%d/%d)",
+                    context,
+                    type(error).__name__,
+                    error,
+                    wait_time,
+                    attempt + 1,
+                    max_attempts,
+                )
+                await asyncio.sleep(wait_time)
+            else:
+                break
+
     assert last_exception is not None
     raise last_exception
 
@@ -1010,6 +1096,125 @@ def upload_aidp_docs_impl(
             ErrorCode.AIDP_RESPONSE_ERROR,
             f"Failed to parse AIDP API response: {str(e)}",
         )
+
+
+def remove_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Remove one or more documents from an AIDP knowledge base."""
+    normalized_url = _validate_params(server_url, api_key)
+    if not file_uuids:
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "At least one file_uuid is required",
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    remove_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Remove"
+    remove_url = urljoin(f"{normalized_url}/", remove_path)
+    logger.info("Removing %d AIDP documents from %s", len(file_uuids), remove_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                remove_url,
+                headers=headers,
+                json={"file_uuids": file_uuids},
+            ),
+            context=f"remove-docs:{kds_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP document removal request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "document removal")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP document removal response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+@asynccontextmanager
+async def stream_aidp_doc_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+) -> AsyncIterator[Dict[str, Any]]:
+    """Stream one AIDP document and expose its response metadata."""
+    normalized_url = _validate_params(server_url, api_key)
+    if not file_uuid:
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "file_uuid is required",
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    download_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Download"
+    download_url = urljoin(f"{normalized_url}/", download_path)
+    logger.info("Downloading AIDP document %s from %s", file_uuid, download_url)
+
+    response: httpx.Response | None = None
+    try:
+        client = http_client_manager.get_async_client(
+            base_url=normalized_url,
+            timeout=120.0,
+            verify_ssl=False,
+        )
+        response = await _request_stream_with_retry(
+            lambda: client.send(
+                client.build_request(
+                    "POST",
+                    download_url,
+                    headers=headers,
+                    json={"file_uuid": file_uuid},
+                ),
+                stream=True,
+            ),
+            context=f"download-doc:{kds_id}:{file_uuid}",
+        )
+        if response.status_code >= 400:
+            await response.aread()
+        response.raise_for_status()
+        yield {
+            "content": response.aiter_bytes(),
+            "content_type": response.headers["Content-Type"],
+            "content_disposition": response.headers["Content-Disposition"],
+            "file_size": response.headers["X-File-Size"],
+        }
+    except httpx.RequestError as e:
+        logger.exception("AIDP document download request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "document download")
+    finally:
+        if response is not None:
+            await response.aclose()
 
 
 def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:

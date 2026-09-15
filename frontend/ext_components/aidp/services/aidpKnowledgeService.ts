@@ -1,7 +1,7 @@
 /**
  * AIDP Knowledge Base Management Service
  *
- * Wraps the 8 AIDP management backend endpoints.
+ * Wraps the AIDP management backend endpoints.
  * Credentials (server_url, api_key) are read by the backend from environment variables.
  */
 
@@ -29,14 +29,11 @@ export interface AidpKbDetail {
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
   resource_status?:
-    | "ACTIVE"
-    | "CREATING"
-    | "DELETE_PENDING"
-    | "ORPHANED"
-    | "UNAVAILABLE";
+    "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
 }
 
 export interface AidpDocumentItem {
+  file_uuid: string;
   file_ino_no: string;
   file_name: string;
   file_size?: number;
@@ -55,10 +52,11 @@ export interface AidpDocumentListResponse {
 }
 
 export interface AidpUploadSuccessItem {
+  file_uuid: string;
   file_name: string;
   file_type: string;
   file_size: number;
-  file_ino_no: number;
+  file_ino_no: string;
   first_upload_time: number;
 }
 
@@ -77,6 +75,67 @@ export interface AidpUploadResponse {
   success_list: AidpUploadSuccessItem[];
   failed_list: AidpUploadFailedItem[];
 }
+
+export interface AidpDocumentIdentity {
+  file_uuid: string;
+  file_ino_no: string;
+}
+
+export interface AidpDocumentOperationItem {
+  file_uuid: string;
+}
+
+export interface AidpDocumentRemoveResponse {
+  summary: {
+    total: number;
+    success: number;
+    failed: number;
+  };
+  success_list: AidpDocumentOperationItem[];
+  failed_list: AidpDocumentOperationItem[];
+}
+
+type AidpOperationSummary = {
+  total: number;
+  success: number;
+  failed: number;
+};
+
+type AidpOperationResponse<TSuccess, TFailure> = {
+  summary: AidpOperationSummary;
+  success_list: TSuccess[];
+  failed_list: TFailure[];
+};
+
+const normalizeAidpOperationResponse = <TSuccess, TFailure>(
+  result: Partial<AidpOperationResponse<TSuccess, TFailure>>
+): AidpOperationResponse<TSuccess, TFailure> => {
+  const successList: TSuccess[] = Array.isArray(result.success_list)
+    ? result.success_list
+    : [];
+  const failedList: TFailure[] = Array.isArray(result.failed_list)
+    ? result.failed_list
+    : [];
+
+  return {
+    summary: {
+      total:
+        typeof result.summary?.total === "number"
+          ? result.summary.total
+          : successList.length + failedList.length,
+      success:
+        typeof result.summary?.success === "number"
+          ? result.summary.success
+          : successList.length,
+      failed:
+        typeof result.summary?.failed === "number"
+          ? result.summary.failed
+          : failedList.length,
+    },
+    success_list: successList,
+    failed_list: failedList,
+  };
+};
 
 export interface AidpModelItem {
   /** Display / identifier used for the model (sent to AIDP as ``vlm_model``). */
@@ -346,31 +405,10 @@ class AidpKnowledgeService {
     }
 
     const result = (await response.json()) as Partial<AidpUploadResponse>;
-    const successList = Array.isArray(result.success_list)
-      ? result.success_list
-      : [];
-    const failedList = Array.isArray(result.failed_list)
-      ? result.failed_list
-      : [];
-
-    return {
-      summary: {
-        total:
-          typeof result.summary?.total === "number"
-            ? result.summary.total
-            : successList.length + failedList.length,
-        success:
-          typeof result.summary?.success === "number"
-            ? result.summary.success
-            : successList.length,
-        failed:
-          typeof result.summary?.failed === "number"
-            ? result.summary.failed
-            : failedList.length,
-      },
-      success_list: successList,
-      failed_list: failedList,
-    };
+    return normalizeAidpOperationResponse<
+      AidpUploadSuccessItem,
+      AidpUploadFailedItem
+    >(result);
   }
 
   /**
@@ -452,6 +490,48 @@ class AidpKnowledgeService {
           ? result.total_reliable
           : typeof result.total_count === "number",
     };
+  }
+
+  /**
+   * Remove one document from an AIDP knowledge base.
+   * The AIDP API accepts an array, so the single-document UI sends one item.
+   * The file_ino_no is kept with the UUID so the backend can clean tag
+   * assignments without issuing a second document-list request.
+   */
+  async removeDoc(
+    id: string,
+    document: AidpDocumentIdentity
+  ): Promise<AidpDocumentRemoveResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.removeKbDocuments(id), {});
+    const response = await fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ documents: [document] }),
+    });
+    const result =
+      (await response.json()) as Partial<AidpDocumentRemoveResponse>;
+    return normalizeAidpOperationResponse<
+      AidpDocumentOperationItem,
+      AidpDocumentOperationItem
+    >(result);
+  }
+
+  /**
+   * Download one document through the AIDP management backend.
+   */
+  async downloadDoc(id: string, fileUuid: string): Promise<Response> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.downloadKbDocument(id), {});
+    return fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file_uuid: fileUuid }),
+    });
   }
 }
 
