@@ -573,11 +573,24 @@ module_mocks = {
     "nexent.core.utils.token_estimation": nexent_core_utils_mock.token_estimation,
 }
 
-# Ensure openai package exists with DefaultHttpxClient for patches
-import types as __types
+# Ensure the OpenAI package stub matches the submodule used by OpenAIModel.
+class StubSDKTimeout:
+    def __init__(self, *, connect, read, write, pool):
+        self.connect = connect
+        self.read = read
+        self.write = write
+        self.pool = pool
+
+
 openai_mod = types.ModuleType("openai")
+openai_mod.__path__ = []
 openai_mod.DefaultHttpxClient = lambda *a, **k: None
+openai_base_client_mod = types.ModuleType("openai._base_client")
+openai_base_client_mod.httpx2 = types.SimpleNamespace(Timeout=StubSDKTimeout)
+openai_mod._base_client = openai_base_client_mod
 sys.modules["openai"] = openai_mod
+sys.modules["openai._base_client"] = openai_base_client_mod
+module_mocks["openai._base_client"] = openai_base_client_mod
 
 # Dynamically load the module directly by file path
 MODULE_NAME = "nexent.core.models.openai_llm"
@@ -1346,6 +1359,31 @@ def test_init_with_ssl_verify_true():
         kwargs = mock_httpx_client.call_args.kwargs
         assert kwargs["verify"] is True
         assert kwargs["timeout"].read == 60.0
+
+
+def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
+    """Use the Timeout class owned by the HTTP implementation behind OpenAI."""
+
+    class SDKTimeout:
+        def __init__(self, *, connect, read, write, pool):
+            self.connect = connect
+            self.read = read
+            self.write = write
+            self.pool = pool
+
+    sdk_httpx = types.SimpleNamespace(Timeout=SDKTimeout)
+    openai_base_client = types.ModuleType("openai._base_client")
+    openai_base_client.httpx2 = sdk_httpx
+
+    with patch.dict(sys.modules, {"openai._base_client": openai_base_client}), \
+            patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        ImportedOpenAIModel(observer=MagicMock(), ssl_verify=True)
+
+    timeout = mock_httpx_client.call_args.kwargs["timeout"]
+    assert isinstance(timeout, SDKTimeout)
+    assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
+        10.0, 60.0, 30.0, 10.0,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -175,24 +175,11 @@ class OpenAIModel(OpenAIServerModel):
         client_kwargs = kwargs.get("client_kwargs", {})
         if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
-            # Resolve the Timeout class from the same httpx implementation
-            # the OpenAI SDK is actually built on. Some deployment
-            # environments ship a patched OpenAI that imports an
-            # httpx-compatible package ("httpx2") whose sync backend only
-            # accepts its own Timeout type; passing the standard
-            # httpx.Timeout there makes socket.settimeout raise TypeError,
-            # which the SDK surfaces as APIConnectionError("Connection
-            # error"). Falls back to the standard httpx.Timeout everywhere
-            # else (including test doubles that stub the openai package).
-            timeout_cls = httpx.Timeout
-            try:
-                import openai._base_client as _openai_base
-                timeout_cls = getattr(_openai_base, "httpx2", None).Timeout or timeout_cls
-            except (ImportError, AttributeError):
-                pass
+            from openai._base_client import httpx2
+
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=timeout_cls(
+                timeout=httpx2.Timeout(
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
