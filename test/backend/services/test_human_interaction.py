@@ -102,7 +102,6 @@ def service(monkeypatch):
         connection.execute(text("DROP SCHEMA IF EXISTS nexent CASCADE"))
         connection.execute(text("CREATE SCHEMA nexent"))
         connection.execute(text(migration.read_text()))
-        connection.execute(text(migration.read_text()))
         connection.exec_driver_sql("CREATE TABLE nexent.conversation_record_t "
                                    "(conversation_id INT PRIMARY KEY, created_by VARCHAR(100), delete_flag VARCHAR(1))")
         connection.exec_driver_sql("INSERT INTO nexent.conversation_record_t VALUES (7, 'owner', 'N')")

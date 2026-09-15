@@ -55,7 +55,7 @@ CoreAgent 仅增加可选生命周期接入点。未启用 HITL 时保持原 exe
 
 ## 3. 持久化与安全语义
 
-新增四张表：`human_run_t`、`human_request_t`、`human_execution_t`、`human_event_t`，迁移为 `deploy/sql/migrations/v2.5.1_001_human_interaction.sql`，未修改已合入 develop 的 SQL。
+新增四张表：`human_run_t`、`human_request_t`、`human_execution_t`、`human_event_t`，建表脚本为 `deploy/sql/migrations/v2.5.1_001_human_interaction.sql`，未修改已合入 develop 的 SQL。
 
 
 ### 数据库字段与写入约束
@@ -74,7 +74,7 @@ CoreAgent 仅增加可选生命周期接入点。未启用 HITL 时保持原 exe
 - 不声明外键、业务唯一约束或唯一索引。创建 run 时在同一事务持有公开 UUID 和 `(tenant_id, user_id, conversation_id)` 的 advisory lock，service 检查公开 ID 不重用、会话归属及唯一活动 run。后续写入持有父 run 行锁，验证整数引用、一条活动待办、每个调用 slot 一条活动回执及不重复的事件序号。审批版本和幂等摘要继续由 service 检查。所有正常查询过滤 `delete_flag='N'`；通过 run 事务软删父记录时，同一事务软删请求、执行回执和事件并更新审计。
 - 仅 `human_event_t.payload` 使用 JSONB：必须是 `{chunk_cipher: string}` 或 `{type: string, content: object}`，拒绝非法 JSON 值。输出块先加密。其余 payload/checkpoint/plan/arguments/result 是服务或 SDK 所有的可变 JSON 快照，Fernet 密文以 TEXT 保存；可空字段表示尚未生成，不给可变模型输出设任意固定长度。决定文本沿用 8000 字符等原有命令校验。
 - 非唯一索引分别支撑公开 run 查询、owner 会话历史、调度领取、run 请求查询、调用 slot 回放及 SSE 顺序分页；活动行索引统一包含软删过滤条件。
-- 该迁移尚未合入 develop，支持直接建表、旧版 PR 表结构原位升级和重复执行。现有迁移执行器发现校验和变化会重跑文件；升级须先停止 HITL worker。升级保留公开 UUID、密文和游标，回填整数关联；旧数据不存在的审计信息以原 run 的 owner/创建时间补齐，不能还原历史操作人。迁移与新后端须一同上线，旧后端不能继续读写新字段。
+- 建表脚本面向新功能的全新数据库，直接创建四张表、非唯一索引、字段注释和审计触发器。
 
 - PostgreSQL 是事实来源，READY run 本身就是可重新领取的持久执行队列；等待人工时结束 worker attempt 并释放租约，保留逻辑运行占位。
 - run 行锁串行化决定、暂停、终止和工具派发。请求版本、动作摘要与幂等键由服务端核验，客户端不能指定身份或执行状态。
@@ -110,10 +110,10 @@ RECOVERY_REQUIRED 必须先检查下游事实。当前没有“强制成功”�
 
 配置样例：`deploy/env/hitl.env.example`。不要直接覆盖现有 `.env`。
 
-1. 通过现有 SQL migration runner 应用新增迁移，并备份数据库。当前工作仅在隔离测试库执行了此迁移。
+1. 初始化数据库时执行新增建表脚本。当前工作仅在隔离测试库执行了此脚本。
 2. 为全部 runtime 实例配置同一持久 Fernet 密钥 `HITL_ENCRYPTION_KEY`，放在部署 secret 中，不提交 Git、不打印到日志。密钥丢失后现有运行无法恢复；首版不支持在线轮换。
 3. 设置 `HITL_ENABLED=true`，`HITL_ACCEPT_NEW_RUNS=true`。`HITL_WAIT_SECONDS` 默认 86400，`HITL_MAX_CONCURRENCY` 默认 2。没有有效密钥时启动失败关闭。
-4. 重建并更新包含 SDK、后端、新迁移和前端的发布产物，先用无副作用工具灰度检查，再接入需要批准的动作。
+4. 重建并更新包含 SDK、后端、建表 SQL 和前端的发布产物，先用无副作用工具灰度检查，再接入需要批准的动作。
 
 如需本地生成密钥文件，可在项目根目录运行以下命令；命令只写文件，不输出密钥，文件已存在时拒绝覆盖：
 
@@ -133,14 +133,14 @@ PY
 
 ### PR #3927 SQL 检视修订验证（2026-09-15）
 
-在独立 PostgreSQL 15 临时容器中运行 **213 项定向测试，全部通过**：数据库规范/迁移回归 31 项，既有 PostgreSQL + CoreAgent 集成 68 项，HTTP/流式/SDK 回归 114 项。没有调用真实外部模型或修改业务数据库。
+在独立 PostgreSQL 15 临时容器中运行 **212 项定向测试，全部通过**：数据库规范/建表回归 30 项，既有 PostgreSQL + CoreAgent 集成 68 项，HTTP/流式/SDK 回归 114 项。没有调用真实外部模型或修改业务数据库。
 
-- 验证空库建表、旧版 PR 数据原位升级及重复执行；保留公开 UUID、密文、检查点、计划和游标，并继续完成升级前的待批动作。
+- 每项数据库测试均从空 schema 执行一次建表脚本，验证创建后的模型映射及完整 HITL 流程。
 - 验证单列 INT4 主键、整数逻辑关联、五个审计字段、全部字段注释及 JSONB 类型；没有外键、业务唯一约束或数据库状态 CHECK。
 - 验证并发创建只产生一个活动 run、并发请求只保留一条待办、并发事件没有重复/缺号，以及原有审批幂等、跨租户隔离和执行回执保护。
 - 验证创建/审批/调度/租约/原始 SQL 的审计维护、非 UTC 数据库会话、父子软删、字段边界和 BIGINT SSE 游标兼容。
 - 以 5000 条 run、50000 条 event 执行 `EXPLAIN (ANALYZE, BUFFERS)`：历史查询、调度领取和事件重放均使用对应非唯一索引。该检查不等于生产容量压测。
-- `bash deploy/tests/test_sql_migrations.sh`、`git diff --check` 通过。HITL 模块与新增测试的 Ruff 检查通过；`db_models.py` 对比 HEAD 的 47 条历史告警，当前剩余 46 条，新增代码没有引入告警。导入检查按项目模块作为 first-party 配置执行。
+- 数据库回归测试文件的 Ruff 检查及 `git diff --check` 通过；Ruff 导入检查按项目模块作为 first-party 配置执行。
 
 ```bash
 HITL_TEST_DATABASE_FILE=/absolute/path/to/isolated-test.dsn \

@@ -4,7 +4,6 @@ Reuse the opt-in hitl_test fixture; never point it at a business database.
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from threading import Barrier
 
 import pytest
@@ -29,8 +28,6 @@ service = hitl_support.service
 
 
 MODELS = (HumanRun, HumanRequest, HumanExecution, HumanEvent)
-ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "deploy/sql/migrations/v2.5.1_001_human_interaction.sql"
 
 
 def test_real_schema_matches_models_and_all_columns_have_comments(service):
@@ -232,68 +229,6 @@ def test_deleted_rows_are_excluded_from_history_dispatch_and_claims(service):
     with service.repository.transaction(run_id) as tx:
         assert tx is None
     assert create_run(service) != run_id
-
-
-def test_legacy_upgrade_preserves_encrypted_state_and_resumes_approval(service):
-    from services.human_interaction.models import digest
-
-    old_run = "00000000-0000-0000-0000-000000000001"
-    old_request = "00000000-0000-0000-0000-000000000002"
-    catalog = digest({"tool-version": "1"})
-    action = service.cipher.digest([old_run, "tenant-a", "owner", "slot", "send", {}, catalog, "conservative-v1"])
-    sealed = {
-        "request_payload": service.cipher.seal({"query": "test"}),
-        "checkpoint": service.cipher.seal({"saved": "checkpoint"}),
-        "plan": service.cipher.seal({"saved": "plan"}),
-        "arguments": service.cipher.seal({}),
-        "request": service.cipher.seal({"tool": "send", "arguments": {}}),
-    }
-    with service.repository.session_factory() as session:
-        session.execute(text("DROP SCHEMA nexent CASCADE; CREATE SCHEMA nexent"))
-        session.execute(text((Path(__file__).parent / "fixtures/human_interaction_legacy.sql").read_text()))
-        session.execute(text("""
-            INSERT INTO nexent.human_run_t (run_id, tenant_id, user_id, conversation_id, status,
-                request_payload, checkpoint, plan, catalog_digest, event_seq, created_at, updated_at)
-            VALUES (:run, 'tenant-a', 'owner', 7, 'WAITING_HUMAN', :request_payload, :checkpoint,
-                    :plan, :catalog, 1, '2026-09-01 12:00:00+08', '2026-09-01 12:01:00+08')
-        """), {**sealed, "run": old_run, "catalog": catalog})
-        session.execute(text("""
-            INSERT INTO nexent.human_request_t (request_id, run_id, kind, status, slot, digest, payload, expires_at)
-            VALUES (:request, :run, 'ACTION_APPROVAL', 'PENDING', 'slot', :digest, :payload, now() + interval '1 day')
-        """), {"request": old_request, "run": old_run, "digest": action, "payload": sealed["request"]})
-        session.execute(text("""
-            INSERT INTO nexent.human_execution_t (run_id, slot, tool, digest, arguments, status)
-            VALUES (:run, 'slot', 'send', :digest, :arguments, 'PREPARED')
-        """), {"run": old_run, "digest": action, "arguments": sealed["arguments"]})
-        session.execute(text("""
-            INSERT INTO nexent.human_event_t (run_id, seq, payload)
-            VALUES (:run, 1, :payload)
-        """), {"run": old_run, "payload": '{"type":"human_run","content":{"status":"WAITING_HUMAN"}}'})
-        session.execute(text(MIGRATION.read_text()))
-        session.execute(text(MIGRATION.read_text()))
-    with service.repository.transaction(old_run) as tx:
-        assert tx.run.run_record_id > 0 and tx.run.event_seq == 1
-        assert str(tx.run.create_time) == "2026-09-01 04:00:00"
-        assert str(tx.run.update_time) == "2026-09-01 04:01:00"
-        assert tx.run.created_by == tx.run.updated_by == "owner"
-        for name in ("request_payload", "checkpoint", "plan"):
-            assert getattr(tx.run, name) == sealed[name]
-        request = tx.requests()[0]
-        assert request.request_id == old_request and request.request_record_id > 0
-        assert request.run_record_id == tx.run.run_record_id
-        assert request.payload == sealed["request"]
-        execution = tx.execution("slot")
-        assert execution.execution_id > 0 and execution.arguments == sealed["arguments"]
-    assert len(service.repository.events(old_run)) == 1
-    assert service.snapshot(old_run, "tenant-a", "owner")["requests"][0]["run_id"] == old_run
-    decide_pending(service, old_run)
-    port = port_for(service, old_run)
-    assert port.dispatch("slot", "send", {})["status"] == "execute"
-    port.receipt("slot", "sent")
-    assert port.dispatch("slot", "send", {}) == {"status": "replay", "result": "sent"}
-    port.finish("completed")
-    assert service.snapshot(old_run, "tenant-a", "owner")["status"] == "COMPLETED"
-    assert [item["seq"] for item in service.repository.events(old_run)] == [1, 2, 3, 4, 5]
 
 
 def test_scheduler_audits_multiple_abandoned_and_claimed_runs(service, monkeypatch):
