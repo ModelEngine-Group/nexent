@@ -2522,8 +2522,12 @@ def _model_row(model_id, model_type, display_name, connect_status="available", c
     }
 
 
-def _run_backfill(svc, existing_rows, existing_config):
+def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, updated=None):
     inserted = []
+    updated = updated if updated is not None else []
+    live_ids = live_model_ids if live_model_ids is not None else {
+        m["model_id"] for m in existing_rows
+    }
 
     def fake_get_records(filters, tenant_id):
         return [m for m in existing_rows if filters.get("model_type") == m["model_type"]]
@@ -2535,11 +2539,20 @@ def _run_backfill(svc, existing_rows, existing_config):
         inserted.append(data)
         return True
 
+    def fake_update_config(config_row_id, value):
+        updated.append((config_row_id, value))
+        return True
+
+    def fake_get_model_by_model_id(model_id, tenant_id=None):
+        return {"model_id": model_id} if model_id in live_ids else None
+
     with mock.patch.object(svc, "get_model_records", side_effect=fake_get_records), \
             mock.patch.object(svc, "get_single_config_info", side_effect=fake_get_single_config), \
-            mock.patch.object(svc, "insert_config", side_effect=fake_insert_config):
+            mock.patch.object(svc, "insert_config", side_effect=fake_insert_config), \
+            mock.patch.object(svc, "update_config_by_tenant_config_id", side_effect=fake_update_config), \
+            mock.patch.object(svc, "get_model_by_model_id", side_effect=fake_get_model_by_model_id):
         result = svc._backfill_default_model_slots("u1", "t1")
-    return result, inserted
+    return result, inserted, updated
 
 
 def test_backfill_fills_empty_slots_with_best_candidate():
@@ -2549,7 +2562,7 @@ def test_backfill_fills_empty_slots_with_best_candidate():
         _model_row(2, "llm", "big-ctx", context=1048576),
         _model_row(3, "embedding", "bge-m3"),
     ]
-    result, inserted = _run_backfill(svc, rows, {})
+    result, inserted, _ = _run_backfill(svc, rows, {})
 
     assert {e["config_key"] for e in result} == {"LLM_ID", "EMBEDDING_ID"}
     # The larger-context llm wins over the smaller one.
@@ -2564,7 +2577,7 @@ def test_backfill_prefers_available_models():
         _model_row(1, "rerank", "unavailable-rerank", connect_status="unavailable"),
         _model_row(2, "rerank", "available-rerank"),
     ]
-    result, _ = _run_backfill(svc, rows, {})
+    result, _, _ = _run_backfill(svc, rows, {})
 
     rerank_entry = next(e for e in result if e["config_key"] == "RERANK_ID")
     assert rerank_entry["model_id"] == 2
@@ -2573,18 +2586,38 @@ def test_backfill_prefers_available_models():
 def test_backfill_never_touches_configured_slots():
     svc = import_svc()
     rows = [_model_row(1, "llm", "llm-one"), _model_row(2, "embedding", "emb-one")]
-    # LLM_ID row exists (user configured it) -- must not be overwritten even
-    # though a "better" candidate exists.
-    result, inserted = _run_backfill(svc, rows, {"LLM_ID": {"config_value": "99"}})
+    # LLM_ID row exists and points at a live model (id 1) -- must not be
+    # overwritten even though a "better" candidate exists.
+    result, inserted, updated = _run_backfill(
+        svc, rows, {"LLM_ID": {"config_value": "1", "tenant_config_id": 100}},
+        live_model_ids={1, 2})
 
     assert {e["config_key"] for e in result} == {"EMBEDDING_ID"}
+    assert all(d["config_key"] != "LLM_ID" for d in inserted)
+    assert all(cid != 100 for cid, _ in updated)
+
+
+def test_backfill_repairs_dangling_config_rows():
+    """A config row whose model was deleted counts as empty and is repaired
+    in place (update, not another insert)."""
+    svc = import_svc()
+    rows = [_model_row(5, "llm", "fresh-llm")]
+    # LLM_ID row points at model 99 which no longer exists.
+    result, inserted, updated = _run_backfill(
+        svc, rows, {"LLM_ID": {"config_value": "99", "tenant_config_id": 42}},
+        live_model_ids={5})
+
+    assert {e["config_key"] for e in result} == {"LLM_ID"}
+    assert result[0]["model_id"] == 5
+    # The stale row is updated, not appended to.
+    assert (42, "5") in updated
     assert all(d["config_key"] != "LLM_ID" for d in inserted)
 
 
 def test_backfill_skips_slots_without_candidates():
     svc = import_svc()
     rows = [_model_row(1, "llm", "only-llm")]
-    result, inserted = _run_backfill(svc, rows, {})
+    result, inserted, _ = _run_backfill(svc, rows, {})
 
     assert {e["config_key"] for e in result} == {"LLM_ID"}
     assert len(inserted) == 1

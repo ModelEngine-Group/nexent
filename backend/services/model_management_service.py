@@ -24,13 +24,18 @@ from consts.provider import (
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
+    get_model_by_model_id,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record
 )
-from database.tenant_config_db import get_single_config_info, insert_config
+from database.tenant_config_db import (
+    get_single_config_info,
+    insert_config,
+    update_config_by_tenant_config_id,
+)
 from services.model_provider_service import (
     prepare_model_dict,
     merge_existing_model_attributes,
@@ -511,13 +516,37 @@ def _default_model_candidate_sort_key(record: Dict[str, Any]):
     return (-is_available, -int(context_tokens or 0), record.get("model_id") or 0)
 
 
-def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
-    """Auto-configure empty default-model slots after models are created.
+def _resolve_existing_slot_config(tenant_id: str, config_key: str):
+    """Classify a default-model slot's existing config row.
 
-    Only slots with NO existing tenant_config row are filled (never override a
-    user-configured value); the candidate pool is the tenant's live models of
-    the matching type, ranked by availability then context size. Failures are
-    logged and skipped so backfill can never break the create flow.
+    Returns (live_model_id, stale_row):
+    - live_model_id set: the configured default still exists -- backfill must
+      skip (user's explicit choice).
+    - stale_row set: a row exists but its model has been deleted (dangling
+      default) -- backfill repairs that row in place.
+    - both None: the slot was never configured -- backfill inserts a row.
+    """
+    row = get_single_config_info(tenant_id, config_key)
+    if row is None:
+        return None, None
+    raw_id = row.get("config_value")
+    try:
+        model_id = int(raw_id) if raw_id else None
+    except (TypeError, ValueError):
+        model_id = None
+    if model_id is not None and get_model_by_model_id(model_id, tenant_id):
+        return model_id, None
+    return None, row
+
+
+def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+    """Auto-configure default-model slots after models are created.
+
+    A slot is skipped only when its config row points at a still-existing
+    model; empty slots and dangling rows (model deleted) are (re)filled. The
+    candidate pool is the tenant's live models of the matching type, ranked by
+    availability then context size. Failures are logged and skipped so
+    backfill can never break the create flow.
 
     Returns a list of {"config_key", "model_id", "display_name", "model_type"}
     entries describing what was auto-configured (empty when nothing changed).
@@ -526,8 +555,10 @@ def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str
     try:
         for slot_name, model_type in _AUTO_CONFIGURABLE_MODEL_SLOTS.items():
             config_key = MODEL_CONFIG_MAPPING[slot_name]
-            # Skip when the tenant has ever configured this slot.
-            if get_single_config_info(tenant_id, config_key) is not None:
+            live_model_id, stale_row = _resolve_existing_slot_config(
+                tenant_id, config_key)
+            if live_model_id is not None:
+                # A live, user-configured default: never touch it.
                 continue
 
             candidates = get_model_records({"model_type": model_type}, tenant_id)
@@ -535,16 +566,23 @@ def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str
                 continue
 
             selected = sorted(candidates, key=_default_model_candidate_sort_key)[0]
-            success = insert_config({
-                "tenant_id": tenant_id,
-                "config_key": config_key,
-                "config_value": str(selected["model_id"]),
-                "created_by": user_id,
-                "updated_by": user_id,
-            })
+            if stale_row is not None:
+                # Dangling row (model deleted): repair it in place instead of
+                # appending another row to the key's history.
+                success = update_config_by_tenant_config_id(
+                    stale_row["tenant_config_id"], str(selected["model_id"])
+                )
+            else:
+                success = insert_config({
+                    "tenant_id": tenant_id,
+                    "config_key": config_key,
+                    "config_value": str(selected["model_id"]),
+                    "created_by": user_id,
+                    "updated_by": user_id,
+                })
             if not success:
                 logging.warning(
-                    "Auto-configure default model failed: insert_config returned "
+                    "Auto-configure default model failed: write returned "
                     "False for key=%s tenant=%s", config_key, tenant_id)
                 continue
 
