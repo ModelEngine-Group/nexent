@@ -179,6 +179,39 @@ def test_resolve_share_context_validates_the_token_without_creating_a_session(mo
     create_session.assert_not_called()
 
 
+def test_resolve_share_context_accepts_database_uuid_public_share_id(mocker):
+    from uuid import UUID
+
+    from services import agent_share_service
+
+    record = _share_record(generation=2)
+    record.update(
+        {
+            "public_share_id": UUID(record["public_share_id"]),
+            "tenant_id": "tenant-a",
+            "agent_id": 9,
+            "owner_user_id": "owner-a",
+        }
+    )
+    mocker.patch.object(agent_share_service, "SUPABASE_JWT_SECRET", "auth-secret")
+    mocker.patch.object(
+        agent_share_service, "get_agent_share_by_public_id", return_value=record
+    )
+    mocker.patch.object(
+        agent_share_service,
+        "parse_agent_share_token",
+        return_value=AgentShareTokenPayload(str(record["public_share_id"]), 2),
+    )
+    mocker.patch.object(
+        agent_share_service, "require_agent_draft_edit", return_value={"agent_id": 9}
+    )
+    mocker.patch.object(agent_share_service, "query_current_version_no", return_value=4)
+
+    result = agent_share_service.resolve_agent_share_context("opaque-token")
+
+    assert result["agent_id"] == 9
+
+
 def test_share_metadata_whitelists_agent_display_fields(mocker):
     from services import agent_share_service
 

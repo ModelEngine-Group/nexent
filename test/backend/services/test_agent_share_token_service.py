@@ -1,3 +1,5 @@
+import uuid
+
 from backend.services.agent_share_token_service import (
     build_agent_share_token,
     parse_agent_share_token,
@@ -24,6 +26,17 @@ def test_share_token_round_trips_only_for_its_current_generation_and_nonce():
     assert payload is not None
     assert payload.public_share_id == PUBLIC_SHARE_ID
     assert payload.generation == 2
+
+
+def test_share_token_builder_accepts_the_uuid_value_returned_by_the_database():
+    token = build_agent_share_token(
+        public_share_id=uuid.UUID(PUBLIC_SHARE_ID),
+        generation=1,
+        nonce="server-side-nonce",
+        secret=SECRET,
+    )
+
+    assert token.startswith(f"{PUBLIC_SHARE_ID}.1.")
 
 
 def test_share_token_rejects_tampering_wrong_secret_and_northbound_key():

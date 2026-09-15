@@ -213,7 +213,7 @@ def resolve_agent_share_context(token: str) -> dict[str, Any]:
     if share is None:
         raise AgentShareError("agent_share_not_found")
     payload = parse_agent_share_token(token, nonce=share["token_nonce"], secret=secret)
-    if payload is None or payload.public_share_id != share["public_share_id"]:
+    if payload is None or payload.public_share_id != str(share["public_share_id"]):
         raise AgentShareError("agent_share_invalid_token")
     if payload.generation != int(share["token_generation"]):
         raise AgentShareError("agent_share_invalid_token")

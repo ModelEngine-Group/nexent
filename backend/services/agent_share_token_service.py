@@ -34,7 +34,7 @@ def _encode_signature(payload: bytes, secret: str) -> str:
 
 def build_agent_share_token(
     *,
-    public_share_id: str,
+    public_share_id: str | uuid.UUID,
     generation: int,
     nonce: str,
     secret: str,
@@ -45,7 +45,7 @@ def build_agent_share_token(
     if generation <= 0:
         raise ValueError("Agent share Token generation must be positive")
 
-    canonical_public_share_id = str(uuid.UUID(public_share_id))
+    canonical_public_share_id = str(uuid.UUID(str(public_share_id)))
     signature = _encode_signature(
         _signature_payload(canonical_public_share_id, generation, nonce), secret
     )
