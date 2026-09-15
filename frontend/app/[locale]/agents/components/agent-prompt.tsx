@@ -1,8 +1,24 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Button, Col, Form, Input, Row, Select, Tooltip } from "antd";
-import { Maximize2 } from "lucide-react";
+import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
+import { GripVertical, ListOrdered, Maximize2 } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -13,13 +29,75 @@ import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExpandEditModal from "@/components/common/ExpandEditModal";
+import {
+  reorderModelIds,
+  resolveModelSelection,
+} from "@/lib/agent/modelPriority";
 
 const { TextArea } = Input;
 
 type PromptTab = "duty" | "constraint" | "few-shots";
 
+type SortableModelItemProps = {
+  disabled: boolean;
+  displayName: string;
+  isPrimary: boolean;
+  modelId: number;
+  primaryLabel: string;
+  reorderLabel: string;
+};
+
+function SortableModelItem({
+  disabled,
+  displayName,
+  isPrimary,
+  modelId,
+  primaryLabel,
+  reorderLabel,
+}: SortableModelItemProps) {
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({
+    id: modelId,
+    disabled,
+  });
+
+  return (
+    <li
+      ref={setNodeRef}
+      className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5"
+      style={{
+        opacity: isDragging ? 0.5 : 1,
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <button
+        type="button"
+        className="flex cursor-grab touch-none text-muted-foreground disabled:cursor-default"
+        aria-label={reorderLabel}
+        disabled={disabled}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={16} />
+      </button>
+      <span className="min-w-0 flex-1 truncate">{displayName}</span>
+      {isPrimary && (
+        <span className="text-xs text-muted-foreground">{primaryLabel}</span>
+      )}
+    </li>
+  );
+}
+
 export default function AgentPrompt() {
   const { t } = useTranslation("common");
+  const form = Form.useFormInstance();
   const { user } = useAuthorizationContext();
   const { availableLlmModels, isSuccess: modelListLoaded } = useModelList();
   const { isSpeedMode } = useDeployment();
@@ -33,6 +111,7 @@ export default function AgentPrompt() {
 
   const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
   const [activePromptTab, setActivePromptTab] = useState<PromptTab>("duty");
+  const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const requestedPromptTab =
     configFocusRequest?.agentId === agentId &&
     configFocusRequest.target.section === "role_model"
@@ -109,6 +188,40 @@ export default function AgentPrompt() {
   ]);
 
   const canManage = canManageModels(user?.role ?? "");
+  const isModelSelectionDisabled = !canManage && !isSpeedMode;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const selectedModels = selectedModelIds.map((id) =>
+    modelOptions.find((option) => option.value === id)
+  );
+
+  useEffect(() => {
+    if (selectedModels.length < 2) setIsModelPriorityOpen(false);
+  }, [selectedModels.length]);
+
+  const updateModelSelection = useCallback(
+    (modelIds: number[]) => {
+      form.setFieldValue("model_ids", modelIds);
+      updateAgent(resolveModelSelection(modelIds, modelOptions));
+    },
+    [form, modelOptions, updateAgent]
+  );
+
+  const handleModelPriorityChange = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      if (!over) return;
+
+      const modelIds = reorderModelIds(
+        selectedModelIds,
+        Number(active.id),
+        Number(over.id)
+      );
+      updateModelSelection(modelIds);
+    },
+    [selectedModelIds, updateModelSelection]
+  );
 
   const expandedPromptConfig = {
     duty: {
@@ -140,6 +253,56 @@ export default function AgentPrompt() {
     </Tooltip>
   );
 
+  const modelPriorityContent = (
+    <div className="w-72 space-y-2">
+      <div>
+        <p className="text-sm font-medium">{t("agent.field.modelPriority")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("agent.field.modelPriorityHint")}
+        </p>
+      </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleModelPriorityChange}
+      >
+        <SortableContext
+          items={selectedModelIds}
+          strategy={verticalListSortingStrategy}
+        >
+          <ul className="space-y-2">
+            {selectedModels.map((model, index) =>
+              model ? (
+                <SortableModelItem
+                  key={model.value}
+                  modelId={model.value}
+                  displayName={model.displayName}
+                  isPrimary={index === 0}
+                  disabled={isModelSelectionDisabled}
+                  primaryLabel={t("agent.field.primaryModel")}
+                  reorderLabel={t("agent.field.reorderModel")}
+                />
+              ) : null
+            )}
+          </ul>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+
+  const modelPriorityTrigger = (
+    <Tooltip title={t("agent.field.adjustModelPriority")}>
+      <span className="inline-flex">
+        <Button
+          type="default"
+          icon={<ListOrdered size={16} />}
+          aria-label={t("agent.field.adjustModelPriority")}
+          disabled={selectedModels.length < 2 || isModelSelectionDisabled}
+        />
+      </span>
+    </Tooltip>
+  );
+
   return (
     <div className="w-full">
       {/* Model Selection */}
@@ -149,42 +312,49 @@ export default function AgentPrompt() {
             label={t("agent.field.model")}
             className="mb-3"
             layout="horizontal"
-            name="model_ids"
-            rules={[
-              {
-                required: true,
-                message: t("agent.validation.modelRequired"),
-              },
-            ]}
           >
-            <Select
-              mode="multiple"
-              placeholder={t("agent.field.modelPlaceholder")}
-              options={modelOptions}
-              value={selectedModelIds}
-              onChange={(values: number[]) => {
-                const model_names = values.map((id) => {
-                  const option = modelOptions.find((opt) => opt.value === id);
-                  return option?.displayName ?? "";
-                });
-                const primaryModel = modelOptions.find(
-                  (option) => option.value === values[0]
-                );
-                updateAgent({
-                  model_ids: values,
-                  model: primaryModel?.displayName ?? "",
-                  model_names,
-                });
-              }}
-              maxTagCount={3}
-              showSearch={{
-                filterOption: (input, option) =>
-                  (option?.label ?? "")
-                    .toLowerCase()
-                    .includes(input.toLowerCase()),
-              }}
-              disabled={!canManage && !isSpeedMode}
-            />
+            <div className="flex w-full items-start gap-2">
+              <Form.Item
+                noStyle
+                name="model_ids"
+                rules={[
+                  {
+                    required: true,
+                    message: t("agent.validation.modelRequired"),
+                  },
+                ]}
+              >
+                <Select
+                  className="min-w-0 flex-1"
+                  mode="multiple"
+                  placeholder={t("agent.field.modelPlaceholder")}
+                  options={modelOptions}
+                  value={selectedModelIds}
+                  onChange={updateModelSelection}
+                  maxTagCount={3}
+                  showSearch={{
+                    filterOption: (input, option) =>
+                      (option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase()),
+                  }}
+                  disabled={isModelSelectionDisabled}
+                />
+              </Form.Item>
+              {selectedModels.length > 1 && !isModelSelectionDisabled ? (
+                <Popover
+                  content={modelPriorityContent}
+                  trigger="click"
+                  placement="bottomRight"
+                  open={isModelPriorityOpen}
+                  onOpenChange={setIsModelPriorityOpen}
+                >
+                  {modelPriorityTrigger}
+                </Popover>
+              ) : (
+                modelPriorityTrigger
+              )}
+            </div>
           </Form.Item>
         </Col>
       </Row>

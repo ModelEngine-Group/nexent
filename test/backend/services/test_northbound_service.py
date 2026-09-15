@@ -1061,6 +1061,7 @@ class TestNorthboundModelAndGeneratedTitleServices:
             conversation_id=42,
             question="Summarize this conversation",
             language="en",
+            model_id=7,
         )
 
         assert result == {
@@ -1074,6 +1075,7 @@ class TestNorthboundModelAndGeneratedTitleServices:
             user_id="user-title",
             tenant_id="tenant-title",
             language="en",
+            model_id=7,
         )
 
 

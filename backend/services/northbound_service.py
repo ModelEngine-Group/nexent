@@ -878,6 +878,7 @@ async def generate_conversation_title(
     conversation_id: int,
     question: str,
     language: str,
+    model_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Generate and persist a conversation title from the user's question."""
     title = await generate_conversation_title_service(
@@ -886,5 +887,6 @@ async def generate_conversation_title(
         user_id=ctx.user_id,
         tenant_id=ctx.tenant_id,
         language=language,
+        model_id=model_id,
     )
     return {"message": "success", "data": title, "requestId": ctx.request_id}
