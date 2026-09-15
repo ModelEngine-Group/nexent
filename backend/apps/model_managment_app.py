@@ -63,6 +63,7 @@ from services.model_management_service import (
 )
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import TokenExpiredError
+from nexent.core.concurrency import run_blocking
 
 # Model Catalog loader (with graceful fallback)
 try:
@@ -568,10 +569,13 @@ async def check_temporary_model_health(
         result = await verify_model_config_connectivity(request.model_dump())
         if result.get("connectivity") is True:
             # suggest_capacity may now issue an LLM self-report HTTP call
-            # (catalog miss → _llm_infer_capacity). Run it off the event loop
-            # so the 15s probe budget does not block other requests.
-            result["capacity_suggestion"] = await asyncio.to_thread(
-                _capacity_suggestion_for_model_request, request
+            # (catalog miss → _llm_infer_capacity). Run it through the
+            # managed thread pool so the 15s probe budget does not block
+            # other requests.
+            result["capacity_suggestion"] = await run_blocking(
+                "model-capacity-suggestion",
+                _capacity_suggestion_for_model_request,
+                request,
             )
         else:
             result["capacity_suggestion"] = None
