@@ -1789,7 +1789,15 @@ async def run_agent_stream(
 
         def _wrap_sse(event_obj: dict) -> str:
             """Serialize an AG-UI event dict into an SSE data-line."""
-            return "data: " + json.dumps(event_obj, ensure_ascii=False) + "\n\n"
+            data_line = "data: " + json.dumps(event_obj, ensure_ascii=False) + "\n\n"
+            event_type = event_obj.get("type", "")
+            if event_type in ("ACTIVITY_SNAPSHOT", "TOOL_CALL_ARGS", "TOOL_CALL_RESULT"):
+                logger.info(
+                    "[RunTransformer] SSE %s -> %s",
+                    event_type,
+                    data_line[:400].replace("\n", "\\n"),
+                )
+            return data_line
 
         def _maybe_encode_chunk(data_chunk: str) -> list[str]:
             """Try to parse a raw SSE line, run it through the encoder, and

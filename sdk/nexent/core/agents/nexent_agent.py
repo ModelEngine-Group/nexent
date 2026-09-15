@@ -669,12 +669,26 @@ class NexentAgent:
             or getattr(inner_agent, "name", None)
             or "subagent"
         )
-        return SubAgentToolWrapper(
+        wrapper = SubAgentToolWrapper(
             inner_agent=inner_agent,
             observer=self.observer,
             agent_id=resolved_id,
             agent_name=str(agent_name),
         )
+        # Ensure smolagents' managed-agent contract: both name and
+        # description must be truthy.  The wrapper forwards attribute
+        # reads to inner_agent via __getattr__, so if the inner
+        # CoreAgent was built with an empty description we'd fail the
+        # assertion.  Patch here so every sub-agent always has a usable
+        # description (inner config takes priority, fallback to name).
+        inner_desc = getattr(inner_agent, "description", None) or ""
+        if not inner_desc.strip():
+            fallback_desc = (
+                getattr(sub_agent_config, "description", None)
+                or f"Managed sub-agent: {agent_name}"
+            )
+            wrapper.description = str(fallback_desc)
+        return wrapper
 
     def create_single_agent(
         self,
@@ -914,6 +928,23 @@ class NexentAgent:
                 context_manager,
                 items=context_items,
             )
+
+            # DEBUG: dump managed_agents_list before CoreAgent construction
+            if managed_agents_list:
+                for _i, _ma in enumerate(managed_agents_list):
+                    _ma_name = getattr(_ma, "name", None)
+                    _ma_desc = getattr(_ma, "description", None)
+                    logger.info(
+                        "[DEBUG_MA] agent=%s managed_agent[%d]: "
+                        "type=%s name=%s desc=%s",
+                        agent_config.name, _i, type(_ma).__name__,
+                        repr(_ma_name), repr(_ma_desc),
+                    )
+            else:
+                logger.info(
+                    "[DEBUG_MA] agent=%s has NO managed_agents",
+                    agent_config.name,
+                )
 
             agent = CoreAgent(
                 observer=self.observer,

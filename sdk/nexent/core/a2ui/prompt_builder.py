@@ -264,6 +264,116 @@ A2UI 响应格式为带 `<a2ui-json>` 标签的 JSON 数组，数组中每个元
 </a2ui-json>
 ```
 
+### 列表/表格示例 - 酒店房间列表（带交互按钮）
+
+展示多条相似数据时，使用 Card 包裹 + Column 堆叠 + Row 作为每项 + Divider 分隔，让列表有清晰的视觉层次：
+
+```
+以下是酒店房间列表：
+<a2ui-json>
+{
+  "beginRendering": {
+    "surfaceId": "room-list",
+    "version": "0.9"
+  }
+}
+{
+  "surfaceUpdate": {
+    "surfaceId": "room-list",
+    "version": "0.9",
+    "components": [
+      {
+        "id": "root",
+        "component": {
+          "type": "Card",
+          "props": {
+            "title": {"literalString": "酒店房间列表"},
+            "padding": 4,
+            "child": "list-col"
+          }
+        }
+      },
+      {
+        "id": "list-col",
+        "component": {
+          "type": "Column",
+          "props": {
+            "children": {"explicitList": ["row-header", "divider-1", "row-1", "divider-2", "row-2"]},
+            "gap": 2
+          }
+        }
+      },
+      {
+        "id": "row-header",
+        "component": {
+          "type": "Row",
+          "props": {
+            "children": {"explicitList": ["h-room", "h-price", "h-action"]},
+            "gap": 4,
+            "justify": "space-between",
+            "align": "center"
+          }
+        }
+      },
+      {"id": "h-room", "component": {"type": "Text", "props": {"text": {"literalString": "房间"}, "usageHint": "h4"}}},
+      {"id": "h-price", "component": {"type": "Text", "props": {"text": {"literalString": "价格"}, "usageHint": "h4"}}},
+      {"id": "h-action", "component": {"type": "Text", "props": {"text": {"literalString": "操作"}, "usageHint": "h4"}}},
+      {"id": "divider-1", "component": {"type": "Divider", "props": {}}},
+      {
+        "id": "row-1",
+        "component": {
+          "type": "Row",
+          "props": {
+            "children": {"explicitList": ["r1-info", "r1-action"]},
+            "gap": 4,
+            "justify": "space-between",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "r1-info",
+        "component": {
+          "type": "Column",
+          "props": {
+            "children": {"explicitList": ["r1-title", "r1-meta"]},
+            "gap": 1
+          }
+        }
+      },
+      {"id": "r1-title", "component": {"type": "Text", "props": {"text": {"literalString": "r101 · 标准大床房"}, "usageHint": "body"}}},
+      {"id": "r1-meta", "component": {"type": "Text", "props": {"text": {"literalString": "¥388/晚 · 可预订"}, "usageHint": "caption"}}},
+      {
+        "id": "r1-action",
+        "component": {
+          "type": "Button",
+          "props": {
+            "child": "r1-btn-text",
+            "action": {
+              "name": "subscribe_room",
+              "context": {
+                "room_id": {"literalString": "r101"},
+                "price": {"literalString": "388"}
+              }
+            }
+          }
+        }
+      },
+      {"id": "r1-btn-text", "component": {"type": "Text", "props": {"text": {"literalString": "订阅"}}}}
+    ]
+  }
+}
+</a2ui-json>
+```
+
+**列表设计规范（极其重要）**：
+1. 外层用 **Card** 包裹（必须带 title 和 padding），让列表有边框阴影，视觉独立
+2. 主体用 **Column**（gap=2 到 4）堆叠每一行和分隔线
+3. 每行用 **Row**（gap=4, justify="space-between", align="center"），让内容两端对齐
+4. 行之间必须用 **Divider** 分隔（视觉层次的关键，不能省）
+5. 复杂单元格用嵌套 **Column + Text**（主标题用 body，元信息用 caption 小字）
+6. 操作按钮放在 Row 最右侧，action.context 用 literalString 绑定静态数据
+
 ## 核心消息类型
 
 A2UI 协议使用以下 4 种消息类型，每个消息对象以类型名作为 key：
@@ -644,6 +754,116 @@ Important notification:
 }
 </a2ui-json>
 ```
+
+### List Example - Hotel Room List with Action Buttons
+
+When displaying multiple similar items, wrap everything in a Card, stack Rows inside a Column, and insert Dividers between rows for clear visual hierarchy:
+
+```
+Here are the hotel rooms available:
+<a2ui-json>
+{
+  "beginRendering": {
+    "surfaceId": "room-list",
+    "version": "0.9"
+  }
+}
+{
+  "surfaceUpdate": {
+    "surfaceId": "room-list",
+    "version": "0.9",
+    "components": [
+      {
+        "id": "root",
+        "component": {
+          "type": "Card",
+          "props": {
+            "title": {"literalString": "Hotel Rooms"},
+            "padding": 4,
+            "child": "list-col"
+          }
+        }
+      },
+      {
+        "id": "list-col",
+        "component": {
+          "type": "Column",
+          "props": {
+            "children": {"explicitList": ["row-header", "divider-1", "row-1", "divider-2", "row-2"]},
+            "gap": 2
+          }
+        }
+      },
+      {
+        "id": "row-header",
+        "component": {
+          "type": "Row",
+          "props": {
+            "children": {"explicitList": ["h-room", "h-price", "h-action"]},
+            "gap": 4,
+            "justify": "space-between",
+            "align": "center"
+          }
+        }
+      },
+      {"id": "h-room", "component": {"type": "Text", "props": {"text": {"literalString": "Room"}, "usageHint": "h4"}}},
+      {"id": "h-price", "component": {"type": "Text", "props": {"text": {"literalString": "Price"}, "usageHint": "h4"}}},
+      {"id": "h-action", "component": {"type": "Text", "props": {"text": {"literalString": "Action"}, "usageHint": "h4"}}},
+      {"id": "divider-1", "component": {"type": "Divider", "props": {}}},
+      {
+        "id": "row-1",
+        "component": {
+          "type": "Row",
+          "props": {
+            "children": {"explicitList": ["r1-info", "r1-action"]},
+            "gap": 4,
+            "justify": "space-between",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "r1-info",
+        "component": {
+          "type": "Column",
+          "props": {
+            "children": {"explicitList": ["r1-title", "r1-meta"]},
+            "gap": 1
+          }
+        }
+      },
+      {"id": "r1-title", "component": {"type": "Text", "props": {"text": {"literalString": "r101 · Standard Queen"}, "usageHint": "body"}}},
+      {"id": "r1-meta", "component": {"type": "Text", "props": {"text": {"literalString": "$388/night · Available"}, "usageHint": "caption"}}},
+      {
+        "id": "r1-action",
+        "component": {
+          "type": "Button",
+          "props": {
+            "child": "r1-btn-text",
+            "action": {
+              "name": "subscribe_room",
+              "context": {
+                "room_id": {"literalString": "r101"},
+                "price": {"literalString": "388"}
+              }
+            }
+          }
+        }
+      },
+      {"id": "r1-btn-text", "component": {"type": "Text", "props": {"text": {"literalString": "Subscribe"}}}}
+    ]
+  }
+}
+</a2ui-json>
+```
+
+**List Design Rules (CRITICAL)**:
+1. Always wrap the list in a **Card** (with title and padding) — it provides the framed surface, border, and shadow that make the list look intentional rather than plain text
+2. Use a **Column** (gap=2 to 4) to stack rows and dividers
+3. Each item is a **Row** (gap=4, justify="space-between", align="center") — space-between pushes labels and actions to opposite edges
+4. **Divider** between every row is NOT optional — it creates the visual "separation" that makes it read as a list
+5. Rich cells use nested **Column + Text** (main label with usageHint="body", metadata with usageHint="caption" for small muted text)
+6. Action buttons go in the rightmost position of the Row; use literalString bindings for static context values
 
 ## Core Message Types
 

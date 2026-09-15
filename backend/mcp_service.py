@@ -231,7 +231,15 @@ def register_openapi_service(
             openapi_spec["servers"] = [{"url": server_url}]
 
         # Create HTTP client for the underlying REST API
-        client = httpx.AsyncClient(base_url=server_url, timeout=120.0, headers=headers_template)
+        # Use trust_env=False so system proxy env vars on Windows don't
+        # hijack localhost requests (common root cause of MCP "connection
+        # failed" errors for local OpenAPI-backed services).
+        from utils.http_client_utils import create_httpx_client
+        client = create_httpx_client(
+            headers=headers_template,
+            timeout=httpx.Timeout(120.0),
+            base_url=server_url,
+        )
 
         # Create FastMCP instance from OpenAPI spec
         mcp_server = FastMCP.from_openapi(

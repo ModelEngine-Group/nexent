@@ -290,58 +290,73 @@ def _flatten_and_resolve_components(
             flat_node: dict[str, Any] = {"id": node_id}
             if "type" in inner:
                 flat_node["component"] = inner["type"]
+            # Flatten Nexus inner.props directly into the node (AG-UI
+            # convert.ts expects props at sibling level, not nested
+            # under a "props" key).
             props = inner.get("props")
             if isinstance(props, dict):
-                flat_node["props"] = _resolve_nexus_bindings(props)
-            # Preserve any other top-level Nexus fields
+                resolved_props = _resolve_nexus_bindings(props)
+                for pk, pv in resolved_props.items():
+                    flat_node[pk] = pv
+            # Preserve any other top-level Nexus fields (but don't
+            # duplicate anything already spread from props)
             for k, v in comp.items():
-                if k not in ("id", "component"):
+                if k not in ("id", "component") and k not in flat_node:
                     flat_node[k] = v
         else:
-            # Already flat (AG-UI format) — still process bindings + children
-            flat_node: dict[str, Any] = {
-                k: _resolve_nexus_bindings(v) if isinstance(v, (dict, list)) else v
-                for k, v in comp.items()
-            }
+            # Already flat (AG-UI format) — spread "props" key into
+            # top-level so convert.ts can read them as flat attributes.
+            flat_node: dict[str, Any] = {}
+            for k, v in comp.items():
+                resolved = _resolve_nexus_bindings(v) if isinstance(v, (dict, list)) else v
+                flat_node[k] = resolved
+            nested_props = flat_node.get("props")
+            if isinstance(nested_props, dict):
+                for pk, pv in nested_props.items():
+                    if pk not in flat_node:
+                        flat_node[pk] = pv
+                flat_node.pop("props", None)
 
-        # Extract child refs from Nexus props into top-level children
-        props = flat_node.get("props", {})
-        if isinstance(props, dict):
-            child_ids: list[str] = []
-            singular_child = props.get("child")
-            if isinstance(singular_child, str):
-                child_ids.append(singular_child)
-                props.pop("child", None)
-            elif isinstance(singular_child, dict):
-                child_id = _walk(singular_child)
-                if child_id:
-                    child_ids.append(child_id)
-                props.pop("child", None)
+        # Extract child refs from Nexus props into top-level children.
+        # Props are now spread into flat_node; check for Nexus-style
+        # nested child references at the top level.
+        child_ids: list[str] = []
+        singular_child = flat_node.get("child")
+        if isinstance(singular_child, str):
+            child_ids.append(singular_child)
+            flat_node.pop("child", None)
+        elif isinstance(singular_child, dict):
+            child_id = _walk(singular_child)
+            if child_id:
+                child_ids.append(child_id)
+            flat_node.pop("child", None)
 
-            children_raw = props.get("children")
-            if children_raw is not None:
-                props.pop("children", None)
-                if isinstance(children_raw, dict):
-                    explicit = children_raw.get("explicitList")
-                    if isinstance(explicit, list):
-                        for item in explicit:
-                            if isinstance(item, str):
-                                child_ids.append(item)
-                            elif isinstance(item, dict):
-                                child_id = _walk(item)
-                                if child_id:
-                                    child_ids.append(child_id)
-                elif isinstance(children_raw, list):
-                    for item in children_raw:
+        children_raw = flat_node.get("children")
+        if children_raw is not None and not isinstance(children_raw, list):
+            # Children is either missing (None), already a list of IDs,
+            # or a Nexus-style wrapper dict — only process the wrapper.
+            flat_node.pop("children", None)
+            if isinstance(children_raw, dict):
+                explicit = children_raw.get("explicitList")
+                if isinstance(explicit, list):
+                    for item in explicit:
                         if isinstance(item, str):
                             child_ids.append(item)
                         elif isinstance(item, dict):
                             child_id = _walk(item)
                             if child_id:
                                 child_ids.append(child_id)
+            elif isinstance(children_raw, list):
+                for item in children_raw:
+                    if isinstance(item, str):
+                        child_ids.append(item)
+                    elif isinstance(item, dict):
+                        child_id = _walk(item)
+                        if child_id:
+                            child_ids.append(child_id)
 
-            if child_ids:
-                flat_node["children"] = child_ids
+        if child_ids:
+            flat_node["children"] = child_ids
 
         collected.append(flat_node)
         return node_id
@@ -351,8 +366,16 @@ def _flatten_and_resolve_components(
         isinstance(c, dict) and isinstance(c.get("component"), str)
         for c in components
     ):
-        # Already flat — just resolve bindings in place
-        _resolve_nexus_bindings(components)
+        # Already flat — resolve bindings in place, and spread any
+        # nested "props" key into top-level for AG-UI convert.ts.
+        for c in components:
+            _resolve_nexus_bindings(c)
+            nested_props = c.get("props")
+            if isinstance(nested_props, dict):
+                for pk, pv in nested_props.items():
+                    if pk not in c:
+                        c[pk] = pv
+                c.pop("props", None)
         return list(components)
 
     for c in components:
