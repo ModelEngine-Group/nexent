@@ -333,7 +333,7 @@ export default function SelectSkillsDialog({
             onClick={onOpenManageTags}
             className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
           >
-            {t("skillPool.bulkAssignTags")}
+            {t("skillPool.manageTags")}
           </Button>
           {onOpenTagManagement ? (
             <Button
@@ -344,7 +344,7 @@ export default function SelectSkillsDialog({
               onClick={onOpenTagManagement}
               className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
             >
-              {t("skillPool.tagManagement")}
+              {t("tagManagement.title.definitionManagement")}
             </Button>
           ) : null}
         </div>
