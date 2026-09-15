@@ -2992,7 +2992,9 @@ class TestBuildPythonExecutor:
 
         assert executor is expected_executor
         assert cfg.level == SandboxLevel.DOCKER
-        acquire.assert_called_once_with(cfg, logger, True)
+        acquire.assert_called_once_with(
+            cfg, logger, True, cancellation_scope=None
+        )
 
     def test_session_container_group_is_forwarded_to_pool(self, mocker):
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
@@ -3015,6 +3017,22 @@ class TestBuildPythonExecutor:
             logger,
             True,
             session_container_group=group,
+            cancellation_scope=None,
+        )
+
+    def test_sdk_ut_tlm_038_run_scope_is_forwarded_to_pool(self, mocker):
+        cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
+        logger = sandbox_module.logging.getLogger("test")
+        scope = MagicMock()
+        pool = SandboxPoolManager.get_instance()
+        acquire = mocker.patch.object(pool, "acquire", return_value=MagicMock())
+
+        sandbox_module.build_python_executor(
+            cfg, logger, host_tools_exist=True, cancellation_scope=scope
+        )
+
+        acquire.assert_called_once_with(
+            cfg, logger, True, cancellation_scope=scope
         )
 
     def test_session_scope_creates_fresh_executor(self):

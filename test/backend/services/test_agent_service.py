@@ -15851,6 +15851,25 @@ async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_be_ut_tlm_036_runtime_signal_closes_run_resources(monkeypatch):
+    """A Redis cancel signal must close resources before a blocked worker exits."""
+    from management.services.agent import run as agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    stop_event = asyncio.Event()
+    cancellation_scope = MagicMock()
+
+    await agent_service._poll_runtime_cancel_signal(
+        123, "user1", stop_event, cancellation_scope
+    )
+
+    assert stop_event.is_set()
+    cancellation_scope.cancel.assert_called_once_with()
+
+
+@pytest.mark.asyncio
 async def test_poll_runtime_cancel_signal_skips_when_already_stopped(monkeypatch):
     """Redis cancel polling should not touch Redis when the stop event is already set."""
     from management.services.agent import run as agent_service
