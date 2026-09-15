@@ -74,25 +74,10 @@ During the upgrade, `nexent-config` runs automatic database migrations while the
 
 ## 3. Post-upgrade Checks
 
-Check Deployment rollouts, Pods, and PVCs:
+Inspect Pod status in the target namespace. The following example uses the default `nexent` namespace:
 
 ```bash
-kubectl get deployment -n "$NS"
-kubectl get pods -n "$NS" -o wide
-kubectl get pvc -n "$NS"
-
-while IFS= read -r deployment; do
-  kubectl rollout status -n "$NS" "$deployment" --timeout=600s
-done < <(kubectl get deployment -n "$NS" -o name)
-
-kubectl logs -n "$NS" deployment/nexent-config --tail=200
+kubectl get pods -n nexent -o wide
 ```
 
-The upgrade passes when:
-
-- Every Deployment for the selected components completes its rollout, and its Pods are `Running` with the expected READY count.
-- No Pod is `CrashLoopBackOff`, `Error`, or persistently `Pending`, and RESTARTS is not continually increasing.
-- Every required PVC is `Bound`.
-- The `nexent-config` log has no `[sql-migrations]` failure, migration wait timeout, or persistent error.
-
-If any condition fails, preserve the current environment and pre-upgrade copy, then inspect Pod events and container logs first.
+The check passes when every Nexent Pod is `Running` and its READY count matches the expected value. Continue waiting while a Pod reports `ContainerCreating`; the check fails if a Pod reports `CrashLoopBackOff`, `Error`, or remains `Pending` for an extended period.

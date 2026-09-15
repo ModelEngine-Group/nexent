@@ -74,25 +74,10 @@ bash deploy.sh \
 
 ## 3. 升级后检查
 
-检查 Deployment rollout、Pod 和 PVC：
+检查指定 namespace 中的 Pod 状态；以下示例使用默认 namespace `nexent`：
 
 ```bash
-kubectl get deployment -n "$NS"
-kubectl get pods -n "$NS" -o wide
-kubectl get pvc -n "$NS"
-
-while IFS= read -r deployment; do
-  kubectl rollout status -n "$NS" "$deployment" --timeout=600s
-done < <(kubectl get deployment -n "$NS" -o name)
-
-kubectl logs -n "$NS" deployment/nexent-config --tail=200
+kubectl get pods -n nexent -o wide
 ```
 
-升级通过需要满足：
-
-- 所有已选组件的 Deployment 都完成 rollout，Pod 为 `Running` 且 READY 数量符合预期。
-- 不存在 `CrashLoopBackOff`、`Error` 或长时间 `Pending` 的 Pod，RESTARTS 没有持续增长。
-- 所有需要的 PVC 都为 `Bound`。
-- `nexent-config` 日志中没有 `[sql-migrations]` 失败、迁移等待超时或持续报错。
-
-如果不满足上述条件，先保留现场和升级前副本，根据 Pod events 和容器日志定位问题。
+所有 Nexent Pod 均为 `Running`，且 READY 数量符合预期，即表示检查通过。Pod 显示 `ContainerCreating` 时继续等待；显示 `CrashLoopBackOff`、`Error` 或长时间 `Pending` 时检查不通过。
