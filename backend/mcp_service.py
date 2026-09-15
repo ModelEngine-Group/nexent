@@ -15,6 +15,12 @@ from fastmcp.tools.tool import ToolResult
 from database.outer_api_tool_db import query_available_openapi_services
 from consts.const import TOKEN
 from mcp.types import Tool as MCPTool
+from nexent.core.concurrency import (
+    ManagedThreadSpec,
+    clear_default_thread_manager,
+    set_default_thread_manager,
+)
+from services.thread_lifecycle_service import mcp_thread_manager
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
@@ -499,18 +505,51 @@ async def _send_forbidden(send: Callable) -> None:
 def run_mcp_server_with_management():
     """Run MCP server with management API."""
     app = get_mcp_management_app()
+    mcp_thread_manager.start()
+    set_default_thread_manager(mcp_thread_manager)
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=5015,
+        log_level="info",
+        log_config=get_uvicorn_logging_config(categories=["mcp"]),
+    )
+    server = uvicorn.Server(config)
 
-    def run_fastapi():
+    def run_fastapi(cancel_event):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        uvicorn.run(app, host="0.0.0.0", port=5015, log_level="info", log_config=get_uvicorn_logging_config(categories=["mcp"]))
+        try:
+            loop.run_until_complete(server.serve())
+        finally:
+            loop.close()
 
-    fastapi_thread = Thread(target=run_fastapi, daemon=True)
-    fastapi_thread.start()
+    management_execution = mcp_thread_manager.register_service(
+        ManagedThreadSpec(
+            task_name="mcp-management-api",
+            owner="api-to-mcp",
+            lane="background-service",
+            close_hook=lambda: setattr(server, "should_exit", True),
+        ),
+        run_fastapi,
+    )
+    mcp_thread_manager.start_service(management_execution.execution_id)
 
     # Serve tenant-scoped SSE applications behind one listener. The management
     # API remains on 5015; MCP clients use /mcp/{tenant_id}/sse on 5011.
     uvicorn.run(TenantMCPRouter(), host="0.0.0.0", port=5011, log_level="info")
+    try:
+        nexent_mcp.run(transport="sse", host="0.0.0.0", port=5011)
+    finally:
+        mcp_thread_manager.cancel(
+            management_execution.execution_id,
+            reason="MCP server stopping",
+            wait_timeout=5,
+        )
+        try:
+            asyncio.run(mcp_thread_manager.shutdown(timeout=15))
+        finally:
+            clear_default_thread_manager(mcp_thread_manager)
 
 
 if __name__ == "__main__":

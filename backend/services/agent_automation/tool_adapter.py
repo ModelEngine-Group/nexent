@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 
 from utils.time_context_utils import strip_current_time_prefix
-import concurrent.futures
 import json
 import logging
 from dataclasses import dataclass
@@ -18,6 +17,7 @@ from typing import Any, Callable, Dict, Optional
 
 from database import agent_automation_db
 from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
 from nexent.core.tools.create_scheduled_task_tool import (
     CreateScheduledTaskProposalTool,
 )
@@ -43,8 +43,20 @@ def _run_coroutine(coro):
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    manager = get_current_thread_manager()
+    if manager is None:
+        from nexent.core.agents.run_agent import _get_default_agent_thread_manager
+
+        manager = _get_default_agent_thread_manager()
+    return manager.run_sync(
+        "model-tool-io",
+        ManagedTaskSpec(
+            task_name="automation-tool-coroutine",
+            owner="runtime",
+        ),
+        asyncio.run,
+        coro,
+    )
 
 
 @dataclass(frozen=True)

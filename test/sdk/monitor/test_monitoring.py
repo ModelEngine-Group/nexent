@@ -243,7 +243,8 @@ class TestMonitoringManager:
                 enable_telemetry=True,
                 service_name="test-service",
                 otlp_endpoint="http://localhost:4318",
-                otlp_protocol="http"
+                otlp_protocol="http",
+                project_name="nexent",
             )
 
             mock_resource_instance = MagicMock()
@@ -263,7 +264,9 @@ class TestMonitoringManager:
 
             manager.configure(config)
 
-            mock_resource.create.assert_called()
+            resource_attributes = mock_resource.create.call_args.args[0]
+            assert resource_attributes["project.name"] == "nexent"
+            assert resource_attributes["openinference.project.name"] == "nexent"
             mock_tracer_provider.assert_called_once()
             mock_span_exporter_http.assert_called_once()
             mock_batch_processor.assert_called_once()
@@ -1962,6 +1965,43 @@ class TestMonitoredClientWrapper:
         assert record["output_tokens"] == 3
         assert record["ttft_ms"] >= 0
         assert record["operation"] == "chat_completion"
+
+    def test_ut_sdk_tlm_022_stream_close_is_forwarded_and_finalized_once(self):
+        class CloseableStream:
+            def __init__(self):
+                self.close_calls = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise StopIteration
+
+            def close(self):
+                self.close_calls += 1
+
+        stream = CloseableStream()
+        mock_buffer = MagicMock()
+        mock_buffer.is_enabled = True
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=mock_buffer):
+            wrapped = _MonitoredStreamIterator(stream, time.time(), "test-model", "llm")
+            assert list(wrapped) == []
+            wrapped.close()
+            wrapped.close()
+
+        assert stream.close_calls == 1
+        mock_buffer.add_record.assert_called_once()
+
+    def test_ut_sdk_tlm_022_stream_context_manager_closes_underlying_stream(self):
+        stream = MagicMock()
+        stream.__iter__.return_value = iter(())
+
+        with patch("sdk.nexent.monitor.monitoring.get_monitoring_buffer", return_value=None):
+            with _MonitoredStreamIterator(stream, time.time(), "test-model", "llm") as wrapped:
+                assert wrapped is not None
+
+        stream.close.assert_called_once_with()
 
     def test_passthrough_attributes(self):
         monitored, mock_original = self._make_monitored_client()

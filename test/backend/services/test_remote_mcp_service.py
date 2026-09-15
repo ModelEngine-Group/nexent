@@ -27,7 +27,10 @@ elasticsearch_module.__spec__ = importlib.machinery.ModuleSpec("elasticsearch", 
 sys.modules['elasticsearch'] = elasticsearch_module
 # Pre-mock nexent module hierarchy to prevent deep SDK import chain
 nexent_mod = types.ModuleType("nexent")
-nexent_mod.__path__ = []
+_sdk_nexent_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent")
+)
+nexent_mod.__path__ = [_sdk_nexent_path]
 nexent_mod.__spec__ = importlib.machinery.ModuleSpec("nexent", loader=None)
 sys.modules['nexent'] = nexent_mod
 
@@ -54,7 +57,11 @@ for _mod_name in [
     if _mod_name not in sys.modules:
         _parts = _mod_name.split('.')
         _mod = types.ModuleType(_mod_name)
-        _mod.__path__ = []
+        _mod.__path__ = (
+            [os.path.join(_sdk_nexent_path, "core")]
+            if _mod_name == "nexent.core"
+            else []
+        )
         _mod.__spec__ = importlib.machinery.ModuleSpec(_mod_name, loader=None)
         sys.modules[_mod_name] = _mod
 

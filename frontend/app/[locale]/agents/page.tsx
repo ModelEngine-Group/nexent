@@ -65,7 +65,7 @@ function resolveDraftFocusTarget(
   if (updatedFields.includes("duty_prompt")) {
     return { section: "role_model", promptTab: "duty" };
   }
-  if (updatedFields.includes("description")) {
+  if (updatedFields.includes("name") || updatedFields.includes("description")) {
     return { section: "display_info" };
   }
   return null;
@@ -158,6 +158,8 @@ function AgentSetupContent() {
     markCompletionSyncFailed,
     markGenerationCompleted,
     markGenerationStopped,
+    markRunFinished,
+    markRunStarted,
     markPromptGenerationFailed,
     requestConfigFocus,
     resetFlow,
@@ -406,6 +408,8 @@ function AgentSetupContent() {
                 }
                 onStateEvent={handleStateEvent}
                 onStopped={handleGenerationStopped}
+                onRunStart={markRunStarted}
+                onRunEnd={markRunFinished}
               />
             </div>
           </PanelCard>
