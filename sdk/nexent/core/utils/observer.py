@@ -25,6 +25,7 @@ _ANSI_ESCAPE_PATTERN = re.compile(
 )
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
     {
+        "name",
         "description",
         "duty_prompt",
         "constraint_prompt",

@@ -303,6 +303,17 @@ sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
+_concurrency_mod = _create_stub_module("nexent.core.concurrency")
+
+
+async def _run_blocking(_task_name, fn, *args, **kwargs):
+    kwargs.pop("lane", None)
+    kwargs.pop("owner", None)
+    return fn(*args, **kwargs)
+
+
+_concurrency_mod.run_blocking = _run_blocking
+sys.modules['nexent.core.concurrency'] = _concurrency_mod
 nexent_agents_module = _create_stub_module("nexent.core.agents")
 nexent_agents_module.__path__ = []
 sys.modules['nexent.core.utils'] = _create_stub_module("nexent.core.utils")
@@ -557,14 +568,6 @@ def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch
 
     assert _get_external_provider_service_for_search() is service
     factory.assert_called_once_with()
-
-
-@pytest.fixture(autouse=True)
-def run_create_agent_thread_work_inline(monkeypatch):
-    async def run_inline(func, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    monkeypatch.setattr(create_agent_info_module.asyncio, "to_thread", run_inline)
 
 
 def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
@@ -4135,6 +4138,8 @@ class TestCreateAgentRunInfo:
                 }],
                 history=[],
                 stop_event="stop_event",
+                mcp_tool_timeout_seconds=ANY,
+                mcp_close_timeout_seconds=ANY,
                 capacity_snapshot=None,
                 context_budget_snapshot=None,
                 redis_client=ANY,

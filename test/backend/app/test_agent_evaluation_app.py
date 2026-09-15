@@ -14,6 +14,55 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+# The app imports lightweight test doubles for several project packages. Keep
+# that temporary module graph out of sibling database and service tests.
+_MODULE_ROOTS = (
+    "boto3",
+    "botocore",
+    "consts",
+    "database",
+    "middleware",
+    "services",
+    "utils",
+)
+
+
+def _owns_module(name: str) -> bool:
+    return name in _MODULE_ROOTS or any(
+        name.startswith(f"{root}.") for root in _MODULE_ROOTS
+    )
+
+
+def _capture_module_state():
+    """Capture modules and package attributes under the app-test roots."""
+    modules = {name: module for name, module in sys.modules.items() if _owns_module(name)}
+    package_attrs = {
+        name: dict(module.__dict__)
+        for name, module in modules.items()
+        if isinstance(module, types.ModuleType) and hasattr(module, "__path__")
+    }
+    return modules, package_attrs
+
+
+def _apply_module_state(state) -> None:
+    """Restore a previously captured module graph."""
+    modules, package_attrs = state
+    current_names = [name for name in sys.modules if _owns_module(name)]
+    for name in current_names:
+        if name not in modules:
+            sys.modules.pop(name, None)
+    sys.modules.update(modules)
+    for name, attrs in package_attrs.items():
+        package = sys.modules.get(name)
+        if not isinstance(package, types.ModuleType):
+            continue
+        for key in set(package.__dict__) - set(attrs):
+            package.__dict__.pop(key, None)
+        package.__dict__.update(attrs)
+
+
+_BASE_MODULE_STATE = _capture_module_state()
+
 # Pre-stub heavy SDK dependencies BEFORE any module imports.
 sys.modules["boto3"] = MagicMock()
 sys.modules["botocore"] = MagicMock()
@@ -65,6 +114,23 @@ _spec = importlib.util.spec_from_file_location(
 agent_evaluation_app = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = agent_evaluation_app
 _spec.loader.exec_module(agent_evaluation_app)
+
+# Keep the app dependency graph as a snapshot, but restore the process state
+# immediately after collection. The autouse fixture below reinstalls these
+# stubs only while an app test is running.
+_STUB_MODULE_STATE = _capture_module_state()
+_apply_module_state(_BASE_MODULE_STATE)
+
+
+@pytest.fixture(autouse=True)
+def _app_module_state():
+    """Scope app-test import doubles to each test function."""
+    previous_module_state = _capture_module_state()
+    _apply_module_state(_STUB_MODULE_STATE)
+    try:
+        yield
+    finally:
+        _apply_module_state(previous_module_state)
 
 
 def _exc(error_code, message):

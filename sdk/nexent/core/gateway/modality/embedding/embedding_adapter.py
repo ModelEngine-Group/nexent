@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 
+from nexent.core.concurrency import run_blocking
+
 from nexent.monitor import record_model_call
 
 from ...model_context import EmbeddingContext
@@ -276,7 +278,12 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
             The embedding vectors from the sample request, or ``[]`` on failure.
         """
         try:
-            return await asyncio.to_thread(self.get_multimodal_embeddings, self._test_inputs(), timeout=timeout)
+            return await run_blocking(
+                "gateway-multimodal-embedding-connectivity",
+                self.get_multimodal_embeddings,
+                self._test_inputs(),
+                timeout=timeout,
+            )
         except requests.exceptions.Timeout:
             logging.error(f"{type(self).__name__} connection timed out ({timeout}s)")
             return []
@@ -290,11 +297,13 @@ class _MultimodalEmbeddingAdapter(EmbeddingAdapter):
     async def invoke(self, request: EmbeddingRequest):
         """Embed ``request.inputs`` via the multimodal or text path, offloaded to a thread."""
         if _is_multimodal(request.inputs):
-            return await asyncio.to_thread(
+            return await run_blocking(
+                "gateway-multimodal-embedding-invoke",
                 self.get_multimodal_embeddings, request.inputs,
                 with_metadata=request.with_metadata, timeout=request.timeout,
             )
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "gateway-text-embedding-invoke",
             self.get_embeddings, request.inputs,
             with_metadata=request.with_metadata, timeout=request.timeout,
         )
