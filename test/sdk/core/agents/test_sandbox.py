@@ -1631,7 +1631,12 @@ class TestPoolManagerLogic:
         leased_executors = []
         bridge_timeouts = []
 
-        def install_bridge(executor, logger_, request_timeout_seconds=None):
+        def install_bridge(
+            executor,
+            logger_,
+            request_timeout_seconds=None,
+            cancellation_scope=None,
+        ):
             leased_executors.append(executor)
             bridge_timeouts.append(request_timeout_seconds)
             return executor
@@ -4306,7 +4311,7 @@ class TestPoolManagerMultipleSystemContainers:
         monkeypatch.setattr(
             sandbox_module,
             "_install_host_tool_bridge",
-            lambda ex, _logger, request_timeout_seconds=None: ex,
+            lambda ex, _logger, request_timeout_seconds=None, cancellation_scope=None: ex,
         )
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
@@ -4500,7 +4505,9 @@ class TestAcquireSharedDockerKernelHostTools:
 
         bridge_installed = [False]
 
-        def mock_install_bridge(ex, l, request_timeout_seconds=None):
+        def mock_install_bridge(
+            ex, l, request_timeout_seconds=None, cancellation_scope=None
+        ):
             bridge_installed[0] = True
             return ex
 
@@ -5382,6 +5389,7 @@ class TestTargetedSandboxCoverage:
             executor,
             ANY,
             request_timeout_seconds=None,
+            cancellation_scope=None,
         )
 
     def test_build_docker_executor_leases_from_existing_session_group(self, monkeypatch):

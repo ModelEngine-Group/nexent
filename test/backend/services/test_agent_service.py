@@ -83,6 +83,19 @@ class _ThreadQueueTimedOut(RuntimeError):
         self.timeout_seconds = timeout_seconds
 
 
+class _RunCancellationScope:
+    """Keep the service test double aligned with run cancellation behavior."""
+
+    def __init__(self, stop_event):
+        self.stop_event = stop_event
+        self.cancelled = False
+
+    def cancel(self):
+        if not self.cancelled:
+            self.cancelled = True
+            self.stop_event.set()
+
+
 async def _run_blocking(_task_name, fn, *args, **kwargs):
     kwargs.pop("lane", None)
     kwargs.pop("owner", None)
@@ -95,6 +108,7 @@ async def _run_managed(_lane, _spec, fn, *args, **kwargs):
 
 _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
 _concurrency_module.ManagedExecution = MagicMock
+_concurrency_module.RunCancellationScope = _RunCancellationScope
 _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
