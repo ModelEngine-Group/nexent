@@ -1995,7 +1995,7 @@ class TestListAidpDocsImpl:
     def test_success_normalizes_docs(self, aidp_service_module):
         mock_resp = _make_success_response({
             "value": [
-                {"name": "doc1", "first_upload_time": 1700000000},
+                {"name": "doc1", "file_uuid": "uuid-1", "first_upload_time": 1700000000},
                 {"name": "doc2", "create_time": 1700100000, "update_time": 1700200000},
             ],
             "total_count": 2,
@@ -2012,6 +2012,7 @@ class TestListAidpDocsImpl:
         assert len(result["value"]) == 2
         # Normalization adds created_at / updated_at
         assert result["value"][0]["created_at"] is not None
+        assert result["value"][0]["file_uuid"] == "uuid-1"
         assert result["value"][1]["updated_at"] is not None
 
     def test_success_non_list_value_not_normalized(self, aidp_service_module):
@@ -2079,6 +2080,112 @@ class TestListAidpDocsImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+# ---------------------------------------------------------------------------
+# remove_aidp_docs_impl / download_aidp_doc_impl tests
+# ---------------------------------------------------------------------------
+class TestAidpDocumentFileOperations:
+    def test_remove_sends_uuid_array_and_preserves_partial_result(
+        self, aidp_service_module
+    ):
+        expected = {
+            "summary": {"total": 2, "success": 1, "failed": 1},
+            "success_list": [{"file_uuid": "uuid-1"}],
+            "failed_list": [{"file_uuid": "uuid-2"}],
+        }
+        mock_client = _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            response=_make_success_response(expected),
+        )
+
+        result = aidp_service_module.remove_aidp_docs_impl(
+            "http://127.0.0.1:30081",
+            "jwt-token",
+            "kb-1",
+            ["uuid-1", "uuid-2"],
+        )
+
+        assert result == expected
+        call = mock_client.post.call_args
+        assert call.args[0].endswith(
+            "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Remove"
+        )
+        assert call.kwargs["json"] == {"file_uuids": ["uuid-1", "uuid-2"]}
+
+    def test_remove_requires_at_least_one_uuid(self, aidp_service_module):
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", []
+            )
+        assert exc_info.value.error_code == ErrorCode.COMMON_MISSING_REQUIRED_FIELD
+
+    @pytest.mark.parametrize("status_code", [401, 403, 500])
+    def test_remove_maps_upstream_http_errors(self, aidp_service_module, status_code):
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=_make_http_error(status_code, "POST"),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
+            )
+        expected_code = (
+            ErrorCode.AIDP_AUTH_ERROR
+            if status_code in (401, 403)
+            else ErrorCode.AIDP_SERVICE_ERROR
+        )
+        assert exc_info.value.error_code == expected_code
+
+    def test_download_returns_binary_content_and_headers(self, aidp_service_module):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
+        mock_response.content = b"downloaded bytes"
+        mock_response.headers = {
+            "Content-Type": "text/plain",
+            "Content-Disposition": 'attachment; filename="a.txt"',
+            "X-File-Name": "a.txt",
+            "X-File-Size": "16",
+        }
+        mock_client = _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            response=mock_response,
+        )
+
+        result = aidp_service_module.download_aidp_doc_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+        )
+
+        assert result == {
+            "content": b"downloaded bytes",
+            "content_type": "text/plain",
+            "content_disposition": 'attachment; filename="a.txt"',
+            "file_name": "a.txt",
+            "file_size": "16",
+        }
+        call = mock_client.post.call_args
+        assert call.args[0].endswith(
+            "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Download"
+        )
+        assert call.kwargs["json"] == {"file_uuid": "uuid-1"}
+
+    def test_download_maps_upstream_http_error(self, aidp_service_module):
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=_make_http_error(404, "POST"),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.download_aidp_doc_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
 
 # ---------------------------------------------------------------------------

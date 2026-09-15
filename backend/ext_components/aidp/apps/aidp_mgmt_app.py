@@ -18,9 +18,11 @@ import logging
 import time
 from http import HTTPStatus
 from typing import Annotated, List, Optional
+from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import APIRouter, File, Path, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from nexent.core.concurrency import run_blocking
@@ -52,9 +54,11 @@ from ext_components.aidp.services.aidp_service import (
     count_aidp_docs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
+    download_aidp_doc_impl,
     get_aidp_kb_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
+    remove_aidp_docs_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
@@ -187,6 +191,25 @@ class SetPermissionRequest(BaseModel):
     )
 
 
+class AidpDocumentIdentity(BaseModel):
+    """The two IDs needed to remove an AIDP file and its tag assignments."""
+
+    file_uuid: UUID = Field(..., description="AIDP file UUID")
+    file_ino_no: str = Field(..., min_length=1, description="Nexent document identity")
+
+
+class RemoveAidpDocumentsRequest(BaseModel):
+    """Documents selected by the frontend for batch removal."""
+
+    documents: List[AidpDocumentIdentity] = Field(..., min_length=1)
+
+
+class DownloadAidpDocumentRequest(BaseModel):
+    """AIDP file selected for download."""
+
+    file_uuid: UUID = Field(..., description="AIDP file UUID")
+
+
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
@@ -250,6 +273,51 @@ from fastapi import HTTPException  # noqa: E402  (placed here to avoid editing m
 
 def _credentials() -> tuple[str, str]:
     return AIDP_SERVER_URL, AIDP_API_KEY
+
+
+def _fallback_content_disposition(file_name: str) -> str:
+    """Build a safe RFC 5987 attachment header when AIDP omits one."""
+    safe_name = (file_name or "download").strip() or "download"
+    ascii_name = "".join(
+        char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_"
+        for char in safe_name
+    ) or "download"
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(safe_name)}'
+
+
+def _cleanup_deleted_aidp_document_tags(
+    tenant_id: str,
+    knowledge_base_id: str,
+    actor_id: str,
+    documents: List[AidpDocumentIdentity],
+    result: dict,
+) -> None:
+    """Remove tag assignments only for files AIDP confirmed as deleted."""
+    from services.tag_management_service import TagManagementService
+
+    success_uuids = {
+        item.get("file_uuid")
+        for item in result.get("success_list", [])
+        if isinstance(item, dict) and item.get("file_uuid")
+    }
+    for document in documents:
+        if str(document.file_uuid) not in success_uuids:
+            continue
+        try:
+            TagManagementService.cleanup_document_assignments(
+                tenant_id,
+                "aidp",
+                knowledge_base_id,
+                document.file_ino_no,
+                actor_id,
+            )
+        except Exception as error:  # noqa: BLE001 - upstream deletion already succeeded
+            logger.warning(
+                "Failed to clean AIDP document tag assignments: kb=%s file_ino_no=%s error=%s",
+                knowledge_base_id,
+                document.file_ino_no,
+                error,
+            )
 
 
 def _is_user_role(user_id: str, tenant_id: str) -> bool:
@@ -783,6 +851,93 @@ async def list_documents(
         count_reliable,
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/remove")
+async def remove_documents(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RemoveAidpDocumentsRequest,
+) -> JSONResponse:
+    """Remove AIDP documents and clean their Nexent tag assignments."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-remove-documents",
+        remove_aidp_docs_impl,
+        server_url,
+        api_key,
+        kds_id,
+        [str(document.file_uuid) for document in body.documents],
+        lane="control-io",
+        owner="config",
+    )
+    _cleanup_deleted_aidp_document_tags(
+        tenant_id,
+        kds_id,
+        user_id,
+        body.documents,
+        result,
+    )
+
+    success_list = result.get("success_list", []) if isinstance(result, dict) else []
+    if success_list:
+        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/download")
+async def download_document(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: DownloadAidpDocumentRequest,
+) -> StreamingResponse:
+    """Proxy an AIDP document as a binary attachment."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-download-document",
+        download_aidp_doc_impl,
+        server_url,
+        api_key,
+        kds_id,
+        str(body.file_uuid),
+        lane="control-io",
+        owner="config",
+    )
+    content = result.get("content") if isinstance(result, dict) else None
+    if not isinstance(content, bytes):
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            "AIDP download response did not contain binary content",
+        )
+
+    file_name = result.get("file_name") if isinstance(result, dict) else None
+    content_disposition = result.get("content_disposition") if isinstance(result, dict) else None
+    response_headers = {
+        "Content-Disposition": content_disposition or _fallback_content_disposition(file_name or "download"),
+        "X-File-Size": str(result.get("file_size") or len(content)),
+    }
+    if isinstance(file_name, str) and file_name:
+        # HTTP headers are Latin-1; Content-Disposition carries the UTF-8 name.
+        try:
+            file_name.encode("latin-1")
+        except UnicodeEncodeError:
+            pass
+        else:
+            response_headers["X-File-Name"] = file_name
+
+    return StreamingResponse(
+        iter((content,)),
+        status_code=HTTPStatus.OK,
+        media_type=result.get("content_type") or "application/octet-stream",
+        headers=response_headers,
+    )
 
 
 @aidp_mgmt_router.patch("/aidp-permissions/{kds_id}")

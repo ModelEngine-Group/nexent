@@ -1012,6 +1012,176 @@ def upload_aidp_docs_impl(
         )
 
 
+def remove_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Remove one or more documents from an AIDP knowledge base."""
+    normalized_url = _validate_params(server_url, api_key)
+    if not file_uuids:
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "At least one file_uuid is required",
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    remove_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Remove"
+    remove_url = urljoin(f"{normalized_url}/", remove_path)
+    logger.info("Removing %d AIDP documents from %s", len(file_uuids), remove_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                remove_url,
+                headers=headers,
+                json={"file_uuids": file_uuids},
+            ),
+            context=f"remove-docs:{kds_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP document removal response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP document removal request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        upstream_reason = _extract_upstream_error(e.response)
+        logger.exception(
+            "AIDP document removal HTTP error: %s, status_code: %s, upstream_reason=%s",
+            e,
+            e.response.status_code,
+            upstream_reason or "unavailable",
+        )
+        details = {
+            "upstream_status": e.response.status_code,
+            "upstream_reason": upstream_reason,
+        }
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                upstream_reason or f"AIDP authentication failed: {str(e)}",
+                details=details,
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                upstream_reason or f"AIDP rate limit exceeded: {str(e)}",
+                details=details,
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            upstream_reason or f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+            details=details,
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP document removal response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def download_aidp_doc_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+) -> Dict[str, Any]:
+    """Download one AIDP document and return its bytes plus response metadata."""
+    normalized_url = _validate_params(server_url, api_key)
+    if not file_uuid:
+        raise AppException(
+            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
+            "file_uuid is required",
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    download_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Download"
+    download_url = urljoin(f"{normalized_url}/", download_path)
+    logger.info("Downloading AIDP document %s from %s", file_uuid, download_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=120.0,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                download_url,
+                headers=headers,
+                json={"file_uuid": file_uuid},
+            ),
+            context=f"download-doc:{kds_id}:{file_uuid}",
+        )
+        response.raise_for_status()
+        content_type = response.headers.get("Content-Type") or "application/octet-stream"
+        file_name = response.headers.get("X-File-Name") or response.headers.get("X-File-Nmae")
+        return {
+            "content": response.content,
+            "content_type": content_type,
+            "content_disposition": response.headers.get("Content-Disposition"),
+            "file_name": file_name,
+            "file_size": response.headers.get("X-File-Size") or str(len(response.content)),
+        }
+    except httpx.RequestError as e:
+        logger.exception("AIDP document download request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        upstream_reason = _extract_upstream_error(e.response)
+        logger.exception(
+            "AIDP document download HTTP error: %s, status_code: %s, upstream_reason=%s",
+            e,
+            e.response.status_code,
+            upstream_reason or "unavailable",
+        )
+        details = {
+            "upstream_status": e.response.status_code,
+            "upstream_reason": upstream_reason,
+        }
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                upstream_reason or f"AIDP authentication failed: {str(e)}",
+                details=details,
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                upstream_reason or f"AIDP rate limit exceeded: {str(e)}",
+                details=details,
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            upstream_reason or f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+            details=details,
+        )
+
+
 def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
     """Get total document count in a KB via AIDP POST .../Count endpoint.
 

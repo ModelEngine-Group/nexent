@@ -801,6 +801,136 @@ class TestListDocuments:
         assert response.json()["total_count"] == 1
 
 
+# --- Remove/download documents -------------------------------------------
+
+
+class TestAidpDocumentFileOperations:
+    def test_remove_forwards_only_uuids_and_cleans_tags_for_successes(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        aidp_result = {
+            "summary": {"total": 2, "success": 1, "failed": 1},
+            "success_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
+            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000002"}],
+        }
+        tag_service = MagicMock()
+        tag_module = types.ModuleType("services.tag_management_service")
+        tag_module.TagManagementService = tag_service
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="EDIT"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "remove_aidp_docs_impl",
+            return_value=aidp_result,
+        ) as mock_remove, patch.dict(
+            sys.modules,
+            {"services.tag_management_service": tag_module},
+        ):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={
+                    "documents": [
+                        {
+                            "file_uuid": "00000000-0000-4000-8000-000000000001",
+                            "file_ino_no": "ino-1",
+                        },
+                        {
+                            "file_uuid": "00000000-0000-4000-8000-000000000002",
+                            "file_ino_no": "ino-2",
+                        },
+                    ]
+                },
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == aidp_result
+        assert mock_remove.call_args.args[3] == [
+            "00000000-0000-4000-8000-000000000001",
+            "00000000-0000-4000-8000-000000000002",
+        ]
+        tag_service.cleanup_document_assignments.assert_called_once_with(
+            TENANT_ID,
+            "aidp",
+            "kb-1",
+            "ino-1",
+            USER_ID,
+        )
+
+    def test_remove_requires_document_identity_pair(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(aidp_mgmt_app, "remove_aidp_docs_impl") as mock_remove:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={
+                    "documents": [
+                        {"file_uuid": "00000000-0000-4000-8000-000000000001"},
+                    ]
+                },
+            )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        mock_remove.assert_not_called()
+
+    def test_remove_requires_standard_file_uuid(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(aidp_mgmt_app, "remove_aidp_docs_impl") as mock_remove:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={
+                    "documents": [
+                        {"file_uuid": "uuid-1", "file_ino_no": "ino-1"},
+                    ]
+                },
+            )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        mock_remove.assert_not_called()
+
+    def test_download_returns_binary_response(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="READ_ONLY"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "download_aidp_doc_impl",
+            return_value={
+                "content": b"hello",
+                "content_type": "text/plain",
+                "content_disposition": 'attachment; filename="a.txt"',
+                "file_name": "a.txt",
+                "file_size": "5",
+            },
+        ) as mock_download:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
+                headers=_bearer(),
+                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.content == b"hello"
+        assert response.headers["content-type"].startswith("text/plain")
+        assert response.headers["content-disposition"] == 'attachment; filename="a.txt"'
+        assert response.headers["x-file-size"] == "5"
+        assert mock_download.call_args.args[3] == "00000000-0000-4000-8000-000000000001"
+
+
 # --- Models list (auth only, no per-KB permission) ------------------------
 
 

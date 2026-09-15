@@ -1,20 +1,33 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Pagination, Upload, message, Tooltip } from "antd";
-import {
-  UploadOutlined,
-  InboxOutlined,
-  ReloadOutlined,
-} from "@ant-design/icons";
+import { Button, Modal, Pagination, Upload, message, Tooltip } from "antd";
+import { InboxOutlined, ReloadOutlined } from "@ant-design/icons";
 
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
+import log from "@/lib/logger";
 import { partitionAidpFiles } from "@/services/uploadService";
 
 const { Dragger } = Upload;
+
+const resolveDownloadFilename = (response: Response, fallback: string) => {
+  const contentDisposition = response.headers.get("content-disposition") || "";
+  const encodedName = contentDisposition.match(
+    /filename\*=UTF-8''([^;]+)/i
+  )?.[1];
+  if (encodedName) {
+    try {
+      return decodeURIComponent(encodedName);
+    } catch {
+      // Use the regular filename or document name when decoding fails.
+    }
+  }
+  const plainName = contentDisposition.match(/filename="?([^";]+)"?/i)?.[1];
+  return plainName || response.headers.get("x-file-name") || fallback;
+};
 
 interface AidpDocumentListProps {
   activeKb: AidpKnowledgeBaseItem | null;
@@ -47,6 +60,11 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const [uploading, setUploading] = useState(false);
+  const [selectedFileUuids, setSelectedFileUuids] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const [downloadingFileUuid, setDownloadingFileUuid] = useState<string | null>(
+    null
+  );
   // Antd <Dragger> fires beforeUpload once per file in a multi-select batch.
   // The `fileList` array may-or-may-not be the same reference across the N
   // calls (behavior differs between <Upload> and <Dragger> and antd versions),
@@ -55,6 +73,126 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   // flush: validation + upload run exactly ONCE per user selection.
   const pendingFilesRef = useRef<File[]>([]);
   const rafIdRef = useRef<number | null>(null);
+
+  const isUnavailable =
+    activeKb?.resource_status === "UNAVAILABLE" ||
+    activeKb?.resource_status === "ORPHANED";
+  const canDeleteDocuments =
+    !!activeKb && !isUnavailable && activeKb.permission === "EDIT";
+  const canDownloadDocuments =
+    !!activeKb &&
+    !isUnavailable &&
+    (activeKb.permission === "EDIT" || activeKb.permission === "READ_ONLY");
+
+  useEffect(() => {
+    setSelectedFileUuids([]);
+  }, [activeKb?.kds_id, documents]);
+
+  const selectableDocuments = documents.filter((doc) =>
+    Boolean(doc.file_uuid && doc.file_ino_no)
+  );
+  const allDocumentsSelected =
+    selectableDocuments.length > 0 &&
+    selectableDocuments.every((doc) =>
+      selectedFileUuids.includes(doc.file_uuid)
+    );
+
+  const toggleDocumentSelection = useCallback((fileUuid: string) => {
+    setSelectedFileUuids((current) =>
+      current.includes(fileUuid)
+        ? current.filter((uuid) => uuid !== fileUuid)
+        : [...current, fileUuid]
+    );
+  }, []);
+
+  const toggleAllDocuments = useCallback(() => {
+    setSelectedFileUuids(
+      allDocumentsSelected
+        ? []
+        : selectableDocuments.map((document) => document.file_uuid)
+    );
+  }, [allDocumentsSelected, selectableDocuments]);
+
+  const handleDownload = useCallback(
+    async (document: AidpDocumentItem) => {
+      if (!activeKb || !document.file_uuid) return;
+      setDownloadingFileUuid(document.file_uuid);
+      try {
+        const response = await aidpKnowledgeService.downloadDoc(
+          activeKb.kds_id,
+          document.file_uuid
+        );
+        const blob = await response.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = window.document.createElement("a");
+        link.href = downloadUrl;
+        link.download = resolveDownloadFilename(response, document.file_name);
+        link.click();
+        URL.revokeObjectURL(downloadUrl);
+        message.success(t("aidpKnowledge.downloadSuccess"));
+      } catch (error) {
+        log.error("Failed to download AIDP document:", error);
+        message.error(t("aidpKnowledge.downloadFailed"));
+      } finally {
+        setDownloadingFileUuid(null);
+      }
+    },
+    [activeKb, t]
+  );
+
+  const handleDelete = useCallback(
+    (documentsToDelete: AidpDocumentItem[]) => {
+      if (!activeKb || documentsToDelete.length === 0) return;
+      Modal.confirm({
+        title: t("aidpKnowledge.confirmDeleteDocsTitle"),
+        content: t("aidpKnowledge.confirmDeleteDocsContent", {
+          count: documentsToDelete.length,
+        }),
+        okText: t("common.confirm"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        centered: true,
+        onOk: async () => {
+          setDeleting(true);
+          try {
+            const result = await aidpKnowledgeService.removeDocs(
+              activeKb.kds_id,
+              documentsToDelete.map(({ file_uuid, file_ino_no }) => ({
+                file_uuid,
+                file_ino_no,
+              }))
+            );
+            if (result.summary.failed === 0) {
+              message.success(
+                t("aidpKnowledge.deleteDocsSuccess", {
+                  count: result.summary.success,
+                })
+              );
+            } else if (result.summary.success > 0) {
+              message.warning(
+                t("aidpKnowledge.deleteDocsPartial", {
+                  success: result.summary.success,
+                  failed: result.summary.failed,
+                })
+              );
+            } else {
+              message.error(t("aidpKnowledge.deleteDocsFailed"));
+            }
+            if (result.summary.success > 0) {
+              onDocsUploaded();
+            }
+            setSelectedFileUuids([]);
+          } catch (error) {
+            log.error("Failed to delete AIDP documents:", error);
+            message.error(t("aidpKnowledge.deleteDocsFailed"));
+          } finally {
+            setDeleting(false);
+          }
+        },
+      });
+    },
+    [activeKb, onDocsUploaded, t]
+  );
 
   const handleUpload = useCallback(
     async (fileList: File[]) => {
@@ -150,6 +288,27 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             />
           </Tooltip>
         </div>
+        {canDeleteDocuments && (
+          <div className="mt-3 flex items-center gap-3">
+            <Button
+              danger
+              size="small"
+              loading={deleting}
+              disabled={selectedFileUuids.length === 0}
+              onClick={() =>
+                handleDelete(
+                  documents.filter((doc) =>
+                    selectedFileUuids.includes(doc.file_uuid)
+                  )
+                )
+              }
+            >
+              {t("aidpKnowledge.deleteSelected", {
+                count: selectedFileUuids.length,
+              })}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Document table */}
@@ -168,6 +327,17 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             <table className="min-w-full bg-white">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
+                  <th className="w-10 px-4 py-2 text-left">
+                    <input
+                      type="checkbox"
+                      aria-label={t("aidpKnowledge.selectAllDocuments")}
+                      checked={allDocumentsSelected}
+                      disabled={
+                        !canDeleteDocuments || selectableDocuments.length === 0
+                      }
+                      onChange={toggleAllDocuments}
+                    />
+                  </th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     {t("aidpKnowledge.docFileName")}
                   </th>
@@ -180,11 +350,28 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     {t("aidpKnowledge.docCreatedAt")}
                   </th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                    {t("aidpKnowledge.docActions")}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {documents.map((doc) => (
-                  <tr key={doc.file_ino_no} className="hover:bg-gray-50">
+                  <tr
+                    key={doc.file_uuid || doc.file_ino_no}
+                    className="hover:bg-gray-50"
+                  >
+                    <td className="w-10 px-4 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label={t("aidpKnowledge.selectDocument", {
+                          name: doc.file_name,
+                        })}
+                        checked={selectedFileUuids.includes(doc.file_uuid)}
+                        disabled={!canDeleteDocuments || !doc.file_uuid}
+                        onChange={() => toggleDocumentSelection(doc.file_uuid)}
+                      />
+                    </td>
                     <td className="px-4 py-2">
                       <div
                         className="text-sm font-medium text-gray-800 truncate max-w-[250px]"
@@ -206,6 +393,32 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                       {doc.created_at
                         ? new Date(doc.created_at).toLocaleString()
                         : "-"}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="flex justify-end gap-2">
+                        {canDownloadDocuments && (
+                          <Button
+                            type="link"
+                            size="small"
+                            loading={downloadingFileUuid === doc.file_uuid}
+                            disabled={!doc.file_uuid}
+                            onClick={() => void handleDownload(doc)}
+                          >
+                            {t("aidpKnowledge.download")}
+                          </Button>
+                        )}
+                        {canDeleteDocuments && (
+                          <Button
+                            type="link"
+                            danger
+                            size="small"
+                            disabled={!doc.file_uuid || deleting}
+                            onClick={() => handleDelete([doc])}
+                          >
+                            {t("aidpKnowledge.delete")}
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
