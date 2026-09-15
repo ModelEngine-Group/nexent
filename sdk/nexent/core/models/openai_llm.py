@@ -175,9 +175,11 @@ class OpenAIModel(OpenAIServerModel):
         client_kwargs = kwargs.get("client_kwargs", {})
         if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
+            from openai._base_client import httpx2
+
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=httpx.Timeout(
+                timeout=httpx2.Timeout(
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
@@ -934,12 +936,19 @@ class OpenAIModel(OpenAIServerModel):
             # Construct a simple test message
             test_message = [{"role": "user", "content": "Hello"}]
 
-            # Directly send a short chat request to test the connection
+            # Directly send a short chat request to test the connection.
+            # Carry the operator's inference params (temperature / top_p /
+            # extra_body incl. __custom__) so that an invalid custom param
+            # surfaces here as a 400, instead of failing at runtime.
             completion_kwargs = self._prepare_completion_kwargs(
                 messages=test_message,
                 model=self.model_id,
                 max_tokens=5,
+                temperature=self.temperature,
+                top_p=self.top_p,
             )
+            if self.extra_body:
+                completion_kwargs["extra_body"] = self.extra_body
 
             # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
             await run_blocking(

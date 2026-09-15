@@ -658,6 +658,8 @@ MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
+MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv(
+    "MONITORING_DASHBOARD_ALLOWED_ROLES", "SU,SPEED")
 MONITORING_TRACE_CONTENT_MODE = os.getenv(
     "MONITORING_TRACE_CONTENT_MODE", "summary")
 MONITORING_TRACE_MAX_CHARS = os.getenv("MONITORING_TRACE_MAX_CHARS", "4000")
@@ -844,6 +846,13 @@ enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"
+
+# Model Catalog - 预置模型目录配置文件路径
+MODEL_CATALOG_JSON_PATH = os.getenv(
+    "MODEL_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
+)
+"""Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")
