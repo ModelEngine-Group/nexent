@@ -35,7 +35,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, StreamingResponse
 
 logger = logging.getLogger("aidp_mgmt_mock")
 logging.basicConfig(
@@ -693,7 +693,7 @@ def download_document(
     kds_id: str,
     body: DownloadFileBody,
     authorization: Optional[str] = Header(default=None),
-) -> Response:
+) -> StreamingResponse:
     """Return deterministic binary content for a document download."""
     _check_auth(authorization)
 
@@ -712,16 +712,12 @@ def download_document(
         "Content-Disposition": _content_disposition(filename),
         "X-File-Size": str(len(content)),
     }
-    # HTTP header values are Latin-1. Unicode filenames are already carried by
-    # Content-Disposition's RFC 5987 filename* parameter.
-    try:
-        filename.encode("latin-1")
-    except UnicodeEncodeError:
-        pass
-    else:
-        response_headers["X-File-Name"] = filename
-    return Response(
-        content=content,
+    async def content_stream():
+        for offset in range(0, len(content), 8 * 1024):
+            yield content[offset : offset + 8 * 1024]
+
+    return StreamingResponse(
+        content_stream(),
         media_type=content_type,
         headers=response_headers,
     )

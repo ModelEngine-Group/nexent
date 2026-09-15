@@ -18,29 +18,24 @@ import logging
 import time
 from http import HTTPStatus
 from typing import Annotated, List, Optional
-from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, File, Path, Query, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
-from nexent.core.concurrency import run_blocking
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
 from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
-    AidpKbConflictError,
-    AidpKbNotFoundError,
-    AidpKbPermissionDeniedError,
-    AidpKbSyncError,
     AidpGroupValidationError,
+    AidpKbConflictError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
-from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
 from ext_components.aidp.services.aidp_access_service import (
     get_cached_aidp_doc_count,
     get_cached_aidp_kb_detail,
@@ -49,26 +44,28 @@ from ext_components.aidp.services.aidp_access_service import (
     invalidate_aidp_kb_detail_cache,
     resolve_current_aidp_access,
 )
+from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
+from ext_components.aidp.services.aidp_permission_service import (
+    EDIT,
+    PRIVATE,
+    READ_ONLY,
+)
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
     count_aidp_docs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
-    download_aidp_doc_impl,
     get_aidp_kb_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
     remove_aidp_docs_impl,
+    stream_aidp_doc_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from ext_components.aidp.services.aidp_permission_service import (
-    EDIT,
-    PRIVATE,
-    READ_ONLY,
-    _validate_group_ids_strict,
-)
+from services.tag_management_service import TagManagementService
 from utils import auth_utils as auth_utils_module
+
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
@@ -266,23 +263,8 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
     )
 
 
-# HTTPException is imported lazily to keep FastAPI's exception handler in
-# control of the response body.
-from fastapi import HTTPException  # noqa: E402  (placed here to avoid editing mid-file)
-
-
 def _credentials() -> tuple[str, str]:
     return AIDP_SERVER_URL, AIDP_API_KEY
-
-
-def _fallback_content_disposition(file_name: str) -> str:
-    """Build a safe RFC 5987 attachment header when AIDP omits one."""
-    safe_name = (file_name or "download").strip() or "download"
-    ascii_name = "".join(
-        char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_"
-        for char in safe_name
-    ) or "download"
-    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(safe_name)}'
 
 
 def _cleanup_deleted_aidp_document_tags(
@@ -293,12 +275,9 @@ def _cleanup_deleted_aidp_document_tags(
     result: dict,
 ) -> None:
     """Remove tag assignments only for files AIDP confirmed as deleted."""
-    from services.tag_management_service import TagManagementService
-
     success_uuids = {
-        item.get("file_uuid")
-        for item in result.get("success_list", [])
-        if isinstance(item, dict) and item.get("file_uuid")
+        item["file_uuid"]
+        for item in result["success_list"]
     }
     for document in documents:
         if str(document.file_uuid) not in success_uuids:
@@ -877,7 +856,7 @@ async def remove_documents(
         result,
     )
 
-    success_list = result.get("success_list", []) if isinstance(result, dict) else []
+    success_list = result["success_list"]
     if success_list:
         invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
         invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
@@ -895,42 +874,30 @@ async def download_document(
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
 
     server_url, api_key = _credentials()
-    result = await run_blocking(
-        "aidp-download-document",
-        download_aidp_doc_impl,
+    stream_context = stream_aidp_doc_impl(
         server_url,
         api_key,
         kds_id,
         str(body.file_uuid),
-        lane="control-io",
-        owner="config",
     )
-    content = result.get("content") if isinstance(result, dict) else None
-    if not isinstance(content, bytes):
-        raise AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR,
-            "AIDP download response did not contain binary content",
-        )
-
-    file_name = result.get("file_name") if isinstance(result, dict) else None
-    content_disposition = result.get("content_disposition") if isinstance(result, dict) else None
+    result = await stream_context.__aenter__()
+    content = result["content"]
     response_headers = {
-        "Content-Disposition": content_disposition or _fallback_content_disposition(file_name or "download"),
-        "X-File-Size": str(result.get("file_size") or len(content)),
+        "Content-Disposition": result["content_disposition"],
+        "X-File-Size": result["file_size"],
     }
-    if isinstance(file_name, str) and file_name:
-        # HTTP headers are Latin-1; Content-Disposition carries the UTF-8 name.
+
+    async def stream_content():
         try:
-            file_name.encode("latin-1")
-        except UnicodeEncodeError:
-            pass
-        else:
-            response_headers["X-File-Name"] = file_name
+            async for chunk in content:
+                yield chunk
+        finally:
+            await stream_context.__aexit__(None, None, None)
 
     return StreamingResponse(
-        iter((content,)),
+        stream_content(),
         status_code=HTTPStatus.OK,
-        media_type=result.get("content_type") or "application/octet-stream",
+        media_type=result["content_type"],
         headers=response_headers,
     )
 

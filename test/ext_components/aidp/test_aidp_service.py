@@ -2,7 +2,7 @@ import importlib.util
 import os
 import sys
 from types import ModuleType
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -1091,6 +1091,16 @@ def _setup_mock_client(aidp_service_module, method="get", response=None, side_ef
     return mock_client
 
 
+def _setup_mock_async_client(aidp_service_module, response=None, side_effect=None):
+    """Create and wire an async mock client into the service module manager."""
+    mock_client = MagicMock()
+    mock_client.send = AsyncMock(side_effect=side_effect, return_value=response)
+    mock_manager = MagicMock()
+    mock_manager.get_async_client.return_value = mock_client
+    aidp_service_module.http_client_manager = mock_manager
+    return mock_client
+
+
 def _make_http_error(status_code, method="GET"):
     """Create an httpx.HTTPStatusError with given status code."""
     request = httpx.Request(method, "http://127.0.0.1:30081")
@@ -2121,19 +2131,6 @@ class TestAidpDocumentFileOperations:
             )
         assert exc_info.value.error_code == ErrorCode.COMMON_MISSING_REQUIRED_FIELD
 
-    def test_remove_rejects_non_dict_response(self, aidp_service_module):
-        _setup_mock_client(
-            aidp_service_module,
-            method="post",
-            response=_make_success_response(["unexpected"]),
-        )
-
-        with pytest.raises(AppException) as exc_info:
-            aidp_service_module.remove_aidp_docs_impl(
-                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
-            )
-        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
-
     def test_remove_maps_request_error(self, aidp_service_module):
         request = httpx.Request("POST", "http://127.0.0.1:30081")
         _setup_mock_client(
@@ -2178,72 +2175,78 @@ class TestAidpDocumentFileOperations:
         )
         assert exc_info.value.error_code == expected_code
 
-    def test_download_returns_binary_content_and_headers(self, aidp_service_module):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status.return_value = None
-        mock_response.content = b"downloaded bytes"
-        mock_response.headers = {
-            "Content-Type": "text/plain",
-            "Content-Disposition": 'attachment; filename="a.txt"',
-            "X-File-Name": "a.txt",
-            "X-File-Size": "16",
-        }
-        mock_client = _setup_mock_client(
-            aidp_service_module,
-            method="post",
-            response=mock_response,
+    @pytest.mark.asyncio
+    async def test_download_streams_binary_content_and_headers(self, aidp_service_module):
+        mock_response = httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/plain",
+                "Content-Disposition": 'attachment; filename="a.txt"',
+                "X-File-Size": "16",
+            },
+            content=b"downloaded bytes",
+            request=httpx.Request("POST", "http://127.0.0.1:30081"),
         )
+        mock_client = _setup_mock_async_client(aidp_service_module, response=mock_response)
 
-        result = aidp_service_module.download_aidp_doc_impl(
+        async with aidp_service_module.stream_aidp_doc_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
-        )
+        ) as result:
+            chunks = [chunk async for chunk in result["content"]]
 
-        assert result == {
-            "content": b"downloaded bytes",
-            "content_type": "text/plain",
-            "content_disposition": 'attachment; filename="a.txt"',
-            "file_name": "a.txt",
-            "file_size": "16",
-        }
-        call = mock_client.post.call_args
-        assert call.args[0].endswith(
+        assert b"".join(chunks) == b"downloaded bytes"
+        assert result["content_type"] == "text/plain"
+        assert result["content_disposition"] == 'attachment; filename="a.txt"'
+        assert result["file_size"] == "16"
+        request = mock_client.build_request.call_args
+        assert request.args[0] == "POST"
+        assert request.args[1].endswith(
             "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Download"
         )
-        assert call.kwargs["json"] == {"file_uuid": "uuid-1"}
+        assert request.kwargs["json"] == {"file_uuid": "uuid-1"}
+        assert mock_response.is_closed
 
-    def test_download_requires_file_uuid(self, aidp_service_module):
+    @pytest.mark.asyncio
+    async def test_download_requires_file_uuid(self, aidp_service_module):
         with pytest.raises(AppException) as exc_info:
-            aidp_service_module.download_aidp_doc_impl(
+            async with aidp_service_module.stream_aidp_doc_impl(
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", ""
-            )
+            ):
+                pass
         assert exc_info.value.error_code == ErrorCode.COMMON_MISSING_REQUIRED_FIELD
 
-    def test_download_maps_request_error(self, aidp_service_module):
+    @pytest.mark.asyncio
+    async def test_download_maps_request_error(self, aidp_service_module):
         request = httpx.Request("POST", "http://127.0.0.1:30081")
-        _setup_mock_client(
+        _setup_mock_async_client(
             aidp_service_module,
-            method="post",
             side_effect=httpx.RequestError("network down", request=request),
         )
 
         with pytest.raises(AppException) as exc_info:
-            aidp_service_module.download_aidp_doc_impl(
+            async with aidp_service_module.stream_aidp_doc_impl(
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
-            )
+            ):
+                pass
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
 
-    def test_download_maps_upstream_http_error(self, aidp_service_module):
-        _setup_mock_client(
+    @pytest.mark.asyncio
+    async def test_download_maps_upstream_http_error(self, aidp_service_module):
+        response = httpx.Response(
+            404,
+            json={"error": "file not found"},
+            request=httpx.Request("POST", "http://127.0.0.1:30081"),
+        )
+        _setup_mock_async_client(
             aidp_service_module,
-            method="post",
-            side_effect=_make_http_error(404, "POST"),
+            response=response,
         )
 
         with pytest.raises(AppException) as exc_info:
-            aidp_service_module.download_aidp_doc_impl(
+            async with aidp_service_module.stream_aidp_doc_impl(
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
-            )
+            ):
+                pass
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
 

@@ -17,6 +17,7 @@ import os
 import sys
 import threading
 import types
+from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -46,6 +47,11 @@ nexent_storage = _mod("nexent.storage")
 nexent_storage_factory = _mod("nexent.storage.storage_client_factory")
 nexent_storage_factory.create_storage_client_from_config = MagicMock()
 
+services_pkg = _mod("services")
+services_pkg.__path__ = [os.path.join(BACKEND_DIR, "services")]
+tag_management_service = _mod("services.tag_management_service")
+tag_management_service.TagManagementService = MagicMock()
+
 
 class _MinIOStorageConfig:
     def __init__(self, **kwargs):
@@ -55,7 +61,7 @@ class _MinIOStorageConfig:
 nexent_storage_factory.MinIOStorageConfig = _MinIOStorageConfig
 
 for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
-            nexent_storage_factory):
+            nexent_storage_factory, services_pkg, tag_management_service):
     sys.modules.setdefault(mod.__name__, mod)
 
 # Register non-prefixed ``database`` / ``database.client`` stubs so that
@@ -826,10 +832,7 @@ class TestAidpDocumentFileOperations:
             aidp_mgmt_app,
             "remove_aidp_docs_impl",
             return_value=aidp_result,
-        ) as mock_remove, patch.dict(
-            sys.modules,
-            {"services.tag_management_service": tag_module},
-        ):
+        ) as mock_remove, patch.object(aidp_mgmt_app, "TagManagementService", tag_service):
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
@@ -902,20 +905,27 @@ class TestAidpDocumentFileOperations:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
+        @asynccontextmanager
+        async def stream_document(*args):
+            async def content_stream():
+                yield b"he"
+                yield b"llo"
+
+            yield {
+                "content": content_stream(),
+                "content_type": "text/plain",
+                "content_disposition": 'attachment; filename="a.txt"',
+                "file_size": "5",
+            }
+
         with patch.object(
             aidp_permission_service,
             "require_permission",
             return_value=MagicMock(permission="READ_ONLY"),
         ), patch.object(
             aidp_mgmt_app,
-            "download_aidp_doc_impl",
-            return_value={
-                "content": b"hello",
-                "content_type": "text/plain",
-                "content_disposition": 'attachment; filename="a.txt"',
-                "file_name": "a.txt",
-                "file_size": "5",
-            },
+            "stream_aidp_doc_impl",
+            return_value=stream_document(),
         ) as mock_download:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
@@ -928,7 +938,13 @@ class TestAidpDocumentFileOperations:
         assert response.headers["content-type"].startswith("text/plain")
         assert response.headers["content-disposition"] == 'attachment; filename="a.txt"'
         assert response.headers["x-file-size"] == "5"
-        assert mock_download.call_args.args[3] == "00000000-0000-4000-8000-000000000001"
+        assert mock_download.call_args.args == (
+            SERVER_URL,
+            API_KEY,
+            "kb-1",
+            "00000000-0000-4000-8000-000000000001",
+        )
+        assert "x-file-name" not in response.headers
 
     def test_remove_continues_when_tag_cleanup_fails(self):
         client = _client()
@@ -952,10 +968,7 @@ class TestAidpDocumentFileOperations:
             aidp_mgmt_app,
             "remove_aidp_docs_impl",
             return_value=aidp_result,
-        ), patch.dict(
-            sys.modules,
-            {"services.tag_management_service": tag_module},
-        ):
+        ), patch.object(aidp_mgmt_app, "TagManagementService", tag_service):
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
@@ -995,10 +1008,7 @@ class TestAidpDocumentFileOperations:
             return_value=aidp_result,
         ), patch.object(aidp_mgmt_app, "invalidate_aidp_kb_detail_cache") as mock_kb_cache, patch.object(
             aidp_mgmt_app, "invalidate_aidp_doc_count_cache"
-        ) as mock_count_cache, patch.dict(
-            sys.modules,
-            {"services.tag_management_service": tag_module},
-        ):
+        ) as mock_count_cache, patch.object(aidp_mgmt_app, "TagManagementService", tag_module.TagManagementService):
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
@@ -1015,66 +1025,6 @@ class TestAidpDocumentFileOperations:
         assert response.status_code == HTTPStatus.OK
         mock_kb_cache.assert_not_called()
         mock_count_cache.assert_not_called()
-
-    def test_download_uses_safe_fallback_for_missing_headers(self):
-        client = _client()
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        with patch.object(
-            aidp_permission_service,
-            "require_permission",
-            return_value=MagicMock(permission="READ_ONLY"),
-        ), patch.object(
-            aidp_mgmt_app,
-            "download_aidp_doc_impl",
-            return_value={
-                "content": "中文文件内容".encode("utf-8"),
-                "content_type": None,
-                "content_disposition": None,
-                "file_name": "中文文件.txt",
-                "file_size": None,
-            },
-        ):
-            response = client.post(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
-                headers=_bearer(),
-                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        assert response.headers["content-type"].startswith("application/octet-stream")
-        assert response.headers["content-disposition"].startswith("attachment; filename=")
-        assert "filename*=UTF-8''%E4%B8%AD%E6%96%87%E6%96%87%E4%BB%B6.txt" in response.headers[
-            "content-disposition"
-        ]
-        assert response.headers["x-file-size"] == str(len("中文文件内容".encode("utf-8")))
-        assert "x-file-name" not in response.headers
-
-    def test_download_rejects_non_binary_service_result(self):
-        client = _client()
-        from consts.error_code import ErrorCode
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        with patch.object(
-            aidp_permission_service,
-            "require_permission",
-            return_value=MagicMock(permission="READ_ONLY"),
-        ), patch.object(
-            aidp_mgmt_app,
-            "download_aidp_doc_impl",
-            return_value={"content": "not binary"},
-        ):
-            response = client.post(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
-                headers=_bearer(),
-                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
-            )
-
-        assert response.status_code == HTTPStatus.BAD_GATEWAY
-        assert response.json()["code"] == ErrorCode.AIDP_RESPONSE_ERROR.value
-
 
 # --- Models list (auth only, no per-KB permission) ------------------------
 
