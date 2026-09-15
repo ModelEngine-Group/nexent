@@ -4,31 +4,19 @@ This guide applies to Nexent deployments managed with Docker Compose. Run the up
 
 > ⚠️ If business writes continue during the copy, data from PostgreSQL, Elasticsearch, Redis, MinIO, and other components may not represent the same point in time, and the backup may not be recoverable.
 
-## 1. Pre-upgrade Preparation
+## 1. Pre-upgrade Check and Backup
 
-### 1.1 Pre-upgrade Check
+Start in the root of the Nexent repository currently used for deployment. For an offline deployment, start in the root of the previously extracted deployment package. The backup directory must be outside both `ROOT_DIR` and `NEXENT_USER_DIR`.
 
-Start in the root of the Nexent repository currently used for deployment. For an offline deployment, start in the root of the previously extracted deployment package. Run the backup script with a local backup directory outside `ROOT_DIR`:
+Before running the following command, you must stop writes from user operations, API requests, scheduled jobs, and similar sources. Keep the containers running; do not run `docker stop` or `docker compose down`. The script does not detect write activity or request confirmation input:
 
 ```bash
 bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 ```
 
-The script first prints `ROOT_DIR`, the named volumes used by this deployment, the total uncompressed data size, and the available space under the backup directory. `[PASS] Pre-upgrade space check passed.` means the destination has enough space. If space is insufficient, the script prints `[ERROR]` and exits before copying. Files are not compressed, so the check uses their original size.
+The script first prints `ROOT_DIR`, `NEXENT_USER_DIR`, the named volumes used by this deployment, the total uncompressed data size, and the available space under the backup directory. If `NEXENT_USER_DIR` is not explicitly set, the deployment default `${HOME}/nexent` is used. `[PASS] Pre-upgrade space check passed.` means the destination has enough space, after which copying starts immediately. If space is insufficient, the script prints `[ERROR]` and exits before copying. Files are not compressed, so the check uses their original size.
 
-### 1.2 Backup
-
-After the space check passes, the script asks you to confirm that business writes have stopped. Stop writes from user operations, API requests, scheduled jobs, and similar sources before confirming. Keep the containers running; do not run `docker stop` or `docker compose down`.
-
-Enter `y` at the interactive prompt. For non-interactive execution, provide explicit confirmation only after business writes have stopped:
-
-```bash
-bash deploy/docker/backup.sh \
-  --backup-dir /mnt/backup/nexent \
-  --confirm-writes-stopped
-```
-
-The script directly copies files from `ROOT_DIR` and the Docker named volumes. It does not use `sudo` and does not create compressed archives or SHA-256 files. Follow progress through `[INFO]` messages. The backup is complete only when `[PASS] Backup complete: <path>` appears; `<path>` is the actual backup directory. If `[ERROR]` appears, do not use the incomplete directory printed by the script.
+The script directly copies files from `ROOT_DIR`, `NEXENT_USER_DIR`, and the Docker named volumes. It does not use `sudo` and does not create compressed archives or SHA-256 files. The actual backup directory preserves source names at its top level: the two host paths use their directory names, and each named volume uses its volume name. For example, a default deployment creates `nexent-data/`, `nexent/`, `nexent-agent-workspace/`, and `nexent_db-config/`. Follow progress through `[INFO]` messages. The backup is complete only when `[PASS] Backup complete: <path>` appears; `<path>` is the actual backup directory. If `[ERROR]` appears, do not use the incomplete directory printed by the script.
 
 ## 2. Perform the Upgrade
 
@@ -64,20 +52,13 @@ During the upgrade, `nexent-config` runs automatic database migrations while the
 
 ## 3. Post-upgrade Checks
 
-Inspect every container in the Nexent and optional monitoring projects:
+Inspect the container health status for the Nexent and optional monitoring projects:
 
 ```bash
 docker ps -a --filter label=com.docker.compose.project=nexent \
-  --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+  --format 'table {{.Names}}\t{{.Status}}'
 docker ps -a --filter label=com.docker.compose.project=monitor \
-  --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-docker logs --tail 200 nexent-config
+  --format 'table {{.Names}}\t{{.Status}}'
 ```
 
-The upgrade passes when:
-
-- Every container for the selected components is `Up`, and every container with a healthcheck is `healthy`.
-- No container is `Exited`, `Restarting`, or `unhealthy`.
-- The `nexent-config` log has no `[sql-migrations]` failure, migration wait timeout, or persistent error.
-
-If any condition fails, do not immediately remove old images or the pre-upgrade copy. Inspect the affected container logs first.
+The check passes when every container with a configured healthcheck reports `healthy`. Continue waiting while a container reports `starting`; the check fails if any container reports `unhealthy`. Containers without a configured healthcheck do not report `healthy` and are outside the scope of this check.

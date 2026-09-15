@@ -7,10 +7,11 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROOT_ENV_FILE="${NEXENT_BACKUP_ENV_FILE:-$PROJECT_ROOT/deploy/env/.env}"
 
 BACKUP_BASE=""
-WRITES_CONFIRMED="false"
 BACKUP_STARTED="false"
 BACKUP_COMPLETED="false"
 PARTIAL_BACKUP_DIR=""
+ROOT_BACKUP_NAME=""
+NEXENT_USER_BACKUP_NAME=""
 
 log_info() {
   printf '[INFO] %s\n' "$*"
@@ -40,13 +41,11 @@ Usage: bash deploy/docker/backup.sh --backup-dir PATH [options]
 Check local space and copy Docker persistent files before an upgrade.
 
 Options:
-  --backup-dir PATH          Local directory that will contain the backup
-  --confirm-writes-stopped  Confirm business writes have already stopped
-  --help, -h                 Show this help message
+  --backup-dir PATH  Local directory that will contain the backup
+  --help, -h         Show this help message
 
 Examples:
   bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
-  bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent --confirm-writes-stopped
 USAGE
 }
 
@@ -60,10 +59,6 @@ parse_args() {
         ;;
       --backup-dir=*)
         BACKUP_BASE="${1#*=}"
-        shift
-        ;;
-      --confirm-writes-stopped)
-        WRITES_CONFIRMED="true"
         shift
         ;;
       --help|-h)
@@ -139,6 +134,12 @@ load_deployment_env() {
   [ -d "$ROOT_DIR" ] || fail "ROOT_DIR does not exist: $ROOT_DIR"
   [ -r "$ROOT_DIR" ] || fail "ROOT_DIR is not readable: $ROOT_DIR"
   ROOT_DIR="$(cd "$ROOT_DIR" && pwd -P)"
+
+  [ -n "${HOME:-}" ] || fail "HOME is not set; cannot resolve the default NEXENT_USER_DIR."
+  NEXENT_USER_DIR="${NEXENT_USER_DIR:-$HOME/nexent}"
+  [ -d "$NEXENT_USER_DIR" ] || fail "NEXENT_USER_DIR does not exist: $NEXENT_USER_DIR"
+  [ -r "$NEXENT_USER_DIR" ] || fail "NEXENT_USER_DIR is not readable: $NEXENT_USER_DIR"
+  NEXENT_USER_DIR="$(cd "$NEXENT_USER_DIR" && pwd -P)"
 }
 
 validate_backup_base() {
@@ -150,6 +151,12 @@ validate_backup_base() {
   case "$BACKUP_BASE" in
     "$ROOT_DIR"|"$ROOT_DIR"/*)
       fail "Backup directory must be outside ROOT_DIR: $ROOT_DIR"
+      ;;
+  esac
+
+  case "$BACKUP_BASE" in
+    "$NEXENT_USER_DIR"|"$NEXENT_USER_DIR"/*)
+      fail "Backup directory must be outside NEXENT_USER_DIR: $NEXENT_USER_DIR"
       ;;
   esac
 }
@@ -184,15 +191,42 @@ discover_volumes() {
   fi
 }
 
+validate_backup_layout_names() {
+  ROOT_BACKUP_NAME="${ROOT_DIR##*/}"
+  NEXENT_USER_BACKUP_NAME="${NEXENT_USER_DIR##*/}"
+
+  [ -n "$ROOT_BACKUP_NAME" ] || fail "Cannot determine the backup name for ROOT_DIR: $ROOT_DIR"
+  [ -n "$NEXENT_USER_BACKUP_NAME" ] \
+    || fail "Cannot determine the backup name for NEXENT_USER_DIR: $NEXENT_USER_DIR"
+
+  if [ "$ROOT_BACKUP_NAME" = "$NEXENT_USER_BACKUP_NAME" ]; then
+    fail "Backup source names collide: $ROOT_BACKUP_NAME"
+  fi
+
+  local volume
+  for volume in "${VOLUMES[@]}"; do
+    if [ "$volume" = "$ROOT_BACKUP_NAME" ] || [ "$volume" = "$NEXENT_USER_BACKUP_NAME" ]; then
+      fail "Backup source names collide: $volume"
+    fi
+  done
+}
+
 measure_sources() {
   ROOT_SIZE_KIB="$(measure_local_path_kib "$ROOT_DIR")" || fail "Cannot measure ROOT_DIR: $ROOT_DIR"
   [[ "$ROOT_SIZE_KIB" =~ ^[0-9]+$ ]] || fail "Invalid ROOT_DIR size: $ROOT_SIZE_KIB"
 
-  TOTAL_SIZE_KIB="$ROOT_SIZE_KIB"
+  NEXENT_USER_SIZE_KIB="$(measure_local_path_kib "$NEXENT_USER_DIR")" \
+    || fail "Cannot measure NEXENT_USER_DIR: $NEXENT_USER_DIR"
+  [[ "$NEXENT_USER_SIZE_KIB" =~ ^[0-9]+$ ]] \
+    || fail "Invalid NEXENT_USER_DIR size: $NEXENT_USER_SIZE_KIB"
+
+  TOTAL_SIZE_KIB=$((ROOT_SIZE_KIB + NEXENT_USER_SIZE_KIB))
   VOLUME_SIZES_KIB=()
 
   log_info "Persistent data directory: $ROOT_DIR"
   log_info "ROOT_DIR size: $(format_kib "$ROOT_SIZE_KIB") ($ROOT_SIZE_KIB KiB)"
+  log_info "Persistent user directory: $NEXENT_USER_DIR"
+  log_info "NEXENT_USER_DIR size: $(format_kib "$NEXENT_USER_SIZE_KIB") ($NEXENT_USER_SIZE_KIB KiB)"
 
   if [ "${#VOLUMES[@]}" -eq 0 ]; then
     log_info "Docker named volumes: none"
@@ -232,28 +266,9 @@ check_space() {
   log_pass "Pre-upgrade space check passed."
 }
 
-confirm_writes_stopped() {
+warn_writes_stopped() {
   log_warn "Stop user actions, API requests, scheduled jobs, and other business writes before copying."
   log_warn "Containers remain running, so this file copy is not a point-in-time snapshot."
-
-  if [ "$WRITES_CONFIRMED" = "true" ]; then
-    log_info "Business-write stop confirmed by --confirm-writes-stopped."
-    return
-  fi
-
-  [ -t 0 ] || fail "Non-interactive use requires --confirm-writes-stopped."
-
-  local answer
-  printf 'Have all business writes stopped? Continue with the backup? [y/N] ' >&2
-  read -r answer
-  case "$answer" in
-    y|Y|yes|YES|Yes)
-      log_info "Business-write stop confirmed interactively."
-      ;;
-    *)
-      fail "Backup cancelled because business-write stop was not confirmed."
-      ;;
-  esac
 }
 
 copy_files() {
@@ -267,22 +282,29 @@ copy_files() {
   [ ! -e "$PARTIAL_BACKUP_DIR" ] || fail "Partial backup directory already exists: $PARTIAL_BACKUP_DIR"
 
   BACKUP_STARTED="true"
-  mkdir -p "$PARTIAL_BACKUP_DIR/root-dir" "$PARTIAL_BACKUP_DIR/volumes" \
+  mkdir -p \
+    "$PARTIAL_BACKUP_DIR/$ROOT_BACKUP_NAME" \
+    "$PARTIAL_BACKUP_DIR/$NEXENT_USER_BACKUP_NAME" \
     || fail "Cannot create backup layout: $PARTIAL_BACKUP_DIR"
 
   log_info "Copying ROOT_DIR files..."
-  cp -a "$ROOT_DIR/." "$PARTIAL_BACKUP_DIR/root-dir/" \
+  cp -a "$ROOT_DIR/." "$PARTIAL_BACKUP_DIR/$ROOT_BACKUP_NAME/" \
     || fail "Failed to copy ROOT_DIR files."
   log_pass "ROOT_DIR files copied."
+
+  log_info "Copying NEXENT_USER_DIR files..."
+  cp -a "$NEXENT_USER_DIR/." "$PARTIAL_BACKUP_DIR/$NEXENT_USER_BACKUP_NAME/" \
+    || fail "Failed to copy NEXENT_USER_DIR files."
+  log_pass "NEXENT_USER_DIR files copied."
 
   local volume
   for volume in "${VOLUMES[@]}"; do
     log_info "Copying Docker volume: $volume"
-    mkdir -p "$PARTIAL_BACKUP_DIR/volumes/$volume" \
+    mkdir -p "$PARTIAL_BACKUP_DIR/$volume" \
       || fail "Cannot create backup directory for volume: $volume"
     docker run --rm --network none --user 0 --entrypoint cp \
       -v "$volume:/source:ro" \
-      -v "$PARTIAL_BACKUP_DIR/volumes/$volume:/backup" \
+      -v "$PARTIAL_BACKUP_DIR/$volume:/backup" \
       "$BACKUP_HELPER_IMAGE" -a /source/. /backup/ \
       || fail "Failed to copy Docker volume: $volume"
     log_pass "Docker volume copied: $volume"
@@ -294,14 +316,19 @@ copy_files() {
 
   local source_entries
   local backup_entries
+  local user_source_entries
+  local user_backup_entries
   local backup_size_output
   local backup_size_kib
   source_entries="$(find "$ROOT_DIR" -mindepth 1 | wc -l | tr -d ' ')"
-  backup_entries="$(find "$final_backup_dir/root-dir" -mindepth 1 | wc -l | tr -d ' ')"
+  backup_entries="$(find "$final_backup_dir/$ROOT_BACKUP_NAME" -mindepth 1 | wc -l | tr -d ' ')"
+  user_source_entries="$(find "$NEXENT_USER_DIR" -mindepth 1 | wc -l | tr -d ' ')"
+  user_backup_entries="$(find "$final_backup_dir/$NEXENT_USER_BACKUP_NAME" -mindepth 1 | wc -l | tr -d ' ')"
   backup_size_output="$(du -sk "$final_backup_dir")"
   backup_size_kib="$(read_first_field "$backup_size_output")"
 
   log_info "ROOT_DIR entries at completion: source=$source_entries backup=$backup_entries"
+  log_info "NEXENT_USER_DIR entries at completion: source=$user_source_entries backup=$user_backup_entries"
   log_info "Backup disk usage: $(format_kib "$backup_size_kib") ($backup_size_kib KiB)"
   log_pass "Backup complete: $final_backup_dir"
 }
@@ -312,9 +339,10 @@ main() {
   validate_backup_base
   validate_docker
   discover_volumes
+  validate_backup_layout_names
   measure_sources
   check_space
-  confirm_writes_stopped
+  warn_writes_stopped
   copy_files
 }
 

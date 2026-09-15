@@ -4,31 +4,19 @@
 
 > ⚠️ 如果复制期间仍有业务写入，PostgreSQL、Elasticsearch、Redis 和 MinIO 等组件的数据可能不属于同一时间点，备份可能无法恢复。
 
-## 1. 升级前准备
+## 1. 升级前检查和备份
 
-### 1.1 升级前检查
+先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。备份目录必须位于 `ROOT_DIR` 和 `NEXENT_USER_DIR` 之外。
 
-先进入当前正在使用的 Nexent 仓库根目录；离线部署则进入上一版已解压部署包的根目录。调用备份脚本并指定 `ROOT_DIR` 之外的本地备份目录：
+执行以下命令前必须停止用户操作、接口请求和定时任务等业务写入；容器保持运行，不需要执行 `docker stop` 或 `docker compose down`。脚本不会检测业务写入状态，也不会要求输入确认：
 
 ```bash
 bash deploy/docker/backup.sh --backup-dir /mnt/backup/nexent
 ```
 
-脚本会先回显 `ROOT_DIR`、本次部署使用的 named volumes、未压缩数据总量以及备份目录可用空间。出现 `[PASS] Pre-upgrade space check passed.` 表示空间充足；空间不足时脚本会在复制前输出 `[ERROR]` 并退出。数据不会压缩，因此空间检查按文件原始大小计算。
+脚本会先回显 `ROOT_DIR`、`NEXENT_USER_DIR`、本次部署使用的 named volumes、未压缩数据总量以及备份目录可用空间。`NEXENT_USER_DIR` 未显式设置时使用部署默认值 `${HOME}/nexent`。出现 `[PASS] Pre-upgrade space check passed.` 表示空间充足，随后脚本直接开始复制；空间不足时会在复制前输出 `[ERROR]` 并退出。数据不会压缩，因此空间检查按文件原始大小计算。
 
-### 1.2 备份
-
-空间检查通过后，脚本会要求确认业务写入已经停止。确认前应停止用户操作、接口请求和定时任务等业务写入；容器保持运行，不需要执行 `docker stop` 或 `docker compose down`。
-
-交互执行时按提示输入 `y`。非交互执行时，只有在已经停止业务写入后才能显式确认：
-
-```bash
-bash deploy/docker/backup.sh \
-  --backup-dir /mnt/backup/nexent \
-  --confirm-writes-stopped
-```
-
-脚本会直接复制 `ROOT_DIR` 和 Docker named volumes 中的文件，不使用 `sudo`，不生成压缩包或 SHA-256 文件。通过 `[INFO]` 查看复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的未完成目录。
+脚本会直接复制 `ROOT_DIR`、`NEXENT_USER_DIR` 和 Docker named volumes 中的文件，不使用 `sudo`，不生成压缩包或 SHA-256 文件。实际备份目录的最外层使用数据源原名：两个宿主机目录使用各自的目录名，每个 named volume 使用其 volume 名；例如默认部署会生成 `nexent-data/`、`nexent/`、`nexent-agent-workspace/` 和 `nexent_db-config/`。通过 `[INFO]` 查看复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的未完成目录。
 
 ## 2. 执行升级
 
@@ -64,20 +52,13 @@ bash deploy.sh \
 
 ## 3. 升级后检查
 
-查看 Nexent 及可选监控项目的全部容器：
+查看 Nexent 及可选监控项目的容器健康状态：
 
 ```bash
 docker ps -a --filter label=com.docker.compose.project=nexent \
-  --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+  --format 'table {{.Names}}\t{{.Status}}'
 docker ps -a --filter label=com.docker.compose.project=monitor \
-  --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-docker logs --tail 200 nexent-config
+  --format 'table {{.Names}}\t{{.Status}}'
 ```
 
-升级通过需要满足：
-
-- 已选组件对应的容器全部为 `Up`，定义了健康检查的容器为 `healthy`。
-- 不存在 `Exited`、`Restarting` 或 `unhealthy` 容器。
-- `nexent-config` 日志中没有 `[sql-migrations]` 失败、迁移等待超时或持续报错。
-
-如果不满足上述条件，不要立即删除旧镜像或升级前副本；先根据容器日志定位问题。
+所有配置了健康检查的容器均显示 `healthy` 即表示检查通过；显示 `starting` 时继续等待，显示 `unhealthy` 时检查不通过。未配置健康检查的容器不会显示 `healthy`，不在本项检查范围内。
