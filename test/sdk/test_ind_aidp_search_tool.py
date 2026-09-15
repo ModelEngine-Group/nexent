@@ -90,15 +90,56 @@ def test_image_uses_proxy_builder_and_removes_html_image_tag():
     assert image_urls == ["/api/ind-aidp/images/signed:kb-1/images/a.png"]
 
 
-def test_forward_can_override_configured_kds_without_mutating_configuration():
+def test_forward_falls_back_to_configured_kds_without_mutating_configuration():
     tool = make_tool(kds_list=["kb-fixed"])
     tool._execute_request = MagicMock(return_value=[])
 
     result = json.loads(tool.forward("question", kds_list=["kb-runtime"]))
 
-    tool._execute_request.assert_called_once_with("question", ["kb-runtime"])
+    tool._execute_request.assert_called_once_with("question", ["kb-fixed"])
     assert tool.kds_list == ["kb-fixed"]
-    assert "No relevant information" in result
+    assert "not configured or unavailable" in result["notice"]
+    assert "kb-runtime" in result["notice"]
+    assert "broadened to all available configured knowledge bases" in result["notice"]
+
+
+def test_forward_explicit_empty_scope_uses_configured_scope():
+    tool = make_tool(kds_list=["kb-fixed"])
+    tool._execute_request = MagicMock(return_value=[])
+
+    result = json.loads(tool.forward("question", kds_list=[]))
+
+    tool._execute_request.assert_called_once_with("question", ["kb-fixed"])
+    assert result["results"] == []
+    assert "No knowledge-base scope was specified" in result["notice"]
+    assert "No relevant information was found" in result["notice"]
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected_used", "expected_ignored", "fallback"),
+    [
+        (["kb-1", "kb-2"], ["kb-1", "kb-2"], [], False),
+        (["kb-1", "kb-missing"], ["kb-1"], ["kb-missing"], False),
+        (["kb-missing"], ["kb-1", "kb-2"], ["kb-missing"], True),
+    ],
+)
+def test_forward_corrects_requested_scope(requested, expected_used, expected_ignored, fallback):
+    tool = make_tool(kds_list=["kb-1", "kb-2"])
+    tool._execute_request = MagicMock(return_value=[])
+
+    response = json.loads(tool.forward("question", kds_list=requested))
+
+    tool._execute_request.assert_called_once_with("question", expected_used)
+    if expected_ignored:
+        assert "not configured or unavailable" in response["notice"]
+        for ignored_kb in expected_ignored:
+            assert ignored_kb in response["notice"]
+        if fallback:
+            assert "broadened to all available configured knowledge bases" in response["notice"]
+        else:
+            assert "remaining available knowledge bases" in response["notice"]
+    else:
+        assert "Search was executed in the requested knowledge bases" in response["notice"]
 
 
 def test_forward_uses_configured_kds_when_runtime_value_is_omitted():
@@ -114,6 +155,7 @@ def test_parse_kds_list_json_string_and_validation():
     tool_module = ind_aidp_search_tool_module
     assert tool_module._parse_kds_list('["a", "a", "b"]') == ["a", "a", "b"]
     assert tool_module._parse_kds_list([1, 2]) == ["1", "2"]
+    assert tool_module._parse_kds_list([], allow_empty=True) == []
 
     with pytest.raises(ValueError, match="JSON"):
         tool_module._parse_kds_list("{not-json")
@@ -231,7 +273,7 @@ def test_forward_emits_messages_with_observer():
 
     result = json.loads(tool.forward("question"))
 
-    assert result[0]["text"] == "content"
+    assert result["results"][0]["text"] == "content"
     assert tool.record_ops == 2
     tool.observer.add_message.call_count >= 2
 

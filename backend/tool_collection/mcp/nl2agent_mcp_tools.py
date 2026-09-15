@@ -88,13 +88,15 @@ NL2A_WRAPPER_DESCRIPTION = (
     "`agent_id` and `subtype`. For `requirement_clarification`, pass structured "
     "`questions`. For resource installation or binding, pass `agent_id` and the "
     "verified `resource_result`. JSON parameters must be decoded dictionaries, "
-    f"never raw JSON strings. Call the tool as `result = {NL2A_WRAPPER_NAME}(...)`, "
-    "then use `print(result)`."
+    "never raw JSON strings. An empty installed-resource result returns a "
+    "non-interactive success result so Prompt generation can continue immediately. "
+    f"Call the tool as `result = {NL2A_WRAPPER_NAME}(...)`, then use `print(result)`."
 )
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
-    "Always pass the current agent_id and only whitelisted description or Prompt "
-    "fields, never null. Never update name or display_name. Call the tool as "
+    "Always pass the current agent_id and only whitelisted fields, never null. "
+    "The name field may be set only when the existing draft name is empty; "
+    "display_name is immutable. Call the tool as "
     f"`result = {SAVE_AGENT_DRAFT_FIELDS_NAME}(...)`, then use `print(result)` exactly once."
 )
 NL2AGENT_MCP_TOOL_META = {"nexent_internal": True}
@@ -111,7 +113,7 @@ _NL2AGENT_PROMPT_FIELDS = frozenset(
 )
 _NL2AGENT_FINAL_PROMPT_BATCH = frozenset({"greeting_message", "example_questions"})
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
-    {"description", *_NL2AGENT_PROMPT_FIELDS}
+    {"name", "description", *_NL2AGENT_PROMPT_FIELDS}
 )
 NL2A_SUBTYPES = Literal[
     "requirement_clarification",
@@ -367,6 +369,12 @@ class AgentDraftFields(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=30,
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*_assistant$",
+    )
     description: str | None = None
     duty_prompt: str | None = None
     constraint_prompt: str | None = None
@@ -437,6 +445,8 @@ class SaveAgentDraftFieldsError(BaseModel):
         "agent_read_only",
         "agent_context_mismatch",
         "draft_save_failed",
+        "agent_name_already_set",
+        "agent_name_duplicate",
         "draft_fields_incomplete",
         "prompt_fields_incomplete",
         "unauthorized",
@@ -560,6 +570,18 @@ def build_nl2a_wrapper(
                 f"{subtype} requires agent_id and resource_result"
             )
         verified = RecommendResourcesOutput.model_validate(resource_result)
+        if subtype == "installed_resource_binding" and not verified.resources:
+            return json.dumps(
+                {
+                    "status": "success",
+                    "subtype": subtype,
+                    "agent_id": agent_id,
+                    "binding_required": False,
+                    "resources": [],
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
         payload_model = (
             SuggestedResourceInstallationPayload
             if subtype == "suggested_resource_installation"
@@ -638,6 +660,7 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                     "fields": {
                         field_name: field_type
                         for field_name, field_type in {
+                            "name": "str",
                             "description": "str",
                             "duty_prompt": "str",
                             "constraint_prompt": "str",
@@ -1008,6 +1031,16 @@ async def nl2a_wrapper(
         if resource_result is None:
             raise ValueError(f"{subtype} requires agent_id and resource_result")
         supplied = RecommendResourcesOutput.model_validate(resource_result)
+
+        if not supplied.resources:
+            if subtype == "suggested_resource_installation":
+                raise ValueError(f"invalid resources for {subtype}")
+            return build_nl2a_wrapper(
+                subtype=subtype,
+                agent_id=resolved_agent_id,
+                resource_result=supplied,
+            )
+
         from services.nl2agent_service import recommend_resources_impl
 
         sources = {resource.candidate.source for resource in supplied.resources}
@@ -1016,7 +1049,7 @@ async def nl2a_wrapper(
             if subtype == "suggested_resource_installation"
             else INSTALLED_RESOURCE_SOURCES
         )
-        if not sources or not sources.issubset(required_sources):
+        if not sources.issubset(required_sources):
             raise ValueError(f"invalid resources for {subtype}")
         verified = await recommend_resources_impl(
             agent_id=resolved_agent_id,

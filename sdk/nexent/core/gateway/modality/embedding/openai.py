@@ -8,6 +8,8 @@ from typing import List
 
 import requests
 
+from nexent.core.concurrency import run_blocking
+
 from nexent.monitor import record_model_call
 
 from ...multimodal_adapter import ModelInfo
@@ -71,7 +73,12 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
             the check fails.
         """
         try:
-            return await asyncio.to_thread(self.get_embeddings, "Hello, nexent!", timeout=timeout)
+            return await run_blocking(
+                "gateway-embedding-connectivity",
+                self.get_embeddings,
+                "Hello, nexent!",
+                timeout=timeout,
+            )
         except requests.exceptions.Timeout:
             logging.error(f"OpenAI embedding connection timed out ({timeout}s)")
             return []
@@ -84,7 +91,8 @@ class OpenAICompatibleEmbeddingAdapter(EmbeddingAdapter):
 
     async def invoke(self, request: EmbeddingRequest):
         """Embed ``request.inputs`` (text), offloaded to a worker thread."""
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "gateway-embedding-invoke",
             self.get_embeddings, request.inputs,
             with_metadata=request.with_metadata, timeout=request.timeout,
         )

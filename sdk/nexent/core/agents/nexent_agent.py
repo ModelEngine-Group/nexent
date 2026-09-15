@@ -229,7 +229,8 @@ class NexentAgent:
                  tenant_id=None,
                  workspace_path=None,
                  workspace_run_id=None,
-                 minio_files=None):
+                 minio_files=None,
+                 cancellation_scope=None):
         """
         Initialize the NexentAgent factory.
 
@@ -256,6 +257,7 @@ class NexentAgent:
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
+        self.cancellation_scope = cancellation_scope
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
@@ -283,7 +285,7 @@ class NexentAgent:
         )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
-        model = OpenAIModel(
+        model_kwargs = dict(
             observer=self.observer,
             model_id=model_config.model_name,
             api_key=model_config.api_key,
@@ -298,6 +300,16 @@ class NexentAgent:
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
         )
+        if self.cancellation_scope is not None:
+            model_kwargs["cancellation_scope"] = self.cancellation_scope
+        if model_config.concurrency_limit is not None:
+            model_kwargs["concurrency_limit"] = model_config.concurrency_limit
+            model_kwargs["concurrency_key"] = (
+                str(self.tenant_id or "default"),
+                str(model_config.model_factory or "unknown"),
+                str(model_config.model_name),
+            )
+        model = OpenAIModel(**model_kwargs)
         model.stop_event = self.stop_event
         return model
 
@@ -745,7 +757,8 @@ class NexentAgent:
                         wrapper = ExternalA2AAgentWrapper(
                             agent_info=a2a_agent_info,
                             stop_event=self.stop_event,
-                            observer=self.observer
+                            observer=self.observer,
+                            cancellation_scope=self.cancellation_scope,
                         )
                         managed_agents_list.append(
                             self._wrap_subagent(

@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 from fastapi import UploadFile
 from nexent import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 
@@ -791,13 +792,22 @@ async def delete_file_impl(
                 )
 
     if reference:
-        result = await asyncio.to_thread(
+        result = await run_blocking(
+            "delete-storage-file",
             delete_file,
+            lane="control-io",
+            owner="config",
             object_name=reference.object_name,
             bucket=reference.bucket_name,
         )
     else:
-        result = await asyncio.to_thread(delete_file, object_name=object_name)
+        result = await run_blocking(
+            "delete-storage-file",
+            delete_file,
+            object_name=object_name,
+            lane="control-io",
+            owner="config",
+        )
     if not result["success"]:
         raise Exception(
             f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}")
