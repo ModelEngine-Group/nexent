@@ -115,6 +115,16 @@ consts_model_mod.AgentRequest = AgentRequest
 consts_model_mod.ConversationResponse = ConversationResponse
 consts_model_mod.MessageUnit = MessageUnit
 consts_model_mod.MessageRequest = MessageRequest
+
+
+def filter_extra_params(model_type, extra_params):
+    """Minimal stub mirroring consts.model.filter_extra_params for import-chain compat."""
+    if not extra_params:
+        return extra_params
+    return dict(extra_params)
+
+
+consts_model_mod.filter_extra_params = filter_extra_params
 sys.modules["consts.model"] = consts_model_mod
 # Also ensure backend.consts.model resolves to our stub for tests that import via backend.consts.model
 sys.modules["backend.consts.model"] = consts_model_mod

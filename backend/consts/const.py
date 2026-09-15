@@ -839,5 +839,12 @@ enabling the provider to return log probability information in the response."""
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"
 
+# Model Catalog - 预置模型目录配置文件路径
+MODEL_CATALOG_JSON_PATH = os.getenv(
+    "MODEL_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
+)
+"""Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
+
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

@@ -766,6 +766,7 @@ async def update_agent_info_impl(
                     "is_a2a": request.is_a2a if request.is_a2a is not None else False,
                     "verification_config": request.verification_config,
                     "context_policy": request.context_policy,
+                    "model_params_override": request.model_params_override,
                     "duty_prompt": request.duty_prompt,
                     "constraint_prompt": request.constraint_prompt,
                     "few_shots_prompt": request.few_shots_prompt,

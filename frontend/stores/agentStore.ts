@@ -23,6 +23,7 @@ export type AgentDraft = Pick<
   | "model"
   | "model_ids"
   | "model_names"
+  | "model_params_override"
   | "unavailable_reasons"
   | "max_step"
   | "requested_output_tokens"
