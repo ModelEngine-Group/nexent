@@ -312,12 +312,7 @@ def _cleanup_deleted_aidp_document_tags(
                 actor_id,
             )
         except Exception as error:  # noqa: BLE001 - upstream deletion already succeeded
-            logger.warning(
-                "Failed to clean AIDP document tag assignments: kb=%s file_ino_no=%s error=%s",
-                knowledge_base_id,
-                document.file_ino_no,
-                error,
-            )
+            logger.warning("Failed to clean AIDP document tag assignments")
 
 
 def _is_user_role(user_id: str, tenant_id: str) -> bool:

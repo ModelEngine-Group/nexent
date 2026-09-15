@@ -15,8 +15,8 @@ const { Dragger } = Upload;
 
 const resolveDownloadFilename = (response: Response, fallback: string) => {
   const contentDisposition = response.headers.get("content-disposition") || "";
-  const encodedName = contentDisposition.match(
-    /filename\*=UTF-8''([^;]+)/i
+  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(
+    contentDisposition
   )?.[1];
   if (encodedName) {
     try {
@@ -25,7 +25,7 @@ const resolveDownloadFilename = (response: Response, fallback: string) => {
       // Use the regular filename or document name when decoding fails.
     }
   }
-  const plainName = contentDisposition.match(/filename="?([^";]+)"?/i)?.[1];
+  const plainName = /filename="?([^";]+)"?/i.exec(contentDisposition)?.[1];
   return plainName || response.headers.get("x-file-name") || fallback;
 };
 
