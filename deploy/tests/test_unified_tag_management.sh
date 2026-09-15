@@ -587,22 +587,34 @@ SQL
   pass "latest init plus the historical tag migration order preserves final tenant provisioning"
 }
 
-test_community_tags_fail_closed() {
+test_community_tags_are_skipped() {
   local database="utm_community"
+  local preflight_output
   create_database "$database"
   create_legacy_schema "$database"
   run_sql "$database" <<'SQL'
 INSERT INTO nexent.user_tenant_t VALUES (DEFAULT, 'tenant-community', 'owner', 'N');
 INSERT INTO nexent.mcp_community_record_t VALUES
-    (1, 'tenant-community', ARRAY['CommunityTag'], 'N');
+    (1, 'tenant-community', ARRAY['CommunityTag'], 'N'),
+    (2, 'tenant-community', ARRAY['DeletedCommunityTag'], 'Y');
 SQL
 
-  expect_migration_failure "$database" "community_canonical_source_unprovable"
-  assert_schema_rolled_back "$database"
+  preflight_output="$(run_file "$database" "$PREFLIGHT_SQL")"
+  assert_contains "$preflight_output" "skipped_mcp_community_tags" \
+    "preflight must identify MCP community tags that will be skipped"
+
+  run_file "$database" "$MIGRATION_SQL" >/dev/null
   assert_query "$database" \
-    "SELECT tags::TEXT FROM nexent.mcp_community_record_t WHERE community_id = 1;" \
-    "{CommunityTag}" "community migration failure must preserve legacy tags"
-  pass "non-empty community tags fail closed and roll back"
+    "SELECT count(*) FROM nexent.resource_tag_assignment WHERE resource_type = 'mcp_service' AND resource_id = '1';" \
+    "0" "active MCP community tags must not create assignments"
+  assert_query "$database" \
+    "SELECT count(*) FROM nexent.resource_tag_assignment WHERE resource_type = 'mcp_service' AND resource_id = '2';" \
+    "0" "deleted MCP community tags must not create assignments"
+  assert_query "$database" \
+    "SELECT string_agg(tags::TEXT, chr(10) ORDER BY community_id) FROM nexent.mcp_community_record_t WHERE community_id IN (1, 2);" \
+    "$(printf '%s\n%s' '{CommunityTag}' '{DeletedCommunityTag}')" \
+    "skipped MCP community tags must remain in the legacy field"
+  pass "MCP community tags are skipped without blocking migration"
 }
 
 test_null_and_empty_tenant_roll_back() {
@@ -1150,7 +1162,7 @@ main() {
   test_agent_category_compatibility_and_future_tenant_provisioning
   test_agent_category_capacity_conflict_rolls_back
   test_latest_init_and_tag_migration_order
-  test_community_tags_fail_closed
+  test_community_tags_are_skipped
   test_null_and_empty_tenant_roll_back
   test_non_string_json_roll_back
   test_source_mismatch_roll_back
