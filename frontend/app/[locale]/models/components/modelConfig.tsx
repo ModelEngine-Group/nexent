@@ -41,7 +41,7 @@ import {
   LAYOUT_CONFIG,
   MODEL_SOURCES,
 } from "@/const/modelConfig";
-import { useConfig } from "@/hooks/useConfig";
+import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
@@ -1428,6 +1428,10 @@ export const ModelConfigSection = forwardRef<
           onClose={() => setIsAddModalV2Open(false)}
           onSuccess={async (newModel) => {
             await loadModelLists(true);
+            // The backend may have auto-configured default-model slots during
+            // the create; refresh the cached config so the defaults column and
+            // the default-model dialog reflect it without a manual reload.
+            await queryClient.invalidateQueries({ queryKey: CONFIG_QUERY_KEY });
             message.success(t("modelConfig.message.addSuccess"));
             if (newModel && newModel.name && newModel.type) {
               setTimeout(() => {
