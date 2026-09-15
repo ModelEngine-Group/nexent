@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from ..concurrency import run_blocking
+
 
 class BaseRerank(ABC):
     """
@@ -232,7 +234,9 @@ class OpenAICompatibleRerank(BaseRerank):
         Returns:
             List of reranked results
         """
-        return await asyncio.to_thread(self.rerank, query, documents, top_n)
+        return await run_blocking(
+            "rerank-call", self.rerank, query, documents, top_n
+        )
 
     async def connectivity_check(self, timeout: float = 5.0) -> bool:
         """
@@ -248,7 +252,8 @@ class OpenAICompatibleRerank(BaseRerank):
             test_query = "test query"
             test_documents = ["test document"]
 
-            await asyncio.to_thread(
+            await run_blocking(
+                "rerank-connectivity",
                 self.rerank, test_query, test_documents, top_n=1
             )
             return True

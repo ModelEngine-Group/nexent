@@ -539,7 +539,6 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
     ("agent_id", "fields"),
     [
         (None, {"description": "Missing ID"}),
-        (1042, {"name": "renamed_agent"}),
         (1042, {"display_name": "Renamed Agent"}),
         (1042, {"business_description": "Removed field"}),
         (1042, {}),
@@ -1108,7 +1107,7 @@ async def test_installation_wrapper_rechecks_agent_and_candidates(mocker):
 
 
 @pytest.mark.asyncio
-async def test_resource_wrapper_rejects_missing_results_and_wrong_sources(mocker):
+async def test_resource_wrapper_validates_results_sources_and_empty_binding(mocker):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
         "get_http_request",
@@ -1154,12 +1153,34 @@ async def test_resource_wrapper_rejects_missing_results_and_wrong_sources(mocker
             agent_id=42,
             resource_result=installed_result,
         )
+    recommend_impl = mocker.patch.object(
+        nl2agent_service,
+        "recommend_resources_impl",
+        new=AsyncMock(),
+    )
+    empty_binding = await nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={"status": "success", "resources": []},
+    )
+    payload = json.loads(empty_binding)
+
+    assert payload == {
+        "status": "success",
+        "subtype": "installed_resource_binding",
+        "agent_id": 42,
+        "binding_required": False,
+        "resources": [],
+    }
+    assert "<nl2a>" not in empty_binding
+    recommend_impl.assert_not_awaited()
+
     with pytest.raises(
         ValueError,
-        match="invalid resources for installed_resource_binding",
+        match="invalid resources for suggested_resource_installation",
     ):
         await nl2a_wrapper(
-            subtype="installed_resource_binding",
+            subtype="suggested_resource_installation",
             agent_id=42,
             resource_result={"status": "success", "resources": []},
         )

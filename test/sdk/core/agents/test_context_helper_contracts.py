@@ -328,7 +328,7 @@ def test_renderer_current_action_without_raw_messages():
         {"step_number": 1, "result": "done"},
     )
     message = ContextItemRenderer().render([action])[0]
-    assert message["role"] == "user"
+    assert message["role"] == "assistant"
     text = message["content"][0]["text"]
     assert '<completed_action_history read_only="true">' in text
     assert "index: 1" in text
@@ -404,7 +404,7 @@ def test_renderer_current_action_preserves_string_tool_arguments():
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
 
-    assert message["role"] == "user"
+    assert message["role"] == "assistant"
     assert "tool: python_interpreter" in text
     assert "result = search(query='GAIA')\nprint(result)" in text
     assert "python_interpreter'()" not in text

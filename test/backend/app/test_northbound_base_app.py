@@ -157,12 +157,61 @@ sys.modules['consts.exceptions'] = consts_exceptions_module
 # consts.const - stub used by northbound_knowledge_app
 consts_const_module = types.ModuleType("consts.const")
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
+consts_const_module.NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = 1
 
 class VectorDatabaseType:
     ELASTICSEARCH = "elasticsearch"
 
 consts_const_module.VectorDatabaseType = VectorDatabaseType
 sys.modules["consts.const"] = consts_const_module
+
+
+class _ManagerState:
+    CREATED = "created"
+    RUNNING = "running"
+    CLOSED = "closed"
+
+
+class _ManagedTaskSpec:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+class _NorthboundThreadManager:
+    def __init__(self):
+        self.state = _ManagerState.CREATED
+
+    def start(self):
+        self.state = _ManagerState.RUNNING
+
+    async def run(self, _lane, _spec, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    async def shutdown(self, timeout):
+        self.state = _ManagerState.CLOSED
+
+    def snapshot(self):
+        return {
+            "service_name": "northbound",
+            "active_count": 0,
+            "queued_count": 0,
+        }
+
+
+concurrency_module = types.ModuleType("nexent.core.concurrency")
+concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
+concurrency_module.ManagerState = _ManagerState
+concurrency_module.set_default_thread_manager = MagicMock()
+concurrency_module.clear_default_thread_manager = MagicMock()
+sys.modules["nexent.core.concurrency"] = concurrency_module
+
+thread_lifecycle_module = types.ModuleType("services.thread_lifecycle_service")
+thread_lifecycle_module.northbound_thread_manager = _NorthboundThreadManager()
+sys.modules["services.thread_lifecycle_service"] = thread_lifecycle_module
+
+runtime_state_module = types.ModuleType("services.runtime_state_service")
+runtime_state_module.runtime_state_service = MagicMock()
+sys.modules["services.runtime_state_service"] = runtime_state_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
@@ -363,6 +412,20 @@ class TestNorthboundBaseApp(unittest.TestCase):
         """The main northbound router should be included."""
         paths = app.openapi()["paths"]
         self.assertIn("/dummy", paths)
+
+    def test_thread_capacity_is_process_local_and_hidden_from_openapi(self):
+        response = self.client.get("/internal/thread-capacity")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "service_name": "northbound",
+                "active_count": 0,
+                "queued_count": 0,
+            },
+        )
+        self.assertNotIn("/internal/thread-capacity", app.openapi()["paths"])
 
     def test_a2a_router_inclusion(self):
         """A2A router should be registered under /nb/a2a."""

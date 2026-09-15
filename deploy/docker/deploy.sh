@@ -1062,6 +1062,74 @@ create_dir_with_permission() {
   fi
 }
 
+project_config_dir_is_empty() {
+  local target_dir="$1"
+  [ ! -d "$target_dir" ] || [ -z "$(find "$target_dir" -mindepth 1 -print -quit 2>/dev/null)" ]
+}
+
+prepare_project_config_dir() {
+  local target_dir="$ROOT_DIR/project-config"
+
+  if ! mkdir -p "$target_dir" || ! chmod 775 "$target_dir"; then
+    echo "   ❌ ERROR Failed to prepare project configuration directory $target_dir." >&2
+    return 1
+  fi
+  echo "   📁 Directory $target_dir has been created and permissions set to 775."
+}
+
+migrate_legacy_project_config() {
+  local target_dir="$ROOT_DIR/project-config"
+  local staging_dir
+  local relative_path
+  local project_config_files=(
+    "modelengine-logo.png"
+    "modelengine-logo2.png"
+    "locales/zh/custom.json"
+    "locales/en/custom.json"
+  )
+
+  if ! project_config_dir_is_empty "$target_dir"; then
+    echo "   ↺ Project configuration directory already contains data; legacy migration skipped."
+    return 0
+  fi
+
+  if ! docker inspect --type container nexent-web >/dev/null 2>&1; then
+    echo "   ↺ No legacy nexent-web container found; project configuration will use image defaults."
+    return 0
+  fi
+
+  staging_dir=$(mktemp -d "$ROOT_DIR/.project-config-migration.XXXXXX") || {
+    echo "   ❌ ERROR Failed to create a project configuration migration directory." >&2
+    return 1
+  }
+
+  for relative_path in "${project_config_files[@]}"; do
+    mkdir -p "$(dirname "$staging_dir/$relative_path")"
+    if ! docker cp \
+      "nexent-web:/opt/frontend-dist/public/$relative_path" \
+      "$staging_dir/$relative_path"; then
+      echo "   ❌ ERROR Failed to back up $relative_path from the legacy nexent-web container." >&2
+      echo "   Migration files were preserved at $staging_dir." >&2
+      return 1
+    fi
+    if [ ! -s "$staging_dir/$relative_path" ]; then
+      echo "   ❌ ERROR Legacy project configuration file is empty: $relative_path" >&2
+      echo "   Migration files were preserved at $staging_dir." >&2
+      return 1
+    fi
+  done
+
+  if ! rmdir "$target_dir" || ! mv "$staging_dir" "$target_dir"; then
+    echo "   ❌ ERROR Failed to activate migrated project configuration." >&2
+    echo "   Migration files were preserved at $staging_dir." >&2
+    return 1
+  fi
+
+  find "$target_dir" -type d -exec chmod 775 {} +
+  find "$target_dir" -type f -exec chmod 664 {} +
+  echo "   ✅ Legacy project configuration migrated to $target_dir."
+}
+
 sql_files_checksum() {
   local payload=""
   local file rel checksum
@@ -1098,6 +1166,8 @@ prepare_directory_and_data() {
   create_dir_with_permission "$ROOT_DIR/minio/data" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
   create_dir_with_permission "$ROOT_DIR/memory-provider-plugins" 775
+  prepare_project_config_dir || return 1
+  migrate_legacy_project_config || return 1
 
   cp -rn "$DOCKER_ASSETS_DIR/volumes" "$ROOT_DIR"
   chmod -R 775 $ROOT_DIR/volumes

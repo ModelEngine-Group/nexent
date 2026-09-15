@@ -96,9 +96,52 @@ class _ProcessParams:
         return dict(self.__dict__)
 
 
+def _infer_model_type_from_name(model_name: str) -> str:
+    """Mock implementation mirroring the real consts.model._infer_model_type_from_name."""
+    if not model_name:
+        return "llm"
+    name = model_name.lower()
+    final_segment = name.rsplit("/", 1)[-1]
+
+    def _matches(*prefixes: str) -> bool:
+        return name.startswith(prefixes) or final_segment.startswith(prefixes)
+
+    def _contains(token: str) -> bool:
+        return token in name or token in final_segment
+
+    if not _contains("reranker") and (
+        _matches("text-embedding-", "embedding-", "bge-") or _contains("embedding")
+    ):
+        return "embedding"
+    if _matches("rerank-", "bge-reranker-", "jina-reranker-") or _contains("rerank"):
+        return "rerank"
+    if _matches("whisper-", "paraformer-", "sensevoice-") or _contains("sensevoice"):
+        return "stt"
+    if _matches("tts-", "cosyvoice-", "speech-") or _contains("cosyvoice"):
+        return "tts"
+    if _contains("omni") or _contains("video"):
+        return "vlm3"
+    if any(
+        _contains(token)
+        for token in (
+            "image", "dall", "flux", "stable-diffusion", "sdxl",
+            "midjourney", "wanx", "kolors", "seedream", "ideogram", "recraft",
+        )
+    ):
+        return "vlm2"
+    if (
+        _matches("qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
+        or "vl" in final_segment.split("-")
+        or any(_contains(token) for token in ("vision", "visual", "ocr"))
+    ):
+        return "vlm"
+    return "llm"
+
+
 consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
 consts_model_mod.ToolValidateRequest = _ToolValidateRequest
 consts_model_mod.ProcessParams = _ProcessParams
+consts_model_mod._infer_model_type_from_name = _infer_model_type_from_name
 sys.modules["consts.model"] = consts_model_mod
 if "consts" not in sys.modules:
     sys.modules["consts"] = types.ModuleType("consts")

@@ -343,6 +343,7 @@ export const authService = {
             data.data.user.user_role
           ),
           email: data.data.user.user_email,
+          username: data.data.user.username,
           role: data.data.user.user_role,
           authProvider: data.data.user.auth_provider,
           avatarUrl: data.data.user.avatarUrl,

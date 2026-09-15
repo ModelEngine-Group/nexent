@@ -1,6 +1,5 @@
 """Tests for OpenAIVLMAdapter - the VLM protocol that lives on the adapter."""
 
-import asyncio
 import base64
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,24 +25,22 @@ def vlm_adapter():
 @pytest.mark.asyncio
 async def test_check_connectivity_success(vlm_adapter):
     """check_connectivity should return True when no exception is raised."""
-    with patch.object(
-        asyncio,
-        "to_thread",
+    with patch(
+        "nexent.core.gateway.modality.vlm.openai.run_blocking",
         new_callable=AsyncMock,
         return_value=None,
-    ) as mock_to_thread:
+    ) as mock_run_blocking:
         result = await vlm_adapter.check_connectivity()
 
     assert result is True
-    mock_to_thread.assert_awaited_once()
+    mock_run_blocking.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_check_connectivity_failure(vlm_adapter):
-    """check_connectivity should return False when to_thread raises."""
-    with patch.object(
-        asyncio,
-        "to_thread",
+    """check_connectivity should return False when managed execution raises."""
+    with patch(
+        "nexent.core.gateway.modality.vlm.openai.run_blocking",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ):
@@ -55,12 +52,12 @@ async def test_check_connectivity_failure(vlm_adapter):
 async def test_check_connectivity_uses_fallback_url(vlm_adapter):
     """check_connectivity should use fallback remote URL when local image missing."""
 
-    async def mock_to_thread_func(*args, **kwargs):
+    async def mock_run_blocking(*args, **kwargs):
         return None
 
     with patch.object(vlm_adapter, "encode_image", return_value=""), \
-         patch.object(asyncio, "to_thread", new_callable=AsyncMock,
-                           side_effect=mock_to_thread_func):
+         patch("nexent.core.gateway.modality.vlm.openai.run_blocking",
+               new_callable=AsyncMock, side_effect=mock_run_blocking):
         import os.path
 
         with patch.object(os.path, "exists", return_value=False):
@@ -82,14 +79,14 @@ async def test_check_connectivity_jpg_to_jpeg_conversion(vlm_adapter):
             return ("", ".jpg")
         return ("", "")
 
-    async def mock_to_thread_func(*args, **kwargs):
+    async def mock_run_blocking(*args, **kwargs):
         return None
 
     with patch.object(os.path, "exists", side_effect=mock_exists), \
          patch.object(os.path, "splitext", side_effect=mock_splitext), \
          patch.object(vlm_adapter, "encode_image", return_value="fakebase64"), \
-         patch.object(asyncio, "to_thread", new_callable=AsyncMock,
-                           side_effect=mock_to_thread_func):
+         patch("nexent.core.gateway.modality.vlm.openai.run_blocking",
+               new_callable=AsyncMock, side_effect=mock_run_blocking):
         result = await vlm_adapter.check_connectivity()
 
     assert result is True
@@ -482,7 +479,8 @@ async def test_check_connectivity_builds_model_and_uses_local_asset():
     with patch.object(adapter, "_build_model", side_effect=_build_model_side_effect(adapter)) as mock_build, \
          patch.object(os.path, "exists", return_value=True), \
          patch.object(adapter, "encode_image", return_value="fakebase64"), \
-         patch.object(asyncio, "to_thread", new_callable=AsyncMock, return_value=None):
+         patch("nexent.core.gateway.modality.vlm.openai.run_blocking",
+               new_callable=AsyncMock, return_value=None):
         result = await adapter.check_connectivity()
 
     assert result is True

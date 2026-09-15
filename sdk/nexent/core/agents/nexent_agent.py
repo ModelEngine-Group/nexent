@@ -229,7 +229,8 @@ class NexentAgent:
                  tenant_id=None,
                  workspace_path=None,
                  workspace_run_id=None,
-                 minio_files=None):
+                 minio_files=None,
+                 cancellation_scope=None):
         """
         Initialize the NexentAgent factory.
 
@@ -256,6 +257,7 @@ class NexentAgent:
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
+        self.cancellation_scope = cancellation_scope
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
@@ -283,7 +285,7 @@ class NexentAgent:
         )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
-        model = OpenAIModel(
+        model_kwargs = dict(
             observer=self.observer,
             model_id=model_config.model_name,
             api_key=model_config.api_key,
@@ -298,6 +300,16 @@ class NexentAgent:
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
         )
+        if self.cancellation_scope is not None:
+            model_kwargs["cancellation_scope"] = self.cancellation_scope
+        if model_config.concurrency_limit is not None:
+            model_kwargs["concurrency_limit"] = model_config.concurrency_limit
+            model_kwargs["concurrency_key"] = (
+                str(self.tenant_id or "default"),
+                str(model_config.model_factory or "unknown"),
+                str(model_config.model_name),
+            )
+        model = OpenAIModel(**model_kwargs)
         model.stop_event = self.stop_event
         return model
 
@@ -745,7 +757,8 @@ class NexentAgent:
                         wrapper = ExternalA2AAgentWrapper(
                             agent_info=a2a_agent_info,
                             stop_event=self.stop_event,
-                            observer=self.observer
+                            observer=self.observer,
+                            cancellation_scope=self.cancellation_scope,
                         )
                         managed_agents_list.append(
                             self._wrap_subagent(
@@ -1129,7 +1142,11 @@ class NexentAgent:
                         observer.add_message("", ProcessType.TOKEN_COUNT, json.dumps(token_data))
 
                         if hasattr(step_log, "error") and step_log.error is not None:
-                            observer.add_message("", ProcessType.ERROR, str(step_log.error))
+                            # Action-step failures are observations in the ReAct loop:
+                            # the model receives them and can repair/retry on the next
+                            # step. Surface them as warnings so the UI does not imply
+                            # that the whole run has already failed.
+                            observer.add_message("", ProcessType.WARNING, str(step_log.error))
 
                     if step_log is None:
                         raise ValueError("Agent run produced no output")
@@ -1157,7 +1174,7 @@ class NexentAgent:
 
                     # Check if we need to stop from external stop_event
                     if self.agent.stop_event.is_set():
-                        observer.add_message(self.agent.agent_name, ProcessType.ERROR,
+                        observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
                 except Exception as e:
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
@@ -1448,7 +1465,11 @@ class NexentAgent:
                 upload_tool.forward(str(path), relative.as_posix())
             except Exception as exc:
                 logger.error("Failed to upload workspace output %s: %s", path, exc)
-                self.observer.add_message("", ProcessType.ERROR, f"Failed to upload output file {relative}: {exc}")
+                self.observer.add_message(
+                    "",
+                    ProcessType.WARNING,
+                    f"Failed to upload output file {relative}: {exc}",
+                )
 
         if self._workspace_uploads:
             self.observer.add_message(
