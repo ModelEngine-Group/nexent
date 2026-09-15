@@ -15,10 +15,7 @@ const threadPath = new URL(
 test("binds an agent selected for a new thread to that thread's metadata", async () => {
   const page = await readFile(pagePath, "utf8");
 
-  assert.match(
-    page,
-    /thread\.updateCustom\(\{\s*agentId:\s*agent\.id\s*\}\)/
-  );
+  assert.match(page, /thread\.updateCustom\(\{\s*agentId:\s*agent\.id\s*\}\)/);
 });
 
 test("initializes a new thread before storing its selected agent", async () => {
@@ -36,6 +33,15 @@ test("supports storing an agent on a new thread before the conversation exists o
   assert.match(
     adapter,
     /async updateCustom\(\s*_remoteId: string,\s*_custom: Record<string, unknown> \| undefined\s*\): Promise<void>/
+  );
+});
+
+test("leaves the active conversation before returning to the agent landing page", async () => {
+  const page = await readFile(pagePath, "utf8");
+
+  assert.match(
+    page,
+    /const handleThreadBack = useCallback\(async \(\) => \{[\s\S]*?shouldRestoreAgentRef\.current = false;[\s\S]*?await runtime\.threads\.switchToNewThread\(\);[\s\S]*?onBack\(\);[\s\S]*?\}, \[onBack, runtime\]\);/
   );
 });
 

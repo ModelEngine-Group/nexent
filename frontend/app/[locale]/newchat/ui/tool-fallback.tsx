@@ -135,7 +135,7 @@ function ToolFallbackResult({
 }: React.ComponentProps<"div"> & {
   result?: unknown;
 }) {
-  if (result === undefined) return null;
+  if (result === undefined || result === "") return null;
 
   return (
     <div className={cn("", className)} {...props}>
