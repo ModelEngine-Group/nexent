@@ -454,7 +454,11 @@ async def add_mcp_service(
         if is_api:
             # Register OpenAPI service (same as agent config flow)
             try:
-                from services.tool_configuration_service import import_openapi_service, _refresh_openapi_services_in_mcp
+                from services.tool_configuration_service import (
+                    import_openapi_service,
+                    _refresh_openapi_services_in_mcp,
+                    update_tool_list,
+                )
                 import_openapi_service(
                     service_name=name,
                     openapi_json=resolved_config_json,
@@ -466,6 +470,9 @@ async def add_mcp_service(
                     force_update=True,
                 )
                 _refresh_openapi_services_in_mcp(tenant_id)
+                # Keep the persisted tool catalog in sync with the tenant MCP runtime.
+                # The agent configuration page reads /tool/list from this catalog.
+                await update_tool_list(tenant_id=tenant_id, user_id=user_id)
             except Exception as exc:
                 logger.warning(f"Failed to register OpenAPI service '{name}': {exc}")
             # Extract tool names from OpenAPI spec for display
@@ -1038,16 +1045,46 @@ async def delete_mcp_service(
         except Exception as exc:
             logger.warning(f"Failed to stop container: {exc}, but continue to delete MCP record")
 
-    # Hide the deleted MCP's tools from the agent tool selection list so they
-    # no longer appear after deletion (tool rows are kept for agent references).
-    try:
-        set_mcp_tools_unavailable(
-            tenant_id=tenant_id,
-            mcp_server_name=current_record.get("mcp_name") or "",
-            user_id=user_id,
-        )
-    except Exception as exc:
-        logger.warning(f"Failed to mark MCP tools unavailable for '{current_record.get('mcp_name')}': {exc}")
+    is_openapi_service = (
+        isinstance(current_record.get("config_json"), dict)
+        and "openapi" in current_record["config_json"]
+    )
+
+    if is_openapi_service:
+        # API-to-MCP services have a separate service record and all their
+        # persisted tools use the shared ``outer-apis`` usage value.
+        try:
+            from services.tool_configuration_service import (
+                delete_openapi_service,
+                _refresh_openapi_services_in_mcp,
+            )
+
+            delete_openapi_service(
+                service_name=current_record.get("mcp_name") or "",
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
+            _refresh_openapi_services_in_mcp(tenant_id)
+            set_mcp_tools_unavailable(
+                tenant_id=tenant_id,
+                mcp_server_name="outer-apis",
+                user_id=user_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Failed to remove API-to-MCP service '{current_record.get('mcp_name')}': {exc}"
+            )
+    else:
+        # Hide the deleted MCP's tools from the agent tool selection list so
+        # they no longer appear after deletion (tool rows are kept for agent references).
+        try:
+            set_mcp_tools_unavailable(
+                tenant_id=tenant_id,
+                mcp_server_name=current_record.get("mcp_name") or "",
+                user_id=user_id,
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to mark MCP tools unavailable for '{current_record.get('mcp_name')}': {exc}")
 
     delete_mcp_record_by_id(
         mcp_id=mcp_id,

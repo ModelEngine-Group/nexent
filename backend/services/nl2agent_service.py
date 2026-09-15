@@ -28,7 +28,7 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
+from consts.const import TOKEN, get_tenant_local_mcp_server, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import (
     query_all_agent_info_by_tenant_id,
@@ -1363,7 +1363,7 @@ async def build_nl2agent_run_info(
     agent_config.capacity_snapshot = capacity_snapshot
     agent_config.context_budget_snapshot = context_budget_snapshot
     mcp_config: dict[str, Any] = {
-        "url": urljoin(LOCAL_MCP_SERVER, "sse"),
+        "url": get_tenant_local_mcp_server(tenant_id),
         "transport": "sse",
         "httpx_client_factory": create_httpx_client,
         "bypass_proxy": True,
@@ -1372,6 +1372,8 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_headers["Authorization"] = authorization
     mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
+    mcp_headers["X-Tenant-ID"] = str(tenant_id)
+    mcp_headers["X-Nexent-Internal-Token"] = TOKEN
     if mcp_headers:
         mcp_config["headers"] = mcp_headers
 

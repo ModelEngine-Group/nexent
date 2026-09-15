@@ -150,6 +150,7 @@ data:
   skip_proxy: {{ .Values.config.skipProxy | quote }}
   UMASK: {{ .Values.config.umask | quote }}
   SKILLS_PATH: {{ .Values.config.skillsPath | quote }}
+  OFFICIAL_AGENTS_PATH: {{ .Values.config.officialAgentsPath | quote }}
   MEMORY_PROVIDER_PLUGINS_DIR: {{ .Values.config.memoryProviderPluginsDir | quote }}
   LOG_DIR: {{ .Values.config.logDir | quote }}
 

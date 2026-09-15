@@ -4093,6 +4093,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -4243,6 +4244,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -4499,6 +4501,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -4531,6 +4534,10 @@ class TestCreateAgentRunInfo:
                 "url": "http://nexent.mcp/sse",
                 "transport": "sse",
                 "httpx_client_factory": create_agent_info_module.create_httpx_client,
+                "headers": {
+                    "X-Tenant-ID": "tenant_1",
+                    "X-Nexent-Internal-Token": create_agent_info_module.TOKEN,
+                },
             }
 
     @pytest.mark.asyncio

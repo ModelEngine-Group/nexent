@@ -19,6 +19,8 @@ from consts.const import (
     DATA_PROCESS_SERVICE,
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
+    TOKEN,
+    get_tenant_local_mcp_server,
 )
 from consts.error_message import ErrorMessage
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
@@ -383,11 +385,11 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
             except Exception as e:
                 logger.error(f"mcp connection error: {str(e)}")
 
-    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     tools_info.extend(await get_tool_from_remote_mcp_server(
         mcp_server_name="outer-apis",
         remote_mcp_server=default_mcp_url,
-        tenant_id=None
+        tenant_id=tenant_id
     ))
     return tools_info
 
@@ -676,6 +678,12 @@ async def get_tool_from_remote_mcp_server(
             mcp_server=remote_mcp_server,
             tenant_id=tenant_id
         )
+    if tenant_id and "/mcp/" in remote_mcp_server:
+        custom_headers = {
+            **(custom_headers or {}),
+            "X-Tenant-ID": str(tenant_id),
+            "X-Nexent-Internal-Token": TOKEN,
+        }
 
     tools_info = []
 
@@ -781,6 +789,15 @@ async def update_tool_list(tenant_id: str, user_id: str):
         for record in get_mcp_records_by_tenant(tenant_id=tenant_id)
         if bool(record.get("enabled"))
     }
+    # API-converted services are persisted separately from regular MCP records,
+    # but their scanned tools use the shared ``outer-apis`` usage value. Keep
+    # those tools available during a transient MCP scan failure as long as at
+    # least one API service still exists for the tenant.
+    try:
+        if query_openapi_services_by_tenant(tenant_id):
+            enabled_mcp_names.add("outer-apis")
+    except Exception as exc:
+        logger.warning("Failed to check API-converted services for tenant %s: %s", tenant_id, exc)
 
     update_tool_table_from_scan_tool_list(tenant_id=tenant_id,
                                           user_id=user_id,
@@ -934,7 +951,8 @@ async def _call_mcp_tool(
 
 async def _validate_mcp_tool_nexent(
     tool_name: str,
-    inputs: Optional[Dict[str, Any]]
+    inputs: Optional[Dict[str, Any]],
+    tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Validate MCP tool using local nexent server.
@@ -949,7 +967,21 @@ async def _validate_mcp_tool_nexent(
     Raises:
         MCPConnectionError: If MCP connection fails
     """
-    actual_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    actual_mcp_url = (
+        get_tenant_local_mcp_server(tenant_id)
+        if tenant_id
+        else urljoin(LOCAL_MCP_SERVER, "sse")
+    )
+    if tenant_id:
+        return await _call_mcp_tool(
+            actual_mcp_url,
+            tool_name,
+            inputs,
+            custom_headers={
+                "X-Tenant-ID": str(tenant_id),
+                "X-Nexent-Internal-Token": TOKEN,
+            },
+        )
     return await _call_mcp_tool(actual_mcp_url, tool_name, inputs)
 
 
@@ -1338,7 +1370,7 @@ async def validate_tool_impl(
             request.name, request.inputs, request.source, request.usage, request.params)
         if source == ToolSourceEnum.MCP.value:
             if usage == "outer-apis":
-                return await _validate_mcp_tool_nexent(tool_name, inputs)
+                return await _validate_mcp_tool_nexent(tool_name, inputs, tenant_id)
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
         elif source == ToolSourceEnum.LOCAL.value:
