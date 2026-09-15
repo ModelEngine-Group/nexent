@@ -168,7 +168,7 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "system",
         "user",
-        "user",
+        "assistant",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -188,6 +188,32 @@ def test_context_manager_owns_final_answer_assembly():
     assert "context_purpose" in final.evidence.prefix_change_reasons or (
         final.evidence.prefix_change_reasons == ("initial_request",)
     )
+
+
+def test_current_run_keeps_only_task_as_user_message():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="policy")
+    memory.steps.extend([
+        TaskStep(task="search once and answer"),
+        ActionStep(step_number=1, timing=Timing(start_time=0), action_output="first result"),
+        ActionStep(step_number=2, timing=Timing(start_time=1), action_output="second result"),
+    ])
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    assert [message["role"] for message in final.messages] == [
+        "system",
+        "user",
+        "assistant",
+        "assistant",
+    ]
+    assert sum(message["role"] == "user" for message in final.messages) == 1
 
 
 def test_context_manager_attributes_tool_schema_change():
