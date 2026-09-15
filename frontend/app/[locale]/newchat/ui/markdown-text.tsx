@@ -693,6 +693,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
+  del: ({ children, ...props }) => <span {...props}>{children}</span>,
   sup: ({ className, ...props }) => (
     <sup
       className={cn("aui-md-sup [&>a]:text-xs [&>a]:no-underline", className)}

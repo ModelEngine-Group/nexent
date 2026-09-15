@@ -7,6 +7,10 @@ const adapterPath = new URL(
   "../app/[locale]/newchat/adapter/conversation-thread-list-adapter.tsx",
   import.meta.url
 );
+const threadPath = new URL(
+  "../app/[locale]/newchat/assistant-ui/thread.tsx",
+  import.meta.url
+);
 
 test("binds an agent selected for a new thread to that thread's metadata", async () => {
   const page = await readFile(pagePath, "utf8");
@@ -32,5 +36,14 @@ test("supports storing an agent on a new thread before the conversation exists o
   assert.match(
     adapter,
     /async updateCustom\(\s*_remoteId: string,\s*_custom: Record<string, unknown> \| undefined\s*\): Promise<void>/
+  );
+});
+
+test("shows the selected agent name beneath a populated conversation title", async () => {
+  const thread = await readFile(threadPath, "utf8");
+
+  assert.match(
+    thread,
+    /\{hasMessages && variant !== "embedded" && \(\s*<span className="text-xs text-muted-foreground">\s*\{displayName\}/
   );
 });
