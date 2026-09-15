@@ -23,7 +23,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { AuiIf, ComposerPrimitive, useAuiState } from "@assistant-ui/react";
+import {
+  AuiIf,
+  ComposerPrimitive,
+  useAui,
+  useAuiState,
+} from "@assistant-ui/react";
 import {
   LexicalComposerInput,
   type DirectiveChipProps as LexicalDirectiveChipProps,
@@ -58,6 +63,9 @@ import {
   skillDirectiveIconMap,
 } from "../ui/skill-directives";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
+
+import { useRunMessageQueueContext } from "@/features/humanInteraction/useRunMessageQueue";
+import { QueuedRunMessageStrip } from "@/features/humanInteraction/QueuedRunMessageStrip";
 
 export type ChatMode = "planning" | "execution";
 
@@ -212,7 +220,17 @@ export const Composer: FC<ComposerProps> = ({
   allowRuntimeMetadata = false,
   disabled = false,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const zh = i18n.language.startsWith("zh");
+  const aui = useAui();
+  const queue = useRunMessageQueueContext();
+  const composerText = useAuiState((state) => state.composer.text);
+  const bufferedInput = Boolean(queue && (queue.active || queue.entry));
+  const queueLocked = Boolean(queue?.entry || (queue?.active && queue.used));
+  const enqueue = () => {
+    if (queue?.enqueue(aui.composer().getState().text))
+      aui.composer().setText("");
+  };
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
   const isRunning = useAuiState((state) => state.thread.isRunning);
 
@@ -305,187 +323,258 @@ export const Composer: FC<ComposerProps> = ({
   ]);
 
   return (
-    <fieldset
-      disabled={disabled}
-      aria-disabled={disabled}
-      className={cn(
-        "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
-        disabled && "cursor-not-allowed opacity-60"
-      )}
-    >
-      {!compact && <PlanView />}
+    <div className="relative w-full">
+      <QueuedRunMessageStrip key={queue?.scope} />
+      <fieldset
+        disabled={disabled}
+        aria-disabled={disabled}
+        className={cn(
+          "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
+          disabled && "cursor-not-allowed opacity-60"
+        )}
+      >
+        {!compact && <PlanView />}
 
-      {/* Mode switcher above input */}
-      {!compact && (
-        <div className="flex items-center border-b border-border px-3 py-2">
-          {/* Mode switcher */}
-          <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-                chatMode === "planning" &&
-                  "bg-blue-50 text-blue-600 hover:bg-blue-50"
-              )}
-              onClick={() => onChatModeChange("planning")}
-            >
-              <Lightbulb
+        {/* Mode switcher above input */}
+        {!compact && (
+          <div className="flex items-center border-b border-border px-3 py-2">
+            {/* Mode switcher */}
+            <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
+              <Button
+                variant="ghost"
+                size="sm"
                 className={cn(
-                  "size-3",
-                  chatMode === "planning" ? "text-blue-600" : ""
+                  "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                  chatMode === "planning" &&
+                    "bg-blue-50 text-blue-600 hover:bg-blue-50"
                 )}
-              />
-              {t("chat.composer.planning")}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
-                chatMode === "execution" &&
-                  "bg-blue-50 text-blue-600 hover:bg-blue-50"
-              )}
-              onClick={() => onChatModeChange("execution")}
-            >
-              <Play className="size-3" />
-              {t("chat.composer.execution")}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Composer Primitive Root */}
-      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
-        {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
-        <ComposerPrimitive.Root className="flex w-full flex-col px-1 py-1 outline-none">
-          {!compact && <ComposerAttachments />}
-          {skillFiles ? (
-            <LexicalComposerInput
-              placeholder={t("chat.composer.placeholder")}
-              className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
-              submitMode="enter"
-              autoFocus
-              formatter={combinedSkillDirectiveFormatter}
-              directiveChip={SkillComposerDirectiveChip}
-            />
-          ) : (
-            <ComposerPrimitive.Input
-              placeholder={t("chat.composer.placeholder")}
-              className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
-              rows={1}
-              submitMode="enter"
-              autoFocus
-            />
-          )}
-          <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1">
-              {showModelSelector && (
-                <ModelSelector
-                  models={models}
-                  value={selectedModelId}
-                  onValueChange={onModelChange}
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0 text-xs"
+                onClick={() => onChatModeChange("planning")}
+              >
+                <Lightbulb
+                  className={cn(
+                    "size-3",
+                    chatMode === "planning" ? "text-blue-600" : ""
+                  )}
                 />
-              )}
-              {!compact &&
-                (knowledgeCapabilities?.sources.local.enabled ||
-                  knowledgeCapabilities?.sources.aidp.enabled ||
-                  knowledgeScope) && (
-                  <Button
-                    type="button"
+                {t("chat.composer.planning")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-6 gap-1 rounded-md px-2 text-xs transition-colors",
+                  chatMode === "execution" &&
+                    "bg-blue-50 text-blue-600 hover:bg-blue-50"
+                )}
+                onClick={() => onChatModeChange("execution")}
+              >
+                <Play className="size-3" />
+                {t("chat.composer.execution")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Composer Primitive Root */}
+        <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+          {skillFiles ? <SkillFileMentionPopover files={skillFiles} /> : null}
+          <ComposerPrimitive.Root
+            className="flex w-full flex-col px-1 py-1 outline-none"
+            onSubmit={(event) => {
+              if (bufferedInput || queueLocked) {
+                event.preventDefault();
+                enqueue();
+              }
+            }}
+          >
+            {!compact && !bufferedInput && <ComposerAttachments />}
+            {bufferedInput || queueLocked ? (
+              <textarea
+                value={composerText}
+                disabled={queueLocked}
+                maxLength={8000}
+                rows={2}
+                aria-label={zh ? "运行中补充内容" : "Message while running"}
+                placeholder={t("chat.composer.placeholder")}
+                onChange={(event) => aui.composer().setText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    enqueue();
+                  }
+                }}
+                className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+              />
+            ) : skillFiles ? (
+              <LexicalComposerInput
+                placeholder={t("chat.composer.placeholder")}
+                className="relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
+                submitMode="enter"
+                autoFocus
+                formatter={combinedSkillDirectiveFormatter}
+                directiveChip={SkillComposerDirectiveChip}
+              />
+            ) : (
+              <ComposerPrimitive.Input
+                placeholder={t("chat.composer.placeholder")}
+                className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
+                rows={1}
+                submitMode="enter"
+                autoFocus
+              />
+            )}
+            <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1">
+                {showModelSelector && (
+                  <ModelSelector
+                    models={models}
+                    value={selectedModelId}
+                    onValueChange={onModelChange}
                     variant="ghost"
                     size="sm"
-                    className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-muted-foreground"
-                    onClick={() => setKnowledgeModalOpen(true)}
-                    disabled={isRunning}
-                    title={
-                      isRunning
-                        ? t("chat.knowledgeScope.runningDisabled")
-                        : knowledgeSummary
-                    }
-                  >
-                    <Database className="size-3.5 shrink-0" />
-                    <span className="truncate">{knowledgeSummary}</span>
-                  </Button>
+                    className="shrink-0 text-xs"
+                  />
                 )}
-              {!compact && allowRuntimeMetadata && onRuntimeMetadataChange && (
-                <RuntimeMetadataEditor
-                  value={runtimeMetadata}
-                  onChange={onRuntimeMetadataChange}
-                  disabled={isRunning}
-                />
-              )}
-            </div>
-            <div className="ml-auto flex items-center gap-1">
-              {!compact && <ComposerAddAttachment />}
-              {!compact && (
-                <AuiIf condition={(s) => !s.composer.dictation}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex">
-                        <ComposerPrimitive.Dictate asChild>
+                {!compact &&
+                  (knowledgeCapabilities?.sources.local.enabled ||
+                    knowledgeCapabilities?.sources.aidp.enabled ||
+                    knowledgeScope) && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-muted-foreground"
+                      onClick={() => setKnowledgeModalOpen(true)}
+                      disabled={isRunning}
+                      title={
+                        isRunning
+                          ? t("chat.knowledgeScope.runningDisabled")
+                          : knowledgeSummary
+                      }
+                    >
+                      <Database className="size-3.5 shrink-0" />
+                      <span className="truncate">{knowledgeSummary}</span>
+                    </Button>
+                  )}
+                {!compact &&
+                  allowRuntimeMetadata &&
+                  onRuntimeMetadataChange && (
+                    <RuntimeMetadataEditor
+                      value={runtimeMetadata}
+                      onChange={onRuntimeMetadataChange}
+                      disabled={isRunning}
+                    />
+                  )}
+              </div>
+              <div className="ml-auto flex items-center gap-1">
+                {!compact && !bufferedInput && !queueLocked && (
+                  <ComposerAddAttachment />
+                )}
+                {!compact && !bufferedInput && !queueLocked && (
+                  <AuiIf condition={(s) => !s.composer.dictation}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <ComposerPrimitive.Dictate asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              disabled={!isDictationConfigured}
+                              className="size-8 text-muted-foreground"
+                            >
+                              <Mic className="size-4" />
+                            </Button>
+                          </ComposerPrimitive.Dictate>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {isDictationConfigured
+                          ? t("chat.composer.voiceInput")
+                          : t("chat.composer.voiceInputDisabled")}
+                      </TooltipContent>
+                    </Tooltip>
+                  </AuiIf>
+                )}
+                {!compact && !bufferedInput && !queueLocked && (
+                  <AuiIf condition={(s) => !!s.composer.dictation}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <ComposerPrimitive.StopDictation asChild>
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            disabled={!isDictationConfigured}
-                            className="size-8 text-muted-foreground"
+                            className="size-8 text-destructive hover:text-destructive"
                           >
-                            <Mic className="size-4" />
+                            <MicOff className="size-4" />
                           </Button>
-                        </ComposerPrimitive.Dictate>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {isDictationConfigured
-                        ? t("chat.composer.voiceInput")
-                        : t("chat.composer.voiceInputDisabled")}
-                    </TooltipContent>
-                  </Tooltip>
-                </AuiIf>
-              )}
-              {!compact && (
-                <AuiIf condition={(s) => !!s.composer.dictation}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <ComposerPrimitive.StopDictation asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-destructive hover:text-destructive"
-                        >
-                          <MicOff className="size-4" />
-                        </Button>
-                      </ComposerPrimitive.StopDictation>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {t("chat.composer.stopVoiceInput")}
-                    </TooltipContent>
-                  </Tooltip>
-                </AuiIf>
-              )}
-              <ComposerSendOrCancel />
+                        </ComposerPrimitive.StopDictation>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {t("chat.composer.stopVoiceInput")}
+                      </TooltipContent>
+                    </Tooltip>
+                  </AuiIf>
+                )}
+                {queue?.active ? (
+                  <>
+                    {!queueLocked && composerText.trim() ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        className="size-8 rounded-full"
+                        onClick={enqueue}
+                        aria-label={zh ? "加入等待队列" : "Queue message"}
+                      >
+                        <ArrowUp className="size-4" />
+                      </Button>
+                    ) : null}
+                    {queue.canStop ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="size-8 rounded-full"
+                        onClick={() => void queue.stop()}
+                        aria-label={t("chat.composer.stopGenerating")}
+                      >
+                        <Square className="size-4 fill-current" />
+                      </Button>
+                    ) : (
+                      <ComposerSendOrCancel />
+                    )}
+                  </>
+                ) : queue?.entry ? null : (
+                  <ComposerSendOrCancel />
+                )}
+              </div>
             </div>
-          </div>
-        </ComposerPrimitive.Root>
-        {!compact && (
-          <ConversationKnowledgeScopeModal
-            open={knowledgeModalOpen}
-            value={knowledgeScope}
-            capabilities={knowledgeCapabilities}
-            onCancel={() => setKnowledgeModalOpen(false)}
-            onConfirm={async (scope, preview) => {
-              await onKnowledgeScopeChange?.(scope, preview);
-              setKnowledgeModalOpen(false);
-            }}
-          />
-        )}
-      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-    </fieldset>
+          </ComposerPrimitive.Root>
+          {!compact && (
+            <ConversationKnowledgeScopeModal
+              open={knowledgeModalOpen}
+              value={knowledgeScope}
+              capabilities={knowledgeCapabilities}
+              onCancel={() => setKnowledgeModalOpen(false)}
+              onConfirm={async (scope, preview) => {
+                await onKnowledgeScopeChange?.(scope, preview);
+                setKnowledgeModalOpen(false);
+              }}
+            />
+          )}
+        </ComposerPrimitive.Unstable_TriggerPopoverRoot>
+      </fieldset>
+      {queue?.error ? (
+        <p role="alert" className="mt-2 px-3 text-xs text-destructive">
+          {queue.error}
+        </p>
+      ) : null}
+    </div>
   );
 };
 

@@ -16,6 +16,8 @@ from apps.file_management_app import (
     file_management_runtime_router as file_management_router,
 )
 from apps.skill_app import skill_creator_router
+from apps.human_interaction_app import router as human_interaction_router
+from apps.human_interaction_app import internal_router as internal_human_interaction_router
 from consts.const import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from middleware.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
@@ -31,7 +33,9 @@ logger = logging.getLogger("runtime_app")
 
 
 async def start_agent_automation_scheduler():
+    from consts.const import HITL_ENABLED
     from services.agent_automation.scheduler import agent_automation_scheduler
+    from services.human_interaction.application import get_service, human_run_scheduler
     from services.startup_recovery_service import recover_runtime_tasks
     from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
@@ -45,12 +49,17 @@ async def start_agent_automation_scheduler():
     )
     cleanup_orphaned_agent_workspaces()
     await agent_automation_scheduler.start()
+    if HITL_ENABLED:
+        get_service()
+        await human_run_scheduler.start()
 
 
 async def stop_agent_automation_scheduler():
     from services.agent_automation.scheduler import agent_automation_scheduler
+    from services.human_interaction.application import human_run_scheduler
 
     await agent_automation_scheduler.stop()
+    await human_run_scheduler.stop()
 
 
 @asynccontextmanager
@@ -116,3 +125,5 @@ app.include_router(conversation_share_router)
 app.include_router(file_management_router)
 app.include_router(voice_router)
 app.include_router(skill_creator_router)
+app.include_router(human_interaction_router)
+app.include_router(internal_human_interaction_router)

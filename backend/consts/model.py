@@ -809,6 +809,9 @@ class ConversationKnowledgeScopeUpdateRequest(BaseModel):
 
 class AgentRequest(BaseModel):
     query: str
+    enable_hitl: bool = False
+    hitl_run_id: Optional[str] = Field(default=None, min_length=36, max_length=36)
+    hitl_after_event: int = Field(default=0, ge=0)
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information

@@ -34,6 +34,12 @@ ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
 RUNTIME_SERVICE_URL = os.getenv("RUNTIME_SERVICE_URL", "http://localhost:5014").rstrip("/")
+HITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() in ("true", "1", "yes")
+HITL_ACCEPT_NEW_RUNS = os.getenv("HITL_ACCEPT_NEW_RUNS", "true").lower() in ("true", "1", "yes")
+HITL_TOOL_APPROVAL_ENABLED = os.getenv("HITL_TOOL_APPROVAL_ENABLED", "false").lower() in ("true", "1", "yes")
+HITL_ENCRYPTION_KEY = os.getenv("HITL_ENCRYPTION_KEY", "")
+HITL_WAIT_SECONDS = int(os.getenv("HITL_WAIT_SECONDS", "86400"))
+HITL_MAX_CONCURRENCY = int(os.getenv("HITL_MAX_CONCURRENCY", "2"))
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(

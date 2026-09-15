@@ -340,6 +340,10 @@ class AgentPlan(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
+    human_interaction: Optional[Any] = Field(
+        default=None, description="Application-injected durable human interaction runtime; never built from model input"
+    )
+    attempt_outcome: Optional[str] = Field(default=None, description="Typed worker outcome for the application host")
     query: str = Field(description="User query")
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")
     observer: MessageObserver = Field(description="Return data")

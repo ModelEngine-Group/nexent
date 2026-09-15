@@ -508,7 +508,7 @@ class ContextManager:
                         id=f"current_task:{index}",
                         type=ContextItemType.CURRENT_TASK,
                         content={"text": step.task or ""},
-                        metadata={"layout_order": index},
+                        metadata={"layout_order": index, "run_order": index},
                     )
                 )
                 projected.append(item)
@@ -527,7 +527,7 @@ class ContextManager:
                         id=f"current_action:{action_index}",
                         type=ContextItemType.CURRENT_ACTION,
                         content=content,
-                        metadata={"layout_order": action_index},
+                        metadata={"layout_order": action_index, "run_order": index},
                     )
                 )
                 projected.append(item)
@@ -538,7 +538,7 @@ class ContextManager:
                         id=f"current_planning:{planning_index}",
                         type=ContextItemType.CURRENT_PLANNING,
                         content={"text": "\n".join(extract_message_text(m) for m in step.to_messages())},
-                        metadata={"layout_order": planning_index},
+                        metadata={"layout_order": planning_index, "run_order": index},
                     )
                 )
                 projected.append(item)

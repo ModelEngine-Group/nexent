@@ -631,6 +631,27 @@ generate_supabase_keys() {
   fi
 }
 
+configure_human_interaction() {
+  export HITL_ENABLED="${HITL_ENABLED:-true}"
+  export HITL_ACCEPT_NEW_RUNS="${HITL_ACCEPT_NEW_RUNS:-true}"
+  export HITL_TOOL_APPROVAL_ENABLED="${HITL_TOOL_APPROVAL_ENABLED:-false}"
+  export HITL_WAIT_SECONDS="${HITL_WAIT_SECONDS:-86400}"
+  export HITL_MAX_CONCURRENCY="${HITL_MAX_CONCURRENCY:-2}"
+
+  update_env_var "HITL_ENABLED" "$HITL_ENABLED"
+  update_env_var "HITL_ACCEPT_NEW_RUNS" "$HITL_ACCEPT_NEW_RUNS"
+  update_env_var "HITL_TOOL_APPROVAL_ENABLED" "$HITL_TOOL_APPROVAL_ENABLED"
+  update_env_var "HITL_WAIT_SECONDS" "$HITL_WAIT_SECONDS"
+  update_env_var "HITL_MAX_CONCURRENCY" "$HITL_MAX_CONCURRENCY"
+
+  if [ "$HITL_ENABLED" = "true" ] && [ -z "${HITL_ENCRYPTION_KEY:-}" ]; then
+    HITL_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '[:space:]')
+    export HITL_ENCRYPTION_KEY
+    update_env_var "HITL_ENCRYPTION_KEY" "$HITL_ENCRYPTION_KEY"
+    echo "   ✅ Human interaction encryption key generated"
+  fi
+}
+
 validate_elasticsearch_api_key() {
   local api_key="$1"
   local http_code
@@ -1886,6 +1907,15 @@ main_deploy() {
       echo "❌ Supabase secrets 生成失败"
     else
       echo "❌ Supabase secrets generation failed"
+    fi
+    exit 1
+  }
+
+  configure_human_interaction || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 人在回路配置生成失败"
+    else
+      echo "❌ Human interaction configuration failed"
     fi
     exit 1
   }

@@ -1709,6 +1709,47 @@ class TestDockerIntegration:
 
     IMAGE = "nexent/nexent-sandbox:latest"
 
+    @pytest.fixture(autouse=True)
+    def isolated_docker_resources(self, monkeypatch, reset_singleton):
+        """Keep integration tests away from the deployment's stable sandbox."""
+        import socket
+        import uuid
+        from functools import partial
+
+        import docker
+
+        prefix = f"nexent-sandbox-test-{uuid.uuid4().hex[:12]}"
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        monkeypatch.setattr(sandbox_module, "SANDBOX_CONTAINER_NAME", prefix)
+        monkeypatch.setattr(sandbox_module, "SANDBOX_SESSION_CONTAINER_PREFIX", f"{prefix}-session")
+        monkeypatch.setattr(sandbox_module, "SANDBOX_NETWORK_NAME", f"{prefix}-network")
+        monkeypatch.setattr(sandbox_module, "SANDBOX_JUPYTER_PORT", port)
+        # The constructor's default port was bound before monkeypatching.
+        monkeypatch.setattr(
+            sandbox_module,
+            "_RecoveredDockerExecutor",
+            partial(sandbox_module._RecoveredDockerExecutor, port=port),
+        )
+        try:
+            yield
+        finally:
+            SandboxPoolManager.get_instance().shutdown(sandbox_module.logging.getLogger("test_sandbox"))
+            client = docker.from_env()
+            try:
+                for container in client.containers.list(all=True, filters={"name": prefix}):
+                    container.remove(force=True)
+                try:
+                    network = client.networks.get(f"{prefix}-network")
+                    if sandbox_module._is_containerized_runtime():
+                        network.disconnect(socket.gethostname(), force=True)
+                    network.remove()
+                except docker.errors.NotFound:
+                    pass
+            finally:
+                client.close()
+
     def test_skill_runner_passes_cli_arguments_and_demuxes_stdout(self, tmp_path):
         """A real sandbox receives argv and returns stdout, not Docker stream IDs."""
         import docker

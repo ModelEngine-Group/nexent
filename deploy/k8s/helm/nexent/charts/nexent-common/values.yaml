@@ -50,6 +50,12 @@ config:
     cancelTtlSeconds: "86400"
     completedTtlSeconds: "300"
     cancelPollIntervalSeconds: "1.0"
+  humanInteraction:
+    enabled: "true"
+    acceptNewRuns: "true"
+    toolApprovalEnabled: "false"
+    waitSeconds: "86400"
+    maxConcurrency: "2"
   northbound:
     idempotencyTtlSeconds: "600"
     rateLimitEnabled: "true"
@@ -225,6 +231,7 @@ config:
 secrets:
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
+  hitlEncryptionKey: ""
   minio:
     rootUser: "nexent"
     rootPassword: "nexent@4321"
