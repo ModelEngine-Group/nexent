@@ -5,7 +5,7 @@ Handles API calls to AIDP for paginated knowledge base listing.
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, NoReturn
 from urllib.parse import urljoin
 
 import httpx
@@ -64,6 +64,39 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
     if not reason:
         return None
     return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
+
+
+def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
+    """Map an AIDP HTTP error to the common application exception format."""
+    response = error.response
+    upstream_reason = _extract_upstream_error(response)
+    logger.exception(
+        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
+        operation,
+        response.status_code,
+        upstream_reason or "unavailable",
+    )
+    details = {
+        "upstream_status": response.status_code,
+        "upstream_reason": upstream_reason,
+    }
+    error_code = {
+        401: ErrorCode.AIDP_AUTH_ERROR,
+        403: ErrorCode.AIDP_AUTH_ERROR,
+        429: ErrorCode.AIDP_RATE_LIMIT,
+    }.get(response.status_code, ErrorCode.AIDP_SERVICE_ERROR)
+    fallback_message = {
+        ErrorCode.AIDP_AUTH_ERROR: f"AIDP authentication failed: {str(error)}",
+        ErrorCode.AIDP_RATE_LIMIT: f"AIDP rate limit exceeded: {str(error)}",
+    }.get(
+        error_code,
+        f"AIDP API HTTP error {response.status_code}: {str(error)}",
+    )
+    raise AppException(
+        error_code,
+        upstream_reason or fallback_message,
+        details=details,
+    )
 
 
 def _extract_upload_failures(response: httpx.Response) -> List[Dict[str, str]]:
@@ -1063,34 +1096,7 @@ def remove_aidp_docs_impl(
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        upstream_reason = _extract_upstream_error(e.response)
-        logger.exception(
-            "AIDP document removal HTTP error: %s, status_code: %s, upstream_reason=%s",
-            e,
-            e.response.status_code,
-            upstream_reason or "unavailable",
-        )
-        details = {
-            "upstream_status": e.response.status_code,
-            "upstream_reason": upstream_reason,
-        }
-        if e.response.status_code in (401, 403):
-            raise AppException(
-                ErrorCode.AIDP_AUTH_ERROR,
-                upstream_reason or f"AIDP authentication failed: {str(e)}",
-                details=details,
-            )
-        if e.response.status_code == 429:
-            raise AppException(
-                ErrorCode.AIDP_RATE_LIMIT,
-                upstream_reason or f"AIDP rate limit exceeded: {str(e)}",
-                details=details,
-            )
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            upstream_reason or f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-            details=details,
-        )
+        _raise_aidp_http_error(e, "document removal")
     except ValueError as e:
         logger.exception("Failed to parse AIDP document removal response: %s", e)
         raise AppException(
@@ -1152,34 +1158,7 @@ def download_aidp_doc_impl(
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        upstream_reason = _extract_upstream_error(e.response)
-        logger.exception(
-            "AIDP document download HTTP error: %s, status_code: %s, upstream_reason=%s",
-            e,
-            e.response.status_code,
-            upstream_reason or "unavailable",
-        )
-        details = {
-            "upstream_status": e.response.status_code,
-            "upstream_reason": upstream_reason,
-        }
-        if e.response.status_code in (401, 403):
-            raise AppException(
-                ErrorCode.AIDP_AUTH_ERROR,
-                upstream_reason or f"AIDP authentication failed: {str(e)}",
-                details=details,
-            )
-        if e.response.status_code == 429:
-            raise AppException(
-                ErrorCode.AIDP_RATE_LIMIT,
-                upstream_reason or f"AIDP rate limit exceeded: {str(e)}",
-                details=details,
-            )
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            upstream_reason or f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-            details=details,
-        )
+        _raise_aidp_http_error(e, "document download")
 
 
 def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:

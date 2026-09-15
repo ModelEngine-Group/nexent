@@ -311,7 +311,7 @@ def _cleanup_deleted_aidp_document_tags(
                 document.file_ino_no,
                 actor_id,
             )
-        except Exception as error:  # noqa: BLE001 - upstream deletion already succeeded
+        except Exception:  # noqa: BLE001 - upstream deletion already succeeded
             logger.warning("Failed to clean AIDP document tag assignments")
 
 

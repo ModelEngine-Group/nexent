@@ -29,11 +29,7 @@ export interface AidpKbDetail {
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
   resource_status?:
-    | "ACTIVE"
-    | "CREATING"
-    | "DELETE_PENDING"
-    | "ORPHANED"
-    | "UNAVAILABLE";
+    "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
 }
 
 export interface AidpDocumentItem {
@@ -98,6 +94,48 @@ export interface AidpDocumentRemoveResponse {
   success_list: AidpDocumentOperationItem[];
   failed_list: AidpDocumentOperationItem[];
 }
+
+type AidpOperationSummary = {
+  total: number;
+  success: number;
+  failed: number;
+};
+
+type AidpOperationResponse<TSuccess, TFailure> = {
+  summary: AidpOperationSummary;
+  success_list: TSuccess[];
+  failed_list: TFailure[];
+};
+
+const normalizeAidpOperationResponse = <TSuccess, TFailure>(
+  result: Partial<AidpOperationResponse<TSuccess, TFailure>>
+): AidpOperationResponse<TSuccess, TFailure> => {
+  const successList: TSuccess[] = Array.isArray(result.success_list)
+    ? result.success_list
+    : [];
+  const failedList: TFailure[] = Array.isArray(result.failed_list)
+    ? result.failed_list
+    : [];
+
+  return {
+    summary: {
+      total:
+        typeof result.summary?.total === "number"
+          ? result.summary.total
+          : successList.length + failedList.length,
+      success:
+        typeof result.summary?.success === "number"
+          ? result.summary.success
+          : successList.length,
+      failed:
+        typeof result.summary?.failed === "number"
+          ? result.summary.failed
+          : failedList.length,
+    },
+    success_list: successList,
+    failed_list: failedList,
+  };
+};
 
 export interface AidpModelItem {
   /** Display / identifier used for the model (sent to AIDP as ``vlm_model``). */
@@ -367,31 +405,10 @@ class AidpKnowledgeService {
     }
 
     const result = (await response.json()) as Partial<AidpUploadResponse>;
-    const successList = Array.isArray(result.success_list)
-      ? result.success_list
-      : [];
-    const failedList = Array.isArray(result.failed_list)
-      ? result.failed_list
-      : [];
-
-    return {
-      summary: {
-        total:
-          typeof result.summary?.total === "number"
-            ? result.summary.total
-            : successList.length + failedList.length,
-        success:
-          typeof result.summary?.success === "number"
-            ? result.summary.success
-            : successList.length,
-        failed:
-          typeof result.summary?.failed === "number"
-            ? result.summary.failed
-            : failedList.length,
-      },
-      success_list: successList,
-      failed_list: failedList,
-    };
+    return normalizeAidpOperationResponse<
+      AidpUploadSuccessItem,
+      AidpUploadFailedItem
+    >(result);
   }
 
   /**
@@ -495,31 +512,10 @@ class AidpKnowledgeService {
     });
     const result =
       (await response.json()) as Partial<AidpDocumentRemoveResponse>;
-    const successList = Array.isArray(result.success_list)
-      ? result.success_list
-      : [];
-    const failedList = Array.isArray(result.failed_list)
-      ? result.failed_list
-      : [];
-
-    return {
-      summary: {
-        total:
-          typeof result.summary?.total === "number"
-            ? result.summary.total
-            : successList.length + failedList.length,
-        success:
-          typeof result.summary?.success === "number"
-            ? result.summary.success
-            : successList.length,
-        failed:
-          typeof result.summary?.failed === "number"
-            ? result.summary.failed
-            : failedList.length,
-      },
-      success_list: successList,
-      failed_list: failedList,
-    };
+    return normalizeAidpOperationResponse<
+      AidpDocumentOperationItem,
+      AidpDocumentOperationItem
+    >(result);
   }
 
   /**
