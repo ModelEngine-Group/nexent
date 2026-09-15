@@ -101,8 +101,11 @@ def service(monkeypatch):
     with engine.begin() as connection:
         connection.execute(text("DROP SCHEMA IF EXISTS nexent CASCADE"))
         connection.execute(text("CREATE SCHEMA nexent"))
-        connection.exec_driver_sql(migration.read_text())
-        connection.exec_driver_sql(migration.read_text())
+        connection.execute(text(migration.read_text()))
+        connection.execute(text(migration.read_text()))
+        connection.exec_driver_sql("CREATE TABLE nexent.conversation_record_t "
+                                   "(conversation_id INT PRIMARY KEY, created_by VARCHAR(100), delete_flag VARCHAR(1))")
+        connection.exec_driver_sql("INSERT INTO nexent.conversation_record_t VALUES (7, 'owner', 'N')")
     value = HumanInteractionService(HumanInteractionRepository(session_scope), PayloadCipher(Fernet.generate_key().decode()))
     yield value
     engine.dispose()
@@ -887,8 +890,8 @@ def test_structured_decision_boundary_without_database():
     cipher = PayloadCipher(Fernet.generate_key().decode())
     payload = {"schema_version": 2, "questions": FORM}
     item = HumanRequest(
-        request_id="request", run_id="run", kind="CLARIFICATION", status="PENDING", version=1,
-        digest=digest(payload), payload=cipher.seal(payload), created_at=utcnow(),
+        request_id="request", run_record_id=1, kind="CLARIFICATION", status="PENDING", version=1,
+        digest=digest(payload), payload=cipher.seal(payload), create_time=utcnow().replace(tzinfo=None),
         expires_at=utcnow() + timedelta(minutes=5),
     )
     events = []

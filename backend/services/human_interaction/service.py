@@ -14,10 +14,10 @@ from nexent.core.human_interaction.clarification import (
     ClarificationAnswer,
     format_clarification_answers,
 )
-from sqlalchemy.exc import IntegrityError
 
 from .crypto import PayloadCipher
 from .models import DecisionCommand, InteractionError, SteeringCommand, digest, redact
+from .persistence import validate_record
 
 TERMINAL_STATUSES = {"COMPLETED", "FAILED", "STOPPED", "EXPIRED", "RECOVERY_REQUIRED"}
 
@@ -44,6 +44,7 @@ def clarification_signature(payload: dict) -> str:
 class HumanInteractionService:
     def __init__(self, repository: HumanInteractionRepository, cipher: PayloadCipher, wait_seconds=86400):
         self.repository = repository
+        self.repository.validator = validate_record
         self.cipher = cipher
         self.wait_seconds = wait_seconds
 
@@ -55,14 +56,19 @@ class HumanInteractionService:
 
     def create(self, tenant_id, user_id, conversation_id, payload, *, ready=True):
         run_id = str(uuid4())
-        try:
-            self.repository.create(HumanRun(
-                run_id=run_id, tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id,
-                status="READY" if ready else "INITIALIZING", request_payload=self.cipher.seal(payload),
-                plan_version=0, fence=0, pause_requested=0, event_seq=0, created_at=utcnow(), updated_at=utcnow(),
-            ))
-        except IntegrityError as exc:
-            raise InteractionError("This conversation already has an active human interaction run") from exc
+        run = HumanRun(
+            run_id=run_id, tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id,
+            status="READY" if ready else "INITIALIZING", request_payload=self.cipher.seal(payload),
+            plan_version=0, fence=0, pause_requested=0, event_seq=0,
+        )
+        with self.repository.creation(run) as tx:
+            if not tx.conversation_exists():
+                raise InteractionError("Conversation was not found for this owner", 404)
+            if tx.active_run_exists():
+                raise InteractionError("This conversation already has an active human interaction run")
+            if tx.run_id_exists():
+                raise InteractionError("This run identity already exists")
+            tx.add(run)
         return run_id
 
     def initialized(self, run_id, tenant_id, user_id, *, succeeded):
@@ -72,9 +78,9 @@ class HumanInteractionService:
                 raise InteractionError("Run initialization was interrupted")
             run.status = "READY" if succeeded else "FAILED"
 
-    def _project_request(self, request):
+    def _project_request(self, request, run_id):
         payload = self.cipher.open(request.payload)
-        return {"request_id": request.request_id, "run_id": request.run_id, "kind": request.kind,
+        return {"request_id": request.request_id, "run_id": run_id, "kind": request.kind,
                 "status": request.status, "version": request.version, "digest": request.digest,
                 "expires_at": request.expires_at.isoformat(), "payload": redact(payload)}
 
@@ -96,17 +102,17 @@ class HumanInteractionService:
             return {"run_id": run.run_id, "conversation_id": run.conversation_id, "status": run.status,
                     "event_seq": run.event_seq, "pause_requested": bool(run.pause_requested),
                     "attempt_active": bool(run.lock_until and run.lock_until > utcnow()),
-                    "requests": [self._project_request(item) for item in tx.requests() if item.status == "PENDING"]}
+                    "requests": [self._project_request(item, run.run_id) for item in tx.requests() if item.status == "PENDING"]}
 
     def request(self, tx, *, kind, slot, action_digest, payload):
         request = HumanRequest(
-            request_id=str(uuid4()), run_id=tx.run.run_id, kind=kind, status="PENDING", version=1,
+            request_id=str(uuid4()), run_record_id=tx.run.run_record_id, kind=kind, status="PENDING", version=1,
             slot=slot, digest=action_digest, payload=self.cipher.seal(payload),
-            expires_at=utcnow() + timedelta(seconds=self.wait_seconds), created_at=utcnow(),
+            expires_at=utcnow() + timedelta(seconds=self.wait_seconds),
         )
         tx.add(request)
         tx.run.status = "WAITING_HUMAN"
-        tx.emit({"type": "human_interaction", "content": self._project_request(request)})
+        tx.emit({"type": "human_interaction", "content": self._project_request(request, tx.run.run_id)})
         return request
 
     def reusable_clarification_answer(self, tx, payload):
@@ -114,7 +120,7 @@ class HumanInteractionService:
         signature = clarification_signature(payload)
         decided = sorted(
             (item for item in tx.requests() if item.kind == "CLARIFICATION" and item.status == "DECIDED"),
-            key=lambda item: item.created_at,
+            key=lambda item: item.create_time,
             reverse=True,
         )
         for request in decided:
@@ -226,14 +232,14 @@ class HumanInteractionService:
             for item in tx.requests():
                 if item.status == "PENDING":
                     item.status = "CANCELLED"
-            tx.session.flush()
+            tx.flush()
             request = HumanRequest(
-                request_id=str(uuid4()), run_id=run_id, kind="USER_STEERING", status="DECIDED", version=1,
+                request_id=str(uuid4()), run_record_id=run.run_record_id, kind="USER_STEERING", status="DECIDED", version=1,
                 slot=f"composer:{command.message_id}", digest=fingerprint,
                 payload=self.cipher.seal({"source": "composer"}),
                 decision=self.cipher.seal({"decision": "steer", "text": command.text}),
                 idempotency_key=command.message_id, decision_digest=fingerprint,
-                expires_at=utcnow() + timedelta(seconds=self.wait_seconds), created_at=utcnow(),
+                expires_at=utcnow() + timedelta(seconds=self.wait_seconds),
             )
             tx.add(request)
             run.pause_requested = 0
@@ -248,7 +254,7 @@ class HumanInteractionService:
         for request in tx.requests():
             if request.status == "PENDING":
                 request.status = "CANCELLED"
-        tx.session.flush()
+        tx.flush()
         tx.run.pause_requested = 0
         self.request(tx, kind="USER_STEERING", slot=f"steering:{tx.run.event_seq}",
                      action_digest=digest([tx.run.run_id, tx.run.event_seq, "steering"]),

@@ -2,6 +2,7 @@
 
 import time
 from contextlib import contextmanager
+from datetime import timezone
 
 from database.human_interaction_db import utcnow
 from database.human_interaction_models import HumanExecution
@@ -84,7 +85,7 @@ class RuntimeInteractionPort:
                     request for request in tx.requests()
                     if request.kind == "USER_STEERING" and request.status == "DECIDED"
                     and request.request_id not in checkpoint.get("steering_ids", [])
-                ), key=lambda request: (request.created_at, request.request_id))
+                ), key=lambda request: (request.create_time, request.request_id))
                 if pending:
                     completed = []
                     for execution in tx.executions():
@@ -172,7 +173,7 @@ class RuntimeInteractionPort:
                     if execution.status in {"STARTED", "UNKNOWN"}:
                         raise RecoveryRequired("An uncertain external effect must be reconciled")
                 else:
-                    execution = HumanExecution(run_id=self.run_id, slot=slot, tool=tool, digest=action_digest,
+                    execution = HumanExecution(run_record_id=tx.run.run_record_id, slot=slot, tool=tool, digest=action_digest,
                                                arguments=self.cipher.seal(arguments), status="PREPARED")
                     tx.add(execution)
                 request = next((item for item in tx.requests()
@@ -264,10 +265,10 @@ class RuntimeInteractionPort:
     def visible_guidance(self):
         """Return accepted composer input for the normal stream/history presentation path."""
         with self.transaction(receipt=True) as tx:
-            requests = sorted(tx.requests(), key=lambda item: (item.created_at, item.request_id))
+            requests = sorted(tx.requests(), key=lambda item: (item.create_time, item.request_id))
             return [
                 {"request_id": item.request_id, "text": self.cipher.open(item.decision)["text"],
-                 "created_at": item.created_at.isoformat()}
+                 "created_at": item.create_time.replace(tzinfo=timezone.utc).isoformat()}
                 for item in requests if item.kind == "USER_STEERING" and item.status == "DECIDED"
                 and self.cipher.open(item.payload).get("source") == "composer"
             ]
