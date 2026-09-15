@@ -680,10 +680,11 @@ const HomeContent: FC<{
     return () => setServerConversationIdState(null);
   }, [serverConversationIdsRef, activeThreadId]);
 
-  const handleThreadBack = useCallback(() => {
+  const handleThreadBack = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
+    await runtime.threads.switchToNewThread();
     onBack();
-  }, [onBack]);
+  }, [onBack, runtime]);
 
   const handlePrepareNewConversation = useCallback(() => {
     // Do not restore the agent from the thread that is being left.
