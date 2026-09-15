@@ -336,7 +336,8 @@ bash deploy.sh k8s
 | `global.monitoring.enabled` | 是否让 Nexent 后端开启 OpenTelemetry 上报 |
 | `global.monitoring.provider` | 后端 provider 标识：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
 | `global.monitoring.otlpEndpoint` | 后端 OTLP HTTP 上报地址，默认 `http://nexent-otel-collector:4318` |
-| `global.monitoring.dashboardUrl` | 前端监控入口地址，留空则隐藏入口；speed 模式下可见，标准模式下仅超级管理员可见 |
+| `global.monitoring.dashboardUrl` | 前端监控入口地址，留空则隐藏入口 |
+| `global.monitoring.dashboardAllowedRoles` | 可看到入口的角色，使用逗号分隔，默认 `SU,SPEED` |
 | `global.monitoring.traceContentMode` | Trace 内容采集模式：`summary`、`metrics`、`full` |
 | `nexent-monitoring.<provider>.service.nodePort` | 调整各 Dashboard 的 NodePort |
 | `nexent-monitoring.langfuse.init.*` | 本地 Langfuse 初始组织、项目和管理员账号 |
