@@ -708,14 +708,22 @@ def download_document(
     filename = str(document.get("file_name") or "download")
     content = _document_content(document)
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    response_headers = {
+        "Content-Disposition": _content_disposition(filename),
+        "X-File-Size": str(len(content)),
+    }
+    # HTTP header values are Latin-1. Unicode filenames are already carried by
+    # Content-Disposition's RFC 5987 filename* parameter.
+    try:
+        filename.encode("latin-1")
+    except UnicodeEncodeError:
+        pass
+    else:
+        response_headers["X-File-Name"] = filename
     return Response(
         content=content,
         media_type=content_type,
-        headers={
-            "Content-Disposition": _content_disposition(filename),
-            "X-File-Name": filename,
-            "X-File-Size": str(len(content)),
-        },
+        headers=response_headers,
     )
 
 
