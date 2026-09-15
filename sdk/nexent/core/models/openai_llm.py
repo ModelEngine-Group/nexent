@@ -190,9 +190,11 @@ class OpenAIModel(OpenAIServerModel):
                 timeout_cls = getattr(_openai_base, "httpx2", None).Timeout or timeout_cls
             except (ImportError, AttributeError):
                 pass
+            from openai._base_client import httpx2
+
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=timeout_cls(
+                timeout=httpx2.Timeout(
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
