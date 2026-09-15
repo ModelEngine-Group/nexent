@@ -937,15 +937,16 @@ class OpenAIModel(OpenAIServerModel):
             test_message = [{"role": "user", "content": "Hello"}]
 
             # Directly send a short chat request to test the connection.
-            # Carry the operator's inference params (temperature / top_p /
-            # extra_body incl. __custom__) so that an invalid custom param
-            # surfaces here as a 400, instead of failing at runtime.
+            # Sampling params (temperature / top_p) are intentionally NOT
+            # sent: reasoning-only models (kimi-k3, DeepSeek-R1 family)
+            # reject any value other than their fixed default, and the model
+            # instance may carry a generic default (0.2) the operator never
+            # configured. The probe validates connectivity and custom params
+            # (extra_body incl. __custom__) still surface as a 400 here.
             completion_kwargs = self._prepare_completion_kwargs(
                 messages=test_message,
                 model=self.model_id,
                 max_tokens=5,
-                temperature=self.temperature,
-                top_p=self.top_p,
             )
             if self.extra_body:
                 completion_kwargs["extra_body"] = self.extra_body
