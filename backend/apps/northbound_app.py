@@ -611,9 +611,15 @@ async def generate_title(payload: GenerateTitleRequest, request: Request):
             conversation_id=payload.conversation_id,
             question=payload.question,
             language=get_user_language(request),
+            model_id=payload.model_id,
         )
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

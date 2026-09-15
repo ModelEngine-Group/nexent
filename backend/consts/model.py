@@ -1089,6 +1089,7 @@ class OptimizePromptFromDebugRequest(BaseModel):
 class GenerateTitleRequest(BaseModel):
     conversation_id: int
     question: str
+    model_id: Optional[int] = Field(default=None, gt=0)
 
 
 class AgentSkillInstanceRequest(BaseModel):
