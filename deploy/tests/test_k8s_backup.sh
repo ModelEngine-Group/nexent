@@ -10,7 +10,11 @@ EN_GUIDE="$PROJECT_ROOT/doc/docs/en/quick-start/kubernetes-upgrade-guide.md"
 TEST_DIR="${TMPDIR:-/tmp}/nexent-k8s-backup-test-$$"
 
 cleanup() {
-  rm -rf "$TEST_DIR"
+  if [ "${KEEP_TEST_DIR:-0}" = "1" ]; then
+    printf 'Test artifacts retained at %s\n' "$TEST_DIR" >&2
+  else
+    rm -rf "$TEST_DIR"
+  fi
 }
 
 trap cleanup EXIT
@@ -56,10 +60,13 @@ mkdir -p \
   "$TEST_DIR/bin" \
   "$TEST_DIR/workspace/deploy/k8s" \
   "$TEST_DIR/remote/nexent-postgresql" \
-  "$TEST_DIR/remote/nexent-workspace"
+  "$TEST_DIR/remote/nexent-workspace/nested"
 cp "$BACKUP_SCRIPT" "$TEST_DIR/workspace/deploy/k8s/backup.sh"
 printf 'postgres-data\n' > "$TEST_DIR/remote/nexent-postgresql/data.txt"
 printf 'workspace-data\n' > "$TEST_DIR/remote/nexent-workspace/workspace.txt"
+printf 'nested-data\n' > "$TEST_DIR/remote/nexent-workspace/nested/file with space.txt"
+printf 'hidden-data\n' > "$TEST_DIR/remote/nexent-workspace/.hidden"
+ln -s workspace.txt "$TEST_DIR/remote/nexent-workspace/workspace-link"
 
 REAL_TAR="$(command -v tar)"
 
@@ -72,10 +79,10 @@ printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 remote_pvc_for_path() {
   case "$1" in
-    /var/lib/postgresql/data|database-0:/var/lib/postgresql/data/.)
+    /var/lib/postgresql/data*|database-0:/var/lib/postgresql/data/*)
       printf 'nexent-postgresql\n'
       ;;
-    /mnt/nexent|runtime-0:/mnt/nexent/.)
+    /mnt/nexent*|runtime-0:/mnt/nexent/*)
       printf 'nexent-workspace\n'
       ;;
     *)
@@ -158,6 +165,11 @@ case "${1:-}" in
       exit 0
     fi
 
+    if [[ " $* " == *" sh -c "* ]] && [[ " $* " == *"command -v tar"* ]]; then
+      [ "${FAKE_TAR_MISSING:-0}" != "1" ]
+      exit
+    fi
+
     if [[ " $* " == *" tar -C "* ]]; then
       [ "${FAKE_TAR_FAIL:-0}" != "1" ] || exit 19
       previous=""
@@ -171,6 +183,37 @@ case "${1:-}" in
       done
       pvc="$(remote_pvc_for_path "$source_path")"
       exec "$REAL_TAR" -C "$FAKE_REMOTE_ROOT/$pvc" -cf - .
+    fi
+
+    if [[ " $* " == *" bash -c "* ]]; then
+      [ "${FAKE_PORTABLE_FAIL:-0}" != "1" ] || exit 23
+      source_path="${!#}"
+      pvc="$(remote_pvc_for_path "$source_path")"
+      while IFS= read -r path; do
+        relative_path="${path#"$FAKE_REMOTE_ROOT/$pvc"/}"
+        encoded_path="$(printf '%s' "$relative_path" | base64 | tr -d '\n')"
+        if [ -L "$path" ]; then
+          link_target="$(readlink "$path")"
+          encoded_target="$(printf '%s' "$link_target" | base64 | tr -d '\n')"
+          printf 'l\t%s\t777\t%s\n' "$encoded_path" "$encoded_target"
+        elif [ -d "$path" ]; then
+          printf 'd\t%s\t755\t-\n' "$encoded_path"
+        else
+          printf 'f\t%s\t644\t-\n' "$encoded_path"
+        fi
+      done < <(find "$FAKE_REMOTE_ROOT/$pvc" -mindepth 1 -print)
+      exit 0
+    fi
+
+    if [[ " $* " == *" cat "* ]]; then
+      source_file="${!#}"
+      pvc="$(remote_pvc_for_path "$source_file")"
+      case "$pvc" in
+        nexent-postgresql) relative_file="${source_file#/var/lib/postgresql/data/}" ;;
+        nexent-workspace) relative_file="${source_file#/mnt/nexent/}" ;;
+        *) exit 1 ;;
+      esac
+      exec /bin/cat "$FAKE_REMOTE_ROOT/$pvc/$relative_file"
     fi
     exit 1
     ;;
@@ -330,8 +373,45 @@ if find "$FALLBACK_DIR" -type f \( -name '*.tar' -o -name '*.gz' -o -name '*.zip
 fi
 
 : > "$FAKE_KUBECTL_LOG"
+mkdir -p "$TEST_DIR/no-tar-fallback"
+NO_TAR_OUTPUT="$(
+  NEXENT_BACKUP_TIMESTAMP=20260915-080005 \
+  FAKE_CP_FAIL_PVC=nexent-workspace \
+  FAKE_TAR_MISSING=1 \
+  FAKE_TAR_FAIL=1 \
+  bash "$TEST_DIR/workspace/deploy/k8s/backup.sh" \
+    --backup-dir "$TEST_DIR/no-tar-fallback" 2>&1
+)"
+NO_TAR_DIR="$TEST_DIR/no-tar-fallback/k8s-20260915-080005"
+assert_file_exists \
+  "$NO_TAR_DIR/nexent-workspace/workspace.txt" \
+  "a container without tar should fall back to per-file streaming"
+assert_file_exists \
+  "$NO_TAR_DIR/nexent-workspace/nested/file with space.txt" \
+  "per-file streaming should preserve nested paths containing spaces"
+assert_file_exists \
+  "$NO_TAR_DIR/nexent-workspace/.hidden" \
+  "per-file streaming should preserve hidden files"
+[ -L "$NO_TAR_DIR/nexent-workspace/workspace-link" ] \
+  || fail "per-file streaming should preserve symbolic links"
+[ "$(readlink "$NO_TAR_DIR/nexent-workspace/workspace-link")" = "workspace.txt" ] \
+  || fail "per-file streaming should preserve symbolic-link targets"
+assert_contains \
+  "$NO_TAR_OUTPUT" \
+  "tar is unavailable for PVC nexent-workspace" \
+  "the no-tar fallback should be reported"
+assert_contains \
+  "$(cat "$FAKE_KUBECTL_LOG")" \
+  "cat /mnt/nexent/workspace.txt" \
+  "the no-tar fallback should stream regular files with kubectl exec"
+if find "$NO_TAR_DIR" -type f \( -name '*.tar' -o -name '*.gz' -o -name '*.zip' \) | grep -q .; then
+  fail "per-file fallback should not retain an archive"
+fi
+
+: > "$FAKE_KUBECTL_LOG"
 mkdir -p "$TEST_DIR/copy-failure"
-if NEXENT_BACKUP_TIMESTAMP=20260915-080002 FAKE_CP_FAIL=1 FAKE_TAR_FAIL=1 \
+if NEXENT_BACKUP_TIMESTAMP=20260915-080002 \
+  FAKE_CP_FAIL=1 FAKE_TAR_FAIL=1 FAKE_PORTABLE_FAIL=1 \
   bash "$TEST_DIR/workspace/deploy/k8s/backup.sh" \
     --backup-dir "$TEST_DIR/copy-failure" \
     > "$TEST_DIR/copy-failure.out" 2>&1; then
@@ -369,7 +449,7 @@ assert_contains "$APPARENT_OUTPUT" "[PASS] Backup complete:" "plain du fallback 
 SCRIPT_CONTENT="$(cat "$BACKUP_SCRIPT")"
 assert_not_contains "$SCRIPT_CONTENT" "sudo " "backup script must not use sudo"
 assert_not_contains "$SCRIPT_CONTENT" "sha256" "backup script must not generate checksum files"
-assert_not_contains "$SCRIPT_CONTENT" "VolumeSnapshot" "backup script must not use storage snapshots"
+assert_not_contains "$SCRIPT_CONTENT" "snapshot" "backup script must not use storage snapshots"
 assert_not_contains "$SCRIPT_CONTENT" "gzip" "backup script must not compress data"
 
 ZH_CONTENT="$(cat "$ZH_GUIDE")"
@@ -386,6 +466,8 @@ assert_contains "$ZH_CONTENT" "备份前必须停止业务写入" "Chinese guide
 assert_contains "$EN_CONTENT" "Business writes must stop" "English guide should require stopping business writes"
 assert_contains "$ZH_CONTENT" "指定 namespace 中的全部 PVC" "Chinese guide should describe the complete PVC scope"
 assert_contains "$EN_CONTENT" "every PVC in the specified namespace" "English guide should describe the complete PVC scope"
+assert_contains "$ZH_CONTENT" "MinIO 等精简镜像不包含" "Chinese guide should document the no-tar fallback"
+assert_contains "$EN_CONTENT" "minimal image such as MinIO" "English guide should document the no-tar fallback"
 assert_not_contains "$ZH_CONTENT" "copy_from_app" "Chinese guide should not retain manual component copy commands"
 assert_not_contains "$EN_CONTENT" "copy_from_app" "English guide should not retain manual component copy commands"
 [ "$(grep -c '^## ' "$ZH_GUIDE")" -eq 3 ] || fail "Chinese guide should retain exactly three main sections"

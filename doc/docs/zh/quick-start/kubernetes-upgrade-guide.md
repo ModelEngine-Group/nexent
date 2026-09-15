@@ -20,7 +20,7 @@ bash deploy/k8s/backup.sh \
 
 脚本通过容器内 `du` 回显每个 PVC 的未压缩数据量和总量，并通过本地 `df` 回显备份目录的可用空间。出现 `[PASS] Pre-upgrade space check passed.` 表示本地空间充足，随后脚本直接开始复制；空间不足时会在复制前退出。数据不会压缩，因此空间检查按文件原始大小计算。
 
-脚本优先使用 `kubectl cp` 将各 PVC 的文件复制到本地；如果该命令失败，则使用 `kubectl exec ... tar -cf -` 流式传输并立即在本地解包，不保留 tar 文件。目标容器和本地机器都必须包含 `tar`。脚本不使用 `sudo`，不创建临时 Pod，也不生成压缩包或 SHA-256 文件。
+脚本优先使用 `kubectl cp` 将各 PVC 的文件复制到本地；如果该命令失败且目标容器包含 `tar`，则使用 `kubectl exec ... tar -cf -` 流式传输并立即在本地解包，不保留 tar 文件。MinIO 等精简镜像不包含 `tar` 时，脚本会使用容器内的 Bash 和基础 coreutils 枚举目录，并通过 `kubectl exec ... cat` 逐文件流式导出；该路径在文件很多时会更慢。脚本不使用 `sudo`，不创建临时 Pod，也不生成压缩包或 SHA-256 文件。
 
 实际备份目录的最外层使用 PVC 原名，例如 `nexent-postgresql/`、`nexent-workspace/`、`nexent-skills/` 和已启用监控组件的 PVC 名。通过 `[INFO]` 查看来源和复制进度；只有出现 `[PASS] Backup complete: <path>` 才表示指定 namespace 中的全部 PVC 已复制完成，`<path>` 是实际备份目录。出现 `[ERROR]` 时不要使用脚本回显的 `.partial` 未完成目录。
 
