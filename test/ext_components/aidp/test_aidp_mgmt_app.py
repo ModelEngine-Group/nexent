@@ -930,6 +930,151 @@ class TestAidpDocumentFileOperations:
         assert response.headers["x-file-size"] == "5"
         assert mock_download.call_args.args[3] == "00000000-0000-4000-8000-000000000001"
 
+    def test_remove_continues_when_tag_cleanup_fails(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        aidp_result = {
+            "summary": {"total": 1, "success": 1, "failed": 0},
+            "success_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
+            "failed_list": [],
+        }
+        tag_service = MagicMock()
+        tag_service.cleanup_document_assignments.side_effect = RuntimeError("tag database unavailable")
+        tag_module = types.ModuleType("services.tag_management_service")
+        tag_module.TagManagementService = tag_service
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="EDIT"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "remove_aidp_docs_impl",
+            return_value=aidp_result,
+        ), patch.dict(
+            sys.modules,
+            {"services.tag_management_service": tag_module},
+        ):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={
+                    "documents": [
+                        {
+                            "file_uuid": "00000000-0000-4000-8000-000000000001",
+                            "file_ino_no": "ino-1",
+                        }
+                    ]
+                },
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == aidp_result
+        tag_service.cleanup_document_assignments.assert_called_once()
+
+    def test_remove_does_not_invalidate_cache_when_no_file_succeeds(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        aidp_result = {
+            "summary": {"total": 1, "success": 0, "failed": 1},
+            "success_list": [],
+            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
+        }
+        tag_module = types.ModuleType("services.tag_management_service")
+        tag_module.TagManagementService = MagicMock()
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="EDIT"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "remove_aidp_docs_impl",
+            return_value=aidp_result,
+        ), patch.object(aidp_mgmt_app, "invalidate_aidp_kb_detail_cache") as mock_kb_cache, patch.object(
+            aidp_mgmt_app, "invalidate_aidp_doc_count_cache"
+        ) as mock_count_cache, patch.dict(
+            sys.modules,
+            {"services.tag_management_service": tag_module},
+        ):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={
+                    "documents": [
+                        {
+                            "file_uuid": "00000000-0000-4000-8000-000000000001",
+                            "file_ino_no": "ino-1",
+                        }
+                    ]
+                },
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_kb_cache.assert_not_called()
+        mock_count_cache.assert_not_called()
+
+    def test_download_uses_safe_fallback_for_missing_headers(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="READ_ONLY"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "download_aidp_doc_impl",
+            return_value={
+                "content": "中文文件内容".encode("utf-8"),
+                "content_type": None,
+                "content_disposition": None,
+                "file_name": "中文文件.txt",
+                "file_size": None,
+            },
+        ):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
+                headers=_bearer(),
+                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.headers["content-type"].startswith("application/octet-stream")
+        assert response.headers["content-disposition"].startswith("attachment; filename=")
+        assert "filename*=UTF-8''%E4%B8%AD%E6%96%87%E6%96%87%E4%BB%B6.txt" in response.headers[
+            "content-disposition"
+        ]
+        assert response.headers["x-file-size"] == str(len("中文文件内容".encode("utf-8")))
+        assert "x-file-name" not in response.headers
+
+    def test_download_rejects_non_binary_service_result(self):
+        client = _client()
+        from consts.error_code import ErrorCode
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="READ_ONLY"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "download_aidp_doc_impl",
+            return_value={"content": "not binary"},
+        ):
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
+                headers=_bearer(),
+                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
+            )
+
+        assert response.status_code == HTTPStatus.BAD_GATEWAY
+        assert response.json()["code"] == ErrorCode.AIDP_RESPONSE_ERROR.value
+
 
 # --- Models list (auth only, no per-KB permission) ------------------------
 

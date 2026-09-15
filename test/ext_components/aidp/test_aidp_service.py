@@ -2121,6 +2121,44 @@ class TestAidpDocumentFileOperations:
             )
         assert exc_info.value.error_code == ErrorCode.COMMON_MISSING_REQUIRED_FIELD
 
+    def test_remove_rejects_non_dict_response(self, aidp_service_module):
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            response=_make_success_response(["unexpected"]),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    def test_remove_maps_request_error(self, aidp_service_module):
+        request = httpx.Request("POST", "http://127.0.0.1:30081")
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_remove_maps_invalid_json(self, aidp_service_module):
+        mock_response = _make_success_response({})
+        mock_response.json.side_effect = ValueError("bad json")
+        _setup_mock_client(aidp_service_module, method="post", response=mock_response)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.remove_aidp_docs_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ["uuid-1"]
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
     @pytest.mark.parametrize("status_code", [401, 403, 500])
     def test_remove_maps_upstream_http_errors(self, aidp_service_module, status_code):
         _setup_mock_client(
@@ -2173,6 +2211,27 @@ class TestAidpDocumentFileOperations:
             "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Download"
         )
         assert call.kwargs["json"] == {"file_uuid": "uuid-1"}
+
+    def test_download_requires_file_uuid(self, aidp_service_module):
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.download_aidp_doc_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", ""
+            )
+        assert exc_info.value.error_code == ErrorCode.COMMON_MISSING_REQUIRED_FIELD
+
+    def test_download_maps_request_error(self, aidp_service_module):
+        request = httpx.Request("POST", "http://127.0.0.1:30081")
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.download_aidp_doc_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
 
     def test_download_maps_upstream_http_error(self, aidp_service_module):
         _setup_mock_client(
