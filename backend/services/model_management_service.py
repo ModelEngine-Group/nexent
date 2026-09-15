@@ -527,7 +527,8 @@ def _resolve_existing_slot_config(tenant_id: str, config_key: str):
     - both None: the slot was never configured -- backfill inserts a row.
     """
     row = get_single_config_info(tenant_id, config_key)
-    if row is None:
+    # Note: the DB helper returns {} (not None) when no row matches.
+    if not row:
         return None, None
     raw_id = row.get("config_value")
     try:

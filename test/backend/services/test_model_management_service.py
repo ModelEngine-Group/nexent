@@ -2533,7 +2533,8 @@ def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, upda
         return [m for m in existing_rows if filters.get("model_type") == m["model_type"]]
 
     def fake_get_single_config(tenant_id, key):
-        return existing_config.get(key)
+        # Mirror the real DB helper: {} when no row matches (NOT None).
+        return existing_config.get(key, {})
 
     def fake_insert_config(data):
         inserted.append(data)
@@ -2595,6 +2596,23 @@ def test_backfill_never_touches_configured_slots():
     assert {e["config_key"] for e in result} == {"EMBEDDING_ID"}
     assert all(d["config_key"] != "LLM_ID" for d in inserted)
     assert all(cid != 100 for cid, _ in updated)
+
+
+def test_backfill_handles_db_helper_empty_dict_for_missing_row():
+    """Regression: get_single_config_info returns {} (not None) when the slot
+    has no row -- the empty dict must be treated as never-configured, not as a
+    dangling row (KeyError on tenant_config_id in earlier builds)."""
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "llm-one")]
+    # Simulate the real helper: every missing key yields {}.
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        existing_config={},  # default .get(key, {}) -> {} for every slot
+    )
+
+    assert {e["config_key"] for e in result} == {"LLM_ID"}
+    assert len(inserted) == 1
+    assert updated == []
 
 
 def test_backfill_repairs_dangling_config_rows():
