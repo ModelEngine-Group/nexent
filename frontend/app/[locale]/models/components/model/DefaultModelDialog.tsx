@@ -165,7 +165,8 @@ export const DefaultModelDialog = ({
       onOk={handleOk}
       okText={t("common.save", { defaultValue: "保存" })}
       cancelText={t("common.cancel", { defaultValue: "取消" })}
-      width={820}
+      width={1000}
+      centered
       destroyOnHidden
       styles={{ body: { paddingTop: 16 } }}
     >
