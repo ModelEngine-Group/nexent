@@ -117,8 +117,6 @@ const translateError = (
   return errorMessage;
 };
 
-const isPresetProvider = (providerKey: string): boolean => providerKey !== "__custom__";
-
 const supportsCapacityFields = (type: ModelType | undefined): boolean => {
   if (!type) return false;
   return (
@@ -1318,7 +1316,9 @@ export const ModelAddDialogV2 = ({
                       value={baseUrl}
                       onChange={(e) => setBaseUrl(e.target.value)}
                       placeholder="https://..."
-                      disabled={isPresetProvider(providerKey) && !!selectedProviderInfo?.base_url}
+                      // Editable even for preset providers: the auto-filled
+                      // value is just a default, operators may point a preset
+                      // provider at a mirror/private gateway.
                     />
                   </div>
                 </div>
