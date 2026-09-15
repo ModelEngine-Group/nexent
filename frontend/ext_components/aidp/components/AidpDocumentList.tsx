@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Modal, Pagination, Upload, message, Tooltip } from "antd";
@@ -60,7 +60,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const [uploading, setUploading] = useState(false);
-  const [selectedFileUuids, setSelectedFileUuids] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [downloadingFileUuid, setDownloadingFileUuid] = useState<string | null>(
     null
@@ -83,35 +82,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
     !!activeKb &&
     !isUnavailable &&
     (activeKb.permission === "EDIT" || activeKb.permission === "READ_ONLY");
-
-  useEffect(() => {
-    setSelectedFileUuids([]);
-  }, [activeKb?.kds_id, documents]);
-
-  const selectableDocuments = documents.filter((doc) =>
-    Boolean(doc.file_uuid && doc.file_ino_no)
-  );
-  const allDocumentsSelected =
-    selectableDocuments.length > 0 &&
-    selectableDocuments.every((doc) =>
-      selectedFileUuids.includes(doc.file_uuid)
-    );
-
-  const toggleDocumentSelection = useCallback((fileUuid: string) => {
-    setSelectedFileUuids((current) =>
-      current.includes(fileUuid)
-        ? current.filter((uuid) => uuid !== fileUuid)
-        : [...current, fileUuid]
-    );
-  }, []);
-
-  const toggleAllDocuments = useCallback(() => {
-    setSelectedFileUuids(
-      allDocumentsSelected
-        ? []
-        : selectableDocuments.map((document) => document.file_uuid)
-    );
-  }, [allDocumentsSelected, selectableDocuments]);
 
   const handleDownload = useCallback(
     async (document: AidpDocumentItem) => {
@@ -141,13 +111,11 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   );
 
   const handleDelete = useCallback(
-    (documentsToDelete: AidpDocumentItem[]) => {
-      if (!activeKb || documentsToDelete.length === 0) return;
+    (document: AidpDocumentItem) => {
+      if (!activeKb || !document.file_uuid) return;
       Modal.confirm({
-        title: t("aidpKnowledge.confirmDeleteDocsTitle"),
-        content: t("aidpKnowledge.confirmDeleteDocsContent", {
-          count: documentsToDelete.length,
-        }),
+        title: t("aidpKnowledge.confirmDeleteDocTitle"),
+        content: t("aidpKnowledge.confirmDeleteDocContent"),
         okText: t("common.confirm"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
@@ -155,36 +123,24 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
         onOk: async () => {
           setDeleting(true);
           try {
-            const result = await aidpKnowledgeService.removeDocs(
+            const result = await aidpKnowledgeService.removeDoc(
               activeKb.kds_id,
-              documentsToDelete.map(({ file_uuid, file_ino_no }) => ({
-                file_uuid,
-                file_ino_no,
-              }))
+              {
+                file_uuid: document.file_uuid,
+                file_ino_no: document.file_ino_no,
+              }
             );
-            if (result.summary.failed === 0) {
-              message.success(
-                t("aidpKnowledge.deleteDocsSuccess", {
-                  count: result.summary.success,
-                })
-              );
-            } else if (result.summary.success > 0) {
-              message.warning(
-                t("aidpKnowledge.deleteDocsPartial", {
-                  success: result.summary.success,
-                  failed: result.summary.failed,
-                })
-              );
+            if (result.summary.success > 0) {
+              message.success(t("aidpKnowledge.deleteDocSuccess"));
             } else {
-              message.error(t("aidpKnowledge.deleteDocsFailed"));
+              message.error(t("aidpKnowledge.deleteDocFailed"));
             }
             if (result.summary.success > 0) {
               onDocsUploaded();
             }
-            setSelectedFileUuids([]);
           } catch (error) {
-            log.error("Failed to delete AIDP documents:", error);
-            message.error(t("aidpKnowledge.deleteDocsFailed"));
+            log.error("Failed to delete AIDP document:", error);
+            message.error(t("aidpKnowledge.deleteDocFailed"));
           } finally {
             setDeleting(false);
           }
@@ -288,27 +244,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             />
           </Tooltip>
         </div>
-        {canDeleteDocuments && (
-          <div className="mt-3 flex items-center gap-3">
-            <Button
-              danger
-              size="small"
-              loading={deleting}
-              disabled={selectedFileUuids.length === 0}
-              onClick={() =>
-                handleDelete(
-                  documents.filter((doc) =>
-                    selectedFileUuids.includes(doc.file_uuid)
-                  )
-                )
-              }
-            >
-              {t("aidpKnowledge.deleteSelected", {
-                count: selectedFileUuids.length,
-              })}
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Document table */}
@@ -327,17 +262,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
             <table className="min-w-full bg-white">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
-                  <th className="w-10 px-4 py-2 text-left">
-                    <input
-                      type="checkbox"
-                      aria-label={t("aidpKnowledge.selectAllDocuments")}
-                      checked={allDocumentsSelected}
-                      disabled={
-                        !canDeleteDocuments || selectableDocuments.length === 0
-                      }
-                      onChange={toggleAllDocuments}
-                    />
-                  </th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     {t("aidpKnowledge.docFileName")}
                   </th>
@@ -361,17 +285,6 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                     key={doc.file_uuid || doc.file_ino_no}
                     className="hover:bg-gray-50"
                   >
-                    <td className="w-10 px-4 py-2">
-                      <input
-                        type="checkbox"
-                        aria-label={t("aidpKnowledge.selectDocument", {
-                          name: doc.file_name,
-                        })}
-                        checked={selectedFileUuids.includes(doc.file_uuid)}
-                        disabled={!canDeleteDocuments || !doc.file_uuid}
-                        onChange={() => toggleDocumentSelection(doc.file_uuid)}
-                      />
-                    </td>
                     <td className="px-4 py-2">
                       <div
                         className="text-sm font-medium text-gray-800 truncate max-w-[250px]"
@@ -413,7 +326,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                             danger
                             size="small"
                             disabled={!doc.file_uuid || deleting}
-                            onClick={() => handleDelete([doc])}
+                            onClick={() => handleDelete(doc)}
                           >
                             {t("aidpKnowledge.delete")}
                           </Button>

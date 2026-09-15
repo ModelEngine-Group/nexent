@@ -493,13 +493,14 @@ class AidpKnowledgeService {
   }
 
   /**
-   * Remove selected documents from an AIDP knowledge base.
-   * The file_ino_no is kept with each UUID so the backend can clean tag
+   * Remove one document from an AIDP knowledge base.
+   * The AIDP API accepts an array, so the single-document UI sends one item.
+   * The file_ino_no is kept with the UUID so the backend can clean tag
    * assignments without issuing a second document-list request.
    */
-  async removeDocs(
+  async removeDoc(
     id: string,
-    documents: AidpDocumentIdentity[]
+    document: AidpDocumentIdentity
   ): Promise<AidpDocumentRemoveResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.removeKbDocuments(id), {});
     const response = await fetchWithErrorHandling(url, {
@@ -508,7 +509,7 @@ class AidpKnowledgeService {
         ...getAuthHeaders(),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ documents }),
+      body: JSON.stringify({ documents: [document] }),
     });
     const result =
       (await response.json()) as Partial<AidpDocumentRemoveResponse>;
