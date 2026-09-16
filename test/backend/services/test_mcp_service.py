@@ -6,7 +6,7 @@ Tests MCP service for OpenAPI service registration and management.
 import os
 import sys
 import types
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 from threading import Thread
 
 import pytest
@@ -845,6 +845,22 @@ class TestRefreshOpenapiServicesByTenant:
         # Should have at least the local service mounted
         assert len(mcp_service.nexent_mcp._mounted_servers) >= initial_mount_count
 
+    @patch.object(mcp_service, "register_openapi_service", return_value=False)
+    def test_refresh_counts_failed_registration_as_skipped(self, mock_register):
+        mcp_service.query_available_openapi_services.return_value = [
+            {
+                "mcp_service_name": "broken_registration",
+                "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
+                "server_url": "https://api.example.com",
+                "headers_template": {},
+            }
+        ]
+
+        result = mcp_service.refresh_openapi_services_by_tenant("tenant1")
+
+        assert result == {"registered": 0, "skipped": 1, "total": 1}
+        mock_register.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # Test refresh_single_openapi_service
@@ -1400,6 +1416,178 @@ class TestTenantMCPRouter:
         )
 
         assert sent[0]["status"] == 403
+
+    @pytest.mark.asyncio
+    async def test_invalid_path_returns_not_found(self):
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        await mcp_service.TenantMCPRouter()(
+            {"type": "http", "path": "/not-mcp", "headers": []},
+            None,
+            send,
+        )
+
+        assert sent == [
+            {"type": "http.response.start", "status": 404, "headers": []},
+            {"type": "http.response.body", "body": b"MCP tenant not found"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_invalid_authorization_returns_forbidden(self, monkeypatch):
+        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module.get_current_user_id = MagicMock(side_effect=ValueError("invalid token"))
+        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        await mcp_service.TenantMCPRouter()(
+            {
+                "type": "http",
+                "path": "/mcp/tenant1/sse",
+                "headers": [(b"authorization", b"Bearer invalid")],
+            },
+            None,
+            send,
+        )
+
+        assert sent[0]["status"] == 403
+
+    @pytest.mark.asyncio
+    async def test_lazy_initialization_delegates_to_tenant_app(self, monkeypatch):
+        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
+        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        delegated = []
+
+        async def tenant_app(scope, receive, send):
+            delegated.append(scope)
+
+        def lazy_refresh(tenant_id):
+            mcp_service._tenant_mcp_apps[tenant_id] = tenant_app
+            return {"registered": 0}
+
+        with patch.object(mcp_service, "refresh_openapi_services_by_tenant", side_effect=lazy_refresh):
+            await mcp_service.TenantMCPRouter()(
+                {
+                    "type": "http",
+                    "path": "/mcp/tenant1/sse",
+                    "root_path": "/api",
+                    "headers": [(b"authorization", b"Bearer valid")],
+                },
+                "receive",
+                "send",
+            )
+
+        assert delegated == [
+            {
+                "type": "http",
+                "path": "/sse",
+                "root_path": "/api/mcp/tenant1",
+                "headers": [(b"authorization", b"Bearer valid")],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_lazy_initialization_failure_returns_not_found(self, monkeypatch):
+        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
+        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        with patch.object(
+            mcp_service,
+            "refresh_openapi_services_by_tenant",
+            side_effect=RuntimeError("refresh failed"),
+        ):
+            await mcp_service.TenantMCPRouter()(
+                {
+                    "type": "http",
+                    "path": "/mcp/tenant1/sse",
+                    "headers": [(b"authorization", b"Bearer valid")],
+                },
+                None,
+                send,
+            )
+
+        assert sent[0]["status"] == 404
+
+    @pytest.mark.asyncio
+    async def test_lazy_initialization_without_app_returns_not_found(self, monkeypatch):
+        auth_module = types.ModuleType("utils.auth_utils")
+        auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
+        monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        with patch.object(mcp_service, "refresh_openapi_services_by_tenant"):
+            await mcp_service.TenantMCPRouter()(
+                {
+                    "type": "http",
+                    "path": "/mcp/tenant1/sse",
+                    "headers": [(b"authorization", b"Bearer valid")],
+                },
+                None,
+                send,
+            )
+
+        assert sent[0]["status"] == 404
+
+
+class TestTenantMcpAppBuilder:
+    def test_build_app_uses_sse_app_when_available(self):
+        app = object()
+        server = types.SimpleNamespace(sse_app=lambda: app)
+        assert mcp_service._build_tenant_mcp_app(server) is app
+
+    def test_build_app_falls_back_to_http_sse_app(self):
+        app = object()
+        server = types.SimpleNamespace(http_app=lambda transport: app)
+        assert mcp_service._build_tenant_mcp_app(server) is app
+
+    def test_build_app_returns_server_when_no_app_factory_exists(self):
+        server = object()
+        assert mcp_service._build_tenant_mcp_app(server) is server
+
+
+def test_run_mcp_server_with_management_starts_and_cleans_up_services():
+    execution = types.SimpleNamespace(execution_id="management-1")
+    mcp_service.mcp_thread_manager.register_service = MagicMock(return_value=execution)
+    mcp_service.mcp_thread_manager.start = MagicMock()
+    mcp_service.mcp_thread_manager.start_service = MagicMock()
+    mcp_service.mcp_thread_manager.cancel = MagicMock()
+    mcp_service.mcp_thread_manager.shutdown = AsyncMock()
+    mcp_service.nexent_mcp.run = MagicMock()
+    mcp_service.uvicorn.Config = MagicMock()
+    mcp_service.uvicorn.Server = MagicMock()
+    mcp_service.uvicorn.run = MagicMock()
+
+    with patch.object(mcp_service, "get_mcp_management_app", return_value=object()), \
+         patch.object(mcp_service, "set_default_thread_manager") as set_default, \
+         patch.object(mcp_service, "clear_default_thread_manager") as clear_default:
+        mcp_service.run_mcp_server_with_management()
+
+    mcp_service.mcp_thread_manager.start.assert_called_once_with()
+    set_default.assert_called_once_with(mcp_service.mcp_thread_manager)
+    mcp_service.mcp_thread_manager.start_service.assert_called_once_with("management-1")
+    mcp_service.uvicorn.run.assert_called_once()
+    mcp_service.nexent_mcp.run.assert_called_once_with(
+        transport="sse", host="0.0.0.0", port=5011
+    )
+    mcp_service.mcp_thread_manager.cancel.assert_called_once_with(
+        "management-1", reason="MCP server stopping", wait_timeout=5
+    )
+    mcp_service.mcp_thread_manager.shutdown.assert_awaited_once_with(timeout=15)
+    clear_default.assert_called_once_with(mcp_service.mcp_thread_manager)
 
     @patch.object(Thread, 'start')
     @patch('mcp_service.uvicorn')
