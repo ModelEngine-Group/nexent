@@ -3,6 +3,7 @@
 import json
 import sys
 import types
+import zipfile
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -158,6 +159,13 @@ class _OfficialAgentInstallStep(BaseModel):
     message: Optional[str] = None
 
 
+class _ToolInstanceInfoRequest(BaseModel):
+    tool_id: int
+    agent_id: int
+    enabled: bool = True
+    params: Dict[str, Any] = {}
+
+
 consts_model.ModelConnectStatusEnum = _ModelConnectStatusEnum
 consts_model.OfficialAgentBundle = _OfficialAgentBundle
 consts_model.OfficialAgentListItem = _OfficialAgentListItem
@@ -170,6 +178,7 @@ consts_model.SkillZipEntry = _SkillZipEntry
 consts_model.SkillResolution = _SkillResolution
 consts_model.AgentRepositorySnapshot = _AgentRepositorySnapshot
 consts_model.ProcessParams = _ProcessParams
+consts_model.ToolInstanceInfoRequest = _ToolInstanceInfoRequest
 # The naming service imports model_management_db, which imports this helper
 # while the test intentionally replaces consts.model with an isolated stub.
 consts_model.filter_extra_params = lambda params: params
@@ -1255,6 +1264,7 @@ def test_attach_kb_docs_distinguishes_text_and_binary(tmp_path):
     _write_dir_bundle(tmp_path, "foldered", kb_logical="industry-kb", kb_docs=("a.md",))
     kb_path = tmp_path / "foldered" / "kb" / "industry-kb"
     (kb_path / "b.docx").write_bytes(b"%PDF-1.4 fake")
+    (kb_path / "nested").mkdir()
 
     with patch.object(
         official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)
@@ -1425,3 +1435,298 @@ async def test_install_bundle_records_failed_step():
 
     assert [(s.name, s.status) for s in steps] == [("mcp", "failed")]
     assert steps[0].message == "boom"
+
+
+# ---------------------------------------------------------------------------
+# Additional filesystem and partial-install branches
+# ---------------------------------------------------------------------------
+
+
+def test_list_bundle_files_handles_json_zip_and_walk_errors(tmp_path):
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        with patch.object(
+            official_agent_service.os,
+            "walk",
+            return_value=[
+                (
+                    str(tmp_path / "profile"),
+                    [".hidden", "nested"],
+                    ["agent.json", "single.JSON", "archive.ZIP"],
+                ),
+                (str(tmp_path / "profile" / "nested"), [], ["agent.json"]),
+            ],
+        ):
+            assert official_agent_service._list_bundle_files() == [
+                "profile",
+                "profile/archive",
+                "profile/nested",
+                "profile/single",
+            ]
+
+        with patch.object(official_agent_service.os, "walk", side_effect=OSError("denied")):
+            assert official_agent_service._list_bundle_files() == []
+
+
+def test_list_bundle_files_returns_empty_when_path_is_missing(tmp_path):
+    with patch.object(
+        official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path / "missing")
+    ):
+        assert official_agent_service._list_bundle_files() == []
+
+
+def test_attach_skills_from_dir_skips_missing_declared_skill(tmp_path):
+    bundle = _make_bundle(name="research")
+    bundle.agent_info["1"].skill_names = ["present", "missing"]
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "present.zip").write_bytes(b"skill")
+
+    official_agent_service._attach_skills_from_dir(bundle, str(tmp_path))
+
+    assert [skill.skill_name for skill in bundle.skills] == ["present"]
+
+
+def test_attach_kb_docs_returns_when_kb_directory_is_missing(tmp_path):
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    bundle.knowledge_bases[0].documents = []
+    official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
+    assert bundle.knowledge_bases[0].documents == []
+
+
+def test_attach_kb_docs_skips_missing_logical_directory(tmp_path):
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    bundle.knowledge_bases[0].documents = []
+    (tmp_path / "kb").mkdir()
+    official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
+    assert bundle.knowledge_bases[0].documents == []
+
+
+def test_attach_kb_docs_handles_directory_read_error(tmp_path):
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    bundle.knowledge_bases[0].documents = []
+    logical_dir = tmp_path / "kb" / "kb-1"
+    logical_dir.mkdir(parents=True)
+    with patch.object(official_agent_service.os, "listdir", side_effect=OSError("denied")):
+        official_agent_service._attach_kb_docs_from_dir(bundle, str(tmp_path))
+    assert bundle.knowledge_bases[0].documents == []
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "../escape", "profile\\escape", "/absolute"])
+def test_load_bundle_rejects_unsafe_names(tmp_path, name):
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        assert official_agent_service._load_bundle(name) is None
+
+
+def test_load_bundle_finds_nested_directory_bundle(tmp_path):
+    bundle_dir = tmp_path / "general" / "assistant"
+    bundle_dir.mkdir(parents=True)
+    (bundle_dir / "agent.json").write_text(
+        json.dumps(_bundle_dict("assistant")), encoding="utf-8"
+    )
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        bundle = official_agent_service._load_bundle("assistant")
+    assert bundle is not None
+    assert bundle.name == "assistant"
+
+
+def test_load_bundle_skips_invalid_directory_bundle(tmp_path):
+    bundle_dir = tmp_path / "assistant"
+    bundle_dir.mkdir()
+    (bundle_dir / "agent.json").write_text("{}", encoding="utf-8")
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        assert official_agent_service._load_bundle("assistant") is None
+
+
+def test_load_bundle_finds_nested_single_json_bundle(tmp_path):
+    nested = tmp_path / "general"
+    nested.mkdir()
+    (nested / "assistant.json").write_text(
+        json.dumps(_bundle_dict("assistant")), encoding="utf-8"
+    )
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        bundle = official_agent_service._load_bundle("assistant")
+    assert bundle is not None
+    assert bundle.name == "assistant"
+
+
+def test_load_bundle_loads_nested_zip_bundle(tmp_path):
+    nested = tmp_path / "general"
+    nested.mkdir()
+    with zipfile.ZipFile(nested / "assistant.zip", "w") as archive:
+        archive.writestr("agent.json", json.dumps(_bundle_dict("assistant")))
+        archive.writestr("empty-directory/", "")
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        bundle = official_agent_service._load_bundle("assistant")
+    assert bundle is not None
+    assert bundle.name == "assistant"
+
+
+def test_load_bundle_rejects_zip_path_traversal(tmp_path):
+    with zipfile.ZipFile(tmp_path / "assistant.zip", "w") as archive:
+        archive.writestr("../agent.json", json.dumps(_bundle_dict("assistant")))
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        assert official_agent_service._load_bundle("assistant") is None
+
+
+def test_load_bundle_skips_invalid_zip_bundle(tmp_path):
+    (tmp_path / "assistant.zip").write_bytes(b"not-a-zip")
+    with patch.object(official_agent_service, "OFFICIAL_AGENTS_PATH", str(tmp_path)):
+        assert official_agent_service._load_bundle("assistant") is None
+
+
+def test_find_installed_agent_id_handles_missing_or_blank_root_agent():
+    bundle = _make_bundle(name="research")
+    bundle.agent_info = {}
+    assert official_agent_service._find_installed_agent_id(bundle, "tenant-1") is False
+
+    bundle.agent_info = {"1": _ExportAndImportAgentInfo(name="")}
+    assert official_agent_service._find_installed_agent_id(bundle, "tenant-1") is False
+
+
+def test_find_installed_agent_id_matches_current_user_only():
+    bundle = _make_bundle(name="research")
+    fake = types.ModuleType("database.agent_db")
+    fake.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[
+            {"name": "research_agent", "created_by": "other", "agent_id": 1},
+            {"name": "research_agent", "created_by": "u", "agent_id": 9},
+        ]
+    )
+    with patch.dict(sys.modules, {"database.agent_db": fake}):
+        assert official_agent_service._find_installed_agent_id(bundle, "tenant-1", "u") == 9
+
+
+def test_find_installed_agent_id_returns_none_when_current_user_has_no_match():
+    bundle = _make_bundle(name="research")
+    fake = types.ModuleType("database.agent_db")
+    fake.query_all_agent_info_by_tenant_id = MagicMock(
+        return_value=[{"name": "research_agent", "created_by": "other", "agent_id": 1}]
+    )
+    with patch.dict(sys.modules, {"database.agent_db": fake}):
+        assert official_agent_service._find_installed_agent_id(bundle, "tenant-1", "u") is None
+
+
+def test_kb_needs_rerank_ignores_non_kb_and_disabled_rerank_tools():
+    bundle = _make_bundle(name="research")
+    bundle.agent_info["1"].tools = [
+        _ToolConfig(class_name="WebSearchTool", params={"rerank": True}),
+        _ToolConfig(class_name="KnowledgeBaseSearchTool", params={"rerank": False}),
+    ]
+    assert official_agent_service._kb_needs_rerank(bundle) is False
+
+
+async def test_index_binary_docs_skips_processing_when_upload_returns_no_path(tmp_path):
+    binary_file = tmp_path / "guide.pdf"
+    binary_file.write_bytes(b"pdf")
+    fake_file_svc = types.ModuleType("services.file_management_service")
+    fake_file_svc.upload_files_impl = AsyncMock(return_value=([], [], []))
+    fake_utils = types.ModuleType("utils.file_management_utils")
+    fake_utils.trigger_data_process = AsyncMock()
+    doc = _KnowledgeBaseSeedDoc(file_name="guide.pdf", file_path=str(binary_file))
+
+    with patch.dict(
+        sys.modules,
+        {
+            "services.file_management_service": fake_file_svc,
+            "utils.file_management_utils": fake_utils,
+        },
+    ):
+        await official_agent_service._index_binary_docs(
+            "index-1",
+            [doc],
+            tenant_id="tenant-1",
+            user_id="u",
+            embedding_model_id=5,
+            authorization="auth",
+        )
+
+    fake_file_svc.upload_files_impl.assert_awaited_once()
+    fake_utils.trigger_data_process.assert_not_awaited()
+
+
+def test_update_existing_agent_kb_refs_updates_matching_tool_instance():
+    bundle = _make_bundle(name="research")
+    bundle.agent_info["1"].tools = [
+        _ToolConfig(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": ["kb-1"]},
+        )
+    ]
+    fake_tool_db = types.ModuleType("database.tool_db")
+    fake_tool_db.query_all_tools = MagicMock(
+        return_value=[{"tool_id": 8, "class_name": "KnowledgeBaseSearchTool", "source": "local"}]
+    )
+    fake_tool_db.query_tool_instances_by_agent_id = MagicMock(
+        return_value=[
+            {"tool_id": 8, "enabled": False},
+            {"tool_id": 9, "enabled": True},
+        ]
+    )
+    fake_tool_db.create_or_update_tool_by_tool_info = MagicMock()
+
+    with patch.dict(sys.modules, {"database.tool_db": fake_tool_db}):
+        official_agent_service._update_existing_agent_kb_refs(bundle, 42, "tenant-1", "u")
+
+    fake_tool_db.create_or_update_tool_by_tool_info.assert_called_once()
+    request = fake_tool_db.create_or_update_tool_by_tool_info.call_args.args[0]
+    assert request.tool_id == 8
+    assert request.agent_id == 42
+    assert request.enabled is False
+    assert request.params == {"index_names": ["kb-1"]}
+
+
+def test_update_existing_agent_kb_refs_returns_without_kb_tools():
+    bundle = _make_bundle(name="research")
+    fake_tool_db = types.ModuleType("database.tool_db")
+    fake_tool_db.query_all_tools = MagicMock()
+    fake_tool_db.query_tool_instances_by_agent_id = MagicMock()
+    fake_tool_db.create_or_update_tool_by_tool_info = MagicMock()
+    with patch.dict(sys.modules, {"database.tool_db": fake_tool_db}):
+        official_agent_service._update_existing_agent_kb_refs(bundle, 42, "tenant-1", "u")
+    fake_tool_db.query_all_tools.assert_not_called()
+
+
+async def test_install_bundle_reuses_existing_agent_after_kb_repair():
+    bundle = _make_bundle(name="research", has_knowledge=True)
+    fake_tool = types.ModuleType("services.tool_configuration_service")
+    fake_tool.update_tool_list = AsyncMock()
+    fake_agent = types.ModuleType("management.services.agent.service")
+    fake_agent.import_agent_impl = AsyncMock()
+    fake_agent.import_agent_with_skills_impl = AsyncMock()
+    steps = []
+
+    with patch.object(official_agent_service, "_install_mcp_servers", new_callable=AsyncMock):
+        with patch.object(
+            official_agent_service,
+            "_create_knowledge_bases",
+            new_callable=AsyncMock,
+            return_value={"kb-1": "tenant-index"},
+        ):
+            with patch.object(
+                official_agent_service, "_update_existing_agent_kb_refs"
+            ) as repair:
+                with patch.dict(
+                    sys.modules,
+                    {
+                        "services.tool_configuration_service": fake_tool,
+                        "management.services.agent.service": fake_agent,
+                    },
+                ):
+                    result = await official_agent_service._install_bundle(
+                        bundle,
+                        "tenant-1",
+                        "u",
+                        "auth",
+                        embedding_model_id=5,
+                        steps=steps,
+                        existing_agent_id=42,
+                    )
+
+    assert result == 42
+    repair.assert_called_once_with(bundle, 42, "tenant-1", "u")
+    assert [(step.name, step.status) for step in steps] == [
+        ("mcp", "ok"),
+        ("knowledge_base", "ok"),
+        ("agent", "ok"),
+    ]
+    assert steps[-1].message == "agent already exists; dependencies ensured"
