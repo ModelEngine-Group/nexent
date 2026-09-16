@@ -33,7 +33,7 @@ export function AgentToolCapability() {
   const [labelModalOpen, setLabelModalOpen] = useState(false);
   const { invalidate, availableTools } = useToolList();
 
-  const refreshAgentAfterMcpDeletion = useCallback(async () => {
+  const prepareAgentForMcpDeletion = useCallback(async () => {
     const initialState = useAgentStore.getState();
     const agentId = initialState.agentId;
     if (agentId === null) return;
@@ -43,6 +43,12 @@ export function AgentToolCapability() {
       throw new Error("Pending Agent edits could not be saved");
     }
     if (useAgentStore.getState().agentId !== agentId) return;
+  }, []);
+
+  const refreshAgentAfterMcpDeletion = useCallback(async () => {
+    const initialState = useAgentStore.getState();
+    const agentId = initialState.agentId;
+    if (agentId === null) return;
 
     const result = await searchAgentInfo(agentId, undefined, 0);
     if (!result.success || !result.data) {
@@ -116,6 +122,7 @@ export function AgentToolCapability() {
       <McpConfigModal
         visible={isMcpModalOpen}
         onCancel={() => setIsMcpModalOpen(false)}
+        onBeforeMcpDelete={prepareAgentForMcpDeletion}
         onMcpDeleted={refreshAgentAfterMcpDeletion}
       />
       <SelectToolsDialog

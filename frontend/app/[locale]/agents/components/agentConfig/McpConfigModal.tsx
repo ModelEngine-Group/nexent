@@ -51,6 +51,7 @@ const { Text, Title } = Typography;
 export default function McpConfigModal({
   visible,
   onCancel,
+  onBeforeMcpDelete,
   onMcpDeleted,
 }: McpConfigModalProps) {
   const { t } = useTranslation("common");
@@ -158,6 +159,17 @@ export default function McpConfigModal({
   // Data loading is handled by React Query (enabled: visible)
 
   // Handlers
+  const prepareAgentForDelete = async () => {
+    try {
+      await onBeforeMcpDelete?.();
+      return true;
+    } catch (error) {
+      log.error("Failed to save Agent draft before MCP deletion:", error);
+      message.error(t("businessLogic.config.error.saveFailed"));
+      return false;
+    }
+  };
+
   const refreshAgentAfterDelete = async () => {
     try {
       await onMcpDeleted?.();
@@ -231,6 +243,8 @@ export default function McpConfigModal({
       }),
       okText: t("common.delete", "Delete"),
       onOk: async () => {
+        if (!(await prepareAgentForDelete())) return;
+
         const result = await handleDeleteServer(server);
         if (!result.success) {
           message.error(
@@ -444,6 +458,8 @@ export default function McpConfigModal({
       }),
       okText: t("common.delete", "Delete"),
       onOk: async () => {
+        if (!(await prepareAgentForDelete())) return;
+
         const result = await handleDeleteContainer(container);
         if (!result.success) {
           message.error(
