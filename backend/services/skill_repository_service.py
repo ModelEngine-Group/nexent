@@ -822,6 +822,7 @@ def install_skill_from_repository_impl(
     tenant_id: str,
     user_id: str,
     target_name: Optional[str] = None,
+    source: str = "repository",
 ) -> Dict[str, Any]:
     """Install a shared skill repository listing into the current tenant."""
     record = get_skill_repository_by_id_and_publisher(
@@ -859,7 +860,7 @@ def install_skill_from_repository_impl(
         created_skill = SkillService(tenant_id=tenant_id).create_skill_from_zip_bytes(
             zip_bytes=zip_bytes,
             skill_name=copy_skill_name,
-            source="repository",
+            source=source,
             user_id=user_id,
             tenant_id=tenant_id,
             ingroup_permission=PERMISSION_READ,
