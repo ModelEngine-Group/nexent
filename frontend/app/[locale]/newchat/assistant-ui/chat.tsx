@@ -1,6 +1,6 @@
 "use client";
 
-import type { FC } from "react";
+import type { FC, ReactNode } from "react";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Thread, type WelcomeSuggestion } from "./thread";
@@ -41,6 +41,7 @@ export interface ChatProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
+  interactionContent?: ReactNode;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -82,6 +83,7 @@ export const Chat: FC<ChatProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   readOnly = false,
+  interactionContent,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -124,6 +126,7 @@ export const Chat: FC<ChatProps> = ({
       runtimeMetadata={runtimeMetadata}
       onRuntimeMetadataChange={onRuntimeMetadataChange}
       readOnly={readOnly}
+      interactionContent={interactionContent}
     />
   );
 };

@@ -12,7 +12,9 @@ parsed with `utils.auth_utils.get_current_user_id`, then propagated as `user_id`
 and `tenant_id` to services/database helpers.
 """
 
+import asyncio
 import logging
+import re
 
 from consts.model import (
     BatchCreateModelsRequest,
@@ -30,6 +32,7 @@ from consts.model import (
     ManageBatchCreateModelsRequest,
     ManageProviderModelListRequest,
     ManageProviderModelCreateRequest,
+    FIXED_INFERENCE_FIELDS_BY_TYPE,
 )
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
@@ -37,7 +40,7 @@ from fastapi import APIRouter, Header, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 from services.model_health_service import (
     check_model_connectivity,
     verify_model_config_connectivity,
@@ -60,10 +63,82 @@ from services.model_management_service import (
 )
 from utils.auth_utils import get_current_user_id
 from consts.exceptions import TokenExpiredError
+from nexent.core.concurrency import run_blocking
+
+# Model Catalog loader (with graceful fallback)
+try:
+    from configs.model_catalog_loader import (
+        list_catalog_providers,
+        list_models_by_provider,
+        get_model_profile as _catalog_get_model_profile,
+        dump_full_catalog,
+    )
+    _CATALOG_AVAILABLE = True
+except Exception as _exc:  # noqa: BLE001
+    logging.getLogger("model_management_app").warning(
+        "Model catalog unavailable: %s", _exc
+    )
+    _CATALOG_AVAILABLE = False
+
+    def list_catalog_providers():
+        return []
+
+    def list_models_by_provider(_p, _t=None):
+        return []
+
+    def _catalog_get_model_profile(_p, _m):
+        return None
+
+    def dump_full_catalog():
+        return {"version": "0.0.0", "metadata": {}, "providers": []}
 
 
 router = APIRouter(prefix="/model")
 logger = logging.getLogger("model_management_app")
+
+# Shared response message for every catalog endpoint's failure branch.
+_CATALOG_UNAVAILABLE_MESSAGE = "catalog unavailable"
+
+# Control characters (including newlines/tabs) that must never reach a log
+# line: catalog lookups interpolate user-supplied provider/model names.
+_LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_model_credentials(payload: Any) -> Any:
+    """Remove model API keys before returning model data to HTTP clients.
+
+    Model records are also consumed by internal services, so credential
+    removal belongs at the HTTP response boundary rather than in the database
+    or model-management service layer. The presence of a configured key is
+    intentionally not returned; callers that need to update a model can omit
+    ``api_key`` to keep the existing value.
+    """
+    if isinstance(payload, list):
+        return [_sanitize_model_credentials(item) for item in payload]
+
+    if isinstance(payload, dict):
+        return {
+            key: _sanitize_model_credentials(value)
+            for key, value in payload.items()
+            if key != "api_key"
+        }
+
+    return payload
+
+
+def _log_safe(value: Any) -> str:
+    """Strip control characters so user input cannot forge log entries."""
+    return _LOG_UNSAFE_CHARS.sub("", str(value))
+
+
+def _catalog_unavailable_response(status_code: HTTPStatus, **extra: Any) -> JSONResponse:
+    """Uniform failure response shared by every catalog endpoint."""
+    content: Dict[str, Any] = {
+        "message": _CATALOG_UNAVAILABLE_MESSAGE,
+        "catalog_available": False,
+    }
+    content.update(extra)
+    return JSONResponse(status_code=status_code, content=content)
 
 
 def _capacity_suggestion_response_to_model(result) -> ModelCapacitySuggestionResponse:
@@ -95,7 +170,6 @@ def _suggest_capacity_for_request(request: ModelCapacitySuggestionRequest) -> Mo
         base_url=request.base_url,
         provider_hint=request.provider_hint,
         model_type=request.model_type,
-        api_key=request.api_key,
         enabled=CAPACITY_SUGGESTION_ENABLED,
     )
     return _capacity_suggestion_response_to_model(result)
@@ -142,12 +216,13 @@ async def create_model(request: ModelRequest, authorization: Optional[str] = Hea
         accept_signal = pop_capacity_accept_signal(model_data)
         logger.debug(
             f"Start to create model, user_id: {user_id}, tenant_id: {tenant_id}")
-        await create_model_for_tenant(user_id, tenant_id, model_data)
+        create_result = await create_model_for_tenant(user_id, tenant_id, model_data)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
         return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully"
         })
     except ValueError as e:
@@ -238,7 +313,7 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
         model_list = await create_provider_models_for_tenant(tenant_id, provider_model_config)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Provider model created successfully",
-            "data": model_list
+            "data": _sanitize_model_credentials(model_list)
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -273,12 +348,13 @@ async def batch_create_models(request: BatchCreateModelsRequest, authorization: 
             for model in batch_model_config.get("models", [])
             if (signal := pop_capacity_accept_signal(model)) is not None
         ]
-        await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
+        batch_result = await batch_create_models_for_tenant(user_id, tenant_id, batch_model_config)
         provider = batch_model_config.get("provider")
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
-            "message": "Batch create models successfully"
+            "message": "Batch create models successfully",
+            "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -305,7 +381,7 @@ async def get_provider_list(request: ProviderModelRequest, authorization: Option
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved provider list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -436,7 +512,7 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
         model_list = await list_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -455,7 +531,7 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
         llm_list = await list_llm_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved LLM list",
-            "data": jsonable_encoder(llm_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(llm_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -515,11 +591,18 @@ async def check_temporary_model_health(
     try:
         get_current_user_id(authorization)
         result = await verify_model_config_connectivity(request.model_dump())
-        result["capacity_suggestion"] = (
-            _capacity_suggestion_for_model_request(request)
-            if result.get("connectivity") is True
-            else None
-        )
+        if result.get("connectivity") is True:
+            # suggest_capacity may now issue an LLM self-report HTTP call
+            # (catalog miss → _llm_infer_capacity). Run it through the
+            # managed thread pool so the 15s probe budget does not block
+            # other requests.
+            result["capacity_suggestion"] = await run_blocking(
+                "model-capacity-suggestion",
+                _capacity_suggestion_for_model_request,
+                request,
+            )
+        else:
+            result["capacity_suggestion"] = None
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully verified model connectivity",
             "data": result
@@ -611,12 +694,13 @@ async def manage_create_model(
         # operator-accepted suggestions saved by SU/asset-owner via
         # /manage/* would silently miss the accept_total SLO numerator.
         accept_signal = pop_capacity_accept_signal(model_data)
-        await create_model_for_tenant(user_id, request.tenant_id, model_data)
+        create_result = await create_model_for_tenant(user_id, request.tenant_id, model_data)
         if accept_signal is not None:
             _record_capacity_suggestion_accept(
                 accept_signal["match_kind"], request.model_factory
             )
         return JSONResponse(status_code=HTTPStatus.OK, content={
+            "auto_configured_defaults": create_result.get("auto_configured_defaults", []),
             "message": "Model created successfully",
             "data": {"tenant_id": request.tenant_id}
         })
@@ -760,11 +844,12 @@ async def manage_batch_create_models(
             for model in batch_model_config.get("models", [])
             if (signal := pop_capacity_accept_signal(model)) is not None
         ]
-        await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
+        batch_result = await batch_create_models_for_tenant(user_id, request.tenant_id, batch_model_config)
         for signal in accept_signals:
             _record_capacity_suggestion_accept(signal["match_kind"], request.provider)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Batch create models successfully",
+            "auto_configured_defaults": batch_result.get("auto_configured_defaults", []),
             "data": {
                 "tenant_id": request.tenant_id,
                 "provider": request.provider,
@@ -810,7 +895,7 @@ async def manage_list_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model list",
-            "data": jsonable_encoder(result)
+            "data": jsonable_encoder(_sanitize_model_credentials(result))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -849,7 +934,7 @@ async def manage_list_provider_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved provider model list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -895,7 +980,7 @@ async def manage_create_provider_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully created provider models",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -904,3 +989,212 @@ async def manage_create_provider_models(
         logging.error(f"Failed to create provider models for tenant: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                             detail=str(e))
+
+
+# =============================================================================
+# Model Catalog (预置模型目录) - readonly endpoints for frontend autocompletion
+# =============================================================================
+
+
+@router.get("/catalog/all")
+async def get_model_catalog_all(
+    authorization: Optional[str] = Header(None),
+):
+    """Return the entire preset model catalog in a single HTTP call.
+
+    The payload contains every provider (display name + default base URL)
+    together with every model's full prefill profile.  The frontend performs
+    filtering, model list rendering and single-profile lookup locally without
+    issuing additional backend requests.
+
+    Authorization is accepted (for consistency) but not required.  The
+    catalog contains only public metadata.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        data = dump_full_catalog()
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Dumping full catalog failed: %s", e)
+        return _catalog_unavailable_response(
+            HTTPStatus.OK,
+            data={"version": "0.0.0", "metadata": {}, "providers": []},
+        )
+
+
+@router.get("/catalog/providers")
+async def list_model_catalog_providers(
+    authorization: Optional[str] = Header(None),
+):
+    """List all providers declared in the preset model catalog.
+
+    The response includes each provider's display name, default base URL,
+    supported model types and how many preset models it contains.  The
+    endpoint is intentionally lightweight so the frontend can decide which
+    providers to render a "From preset" entry-point for.
+
+    Authorization is accepted (for consistency) but not required.  The
+    catalog contains only public metadata.
+    """
+    try:
+        # Validate the caller is still a real user.  Failure here means the
+        # frontend is not logged in (rare for model-config page); we still
+        # return catalog data since it carries no tenant information.
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        providers = list_catalog_providers()
+        data = [p.model_dump(mode="json") for p in providers]
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Listing catalog providers failed: %s", e)
+        return _catalog_unavailable_response(HTTPStatus.OK, data=[])
+
+
+@router.get("/catalog/inference_field_specs")
+async def get_inference_field_specs(
+    authorization: Optional[str] = Header(None),
+):
+    """Return fixed inference field specifications grouped by model type.
+
+    v2.6.0: The frontend uses this to dynamically render the advanced-settings
+    form for each model type (LLM/Embedding/STT/TTS/...). Defining the field
+    set in one place (backend consts.model) avoids hardcoding two copies.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        data = {
+            model_type: [spec.model_dump(mode="json") for spec in specs]
+            for model_type, specs in FIXED_INFERENCE_FIELDS_BY_TYPE.items()
+        }
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "data": data,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Returning inference field specs failed: %s", e)
+        return JSONResponse(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            content={
+                "message": "failed to load inference field specs",
+                "data": {},
+            },
+        )
+
+
+@router.get("/catalog/{provider}/models")
+async def list_model_catalog_models(
+    provider: str,
+    model_type: Annotated[Optional[str], Query()] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """List preset models inside one specific provider (optionally filtered by type).
+
+    Returns a list of ``{model_name, profile}`` pairs.  ``profile`` contains
+    the exact fields the frontend needs to prefill the Add-Model dialog form.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        models = list_models_by_provider(provider, model_type)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "provider": provider,
+                "filter_model_type": model_type,
+                "data": models,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Listing catalog models for %s failed: %s", _log_safe(provider), e)
+        return _catalog_unavailable_response(
+            HTTPStatus.OK,
+            provider=provider,
+            filter_model_type=model_type,
+            data=[],
+        )
+
+
+@router.get("/catalog/{provider}/{model_name:path}")
+async def get_model_catalog_profile(
+    provider: str,
+    model_name: str,
+    authorization: Optional[str] = Header(None),
+):
+    """Return the exact preset profile for a single (provider, model_name).
+
+    Used by the Add-Model dialog immediately after the operator selects a
+    preset entry from the dropdown -- the returned ``profile`` dict is the
+    source of truth for prefilling every field (base_url, context_window,
+    chunk sizes, tokenizer, ...).  ``model_name`` uses ``:path`` capture so
+    slashed identifiers like ``Qwen/Qwen3-8B`` round-trip correctly.
+    """
+    try:
+        try:
+            get_current_user_id(authorization)
+        except Exception:  # noqa: BLE001
+            pass
+
+        profile = _catalog_get_model_profile(provider, model_name)
+        if profile is None:
+            return JSONResponse(
+                status_code=HTTPStatus.NOT_FOUND,
+                content={
+                    "message": f"No catalog profile for {provider}/{model_name}",
+                    "catalog_available": _CATALOG_AVAILABLE,
+                    "provider": provider,
+                    "model_name": model_name,
+                    "data": None,
+                },
+            )
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "message": "ok",
+                "catalog_available": _CATALOG_AVAILABLE,
+                "provider": provider,
+                "model_name": model_name,
+                "data": profile.model_dump(mode="json"),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Get catalog profile for %s/%s failed: %s",
+                       _log_safe(provider), _log_safe(model_name), e)
+        return _catalog_unavailable_response(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            provider=provider,
+            model_name=model_name,
+            data=None,
+        )

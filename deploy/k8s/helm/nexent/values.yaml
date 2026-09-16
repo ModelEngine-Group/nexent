@@ -23,6 +23,10 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/logs"
       existingClaim: "nexent-logs"
+    projectConfig:
+      size: "1Gi"
+      localPath: "/var/lib/nexent-data/project-config"
+      existingClaim: "nexent-project-config"
   deploymentVersion: "full"
   deploymentComponents:
     infrastructure: false
@@ -54,6 +58,7 @@ global:
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"
@@ -107,6 +112,8 @@ nexent-northbound:
 nexent-web:
   enabled: true
   replicaCount: 1
+  config:
+    fileUploadSizeLimit: "10"
 nexent-data-process:
   enabled: true
 nexent-supabase-kong:

@@ -82,7 +82,7 @@ def create_embedding_model(model: dict) -> Any:
 
     # Vendor dispatch (DashScope/Siliconflow/Jina/OpenAI) is resolved by the
     # adapter registry; per-vendor request-body formatting lives in the
-    # embedding adapters. Built fresh (no gateway cache). Returns the adapter;
+    # embedding adapters. Built fresh. Returns the adapter;
     # callers use adapter.get_embeddings / adapter.dimension_check unchanged.
     return build_adapter_fresh(model_config, modality, slot, None)
 

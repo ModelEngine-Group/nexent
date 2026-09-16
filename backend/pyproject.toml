@@ -57,7 +57,7 @@ test = [
     "mock",
     "pytest-asyncio",
     "pytest-mock",
-    "fastapi[testclient]",
+    "httpx>=0.28.1",
     "selenium",
     "botocore"
 ]

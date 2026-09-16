@@ -91,6 +91,7 @@ POST /nb/v1/chat/run
 |------|------|------|------|
 | `agent_name` | string | 是 | 目标 Agent 名称 |
 | `query` | string | 是 | 用户输入内容 |
+| `enable_hitl` | boolean | 否 | 是否启用人在回路，默认 `false` |
 | `conversation_id` | integer | 否 | 已有对话 ID，不填则创建新对话 |
 | `attachments` | array | 否 | 附件列表（S3 URL 或附件元数据对象） |
 | `model_id` | integer | 否 | 模型 ID（覆盖 Agent 默认模型） |
@@ -197,12 +198,125 @@ curl -X POST "https://your-nexent-domain.com/nb/v1/chat/run" \
 接口返回 Server-Sent Events（SSE）流，逐块返回 Agent 响应：
 
 ```text
-data: {"type":"text","content":"正在分析数据"}
+data: {"type":"model_output_thinking","content":"正在分析数据","unit_index":1}
 
-data: {"type":"text","content":"，请稍候..."}
+data: {"type":"model_output_thinking","content":"，请稍候...","unit_index":1}
 
-data: {"type":"done","conversation_id":123,"content":"分析完成"}
+data: {"type":"final_answer","content":"分析完成","unit_index":2}
 ```
+
+## 人在回路（HITL）
+
+对话入口为 `POST /api/nb/v1/chat/run`。本文其他路径省略网关公共前缀 `/api`；直连服务时请按实际部署的根路径访问。所有 HITL 接口沿用 `Authorization: Bearer {access_key}`，用户和租户由 API Key 解析，不接受调用方指定 `user_id` 或 `tenant_id`。
+
+### 开启与运行过程
+
+```bash
+curl -N 'https://your-nexent-domain.com/api/nb/v1/chat/run' \
+  -H "Authorization: Bearer ${NEXENT_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_name":"general-assistant","query":"帮我准备通知","enable_hitl":true}'
+```
+
+`enable_hitl` 默认为 `false`。客户端应先查询 `GET /nb/v1/chat/human-interactions/capabilities`，读取响应的 `data.enabled`、`data.accept_new_runs` 和 `data.tool_approval_enabled`。runtime 关闭 HITL 或停止接收新 HITL 运行时，启动请求沿用普通对话行为；`enable_hitl=true` 不保证一定生成卡片，Agent 只在需要补充关键信息时提问。
+
+启动后，runtime 为当前会话建立一个 `run_id`。遇到人工交互时持久化卡片并进入 `WAITING_HUMAN`；提交有效决定后进入 `READY`，由当前执行线程或调度器继续同一次运行。北向服务通过内部 JWT 代理到 runtime，复用其持久化、租户及用户归属校验、版本校验和幂等处理。
+
+### 流式事件协议
+
+继续使用 `data: {"type": ..., "content": ...}`。**卡片的 `type` 固定为 `human_interaction`**，卡片内容为 JSON 对象，不需要再次 `JSON.parse(content)`。
+
+| `type` | `content` | 用途 |
+|---|---|---|
+| `conversation_created` | 对象，包含 `conversation_id` | 新建会话时的北向通知 |
+| `human_run` | 对象，包含 `run_id`、`status`；快照还包含 `conversation_id`、`event_seq`、`requests` | 运行状态和待处理卡片快照 |
+| `human_interaction` | 卡片对象 | 展示人工输入或确认卡片 |
+| `human_decision` | 对象，包含 `run_id`、`request_id`、`status` | 决定已接受，更新卡片状态 |
+| `human_execution` | 对象，包含工具执行槽位及状态 | 工具执行进度通知 |
+| `model_output_thinking`、`final_answer`、`token_count` 等 | 沿用原运行时格式 | 普通 Agent 输出，北向原样透传 |
+
+`human_interaction.content.kind` 进一步区分：
+
+| `kind` | 提交的 `decision` | 输入 |
+|---|---|---|
+| `CLARIFICATION` | `answer` | 结构化卡片用 `answers`；兼容旧单问题卡片时用 `text` |
+| `ACTION_APPROVAL` | `approve` / `reject` | 审批原卡片中的动作；不能修改工具参数后沿用原审批 |
+| `USER_STEERING` | `steer` | 使用 `text` 提交暂停后的指导意见 |
+
+卡片示例（`digest` 仅为示例，提交时必须原样复制实际卡片的值）：
+
+```text
+id: 12
+data: {"type":"human_interaction","content":{"request_id":"01a09fce-3a28-7860-8646-b0eec69d5f47","run_id":"01a09fce-3a28-7860-8646-b0eec69d5f46","kind":"CLARIFICATION","status":"PENDING","version":1,"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expires_at":"2026-09-15T10:00:00+00:00","payload":{"schema_version":2,"questions":[{"id":"audience","type":"single_choice","title":"通知发给谁？","required":true,"options":[{"id":"team","label":"内部团队"},{"id":"client","label":"客户"}],"allow_other":true}]}}}
+```
+
+`payload.questions` 支持 `text`、`single_choice`、`multiple_choice`，最多 5 个问题，同一次运行最多 1 张澄清卡片。单选提交选项 ID 字符串，多选提交选项 ID 数组；允许其他答案时可加 `other_text`。必答项、未知选项及重复问题答案均由 runtime 校验。不要把卡片的内部题型 `type` 和外层流事件 `type` 混淆。
+
+### 查询与提交接口
+
+以下表格中的公共前缀为 `/nb/v1/chat/human-interactions`：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/capabilities` | 查询 runtime 的实际能力开关 |
+| GET | `/conversation/{conversation_id}` | 当前 API 用户在此会话的最新 HITL 运行；没有可见运行时 `data=null` |
+| GET | `/{run_id}` | 查询运行状态及 `requests` 中的待处理卡片 |
+| POST | `/{run_id}/requests/{request_id}/decisions` | 提交卡片答案、批准、拒绝或暂停后的意见 |
+| GET | `/{run_id}/events?after_event=12` | 订阅同一运行的后续 SSE 事件 |
+| POST | `/{run_id}/pause` | 请求在安全执行边界暂停；不代表立即中断正在执行的工具 |
+| POST | `/{run_id}/steer` | 在当前运行追加指导意见；会取消当前待处理卡片 |
+| POST | `/{run_id}/terminate` | 终止当前运行并取消待处理卡片 |
+
+JSON 成功响应统一为 `{"message":"success","requestId":"...","data":...}`。决定接口的 `data` 为 `{"run_id":"...","request_id":"...","accepted":true}`。SSE 接口仍直接返回事件流。
+
+填写卡片后，**调用决定接口，不要将答案作为新的 `query` 再调用 `/chat/run`**：
+
+```bash
+curl -X POST \
+  'https://your-nexent-domain.com/api/nb/v1/chat/human-interactions/01a09fce-3a28-7860-8646-b0eec69d5f46/requests/01a09fce-3a28-7860-8646-b0eec69d5f47/decisions' \
+  -H "Authorization: Bearer ${NEXENT_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "version":1,
+    "digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "idempotency_key":"answer-20260914-0001",
+    "decision":"answer",
+    "answers":[{"question_id":"audience","value":"team"}]
+  }'
+```
+
+- `version`、`digest` 从原卡片复制；它们将决定绑定到具体版本和动作。
+- `idempotency_key` 放在 JSON 请求体中，长度 8–100。同一提交超时重试时复用同一键和完全相同的内容；相同键对应不同内容返回 `409`。
+- 结构化澄清只传 `answers`，不要同时传 `text`；旧单问题澄清或 `USER_STEERING` 使用 `text`。
+- 审批使用同一接口，将 `decision` 改为 `approve` 或 `reject`，不传 `answers`。
+- 没有待处理卡片时需要补充新意见，可调用 `/{run_id}/steer`，请求体为 `{"message_id":"guidance-0001","text":"请按新的要求继续"}`。`message_id` 是该条指导意见的幂等标识。此操作会取消待处理卡片，并不表示批准待审工具动作。
+
+只凭 `conversation_id` 无法明确区分同一会话的多轮运行、不同卡片和卡片版本，因此提交接口必须绑定 `run_id + request_id + version + digest`。会话查询接口用于找回这些信息。
+
+### 等待、断线和恢复
+
+1. 消费启动流，保存 `conversation_id`、`run_id` 和已经完整消费的 SSE `id`。`human_run.requests` 也可能包含待处理卡片，按 `request_id + version` 合并，避免重复展示。
+2. 收到 `human_interaction` 后展示卡片，收到 `human_decision` 后关闭或更新卡片。
+3. 决定接口返回 `accepted=true` 只表示输入已接受，执行结果仍从 SSE 读取。原流还连接时可继续消费；原流已结束或断开时，订阅 `GET /nb/v1/chat/human-interactions/{run_id}/events?after_event=<最后消费的ID>`。
+4. 未提供 `after_event` 时，订阅接口也接受 `Last-Event-ID` 请求头；显式 `after_event` 优先。默认 `0` 重放全部持久化事件。订阅不写入用户消息、不重新启动 Agent。
+5. 每次订阅先发送无 SSE `id` 的当前 `human_run` 快照，再按顺序重放大于游标的持久化事件。**不要把初始快照的 `event_seq` 当作已消费游标**，否则会跳过尚未读取的输出；无 `id` 的快照和心跳不推进客户端游标。提交答案后应继续使用提交前最后消费的 ID。
+6. `WAITING_HUMAN` 是等待输入，不是完成；此时 SSE 可能保持连接，也可能结束订阅。只有 `human_run.status` 为 `COMPLETED`、`FAILED`、`STOPPED`、`EXPIRED` 或 `RECOVERY_REQUIRED` 时，客户端才应结束本轮等待。`RECOVERY_REQUIRED` 表示执行无法自动恢复，不能将原动作盲目重发。
+
+`GET /nb/v1/chat/stop/{conversation_id}` 同样会终止此会话当前 API 用户的活跃 HITL 运行。
+
+### 错误与部署要求
+
+| HTTP 状态 | 含义 |
+|---|---|
+| 401 | API Key 或内部 runtime 身份验证失败 |
+| 404 | 运行/卡片不存在，或不属于当前租户及用户 |
+| 409 | 卡片已处理、版本/摘要不一致，或幂等键对应不同内容 |
+| 410 | 本次提交检测到卡片过期；若过期状态已被调度器处理，也可能返回 `409` |
+| 422 | 请求体、回答、决定类型或事件游标不合法 |
+| 503 | runtime 未启用 HITL，无法查询运行或处理决定 |
+| 502 / 504 | runtime 不可连接 / 请求超时 |
+
+部署需已应用 `deploy/sql/migrations/v2.6.0_merged_migrations.sql`，runtime 配置有效的 `HITL_ENCRYPTION_KEY`，并开启 `HITL_ENABLED`、`HITL_ACCEPT_NEW_RUNS`。工具审批另外受 `HITL_TOOL_APPROVAL_ENABLED` 控制；默认的 `native-live-v1` 保留原执行现场以继续运行，worker 丢失后不能保证自动恢复，会进入需要恢复处理的状态。北向接口不改变已有执行模式的能力边界。
 
 ## 📎 上传对话附件
 

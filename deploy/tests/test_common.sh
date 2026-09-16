@@ -493,6 +493,7 @@ deployment_prepare_monitoring_env k8s
 assert_eq "true" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "ENABLE_TELEMETRY")" "monitoring.env should record selected monitoring enablement"
 assert_eq "langsmith" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_PROVIDER")" "monitoring.env should record selected provider"
 assert_eq "https://smith.langchain.com/" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "monitoring.env should record K8s dashboard URL"
+assert_eq "SU,SPEED" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_ALLOWED_ROLES")" "monitoring.env should default dashboard roles compatibly"
 assert_eq "http://nexent-otel-collector:4318" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_EXPORTER_OTLP_ENDPOINT")" "monitoring.env should record K8s OTLP endpoint"
 assert_eq "otel-collector-langsmith-config.yml" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_COLLECTOR_CONFIG_FILE")" "monitoring.env should record K8s collector config file"
 assert_eq "ls-root-fallback" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "LANGSMITH_API_KEY")" "monitoring.env should migrate LangSmith key from root .env when missing"
@@ -503,12 +504,18 @@ MONITORING_CHECKSUM_A="$(deployment_env_values_checksum)"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_TRACE_MAX_CHARS" "1234"
 MONITORING_CHECKSUM_B="$(deployment_env_values_checksum)"
 assert_not_eq "$MONITORING_CHECKSUM_A" "$MONITORING_CHECKSUM_B" "env checksum should change when monitoring.env changes"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_ALLOWED_ROLES" "SU,ADMIN,SPEED"
 MONITORING_HELM_VALUES="$TMP_DIR/monitoring-generated-values.yaml"
 deployment_render_helm_values "$MONITORING_HELM_VALUES"
 MONITORING_HELM_CONTENT="$(cat "$MONITORING_HELM_VALUES")"
 assert_contains "$MONITORING_HELM_CONTENT" 'provider: "langsmith"' "Helm values should render monitoring provider from monitoring.env"
+assert_contains "$MONITORING_HELM_CONTENT" 'dashboardAllowedRoles: "SU,ADMIN,SPEED"' "Helm values should render dashboard roles from monitoring.env"
 assert_contains "$MONITORING_HELM_CONTENT" 'langsmithApiKey: "ls-root-fallback"' "Helm values should pass LangSmith key to monitoring collector values"
 assert_contains "$MONITORING_HELM_CONTENT" 'configFile: "otel-collector-langsmith-config.yml"' "Helm values should pass collector config from monitoring.env"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_ALLOWED_ROLES" ""
+deployment_render_helm_values "$MONITORING_HELM_VALUES"
+MONITORING_HELM_CONTENT="$(cat "$MONITORING_HELM_VALUES")"
+assert_contains "$MONITORING_HELM_CONTENT" 'dashboardAllowedRoles: ""' "Helm values should preserve an explicitly empty dashboard role list"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER" "Basic stale"
@@ -622,6 +629,7 @@ DOCKER_DEV_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.dev.yml"
 for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   CONFIG_COMPOSE_BLOCK="$(awk '/^  nexent-config:/,/^  nexent-runtime:/' "$compose_file")"
   RUNTIME_COMPOSE_BLOCK="$(awk '/^  nexent-runtime:/,/^  nexent-mcp:/' "$compose_file")"
+  WEB_COMPOSE_BLOCK="$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$compose_file")"
   assert_contains "$CONFIG_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker config service should load monitoring.env after root .env"
   assert_contains "$RUNTIME_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
   assert_contains "$CONFIG_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker config service should mount external memory provider plugins"
@@ -629,6 +637,8 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-northbound:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-northbound:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
+  assert_contains "$WEB_COMPOSE_BLOCK" '${ROOT_DIR}/project-config:/mnt/nexent-data/project-config' "docker web should mount persistent project configuration"
+  assert_contains "$WEB_COMPOSE_BLOCK" 'PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config' "docker web should read and write the persistent project configuration path"
   MINIO_COMPOSE_BLOCK="$(awk '/^  nexent-minio:/,/^  nexent-openssh-server:/' "$compose_file")"
   assert_contains "$MINIO_COMPOSE_BLOCK" '${ROOT_DIR}/minio/data:/data' "docker MinIO should bind the persistent host directory to the image data path"
   assert_contains "$MINIO_COMPOSE_BLOCK" "minio server /data" "docker MinIO should serve objects from the bind-mounted data path"
@@ -642,7 +652,107 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_not_contains "$MINIO_COMPOSE_BLOCK" "/etc/minio/data" "docker MinIO should not retain the obsolete data mount"
   assert_not_contains "$MINIO_COMPOSE_BLOCK" "command: server /data" "docker MinIO should not keep the old unused image command override"
 done
+assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_COMPOSE_FILE")" '../../env/.env' "docker standard web should refresh the upload size from its env file"
+assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_PROD_COMPOSE_FILE")" 'FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}' "docker production web should refresh the persisted upload size during startup"
 assert_contains "$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")" 'create_dir_with_permission "$ROOT_DIR/minio/data" 775' "docker deploy should initialize the exact MinIO bind-mount directory"
+DOCKER_PREPARE_DATA_BLOCK="$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
+assert_contains "$DOCKER_PREPARE_DATA_BLOCK" 'prepare_project_config_dir || return 1' "docker deploy should initialize the project configuration bind-mount directory"
+assert_contains "$DOCKER_PREPARE_DATA_BLOCK" 'migrate_legacy_project_config || return 1' "docker deploy should stop before recreation when project configuration migration fails"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/deploy.sh")" 'docker cp' "docker deploy should migrate legacy web project configuration before recreation"
+
+DOCKER_PROJECT_CONFIG_FUNCTIONS="$(awk '
+  /^project_config_dir_is_empty\(\) \{/ { capture=1 }
+  /^sql_files_checksum\(\) \{/ { capture=0 }
+  capture { print }
+' "$SCRIPT_DIR/../docker/deploy.sh")"
+DOCKER_PROJECT_CONFIG_TEST_ROOT="$TMP_DIR/docker-project-config"
+DOCKER_PROJECT_CONFIG_LEGACY="$DOCKER_PROJECT_CONFIG_TEST_ROOT/legacy"
+mkdir -p \
+  "$DOCKER_PROJECT_CONFIG_LEGACY/locales/zh" \
+  "$DOCKER_PROJECT_CONFIG_LEGACY/locales/en"
+printf 'primary-logo' > "$DOCKER_PROJECT_CONFIG_LEGACY/modelengine-logo.png"
+printf 'secondary-logo' > "$DOCKER_PROJECT_CONFIG_LEGACY/modelengine-logo2.png"
+printf '{"productName":"持久化项目"}' > "$DOCKER_PROJECT_CONFIG_LEGACY/locales/zh/custom.json"
+printf '{"productName":"Persistent Project"}' > "$DOCKER_PROJECT_CONFIG_LEGACY/locales/en/custom.json"
+
+(
+  eval "$DOCKER_PROJECT_CONFIG_FUNCTIONS"
+  ROOT_DIR="$DOCKER_PROJECT_CONFIG_TEST_ROOT/success"
+  MOCK_DOCKER_LOG="$DOCKER_PROJECT_CONFIG_TEST_ROOT/success-docker.log"
+  docker() {
+    printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
+    if [ "$1" = "inspect" ]; then
+      return 0
+    fi
+    if [ "$1" = "cp" ]; then
+      local relative_path="${2#nexent-web:/opt/frontend-dist/public/}"
+      cp "$DOCKER_PROJECT_CONFIG_LEGACY/$relative_path" "$3"
+      return $?
+    fi
+    return 1
+  }
+  prepare_project_config_dir
+  migrate_legacy_project_config
+  assert_eq "primary-logo" "$(cat "$ROOT_DIR/project-config/modelengine-logo.png")" "docker migration should preserve the primary Logo"
+  assert_eq "Persistent Project" "$(sed -n 's/.*:\"\([^\"]*\)\".*/\1/p' "$ROOT_DIR/project-config/locales/en/custom.json")" "docker migration should preserve English project configuration"
+  if [ -x "$ROOT_DIR/project-config/modelengine-logo.png" ]; then
+    echo "FAIL: migrated project configuration files should not be executable"
+    exit 1
+  fi
+)
+
+(
+  eval "$DOCKER_PROJECT_CONFIG_FUNCTIONS"
+  ROOT_DIR="$DOCKER_PROJECT_CONFIG_TEST_ROOT/existing"
+  MOCK_DOCKER_LOG="$DOCKER_PROJECT_CONFIG_TEST_ROOT/existing-docker.log"
+  mkdir -p "$ROOT_DIR/project-config/locales/en"
+  printf 'keep-me' > "$ROOT_DIR/project-config/locales/en/custom.json"
+  chmod 600 "$ROOT_DIR/project-config/locales/en/custom.json"
+  docker() {
+    printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
+    return 1
+  }
+  prepare_project_config_dir
+  migrate_legacy_project_config
+  assert_eq "keep-me" "$(cat "$ROOT_DIR/project-config/locales/en/custom.json")" "docker migration should not overwrite an existing project configuration directory"
+  if [ -x "$ROOT_DIR/project-config/locales/en/custom.json" ]; then
+    echo "FAIL: preparing the project configuration directory should not make existing files executable"
+    exit 1
+  fi
+  if [ -e "$MOCK_DOCKER_LOG" ]; then
+    echo "FAIL: docker migration should not inspect the legacy container when the target is nonempty"
+    exit 1
+  fi
+)
+
+(
+  eval "$DOCKER_PROJECT_CONFIG_FUNCTIONS"
+  ROOT_DIR="$DOCKER_PROJECT_CONFIG_TEST_ROOT/failure"
+  MOCK_DOCKER_LOG="$DOCKER_PROJECT_CONFIG_TEST_ROOT/failure-docker.log"
+  docker() {
+    printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
+    if [ "$1" = "inspect" ]; then
+      return 0
+    fi
+    if [ "$1" = "cp" ]; then
+      return 1
+    fi
+    return 1
+  }
+  prepare_project_config_dir
+  if migrate_legacy_project_config; then
+    echo "FAIL: docker migration should fail when a legacy file cannot be copied"
+    exit 1
+  fi
+  if ! project_config_dir_is_empty "$ROOT_DIR/project-config"; then
+    echo "FAIL: failed docker migration should not partially populate the target directory"
+    exit 1
+  fi
+  if [ -z "$(find "$ROOT_DIR" -maxdepth 1 -type d -name '.project-config-migration.*' -print -quit)" ]; then
+    echo "FAIL: failed docker migration should preserve its staging directory"
+    exit 1
+  fi
+)
 assert_not_contains "$(cat "$DOCKER_DEV_COMPOSE_FILE")" "monitoring.env" "docker dev data-process compose should not receive monitoring.env"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}' "docker monitoring compose should pass Langfuse OTLP auth header to the collector"
 assert_not_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" "LANGFUSE_OLTP_AUTH_HEADER" "docker monitoring compose should not pass the misspelled Langfuse auth header alias"
@@ -667,6 +777,7 @@ assert_contains "$DOCKER_UNINSTALL_CONTENT" 'nexent-grafana' "docker uninstall s
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'nexent-zipkin' "docker uninstall should include Zipkin containers in fallback cleanup"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'monitor_langfuse-postgres-data' "docker uninstall should include monitoring volumes in delete-all cleanup"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'remove_docker_volumes_by_name < <(monitoring_volume_names)' "docker uninstall should remove monitoring volumes when delete-volumes is enabled"
+assert_contains "$DOCKER_UNINSTALL_CONTENT" '"$root_dir/project-config"' "docker uninstall should delete project configuration only with persistent data cleanup"
 
 K8S_UNINSTALL_CONTENT="$(cat "$SCRIPT_DIR/../k8s/uninstall.sh")"
 assert_contains "$K8S_UNINSTALL_CONTENT" "cleanup_leftover_monitoring_resources()" "k8s uninstall should define monitoring fallback cleanup"

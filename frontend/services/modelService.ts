@@ -10,6 +10,11 @@ import {
   ModelSource,
   CapacitySuggestion,
   CapacityCoverage,
+  ModelCatalogProviderInfo,
+  ModelCatalogModelEntry,
+  ModelCatalogProfile,
+  ModelCatalogFullPayload,
+  InferenceFieldSpecsByType,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -77,6 +82,55 @@ const buildCapacityRequestBody = (model: {
           model.acceptedCapabilityProfileVersion,
       }
     : {}),
+});
+
+/**
+ * Build snake_case request body fragments for v2.6.0 inference params
+ * (temperature / top_p / extra_params). Used by add/update/batch paths
+ * so the new advanced-settings fields flow through consistently.
+ *
+ * Accepts both camelCase (topP / extraParams, from ModelOption-style input)
+ * and snake_case (top_p / extra_params, from buildInferenceParamsPayload output)
+ * so callers don't need to convert between the two.
+ */
+/** First defined value among the arguments, or undefined. */
+const firstDefined = <T,>(...values: (T | undefined)[]): T | undefined => {
+  for (const value of values) {
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
+const buildInferenceParamsRequestBody = (model: {
+  temperature?: number;
+  topP?: number;
+  top_p?: number;
+  extraParams?: Record<string, unknown>;
+  extra_params?: Record<string, unknown>;
+}) => {
+  const topP = firstDefined(model.topP, model.top_p);
+  const extraParams = firstDefined(model.extraParams, model.extra_params);
+  return {
+    ...(model.temperature !== undefined
+      ? { temperature: model.temperature }
+      : {}),
+    ...(topP !== undefined ? { top_p: topP } : {}),
+    ...(extraParams !== undefined ? { extra_params: extraParams } : {}),
+  };
+};
+
+/**
+ * Map v2.6.0 inference params (temperature / top_p / extra_params) from
+ * the snake_case API response into the camelCase ModelOption shape.
+ * Returns an empty object when the underlying fields are absent so it
+ * can be spread safely into any model mapper.
+ */
+const mapInferenceParamsFromApi = (model: any) => ({
+  temperature: model.temperature,
+  topP: model.top_p,
+  extraParams: model.extra_params,
 });
 
 const mapCapacitySuggestionFromApi = (
@@ -177,7 +231,10 @@ export const modelService = {
           type: model.model_type as ModelType,
           maxTokens: model.max_tokens || 0,
           source: model.model_factory as ModelSource,
-          apiKey: model.api_key,
+          // Model-management responses never include the stored API key.
+          // The key is only needed when creating or explicitly changing a
+          // model, so keep the client-side field empty for edit forms.
+          apiKey: "",
           apiUrl: model.base_url,
           displayName: model.display_name || model.model_name,
           connect_status:
@@ -186,6 +243,8 @@ export const modelService = {
           maximumChunkSize: model.maximum_chunk_size,
           chunkingBatchSize: model.chunk_batch,
           ...mapCapacityFieldsFromApi(model),
+          // v2.6.0 inference params (model-level defaults)
+          ...mapInferenceParamsFromApi(model),
           // STT specific fields
           modelAppid: model.model_appid,
           accessToken: model.access_token,
@@ -236,7 +295,15 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
-  }): Promise<void> => {
+    // Connectivity status verified by the add-dialog probe. Sent so the newly
+    // created record reflects the just-verified result instead of resetting
+    // to not_detected (backend: connect_status = payload or NOT_DETECTED).
+    connectStatus?: ModelConnectStatus;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
+  }): Promise<any> => {
     try {
       const requestBody: any = {
         model_repo: "",
@@ -246,12 +313,14 @@ export const modelService = {
         api_key: model.apiKey,
         max_tokens: model.maxTokens,
         display_name: model.displayName,
+        connect_status: model.connectStatus,
         expected_chunk_size: model.expectedChunkSize,
         maximum_chunk_size: model.maximumChunkSize,
         chunk_batch: model.chunkingBatchSize,
         timeout_seconds: model.timeoutSeconds,
         concurrency_limit: model.concurrencyLimit,
         ...buildCapacityRequestBody(model),
+        ...buildInferenceParamsRequestBody(model),
       };
 
       // Add STT specific fields
@@ -279,6 +348,7 @@ export const modelService = {
           response.status
         );
       }
+      return result;
     } catch (error) {
       if (error instanceof ModelError) throw error;
       throw new ModelError("添加自定义模型失败", 500);
@@ -287,7 +357,7 @@ export const modelService = {
 
   addProviderModel: async (model: {
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, backend returns all types and infers per-model
     apiKey: string;
     baseUrl?: string;
   }): Promise<any[]> => {
@@ -299,7 +369,7 @@ export const modelService = {
           headers: getAuthHeaders(),
           body: JSON.stringify({
             provider: model.provider,
-            model_type: model.type,
+            ...(model.type !== undefined ? { model_type: model.type } : {}),
             api_key: model.apiKey,
             ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
@@ -324,7 +394,7 @@ export const modelService = {
   addBatchCustomModel: async (model: {
     api_key: string;
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — per-model type is carried in each model entry
     models: any[];
   }): Promise<number> => {
     try {
@@ -334,7 +404,7 @@ export const modelService = {
         body: JSON.stringify({
           api_key: model.api_key,
           models: model.models,
-          type: model.type,
+          ...(model.type !== undefined ? { type: model.type } : {}),
           provider: model.provider,
         }),
       });
@@ -355,7 +425,7 @@ export const modelService = {
 
   getProviderSelectedModalList: async (model: {
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, returns all types
     api_key: string;
     baseUrl?: string;
   }): Promise<any[]> => {
@@ -367,7 +437,7 @@ export const modelService = {
           headers: getAuthHeaders(),
           body: JSON.stringify({
             provider: model.provider,
-            model_type: model.type,
+            ...(model.type !== undefined ? { model_type: model.type } : {}),
             api_key: model.api_key,
             ...(model.baseUrl ? { base_url: model.baseUrl } : {}),
           }),
@@ -440,7 +510,7 @@ export const modelService = {
     name?: string;
     displayName?: string;
     url: string;
-    apiKey: string;
+    apiKey?: string;
     maxTokens?: number;
     source?: ModelSource;
     expectedChunkSize?: number;
@@ -460,6 +530,10 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
       const response = await authedFetch(
@@ -473,7 +547,7 @@ export const modelService = {
               : {}),
             ...(model.name !== undefined ? { model_name: model.name } : {}),
             base_url: model.url,
-            api_key: model.apiKey,
+            ...(model.apiKey?.trim() ? { api_key: model.apiKey } : {}),
             ...(model.maxTokens !== undefined
               ? { max_tokens: model.maxTokens }
               : {}),
@@ -503,6 +577,7 @@ export const modelService = {
               ? { concurrency_limit: model.concurrencyLimit }
               : {}),
             ...buildCapacityRequestBody(model),
+            ...buildInferenceParamsRequestBody(model),
           }),
         }
       );
@@ -524,7 +599,7 @@ export const modelService = {
   updateBatchModel: async (
     models: {
       model_id: string;
-      apiKey: string;
+      apiKey?: string;
       maxTokens?: number;
       timeoutSeconds?: number;
       concurrencyLimit?: number;
@@ -534,6 +609,10 @@ export const modelService = {
       defaultOutputReserveTokens?: number;
       tokenizerFamily?: string;
       capacitySource?: string;
+      // v2.6.0 inference params
+      temperature?: number;
+      topP?: number;
+      extraParams?: Record<string, unknown>;
     }[],
     provider?: string
   ): Promise<any> => {
@@ -544,7 +623,7 @@ export const modelService = {
         body: JSON.stringify(
           models.map((m) => ({
             model_id: m.model_id,
-            api_key: m.apiKey,
+            ...(m.apiKey?.trim() ? { api_key: m.apiKey } : {}),
             ...(m.maxTokens !== undefined ? { max_tokens: m.maxTokens } : {}),
             ...(m.timeoutSeconds !== undefined
               ? { timeout_seconds: m.timeoutSeconds }
@@ -569,6 +648,13 @@ export const modelService = {
               : {}),
             ...(m.capacitySource !== undefined
               ? { capacity_source: m.capacitySource }
+              : {}),
+            ...(m.temperature !== undefined
+              ? { temperature: m.temperature }
+              : {}),
+            ...(m.topP !== undefined ? { top_p: m.topP } : {}),
+            ...(m.extraParams !== undefined
+              ? { extra_params: m.extraParams }
               : {}),
             ...(provider ? { model_factory: provider } : {}),
           }))
@@ -742,6 +828,10 @@ export const modelService = {
       modelFactory?: string;
       modelAppid?: string;
       accessToken?: string;
+      // v2.6.0 inference params (passed through; do not affect connectivity)
+      temperature?: number;
+      topP?: number;
+      extraParams?: Record<string, unknown>;
     },
     signal?: AbortSignal
   ): Promise<ModelValidationResponse> => {
@@ -755,6 +845,7 @@ export const modelService = {
           ? { max_tokens: config.maxTokens }
           : {}),
         embedding_dim: config.embeddingDim || 1024,
+        ...buildInferenceParamsRequestBody(config),
       };
 
       // Add STT specific fields if provided
@@ -888,7 +979,7 @@ export const modelService = {
           type: MODEL_TYPES.LLM,
           maxTokens: model.max_tokens || 0,
           source: model.model_factory || MODEL_SOURCES.OPENAI_API_COMPATIBLE,
-          apiKey: model.api_key || "",
+          apiKey: "",
           apiUrl: model.base_url || "",
           displayName: model.display_name || model.model_name || model.name,
           connect_status: model.connect_status as ModelConnectStatus,
@@ -940,7 +1031,7 @@ export const modelService = {
             type: model.model_type as ModelType,
             maxTokens: model.max_tokens || 0,
             source: model.model_factory as ModelSource,
-            apiKey: model.api_key || "",
+            apiKey: "",
             apiUrl: model.base_url || "",
             displayName: model.display_name || model.model_name,
             connect_status: model.connect_status as ModelConnectStatus,
@@ -948,6 +1039,8 @@ export const modelService = {
             maximumChunkSize: model.maximum_chunk_size,
             chunkingBatchSize: model.chunk_batch,
             ...mapCapacityFieldsFromApi(model),
+            // v2.6.0 inference params (model-level defaults)
+            ...mapInferenceParamsFromApi(model),
             // STT specific fields
             modelAppid: model.model_appid,
             accessToken: model.access_token,
@@ -1009,7 +1102,14 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
-  }): Promise<void> => {
+    // Connectivity status verified by the add-dialog probe (same purpose as
+    // addCustomModel.connectStatus).
+    connectStatus?: ModelConnectStatus;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
+  }): Promise<any> => {
     try {
       const requestBody: any = {
         tenant_id: params.tenantId,
@@ -1023,12 +1123,14 @@ export const modelService = {
           : {}),
         display_name: params.displayName || params.name,
         model_factory: params.modelFactory || "OpenAI-API-Compatible",
+        connect_status: params.connectStatus,
         expected_chunk_size: params.expectedChunkSize,
         maximum_chunk_size: params.maximumChunkSize,
         chunk_batch: params.chunkingBatchSize,
         timeout_seconds: params.timeoutSeconds,
         concurrency_limit: params.concurrencyLimit,
         ...buildCapacityRequestBody(params),
+        ...buildInferenceParamsRequestBody(params),
       };
 
       // Add STT specific fields
@@ -1060,6 +1162,7 @@ export const modelService = {
           response.status
         );
       }
+      return result;
     } catch (error) {
       if (error instanceof ModelError) throw error;
       log.warn("Failed to create manage tenant model:", error);
@@ -1074,7 +1177,7 @@ export const modelService = {
     name?: string;
     displayName?: string;
     url: string;
-    apiKey: string;
+    apiKey?: string;
     maxTokens?: number;
     expectedChunkSize?: number;
     maximumChunkSize?: number;
@@ -1093,6 +1196,10 @@ export const modelService = {
     capacitySource?: string;
     acceptedSuggestionMatchKind?: string;
     acceptedCapabilityProfileVersion?: string;
+    // v2.6.0 inference params
+    temperature?: number;
+    topP?: number;
+    extraParams?: Record<string, unknown>;
   }): Promise<void> => {
     try {
       const response = await authedFetch(
@@ -1111,7 +1218,7 @@ export const modelService = {
               ? { display_name: params.displayName }
               : {}),
             base_url: params.url,
-            api_key: params.apiKey,
+            ...(params.apiKey?.trim() ? { api_key: params.apiKey } : {}),
             ...(params.maxTokens !== undefined
               ? { max_tokens: params.maxTokens }
               : {}),
@@ -1140,6 +1247,7 @@ export const modelService = {
               ? { concurrency_limit: params.concurrencyLimit }
               : {}),
             ...buildCapacityRequestBody(params),
+            ...buildInferenceParamsRequestBody(params),
           }),
         }
       );
@@ -1201,7 +1309,7 @@ export const modelService = {
   batchCreateManageTenantModels: async (params: {
     tenantId: string;
     provider: string;
-    type: string;
+    type?: string; // v2.6.0: optional — per-model type is carried in each model entry
     apiKey: string;
     models: Array<{
       id: string;
@@ -1209,6 +1317,10 @@ export const modelService = {
       created?: number;
       owned_by?: string;
       max_tokens?: number;
+      model_type?: string;
+      model_name?: string;
+      display_name?: string;
+      [key: string]: unknown;
     }>;
   }): Promise<{
     tenantId: string;
@@ -1226,7 +1338,7 @@ export const modelService = {
         body: JSON.stringify({
           tenant_id: params.tenantId,
           provider: params.provider,
-          type: params.type,
+          ...(params.type !== undefined ? { type: params.type } : {}),
           api_key: params.apiKey,
           models: params.models,
         }),
@@ -1258,7 +1370,7 @@ export const modelService = {
   addManageProviderModel: async (params: {
     tenantId: string;
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, returns all types
     apiKey: string;
     baseUrl?: string;
   }): Promise<any[]> => {
@@ -1274,7 +1386,7 @@ export const modelService = {
           body: JSON.stringify({
             tenant_id: params.tenantId,
             provider: params.provider,
-            model_type: params.type,
+            ...(params.type !== undefined ? { model_type: params.type } : {}),
             api_key: params.apiKey,
             ...(params.baseUrl ? { base_url: params.baseUrl } : {}),
           }),
@@ -1302,7 +1414,7 @@ export const modelService = {
   getManageProviderSelectedModalList: async (params: {
     tenantId: string;
     provider: string;
-    type: ModelType;
+    type?: ModelType; // v2.6.0: optional — when omitted, returns all types
   }): Promise<any[]> => {
     try {
       const response = await authedFetch(
@@ -1316,7 +1428,7 @@ export const modelService = {
           body: JSON.stringify({
             tenant_id: params.tenantId,
             provider: params.provider,
-            model_type: params.type,
+            ...(params.type !== undefined ? { model_type: params.type } : {}),
           }),
         }
       );
@@ -1338,6 +1450,153 @@ export const modelService = {
         "Failed to get provider selected list for tenant",
         500
       );
+    }
+  },
+
+  // ================================================================
+  // Preset Model Catalog (预置模型目录) - readonly queries.
+  // Single-call fetch is preferred: getFullCatalog() returns every
+  // provider + model in one payload.  All filtering / profile lookups
+  // happen client-side, reducing network round-trips on the Add-Model
+  // page.  The older 3-endpoint methods are preserved for backwards
+  // compatibility but are no longer used internally.
+  // ================================================================
+
+  async getFullCatalog(): Promise<{
+    catalog: ModelCatalogFullPayload;
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.catalogAll, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      const result = await response.json();
+      const data = result.data || {
+        version: "0.0.0",
+        metadata: {},
+        providers: [],
+      };
+      return {
+        catalog: data as ModelCatalogFullPayload,
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn("Model catalog full query failed:", error);
+      return {
+        catalog: { version: "0.0.0", metadata: {}, providers: [] },
+        catalogAvailable: false,
+      };
+    }
+  },
+
+  /** @deprecated Use getFullCatalog() and filter client-side. */
+  async listCatalogProviders(): Promise<{
+    providers: ModelCatalogProviderInfo[];
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const response = await fetch(API_ENDPOINTS.model.catalogProviders, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      const result = await response.json();
+      return {
+        providers: (result.data || []) as ModelCatalogProviderInfo[],
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn("Model catalog providers query failed:", error);
+      return { providers: [], catalogAvailable: false };
+    }
+  },
+
+  /** @deprecated Use getFullCatalog() and filter client-side. */
+  async listCatalogModels(
+    provider: string,
+    modelType?: ModelType
+  ): Promise<{
+    models: ModelCatalogModelEntry[];
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const url = API_ENDPOINTS.model.catalogProviderModels(
+        provider,
+        modelType
+      );
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      const result = await response.json();
+      return {
+        models: (result.data || []) as ModelCatalogModelEntry[],
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn(
+        `Model catalog models query failed for provider=${provider}:`,
+        error
+      );
+      return { models: [], catalogAvailable: false };
+    }
+  },
+
+  /** @deprecated Use getFullCatalog() and look up profile client-side. */
+  async getCatalogModelProfile(
+    provider: string,
+    modelName: string
+  ): Promise<{
+    profile: ModelCatalogProfile | null;
+    catalogAvailable: boolean;
+  }> {
+    try {
+      const url = API_ENDPOINTS.model.catalogModelProfile(provider, modelName);
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { ...getAuthHeaders() },
+      });
+      if (response.status === 404) {
+        return { profile: null, catalogAvailable: true };
+      }
+      const result = await response.json();
+      return {
+        profile: (result.data || null) as ModelCatalogProfile | null,
+        catalogAvailable: !!result.catalog_available,
+      };
+    } catch (error) {
+      log.warn(
+        `Model catalog profile query failed for ${provider}/${modelName}:`,
+        error
+      );
+      return { profile: null, catalogAvailable: false };
+    }
+  },
+
+  // ================================================================
+  // v2.6.0: Fixed inference field specs by model type.
+  // Returned by GET /model/catalog/inference_field_specs and used by
+  // ModelAdvancedSettings.tsx to dynamically render the per-type
+  // advanced settings form. Falls back to an empty object on failure
+  // so the caller can render a no-fields form instead of crashing.
+  // ================================================================
+  async getInferenceFieldSpecs(): Promise<InferenceFieldSpecsByType> {
+    try {
+      const response = await fetch(
+        API_ENDPOINTS.model.catalogInferenceFieldSpecs,
+        {
+          method: "GET",
+          headers: { ...getAuthHeaders() },
+        }
+      );
+      const result = await response.json();
+      if (response.status === STATUS_CODES.SUCCESS && result.data) {
+        return result.data as InferenceFieldSpecsByType;
+      }
+      return {};
+    } catch (error) {
+      log.warn("Failed to load inference field specs:", error);
+      return {};
     }
   },
 };

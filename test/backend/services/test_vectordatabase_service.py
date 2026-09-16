@@ -3777,12 +3777,12 @@ class TestElasticSearchService(unittest.TestCase):
 
             asyncio.run(run_test())
 
-    def test_summary_index_name_runtime_error_fallback(self):
+    def test_summary_index_name_uses_managed_blocking_execution(self):
         """
-        Test summary_index_name fallback when get_running_loop raises RuntimeError.
+        Test summary_index_name delegates blocking work to the managed executor.
 
         This test verifies that:
-        1. When get_running_loop() raises RuntimeError, get_event_loop() is used as fallback
+        1. Blocking Map-Reduce work uses the model-tool-io lane
         2. The summary generation still works correctly
         """
         # Mock the new Map-Reduce functions
@@ -3802,20 +3802,14 @@ class TestElasticSearchService(unittest.TestCase):
                 0: "Test cluster summary"}  # cluster_summaries
             mock_merge.return_value = "Final merged summary"  # final_summary
 
-            # Create a mock loop with run_in_executor that returns a coroutine
-            mock_loop = MagicMock()
+            async def run_inline(_task_name, func, *args, **kwargs):
+                return func(*args)
 
-            async def mock_run_in_executor(executor, func, *args):
-                # Execute the function synchronously and return its result
-                return func()
-
-            mock_loop.run_in_executor = mock_run_in_executor
-
-            # Patch asyncio functions to trigger RuntimeError fallback
-            with patch('management.services.knowledge_base.service.asyncio.get_running_loop',
-                       side_effect=RuntimeError("No running event loop")), \
-                    patch('management.services.knowledge_base.service.asyncio.get_event_loop',
-                          return_value=mock_loop) as mock_get_event_loop:
+            with patch(
+                'management.services.knowledge_base.service.run_blocking',
+                new_callable=AsyncMock,
+                side_effect=run_inline,
+            ) as mock_run_blocking:
 
                 # Execute
                 async def run_test():
@@ -3842,8 +3836,10 @@ class TestElasticSearchService(unittest.TestCase):
 
                 # Assert
                 self.assertIsInstance(result, StreamingResponse)
-                # Verify fallback was used
-                mock_get_event_loop.assert_called()
+                mock_run_blocking.assert_awaited_once()
+                self.assertEqual(mock_run_blocking.call_args.args[0], "knowledge-summary")
+                self.assertEqual(mock_run_blocking.call_args.kwargs["lane"], "model-tool-io")
+                self.assertEqual(mock_run_blocking.call_args.kwargs["owner"], "config")
 
     def test_summary_index_name_generator_exception(self):
         """

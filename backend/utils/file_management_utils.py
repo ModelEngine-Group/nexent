@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import subprocess
@@ -11,6 +10,7 @@ import aiofiles
 import httpx
 import requests
 from fastapi import UploadFile
+from nexent.core.concurrency import run_blocking
 
 from consts.const import DATA_PROCESS_SERVICE, LIBREOFFICE_PROFILE_DIR
 from consts.model import ProcessParams
@@ -446,7 +446,12 @@ async def convert_office_to_pdf(input_path: str, output_dir: str, timeout: int =
 
     try:
         # Run blocking subprocess in thread executor to avoid blocking event loop
-        result = await asyncio.to_thread(_run_libreoffice_conversion)
+        result = await run_blocking(
+            "libreoffice-conversion",
+            _run_libreoffice_conversion,
+            lane="control-io",
+            owner="config",
+        )
 
         if result.returncode != 0:
             error_msg = result.stderr or result.stdout or "Unknown conversion error"

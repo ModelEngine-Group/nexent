@@ -114,13 +114,14 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http
 MONITORING_DASHBOARD_URL=http://localhost:9411
 ```
 
-Set `MONITORING_DASHBOARD_URL` in `deploy/env/monitoring.env` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path. In speed mode, the top-bar entry is visible when the URL is configured; in standard mode, only the super administrator can see it.
+Set `MONITORING_DASHBOARD_URL` in `deploy/env/monitoring.env` to the browser-accessible monitoring UI URL. The backend returns this value to the frontend top bar without deriving a provider-specific path. Use `MONITORING_DASHBOARD_ALLOWED_ROLES` to control which roles see the top-bar entry. The default `SU,SPEED` preserves super-administrator access in standard mode and access in speed mode.
 
 ```bash
 MONITORING_DASHBOARD_URL=http://localhost:6006
 MONITORING_DASHBOARD_URL=http://localhost:3001/project/nexent
 MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
 MONITORING_DASHBOARD_URL=http://localhost:9411
+MONITORING_DASHBOARD_ALLOWED_ROLES=SU,ADMIN,SPEED
 ```
 
 ## Environment Variables
@@ -129,7 +130,8 @@ MONITORING_DASHBOARD_URL=http://localhost:9411
 |----------|---------|-------------|
 | `ENABLE_TELEMETRY` | `false` | Enable/disable monitoring |
 | `MONITORING_PROVIDER` | `otlp` | Provider profile: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
-| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar; visible in speed mode and to super administrators in standard mode |
+| `MONITORING_DASHBOARD_URL` | (empty) | Browser-accessible monitoring UI URL used by the frontend top bar |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | `SU,SPEED` | Comma-separated roles allowed to see the dashboard entry; set an empty value to hide it from every role |
 | `MONITORING_PROJECT_NAME` | `nexent` | Observability platform project name |
 | `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload mode: `summary` records bounded previews plus metadata, `metrics` records only structure/size metadata, `full` keeps full payloads subject to `MONITORING_TRACE_MAX_CHARS` |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | Maximum characters for each payload preview written to trace attributes |

@@ -251,9 +251,187 @@ def test_modelengine_message_flattening_can_be_disabled_for_vlm():
     assert captured["flatten_messages_as_text"] is False
     assert captured["messages"][1].content[0]["type"] == "image_url"
 
+
+def test_ut_sdk_tlm_023_successful_attempt_closes_stream_once():
+    model, _ = _make_modelengine_model()
+
+    class CloseableStream:
+        def __init__(self):
+            self._chunks = iter([make_chunk("done")])
+            self.close_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self._chunks)
+
+        def close(self):
+            self.close_calls += 1
+
+    stream = CloseableStream()
+    model.client.chat.completions.create = lambda stream=True, **kwargs: stream_instance
+    stream_instance = stream
+
+    message = model([{"role": "user", "content": "hello"}])
+
+    assert message.content == "done"
+    assert stream.close_calls == 1
+
+
+def test_ut_sdk_tlm_024_cancel_closes_blocked_stream_and_stops_retry():
+    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
+    scope_class = openai_llm_module.RunCancellationScope
+    model = ModelClass(
+        model_id="m",
+        api_base="u",
+        api_key="k",
+        model_factory="modelengine",
+        retry_config=openai_llm_module.ModelRetryConfig(
+            max_attempts=3,
+            backoff_base_seconds=0,
+            jitter=False,
+        ),
+    )
+    model._prepare_completion_kwargs = lambda messages=None, **kwargs: {}
+    model.model_id = "m"
+    model.custom_role_conversions = {}
+    model.observer = types.SimpleNamespace(
+        current_mode=None,
+        add_model_new_token=lambda token: None,
+        add_model_reasoning_content=lambda reasoning: None,
+        flush_remaining_tokens=lambda: None,
+    )
+    scope = scope_class(model.stop_event)
+    model.cancellation_scope = scope
+    entered = threading.Event()
+    released = threading.Event()
+
+    class BlockingStream:
+        close_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            entered.set()
+            released.wait(1)
+            raise ConnectionError("stream closed")
+
+        def close(self):
+            self.close_calls += 1
+            released.set()
+
+    stream_instance = BlockingStream()
+    create_calls = []
+    model.client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(
+                create=lambda **kwargs: (create_calls.append(kwargs), stream_instance)[1]
+            )
+        )
+    )
+    result = {}
+
+    def invoke():
+        try:
+            model([{"role": "user", "content": "hello"}])
+        except Exception as exc:
+            result["error"] = exc
+
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    assert entered.wait(1)
+
+    scope.cancel()
+    worker.join(1)
+
+    assert worker.is_alive() is False
+    assert stream_instance.close_calls == 1
+    assert len(create_calls) == 1
+    assert str(result["error"]) == openai_llm_module.STOP_EVENT_INTERRUPTED_MESSAGE
+
+
+def test_ut_sdk_tlm_024_supplied_cancellation_scope_owns_model_stop_event():
+    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
+    scope = openai_llm_module.RunCancellationScope()
+
+    model = ModelClass(
+        model_id="m",
+        api_base="u",
+        api_key="k",
+        model_factory="modelengine",
+        cancellation_scope=scope,
+    )
+
+    assert model.stop_event is scope.stop_event
+
+
+def test_ut_sdk_tlm_031_model_timeout_emits_sanitized_warning(caplog):
+    class TimeoutStream:
+        def __init__(self, chunks_before_timeout):
+            self.chunks = [make_chunk("partial-secret")] * chunks_before_timeout
+            self.close_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.chunks:
+                return self.chunks.pop(0)
+            raise openai_llm_module.httpx.ReadTimeout("sensitive-response-body")
+
+        def close(self):
+            self.close_calls += 1
+
+    for chunks_before_timeout, expected_phase in ((0, "initial_chunk"), (1, "next_chunk")):
+        caplog.clear()
+        model, _ = _make_modelengine_model()
+        model.retry_config = openai_llm_module.ModelRetryConfig(max_attempts=1)
+        stream = TimeoutStream(chunks_before_timeout)
+        model.client.chat.completions.create = lambda **kwargs: stream
+
+        with pytest.raises(openai_llm_module.httpx.ReadTimeout):
+            model([{"role": "user", "content": "secret-prompt"}])
+
+        timeout_records = [
+            record for record in caplog.records
+            if "event=model_stream_timeout" in record.getMessage()
+        ]
+        assert len(timeout_records) == 1
+        assert timeout_records[0].levelname == "WARNING"
+        assert f"phase={expected_phase}" in timeout_records[0].getMessage()
+        assert f"chunk_count={chunks_before_timeout}" in timeout_records[0].getMessage()
+        assert "model_id=m" in timeout_records[0].getMessage()
+        assert "secret-prompt" not in caplog.text
+        assert "sensitive-response-body" not in caplog.text
+
+
+def test_ut_sdk_tlm_028_no_http_stream_is_created_without_concurrency_permit(monkeypatch):
+    model, _ = _make_modelengine_model()
+    model.concurrency_limit = 1
+    model.retry_config = openai_llm_module.ModelRetryConfig(max_attempts=1)
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    monkeypatch.setattr(
+        openai_llm_module.model_concurrency_limiter,
+        "acquire",
+        MagicMock(
+            side_effect=openai_llm_module.ModelConcurrencyExceeded(
+                "permit unavailable"
+            )
+        ),
+    )
+
+    with pytest.raises(openai_llm_module.ModelConcurrencyExceeded):
+        model([{"role": "user", "content": "hello"}])
+
+    create.assert_not_called()
+
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -395,11 +573,24 @@ module_mocks = {
     "nexent.core.utils.token_estimation": nexent_core_utils_mock.token_estimation,
 }
 
-# Ensure openai package exists with DefaultHttpxClient for patches
-import types as __types
+# Ensure the OpenAI package stub matches the submodule used by OpenAIModel.
+class StubSDKTimeout:
+    def __init__(self, *, connect, read, write, pool):
+        self.connect = connect
+        self.read = read
+        self.write = write
+        self.pool = pool
+
+
 openai_mod = types.ModuleType("openai")
+openai_mod.__path__ = []
 openai_mod.DefaultHttpxClient = lambda *a, **k: None
+openai_base_client_mod = types.ModuleType("openai._base_client")
+openai_base_client_mod.httpx2 = types.SimpleNamespace(Timeout=StubSDKTimeout)
+openai_mod._base_client = openai_base_client_mod
 sys.modules["openai"] = openai_mod
+sys.modules["openai._base_client"] = openai_base_client_mod
+module_mocks["openai._base_client"] = openai_base_client_mod
 
 # Dynamically load the module directly by file path
 MODULE_NAME = "nexent.core.models.openai_llm"
@@ -499,7 +690,7 @@ def test_check_connectivity_success(openai_model_instance):
             "_prepare_completion_kwargs",
             return_value={},
     ) as mock_prepare_kwargs, patch(
-        "nexent.core.models.openai_llm.asyncio.to_thread",
+        "nexent.core.models.openai_llm.run_blocking",
         new_callable=AsyncMock,
         return_value=None,
     ) as mock_to_thread:
@@ -516,12 +707,98 @@ def test_check_connectivity_failure(openai_model_instance):
             "_prepare_completion_kwargs",
             return_value={},
     ), patch(
-        "nexent.core.models.openai_llm.asyncio.to_thread",
+        "nexent.core.models.openai_llm.run_blocking",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ):
         result = __import__("asyncio").run(openai_model_instance.check_connectivity())
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for sampling-parameter fallback in _dispatch_chat_completion
+# ---------------------------------------------------------------------------
+
+
+class _FakeBadRequest(Exception):
+    """Stand-in for openai.BadRequestError with an injectable message."""
+
+
+def _sampling_fallback_setup(model, message: str, sampled: bool):
+    """Prepare the model for a _dispatch_chat_completion fallback test.
+
+    Returns the mocked ``create`` callable; the first call raises the given
+    400 message, the second one succeeds.
+    """
+    kwargs = {"messages": [{"role": "user", "content": "hi"}], "stream": True}
+    if sampled:
+        kwargs["temperature"] = 0.2
+        kwargs["top_p"] = 0.95
+
+    create = MagicMock()
+    create.side_effect = [
+        _FakeBadRequest(message),
+        MagicMock(name="second_response"),
+    ]
+    model.client.chat.completions.create = create
+    return create, kwargs
+
+
+def test_dispatch_sampling_fallback_strips_params_on_temperature_400(openai_model_instance):
+    """A 400 naming temperature must retry once without temperature/top_p."""
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid temperature: only 1 is allowed for this model",
+        sampled=True,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        result = openai_model_instance._dispatch_chat_completion(**kwargs)
+
+    assert create.call_count == 2
+    retried_kwargs = create.call_args_list[1].kwargs
+    assert "temperature" not in retried_kwargs
+    assert "top_p" not in retried_kwargs
+    # Non-sampling params must survive the retry.
+    assert retried_kwargs["stream"] is True
+
+
+def test_dispatch_sampling_fallback_reraises_non_sampling_400(openai_model_instance):
+    """A 400 that does not name temperature must surface unchanged."""
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid request: model not found",
+        sampled=True,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        with pytest.raises(_FakeBadRequest):
+            openai_model_instance._dispatch_chat_completion(**kwargs)
+    assert create.call_count == 1
+
+
+def test_dispatch_sampling_fallback_reraises_when_params_absent(openai_model_instance):
+    """A temperature 400 on a request WITHOUT sampling params must surface.
+
+    The params can only come from the user's __custom__ extra_body in that
+    case, and silently altering user-supplied config is worse than the error.
+    """
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid temperature: only 1 is allowed for this model",
+        sampled=False,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        with pytest.raises(_FakeBadRequest):
+            openai_model_instance._dispatch_chat_completion(**kwargs)
+    assert create.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -697,6 +974,82 @@ def test_call_context_length_exceeded_error(openai_model_instance):
             openai_model_instance.__call__(messages)
 
 
+def test_provider_context_overflow_rebuilds_and_retries(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    rebuilt_messages = [{"role": "user", "content": [{"text": "smaller"}]}]
+    success_chunk = make_chunk("recovered", role="assistant")
+    success_chunk.usage = None
+    openai_model_instance.client.chat.completions.create.side_effect = [
+        Exception("context_length_exceeded: maximum context length"),
+        [success_chunk],
+    ]
+    rebuild = MagicMock(return_value=rebuilt_messages)
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=MagicMock()):
+        openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_called_once_with()
+    assert openai_model_instance.client.chat.completions.create.call_count == 2
+
+
+def test_provider_context_overflow_rejects_non_list_rebuild(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(TypeError, match="must return FinalContext or a message list"):
+            openai_model_instance.__call__(messages, context_rebuild=lambda: object())
+
+
+def test_provider_context_overflow_stops_after_two_recovery_dispatches(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "still too large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryExhausted,
+            match="persisted after two recovery dispatches",
+        ):
+            openai_model_instance.__call__(
+                messages,
+                context_rebuild=lambda: messages,
+                _overflow_recovery_ordinal=2,
+            )
+
+
+def test_provider_context_overflow_without_rebuild_is_retry_unsafe(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "large"}]}]
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "context_length_exceeded: maximum context length"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(
+            openai_llm_module.ProviderContextOverflowRetryUnsafe,
+            match="cannot be safely rebuilt",
+        ):
+            openai_model_instance.__call__(messages, context_rebuild=None)
+
+
+def test_provider_context_overflow_does_not_recover_unrelated_error(openai_model_instance):
+    messages = [{"role": "user", "content": [{"text": "hello"}]}]
+    rebuild = MagicMock()
+    openai_model_instance.client.chat.completions.create.side_effect = Exception(
+        "authentication failed"
+    )
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        with pytest.raises(Exception, match="authentication failed"):
+            openai_model_instance.__call__(messages, context_rebuild=rebuild)
+
+    rebuild.assert_not_called()
+
+
 def test_call_general_exception(openai_model_instance):
     """Test __call__ method re-raises general exceptions"""
 
@@ -790,12 +1143,14 @@ def test_call_with_reasoning_content(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = "Let me think about this"
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "This is a reasoning step"
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = "Response"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
     mock_chunk2.usage = MagicMock()
     mock_chunk2.usage.prompt_tokens = 5
@@ -828,6 +1183,36 @@ def test_call_with_reasoning_content(openai_model_instance):
             "Response")
 
 
+def test_call_with_reasoning_field(openai_model_instance):
+    """Test __call__ handles providers that stream reasoning in the reasoning field."""
+    messages = [{"role": "user", "content": [{"text": "Hello"}]}]
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Response"
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = "Alternate reasoning field"
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 5
+    mock_chunk.usage.total_tokens = 8
+
+    mock_result_message = MagicMock()
+    mock_result_message.raw = [mock_chunk]
+    mock_result_message.role = MagicMock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}), \
+            patch.object(mock_models_module.ChatMessage, "from_dict", return_value=mock_result_message):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+
+        result = openai_model_instance.__call__(messages)
+
+        assert result == mock_result_message
+        openai_model_instance.observer.add_model_reasoning_content.assert_called_once_with(
+            "Alternate reasoning field"
+        )
+        openai_model_instance.observer.add_model_new_token.assert_called_once_with("Response")
+
+
 def test_call_with_multiple_reasoning_content_chunks(openai_model_instance):
     """Test __call__ method handles multiple chunks with reasoning_content"""
 
@@ -838,18 +1223,21 @@ def test_call_with_multiple_reasoning_content_chunks(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = "Let me"
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "First reasoning step"
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = " think"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = "Second reasoning step"
 
     mock_chunk3 = MagicMock()
     mock_chunk3.choices = [MagicMock()]
     mock_chunk3.choices[0].delta.content = " about this"
     mock_chunk3.choices[0].delta.role = None
+    mock_chunk3.choices[0].delta.reasoning = None
     mock_chunk3.choices[0].delta.reasoning_content = None
     mock_chunk3.usage = MagicMock()
     mock_chunk3.usage.prompt_tokens = 5
@@ -896,12 +1284,14 @@ def test_call_with_reasoning_content_only(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = None
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "Pure reasoning content"
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = "Final response"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
     mock_chunk2.usage = MagicMock()
     mock_chunk2.usage.prompt_tokens = 5
@@ -942,6 +1332,7 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     reasoning_chunk.choices = [MagicMock()]
     reasoning_chunk.choices[0].delta.content = None
     reasoning_chunk.choices[0].delta.role = "assistant"
+    reasoning_chunk.choices[0].delta.reasoning = None
     reasoning_chunk.choices[0].delta.reasoning_content = "Internal reasoning"
     reasoning_chunk.choices[0].finish_reason = None
     reasoning_chunk.usage = None
@@ -950,6 +1341,7 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     final_chunk.choices = [MagicMock()]
     final_chunk.choices[0].delta.content = None
     final_chunk.choices[0].delta.role = None
+    final_chunk.choices[0].delta.reasoning = None
     final_chunk.choices[0].delta.reasoning_content = None
     final_chunk.choices[0].finish_reason = "length"
     final_chunk.usage = MagicMock(prompt_tokens=10, completion_tokens=20)
@@ -985,6 +1377,7 @@ def test_call_with_reasoning_content_and_content_together(openai_model_instance)
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response text"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = "Reasoning alongside content"
     mock_chunk.usage = MagicMock()
     mock_chunk.usage.prompt_tokens = 5
@@ -1029,12 +1422,17 @@ def test_init_with_ssl_verify_false():
         # Create model with ssl_verify=False
         model = ImportedOpenAIModel(observer=observer, ssl_verify=False)
 
-        # Verify DefaultHttpxClient was called with verify=False
-        mock_httpx_client.assert_called_once_with(verify=False)
+        mock_httpx_client.assert_called_once()
+        kwargs = mock_httpx_client.call_args.kwargs
+        assert kwargs["verify"] is False
+        assert kwargs["timeout"].connect == 10.0
+        assert kwargs["timeout"].read == 60.0
+        assert kwargs["timeout"].write == 30.0
+        assert kwargs["timeout"].pool == 10.0
 
 
 def test_init_with_ssl_verify_true():
-    """Test __init__ method doesn't create http_client when ssl_verify=True (default)"""
+    """Default SSL mode still applies finite HTTP phase timeouts."""
 
     observer = MagicMock()
 
@@ -1043,8 +1441,35 @@ def test_init_with_ssl_verify_true():
         # Create model with ssl_verify=True (default)
         model = ImportedOpenAIModel(observer=observer, ssl_verify=True)
 
-        # Verify DefaultHttpxClient was NOT called
-        mock_httpx_client.assert_not_called()
+        mock_httpx_client.assert_called_once()
+        kwargs = mock_httpx_client.call_args.kwargs
+        assert kwargs["verify"] is True
+        assert kwargs["timeout"].read == 60.0
+
+
+def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
+    """Use the Timeout class owned by the HTTP implementation behind OpenAI."""
+
+    class SDKTimeout:
+        def __init__(self, *, connect, read, write, pool):
+            self.connect = connect
+            self.read = read
+            self.write = write
+            self.pool = pool
+
+    sdk_httpx = types.SimpleNamespace(Timeout=SDKTimeout)
+    openai_base_client = types.ModuleType("openai._base_client")
+    openai_base_client.httpx2 = sdk_httpx
+
+    with patch.dict(sys.modules, {"openai._base_client": openai_base_client}), \
+            patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        ImportedOpenAIModel(observer=MagicMock(), ssl_verify=True)
+
+    timeout = mock_httpx_client.call_args.kwargs["timeout"]
+    assert isinstance(timeout, SDKTimeout)
+    assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
+        10.0, 60.0, 30.0, 10.0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1067,18 +1492,21 @@ def test_call_with_monitoring_and_token_tracker(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = "Hello"
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = None
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = " world"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
 
     mock_chunk3 = MagicMock()
     mock_chunk3.choices = [MagicMock()]
     mock_chunk3.choices[0].delta.content = None
     mock_chunk3.choices[0].delta.role = None
+    mock_chunk3.choices[0].delta.reasoning = None
     mock_chunk3.choices[0].delta.reasoning_content = None
     mock_chunk3.usage = MagicMock()
     mock_chunk3.usage.prompt_tokens = 10
@@ -1126,12 +1554,14 @@ def test_call_with_token_tracker_on_reasoning_content(openai_model_instance):
     mock_chunk1.choices = [MagicMock()]
     mock_chunk1.choices[0].delta.content = None
     mock_chunk1.choices[0].delta.role = "assistant"
+    mock_chunk1.choices[0].delta.reasoning = None
     mock_chunk1.choices[0].delta.reasoning_content = "Thinking..."
 
     mock_chunk2 = MagicMock()
     mock_chunk2.choices = [MagicMock()]
     mock_chunk2.choices[0].delta.content = "Response"
     mock_chunk2.choices[0].delta.role = None
+    mock_chunk2.choices[0].delta.reasoning = None
     mock_chunk2.choices[0].delta.reasoning_content = None
     mock_chunk2.usage = MagicMock()
     mock_chunk2.usage.prompt_tokens = 5
@@ -1170,6 +1600,7 @@ def test_call_with_stop_event_and_token_tracker(openai_model_instance):
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
@@ -1462,27 +1893,32 @@ def test_call_with_token_tracker_uses_provided_tracker(openai_model_instance):
     mock_tracker.record_token.assert_called()
 
 
-def _safe_input_budget_snapshot(requested_output_tokens=128):
+def _context_budget_snapshot(requested_output_tokens=128):
+    from nexent.core.models.capacity_budget import compute_context_budget_fingerprint
+
     payload = {
         "w1_fingerprint": "w1fingerprint",
         "provider": "openai",
         "model_name": "gpt-test",
         "requested_output_tokens": requested_output_tokens,
         "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000,
+        "effective_input_limit_tokens": 1000,
         "uncertainty_reserve_tokens": 0,
         "uncertainty_reserve_basis": "none",
         "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8,
-        "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800,
-        "hard_input_budget_tokens": 1000,
+        "compaction_trigger_ratio": 0.8,
+        "compaction_trigger_ratio_source": "code_default",
+        "compaction_trigger_threshold_tokens": 800,
+        "compaction_target_ratio": 0.6,
+        "compaction_target_ratio_source": "code_default",
+        "compaction_target_tokens": 600,
         "field_sources": {},
         "warnings": [],
-        "resolver_version": "1.0.0",
+        "schema_version": 2,
+        "resolver_version": "2.0.0",
     }
-    payload["fingerprint"] = openai_llm_module.compute_w2_fingerprint(
-        w2_resolver_version=payload["resolver_version"],
+    payload["fingerprint"] = compute_context_budget_fingerprint(
+        resolver_version=payload["resolver_version"],
         w1_fingerprint=payload["w1_fingerprint"],
         provider=payload["provider"],
         model_name=payload["model_name"],
@@ -1491,14 +1927,33 @@ def _safe_input_budget_snapshot(requested_output_tokens=128):
         uncertainty_reserve_tokens=payload["uncertainty_reserve_tokens"],
         uncertainty_reserve_basis=payload["uncertainty_reserve_basis"],
         approved_profile_reserve_tokens=payload["approved_profile_reserve_tokens"],
-        soft_limit_ratio=payload["soft_limit_ratio"],
-        soft_limit_ratio_source=payload["soft_limit_ratio_source"],
-        soft_input_budget_tokens=payload["soft_input_budget_tokens"],
-        hard_input_budget_tokens=payload["hard_input_budget_tokens"],
+        effective_input_limit_tokens=payload["effective_input_limit_tokens"],
+        compaction_trigger_ratio=payload["compaction_trigger_ratio"],
+        compaction_trigger_ratio_source=payload["compaction_trigger_ratio_source"],
+        compaction_trigger_threshold_tokens=payload["compaction_trigger_threshold_tokens"],
+        compaction_target_ratio=payload["compaction_target_ratio"],
+        compaction_target_ratio_source=payload["compaction_target_ratio_source"],
+        compaction_target_tokens=payload["compaction_target_tokens"],
         field_sources=payload["field_sources"],
         warnings=payload["warnings"],
     )
     return payload
+
+
+def test_monitoring_projection_cannot_be_assigned_to_dispatch_model(
+    openai_model_instance,
+):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        openai_model_instance.context_budget_snapshot = {
+            "provider": "openai",
+            "effective_input_limit_tokens": 1000,
+            "compaction_trigger_threshold_tokens": 800,
+            "compaction_target_tokens": 600,
+        }
+
+    openai_model_instance.client.chat.completions.create.assert_not_called()
 
 
 def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
@@ -1510,9 +1965,9 @@ def test_call_with_snapshot_does_not_autofill_max_tokens_from_max_output_tokens(
     CallerMaxTokensOverrideForbidden, so the pre-W2 auto-fill must be gated
     on the snapshot being absent.
     """
-    snapshot = _safe_input_budget_snapshot(requested_output_tokens=8192)
+    snapshot = _context_budget_snapshot(requested_output_tokens=8192)
     openai_model_instance.max_output_tokens = 131072
-    openai_model_instance.safe_input_budget_snapshot = snapshot
+    openai_model_instance.context_budget_snapshot = snapshot
 
     messages = [{"role": "user", "content": [{"text": "Hi"}]}]
 
@@ -1558,7 +2013,7 @@ def test_dispatch_without_w2_snapshot_preserves_existing_max_tokens(openai_model
 
 def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_instance):
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        context_budget_snapshot=_context_budget_snapshot(256),
         stream=True,
         messages=[],
     )
@@ -1572,7 +2027,7 @@ def test_dispatch_with_w2_snapshot_sets_requested_output_tokens(openai_model_ins
 
 def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instance):
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+        context_budget_snapshot=_context_budget_snapshot(256),
         stream=True,
         messages=[],
         max_tokens=256,
@@ -1588,7 +2043,7 @@ def test_dispatch_with_matching_caller_max_tokens_is_allowed(openai_model_instan
 def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
     with pytest.raises(openai_llm_module.CallerMaxTokensOverrideForbidden):
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=_safe_input_budget_snapshot(256),
+            context_budget_snapshot=_context_budget_snapshot(256),
             stream=True,
             messages=[],
             max_tokens=128,
@@ -1598,12 +2053,14 @@ def test_dispatch_rejects_caller_max_tokens_override(openai_model_instance):
 
 
 def test_dispatch_rejects_tampered_w2_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
-    snapshot["hard_input_budget_tokens"] = 999
+    snapshot = _context_budget_snapshot(256)
+    snapshot["compaction_target_tokens"] = 999
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetFingerprintMismatch):
+    from nexent.core.models.capacity_budget import ContextBudgetFingerprintMismatch
+
+    with pytest.raises(ContextBudgetFingerprintMismatch):
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             stream=True,
             messages=[],
         )
@@ -1620,9 +2077,9 @@ def _matching_capacity_snapshot(budget_snapshot):
 
 
 def test_dispatch_accepts_matching_w1_capacity_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=snapshot,
+        context_budget_snapshot=snapshot,
         capacity_snapshot=_matching_capacity_snapshot(snapshot),
         stream=True,
         messages=[],
@@ -1636,13 +2093,13 @@ def test_dispatch_accepts_matching_w1_capacity_snapshot(openai_model_instance):
 
 
 def test_dispatch_rejects_stale_w1_fingerprint(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     capacity = _matching_capacity_snapshot(snapshot)
     capacity["capacity_fingerprint"] = "different-w1-fingerprint"
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+    with pytest.raises(openai_llm_module.ContextBudgetCapacityMismatch) as exc_info:
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             capacity_snapshot=capacity,
             stream=True,
             messages=[],
@@ -1653,13 +2110,13 @@ def test_dispatch_rejects_stale_w1_fingerprint(openai_model_instance):
 
 
 def test_dispatch_rejects_cross_provider_w2_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     capacity = _matching_capacity_snapshot(snapshot)
     capacity["provider"] = "dashscope"
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+    with pytest.raises(openai_llm_module.ContextBudgetCapacityMismatch) as exc_info:
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             capacity_snapshot=capacity,
             stream=True,
             messages=[],
@@ -1670,13 +2127,13 @@ def test_dispatch_rejects_cross_provider_w2_snapshot(openai_model_instance):
 
 
 def test_dispatch_rejects_cross_model_w2_snapshot(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
     capacity = _matching_capacity_snapshot(snapshot)
     capacity["model_name"] = "gpt-other"
 
-    with pytest.raises(openai_llm_module.SafeInputBudgetCapacityMismatch) as exc_info:
+    with pytest.raises(openai_llm_module.ContextBudgetCapacityMismatch) as exc_info:
         openai_model_instance._dispatch_chat_completion(
-            safe_input_budget_snapshot=snapshot,
+            context_budget_snapshot=snapshot,
             capacity_snapshot=capacity,
             stream=True,
             messages=[],
@@ -1687,10 +2144,10 @@ def test_dispatch_rejects_cross_model_w2_snapshot(openai_model_instance):
 
 
 def test_dispatch_skips_w1_w2_consistency_when_capacity_snapshot_absent(openai_model_instance):
-    snapshot = _safe_input_budget_snapshot(256)
+    snapshot = _context_budget_snapshot(256)
 
     openai_model_instance._dispatch_chat_completion(
-        safe_input_budget_snapshot=snapshot,
+        context_budget_snapshot=snapshot,
         capacity_snapshot=None,
         stream=True,
         messages=[],
@@ -1703,16 +2160,18 @@ def test_dispatch_skips_w1_w2_consistency_when_capacity_snapshot_absent(openai_m
     )
 
 
-def test_safe_input_budget_trace_attributes_are_prefixed():
-    attrs = ImportedOpenAIModel._safe_input_budget_trace_attributes(
-        _safe_input_budget_snapshot(256)
+def test_context_budget_trace_attributes_are_prefixed():
+    attrs = ImportedOpenAIModel._context_budget_trace_attributes(
+        _context_budget_snapshot(256)
     )
 
     assert len(attrs["w2.budget_fingerprint"]) == 32
     assert attrs["w2.w1_fingerprint"] == "w1fingerprint"
     assert attrs["w2.requested_output_tokens"] == 256
-    assert attrs["w2.soft_input_budget_tokens"] == 800
-    assert attrs["w2.hard_input_budget_tokens"] == 1000
+    assert attrs["context.effective_input_limit_tokens"] == 1000
+    assert attrs["context.compaction_trigger_threshold_tokens"] == 800
+    assert attrs["context.compaction_target_tokens"] == 600
+    assert "context.compaction_target_tokens" in attrs
 
 
 def test_call_without_tracker_creates_tracker(openai_model_instance):
@@ -1753,6 +2212,7 @@ def test_call_token_estimation_with_list_content(openai_model_instance):
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.usage = None  # No usage info to trigger token estimation
 
@@ -1772,8 +2232,8 @@ def test_call_token_estimation_with_list_content(openai_model_instance):
         assert openai_model_instance.last_output_token_count >= 0
 
 
-def test_call_context_length_exceeded_during_iteration(openai_model_instance):
-    """Test __call__ method raises ValueError when context_length_exceeded occurs during iteration (line 264)."""
+def test_call_context_length_exceeded_during_iteration_is_not_replayed(openai_model_instance):
+    """An iteration-time overflow is unsafe because a response may have started."""
 
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
 
@@ -1785,8 +2245,7 @@ def test_call_context_length_exceeded_during_iteration(openai_model_instance):
     with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
         openai_model_instance.client.chat.completions.create.return_value = iter_that_raises()
 
-        # Should raise ValueError wrapping the context_length_exceeded error
-        with pytest.raises(ValueError, match="Token limit exceeded"):
+        with pytest.raises(Exception, match="cannot be safely rebuilt"):
             openai_model_instance.__call__(messages)
 
 
@@ -1801,6 +2260,7 @@ def test_prompt_cache_plan_records_unknown_capability_without_payload_directive(
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.usage = MagicMock()
     mock_chunk.usage.prompt_tokens = 10
@@ -1827,6 +2287,7 @@ def test_prompt_cache_usage_extracts_openai_cached_tokens(openai_model_instance)
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Response"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.usage = MagicMock()
     mock_chunk.usage.prompt_tokens = 100
@@ -1856,6 +2317,7 @@ def test_provider_adapter_preserves_context_manager_tool_order(openai_model_inst
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "ok"
     mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
     mock_chunk.choices[0].finish_reason = "stop"
     mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
@@ -1891,6 +2353,7 @@ def _make_content_chunk(content: str = "hi"):
     chunk.choices = [MagicMock()]
     chunk.choices[0].delta.content = content
     chunk.choices[0].delta.role = "assistant"
+    chunk.choices[0].delta.reasoning = None
     chunk.choices[0].delta.reasoning_content = None
     chunk.usage = MagicMock()
     chunk.usage.prompt_tokens = 1
@@ -2045,7 +2508,7 @@ def test_reasoning_only_retry_is_interrupted_by_stop_event(openai_model_instance
 #   L460      string content path in input_text extraction
 #   L590      stop_event check during retry backoff wait
 #   L652      all-None capacity_snapshot early return in _check_capacity_consistency
-#   L679      _resolve_budget_snapshot SafeInputBudgetSnapshot passthrough
+#   L679      canonical ContextBudgetSnapshot passthrough
 #   L683      _resolve_budget_snapshot TypeError for invalid type
 # ---------------------------------------------------------------------------
 
@@ -2069,7 +2532,11 @@ def test_init_with_ssl_verify_false_and_timeout():
         mock_httpx.assert_called_once()
         call_kwargs = mock_httpx.call_args[1]
         assert call_kwargs["verify"] is False
-        assert call_kwargs["timeout"] == 45
+        timeout = call_kwargs["timeout"]
+        assert timeout.connect == 10.0
+        assert timeout.read == 45
+        assert timeout.write == 30.0
+        assert timeout.pool == 10.0
 
 
 def test_dispatch_extra_body_forwarded(openai_model_instance):
@@ -2090,7 +2557,7 @@ def test_dispatch_extra_body_forwarded(openai_model_instance):
 def test_dispatch_max_output_tokens_autofill_when_budget_none(openai_model_instance):
     """max_output_tokens is set into completion_kwargs when not already there and budget is None (L288)."""
     openai_model_instance.max_output_tokens = 256
-    openai_model_instance.safe_input_budget_snapshot = None
+    openai_model_instance.context_budget_snapshot = None
 
     with patch.object(openai_model_instance, "_prepare_completion_kwargs",
                       return_value={}) as mock_prep:
@@ -2176,89 +2643,41 @@ def test_retry_backoff_interrupted_by_stop_event(openai_model_instance):
 
 
 def test_verify_w1_w2_consistency_all_none_returns_early():
-    """All-None capacity_snapshot fields causes _verify_w1_w2_consistency to return immediately (L652).
-
-    Note: empty dict {} would be caught by L646 (`if not capacity_snapshot`).
-    To reach L652 we need a truthy snapshot where all three fields are None/absent.
-    """
-    from nexent.core.models.openai_llm import OpenAIModel, SafeInputBudgetSnapshot
-    # Truthy dict with irrelevant key → passes L646, hits L652 where all W1 fields are None
-    partial_snap = {"irrelevant": "data"}
-    budget = SafeInputBudgetSnapshot.model_validate({
-        "w1_fingerprint": "fp", "provider": "p", "model_name": "m",
-        "requested_output_tokens": 128, "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
-        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
-        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
-        "fingerprint": "w2-fp-test",
-    })
-    OpenAIModel._verify_w1_w2_consistency(budget_snapshot=budget, capacity_snapshot=partial_snap)
-
-
-def test_coerce_budget_snapshot_passes_safeinput_instance():
-    """_coerce_safe_input_budget_snapshot returns SafeInputBudgetSnapshot unchanged (L679)."""
-    from nexent.core.models.openai_llm import (
-        OpenAIModel, SafeInputBudgetSnapshot, compute_w2_fingerprint,
-    )
-    fp = compute_w2_fingerprint(
-        w2_resolver_version="1.0.0", w1_fingerprint="fp", provider="p",
-        model_name="m", requested_output_tokens=128,
-        output_reserve_source="model_default", uncertainty_reserve_tokens=0,
-        uncertainty_reserve_basis="none", approved_profile_reserve_tokens=None,
-        soft_limit_ratio=0.8, soft_limit_ratio_source="code_default",
-        soft_input_budget_tokens=800, hard_input_budget_tokens=1000,
-        field_sources={}, warnings=[],
-    )
-    snapshot = SafeInputBudgetSnapshot.model_validate({
-        "w1_fingerprint": "fp", "provider": "p", "model_name": "m",
-        "requested_output_tokens": 128, "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
-        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
-        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
-        "fingerprint": fp,
-    })
-    result = OpenAIModel._coerce_safe_input_budget_snapshot(snapshot)
-    assert result is snapshot
-
-
-def test_coerce_budget_snapshot_raises_type_error():
-    """_coerce_safe_input_budget_snapshot raises TypeError for invalid type (L683)."""
     from nexent.core.models.openai_llm import OpenAIModel
-    with pytest.raises(TypeError, match="safe_input_budget_snapshot must be"):
-        OpenAIModel._coerce_safe_input_budget_snapshot("not_a_dict_or_snapshot")
+
+    budget_snapshot = OpenAIModel._coerce_context_budget_snapshot(
+        _context_budget_snapshot()
+    )
+    OpenAIModel._verify_w1_w2_consistency(
+        budget_snapshot=budget_snapshot,
+        capacity_snapshot={"irrelevant": "data"},
+    )
 
 
-def test_coerce_budget_snapshot_from_dict():
-    """_coerce_safe_input_budget_snapshot validates dict into SafeInputBudgetSnapshot (L681)."""
-    from nexent.core.models.openai_llm import (
-        OpenAIModel, compute_w2_fingerprint,
+def test_coerce_context_budget_snapshot_passes_v2_instance():
+    from nexent.core.models.openai_llm import OpenAIModel
+
+    snapshot = OpenAIModel._coerce_context_budget_snapshot(
+        _context_budget_snapshot()
     )
-    fp = compute_w2_fingerprint(
-        w2_resolver_version="1.0.0", w1_fingerprint="fp1", provider="openai",
-        model_name="gpt4", requested_output_tokens=128,
-        output_reserve_source="model_default", uncertainty_reserve_tokens=0,
-        uncertainty_reserve_basis="none", approved_profile_reserve_tokens=None,
-        soft_limit_ratio=0.8, soft_limit_ratio_source="code_default",
-        soft_input_budget_tokens=800, hard_input_budget_tokens=1000,
-        field_sources={}, warnings=[],
+    assert OpenAIModel._coerce_context_budget_snapshot(snapshot) is snapshot
+
+
+def test_coerce_context_budget_snapshot_raises_type_error():
+    from nexent.core.models.openai_llm import OpenAIModel
+
+    with pytest.raises(TypeError, match="context_budget_snapshot must be"):
+        OpenAIModel._coerce_context_budget_snapshot("not_a_dict_or_snapshot")
+
+
+def test_coerce_context_budget_snapshot_from_dict():
+    from nexent.core.models.openai_llm import OpenAIModel
+
+    result = OpenAIModel._coerce_context_budget_snapshot(
+        _context_budget_snapshot()
     )
-    snap_dict = {
-        "w1_fingerprint": "fp1", "provider": "openai", "model_name": "gpt4",
-        "requested_output_tokens": 128, "output_reserve_source": "model_default",
-        "provider_input_limit_tokens": 1000, "uncertainty_reserve_tokens": 0,
-        "uncertainty_reserve_basis": "none", "approved_profile_reserve_tokens": None,
-        "soft_limit_ratio": 0.8, "soft_limit_ratio_source": "code_default",
-        "soft_input_budget_tokens": 800, "hard_input_budget_tokens": 1000,
-        "field_sources": {}, "warnings": [], "resolver_version": "1.0.0",
-        "fingerprint": fp,
-    }
-    result = OpenAIModel._coerce_safe_input_budget_snapshot(snap_dict)
     assert result is not None
-    assert result.w1_fingerprint == "fp1"
+    assert result.w1_fingerprint == "w1fingerprint"
 
 
 def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance):
@@ -2274,6 +2693,7 @@ def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance)
     clean_delta = types.SimpleNamespace()
     clean_delta.content = "ok"
     clean_delta.role = "assistant"
+    clean_delta.reasoning = None
     clean_delta.reasoning_content = None
     clean_choice.delta = clean_delta
     clean_chunk.choices = [clean_choice]
@@ -2287,3 +2707,45 @@ def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance)
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+# ---------------------------------------------------------------------------
+# Tests for enable_thinking wire-format translation
+# ---------------------------------------------------------------------------
+
+
+def test_translate_thinking_wraps_qwen_in_chat_template_kwargs(openai_model_instance):
+    """Qwen-family models only read chat_template_kwargs.enable_thinking."""
+    openai_model_instance.model_id = "Qwen/Qwen3-235B-A22B"
+    result = openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False}
+    )
+    assert result == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert "enable_thinking" not in result
+
+
+def test_translate_thinking_keeps_top_level_for_non_qwen(openai_model_instance):
+    """DeepSeek/DashScope-style providers read the top-level flag."""
+    openai_model_instance.model_id = "deepseek-ai/DeepSeek-V3"
+    result = openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False}
+    )
+    assert result == {"enable_thinking": False}
+
+
+def test_translate_thinking_merges_existing_chat_template_kwargs(openai_model_instance):
+    """Existing chat_template_kwargs must survive the merge."""
+    openai_model_instance.model_id = "qwen3-max"
+    result = openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": True, "chat_template_kwargs": {"custom": 1}}
+    )
+    assert result == {
+        "chat_template_kwargs": {"custom": 1, "enable_thinking": True}
+    }
+
+
+def test_translate_thinking_passthrough_without_flag(openai_model_instance):
+    """No enable_thinking in extra_body -> the dict is returned unchanged."""
+    openai_model_instance.model_id = "Qwen/Qwen3"
+    original = {"other_param": "x"}
+    assert openai_model_instance._translate_thinking_flag(original) == original

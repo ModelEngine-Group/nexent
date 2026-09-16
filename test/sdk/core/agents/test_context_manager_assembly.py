@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import pytest
+from nexent.core.agents.context import (
+    ContextItemInput,
+    ContextManager,
+    ContextManagerConfig,
+)
 from smolagents.memory import ActionStep, TaskStep
 from smolagents.monitoring import Timing
-
-from nexent.core.agents.context import ContextManager
-from nexent.core.agents.context import ContextItemInput
-from nexent.core.agents.context import ContextManagerConfig
 
 
 def _message_text(message):
@@ -168,7 +169,7 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "system",
         "user",
-        "user",
+        "assistant",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -188,6 +189,32 @@ def test_context_manager_owns_final_answer_assembly():
     assert "context_purpose" in final.evidence.prefix_change_reasons or (
         final.evidence.prefix_change_reasons == ("initial_request",)
     )
+
+
+def test_current_run_keeps_only_task_as_user_message():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="policy")
+    memory.steps.extend([
+        TaskStep(task="search once and answer"),
+        ActionStep(step_number=1, timing=Timing(start_time=0), action_output="first result"),
+        ActionStep(step_number=2, timing=Timing(start_time=1), action_output="second result"),
+    ])
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    assert [message["role"] for message in final.messages] == [
+        "system",
+        "user",
+        "assistant",
+        "assistant",
+    ]
+    assert sum(message["role"] == "user" for message in final.messages) == 1
 
 
 def test_context_manager_attributes_tool_schema_change():
@@ -240,3 +267,35 @@ def test_context_manager_reports_multiple_stable_change_reasons():
 
     assert "tool_schema_version" in second.evidence.prefix_change_reasons
     assert "system_prompt_version" in second.evidence.prefix_change_reasons
+
+
+@pytest.mark.parametrize("purpose", ["step", "final_answer"])
+def test_current_run_preserves_action_clarification_and_guidance_order(purpose):
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="stable policy")
+    memory.steps = [
+        TaskStep(task="Draft a notice"),
+        ActionStep(step_number=1, timing=Timing(start_time=0), observations="Asked for missing intent"),
+        TaskStep(task="Clarification: formal tone"),
+        ActionStep(step_number=2, timing=Timing(start_time=0), observations="Created formal draft"),
+        TaskStep(task="Guidance: friendly tone instead"),
+        ActionStep(step_number=3, timing=Timing(start_time=0), observations="Revised draft successfully"),
+    ]
+    kwargs = {
+        "model": None, "memory": memory, "current_run_start_idx": 0, "run_context": run_context,
+        "purpose": purpose, "task": "Draft a notice", "final_answer_templates": {
+            "final_answer": {"pre_messages": "Finalize", "post_messages": "Finish {{ task }}"},
+        },
+    }
+    expected = ["Draft a notice", "Asked for missing intent", "Clarification: formal tone",
+                "Created formal draft", "Guidance: friendly tone instead", "Revised draft successfully"]
+    # Reassembly exercises the projection cache, including a newly appended task.
+    for _ in range(2):
+        final = manager.assemble_final_context(**kwargs)
+        texts = [_message_text(message) for message in final.messages]
+        positions = [next(index for index, text in enumerate(texts) if marker in text) for marker in expected]
+        assert positions == sorted(positions)
+        if len(expected) == 6:
+            memory.steps.append(TaskStep(task="Guidance: include the date"))
+            expected.append("Guidance: include the date")

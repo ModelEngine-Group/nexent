@@ -34,6 +34,12 @@ ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv("DATA_PROCESS_SERVICE")
 RUNTIME_SERVICE_URL = os.getenv("RUNTIME_SERVICE_URL", "http://localhost:5014").rstrip("/")
+HITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() in ("true", "1", "yes")
+HITL_ACCEPT_NEW_RUNS = os.getenv("HITL_ACCEPT_NEW_RUNS", "true").lower() in ("true", "1", "yes")
+HITL_TOOL_APPROVAL_ENABLED = os.getenv("HITL_TOOL_APPROVAL_ENABLED", "false").lower() in ("true", "1", "yes")
+HITL_ENCRYPTION_KEY = os.getenv("HITL_ENCRYPTION_KEY", "")
+HITL_WAIT_SECONDS = int(os.getenv("HITL_WAIT_SECONDS", "86400"))
+HITL_MAX_CONCURRENCY = int(os.getenv("HITL_MAX_CONCURRENCY", "2"))
 CLIP_MODEL_PATH = os.getenv("CLIP_MODEL_PATH")
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
@@ -148,6 +154,8 @@ OAUTH_LOGIN_MODE = os.getenv("OAUTH_LOGIN_MODE", "button").lower()
 # CAS SSO Configuration
 CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", "on")
 CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", "").rstrip("/")
+# Optional backend-only URL for CAS servers reachable through an internal container network.
+CAS_INTERNAL_SERVER_URL = os.getenv("CAS_INTERNAL_SERVER_URL", "").rstrip("/")
 CAS_VALIDATE_PATH = os.getenv("CAS_VALIDATE_PATH", "/p3/serviceValidate")
 CAS_CALLBACK_BASE_URL = os.getenv("CAS_CALLBACK_BASE_URL", OAUTH_CALLBACK_BASE_URL).rstrip("/")
 # CAS login mode:
@@ -283,6 +291,45 @@ RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
 RUNTIME_CANCEL_POLL_INTERVAL_SECONDS = float(os.getenv("RUNTIME_CANCEL_POLL_INTERVAL_SECONDS", "1.0"))
+RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS = int(
+    os.getenv("RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS", "50")
+)
+RUNTIME_AGENT_THREAD_MAX_WORKERS = int(os.getenv("RUNTIME_AGENT_THREAD_MAX_WORKERS", "200"))
+RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE = int(os.getenv("RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE", "32"))
+if RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS <= 0:
+    raise ValueError("RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS must be greater than zero")
+if RUNTIME_AGENT_THREAD_MAX_WORKERS <= 0:
+    raise ValueError("RUNTIME_AGENT_THREAD_MAX_WORKERS must be greater than zero")
+RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS", "30")
+)
+if RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS must be greater than zero")
+RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS = float(
+    os.getenv("RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS", "5")
+)
+RUNTIME_MCP_TOOL_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS", "60")
+)
+RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS", "5")
+)
+if RUNTIME_MCP_TOOL_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS must be greater than zero")
+if RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS must be greater than zero")
+RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = float(
+    os.getenv("RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS", "30")
+)
+NORTHBOUND_CONTROL_THREAD_MAX_WORKERS = int(
+    os.getenv("NORTHBOUND_CONTROL_THREAD_MAX_WORKERS", "8")
+)
+NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE = int(
+    os.getenv("NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE", "64")
+)
+NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = float(
+    os.getenv("NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS", "15")
+)
 NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv("NORTHBOUND_IDEMPOTENCY_TTL_SECONDS", "600"))
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv("NORTHBOUND_RATE_LIMIT_ENABLED", "true").lower() == "true"
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv("NORTHBOUND_RATE_LIMIT_PER_MINUTE", "120"))
@@ -611,6 +658,8 @@ MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
+MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv(
+    "MONITORING_DASHBOARD_ALLOWED_ROLES", "SU,SPEED")
 MONITORING_TRACE_CONTENT_MODE = os.getenv(
     "MONITORING_TRACE_CONTENT_MODE", "summary")
 MONITORING_TRACE_MAX_CHARS = os.getenv("MONITORING_TRACE_MAX_CHARS", "4000")
@@ -797,6 +846,13 @@ enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"
+
+# Model Catalog - 预置模型目录配置文件路径
+MODEL_CATALOG_JSON_PATH = os.getenv(
+    "MODEL_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
+)
+"""Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")

@@ -107,7 +107,7 @@ def test_context_contract_defaults_and_unconfigured_runtime_guards():
     assert runtime.chars_per_token == pytest.approx(1.5)
     assert runtime.token_threshold is None
     assert runtime.context_window_tokens is None
-    assert runtime.hard_input_budget_tokens is None
+    assert runtime.effective_input_limit_tokens is None
     assert runtime.processing_mode is None
     assert runtime.token_counts() == {"uncompressed": None, "compressed": None}
     assert runtime.global_compression_stats() == {"calls": 0, "records": []}
@@ -328,7 +328,7 @@ def test_renderer_current_action_without_raw_messages():
         {"step_number": 1, "result": "done"},
     )
     message = ContextItemRenderer().render([action])[0]
-    assert message["role"] == "user"
+    assert message["role"] == "assistant"
     text = message["content"][0]["text"]
     assert '<completed_action_history read_only="true">' in text
     assert "index: 1" in text
@@ -404,7 +404,7 @@ def test_renderer_current_action_preserves_string_tool_arguments():
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
 
-    assert message["role"] == "user"
+    assert message["role"] == "assistant"
     assert "tool: python_interpreter" in text
     assert "result = search(query='GAIA')\nprint(result)" in text
     assert "python_interpreter'()" not in text
@@ -521,7 +521,7 @@ def test_context_manager_management_and_diagnostic_helpers():
     item_input = ContextItemInput(id="system", type="system", content={"text": "policy"})
     normalized = ContextItem.from_input(item_input)
 
-    assert manager.hard_input_budget_tokens == 110
+    assert manager.effective_input_limit_tokens == 0
     assert manager.processing_mode == "passthrough"
     assert manager.get_step_compression_stats() == {"calls": 0, "records": []}
     assert manager.get_all_compression_stats() == {"calls": 0, "records": []}

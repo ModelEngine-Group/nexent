@@ -292,11 +292,17 @@ async def generate_conversation_title_endpoint(
         user_id, tenant_id, language = get_current_user_info(
             authorization=authorization, request=http_request)
         title = await generate_conversation_title_service(
-            request.conversation_id, request.question, user_id, tenant_id=tenant_id, language=language)
+            request.conversation_id, request.question, user_id, tenant_id=tenant_id,
+            language=language, model_id=request.model_id)
         return ConversationResponse(code=0, message="success", data=title)
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

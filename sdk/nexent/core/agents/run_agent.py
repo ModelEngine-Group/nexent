@@ -1,24 +1,87 @@
 import asyncio
-from copy import deepcopy
 import json
 import logging
-from contextvars import copy_context
-from threading import Thread
+import threading
+from copy import deepcopy
 from typing import Any, Dict, Union
 
 import httpx
-from smolagents import ToolCollection
 
 from ...monitor import (
     set_monitoring_capacity_snapshot,
-    set_monitoring_safe_input_budget_snapshot,
+    set_monitoring_context_budget_snapshot,
 )
+from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
+from ..concurrency.helpers import (
+    get_fallback_thread_manager,
+    shutdown_fallback_thread_manager,
+)
+from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, RunTerminated
 from .agent_model import AgentRunInfo
+from .managed_mcp import ManagedMCPToolCollection
 from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
 logger = logging.getLogger("run_agent")
 logger.setLevel(logging.DEBUG)
+
+
+class DeferredAgentRun:
+    """Managed worker target that waits for request preparation to bind run data."""
+
+    def __init__(self):
+        self._ready = threading.Event()
+        self._lock = threading.Lock()
+        self._agent_run_info: AgentRunInfo | None = None
+        self._cancelled = False
+
+    def bind(self, agent_run_info: AgentRunInfo) -> None:
+        with self._lock:
+            if self._agent_run_info is not None:
+                raise RuntimeError("Deferred agent run is already bound")
+            self._agent_run_info = agent_run_info
+            cancelled = self._cancelled
+            self._ready.set()
+        if cancelled:
+            agent_run_info.cancellation_scope.cancel()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            agent_run_info = self._agent_run_info
+            self._ready.set()
+        if agent_run_info is not None:
+            agent_run_info.cancellation_scope.cancel()
+
+    def run(self, cancel_event: threading.Event) -> None:
+        while not self._ready.wait(0.05):
+            if cancel_event.is_set():
+                self.cancel()
+                return
+        with self._lock:
+            agent_run_info = self._agent_run_info
+            cancelled = self._cancelled or cancel_event.is_set()
+        if agent_run_info is None:
+            return
+        if cancelled:
+            agent_run_info.cancellation_scope.cancel()
+            return
+        agent_run_thread(agent_run_info)
+
+
+def _get_default_agent_thread_manager() -> ThreadManager:
+    """Return a bounded fallback for direct SDK callers.
+
+    Backend services must inject their process-local manager. The fallback keeps
+    the public SDK call compatible and can be closed explicitly with
+    ``shutdown_default_agent_thread_manager``.
+    """
+    return get_fallback_thread_manager()
+
+
+async def shutdown_default_agent_thread_manager(timeout: float = 15.0):
+    """Close the direct-SDK fallback manager when an embedding process exits."""
+    return await shutdown_fallback_thread_manager(timeout=timeout)
 
 
 def build_run_additional_args(agent_run_info: AgentRunInfo) -> Dict[str, Any]:
@@ -56,9 +119,7 @@ def _log_memory_value_assessment(agent: Any) -> None:
         return
 
     invocation_count = int(getattr(store_tool, "invocation_count", 0) or 0)
-    successful_store_count = int(
-        getattr(store_tool, "successful_store_count", 0) or 0
-    )
+    successful_store_count = int(getattr(store_tool, "successful_store_count", 0) or 0)
     decision = "store_attempted" if invocation_count else "skip"
     logger.info(
         "event=memory_value_assessment tenant_id=%s user_id=%s agent_id=%s "
@@ -76,10 +137,10 @@ def _log_memory_value_assessment(agent: Any) -> None:
 
 
 def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
-    snapshot = getattr(agent_run_info, "safe_input_budget_snapshot", None)
-    if not isinstance(snapshot, dict):
+    snapshot = getattr(agent_run_info, "context_budget_snapshot", None)
+    if snapshot is None:
         return
-    warnings = snapshot.get("warnings") or []
+    warnings = snapshot.warnings
     if "uncertainty_reserve_active" not in warnings:
         return
 
@@ -89,18 +150,18 @@ def _emit_uncertainty_reserve_warning(agent_run_info: AgentRunInfo) -> None:
             "W2 applied the unified 10% uncertainty reserve because selected "
             "model capability behavior is not fully verified."
         ),
-        "budget_fingerprint": snapshot.get("fingerprint"),
-        "w1_fingerprint": snapshot.get("w1_fingerprint"),
-        "uncertainty_reserve_tokens": snapshot.get("uncertainty_reserve_tokens"),
-        "hard_input_budget_tokens": snapshot.get("hard_input_budget_tokens"),
+        "budget_fingerprint": snapshot.fingerprint,
+        "w1_fingerprint": snapshot.w1_fingerprint,
+        "uncertainty_reserve_tokens": snapshot.uncertainty_reserve_tokens,
+        "effective_input_limit_tokens": snapshot.effective_input_limit_tokens,
     }
     logger.warning(
         "W2 uncertainty reserve active: budget_fingerprint=%s w1_fingerprint=%s "
-        "uncertainty_reserve_tokens=%s hard_input_budget_tokens=%s",
+        "uncertainty_reserve_tokens=%s effective_input_limit_tokens=%s",
         payload["budget_fingerprint"],
         payload["w1_fingerprint"],
         payload["uncertainty_reserve_tokens"],
-        payload["hard_input_budget_tokens"],
+        payload["effective_input_limit_tokens"],
     )
     try:
         agent_run_info.observer.add_message(
@@ -202,8 +263,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         set_monitoring_capacity_snapshot(
             getattr(agent_run_info, "capacity_snapshot", None)
         )
-        set_monitoring_safe_input_budget_snapshot(
-            getattr(agent_run_info, "safe_input_budget_snapshot", None)
+        set_monitoring_context_budget_snapshot(
+            getattr(agent_run_info, "context_budget_snapshot", None)
         )
         _emit_uncertainty_reserve_warning(agent_run_info)
         mcp_host = agent_run_info.mcp_host
@@ -221,12 +282,15 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 workspace_path=getattr(agent_run_info, "workspace_path", None),
                 workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
                 minio_files=getattr(agent_run_info, "minio_files", None),
+                cancellation_scope=agent_run_info.cancellation_scope,
             )
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
                 context_items_override=_get_authorized_context_items(agent_run_info),
             )
             nexent.set_agent(agent)
+            if agent_run_info.human_interaction is not None:
+                agent_run_info.human_interaction.attach(agent)
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             try:
@@ -238,11 +302,19 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
             finally:
                 _log_memory_value_assessment(agent)
         else:
-            agent_run_info.observer.add_message(
-                "", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
+            agent_run_info.observer.add_message("", ProcessType.AGENT_NEW_RUN, "<MCP_START>")
             mcp_client_list = [_normalize_mcp_config(item) for item in mcp_host]
+            mcp_cancellation_scope = agent_run_info.cancellation_scope or RunCancellationScope(
+                agent_run_info.stop_event
+            )
 
-            with ToolCollection.from_mcp(mcp_client_list, trust_remote_code=True) as tool_collection:
+            with ManagedMCPToolCollection(
+                manager=agent_run_info.thread_manager or _get_default_agent_thread_manager(),
+                server_parameters=mcp_client_list,
+                cancellation_scope=mcp_cancellation_scope,
+                tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
+                close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
+            ) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
                     model_config_list=agent_run_info.model_config_list,
@@ -257,12 +329,15 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                     workspace_path=getattr(agent_run_info, "workspace_path", None),
                     workspace_run_id=getattr(agent_run_info, "workspace_run_id", None),
                     minio_files=getattr(agent_run_info, "minio_files", None),
+                    cancellation_scope=agent_run_info.cancellation_scope,
                 )
                 agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                     agent_run_info.agent_config,
                     context_items_override=_get_authorized_context_items(agent_run_info),
                 )
                 nexent.set_agent(agent)
+                if agent_run_info.human_interaction is not None:
+                    agent_run_info.human_interaction.attach(agent)
 
                 nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
                 try:
@@ -274,14 +349,31 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
                 finally:
                     _log_memory_value_assessment(agent)
 
+        agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
+    except AttemptSuspended:
+        agent_run_info.attempt_outcome = "waiting_human"
+    except RunTerminated:
+        agent_run_info.attempt_outcome = "stopped"
+    except RecoveryRequired:
+        agent_run_info.attempt_outcome = "recovery_required"
+        message = (
+            "执行进程已中断。为避免重复执行操作，本次任务无法自动恢复，请重新发起任务。"
+            if agent_run_info.observer.lang == "zh" else
+            "Execution was interrupted. To avoid repeating actions, this task cannot resume automatically. "
+            "Please start a new task."
+        )
+        agent_run_info.observer.add_message("", ProcessType.ERROR, message)
     except Exception as e:
+        agent_run_info.attempt_outcome = "failed"
         if "Couldn't connect to the MCP server" in str(e):
-            mcp_connect_error_str = "MCP服务器连接超时。" if agent_run_info.observer.lang == "zh" else "Couldn't connect to the MCP server."
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
+            mcp_connect_error_str = (
+                "MCP服务器连接超时。"
+                if agent_run_info.observer.lang == "zh"
+                else "Couldn't connect to the MCP server."
+            )
+            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
         else:
-            agent_run_info.observer.add_message(
-                "", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
+            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
         raise ValueError(f"Error in agent_run_thread: {e}")
     finally:
         # Agent construction, MCP setup, and executor initialization can fail
@@ -294,21 +386,73 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
         )
 
 
-async def agent_run(agent_run_info: AgentRunInfo):
+async def agent_run(
+    agent_run_info: AgentRunInfo,
+    thread_manager: ThreadManager | None = None,
+    execution: ManagedExecution | None = None,
+    deferred_run: DeferredAgentRun | None = None,
+):
     observer = agent_run_info.observer
+    manager = thread_manager or _get_default_agent_thread_manager()
+    run_id = getattr(agent_run_info, "workspace_run_id", None)
+    if run_id is None and getattr(agent_run_info, "conversation_id", None) is not None:
+        run_id = str(agent_run_info.conversation_id)
+    runtime_metadata = getattr(agent_run_info, "runtime_metadata", {}) or {}
+    if agent_run_info.cancellation_scope is None:
+        agent_run_info.cancellation_scope = RunCancellationScope(agent_run_info.stop_event)
+    agent_run_info.thread_manager = manager
+    if execution is None:
+        execution = manager.submit(
+            "agent-run",
+            ManagedTaskSpec(
+                task_name="agent-run",
+                owner="nexent.core.agents.run_agent",
+                run_id=run_id,
+                attempt_id=runtime_metadata.get("attempt_id"),
+                close_hook=agent_run_info.cancellation_scope.cancel,
+            ),
+            agent_run_thread,
+            agent_run_info,
+        )
+    elif deferred_run is None:
+        raise ValueError("deferred_run is required with a pre-admitted execution")
+    else:
+        deferred_run.bind(agent_run_info)
+    agent_run_info.thread_execution_id = execution.execution_id
+    agent_run_info.thread_future = execution.future
 
-    ctx = copy_context()
-    thread_agent = Thread(target=ctx.run, args=(agent_run_thread, agent_run_info))
-    thread_agent.start()
+    worker_finished = False
+    try:
+        while not execution.future.done():
+            cached_message = observer.get_cached_message()
+            for message in cached_message:
+                yield message
+                if len(cached_message) < 8:
+                    await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
+        worker_finished = True
 
-    while thread_agent.is_alive():
+        # Consume the exception so the Future does not emit an unobserved failure.
+        # agent_run_thread has already converted it into an observer error message.
+        try:
+            execution.future.result()
+        except Exception:
+            logger.debug(
+                "event=agent_managed_execution_failed execution_id=%s run_id=%s",
+                execution.execution_id,
+                run_id or "",
+                exc_info=True,
+            )
+
         cached_message = observer.get_cached_message()
         for message in cached_message:
             yield message
-            if len(cached_message) < 8:
-                await asyncio.sleep(0.05)
-        await asyncio.sleep(0.1)
-
-    cached_message = observer.get_cached_message()
-    for message in cached_message:
-        yield message
+    finally:
+        if not worker_finished and not execution.future.done():
+            agent_run_info.stop_event.set()
+            manager.cancel(
+                execution.execution_id,
+                reason="agent stream consumer closed",
+                wait_timeout=0,
+                mark_stuck_on_timeout=False,
+            )

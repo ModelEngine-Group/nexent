@@ -20,6 +20,7 @@ from database.model_management_db import get_model_by_model_id
 from utils.config_utils import tenant_config_manager, get_model_name_from_config
 from utils.content_classifier_utils import ContentClassifier
 from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
+from services.thread_lifecycle_service import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +271,10 @@ async def create_nl2skill_stream(
                         "paths": target_files,
                     }
                 )
-            async for raw_chunk in agent_run(run_info):
+            async for raw_chunk in agent_run(
+                run_info,
+                thread_manager=runtime_thread_manager,
+            ):
                 try:
                     chunk = json.loads(raw_chunk) if isinstance(raw_chunk, str) else raw_chunk
                 except json.JSONDecodeError:

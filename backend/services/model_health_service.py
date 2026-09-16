@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from nexent.core import MessageObserver
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
@@ -31,6 +31,14 @@ def _normalize_embedding_url(base_url: str) -> str:
     if not base_url or "/embeddings" in base_url:
         return base_url
     return f"{base_url.rstrip('/')}/embeddings"
+
+
+def _embedding_url_candidates(base_url: str) -> List[str]:
+    """Ordered URLs to probe: the /embeddings endpoint first, then the URL as given."""
+    if not base_url:
+        return []
+    normalized = _normalize_embedding_url(base_url)
+    return [normalized] if normalized == base_url else [normalized, base_url]
 
 
 def _infer_model_factory(model_type: str, base_url: str, current_factory: Optional[str] = None) -> Optional[str]:
@@ -70,15 +78,21 @@ async def _embedding_dimension_check(
     ssl_verify: bool = True,
     model_factory: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
+    extra_params: Optional[dict] = None,
 ):
-    if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
-
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
 
     if model_type == "embedding":
+        adapter_config = {
+            "base_url": model_base_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_type": "embedding",
+        }
+        if extra_params is not None:
+            adapter_config["extra_params"] = extra_params
         embedding = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
+            adapter_config,
             "embedding", "embedding", None, model_name=model_name,
         ).dimension_check(timeout=effective_timeout)
         if len(embedding) > 0:
@@ -87,8 +101,17 @@ async def _embedding_dimension_check(
             f"Embedding dimension check for {model_name} gets empty response")
         return 0
     elif model_type == "multi_embedding":
+        adapter_config = {
+            "model_factory": model_factory,
+            "base_url": model_base_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_type": "multi_embedding",
+        }
+        if extra_params is not None:
+            adapter_config["extra_params"] = extra_params
         embedding = await build_adapter_fresh(
-            {"model_factory": model_factory, "base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
+            adapter_config,
             "multi_embedding", "multiEmbedding", None, model_name=model_name,
         ).dimension_check(timeout=effective_timeout)
         if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
@@ -136,6 +159,9 @@ async def _perform_connectivity_check(
     access_token: Optional[str] = None,
     display_name: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    extra_params: Optional[dict] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -154,25 +180,30 @@ async def _perform_connectivity_check(
         model_base_url = model_base_url.replace(
             LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
 
-    # Normalize embedding URLs by appending /embeddings if not present
-    if model_type in EMBEDDING_TYPES:
-        model_base_url = _normalize_embedding_url(model_base_url)
-
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
     connectivity: bool
 
-    if model_type == "embedding":
-        emb = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
-            "embedding", "embedding", None, model_name=model_name,
-        ).dimension_check(timeout=effective_timeout)
-        connectivity = len(emb) > 0 and len(emb[0]) > 0
-    elif model_type == "multi_embedding":
-        emb = await build_adapter_fresh(
-            {"model_factory": model_factory, "base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
-            "multi_embedding", "multiEmbedding", None, model_name=model_name,
-        ).dimension_check(timeout=effective_timeout)
-        connectivity = len(emb) > 0 and len(emb[0]) > 0
+    if model_type in EMBEDDING_TYPES:
+        is_multimodal = model_type == "multi_embedding"
+        slot = "multiEmbedding" if is_multimodal else "embedding"
+        adapter_config = {
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_type": model_type,
+        }
+        if is_multimodal:
+            adapter_config["model_factory"] = model_factory
+        # Try the normalized /embeddings endpoint first, then the URL as the
+        # user gave it — aggregator URL quirks don't fail the probe on the
+        # first candidate.
+        for candidate_url in _embedding_url_candidates(model_base_url):
+            emb = await build_adapter_fresh(
+                {**adapter_config, "base_url": candidate_url},
+                model_type, slot, None, model_name=model_name,
+            ).dimension_check(timeout=effective_timeout)
+            if len(emb) > 0 and len(emb[0]) > 0:
+                return True
+        return False
     elif model_type == "llm":
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
@@ -180,7 +211,9 @@ async def _perform_connectivity_check(
         connectivity = await build_adapter_fresh(
             {"base_url": model_base_url, "api_key": model_api_key,
              "ssl_verify": ssl_verify, "timeout_seconds": timeout_seconds,
-             "display_name": display_name},
+             "display_name": display_name,
+             "temperature": temperature, "top_p": top_p,
+             "extra_params": extra_params},
             "llm", "llm", None,
             observer=observer,
             model_name=model_name,
@@ -188,9 +221,33 @@ async def _perform_connectivity_check(
             display_name=display_name,
         ).health_check()
     elif model_type == "rerank":
+        # Normalize the probe URL to the rerank endpoint — the form/base_url
+        # passed in at verify time is usually the bare provider root (e.g.
+        # https://api.siliconflow.cn/v1/), while the rerank adapter POSTs the
+        # URL as-is, so a bare root would 404. Mirrors the URL munging that
+        # prepare_model_dict applies when the model is SAVED, so probe-time
+        # and save-time URLs agree:
+        #   dashscope: compatible-mode/v1 -> api/v1 .../services/rerank/text-rerank/text-rerank
+        #   others:    {root}/rerank
+        # Already-normalized URLs (ending in /rerank or the dashscope path)
+        # pass through untouched.
+        rerank_url = (model_base_url or "").rstrip("/")
+        if "dashscope" in rerank_url.lower() and "text-rerank" not in rerank_url:
+            rerank_url = (
+                rerank_url.replace("compatible-mode/v1", "api/v1").rstrip("/")
+                + "/services/rerank/text-rerank/text-rerank"
+            )
+        elif not rerank_url.lower().endswith("/rerank") and "text-rerank" not in rerank_url:
+            rerank_url = f"{rerank_url}/rerank"
+        rerank_config = {
+            "base_url": rerank_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+        }
+        if extra_params is not None:
+            rerank_config["extra_params"] = extra_params
         connectivity = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key,
-             "ssl_verify": ssl_verify},
+            rerank_config,
             "rerank", "rerank", None, model_name=model_name,
         ).health_check()
     elif model_type in ("vlm", "vlm2", "vlm3", "vlm4"):
@@ -205,9 +262,20 @@ async def _perform_connectivity_check(
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
+        vlm_config = {
+            "base_url": model_base_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_factory": model_factory,
+        }
+        if temperature is not None:
+            vlm_config["temperature"] = temperature
+        if top_p is not None:
+            vlm_config["top_p"] = top_p
+        if extra_params is not None:
+            vlm_config["extra_params"] = extra_params
         connectivity = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key,
-             "ssl_verify": ssl_verify, "model_factory": model_factory},
+            vlm_config,
             "vlm", model_type, None, model_name=model_name,
             observer=observer, display_name=display_name,
         ).health_check()
@@ -294,20 +362,32 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
         model_appid = model.get("model_appid")
         access_token = model.get("access_token")
         timeout_seconds = model.get("timeout_seconds")
+        temperature = model.get("temperature")
+        top_p = model.get("top_p")
+        extra_params = model.get("extra_params")
 
         try:
             set_monitoring_context(tenant_id=tenant_id)
 
             ssl_verify_fallback = False
+            connectivity_kwargs = {}
+            if temperature is not None:
+                connectivity_kwargs["temperature"] = temperature
+            if top_p is not None:
+                connectivity_kwargs["top_p"] = top_p
+            if extra_params is not None:
+                connectivity_kwargs["extra_params"] = extra_params
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
                 model_factory, model_appid, access_token, display_name, timeout_seconds,
+                **connectivity_kwargs,
             )
             if not connectivity and ssl_verify:
                 ssl_verify_fallback = True
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
                     model_factory, model_appid, access_token, display_name, timeout_seconds,
+                    **connectivity_kwargs,
                 )
         except Exception as e:
             update_data = {
@@ -365,6 +445,12 @@ async def verify_model_config_connectivity(model_config: dict):
         access_token = model_config.get("access_token")
         # Get timeout from model config if present
         timeout_seconds = model_config.get("timeout_seconds")
+        # v2.6.0 inference params (temperature / top_p / extra_params incl.
+        # __custom__) — carried into the connectivity probe so that an invalid
+        # custom param surfaces here as a 400, instead of failing at runtime.
+        temperature = model_config.get("temperature")
+        top_p = model_config.get("top_p")
+        extra_params = model_config.get("extra_params")
 
         # Infer model_factory from base_url when not provided
         model_factory = _infer_model_factory(model_type, model_base_url, model_config.get("model_factory"))
@@ -373,11 +459,13 @@ async def verify_model_config_connectivity(model_config: dict):
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
                 model_factory, model_appid, access_token, None, timeout_seconds,
+                temperature=temperature, top_p=top_p, extra_params=extra_params,
             )
             if not connectivity and ssl_verify:
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
                     model_factory, model_appid, access_token, None, timeout_seconds,
+                    temperature=temperature, top_p=top_p, extra_params=extra_params,
                 )
             if not connectivity:
                 error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
@@ -421,15 +509,21 @@ async def embedding_dimension_check(model_config: dict):
         ssl_verify = model_config.get("ssl_verify", True)
         model_factory = _infer_model_factory(model_type, model_base_url, model_config.get("model_factory"))
         timeout_seconds = model_config.get("timeout_seconds")
+        embedding_check_kwargs = {
+            "model_factory": model_factory,
+            "timeout_seconds": timeout_seconds,
+        }
+        if model_config.get("extra_params") is not None:
+            embedding_check_kwargs["extra_params"] = model_config["extra_params"]
         dimension = await _embedding_dimension_check(
             model_name, model_type, model_base_url, model_api_key, ssl_verify,
-            model_factory=model_factory, timeout_seconds=timeout_seconds
+            **embedding_check_kwargs,
         )
         # Fallback to ssl_verify=False if initial check fails
         if dimension == 0 and ssl_verify:
             dimension = await _embedding_dimension_check(
                 model_name, model_type, model_base_url, model_api_key, False,
-                model_factory=model_factory, timeout_seconds=timeout_seconds
+                **embedding_check_kwargs,
             )
         if dimension == 0:
             logger.error(f"Embedding dimension check returned 0 for model: {model_name}")

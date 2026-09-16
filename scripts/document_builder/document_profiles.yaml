@@ -1,0 +1,137 @@
+{
+  "product": {
+    "zh": {
+      "title": "Nexent 产品与技术指南",
+      "subtitle": "部署 使用 集成与运维",
+      "author": "Nexent 项目组",
+      "document_version": "1.0",
+      "intro": "本指南汇集 Nexent 的正式产品与技术资料，面向负责产品评估、部署、使用、集成和运维的团队。文档说明产品能力、实施要求和技术参考，并按典型使用过程组织内容。",
+      "purpose": "帮助使用团队了解 Nexent 的产品范围，完成环境部署和系统配置，并为集成、运维及安全评审提供依据。",
+      "audience": "技术负责人、系统架构师、实施人员、运维人员、安全评审人员和产品管理员。",
+      "scope": "涵盖产品概述、部署、产品使用、系统集成、运维、安全说明和开发者参考。",
+      "exclude_files": [
+        "contributing.md",
+        "opensource-memorial-wall.md",
+        "contributors.md",
+        "code-of-conduct.md"
+      ],
+      "remove_headings": ["Demo 视频", "加入我们的社区", "加入社区", "社区", "快速开始"],
+      "remove_phrases": [
+        "一个提示词，无限种可能",
+        "Rome wasn't built in a day",
+        "前往 GitHub 为我们点星",
+        "如果我们的愿景与您产生共鸣"
+      ],
+      "sections": [
+        {"title": "产品概述", "includes": ["getting-started/**"]},
+        {"title": "部署与环境准备", "includes": ["quick-start/**", "deployment/**"]},
+        {
+          "title": "产品使用指南",
+          "includes": ["user-guide/**"],
+          "excludes": [
+            "user-guide/modelengine.md",
+            "user-guide/monitor.md",
+            "user-guide/agent-development/a2a-*.md"
+          ]
+        },
+        {
+          "title": "系统集成",
+          "includes": [
+            "user-guide/modelengine.md",
+            "user-guide/agent-development/a2a-*.md",
+            "integration/**",
+            "mcp-ecosystem/**"
+          ]
+        },
+        {
+          "title": "运维管理",
+          "includes": [
+            "user-guide/monitor.md",
+            "backend/version-management.md",
+            "sdk/monitoring.md",
+            "sdk/opentelemetry-design.md"
+          ]
+        },
+        {"title": "安全说明", "includes": ["security.md"]},
+        {
+          "title": "开发者参考",
+          "includes": [
+            "developer-guide/**",
+            "frontend/**",
+            "backend/**",
+            "testing/**",
+            "sdk/**",
+            "docs-development.md"
+          ]
+        },
+        {"title": "附录", "includes": ["license.md"]}
+      ]
+    },
+    "en": {
+      "title": "Nexent Product and Technical Guide",
+      "subtitle": "Deployment Usage Integration and Operations",
+      "author": "Nexent Project Team",
+      "document_version": "1.0",
+      "intro": "This guide brings together the official Nexent product and technical documentation for teams evaluating, deploying, using, integrating, and operating the product. It presents capabilities, implementation requirements, and technical references in a typical usage sequence.",
+      "purpose": "Help teams understand the Nexent product scope, complete deployment and configuration, and support integration, operations, and security reviews.",
+      "audience": "Technology leaders, solution architects, implementation engineers, operators, security reviewers, and product administrators.",
+      "scope": "Product overview, deployment, product usage, integration, operations, security, and developer reference material.",
+      "exclude_files": [
+        "contributing.md",
+        "opensource-memorial-wall.md",
+        "contributors.md",
+        "code-of-conduct.md"
+      ],
+      "remove_headings": ["Demo Video", "Join Our Community", "Community", "Quick Start"],
+      "remove_phrases": [
+        "One prompt, infinite possibilities",
+        "Rome wasn't built in a day",
+        "star us on GitHub",
+        "If our vision resonates with you"
+      ],
+      "sections": [
+        {"title": "Product Overview", "includes": ["getting-started/**"]},
+        {"title": "Deployment and Environment Preparation", "includes": ["quick-start/**", "deployment/**"]},
+        {
+          "title": "Product User Guide",
+          "includes": ["user-guide/**"],
+          "excludes": [
+            "user-guide/modelengine.md",
+            "user-guide/monitor.md",
+            "user-guide/agent-development/a2a-*.md"
+          ]
+        },
+        {
+          "title": "System Integration",
+          "includes": [
+            "user-guide/modelengine.md",
+            "user-guide/agent-development/a2a-*.md",
+            "integration/**",
+            "mcp-ecosystem/**"
+          ]
+        },
+        {
+          "title": "Operations",
+          "includes": [
+            "user-guide/monitor.md",
+            "backend/version-management.md",
+            "sdk/monitoring.md"
+          ]
+        },
+        {"title": "Security", "includes": ["security.md"]},
+        {
+          "title": "Developer Reference",
+          "includes": [
+            "developer-guide/**",
+            "frontend/**",
+            "backend/**",
+            "testing/**",
+            "sdk/**",
+            "docs-development.md"
+          ]
+        },
+        {"title": "Appendix", "includes": ["license.md"]}
+      ]
+    }
+  }
+}
