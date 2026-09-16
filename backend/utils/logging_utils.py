@@ -1,6 +1,7 @@
 import logging
 import logging.config
 import os
+import re
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -12,6 +13,26 @@ from consts.const import (
     LOG_MAX_BYTES,
     LOG_ROTATION_INTERVAL,
 )
+
+
+class AgentShareAccessLogFilter(logging.Filter):
+    """Redact Agent share Tokens from Uvicorn access-log request paths."""
+
+    _AGENT_SHARE_PATH_PATTERN = re.compile(r"(/(?:api/)?agent-share/)[^/?\s\"]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not isinstance(record.args, tuple) or len(record.args) < 3:
+            return True
+
+        path = record.args[2]
+        if not isinstance(path, str):
+            return True
+
+        redacted_path = self._AGENT_SHARE_PATH_PATTERN.sub(r"\1[redacted]", path)
+        if redacted_path != path:
+            record.args = (*record.args[:2], redacted_path, *record.args[3:])
+
+        return True
 
 
 class ColorFormatter(logging.Formatter):
@@ -161,6 +182,7 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         "class": "logging.StreamHandler",
         "level": level,
         "formatter": "color",
+        "filters": ["redact_agent_share_token"],
         "stream": "ext://sys.stdout",
     }
 
@@ -176,6 +198,7 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
             "class": f"{__name__}.HybridRotatingFileHandler",
             "level": level,
             "formatter": "plain",
+            "filters": ["redact_agent_share_token"],
             "filename": log_path,
             "when": "midnight",
             "interval": LOG_ROTATION_INTERVAL,
@@ -202,6 +225,11 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
     config: dict[str, object] = {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {
+            "redact_agent_share_token": {
+                "()": f"{__name__}.AgentShareAccessLogFilter",
+            }
+        },
         "formatters": formatters,
         "handlers": {**{"console": console_handler}, **file_handlers},
         "root": {"level": level, "handlers": handler_names},

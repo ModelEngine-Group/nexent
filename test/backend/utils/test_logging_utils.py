@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.utils import logging_utils
 from backend.utils.logging_utils import (
     ColorFormatter,
     HybridRotatingFileHandler,
@@ -22,6 +23,40 @@ from backend.utils.logging_utils import (
     configure_logging,
     get_uvicorn_logging_config,
 )
+
+
+class TestAgentShareAccessLogFilter:
+    """Agent share Tokens must never appear in Uvicorn access logs."""
+
+    def test_redacts_token_from_agent_share_path(self):
+        token = "public-id.1.signature"
+        record = logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            "",
+            0,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:1234", "GET", f"/api/agent-share/{token}/history", "1.1", 200),
+            None,
+        )
+
+        assert logging_utils.AgentShareAccessLogFilter().filter(record)
+        assert token not in record.getMessage()
+        assert "/api/agent-share/[redacted]/history" in record.getMessage()
+
+    def test_keeps_non_share_paths_unchanged(self):
+        record = logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            "",
+            0,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:1234", "GET", "/api/health", "1.1", 200),
+            None,
+        )
+
+        assert logging_utils.AgentShareAccessLogFilter().filter(record)
+        assert "/api/health" in record.getMessage()
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +324,14 @@ class TestGetUvicornLoggingConfig:
         assert file_h["filename"].replace("\\", "/").endswith("my_cat/nexent_my_cat.log")
         assert file_h["encoding"] == "utf-8"
         assert file_h["class"].endswith("HybridRotatingFileHandler")
+
+    def test_all_handlers_redact_agent_share_tokens(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        cfg = get_uvicorn_logging_config(categories=["runtime"])
+
+        assert cfg["filters"]["redact_agent_share_token"]["()"].endswith("AgentShareAccessLogFilter")
+        for handler in cfg["handlers"].values():
+            assert "redact_agent_share_token" in handler["filters"]
 
 
 # ---------------------------------------------------------------------------
