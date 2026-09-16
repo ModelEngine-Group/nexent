@@ -244,6 +244,12 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
     return config
 
 
+def configure_runtime_uvicorn_logging():
+    """Apply the runtime Uvicorn logging configuration before serving requests."""
+    logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime"]))
+    configure_elasticsearch_logging()
+
+
 def configure_elasticsearch_logging():
     """Configure logging for Elasticsearch client to reduce verbosity."""
     logging.getLogger("elastic_transport.transport").setLevel(logging.WARNING)

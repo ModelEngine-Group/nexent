@@ -20,6 +20,7 @@ from backend.utils.logging_utils import (
     ColorFormatter,
     HybridRotatingFileHandler,
     configure_elasticsearch_logging,
+    configure_runtime_uvicorn_logging,
     configure_logging,
     get_uvicorn_logging_config,
 )
@@ -337,6 +338,20 @@ class TestGetUvicornLoggingConfig:
             "level": cfg["root"]["level"],
             "propagate": False,
         }
+
+
+class TestConfigureRuntimeUvicornLogging:
+    """Runtime logging must apply the access-log token redaction configuration."""
+
+    def test_applies_runtime_config_and_quiets_elasticsearch(self, mocker):
+        dict_config = mocker.patch("backend.utils.logging_utils.logging.config.dictConfig")
+        quiet_elasticsearch = mocker.patch("backend.utils.logging_utils.configure_elasticsearch_logging")
+
+        configure_runtime_uvicorn_logging()
+
+        applied_config = dict_config.call_args.args[0]
+        assert applied_config["loggers"]["uvicorn.access"]["handlers"] == ["console", "file_runtime"]
+        quiet_elasticsearch.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
