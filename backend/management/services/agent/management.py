@@ -517,6 +517,7 @@ async def export_agent_by_agent_id(
                                           allow_chat_metadata=agent_info.get("allow_chat_metadata", False),
                                           verification_config=agent_info.get("verification_config"),
                                           context_policy=agent_info.get("context_policy"),
+                                          model_params_override=agent_info.get("model_params_override"),
                                           duty_prompt=agent_info.get(
                                               "duty_prompt"),
                                           constraint_prompt=agent_info.get(
@@ -693,6 +694,7 @@ async def import_agent_by_agent_id(
                                          "allow_chat_metadata": import_agent_info.allow_chat_metadata,
                                          "verification_config": getattr(import_agent_info, "verification_config", None),
                                          "context_policy": getattr(import_agent_info, "context_policy", None),
+                                         "model_params_override": getattr(import_agent_info, "model_params_override", None),
                                          "duty_prompt": import_agent_info.duty_prompt,
                                          "constraint_prompt": import_agent_info.constraint_prompt,
                                          "few_shots_prompt": import_agent_info.few_shots_prompt,

@@ -19,7 +19,13 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
+from consts.exceptions import (
+    ForbiddenError,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
+    UnauthorizedError,
+    ValidationError,
+)
 from consts.model import NL2AgentRunRequest
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
@@ -197,7 +203,6 @@ async def test_agent_run_api(mocker, mock_auth_header):
     mock_run_agent_stream.assert_called_once()
     assert "text/event-stream" in response.headers["content-type"]
 
-    # Check streamed content
     content = response.content.decode()
     assert "data: chunk1" in content
     assert "data: chunk2" in content
@@ -289,6 +294,42 @@ def test_nl2agent_resource_config_reads_only_requested_candidate(
         tenant_id="tenant-a",
         user_id="user-a",
     )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code", "expected_retry_after"),
+    [
+        (RuntimeCapacityExceededError(), "RUNTIME_CAPACITY_FULL", "1"),
+        (RuntimeQueueTimeoutError(2.2), "RUNTIME_QUEUE_TIMEOUT", "3"),
+    ],
+)
+def test_ut_be_tlm_027_agent_run_overload_is_json_before_sse(
+    mocker,
+    mock_auth_header,
+    error,
+    expected_code,
+    expected_retry_after,
+):
+    mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock, side_effect=error)
+
+    response = runtime_client.post(
+        "/agent/run",
+        json={"agent_id": 1, "query": "test", "is_debug": True},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == expected_retry_after
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {
+        "code": expected_code,
+        "message": (
+            "Agent runtime is at capacity."
+            if expected_code == "RUNTIME_CAPACITY_FULL"
+            else "Agent runtime queue wait timed out."
+        ),
+        "retryable": True,
+    }
 
 
 @pytest.mark.asyncio
@@ -2823,3 +2864,27 @@ def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Agent icon retrieval error."
+
+
+@pytest.mark.parametrize("status", [404, 409, 410, 422, 503])
+def test_northbound_run_preserves_hitl_errors(mocker, status):
+    from services.human_interaction.models import InteractionError
+
+    mocker.patch("apps.agent_app.verify_internal_runtime_jwt", return_value=("owner", "tenant"))
+    mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock, side_effect=InteractionError("HITL", status))
+    response = runtime_client.post("/agent/internal/northbound/run", json={"query": "hello", "enable_hitl": True})
+    assert response.status_code == status
+
+
+def test_northbound_stop_terminates_waiting_durable_run(mocker):
+    mocker.patch("consts.const.HITL_ENABLED", True)
+    mocker.patch("apps.agent_app.verify_internal_runtime_jwt", return_value=("owner", "tenant"))
+    service = MagicMock()
+    service.repository.latest.return_value = "durable-run"
+    mocker.patch("services.human_interaction.application.get_service", return_value=service)
+    stop = mocker.patch("apps.agent_app.stop_agent_tasks", return_value={"message": "stopped"})
+    response = runtime_client.post("/agent/internal/northbound/stop/7")
+    assert response.status_code == 200
+    service.repository.latest.assert_called_once_with("tenant", "owner", 7, active_only=True)
+    service.control.assert_called_once_with("durable-run", "tenant", "owner", "terminate")
+    stop.assert_called_once_with(7, "owner")

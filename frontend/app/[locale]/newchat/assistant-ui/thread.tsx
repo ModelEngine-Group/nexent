@@ -12,6 +12,8 @@ import {
 import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
+import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
+import { UserGuidanceMessage } from "@/features/humanInteraction/UserGuidanceMessage";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
@@ -55,6 +57,7 @@ import {
   MoreHorizontalIcon,
   RefreshCwIcon,
   ArrowLeft,
+  AlertTriangleIcon,
   SparklesIcon,
   type LucideIcon,
   PencilIcon,
@@ -149,6 +152,7 @@ import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
+import { formatWarningText } from "@/lib/warningText";
 import { configService } from "@/services/configService";
 import { conversationService } from "@/services/conversationService";
 import type {
@@ -195,6 +199,7 @@ export interface ThreadProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
   showComposer?: boolean;
+  interactionContent?: ReactNode;
 }
 
 /**
@@ -282,6 +287,7 @@ export const Thread: FC<ThreadProps> = ({
   onRuntimeMetadataChange,
   readOnly = false,
   showComposer = true,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -525,6 +531,7 @@ export const Thread: FC<ThreadProps> = ({
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
         showComposer={showComposer}
+        interactionContent={interactionContent}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -641,6 +648,7 @@ interface ThreadViewProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
   showComposer: boolean;
+  interactionContent?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -683,6 +691,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   onRuntimeMetadataChange,
   readOnly,
   showComposer,
+  interactionContent,
 }) => {
   const { t } = useTranslation();
 
@@ -724,7 +733,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                   </span>
                   {hasMessages && variant !== "embedded" && (
                     <span className="text-xs text-muted-foreground">
-                      {t("chat.thread.conversation")}
+                      {displayName}
                     </span>
                   )}
                 </div>
@@ -813,6 +822,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               suggestions={welcomeSuggestions}
             />
           )}
+          {interactionContent}
         </ThreadPrimitive.Viewport>
 
         {showComposer && (
@@ -1477,6 +1487,7 @@ const AssistantMessage: FC<{
               case "text": {
                 const textPart = part as typeof part & {
                   isError?: boolean;
+                  isWarning?: boolean;
                   text?: string;
                   isSearchImage?: boolean;
                   imageSource?: SourcePartLike;
@@ -1489,6 +1500,17 @@ const AssistantMessage: FC<{
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
                       <span className="break-all">{textPart.text}</span>
+                    </div>
+                  );
+                }
+                if (textPart.isWarning) {
+                  const warningText = formatWarningText(textPart.text ?? "");
+                  return (
+                    <div className="mt-2 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
+                      <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-gray-400 dark:text-gray-500" />
+                      <span className="line-clamp-3 min-w-0 break-all">
+                        {warningText}
+                      </span>
                     </div>
                   );
                 }
@@ -1524,6 +1546,9 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
+                if ((part as typeof part & { name?: string }).name === "user-steering") {
+                  return <UserGuidanceMessage data={(part as typeof part & { data?: unknown }).data} />;
+                }
                 if (
                   (part as typeof part & { name?: string }).name ===
                   "history-summary"
@@ -1730,7 +1755,7 @@ const UserMessage: FC<{
         <UserMessageAttachments />
 
         <div className="aui-user-message-content-wrapper relative self-end inline-block min-w-0">
-          <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
+          <UserMessageBubble>
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}
             </MessagePrimitive.Quote>
@@ -1741,7 +1766,7 @@ const UserMessage: FC<{
                   : DirectiveText,
               }}
             />
-          </div>
+          </UserMessageBubble>
           {!readOnly && (
             <div className="aui-user-action-bar-wrapper absolute top-1/2 left-0 -translate-x-full -translate-y-1/2 pr-2 peer-empty:hidden">
               <UserActionBar />

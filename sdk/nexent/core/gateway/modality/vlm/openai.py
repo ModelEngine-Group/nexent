@@ -9,6 +9,7 @@ import os
 from typing import Any, BinaryIO, Dict, List, Union
 
 from ....models import OpenAIModel
+from nexent.core.concurrency import run_blocking
 
 from ...model_context import VLMContext
 from ...multimodal_adapter import ModelInfo, MultimodalAdapter
@@ -243,7 +244,8 @@ class OpenAIVLMAdapter(VLMAdapter, HttpTransportMixin):
             ]
 
         try:
-            await asyncio.to_thread(
+            await run_blocking(
+                "gateway-vlm-connectivity",
                 self._model.client.chat.completions.create,
                 model=self._model.model_id,
                 messages=[{"role": "user", "content": content_parts}],

@@ -249,18 +249,18 @@ def test_resource_config_http_dto_separates_schema_defaults_from_values():
 
 
 @pytest.mark.parametrize(
-    ("language", "heading", "immutable_rule", "description_rule"),
+    ("language", "heading", "name_rule", "description_rule"),
     [
         (
             "en",
             "### Role",
-            "`name` and `display_name` are immutable",
+            "only when the authoritative draft `name` is absent",
             "generate only `description`",
         ),
         (
             "zh",
             "### 核心职责",
-            "`name` 和 `display_name` 不可修改",
+            "仅当权威草稿中的 `name` 缺失",
             "只生成 `description`",
         ),
     ],
@@ -268,7 +268,7 @@ def test_resource_config_http_dto_separates_schema_defaults_from_values():
 def test_build_nl2agent_system_prompt_configures_existing_draft(
     language,
     heading,
-    immutable_rule,
+    name_rule,
     description_rule,
 ):
     prompt = build_nl2agent_system_prompt(
@@ -280,7 +280,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     )
 
     assert heading in prompt
-    assert immutable_rule in prompt
+    assert name_rule in prompt
     assert description_rule in prompt
     assert "runtime_resolve" in prompt
     assert "runtime_wrapper" in prompt
@@ -341,7 +341,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 6
+    assert len(code_blocks) == 7
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -692,15 +692,16 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
         agent_id=42,
         resource_result={"status": "success", "resources": []},
     )
-    empty_payload = json.loads(
-        empty_wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0]
-    )
+    empty_payload = json.loads(empty_wrapped)
     assert empty_payload == {
+        "status": "success",
         "subtype": "installed_resource_binding",
         "agent_id": 42,
+        "binding_required": False,
         "resources": [],
         "requirements": [],
     }
+    assert "<nl2a>" not in empty_wrapped
 
 
 def test_resource_gap_resolution_wrapper_preserves_original_requirements():
@@ -736,8 +737,9 @@ def test_installed_resource_binding_wrapper_preserves_requirements_for_rejection
         requirements=[requirement],
     )
 
-    payload = json.loads(wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0])
+    payload = json.loads(wrapped)
     assert payload["requirements"] == [requirement.model_dump(mode="json")]
+    assert payload["binding_required"] is False
 
 
 def test_resource_gap_requires_a_requirement_uncovered_by_both_searches():
@@ -812,6 +814,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     save_inputs = json.loads(config.tools[1].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
+        "name",
         "description",
         "duty_prompt",
         "constraint_prompt",

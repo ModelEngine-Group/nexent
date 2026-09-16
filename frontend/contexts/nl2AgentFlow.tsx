@@ -18,6 +18,7 @@ import {
 
 export type Nl2AgentFlowPhase =
   | "idle"
+  | "running"
   | "clarifying"
   | "installing"
   | "resolving_gap"
@@ -77,6 +78,8 @@ interface Nl2AgentFlowState {
 
 type Nl2AgentFlowAction =
   | { type: "reset"; agentId: number | null }
+  | { type: "run_started"; agentId: number }
+  | { type: "run_finished"; agentId: number }
   | { type: "register_card"; card: ActiveNl2AgentCard }
   | { type: "submit_card"; cardKey: string }
   | {
@@ -133,6 +136,32 @@ function reducer(
         agentId: action.agentId,
         sessionGeneration: state.sessionGeneration + 1,
         configFocusRequestSequence: state.configFocusRequestSequence,
+      };
+    case "run_started":
+      if (state.agentId !== null && state.agentId !== action.agentId) {
+        return state;
+      }
+      return {
+        ...state,
+        phase: "running",
+        agentId: action.agentId,
+        completionSyncFailed: false,
+        isFormLocked: true,
+      };
+    case "run_finished":
+      if (state.agentId !== action.agentId) return state;
+      if (
+        state.activeCard !== null ||
+        state.phase === "generating" ||
+        state.phase === "generation_failed" ||
+        state.phase === "completing"
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        phase: "idle",
+        isFormLocked: false,
       };
     case "register_card":
       if (state.submittedCardKeys.has(action.card.key)) return state;
@@ -290,6 +319,8 @@ function reducer(
 
 interface Nl2AgentFlowContextValue extends Nl2AgentFlowState {
   resetFlow: (agentId?: number | null) => void;
+  markRunStarted: (agentId: number) => void;
+  markRunFinished: (agentId: number) => void;
   registerCard: (key: string, subtype: string) => void;
   submitCard: (key: string) => void;
   requestSkillCreation: (
@@ -326,6 +357,14 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const resetFlow = useCallback(
     (agentId: number | null = null) => dispatch({ type: "reset", agentId }),
+    []
+  );
+  const markRunStarted = useCallback(
+    (agentId: number) => dispatch({ type: "run_started", agentId }),
+    []
+  );
+  const markRunFinished = useCallback(
+    (agentId: number) => dispatch({ type: "run_finished", agentId }),
     []
   );
   const registerCard = useCallback(
@@ -410,6 +449,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
     () => ({
       ...state,
       resetFlow,
+      markRunStarted,
+      markRunFinished,
       registerCard,
       submitCard,
       requestSkillCreation,
@@ -434,6 +475,8 @@ export const Nl2AgentFlowProvider: FC<PropsWithChildren> = ({ children }) => {
       markGenerationStopped,
       markPromptGenerationFailed,
       markResourcesBound,
+      markRunFinished,
+      markRunStarted,
       registerCard,
       requestConfigFocus,
       clearConfigFocusRequest,

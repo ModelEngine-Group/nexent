@@ -141,6 +141,9 @@ async def _perform_connectivity_check(
     access_token: Optional[str] = None,
     display_name: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    extra_params: Optional[dict] = None,
 ) -> bool:
     """
     Perform specific model connectivity check
@@ -172,6 +175,9 @@ async def _perform_connectivity_check(
         }
         if is_multimodal:
             adapter_config["model_factory"] = model_factory
+        # Try the normalized /embeddings endpoint first, then the URL as the
+        # user gave it — aggregator URL quirks don't fail the probe on the
+        # first candidate.
         for candidate_url in _embedding_url_candidates(model_base_url):
             emb = await build_adapter_fresh(
                 {**adapter_config, "base_url": candidate_url},
@@ -187,7 +193,9 @@ async def _perform_connectivity_check(
         connectivity = await build_adapter_fresh(
             {"base_url": model_base_url, "api_key": model_api_key,
              "ssl_verify": ssl_verify, "timeout_seconds": timeout_seconds,
-             "display_name": display_name},
+             "display_name": display_name,
+             "temperature": temperature, "top_p": top_p,
+             "extra_params": extra_params},
             "llm", "llm", None,
             observer=observer,
             model_name=model_name,
@@ -195,8 +203,26 @@ async def _perform_connectivity_check(
             display_name=display_name,
         ).health_check()
     elif model_type == "rerank":
+        # Normalize the probe URL to the rerank endpoint — the form/base_url
+        # passed in at verify time is usually the bare provider root (e.g.
+        # https://api.siliconflow.cn/v1/), while the rerank adapter POSTs the
+        # URL as-is, so a bare root would 404. Mirrors the URL munging that
+        # prepare_model_dict applies when the model is SAVED, so probe-time
+        # and save-time URLs agree:
+        #   dashscope: compatible-mode/v1 -> api/v1 .../services/rerank/text-rerank/text-rerank
+        #   others:    {root}/rerank
+        # Already-normalized URLs (ending in /rerank or the dashscope path)
+        # pass through untouched.
+        rerank_url = (model_base_url or "").rstrip("/")
+        if "dashscope" in rerank_url.lower() and "text-rerank" not in rerank_url:
+            rerank_url = (
+                rerank_url.replace("compatible-mode/v1", "api/v1").rstrip("/")
+                + "/services/rerank/text-rerank/text-rerank"
+            )
+        elif not rerank_url.lower().endswith("/rerank") and "text-rerank" not in rerank_url:
+            rerank_url = f"{rerank_url}/rerank"
         connectivity = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key,
+            {"base_url": rerank_url, "api_key": model_api_key,
              "ssl_verify": ssl_verify},
             "rerank", "rerank", None, model_name=model_name,
         ).health_check()
@@ -372,6 +398,12 @@ async def verify_model_config_connectivity(model_config: dict):
         access_token = model_config.get("access_token")
         # Get timeout from model config if present
         timeout_seconds = model_config.get("timeout_seconds")
+        # v2.6.0 inference params (temperature / top_p / extra_params incl.
+        # __custom__) — carried into the connectivity probe so that an invalid
+        # custom param surfaces here as a 400, instead of failing at runtime.
+        temperature = model_config.get("temperature")
+        top_p = model_config.get("top_p")
+        extra_params = model_config.get("extra_params")
 
         # Infer model_factory from base_url when not provided
         model_factory = _infer_model_factory(model_type, model_base_url, model_config.get("model_factory"))
@@ -380,11 +412,13 @@ async def verify_model_config_connectivity(model_config: dict):
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
                 model_factory, model_appid, access_token, None, timeout_seconds,
+                temperature=temperature, top_p=top_p, extra_params=extra_params,
             )
             if not connectivity and ssl_verify:
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
                     model_factory, model_appid, access_token, None, timeout_seconds,
+                    temperature=temperature, top_p=top_p, extra_params=extra_params,
                 )
             if not connectivity:
                 error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."

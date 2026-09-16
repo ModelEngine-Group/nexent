@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -83,6 +85,7 @@ class CapacitySuggestionMatchKind(str, Enum):
     CATALOG_EXACT = "catalog_exact"
     CATALOG_FUZZY = "catalog_fuzzy"
     PROVIDER_DISCOVERY = "provider_discovery"
+    LITELLM_LOOKUP = "litellm_lookup"
     NONE = "none"
 
 
@@ -300,7 +303,6 @@ def suggest_capacity(
     base_url: Optional[str] = None,
     provider_hint: Optional[str] = None,
     model_type: Optional[str] = None,
-    api_key: Optional[str] = None,
     catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]] = None,
     enabled: bool = CAPACITY_SUGGESTION_ENABLED,
 ) -> CapacitySuggestionResult:
@@ -310,7 +312,6 @@ def suggest_capacity(
         base_url=base_url,
         provider_hint=provider_hint,
         model_type=model_type,
-        api_key=api_key,
         catalog=catalog,
         enabled=enabled,
     )
@@ -324,38 +325,26 @@ def suggest_capacity(
     return result
 
 
-def _suggest_capacity_inner(
-    model_name: str,
-    base_url: Optional[str],
-    provider_hint: Optional[str],
-    model_type: Optional[str],
-    api_key: Optional[str],
-    catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]],
-    enabled: bool,
-) -> CapacitySuggestionResult:
-    del api_key
+def _find_normalized_exact_key(
+    clean_model_name: str,
+    provider: str,
+    active_catalog: Mapping[ProfileKey, CapabilityProfileLike],
+) -> Optional[ProfileKey]:
+    """Case/punctuation-insensitive exact match inside one provider's entries."""
+    wanted = _normalize_catalog_exact_name(clean_model_name)
+    for catalog_key in _provider_catalog(active_catalog, provider).keys():
+        if _normalize_catalog_exact_name(catalog_key[1]) == wanted:
+            return catalog_key
+    return None
 
-    if not enabled:
-        return _none_result("Capacity suggestion is disabled")
 
-    clean_model_name = (model_name or "").strip()
-    if not clean_model_name:
-        raise ValueError("model_name is required")
-
-    if len(clean_model_name) > 512:
-        raise ValueError("model_name is too long")
-
-    if model_type and model_type.lower() not in SUPPORTED_SUGGESTION_MODEL_TYPES:
-        return _none_result(f"Capacity suggestion is not supported for model_type={model_type}")
-
-    active_catalog = catalog if catalog is not None else _get_default_catalog()
-
-    provider = pick_provider(provider_hint, base_url, clean_model_name, active_catalog)
-    if not provider:
-        return _none_result("No provider candidate could be inferred")
-
-    exact_key = (provider, clean_model_name)
-    exact_profile = active_catalog.get(exact_key)
+def _catalog_match(
+    clean_model_name: str,
+    provider: str,
+    active_catalog: Mapping[ProfileKey, CapabilityProfileLike],
+) -> Optional[CapacitySuggestionResult]:
+    """Try the catalog match ladder: exact, normalized-exact, then fuzzy."""
+    exact_profile = active_catalog.get((provider, clean_model_name))
     if exact_profile:
         return _result_from_profile(
             provider,
@@ -364,12 +353,9 @@ def _suggest_capacity_inner(
             CapacitySuggestionMatchKind.CATALOG_EXACT,
         )
 
-    normalized_exact_key = None
-    for catalog_key in _provider_catalog(active_catalog, provider).keys():
-        if _normalize_catalog_exact_name(catalog_key[1]) == _normalize_catalog_exact_name(clean_model_name):
-            normalized_exact_key = catalog_key
-            break
-
+    normalized_exact_key = _find_normalized_exact_key(
+        clean_model_name, provider, active_catalog
+    )
     if normalized_exact_key:
         return _result_from_profile(
             normalized_exact_key[0],
@@ -387,5 +373,171 @@ def _suggest_capacity_inner(
             profile,
             CapacitySuggestionMatchKind.CATALOG_FUZZY,
         )
+    return None
+
+
+def _suggest_capacity_inner(
+    model_name: str,
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+    model_type: Optional[str],
+    catalog: Optional[Mapping[ProfileKey, CapabilityProfileLike]],
+    enabled: bool,
+) -> CapacitySuggestionResult:
+    if not enabled:
+        return _none_result("Capacity suggestion is disabled")
+
+    clean_model_name = (model_name or "").strip()
+    if not clean_model_name:
+        raise ValueError("model_name is required")
+
+    if len(clean_model_name) > 512:
+        raise ValueError("model_name is too long")
+
+    if model_type and model_type.lower() not in SUPPORTED_SUGGESTION_MODEL_TYPES:
+        return _none_result(f"Capacity suggestion is not supported for model_type={model_type}")
+
+    active_catalog = catalog if catalog is not None else _get_default_catalog()
+
+    provider = pick_provider(provider_hint, base_url, clean_model_name, active_catalog)
+    if not provider:
+        # Provider can't be inferred (e.g. base_url still empty while the user
+        # is typing). The catalog needs a provider, but the bundled LiteLLM
+        # JSON can still be matched by bare model name — give that a try
+        # before giving up.
+        litellm_result = _litellm_lookup(clean_model_name, None)
+        if litellm_result is not None:
+            return litellm_result
+        return _none_result("No provider candidate could be inferred")
+
+    catalog_result = _catalog_match(clean_model_name, provider, active_catalog)
+    if catalog_result is not None:
+        return catalog_result
+
+    litellm_result = _litellm_lookup(clean_model_name, provider)
+    if litellm_result is not None:
+        return litellm_result
 
     return _none_result(f"No approved catalog profile matched provider={provider}, model={clean_model_name}")
+
+
+# =============================================================================
+# LiteLLM lookup (match_kind=LITELLM_LOOKUP)
+# =============================================================================
+# When the catalog has no entry for a model, look it up in the bundled
+# LiteLLM model_prices_and_context_window.json (3818 models, fetched at
+# image build time so it works offline / without VPN). We map
+# max_input_tokens -> context_window and max_output_tokens -> max_output;
+# max_input / reserve stay None (SDK derives them from the combined window).
+
+_LITELLM_JSON_PATH = os.environ.get(
+    "NEXENT_LITELLM_JSON",
+    "/opt/nexent/litellm_models.json",
+)
+_LITELLM_CACHE: Optional[dict] = None
+
+
+def _litellm_cache() -> Optional[dict]:
+    """Load the bundled LiteLLM JSON once and cache it in memory."""
+    global _LITELLM_CACHE
+    if _LITELLM_CACHE is not None:
+        return _LITELLM_CACHE
+    try:
+        with open(_LITELLM_JSON_PATH, "r", encoding="utf-8") as f:
+            _LITELLM_CACHE = json.load(f)
+    except Exception as exc:
+        logger.debug("LiteLLM JSON load failed (%s): %s", _LITELLM_JSON_PATH, exc)
+        _LITELLM_CACHE = {}
+    return _LITELLM_CACHE
+
+
+def _litellm_exact_entry(cache: dict, target: str, provider: Optional[str]) -> Optional[dict]:
+    """Find the first cache entry whose key is one of the exact candidates."""
+    candidates = []
+    if provider:
+        candidates.append(f"{provider}/{target}")
+    candidates.append(target)
+    # try matching by final segment (handles "org/model" naming)
+    final_segment = target.split("/")[-1]
+    if final_segment != target:
+        candidates.append(final_segment)
+
+    for cand in candidates:
+        if cand in cache:
+            return cache[cand]
+    return None
+
+
+def _litellm_cross_provider_entry(cache: dict, final_segment: str) -> Optional[dict]:
+    """Find an entry across all providers whose final segment matches.
+
+    Collects all case-insensitive matches and prefers one that has BOTH
+    context and max_output (some providers leave max_output as null).
+    """
+    lowered = final_segment.lower()
+    matches = [v for k, v in cache.items() if k.split("/")[-1].lower() == lowered]
+    return next(
+        (m for m in matches if m.get("max_input_tokens") and m.get("max_output_tokens")),
+        matches[0] if matches else None,
+    )
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    """Coerce to a positive int; None for missing/invalid/non-positive values."""
+    if value is None:
+        return None
+    try:
+        n = int(value)
+    except (ValueError, TypeError):
+        return None
+    return n if n > 0 else None
+
+
+def _litellm_lookup(
+    model_name: str,
+    provider: Optional[str],
+) -> Optional[CapacitySuggestionResult]:
+    """Look up model_name in the bundled LiteLLM JSON.
+
+    Tries exact key match first (preferring the LiteLLM provider that maps to
+    nexent's provider), then falls back to matching by the final path segment
+    (e.g. deepseek-ai/DeepSeek-V4-Flash -> DeepSeek-V4-Flash) across all
+    providers. Returns None if nothing usable is found.
+    """
+    cache = _litellm_cache()
+    if not cache:
+        return None
+
+    target = model_name.strip()
+    if not target:
+        return None
+
+    entry = _litellm_exact_entry(cache, target, provider)
+    if entry is None:
+        entry = _litellm_cross_provider_entry(cache, target.split("/")[-1])
+    if not entry or not isinstance(entry, dict):
+        return None
+
+    # LiteLLM's max_input_tokens is the total context window (input+output);
+    # max_output_tokens is the output cap. Map accordingly.
+    context = _positive_int(entry.get("max_input_tokens"))
+    max_output = _positive_int(entry.get("max_output_tokens"))
+    if context is None and max_output is None:
+        return None
+
+    fields = CapacitySuggestionFields(
+        context_window_tokens=context,
+        max_input_tokens=None,
+        max_output_tokens=max_output,
+        default_output_reserve_tokens=None,
+        tokenizer_family=None,
+    )
+    return CapacitySuggestionResult(
+        suggestions=fields,
+        match_kind=CapacitySuggestionMatchKind.LITELLM_LOOKUP,
+        match_confidence=CapacitySuggestionConfidence.MEDIUM,
+        match_explanation=f"Matched LiteLLM bundled catalog (3818 models) for {target}",
+        suggested_provider=provider,
+        canonical_model_name=target,
+        capacity_source_on_accept="operator",
+    )

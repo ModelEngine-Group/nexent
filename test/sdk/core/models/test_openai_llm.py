@@ -251,9 +251,187 @@ def test_modelengine_message_flattening_can_be_disabled_for_vlm():
     assert captured["flatten_messages_as_text"] is False
     assert captured["messages"][1].content[0]["type"] == "image_url"
 
+
+def test_ut_sdk_tlm_023_successful_attempt_closes_stream_once():
+    model, _ = _make_modelengine_model()
+
+    class CloseableStream:
+        def __init__(self):
+            self._chunks = iter([make_chunk("done")])
+            self.close_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self._chunks)
+
+        def close(self):
+            self.close_calls += 1
+
+    stream = CloseableStream()
+    model.client.chat.completions.create = lambda stream=True, **kwargs: stream_instance
+    stream_instance = stream
+
+    message = model([{"role": "user", "content": "hello"}])
+
+    assert message.content == "done"
+    assert stream.close_calls == 1
+
+
+def test_ut_sdk_tlm_024_cancel_closes_blocked_stream_and_stops_retry():
+    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
+    scope_class = openai_llm_module.RunCancellationScope
+    model = ModelClass(
+        model_id="m",
+        api_base="u",
+        api_key="k",
+        model_factory="modelengine",
+        retry_config=openai_llm_module.ModelRetryConfig(
+            max_attempts=3,
+            backoff_base_seconds=0,
+            jitter=False,
+        ),
+    )
+    model._prepare_completion_kwargs = lambda messages=None, **kwargs: {}
+    model.model_id = "m"
+    model.custom_role_conversions = {}
+    model.observer = types.SimpleNamespace(
+        current_mode=None,
+        add_model_new_token=lambda token: None,
+        add_model_reasoning_content=lambda reasoning: None,
+        flush_remaining_tokens=lambda: None,
+    )
+    scope = scope_class(model.stop_event)
+    model.cancellation_scope = scope
+    entered = threading.Event()
+    released = threading.Event()
+
+    class BlockingStream:
+        close_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            entered.set()
+            released.wait(1)
+            raise ConnectionError("stream closed")
+
+        def close(self):
+            self.close_calls += 1
+            released.set()
+
+    stream_instance = BlockingStream()
+    create_calls = []
+    model.client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(
+                create=lambda **kwargs: (create_calls.append(kwargs), stream_instance)[1]
+            )
+        )
+    )
+    result = {}
+
+    def invoke():
+        try:
+            model([{"role": "user", "content": "hello"}])
+        except Exception as exc:
+            result["error"] = exc
+
+    worker = threading.Thread(target=invoke)
+    worker.start()
+    assert entered.wait(1)
+
+    scope.cancel()
+    worker.join(1)
+
+    assert worker.is_alive() is False
+    assert stream_instance.close_calls == 1
+    assert len(create_calls) == 1
+    assert str(result["error"]) == openai_llm_module.STOP_EVENT_INTERRUPTED_MESSAGE
+
+
+def test_ut_sdk_tlm_024_supplied_cancellation_scope_owns_model_stop_event():
+    ModelClass = OpenAIModel or globals().get("ImportedOpenAIModel")
+    scope = openai_llm_module.RunCancellationScope()
+
+    model = ModelClass(
+        model_id="m",
+        api_base="u",
+        api_key="k",
+        model_factory="modelengine",
+        cancellation_scope=scope,
+    )
+
+    assert model.stop_event is scope.stop_event
+
+
+def test_ut_sdk_tlm_031_model_timeout_emits_sanitized_warning(caplog):
+    class TimeoutStream:
+        def __init__(self, chunks_before_timeout):
+            self.chunks = [make_chunk("partial-secret")] * chunks_before_timeout
+            self.close_calls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.chunks:
+                return self.chunks.pop(0)
+            raise openai_llm_module.httpx.ReadTimeout("sensitive-response-body")
+
+        def close(self):
+            self.close_calls += 1
+
+    for chunks_before_timeout, expected_phase in ((0, "initial_chunk"), (1, "next_chunk")):
+        caplog.clear()
+        model, _ = _make_modelengine_model()
+        model.retry_config = openai_llm_module.ModelRetryConfig(max_attempts=1)
+        stream = TimeoutStream(chunks_before_timeout)
+        model.client.chat.completions.create = lambda **kwargs: stream
+
+        with pytest.raises(openai_llm_module.httpx.ReadTimeout):
+            model([{"role": "user", "content": "secret-prompt"}])
+
+        timeout_records = [
+            record for record in caplog.records
+            if "event=model_stream_timeout" in record.getMessage()
+        ]
+        assert len(timeout_records) == 1
+        assert timeout_records[0].levelname == "WARNING"
+        assert f"phase={expected_phase}" in timeout_records[0].getMessage()
+        assert f"chunk_count={chunks_before_timeout}" in timeout_records[0].getMessage()
+        assert "model_id=m" in timeout_records[0].getMessage()
+        assert "secret-prompt" not in caplog.text
+        assert "sensitive-response-body" not in caplog.text
+
+
+def test_ut_sdk_tlm_028_no_http_stream_is_created_without_concurrency_permit(monkeypatch):
+    model, _ = _make_modelengine_model()
+    model.concurrency_limit = 1
+    model.retry_config = openai_llm_module.ModelRetryConfig(max_attempts=1)
+    create = MagicMock()
+    model.client.chat.completions.create = create
+    monkeypatch.setattr(
+        openai_llm_module.model_concurrency_limiter,
+        "acquire",
+        MagicMock(
+            side_effect=openai_llm_module.ModelConcurrencyExceeded(
+                "permit unavailable"
+            )
+        ),
+    )
+
+    with pytest.raises(openai_llm_module.ModelConcurrencyExceeded):
+        model([{"role": "user", "content": "hello"}])
+
+    create.assert_not_called()
+
 from unittest.mock import AsyncMock, MagicMock, patch, ANY
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -395,11 +573,24 @@ module_mocks = {
     "nexent.core.utils.token_estimation": nexent_core_utils_mock.token_estimation,
 }
 
-# Ensure openai package exists with DefaultHttpxClient for patches
-import types as __types
+# Ensure the OpenAI package stub matches the submodule used by OpenAIModel.
+class StubSDKTimeout:
+    def __init__(self, *, connect, read, write, pool):
+        self.connect = connect
+        self.read = read
+        self.write = write
+        self.pool = pool
+
+
 openai_mod = types.ModuleType("openai")
+openai_mod.__path__ = []
 openai_mod.DefaultHttpxClient = lambda *a, **k: None
+openai_base_client_mod = types.ModuleType("openai._base_client")
+openai_base_client_mod.httpx2 = types.SimpleNamespace(Timeout=StubSDKTimeout)
+openai_mod._base_client = openai_base_client_mod
 sys.modules["openai"] = openai_mod
+sys.modules["openai._base_client"] = openai_base_client_mod
+module_mocks["openai._base_client"] = openai_base_client_mod
 
 # Dynamically load the module directly by file path
 MODULE_NAME = "nexent.core.models.openai_llm"
@@ -499,7 +690,7 @@ def test_check_connectivity_success(openai_model_instance):
             "_prepare_completion_kwargs",
             return_value={},
     ) as mock_prepare_kwargs, patch(
-        "nexent.core.models.openai_llm.asyncio.to_thread",
+        "nexent.core.models.openai_llm.run_blocking",
         new_callable=AsyncMock,
         return_value=None,
     ) as mock_to_thread:
@@ -516,12 +707,98 @@ def test_check_connectivity_failure(openai_model_instance):
             "_prepare_completion_kwargs",
             return_value={},
     ), patch(
-        "nexent.core.models.openai_llm.asyncio.to_thread",
+        "nexent.core.models.openai_llm.run_blocking",
         new_callable=AsyncMock,
         side_effect=Exception("connection error"),
     ):
         result = __import__("asyncio").run(openai_model_instance.check_connectivity())
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for sampling-parameter fallback in _dispatch_chat_completion
+# ---------------------------------------------------------------------------
+
+
+class _FakeBadRequest(Exception):
+    """Stand-in for openai.BadRequestError with an injectable message."""
+
+
+def _sampling_fallback_setup(model, message: str, sampled: bool):
+    """Prepare the model for a _dispatch_chat_completion fallback test.
+
+    Returns the mocked ``create`` callable; the first call raises the given
+    400 message, the second one succeeds.
+    """
+    kwargs = {"messages": [{"role": "user", "content": "hi"}], "stream": True}
+    if sampled:
+        kwargs["temperature"] = 0.2
+        kwargs["top_p"] = 0.95
+
+    create = MagicMock()
+    create.side_effect = [
+        _FakeBadRequest(message),
+        MagicMock(name="second_response"),
+    ]
+    model.client.chat.completions.create = create
+    return create, kwargs
+
+
+def test_dispatch_sampling_fallback_strips_params_on_temperature_400(openai_model_instance):
+    """A 400 naming temperature must retry once without temperature/top_p."""
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid temperature: only 1 is allowed for this model",
+        sampled=True,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        result = openai_model_instance._dispatch_chat_completion(**kwargs)
+
+    assert create.call_count == 2
+    retried_kwargs = create.call_args_list[1].kwargs
+    assert "temperature" not in retried_kwargs
+    assert "top_p" not in retried_kwargs
+    # Non-sampling params must survive the retry.
+    assert retried_kwargs["stream"] is True
+
+
+def test_dispatch_sampling_fallback_reraises_non_sampling_400(openai_model_instance):
+    """A 400 that does not name temperature must surface unchanged."""
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid request: model not found",
+        sampled=True,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        with pytest.raises(_FakeBadRequest):
+            openai_model_instance._dispatch_chat_completion(**kwargs)
+    assert create.call_count == 1
+
+
+def test_dispatch_sampling_fallback_reraises_when_params_absent(openai_model_instance):
+    """A temperature 400 on a request WITHOUT sampling params must surface.
+
+    The params can only come from the user's __custom__ extra_body in that
+    case, and silently altering user-supplied config is worse than the error.
+    """
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid temperature: only 1 is allowed for this model",
+        sampled=False,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        with pytest.raises(_FakeBadRequest):
+            openai_model_instance._dispatch_chat_completion(**kwargs)
+    assert create.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1145,12 +1422,17 @@ def test_init_with_ssl_verify_false():
         # Create model with ssl_verify=False
         model = ImportedOpenAIModel(observer=observer, ssl_verify=False)
 
-        # Verify DefaultHttpxClient was called with verify=False
-        mock_httpx_client.assert_called_once_with(verify=False)
+        mock_httpx_client.assert_called_once()
+        kwargs = mock_httpx_client.call_args.kwargs
+        assert kwargs["verify"] is False
+        assert kwargs["timeout"].connect == 10.0
+        assert kwargs["timeout"].read == 60.0
+        assert kwargs["timeout"].write == 30.0
+        assert kwargs["timeout"].pool == 10.0
 
 
 def test_init_with_ssl_verify_true():
-    """Test __init__ method doesn't create http_client when ssl_verify=True (default)"""
+    """Default SSL mode still applies finite HTTP phase timeouts."""
 
     observer = MagicMock()
 
@@ -1159,8 +1441,35 @@ def test_init_with_ssl_verify_true():
         # Create model with ssl_verify=True (default)
         model = ImportedOpenAIModel(observer=observer, ssl_verify=True)
 
-        # Verify DefaultHttpxClient was NOT called
-        mock_httpx_client.assert_not_called()
+        mock_httpx_client.assert_called_once()
+        kwargs = mock_httpx_client.call_args.kwargs
+        assert kwargs["verify"] is True
+        assert kwargs["timeout"].read == 60.0
+
+
+def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
+    """Use the Timeout class owned by the HTTP implementation behind OpenAI."""
+
+    class SDKTimeout:
+        def __init__(self, *, connect, read, write, pool):
+            self.connect = connect
+            self.read = read
+            self.write = write
+            self.pool = pool
+
+    sdk_httpx = types.SimpleNamespace(Timeout=SDKTimeout)
+    openai_base_client = types.ModuleType("openai._base_client")
+    openai_base_client.httpx2 = sdk_httpx
+
+    with patch.dict(sys.modules, {"openai._base_client": openai_base_client}), \
+            patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        ImportedOpenAIModel(observer=MagicMock(), ssl_verify=True)
+
+    timeout = mock_httpx_client.call_args.kwargs["timeout"]
+    assert isinstance(timeout, SDKTimeout)
+    assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
+        10.0, 60.0, 30.0, 10.0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2223,7 +2532,11 @@ def test_init_with_ssl_verify_false_and_timeout():
         mock_httpx.assert_called_once()
         call_kwargs = mock_httpx.call_args[1]
         assert call_kwargs["verify"] is False
-        assert call_kwargs["timeout"] == 45
+        timeout = call_kwargs["timeout"]
+        assert timeout.connect == 10.0
+        assert timeout.read == 45
+        assert timeout.write == 30.0
+        assert timeout.pool == 10.0
 
 
 def test_dispatch_extra_body_forwarded(openai_model_instance):
