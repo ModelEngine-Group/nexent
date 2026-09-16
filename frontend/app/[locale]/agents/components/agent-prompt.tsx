@@ -595,21 +595,11 @@ export default function AgentPrompt() {
                 top_p: (configuringModel as any).topP,
               }}
             />
-            {Object.keys(modelParamsOverride[String(configuringModel.id)] ?? {}).length > 0 && (
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleClearModelParamsOverride(configuringModel.id);
-                    setEditingOverrideValue(advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm"));
-                  }}
-                  disabled={!canManage && !isSpeedMode}
-                  className="text-xs text-red-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {t("model.advanced.clearOverride", { defaultValue: "清空该模型的覆盖" })}
-                </button>
-              </div>
-            )}
+            {/*
+              // "清空该模型的覆盖" button temporarily hidden per product
+              // feedback (2026-09). Clearing overrides remains reachable by
+              // emptying the fields individually and confirming.
+            */}
           </div>
         )}
       </Modal>
