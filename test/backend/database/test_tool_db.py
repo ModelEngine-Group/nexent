@@ -130,6 +130,7 @@ from backend.database.tool_db import (
     search_last_tool_instance_by_tool_id,
     check_tool_list_initialized,
     set_mcp_tools_unavailable,
+    ToolInstance,
 )
 
 class MockToolInstance:
@@ -1122,12 +1123,22 @@ def test_update_tool_table_mcp_tool_invalid_name(monkeypatch, mock_session):
 
 
 def test_set_mcp_tools_unavailable(monkeypatch, mock_session):
-    """Test marking all tools of a deleted MCP server as unavailable."""
-    session, query = mock_session
-    mock_update = MagicMock(return_value=3)
-    mock_filter = MagicMock()
-    mock_filter.update = mock_update
-    query.filter.return_value = mock_filter
+    """Test hiding MCP tools and soft-deleting only draft agent bindings."""
+    session, _ = mock_session
+    ToolInstance.version_no.reset_mock()
+    tool_lookup_query = MagicMock()
+    tool_lookup_query.filter.return_value.all.return_value = [(11,), (12,), (13,)]
+    tool_update_query = MagicMock()
+    tool_update = tool_update_query.filter.return_value.update
+    tool_update.return_value = 3
+    instance_update_query = MagicMock()
+    instance_update = instance_update_query.filter.return_value.update
+    instance_update.return_value = 2
+    session.query.side_effect = [
+        tool_lookup_query,
+        tool_update_query,
+        instance_update_query,
+    ]
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -1139,17 +1150,21 @@ def test_set_mcp_tools_unavailable(monkeypatch, mock_session):
         tenant_id="tenant1", mcp_server_name="deleted_server", user_id="user1")
 
     assert result == 3
-    mock_update.assert_called_once_with(
+    tool_update.assert_called_once_with(
         {"is_available": False, "updated_by": "user1"})
+    instance_update.assert_called_once_with(
+        {ToolInstance.delete_flag: "Y", "updated_by": "user1"},
+        synchronize_session=False,
+    )
+    ToolInstance.version_no.__eq__.assert_called_once_with(0)
 
 
 def test_set_mcp_tools_unavailable_no_rows(monkeypatch, mock_session):
-    """Test set_mcp_tools_unavailable returns 0 when no tool rows match."""
-    session, query = mock_session
-    mock_update = MagicMock(return_value=None)  # None from SQLAlchemy edge case
-    mock_filter = MagicMock()
-    mock_filter.update = mock_update
-    query.filter.return_value = mock_filter
+    """Test no tool or binding updates run when the MCP has no tools."""
+    session, _ = mock_session
+    tool_lookup_query = MagicMock()
+    tool_lookup_query.filter.return_value.all.return_value = []
+    session.query.return_value = tool_lookup_query
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -1161,6 +1176,7 @@ def test_set_mcp_tools_unavailable_no_rows(monkeypatch, mock_session):
         tenant_id="tenant1", mcp_server_name="missing_server", user_id="user1")
 
     assert result == 0
+    assert session.query.call_count == 1
 
 
 def test_add_tool_field(monkeypatch, mock_session):
