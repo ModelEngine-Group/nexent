@@ -573,7 +573,12 @@ export default function AgentPrompt() {
             />
             <ModelAdvancedSettings
               modelType={(configuringModel as any).type ?? "llm"}
-              specs={inferenceSpecs}
+              specs={Object.fromEntries(
+                Object.entries(inferenceSpecs).map(([type, specs]) => [
+                  type,
+                  (specs as any[]).filter((s) => s.key !== "tokenizer_family"),
+                ])
+              )}
               value={editingOverrideValue ?? advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm")}
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
@@ -586,26 +591,10 @@ export default function AgentPrompt() {
                 max_input_tokens: (configuringModel as any).maxInputTokens,
                 max_output_tokens: (configuringModel as any).maxOutputTokens,
                 default_output_reserve_tokens: (configuringModel as any).defaultOutputReserveTokens,
-                tokenizer_family: (configuringModel as any).tokenizerFamily,
                 temperature: (configuringModel as any).temperature,
                 top_p: (configuringModel as any).topP,
               }}
             />
-            {Object.keys(modelParamsOverride[String(configuringModel.id)] ?? {}).length > 0 && (
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleClearModelParamsOverride(configuringModel.id);
-                    setEditingOverrideValue(advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm"));
-                  }}
-                  disabled={!canManage && !isSpeedMode}
-                  className="text-xs text-red-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {t("model.advanced.clearOverride", { defaultValue: "清空该模型的覆盖" })}
-                </button>
-              </div>
-            )}
           </div>
         )}
       </Modal>
