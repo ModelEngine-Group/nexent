@@ -609,6 +609,7 @@ def test_prompt_observes_resource_candidates_before_verification(language):
     assert "print(verification_result)" in first_resolution_example
     assert "capability_verifications = [" not in first_resolution_example
     assert '"accepted_candidate_refs": []' not in first_resolution_example
+    assert "omit `verification_required`" in prompt or "必须省略 `verification_required`" in prompt
 
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
