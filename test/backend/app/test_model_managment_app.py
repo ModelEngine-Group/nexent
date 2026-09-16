@@ -399,7 +399,12 @@ async def test_create_provider_model_success(client, auth_header, user_credentia
     
     mock_get = mocker.patch(
         'backend.apps.model_managment_app.create_provider_models_for_tenant', 
-        return_value=[{"id": "A1"}, {"id": "a0"}, {"id": "b2"}, {"id": "c3"}]
+        return_value=[
+            {"id": "A1", "api_key": "provider-secret"},
+            {"id": "a0"},
+            {"id": "b2"},
+            {"id": "c3"},
+        ]
     )
     
     # Fix: Add required model_type field
@@ -412,6 +417,7 @@ async def test_create_provider_model_success(client, auth_header, user_credentia
     assert "Provider model created successfully" in data["message"]
     # Check that models are sorted by first letter in ascending order
     assert [m["id"] for m in data["data"]] == ["A1", "a0", "b2", "c3"]
+    assert "api_key" not in data["data"][0]
     mock_get.assert_called_once()
 
 
@@ -592,6 +598,7 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
                 "model_name": "huggingface/llama",
                 "display_name": "LLaMA Model",
                 "model_type": "llm",
+                "api_key": "stored-secret",
                 "connect_status": "operational"
             },
             {
@@ -614,6 +621,7 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
     assert data["data"][0]["model_name"] == "huggingface/llama"
     assert data["data"][1]["model_name"] == "openai/clip"
     assert data["data"][1]["connect_status"] == "not_detected"
+    assert "api_key" not in data["data"][0]
     mock_list.assert_called_once_with(user_credentials[1])
 
 
@@ -629,6 +637,7 @@ async def test_get_llm_model_list_success(client, auth_header, user_credentials,
                 "model_id": "llm1",
                 "model_name": "huggingface/llama-2",
                 "display_name": "LLaMA 2 Model",
+                "api_key": "stored-secret",
                 "connect_status": "operational"
             },
             {
@@ -651,6 +660,7 @@ async def test_get_llm_model_list_success(client, auth_header, user_credentials,
     assert data["data"][1]["model_name"] == "openai/gpt-4"
     assert data["data"][0]["connect_status"] == "operational"
     assert data["data"][1]["connect_status"] == "not_detected"
+    assert "api_key" not in data["data"][0]
     mock_list.assert_called_once_with(user_credentials[1])
 
 
@@ -942,6 +952,7 @@ async def test_get_manage_model_list_success(client, auth_header, user_credentia
                     "model_name": "huggingface/llama",
                     "display_name": "LLaMA Model",
                     "model_type": "llm",
+                    "api_key": "stored-secret",
                     "connect_status": "operational"
                 },
                 {
@@ -980,6 +991,7 @@ async def test_get_manage_model_list_success(client, auth_header, user_credentia
     assert len(data["data"]["models"]) == 2
     assert data["data"]["models"][0]["model_name"] == "huggingface/llama"
     assert data["data"]["models"][1]["model_name"] == "openai/clip"
+    assert "api_key" not in data["data"]["models"][0]
     mock_list.assert_called_once_with("target_tenant", None, 1, 20)
 
 

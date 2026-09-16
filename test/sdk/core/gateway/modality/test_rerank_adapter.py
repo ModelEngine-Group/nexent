@@ -88,6 +88,26 @@ def test_prepare_request_flat_default_top_n_is_doc_count():
     assert data["top_n"] == 2
 
 
+def test_prepare_request_flat_preserves_json_custom_fields():
+    custom = {
+        "return_documents": True,
+        "metadata": {"tenant": "demo"},
+        "scores": [0.1, 0.9],
+        "model": "custom-model-must-not-win",
+    }
+    adapter = OpenAICompatibleRerankAdapter(_ctx(extra_body=custom))
+
+    data = adapter._prepare_request("q", ["a"], top_n=1)
+
+    assert data == {
+        **custom,
+        "model": "rr-model",
+        "query": "q",
+        "documents": ["a"],
+        "top_n": 1,
+    }
+
+
 def test_prepare_request_dashscope_wrapper():
     adapter = OpenAICompatibleRerankAdapter(
         _ctx(base_url="https://dashscope.example.com/v1")
@@ -95,6 +115,20 @@ def test_prepare_request_dashscope_wrapper():
     data = adapter._prepare_request("q", ["a", "b"])
     assert data["input"] == {"query": "q", "documents": ["a", "b"]}
     assert data["parameters"] == {"top_n": 2}
+
+
+def test_prepare_request_dashscope_merges_custom_parameters():
+    adapter = OpenAICompatibleRerankAdapter(
+        _ctx(
+            base_url="https://dashscope.example.com/v1",
+            extra_body={"parameters": {"return_documents": True}, "trace": {"id": 1}},
+        )
+    )
+
+    data = adapter._prepare_request("q", ["a", "b"])
+
+    assert data["trace"] == {"id": 1}
+    assert data["parameters"] == {"return_documents": True, "top_n": 2}
 
 
 def test_make_request_posts_and_parses(monkeypatch):

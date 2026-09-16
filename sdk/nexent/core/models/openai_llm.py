@@ -349,7 +349,9 @@ class OpenAIModel(OpenAIServerModel):
         # set when the caller actually supplied something so default OpenAI
         # behaviour is unchanged for everyone else.
         if self.extra_body:
-            completion_kwargs["extra_body"] = self.extra_body
+            completion_kwargs["extra_body"] = self._translate_thinking_flag(
+                self.extra_body
+            )
 
         trusted_budget_snapshot = (
             context_budget_snapshot or self.context_budget_snapshot
@@ -880,6 +882,35 @@ class OpenAIModel(OpenAIServerModel):
                 exc,
             )
             return self.client.chat.completions.create(**retry_kwargs)
+
+    def _translate_thinking_flag(
+        self, extra_body: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Translate the enable_thinking flag to the provider's wire format.
+
+        Qwen-family models (vLLM/SGLang deployments and DashScope alike) only
+        read it from ``chat_template_kwargs.enable_thinking``; a top-level
+        flag is silently ignored there. Other providers (DashScope
+        non-Qwen, DeepSeek, SiliconFlow DeepSeek-V3.x) read the top-level
+        ``enable_thinking``. An explicit False must therefore be wrapped for
+        Qwen and kept top-level for everyone else; an absent flag is passed
+        through untouched (model default applies).
+        """
+        if "enable_thinking" not in extra_body:
+            return extra_body
+        translated = dict(extra_body)
+        thinking = translated.pop("enable_thinking")
+        if "qwen" in (self.model_id or "").lower():
+            chat_kwargs = translated.get("chat_template_kwargs")
+            if isinstance(chat_kwargs, dict):
+                translated["chat_template_kwargs"] = {
+                    **chat_kwargs, "enable_thinking": thinking,
+                }
+            else:
+                translated["chat_template_kwargs"] = {"enable_thinking": thinking}
+        else:
+            translated["enable_thinking"] = thinking
+        return translated
 
     def _sampling_fallback_kwargs(
         self, exc: Exception, completion_kwargs: Dict[str, Any]

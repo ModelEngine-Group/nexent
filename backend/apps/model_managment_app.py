@@ -104,6 +104,28 @@ _CATALOG_UNAVAILABLE_MESSAGE = "catalog unavailable"
 _LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
+def _sanitize_model_credentials(payload: Any) -> Any:
+    """Remove model API keys before returning model data to HTTP clients.
+
+    Model records are also consumed by internal services, so credential
+    removal belongs at the HTTP response boundary rather than in the database
+    or model-management service layer. The presence of a configured key is
+    intentionally not returned; callers that need to update a model can omit
+    ``api_key`` to keep the existing value.
+    """
+    if isinstance(payload, list):
+        return [_sanitize_model_credentials(item) for item in payload]
+
+    if isinstance(payload, dict):
+        return {
+            key: _sanitize_model_credentials(value)
+            for key, value in payload.items()
+            if key != "api_key"
+        }
+
+    return payload
+
+
 def _log_safe(value: Any) -> str:
     """Strip control characters so user input cannot forge log entries."""
     return _LOG_UNSAFE_CHARS.sub("", str(value))
@@ -291,7 +313,7 @@ async def create_provider_model(request: ProviderModelRequest, authorization: Op
         model_list = await create_provider_models_for_tenant(tenant_id, provider_model_config)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Provider model created successfully",
-            "data": model_list
+            "data": _sanitize_model_credentials(model_list)
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -359,7 +381,7 @@ async def get_provider_list(request: ProviderModelRequest, authorization: Option
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved provider list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -490,7 +512,7 @@ async def get_model_list(authorization: Optional[str] = Header(None)):
         model_list = await list_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -509,7 +531,7 @@ async def get_llm_model_list(authorization: Optional[str] = Header(None)):
         llm_list = await list_llm_models_for_tenant(tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved LLM list",
-            "data": jsonable_encoder(llm_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(llm_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -873,7 +895,7 @@ async def manage_list_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved model list",
-            "data": jsonable_encoder(result)
+            "data": jsonable_encoder(_sanitize_model_credentials(result))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -912,7 +934,7 @@ async def manage_list_provider_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully retrieved provider model list",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")
@@ -958,7 +980,7 @@ async def manage_create_provider_models(
         )
         return JSONResponse(status_code=HTTPStatus.OK, content={
             "message": "Successfully created provider models",
-            "data": jsonable_encoder(model_list)
+            "data": jsonable_encoder(_sanitize_model_credentials(model_list))
         })
     except TokenExpiredError as e:
         logging.warning("Session expired")

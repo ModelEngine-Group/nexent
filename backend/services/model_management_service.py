@@ -801,6 +801,18 @@ async def update_single_model_for_tenant(
                 existing_model_type not in ("embedding", "multi_embedding"):
             model_data["max_tokens"] = model_data["max_output_tokens"]
 
+        # The list endpoints return model_name as add_repo_to_name(repo, name)
+        # -- a repo-qualified full name. When such a value is written back
+        # verbatim, the model_name column accumulates a repo prefix on every
+        # save ("deepseek-ai/X" -> "deepseek-ai/deepseek-ai/X" -> ...), which
+        # breaks provider catalog matching and connectivity probes. Split the
+        # incoming name the same way the create paths do.
+        if "model_name" in model_data and model_data.get("model_name"):
+            incoming_repo, incoming_name = split_repo_name(str(model_data["model_name"]))
+            if incoming_repo:
+                model_data["model_repo"] = incoming_repo
+            model_data["model_name"] = incoming_name
+
         # Re-probe a changed URL so the stored value is the one that was validated.
         if "base_url" in model_data \
                 and existing_model_type in ("embedding", "multi_embedding") \

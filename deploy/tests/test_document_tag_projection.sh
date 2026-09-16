@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
+MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.6.0_merged_migrations.sql"
 INIT_SQL="$DEPLOY_ROOT/sql/init.sql"
 POSTGRES_TEST_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:15-alpine}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
@@ -128,7 +128,7 @@ END;
 $$;
 SQL
   run_file "$database" "$INIT_SQL" >/dev/null
-  run_migration_files_through "$database" "v2.5.2_unified_tag_management.sql"
+  run_migration_files_through "$database" "v2.6.0_merged_migrations.sql"
   assert_query "$database" \
     "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name = 'document_tag_projection';" \
     "1" "migration creates document_tag_projection table"
@@ -157,7 +157,7 @@ test_fresh_install_requires_versioned_tag_migration() {
     "SELECT count(*) FROM pg_proc AS procedure JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = 'nexent' AND procedure.proname IN ('provision_unified_tag_management', 'provision_unified_tag_management_after_user_tenant_insert', 'enforce_tag_definition_limit', 'enforce_tag_value_limit', 'enforce_resource_tag_assignment_rules');" \
     "0" "init.sql must not create unified tag management functions"
 
-  run_migration_files_through "$database" "v2.5.2_unified_tag_management.sql"
+  run_migration_files_through "$database" "v2.6.0_merged_migrations.sql"
   assert_query "$database" \
     "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'nexent' AND table_name IN ('tag_bucket', 'tag_bucket_resource_type', 'tag_definition', 'tag_value', 'resource_tag_assignment', 'document_tag_projection');" \
     "6" "the versioned migration chain must create all unified tag management tables"
