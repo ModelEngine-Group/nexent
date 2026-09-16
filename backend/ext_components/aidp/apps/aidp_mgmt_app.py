@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
+from starlette.background import BackgroundTask
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
@@ -875,31 +876,22 @@ async def download_document(
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
 
     server_url, api_key = _credentials()
-    stream_context = stream_aidp_doc_impl(
+    aidp_response = await stream_aidp_doc_impl(
         server_url,
         api_key,
         kds_id,
         str(body.file_uuid),
     )
-    result = await stream_context.__aenter__()
-    content = result["content"]
     response_headers = {
-        "Content-Disposition": result["content_disposition"],
-        "X-File-Size": result["file_size"],
+        "Content-Disposition": aidp_response.headers["Content-Disposition"],
+        "X-File-Size": aidp_response.headers["X-File-Size"],
     }
 
-    async def stream_content():
-        try:
-            async for chunk in content:
-                yield chunk
-        finally:
-            await stream_context.__aexit__(None, None, None)
-
     return StreamingResponse(
-        stream_content(),
-        status_code=HTTPStatus.OK,
-        media_type=result["content_type"],
+        aidp_response.aiter_bytes(),
+        media_type=aidp_response.headers["Content-Type"],
         headers=response_headers,
+        background=BackgroundTask(aidp_response.aclose),
     )
 
 

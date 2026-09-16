@@ -2,12 +2,10 @@
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
-import asyncio
 import logging
 import time
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, NoReturn
+from typing import Any, Callable, Dict, List, NoReturn
 from urllib.parse import urljoin
 
 import httpx
@@ -219,6 +217,7 @@ _AIDP_RETRY_MAX_ATTEMPTS = 3
 _AIDP_RETRY_BACKOFF_FACTOR = 0.5
 _AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 _AIDP_READ_TIMEOUT_SECONDS = 30.0
+_AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
 
 def _request_with_retry(
@@ -272,56 +271,6 @@ def _request_with_retry(
                 break
 
     # All retries exhausted on RequestError — let caller translate to AppException.
-    assert last_exception is not None
-    raise last_exception
-
-
-async def _request_stream_with_retry(
-    request_fn: Callable[[], Awaitable[httpx.Response]],
-    context: str,
-    max_attempts: int = _AIDP_RETRY_MAX_ATTEMPTS,
-) -> httpx.Response:
-    """Open a streaming response with the same transient retry policy as sync requests."""
-    last_exception: Exception | None = None
-
-    for attempt in range(max_attempts):
-        try:
-            response = await request_fn()
-            if 200 <= response.status_code < 300:
-                return response
-            if response.status_code not in _AIDP_RETRYABLE_STATUS_CODES:
-                return response
-            if attempt < max_attempts - 1:
-                wait_time = _compute_retry_wait(response, attempt)
-                logger.warning(
-                    "HTTP %d for %s, retrying in %ss (attempt %d/%d)",
-                    response.status_code,
-                    context,
-                    wait_time,
-                    attempt + 1,
-                    max_attempts,
-                )
-                await response.aclose()
-                await asyncio.sleep(wait_time)
-                continue
-            return response
-        except httpx.RequestError as error:
-            last_exception = error
-            if attempt < max_attempts - 1:
-                wait_time = _AIDP_RETRY_BACKOFF_FACTOR * (2 ** attempt)
-                logger.warning(
-                    "AIDP request error for %s: [%s] %s, retrying in %ss (%d/%d)",
-                    context,
-                    type(error).__name__,
-                    error,
-                    wait_time,
-                    attempt + 1,
-                    max_attempts,
-                )
-                await asyncio.sleep(wait_time)
-            else:
-                break
-
     assert last_exception is not None
     raise last_exception
 
@@ -1106,11 +1055,6 @@ def remove_aidp_docs_impl(
 ) -> Dict[str, Any]:
     """Remove one or more documents from an AIDP knowledge base."""
     normalized_url = _validate_params(server_url, api_key)
-    if not file_uuids:
-        raise AppException(
-            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
-            "At least one file_uuid is required",
-        )
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -1153,20 +1097,14 @@ def remove_aidp_docs_impl(
         )
 
 
-@asynccontextmanager
 async def stream_aidp_doc_impl(
     server_url: str,
     api_key: str,
     kds_id: str,
     file_uuid: str,
-) -> AsyncIterator[Dict[str, Any]]:
-    """Stream one AIDP document and expose its response metadata."""
+) -> httpx.Response:
+    """Open a streaming response for one AIDP document."""
     normalized_url = _validate_params(server_url, api_key)
-    if not file_uuid:
-        raise AppException(
-            ErrorCode.COMMON_MISSING_REQUIRED_FIELD,
-            "file_uuid is required",
-        )
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -1180,41 +1118,34 @@ async def stream_aidp_doc_impl(
     try:
         client = http_client_manager.get_async_client(
             base_url=normalized_url,
-            timeout=120.0,
+            timeout=_AIDP_DOWNLOAD_TIMEOUT_SECONDS,
             verify_ssl=False,
         )
-        response = await _request_stream_with_retry(
-            lambda: client.send(
-                client.build_request(
-                    "POST",
-                    download_url,
-                    headers=headers,
-                    json={"file_uuid": file_uuid},
-                ),
-                stream=True,
+        response = await client.send(
+            client.build_request(
+                "POST",
+                download_url,
+                headers=headers,
+                json={"file_uuid": file_uuid},
             ),
-            context=f"download-doc:{kds_id}:{file_uuid}",
+            stream=True,
         )
         if response.status_code >= 400:
             await response.aread()
         response.raise_for_status()
-        yield {
-            "content": response.aiter_bytes(),
-            "content_type": response.headers["Content-Type"],
-            "content_disposition": response.headers["Content-Disposition"],
-            "file_size": response.headers["X-File-Size"],
-        }
+        return response
     except httpx.RequestError as e:
+        if response is not None:
+            await response.aclose()
         logger.exception("AIDP document download request failed: %s", e)
         raise AppException(
             ErrorCode.AIDP_CONNECTION_ERROR,
             f"AIDP API request failed: {str(e)}",
         )
     except httpx.HTTPStatusError as e:
-        _raise_aidp_http_error(e, "document download")
-    finally:
         if response is not None:
             await response.aclose()
+        _raise_aidp_http_error(e, "document download")
 
 
 def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:

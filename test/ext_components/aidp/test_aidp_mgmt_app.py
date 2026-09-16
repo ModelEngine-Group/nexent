@@ -17,11 +17,11 @@ import os
 import sys
 import threading
 import types
-from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -905,18 +905,19 @@ class TestAidpDocumentFileOperations:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
-        @asynccontextmanager
-        async def stream_document(*args):
-            async def content_stream():
-                yield b"he"
-                yield b"llo"
+        mock_response = httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/plain",
+                "Content-Disposition": 'attachment; filename="a.txt"',
+                "X-File-Size": "5",
+            },
+            content=b"hello",
+            request=httpx.Request("POST", SERVER_URL),
+        )
 
-            yield {
-                "content": content_stream(),
-                "content_type": "text/plain",
-                "content_disposition": 'attachment; filename="a.txt"',
-                "file_size": "5",
-            }
+        async def stream_document(*args):
+            return mock_response
 
         with patch.object(
             aidp_permission_service,
@@ -925,7 +926,7 @@ class TestAidpDocumentFileOperations:
         ), patch.object(
             aidp_mgmt_app,
             "stream_aidp_doc_impl",
-            return_value=stream_document(),
+            side_effect=stream_document,
         ) as mock_download:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/download",

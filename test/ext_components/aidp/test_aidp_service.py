@@ -2124,13 +2124,6 @@ class TestAidpDocumentFileOperations:
         )
         assert call.kwargs["json"] == {"file_uuids": ["uuid-1", "uuid-2"]}
 
-    def test_remove_requires_at_least_one_uuid(self, aidp_service_module):
-        with pytest.raises(AppException) as exc_info:
-            aidp_service_module.remove_aidp_docs_impl(
-                "http://127.0.0.1:30081", "jwt-token", "kb-1", []
-            )
-        assert exc_info.value.error_code == ErrorCode.COMMON_MISSING_REQUIRED_FIELD
-
     def test_remove_maps_request_error(self, aidp_service_module):
         request = httpx.Request("POST", "http://127.0.0.1:30081")
         _setup_mock_client(
@@ -2189,31 +2182,23 @@ class TestAidpDocumentFileOperations:
         )
         mock_client = _setup_mock_async_client(aidp_service_module, response=mock_response)
 
-        async with aidp_service_module.stream_aidp_doc_impl(
+        response = await aidp_service_module.stream_aidp_doc_impl(
             "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
-        ) as result:
-            chunks = [chunk async for chunk in result["content"]]
+        )
+        chunks = [chunk async for chunk in response.aiter_bytes()]
 
         assert b"".join(chunks) == b"downloaded bytes"
-        assert result["content_type"] == "text/plain"
-        assert result["content_disposition"] == 'attachment; filename="a.txt"'
-        assert result["file_size"] == "16"
+        assert response.headers["Content-Type"] == "text/plain"
+        assert response.headers["Content-Disposition"] == 'attachment; filename="a.txt"'
+        assert response.headers["X-File-Size"] == "16"
         request = mock_client.build_request.call_args
         assert request.args[0] == "POST"
         assert request.args[1].endswith(
             "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Download"
         )
         assert request.kwargs["json"] == {"file_uuid": "uuid-1"}
+        await response.aclose()
         assert mock_response.is_closed
-
-    @pytest.mark.asyncio
-    async def test_download_requires_file_uuid(self, aidp_service_module):
-        with pytest.raises(AppException) as exc_info:
-            async with aidp_service_module.stream_aidp_doc_impl(
-                "http://127.0.0.1:30081", "jwt-token", "kb-1", ""
-            ):
-                pass
-        assert exc_info.value.error_code == ErrorCode.COMMON_MISSING_REQUIRED_FIELD
 
     @pytest.mark.asyncio
     async def test_download_maps_request_error(self, aidp_service_module):
@@ -2224,10 +2209,9 @@ class TestAidpDocumentFileOperations:
         )
 
         with pytest.raises(AppException) as exc_info:
-            async with aidp_service_module.stream_aidp_doc_impl(
+            await aidp_service_module.stream_aidp_doc_impl(
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
-            ):
-                pass
+            )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
 
     @pytest.mark.asyncio
@@ -2243,10 +2227,9 @@ class TestAidpDocumentFileOperations:
         )
 
         with pytest.raises(AppException) as exc_info:
-            async with aidp_service_module.stream_aidp_doc_impl(
+            await aidp_service_module.stream_aidp_doc_impl(
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
-            ):
-                pass
+            )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
 
