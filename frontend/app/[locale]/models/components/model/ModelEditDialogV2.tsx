@@ -466,7 +466,10 @@ export const ModelEditDialogV2 = ({
     };
     return {
       url: form.url,
-      apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
+      // Model list responses intentionally omit stored API keys. An empty
+      // value on edit therefore means "keep the existing key"; only send a
+      // key when the operator explicitly enters a new one.
+      ...(form.apiKey.trim() ? { apiKey: form.apiKey } : {}),
       // Send chunk size range for embedding models
       ...(isEmbeddingModel
         ? {
@@ -523,7 +526,9 @@ export const ModelEditDialogV2 = ({
         modelName: acceptedModelName,
         displayName: form.displayName || form.name,
         apiConfig: {
-          apiKey: form.apiKey,
+          // Keep the existing local config key when the edit form is blank.
+          // The backend update already preserves the stored key in this case.
+          ...(form.apiKey.trim() ? { apiKey: form.apiKey } : {}),
           modelUrl: form.url,
         },
         ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
@@ -737,6 +742,7 @@ export const ModelEditDialogV2 = ({
             <Input.Password
               value={form.apiKey}
               onChange={(e) => handleFormChange("apiKey", e.target.value)}
+              placeholder={t("model.dialog.placeholder.apiKeyKeepExisting")}
               autoComplete="new-password"
               visibilityToggle={false}
             />
