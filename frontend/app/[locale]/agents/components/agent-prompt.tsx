@@ -573,7 +573,12 @@ export default function AgentPrompt() {
             />
             <ModelAdvancedSettings
               modelType={(configuringModel as any).type ?? "llm"}
-              specs={inferenceSpecs}
+              specs={Object.fromEntries(
+                Object.entries(inferenceSpecs).map(([type, specs]) => [
+                  type,
+                  (specs as any[]).filter((s) => s.key !== "tokenizer_family"),
+                ])
+              )}
               value={editingOverrideValue ?? advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm")}
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
