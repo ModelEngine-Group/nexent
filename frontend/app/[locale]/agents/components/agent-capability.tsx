@@ -6,6 +6,7 @@ import { App, Button, Col, Flex, Row } from "antd";
 import { BlocksIcon, Plug, RefreshCw, Wrench } from "lucide-react";
 
 import { updateToolList } from "@/services/mcpService";
+import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -31,6 +32,29 @@ export function AgentToolCapability() {
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
   const [labelModalOpen, setLabelModalOpen] = useState(false);
   const { invalidate, availableTools } = useToolList();
+
+  const refreshAgentAfterMcpDeletion = useCallback(async () => {
+    const initialState = useAgentStore.getState();
+    const agentId = initialState.agentId;
+    if (agentId === null) return;
+
+    const autosaveSucceeded = await initialState.waitForIdle();
+    if (!autosaveSucceeded) {
+      throw new Error("Pending Agent edits could not be saved");
+    }
+    if (useAgentStore.getState().agentId !== agentId) return;
+
+    const result = await searchAgentInfo(agentId, undefined, 0);
+    if (!result.success || !result.data) {
+      throw new Error(result.message || "Failed to refresh Agent draft");
+    }
+
+    const currentState = useAgentStore.getState();
+    if (currentState.agentId !== agentId) return;
+    if (!currentState.replaceServerSnapshot(agentId, result.data)) {
+      throw new Error("Agent context changed during synchronization");
+    }
+  }, []);
 
   const handleRefreshTools = useCallback(async () => {
     setIsRefreshing(true);
@@ -92,6 +116,7 @@ export function AgentToolCapability() {
       <McpConfigModal
         visible={isMcpModalOpen}
         onCancel={() => setIsMcpModalOpen(false)}
+        onMcpDeleted={refreshAgentAfterMcpDeletion}
       />
       <SelectToolsDialog
         open={isToolSelectOpen}

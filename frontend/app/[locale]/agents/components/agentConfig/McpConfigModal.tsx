@@ -51,7 +51,8 @@ const { Text, Title } = Typography;
 export default function McpConfigModal({
   visible,
   onCancel,
-  }: McpConfigModalProps) {
+  onMcpDeleted,
+}: McpConfigModalProps) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
   const { message, modal } = App.useApp();
@@ -157,6 +158,15 @@ export default function McpConfigModal({
   // Data loading is handled by React Query (enabled: visible)
 
   // Handlers
+  const refreshAgentAfterDelete = async () => {
+    try {
+      await onMcpDeleted?.();
+    } catch (error) {
+      log.error("Failed to refresh Agent draft after MCP deletion:", error);
+      message.warning(t("agent.config.refreshAvailabilityFailed"));
+    }
+  };
+
   const onAddServer = async () => {
     if (!newServerName.trim() || !newServerUrl.trim()) {
       message.error(t("mcpConfig.message.completeServerInfo"));
@@ -229,6 +239,7 @@ export default function McpConfigModal({
               : result.message || t("mcpConfig.message.deleteServerFailed")
           );
         } else {
+          await refreshAgentAfterDelete();
           message.success(
             result.messageKey
               ? t(result.messageKey)
@@ -441,6 +452,7 @@ export default function McpConfigModal({
               : result.message || t("mcpConfig.message.deleteContainerFailed")
           );
         } else {
+          await refreshAgentAfterDelete();
           message.success(
             result.messageKey
               ? t(result.messageKey)
