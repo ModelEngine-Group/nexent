@@ -68,6 +68,19 @@ const CONNECT_STATUS_FALLBACK_LABELS: Record<string, string> = {
   not_detected: "未检测",
 };
 
+const DEFAULT_USAGE_I18N_KEYS: Record<string, string> = {
+  "llm.main": "modelConfig.option.mainModel",
+  "embedding.embedding": "modelConfig.option.embeddingModel",
+  "embedding.multi_embedding": "modelConfig.option.multiEmbeddingModel",
+  "reranker.reranker": "modelConfig.option.rerankerModel",
+  "multimodal.vlm": "modelConfig.option.imageUnderstandingModel",
+  "multimodal.vlm2": "modelConfig.option.imageGenerationModel",
+  "multimodal.vlm3": "modelConfig.option.videoUnderstandingModel",
+  "multimodal.vlm4": "modelConfig.option.audioUnderstandingModel",
+  "voice.tts": "modelConfig.option.ttsModel",
+  "voice.stt": "modelConfig.option.sttModel",
+};
+
 // Model data structure
 const getModelData = (t: any) => ({
   llm: {
@@ -189,6 +202,7 @@ export const ModelConfigSection = forwardRef<
   const abortControllerRef = useRef<AbortController | null>(null);
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const capacityCoverageRequestIdRef = useRef(0);
 
   const scheduleAutoSave = () => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -496,7 +510,9 @@ export const ModelConfigSection = forwardRef<
             <Space size={4} wrap>
               {slots.map((s) => (
                 <Tag key={s} color="geekblue">
-                  {s}
+                  {t(DEFAULT_USAGE_I18N_KEYS[s] ?? s, {
+                    defaultValue: s,
+                  })}
                 </Tag>
               ))}
             </Space>
@@ -611,12 +627,24 @@ export const ModelConfigSection = forwardRef<
     if (!cfg) return;
     try {
       await invalidate();
-      const [allModels, coverage] = await Promise.all([
-        modelService.getAllModels(),
-        modelService.getCapacityCoverage(),
-      ]);
+
+      // Capacity coverage only drives the warning banner, so keep it off the
+      // critical path for rendering the model table.
+      const coverageRequestId = ++capacityCoverageRequestIdRef.current;
+      setCapacityCoverage(null);
+      void modelService
+        .getCapacityCoverage()
+        .then((coverage) => {
+          if (coverageRequestId === capacityCoverageRequestIdRef.current) {
+            setCapacityCoverage(coverage);
+          }
+        })
+        .catch((error) => {
+          log.warn("Failed to apply model capacity coverage:", error);
+        });
+
+      const allModels = await modelService.getAllModels();
       setModels(allModels);
-      setCapacityCoverage(coverage);
 
       const exists = (
         disp: string,

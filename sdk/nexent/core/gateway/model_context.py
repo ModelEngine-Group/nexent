@@ -25,6 +25,7 @@ class ModelContext:
     display_name: Optional[str] = None
     observer: Any = None                 # cross-cutting: LLM/VLM/ModelEngine STT/TTS
     timeout_seconds: Optional[float] = None  # cross-cutting: all HTTP-backed adapters
+    extra_body: Optional[dict] = None    # Provider-specific JSON request fields
 
 
 @dataclass
@@ -34,9 +35,6 @@ class LLMContext(ModelContext):
     stream: Optional[bool] = None
     max_output_tokens: Optional[int] = None
     frequency_penalty: Optional[float] = None
-    extra_body: Optional[dict] = None    # OpenAI API passthrough
-
-
 @dataclass
 class LongContextLLMContext(LLMContext):
     max_tokens: Optional[int] = None           # context window size
