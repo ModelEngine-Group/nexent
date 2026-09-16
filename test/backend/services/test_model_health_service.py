@@ -170,7 +170,7 @@ async def test_perform_connectivity_check_embedding():
 
 
 @pytest.mark.asyncio
-async def test_perform_connectivity_check_embedding_forwards_custom_json():
+async def test_perform_connectivity_check_embedding_ignores_custom_json():
     custom = {
         "dimensions": 512,
         "metadata": {"tenant": "demo"},
@@ -190,7 +190,7 @@ async def test_perform_connectivity_check_embedding_forwards_custom_json():
         )
 
     assert result is True
-    assert mock_build.call_args.args[0]["extra_params"] == {"__custom__": custom}
+    assert "extra_params" not in mock_build.call_args.args[0]
 
 
 @pytest.mark.asyncio
