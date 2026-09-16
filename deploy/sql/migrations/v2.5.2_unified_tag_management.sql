@@ -446,7 +446,8 @@ INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reaso
 SELECT source_name, source_row_id, tenant_id, resource_type || '/' || COALESCE(resource_id, '?'),
        'null_or_empty_tenant', to_jsonb(source)
 FROM utm_legacy_source AS source
-WHERE tenant_id IS NULL OR btrim(tenant_id) = '';
+WHERE (tenant_id IS NULL OR btrim(tenant_id) = '')
+  AND source_name NOT IN ('skill.skill_tags', 'mcp_community.tags');
 
 INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, sample)
 SELECT source_name, source_row_id, tenant_id, resource_type || '/' || COALESCE(resource_id, '?'),
@@ -474,7 +475,8 @@ SELECT source_name, source_row_id, tenant_id,
             ELSE 'canonical_source_missing_or_tenant_mismatch' END,
        canonical_match_count, to_jsonb(source)
 FROM utm_legacy_source AS source
-WHERE canonical_match_count = 0;
+WHERE canonical_match_count = 0
+  AND source_name NOT IN ('agent_repository.tags', 'mcp_community.tags');
 
 INSERT INTO utm_conflict (source_name, source_row_id, tenant_id, resource, reason, conflict_count, sample)
 SELECT source_name, source_row_id, tenant_id,
@@ -731,6 +733,7 @@ SET display_value = EXCLUDED.display_value,
     update_time = CURRENT_TIMESTAMP,
     updated_by = EXCLUDED.updated_by;
 
+CREATE TEMP TABLE utm_projected_assignment ON COMMIT DROP AS
 WITH projected_assignments AS (
     SELECT source.tenant_id, source.resource_type, source.resource_id,
            definition.definition_id, value.value_id,
@@ -750,21 +753,37 @@ WITH projected_assignments AS (
     GROUP BY source.tenant_id, source.resource_type, source.resource_id,
              definition.definition_id, value.value_id
 )
+SELECT * FROM projected_assignments;
+
+-- Assignment capacity is validated above. The validation trigger acquires one
+-- advisory lock per inserted row, which exhausts max_locks_per_transaction on
+-- large migration datasets. Disable it only for this migration transaction and
+-- restore it before commit; the complete migration remains all-or-nothing.
+ALTER TABLE nexent.resource_tag_assignment
+    DISABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
+
 INSERT INTO nexent.resource_tag_assignment (
     tenant_id, resource_type, resource_id, definition_id, value_id,
     status, created_by, updated_by, delete_flag
 )
 SELECT tenant_id, resource_type, resource_id, definition_id, value_id,
        'active', 'migration:v2.5.0', 'migration:v2.5.0', delete_flag
-FROM projected_assignments
+FROM utm_projected_assignment
 ON CONFLICT (tenant_id, resource_type, resource_id, value_id) DO UPDATE
-SET status = CASE WHEN nexent.resource_tag_assignment.status = 'active' THEN 'active' ELSE EXCLUDED.status END,
+SET status = CASE
+        WHEN nexent.resource_tag_assignment.status = 'active' THEN 'active'
+        ELSE EXCLUDED.status
+    END,
     update_time = CURRENT_TIMESTAMP,
     updated_by = EXCLUDED.updated_by,
     delete_flag = CASE
-        WHEN nexent.resource_tag_assignment.delete_flag = 'N' OR EXCLUDED.delete_flag = 'N' THEN 'N'
+        WHEN nexent.resource_tag_assignment.delete_flag = 'N'
+             OR EXCLUDED.delete_flag = 'N' THEN 'N'
         ELSE 'Y'
     END;
+
+ALTER TABLE nexent.resource_tag_assignment
+    ENABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
 
 -- -----------------------------------------------------------------------------
 -- Consolidated from v2.5.1_0817_tag_library_permissions.sql
@@ -1227,7 +1246,13 @@ CROSS JOIN LATERAL unnest(repository.tags) AS expanded(raw_value)
 JOIN utm_agent_category_alias AS aliases
   ON aliases.normalized_alias = lower(btrim(expanded.raw_value) COLLATE "C")
 WHERE COALESCE(cardinality(repository.tags), 0) > 0
-  AND COALESCE(repository.delete_flag, 'N') <> 'Y';
+  AND COALESCE(repository.delete_flag, 'N') <> 'Y'
+  AND EXISTS (
+      SELECT 1
+      FROM nexent.ag_tenant_agent_t AS agent
+      WHERE agent.agent_id = repository.agent_id
+        AND agent.tenant_id = repository.publisher_tenant_id
+  );
 
 DO $$
 DECLARE
@@ -1363,6 +1388,9 @@ BEGIN
 END;
 $$;
 
+ALTER TABLE nexent.resource_tag_assignment
+    DISABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
+
 INSERT INTO nexent.resource_tag_assignment (
     tenant_id, resource_type, resource_id, definition_id, value_id,
     status, created_by, updated_by, delete_flag
@@ -1375,6 +1403,9 @@ SET status = 'active',
     update_time = CURRENT_TIMESTAMP,
     updated_by = EXCLUDED.updated_by,
     delete_flag = 'N';
+
+ALTER TABLE nexent.resource_tag_assignment
+    ENABLE TRIGGER enforce_resource_tag_assignment_rules_trigger;
 
 -- -----------------------------------------------------------------------------
 -- Consolidated from v2.5.6_0829_document_tag_projection_delete_flag.sql

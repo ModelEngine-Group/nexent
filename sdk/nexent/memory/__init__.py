@@ -46,11 +46,6 @@ from .providers import (
     reset_provider_registry,
 )
 
-from .providers.adapters import (
-    A800Adapter,
-    Mem0Adapter,
-)
-
 from .retrieval import (
     MMRDeduplicator,
     Normalizer,
@@ -108,9 +103,6 @@ __all__ = [
     "DegradableProviderError",
     "NonRetryableProviderError",
     "execute_with_retry",
-    # Provider adapters
-    "A800Adapter",
-    "Mem0Adapter",
     # Retrieval pipeline (Phase 4)
     "Normalizer",
     "ScoreFusion",

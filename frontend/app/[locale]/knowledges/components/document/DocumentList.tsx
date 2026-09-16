@@ -17,6 +17,7 @@ import {
   Popover,
   Progress,
   Segmented,
+  Modal,
   Tooltip,
 } from "antd";
 import { useStorageQuotaBlocked } from "@/hooks/useStorageQuotaBlocked";
@@ -34,6 +35,7 @@ import {
   Glasses,
   CircleOff,
   AlertCircle,
+  Settings2,
   Tag,
   SlidersHorizontal,
   ChevronDown,
@@ -65,6 +67,13 @@ import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
 import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
 import log from "@/lib/logger";
+import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import {
+  ModelAdvancedSettings,
+  ModelAdvancedSettingsValue,
+  advancedSettingsValueFromRecord,
+  buildModelOverrideEntry,
+} from "../../../models/components/model/ModelAdvancedSettings";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 
@@ -124,6 +133,26 @@ interface DocumentListProps {
   availableEmbeddingModels?: ModelOption[];
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
+  // v2.6.0: per-KB embedding model params override
+  // Shape: { "<model_id>": { temperature?, top_p?, extra_params? } }
+  embeddingModelParamsOverride?: Record<
+    string,
+    {
+      temperature?: number | null;
+      top_p?: number | null;
+      extra_params?: Record<string, unknown> | null;
+    }
+  >;
+  onEmbeddingModelParamsOverrideChange?: (
+    value: Record<
+      string,
+      {
+        temperature?: number | null;
+        top_p?: number | null;
+        extra_params?: Record<string, unknown> | null;
+      }
+    >
+  ) => void;
   isMultimodal?: boolean;
   quotaLimitBytes?: number | null;
   onQuotaLimitBytesChange?: (value: number | null) => void;
@@ -182,6 +211,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       availableEmbeddingModels,
       selectedEmbeddingModel,
       onEmbeddingModelChange,
+      // v2.6.0: per-KB embedding model params override
+      embeddingModelParamsOverride,
+      onEmbeddingModelParamsOverrideChange,
       isMultimodal = false,
       onMultimodalChange,
       permission,
@@ -396,7 +428,14 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [frequencyOptions, setFrequencyOptions] = useState<FrequencyOption[]>(
       []
     );
+    // v2.6.0: embedding model advanced settings modal state
+    const [embeddingAdvancedOpen, setEmbeddingAdvancedOpen] = useState(false);
+    const [embeddingAdvancedValue, setEmbeddingAdvancedValue] =
+      useState<ModelAdvancedSettingsValue>({});
     const { t } = useTranslation();
+    const { specs: inferenceSpecs } = useInferenceFieldSpecs({
+      enabled: embeddingAdvancedOpen,
+    });
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
     const {
       hasQuota,
@@ -415,6 +454,72 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const isReadOnlyMode = permission === "READ_ONLY";
     const canToggleMultimodal =
       isCreatingMode && typeof onMultimodalChange === "function";
+
+    // v2.6.0: resolve the currently selected embedding model to a ModelOption
+    // for the advanced settings modal. The Select value is "displayName::type".
+    const selectedEmbeddingModelOption = React.useMemo<ModelOption | undefined>(
+      () => {
+        if (!selectedEmbeddingModel || !availableEmbeddingModels) return undefined;
+        const delimiterIndex = selectedEmbeddingModel.lastIndexOf("::");
+        if (delimiterIndex < 0) return undefined;
+        const displayName = selectedEmbeddingModel.slice(0, delimiterIndex);
+        const modelType = selectedEmbeddingModel.slice(delimiterIndex + 2);
+        return availableEmbeddingModels.find(
+          (m) => m.displayName === displayName && m.type === modelType
+        );
+      },
+      [selectedEmbeddingModel, availableEmbeddingModels]
+    );
+
+    // Sync the advanced settings form value when opening the modal or switching models
+    React.useEffect(() => {
+      if (!embeddingAdvancedOpen) return;
+      if (!selectedEmbeddingModelOption) {
+        setEmbeddingAdvancedValue({});
+        return;
+      }
+      const existingOverride =
+        embeddingModelParamsOverride?.[String(selectedEmbeddingModelOption.id)] ?? {};
+      const hasOverride = Object.keys(existingOverride).length > 0;
+      // When no per-KB override exists yet, fall back to the model-level defaults
+      // (temperature/top_p/extra_params, including __custom__) so the user can
+      // see the currently effective values. Once an override exists, it takes
+      // precedence.
+      const formRecord = hasOverride
+        ? existingOverride
+        : {
+            temperature: selectedEmbeddingModelOption.temperature,
+            top_p: selectedEmbeddingModelOption.topP,
+            extra_params: selectedEmbeddingModelOption.extraParams,
+          };
+      setEmbeddingAdvancedValue(
+        advancedSettingsValueFromRecord(
+          formRecord,
+          inferenceSpecs,
+          selectedEmbeddingModelOption.type
+        )
+      );
+    }, [
+      embeddingAdvancedOpen,
+      selectedEmbeddingModelOption,
+      embeddingModelParamsOverride,
+      inferenceSpecs,
+    ]);
+
+    const handleEmbeddingAdvancedChange = (next: ModelAdvancedSettingsValue) => {
+      setEmbeddingAdvancedValue(next);
+      if (!selectedEmbeddingModelOption || !onEmbeddingModelParamsOverrideChange)
+        return;
+      const entry = buildModelOverrideEntry(next);
+      const current = embeddingModelParamsOverride ?? {};
+      const updated = { ...current };
+      if (Object.keys(entry).length === 0) {
+        delete updated[String(selectedEmbeddingModelOption.id)];
+      } else {
+        updated[String(selectedEmbeddingModelOption.id)] = entry;
+      }
+      onEmbeddingModelParamsOverrideChange(updated);
+    };
 
     // Permission options with icons shown inside dropdown
     const permissionOptions = [
@@ -1229,6 +1334,19 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           },
                         ].filter((group) => group.options.length > 0)}
                       />
+                      <Button
+                        size="small"
+                        icon={<Settings2 size={14} />}
+                        onClick={() => setEmbeddingAdvancedOpen(true)}
+                        disabled={
+                          !selectedEmbeddingModel ||
+                          !availableEmbeddingModels ||
+                          availableEmbeddingModels.length === 0
+                        }
+                        title={t("knowledgeBase.create.embeddingAdvancedSettings", {
+                          defaultValue: "高级设置",
+                        })}
+                      />
                     </div>
                   )}
 
@@ -1670,6 +1788,38 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             onClose={() => setSelectedFile(null)}
           />
         )}
+
+        {/* v2.6.0: Embedding model advanced settings modal */}
+        <Modal
+          open={embeddingAdvancedOpen}
+          onCancel={() => setEmbeddingAdvancedOpen(false)}
+          onOk={() => setEmbeddingAdvancedOpen(false)}
+          title={t("knowledgeBase.create.embeddingAdvancedSettings", {
+            defaultValue: "Embedding 模型高级设置",
+          })}
+          okText={t("common.confirm", { defaultValue: "确定" })}
+          cancelText={t("common.cancel", { defaultValue: "取消" })}
+          width={720}
+          centered
+          destroyOnClose={false}
+          styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
+        >
+          {selectedEmbeddingModelOption ? (
+            <ModelAdvancedSettings
+              modelType={selectedEmbeddingModelOption.type}
+              specs={inferenceSpecs}
+              value={embeddingAdvancedValue}
+              onChange={handleEmbeddingAdvancedChange}
+              mode="override"
+            />
+          ) : (
+            <div className="text-gray-500 text-sm">
+              {t("knowledgeBase.create.noEmbeddingModelSelected", {
+                defaultValue: "请先选择 Embedding 模型",
+              })}
+            </div>
+          )}
+        </Modal>
       </div>
     );
   }

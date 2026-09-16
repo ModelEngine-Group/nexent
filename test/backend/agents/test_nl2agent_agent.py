@@ -33,18 +33,18 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
 
 
 @pytest.mark.parametrize(
-    ("language", "heading", "immutable_rule", "description_rule"),
+    ("language", "heading", "name_rule", "description_rule"),
     [
         (
             "en",
             "### Role",
-            "`name` and `display_name` are immutable",
+            "only when the authoritative draft `name` is absent",
             "generate only `description`",
         ),
         (
             "zh",
             "### 核心职责",
-            "`name` 和 `display_name` 不可修改",
+            "仅当权威草稿中的 `name` 缺失",
             "只生成 `description`",
         ),
     ],
@@ -52,7 +52,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
 def test_build_nl2agent_system_prompt_configures_existing_draft(
     language,
     heading,
-    immutable_rule,
+    name_rule,
     description_rule,
 ):
     prompt = build_nl2agent_system_prompt(
@@ -65,7 +65,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     )
 
     assert heading in prompt
-    assert immutable_rule in prompt
+    assert name_rule in prompt
     assert description_rule in prompt
     assert "runtime_search" in prompt
     assert "runtime_recommend" in prompt
@@ -127,7 +127,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 7
+    assert len(code_blocks) == 8
     for code_block in code_blocks:
         ast.parse(code_block)
 
@@ -160,6 +160,26 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
 
 
 @pytest.mark.parametrize(
+    ("language", "skip_all_rule"),
+    [
+        (
+            "en",
+            "explicit choice to continue without any suggested Tool or Skill",
+        ),
+        ("zh", "明确选择不安装任何建议的 Tool 或 Skill"),
+    ],
+)
+def test_build_nl2agent_system_prompt_allows_skipping_all_suggested_resources(
+    language,
+    skip_all_rule,
+):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert skip_all_rule in prompt
+    assert "binding_required=false" in prompt
+
+
+@pytest.mark.parametrize(
     (
         "language",
         "boundary_heading",
@@ -175,7 +195,7 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
             "### Scheduled-task Boundary",
             "this workflow does not create the scheduled task",
             "Never search for a scheduled-task resource",
-            'resource_result={"status": "success", "resources": []}',
+            "do not show a binding card",
             "Every Prompt field describes one invocation",
             "open [Scheduled tasks](/agent-tasks)",
         ),
@@ -184,7 +204,7 @@ def test_build_nl2agent_system_prompt_falls_back_to_chinese():
             "### 定时任务边界",
             "本流程不创建定时任务",
             "不得搜索定时任务资源",
-            'resource_result={"status": "success", "resources": []}',
+            "不得显示资源绑定卡",
             "所有 Prompt 字段只描述 Agent 单次被调用时的行为",
             "前往[定时任务](/agent-tasks)",
         ),
@@ -403,14 +423,15 @@ def test_installed_resource_binding_wrapper_preserves_verified_contract():
         agent_id=42,
         resource_result={"status": "success", "resources": []},
     )
-    empty_payload = json.loads(
-        empty_wrapped.split("<nl2a>", 1)[1].split("</nl2a>", 1)[0]
-    )
+    empty_payload = json.loads(empty_wrapped)
     assert empty_payload == {
+        "status": "success",
         "subtype": "installed_resource_binding",
         "agent_id": 42,
+        "binding_required": False,
         "resources": [],
     }
+    assert "<nl2a>" not in empty_wrapped
 
 
 def test_requirement_clarification_accepts_at_most_five_questions():
@@ -466,6 +487,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     save_inputs = json.loads(config.tools[3].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
+        "name",
         "description",
         "duty_prompt",
         "constraint_prompt",

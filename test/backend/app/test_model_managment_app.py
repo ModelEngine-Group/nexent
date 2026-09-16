@@ -277,7 +277,7 @@ async def test_create_model_success(client, auth_header, user_credentials, sampl
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
     
     mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     
@@ -300,7 +300,7 @@ async def test_create_model_records_accept_signal_when_present(client, auth_head
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
@@ -340,7 +340,7 @@ async def test_create_model_skips_accept_recorder_without_match_kind(client, aut
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
@@ -444,7 +444,7 @@ async def test_provider_batch_create_success(client, auth_header, user_credentia
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def _batch(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
     
     mock_batch = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch)
     
@@ -504,7 +504,7 @@ async def test_provider_batch_create_strips_accept_signal_and_records(
     )
 
     async def _batch(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_batch = mocker.patch(
         'backend.apps.model_managment_app.batch_create_models_for_tenant',
@@ -1091,7 +1091,7 @@ async def test_manage_create_model_success(client, auth_header, user_credentials
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
 
@@ -1137,7 +1137,7 @@ async def test_manage_create_model_records_accept_signal_when_present(
     )
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_create = mocker.patch(
         'backend.apps.model_managment_app.create_model_for_tenant',
@@ -1407,7 +1407,7 @@ async def test_manage_batch_create_models_success(client, auth_header, user_cred
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _batch_create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_batch_create = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
 
@@ -1476,7 +1476,7 @@ async def test_manage_batch_create_models_empty_list(client, auth_header, user_c
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _batch_create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_batch_create = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
 

@@ -2219,6 +2219,7 @@ deployment_render_helm_monitoring_global_values() {
   printf '    enabled: %s\n' "$enabled"
   printf '    provider: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROVIDER "$DEPLOYMENT_MONITORING_PROVIDER")")"
   printf '    dashboardUrl: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_URL "$(deployment_monitoring_dashboard_url k8s)")")"
+  printf '    dashboardAllowedRoles: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_DASHBOARD_ALLOWED_ROLES "SU,SPEED")")"
   printf '    projectName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value MONITORING_PROJECT_NAME "nexent")")"
   printf '    serviceName: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_SERVICE_NAME "nexent-backend")")"
   printf '    otlpEndpoint: %s\n' "$(deployment_yaml_quote "$(deployment_monitoring_env_value OTEL_EXPORTER_OTLP_ENDPOINT "http://nexent-otel-collector:4318")")"

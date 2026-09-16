@@ -25,6 +25,7 @@ consts_mock.const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # Register mocked consts module in sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+sys.modules['consts.model'] = consts_mock.model
 
 # Mock utils module used by target module
 utils_mock = MagicMock()

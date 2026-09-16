@@ -33,7 +33,7 @@ async def test_dispatch_claims_pending_run_and_submits_runtime_worker(monkeypatc
     executor = MagicMock()
     monkeypatch.setattr(runtime_app, "_load_evaluation_executor", lambda: executor)
     submit = MagicMock()
-    monkeypatch.setattr(runtime_app.pool, "submit", submit)
+    monkeypatch.setattr(runtime_app.runtime_thread_manager, "submit", submit)
 
     result = await dispatch_evaluation_run_api(
         EvaluationRunRequest(agent_evaluation_id=7), "internal-token"
@@ -41,7 +41,11 @@ async def test_dispatch_claims_pending_run_and_submits_runtime_worker(monkeypatc
 
     assert result == {"accepted": True, "agent_evaluation_id": 7}
     claim.assert_called_once_with(agent_evaluation_id=7, tenant_id="t1", updated_by="u1")
-    submit.assert_called_once_with(
+    submitted = submit.call_args.args
+    assert submitted[0] == "evaluation"
+    assert submitted[1].task_name == "agent-evaluation-dispatch"
+    assert submitted[1].run_id == "7"
+    assert submitted[2:] == (
         executor,
         "t1",
         "u1",
@@ -60,7 +64,7 @@ async def test_dispatch_is_idempotent_when_run_is_already_running(monkeypatch):
     )
     monkeypatch.setattr(runtime_app, "_load_evaluation_executor", lambda: MagicMock())
     submit = MagicMock()
-    monkeypatch.setattr(runtime_app.pool, "submit", submit)
+    monkeypatch.setattr(runtime_app.runtime_thread_manager, "submit", submit)
 
     result = await dispatch_evaluation_run_api(
         EvaluationRunRequest(agent_evaluation_id=7), "internal-token"
@@ -133,7 +137,7 @@ async def test_dispatch_is_idempotent_when_pending_claim_is_lost(monkeypatch):
     )
     monkeypatch.setattr(runtime_app, "claim_agent_evaluation_run", lambda **_: False)
     submit = MagicMock()
-    monkeypatch.setattr(runtime_app.pool, "submit", submit)
+    monkeypatch.setattr(runtime_app.runtime_thread_manager, "submit", submit)
 
     result = await dispatch_evaluation_run_api(
         EvaluationRunRequest(agent_evaluation_id=7), "internal-token"
@@ -199,7 +203,11 @@ async def test_dispatch_maps_runtime_pool_submission_failure(monkeypatch):
     )
     monkeypatch.setattr(runtime_app, "claim_agent_evaluation_run", lambda **_: True)
     monkeypatch.setattr(runtime_app, "_load_evaluation_executor", MagicMock())
-    monkeypatch.setattr(runtime_app.pool, "submit", MagicMock(side_effect=RuntimeError("pool closed")))
+    monkeypatch.setattr(
+        runtime_app.runtime_thread_manager,
+        "submit",
+        MagicMock(side_effect=RuntimeError("pool closed")),
+    )
     payload = EvaluationRunRequest(agent_evaluation_id=7)
 
     with pytest.raises(HTTPException) as exc_info:

@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, Path, Query
 from nexent.vector_database.base import VectorDatabaseCore
+from nexent.core.concurrency import run_blocking
 
 from consts.const import (
     DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
@@ -373,8 +374,11 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         file_id = (lifecycle_record or {}).get("file_id")
         legacy_mode = lifecycle_record is None or not lifecycle_record.get("object_name")
         if lifecycle_record and lifecycle_record.get("object_name"):
-            drained = await asyncio.to_thread(
+            drained = await run_blocking(
+                "knowledge-document-drain",
                 service_cls._wait_for_document_tasks,
+                lane="control-io",
+                owner="config",
                 index_name=index_name,
                 path_or_url=path_or_url,
                 lifecycle_record=lifecycle_record,

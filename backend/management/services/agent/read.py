@@ -17,6 +17,7 @@ class AgentModelProjection:
 
     fields: dict
     deleted_model_ids: frozenset[int]
+    availability_model_ids: list[int]
 
 
 def project_agent_models(
@@ -30,16 +31,29 @@ def project_agent_models(
     configured_model_ids = agent.get("model_ids") or []
     model_ids = get_valid_model_ids(configured_model_ids, tenant_id)
     records = [
-        resolve_model_record(mid, None if detail else tenant_id, model_cache)
+        (mid, resolve_model_record(mid, None if detail else tenant_id, model_cache))
         for mid in model_ids
     ]
-    names = [record["display_name"] for record in records if record and record.get("display_name")]
+    available_records = [
+        (mid, record) for mid, record in records if is_model_available(record)
+    ]
+    available_model_ids = [mid for mid, _ in available_records]
+    names = [
+        record["display_name"]
+        for _, record in available_records
+        if record and record.get("display_name")
+    ]
     legacy_name = names[0] if names else None
     if detail:
-        legacy_name = records[0].get("display_name") if records and records[0] is not None else None
+        legacy_name = (
+            available_records[0][1].get("display_name")
+            if available_records and available_records[0][1] is not None
+            else None
+        )
     return AgentModelProjection(
-        fields={"model_ids": model_ids, "model_names": names, "model_name": legacy_name},
+        fields={"model_ids": available_model_ids, "model_names": names, "model_name": legacy_name},
         deleted_model_ids=frozenset(configured_model_ids) - frozenset(model_ids),
+        availability_model_ids=model_ids,
     )
 
 
@@ -90,10 +104,9 @@ def check_agent_availability(
     if not model_ids:
         reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
     else:
-        reasons.extend(
-            AgentUnavailableReason.MODEL_UNAVAILABLE
-            for mid in model_ids if mid and not is_model_available(resolve_model_record(mid, tenant_id, cache))
-        )
+        model_records = [resolve_model_record(mid, tenant_id, cache) for mid in model_ids if mid]
+        if not any(is_model_available(record) for record in model_records):
+            reasons.append(AgentUnavailableReason.MODEL_UNAVAILABLE)
     return not reasons, reasons
 
 

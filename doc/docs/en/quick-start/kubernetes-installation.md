@@ -333,7 +333,8 @@ Common generated Helm values:
 | `global.monitoring.enabled` | Enables OpenTelemetry export in the Nexent backend |
 | `global.monitoring.provider` | Backend provider label: `otlp`, `phoenix`, `langfuse`, `langsmith`, `grafana`, `zipkin` |
 | `global.monitoring.otlpEndpoint` | Backend OTLP HTTP endpoint, default `http://nexent-otel-collector:4318` |
-| `global.monitoring.dashboardUrl` | Frontend monitoring entry URL; leave empty to hide the entry. Visible in speed mode; in standard mode only the super administrator can see it |
+| `global.monitoring.dashboardUrl` | Frontend monitoring entry URL; leave empty to hide the entry |
+| `global.monitoring.dashboardAllowedRoles` | Comma-separated roles that can see the entry; defaults to `SU,SPEED` |
 | `global.monitoring.traceContentMode` | Trace content capture mode: `summary`, `metrics`, or `full` |
 | `nexent-monitoring.<provider>.service.nodePort` | NodePort override for provider dashboards |
 | `nexent-monitoring.langfuse.init.*` | Local Langfuse bootstrap organization, project, and admin account |

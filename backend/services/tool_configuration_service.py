@@ -17,6 +17,7 @@ from consts.const import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
+    ENABLE_AIDP_KNOWLEDGE,
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
 )
@@ -71,6 +72,24 @@ from utils.tool_utils import get_local_tools_classes, get_local_tools_descriptio
 logger = logging.getLogger("tool_configuration_service")
 
 TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES = ErrorMessage.get_param_constraint_messages()
+
+_ALWAYS_HIDDEN_KNOWLEDGE_TOOLS = frozenset({
+    "knowledge_base_search",
+    "aidp_search",
+})
+_INDEPENDENT_AIDP_SEARCH_TOOL = "ind_aidp_search"
+
+
+def _get_deployment_user_selectability(
+    tool_name: str,
+    default: bool,
+) -> bool:
+    """Return the deployment-controlled user selection state for a tool."""
+    if tool_name in _ALWAYS_HIDDEN_KNOWLEDGE_TOOLS:
+        return False
+    if tool_name == _INDEPENDENT_AIDP_SEARCH_TOOL:
+        return not ENABLE_AIDP_KNOWLEDGE
+    return default
 
 
 def _parse_kds_list(value: Any) -> list[str]:
@@ -284,7 +303,10 @@ def get_local_tools() -> List[ToolInfo]:
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             labels=getattr(tool_class, 'labels', None),
-            is_user_selectable=getattr(tool_class, 'is_user_selectable', True),
+            is_user_selectable=_get_deployment_user_selectability(
+                getattr(tool_class, 'name'),
+                getattr(tool_class, 'is_user_selectable', True),
+            ),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -873,7 +895,10 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
-            "is_user_selectable": tool.get("is_user_selectable", True),
+            "is_user_selectable": _get_deployment_user_selectability(
+                tool_name,
+                tool.get("is_user_selectable", True),
+            ),
             "updated_by": tool.get("updated_by", ""),
             "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }

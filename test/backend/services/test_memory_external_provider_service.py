@@ -236,7 +236,7 @@ def test_build_provider_missing_plugin_name(service):
         service.build_provider({}, {})
 
 
-def test_runtime_factory_loads_plugins_and_caches_service(monkeypatch):
+def test_ac_009_runtime_factory_loads_builtin_and_external_plugins(monkeypatch):
     monkeypatch.setattr(
         sys.modules["consts.const"],
         "MEMORY_PROVIDER_PLUGINS_DIR",
@@ -254,7 +254,9 @@ def test_runtime_factory_loads_plugins_and_caches_service(monkeypatch):
     first = service_module.get_memory_external_provider_service()
     second = service_module.get_memory_external_provider_service()
 
-    loader_cls.assert_called_once()
+    loader_cls.assert_called_once_with(
+        "/tmp/test-memory-provider-plugins", include_builtin_plugins=True
+    )
     loader.load_all.assert_called_once_with()
     config_cls.assert_called_once_with(loader)
     assert first is second

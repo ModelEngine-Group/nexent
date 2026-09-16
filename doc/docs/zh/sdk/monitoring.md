@@ -119,12 +119,13 @@ cd deploy
 bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana
 ```
 
-`deploy/env/monitoring.env` 中的 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口。speed 模式下配置 URL 后即可显示；标准模式下只有超级管理员可见。
+`deploy/env/monitoring.env` 中的 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口地址，`MONITORING_DASHBOARD_ALLOWED_ROLES` 控制入口对哪些角色可见。默认值 `SU,SPEED` 保持标准模式下超级管理员可见、speed 模式下可见的现有行为。
 
 ```bash
 ENABLE_TELEMETRY=true
 MONITORING_PROVIDER=grafana
 MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
+MONITORING_DASHBOARD_ALLOWED_ROLES=SU,ADMIN,SPEED
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
@@ -219,7 +220,8 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
 | `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
-| `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址；speed 模式下可见，标准模式下仅超级管理员可见 |
+| `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址 |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | `SU,SPEED` | 可看到监控入口的角色，使用逗号分隔；配置为空时对所有角色隐藏 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
 | `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | 每个 payload 预览最多写入的字符数 |
