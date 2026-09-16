@@ -2,11 +2,30 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "deploy/sql/migrations/v2.5.4_0910_context_budget_v2.sql"
+MERGED_MIGRATION = ROOT / "deploy/sql/migrations/v2.6.0_merged_migrations.sql"
+CONTEXT_BUDGET_V2_SOURCE_MARKER = (
+    "-- Source migration: v2.5.4_0910_context_budget_v2.sql"
+)
+
+
+def _read_context_budget_v2_migration() -> str:
+    merged = MERGED_MIGRATION.read_text(encoding="utf-8")
+    assert CONTEXT_BUDGET_V2_SOURCE_MARKER in merged
+    context_budget_and_later = merged.split(CONTEXT_BUDGET_V2_SOURCE_MARKER, maxsplit=1)[1]
+    next_source_marker = "\n-- Source migration:"
+    if next_source_marker in context_budget_and_later:
+        context_budget_and_later = context_budget_and_later.split(next_source_marker, maxsplit=1)[0]
+    # Skip the embedded header ("-- Source SHA-256: ..." plus surrounding
+    # blank lines) so the returned SQL starts with the source migration body.
+    lines = context_budget_and_later.split("\n")
+    sha_index = next(
+        index for index, line in enumerate(lines) if line.startswith("-- Source SHA-256: ")
+    )
+    return "\n".join(lines[sha_index + 2:])
 
 
 def test_context_budget_v2_migration_is_transactional_and_idempotent():
-    sql = MIGRATION.read_text(encoding="utf-8")
+    sql = _read_context_budget_v2_migration()
 
     assert sql.startswith("-- Context Budget V2 final-state migration.")
     assert "BEGIN;" in sql
@@ -17,7 +36,7 @@ def test_context_budget_v2_migration_is_transactional_and_idempotent():
 
 
 def test_context_budget_v2_migration_preserves_trigger_and_derives_target():
-    sql = MIGRATION.read_text(encoding="utf-8")
+    sql = _read_context_budget_v2_migration()
 
     assert "RENAME COLUMN budget_soft_limit_ratio" in sql
     assert "TO budget_compaction_trigger_ratio" in sql

@@ -55,7 +55,7 @@ CoreAgent 仅增加可选生命周期接入点。未启用 HITL 时保持原 exe
 
 ## 3. 持久化与安全语义
 
-新增四张表：`human_run_t`、`human_request_t`、`human_execution_t`、`human_event_t`，建表脚本为 `deploy/sql/migrations/v2.5.1_001_human_interaction.sql`，未修改已合入 develop 的 SQL。
+新增四张表：`human_run_t`、`human_request_t`、`human_execution_t`、`human_event_t`，建表脚本为 `deploy/sql/migrations/v2.6.0_merged_migrations.sql`，未修改已合入 develop 的 SQL。
 
 
 ### 数据库字段与写入约束
