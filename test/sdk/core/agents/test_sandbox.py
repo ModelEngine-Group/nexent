@@ -187,6 +187,54 @@ def test_seed_pnpm_offline_store_reports_preparation_failure():
         seed_pnpm_offline_store(container)
 
 
+def test_docker_bridge_gateway_returns_concrete_ipv4_address():
+    network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "fd00::1"}, {"Gateway": "172.17.0.1"}]}})
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    assert sandbox_module._docker_bridge_gateway(client) == "172.17.0.1"
+    client.networks.get.assert_called_once_with("bridge")
+    network.reload.assert_called_once_with()
+
+
+def test_docker_bridge_gateway_rejects_missing_ipv4_address():
+    network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "fd00::1"}]}})
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    with pytest.raises(RuntimeError, match="does not expose an IPv4 gateway"):
+        sandbox_module._docker_bridge_gateway(client)
+
+
+@pytest.mark.parametrize("server_version", ["18.09.9", "19.03.15", "20.10.9-ce"])
+def test_legacy_docker_disables_seccomp_for_clone3_compatibility(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, MagicMock())
+
+    assert run_kwargs["security_opt"] == ["seccomp=unconfined"]
+
+
+@pytest.mark.parametrize("server_version", ["20.10.10", "20.10.24", "23.0.0", "29.1.0"])
+def test_modern_docker_preserves_default_seccomp_profile(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, MagicMock())
+
+    assert "security_opt" not in run_kwargs
+
+
+def test_unknown_docker_version_preserves_default_seccomp_profile():
+    client = SimpleNamespace(version=lambda: {"Version": "vendor-build"})
+    run_kwargs = {}
+    logger = MagicMock()
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger)
+
+    assert "security_opt" not in run_kwargs
+    logger.warning.assert_called_once()
+
+
 def _docker_available() -> bool:
     try:
         import docker
