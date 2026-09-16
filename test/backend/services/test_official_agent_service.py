@@ -170,6 +170,9 @@ consts_model.SkillZipEntry = _SkillZipEntry
 consts_model.SkillResolution = _SkillResolution
 consts_model.AgentRepositorySnapshot = _AgentRepositorySnapshot
 consts_model.ProcessParams = _ProcessParams
+# The naming service imports model_management_db, which imports this helper
+# while the test intentionally replaces consts.model with an isolated stub.
+consts_model.filter_extra_params = lambda params: params
 sys.modules["consts.model"] = consts_model
 
 from services import official_agent_service  # noqa: E402
