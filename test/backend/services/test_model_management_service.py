@@ -1088,6 +1088,54 @@ async def test_update_single_model_for_tenant_success_single_model():
         )
 
 
+async def test_update_single_model_for_tenant_splits_repo_prefix_from_model_name():
+    """A repo-qualified model_name (as returned by the list endpoints) must be
+    split on update, otherwise the model_name column accumulates a repo prefix
+    on every save ("deepseek-ai/X" -> "deepseek-ai/deepseek-ai/X"), breaking
+    provider catalog matching and connectivity probes."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 7, "model_type": "llm", "display_name": "name",
+         "model_repo": "deepseek-ai", "model_name": "DeepSeek-V4-Flash"},
+    ]
+    model_data = {
+        "model_name": "deepseek-ai/DeepSeek-V4-Flash",
+        "api_key": "sk-keep",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_payload = mock_update.call_args[0][1]
+        assert update_payload["model_name"] == "DeepSeek-V4-Flash"
+        assert update_payload["model_repo"] == "deepseek-ai"
+        assert update_payload["api_key"] == "sk-keep"
+
+
+async def test_update_single_model_for_tenant_keeps_bare_model_name_and_repo():
+    """A bare model_name (no repo prefix) must pass through unchanged and must
+    NOT clobber an existing model_repo that the payload does not carry."""
+    svc = import_svc()
+
+    existing_models = [
+        {"model_id": 8, "model_type": "llm", "display_name": "name",
+         "model_repo": "BAAI", "model_name": "bge-m3"},
+    ]
+    model_data = {
+        "model_name": "bge-m3",
+    }
+
+    with mock.patch.object(svc, "get_models_by_display_name", return_value=existing_models), \
+            mock.patch.object(svc, "update_model_record") as mock_update:
+        await svc.update_single_model_for_tenant("u1", "t1", "name", model_data)
+
+        update_payload = mock_update.call_args[0][1]
+        assert update_payload["model_name"] == "bge-m3"
+        assert "model_repo" not in update_payload
+
+
 async def test_update_single_model_for_tenant_mirrors_max_output_into_legacy_max_tokens():
     """LLM updates carrying max_output_tokens must mirror into the legacy
     max_tokens column so the SDK's pre-W2 auto-fill cannot read a stale value

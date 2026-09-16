@@ -64,6 +64,10 @@ export interface ModelAdvancedSettingsProps {
   mode?: ModelAdvancedSettingsMode;
   /** Disable all inputs. */
   disabled?: boolean;
+  /** Model-level defaults shown as placeholders when a field is empty
+   * (override mode): makes "empty = inherit this value" visible. Keys match
+   * spec.key (snake_case). */
+  inheritedDefaults?: Record<string, unknown>;
 }
 
 /** Keys that have dedicated DB columns or are stored as top-level fields (not in extra_params). */
@@ -293,7 +297,8 @@ const renderIntField = (
   spec: InferenceFieldSpec,
   value: unknown,
   onChange: (next: unknown) => void,
-  disabled: boolean
+  disabled: boolean,
+  placeholder?: string
 ) => (
   <InputNumber
     className="w-full"
@@ -304,6 +309,7 @@ const renderIntField = (
     precision={0}
     min={spec.range ? spec.range[0] : undefined}
     max={spec.range ? spec.range[1] : undefined}
+    placeholder={placeholder}
     onChange={(next) => onChange(next === null ? undefined : next)}
   />
 );
@@ -312,7 +318,8 @@ const renderFloatField = (
   spec: InferenceFieldSpec,
   value: unknown,
   onChange: (next: unknown) => void,
-  disabled: boolean
+  disabled: boolean,
+  placeholder?: string
 ) => (
   <InputNumber
     className="w-full"
@@ -322,6 +329,7 @@ const renderFloatField = (
     step={0.1}
     min={spec.range ? spec.range[0] : undefined}
     max={spec.range ? spec.range[1] : undefined}
+    placeholder={placeholder}
     onChange={(next) => onChange(next === null ? undefined : next)}
   />
 );
@@ -332,11 +340,23 @@ const renderBoolField = (
   onChange: (next: unknown) => void,
   disabled: boolean
 ) => (
-  <Switch
-    checked={Boolean(value)}
-    disabled={disabled}
-    onChange={(checked) => onChange(checked)}
-  />
+  <span className="inline-flex items-center gap-2">
+    <Switch
+      // An unset boolean renders ON: hybrid-thinking models (Qwen3,
+      // DeepSeek-V3.x) default to thinking enabled, so "empty = inherit"
+      // must not look like "off". Toggling stores an explicit value.
+      checked={value === undefined || value === null ? true : Boolean(value)}
+      disabled={disabled}
+      onChange={(checked) => onChange(checked)}
+    />
+    {value === undefined || value === null ? (
+      <span className="text-xs text-gray-400">
+        <Tooltip title="默认开启（跟随模型默认）。切换开关以显式启用或禁用。">
+          <span>默认</span>
+        </Tooltip>
+      </span>
+    ) : null}
+  </span>
 );
 
 /** Chinese display labels for STT/TTS provider option values. The option
@@ -391,16 +411,17 @@ const renderFieldControl = (
   spec: InferenceFieldSpec,
   value: unknown,
   onChange: (next: unknown) => void,
-  disabled: boolean
+  disabled: boolean,
+  placeholder?: string
 ) => {
   const type: InferenceFieldType = spec.type;
   switch (type) {
     case "str":
-      return renderStringField(spec, value, onChange, disabled);
+      return renderStringField(spec, value, onChange, disabled, placeholder);
     case "int":
-      return renderIntField(spec, value, onChange, disabled);
+      return renderIntField(spec, value, onChange, disabled, placeholder);
     case "float":
-      return renderFloatField(spec, value, onChange, disabled);
+      return renderFloatField(spec, value, onChange, disabled, placeholder);
     case "bool":
       return renderBoolField(spec, value, onChange, disabled);
     case "select":
@@ -544,6 +565,7 @@ export const ModelAdvancedSettings = ({
   onChange,
   mode = "default",
   disabled = false,
+  inheritedDefaults,
 }: ModelAdvancedSettingsProps) => {
   const { t } = useTranslation();
   // STT/TTS auth fields (AppID, Access Token) only apply to Volcano Engine.
@@ -698,7 +720,15 @@ export const ModelAdvancedSettings = ({
                 spec,
                 fieldValue,
                 (next) => handleFieldChange(spec.key, next),
-                disabled
+                disabled,
+                // Show what an empty field inherits (model-level defaults in
+                // override mode) so "empty" is an informed choice.
+                fieldValue === undefined || fieldValue === null || fieldValue === ""
+                  ? inheritedDefaults?.[spec.key] !== undefined &&
+                    inheritedDefaults?.[spec.key] !== null
+                    ? String(inheritedDefaults[spec.key])
+                    : undefined
+                  : undefined
               )}
             </div>
           );
