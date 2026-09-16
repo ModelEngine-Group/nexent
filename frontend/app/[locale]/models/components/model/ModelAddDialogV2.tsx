@@ -218,9 +218,7 @@ const notifyAutoConfiguredDefaults = (
     .join("、");
   if (!names) return;
   message.info(
-    t("model.dialog.v2.autoConfiguredDefaults", {
-      defaultValue: `已自动设为默认模型：${names}`,
-    })
+    t("model.dialog.v2.autoConfiguredDefaults", { names })
   );
 };
 
