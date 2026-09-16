@@ -571,9 +571,6 @@ export default function AgentPrompt() {
               onChange={(v: number) => setConfiguringModelId(v)}
               disabled={!canManage && !isSpeedMode}
             />
-            <div className="text-xs text-gray-500 pb-2 border-b border-gray-100">
-              {t("model.advanced.overrideHint", { defaultValue: "留空表示继承模型默认值。" })}
-            </div>
             <ModelAdvancedSettings
               modelType={(configuringModel as any).type ?? "llm"}
               specs={inferenceSpecs}
