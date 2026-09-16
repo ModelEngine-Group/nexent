@@ -335,11 +335,11 @@ def update_tool_table_from_scan_tool_list(
 
 def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: str) -> int:
     """
-    Mark all tool records belonging to a deleted MCP server as unavailable.
+    Mark a deleted MCP server's tools unavailable and unbind them from agent drafts.
 
-    Keeps the tool rows in place (agents may still reference them via tool
-    instances) but hides them from the agent tool selection list, which only
-    shows tools where is_available != False.
+    Keeps tool rows and published agent snapshots in place. Draft tool
+    instances are soft-deleted so users do not retain unusable bindings after
+    the MCP server is removed.
 
     Args:
         tenant_id: Tenant ID (stored as ToolInfo.author)
@@ -350,12 +350,29 @@ def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: 
         Number of tool records updated
     """
     with get_db_session() as session:
-        updated = session.query(ToolInfo).filter(
+        tool_rows = session.query(ToolInfo.tool_id).filter(
             ToolInfo.delete_flag != 'Y',
             ToolInfo.author == tenant_id,
             ToolInfo.source == ToolSourceEnum.MCP.value,
             ToolInfo.usage == mcp_server_name,
+        ).all()
+        tool_ids = [row[0] for row in tool_rows]
+        if not tool_ids:
+            return 0
+
+        updated = session.query(ToolInfo).filter(
+            ToolInfo.tool_id.in_(tool_ids),
         ).update({"is_available": False, "updated_by": user_id})
+
+        session.query(ToolInstance).filter(
+            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.tool_id.in_(tool_ids),
+            ToolInstance.version_no == 0,
+            ToolInstance.delete_flag != 'Y',
+        ).update({
+            ToolInstance.delete_flag: 'Y',
+            "updated_by": user_id,
+        }, synchronize_session=False)
         return updated or 0
 
 

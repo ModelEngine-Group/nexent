@@ -86,6 +86,18 @@ def test_coalesce_preserves_falsy_values():
     assert mgs._coalesce(False, True) is False
 
 
+def test_custom_extra_body_preserves_json_value_types():
+    custom = {
+        "top_k": 20,
+        "stop": ["END", "STOP"],
+        "response_format": {"type": "json_object"},
+        "enabled": True,
+        "nullable": None,
+    }
+
+    assert mgs._custom_extra_body({"__custom__": custom}) == custom
+
+
 # _config_to_context
 
 
@@ -364,11 +376,28 @@ def test_config_to_context_llm_long_context_branch():
 
 def test_config_to_context_embedding_branch():
     ctx = mgs._config_to_context(
-        _user_cfg(max_tokens=512), "embedding", "embedding", None, model_name="m"
+        _user_cfg(
+            max_tokens=512,
+            extra_params={
+                "__custom__": {
+                    "dimensions": 256,
+                    "metadata": {"tenant": "demo"},
+                }
+            },
+            extra_body={},
+        ),
+        "embedding",
+        "embedding",
+        None,
+        model_name="m",
     )
     assert isinstance(ctx, mgs.EmbeddingContext)
     assert ctx.embedding_dim == 512
     assert ctx.model_type == "llm"
+    assert ctx.extra_body == {
+        "dimensions": 256,
+        "metadata": {"tenant": "demo"},
+    }
 
 
 def test_config_to_context_embedding_default_dim():

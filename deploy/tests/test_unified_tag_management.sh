@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INIT_SQL="$DEPLOY_ROOT/sql/init.sql"
-MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
+MIGRATION_SQL="$DEPLOY_ROOT/sql/migrations/v2.6.0_merged_migrations.sql"
 PREFLIGHT_SQL="$DEPLOY_ROOT/sql/preflight/unified_tag_management_preflight.sql"
 POSTGRES_TEST_IMAGE="${POSTGRES_TEST_IMAGE:-postgres:15-alpine}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
@@ -574,7 +574,7 @@ END;
 $$;
 SQL
   run_file_with_search_path "$database" "$INIT_SQL" >/dev/null
-  run_migration_files_through "$database" "v2.5.2_unified_tag_management.sql"
+  run_migration_files_through "$database" "v2.6.0_merged_migrations.sql"
 
   run_sql "$database" <<'SQL'
 INSERT INTO nexent.user_tenant_t (user_id, tenant_id, created_by, delete_flag)

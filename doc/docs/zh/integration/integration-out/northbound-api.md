@@ -316,7 +316,7 @@ curl -X POST \
 | 503 | runtime 未启用 HITL，无法查询运行或处理决定 |
 | 502 / 504 | runtime 不可连接 / 请求超时 |
 
-部署需已应用 `deploy/sql/migrations/v2.5.1_001_human_interaction.sql`，runtime 配置有效的 `HITL_ENCRYPTION_KEY`，并开启 `HITL_ENABLED`、`HITL_ACCEPT_NEW_RUNS`。工具审批另外受 `HITL_TOOL_APPROVAL_ENABLED` 控制；默认的 `native-live-v1` 保留原执行现场以继续运行，worker 丢失后不能保证自动恢复，会进入需要恢复处理的状态。北向接口不改变已有执行模式的能力边界。
+部署需已应用 `deploy/sql/migrations/v2.6.0_merged_migrations.sql`，runtime 配置有效的 `HITL_ENCRYPTION_KEY`，并开启 `HITL_ENABLED`、`HITL_ACCEPT_NEW_RUNS`。工具审批另外受 `HITL_TOOL_APPROVAL_ENABLED` 控制；默认的 `native-live-v1` 保留原执行现场以继续运行，worker 丢失后不能保证自动恢复，会进入需要恢复处理的状态。北向接口不改变已有执行模式的能力边界。
 
 ## 📎 上传对话附件
 

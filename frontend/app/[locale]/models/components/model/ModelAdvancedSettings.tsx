@@ -37,11 +37,13 @@ import type {
 //    included — the new dialog matches the original ModelAddDialog's parameter
 //    set without adding new inference parameters.
 //  - __custom__ (user-defined key/value pairs) → extra_params.__custom__
-//    sub-object on the wire (dict of string -> string). In the editing state
-//    (ModelAdvancedSettingsValue), __custom__ is a [string, string][] entries
-//    array so the user can edit empty/duplicate keys; buildInferenceParamsPayload
-//    converts it to a clean dict on save. Backend filter_extra_params validates
-//    the dict shape and passes through. No DB schema change required.
+//    sub-object on the wire (dict of string -> JSON value). In the editing
+//    state (ModelAdvancedSettingsValue), __custom__ is a [string, string][]
+//    entries array so the user can edit empty/duplicate keys;
+//    buildInferenceParamsPayload parses each value as JSON first and falls
+//    back to the original text when parsing fails. Backend filter_extra_params
+//    validates the JSON-compatible value and passes it through. No DB schema
+//    change required.
 // =============================================================================
 
 export interface ModelAdvancedSettingsValue {
@@ -64,6 +66,10 @@ export interface ModelAdvancedSettingsProps {
   mode?: ModelAdvancedSettingsMode;
   /** Disable all inputs. */
   disabled?: boolean;
+  /** Model-level defaults shown as placeholders when a field is empty
+   * (override mode): makes "empty = inherit this value" visible. Keys match
+   * spec.key (snake_case). */
+  inheritedDefaults?: Record<string, unknown>;
 }
 
 /** Keys that have dedicated DB columns or are stored as top-level fields (not in extra_params). */
@@ -151,20 +157,58 @@ const REMOVED_ADVANCED_PARAM_KEYS = new Set<string>([
  *
  * Empty / undefined values are dropped so the backend treats them as "inherit".
  */
-/** Convert the editing-state __custom__ entries array into a clean wire dict.
+/** Parse one custom value using the UI wire contract.
+ *
+ * Valid JSON values keep their JSON type (including objects, arrays, booleans,
+ * numbers, and null). Invalid JSON is intentionally treated as a plain string.
+ */
+const parseCustomValue = (raw: string): unknown => {
+  const trimmed = raw.trim();
+  if (trimmed === "") return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return raw;
+  }
+};
 
- * Empty keys are dropped and duplicates collapse (last-wins); numeric strings
- * are coerced to numbers so provider params like top_k / seed that expect
- * ints/floats receive a real number, not a string.
+/**
+ * Format a persisted custom value back into the editing state.
+ *
+ * Non-string JSON values must be serialized so objects/arrays can be edited
+ * in the text control. Strings that look like another JSON type are quoted
+ * to avoid changing their type when the form is opened and saved again.
+ */
+const formatCustomValueForEditing = (raw: unknown): string => {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed !== "") {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (typeof parsed !== "string") {
+          return JSON.stringify(raw) ?? "";
+        }
+      } catch {
+        // Plain strings remain readable without JSON quotes.
+      }
+    }
+    return raw;
+  }
+  if (raw === undefined) return "";
+  return JSON.stringify(raw) ?? "";
+};
+
+/** Convert the editing-state __custom__ entries array into a clean wire dict.
+ * Empty keys are dropped and duplicates collapse (last-wins).
  */
 const buildCustomDict = (raw: unknown): Record<string, unknown> => {
   const entries = Array.isArray(raw) ? (raw as [string, string][]) : [];
   const dict: Record<string, unknown> = {};
   for (const [k, v] of entries) {
     if (k === "") continue;
-    const trimmed = String(v ?? "").trim();
-    if (trimmed === "") continue;
-    dict[k] = !Number.isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
+    const parsed = parseCustomValue(String(v ?? ""));
+    if (parsed === undefined) continue;
+    dict[k] = parsed;
   }
   return dict;
 };
@@ -260,11 +304,16 @@ export const advancedSettingsValueFromRecord = (
   }
 
   // Pass through user-defined custom params (extra_params.__custom__).
-  // Backend stores a dict; the editor works on a [string, string][] entries
-  // array so the user can edit empty/duplicate keys before commit.
-  const customRaw = "__custom__" in record ? record["__custom__"] : extra["__custom__"];
+  // Backend stores a dict of JSON-compatible values; the editor works on a
+  // [string, string][] entries array so the user can edit empty/duplicate
+  // keys before commit.
+  const customRaw =
+    "__custom__" in record ? record["__custom__"] : extra["__custom__"];
   if (customRaw && typeof customRaw === "object" && !Array.isArray(customRaw)) {
-    value["__custom__"] = Object.entries(customRaw as Record<string, string>);
+    value["__custom__"] = Object.entries(customRaw as Record<string, unknown>).map(
+      ([key, customValue]) =>
+        [key, formatCustomValueForEditing(customValue)] as [string, string]
+    );
   }
   return value;
 };
@@ -293,7 +342,8 @@ const renderIntField = (
   spec: InferenceFieldSpec,
   value: unknown,
   onChange: (next: unknown) => void,
-  disabled: boolean
+  disabled: boolean,
+  placeholder?: string
 ) => (
   <InputNumber
     className="w-full"
@@ -304,6 +354,7 @@ const renderIntField = (
     precision={0}
     min={spec.range ? spec.range[0] : undefined}
     max={spec.range ? spec.range[1] : undefined}
+    placeholder={placeholder}
     onChange={(next) => onChange(next === null ? undefined : next)}
   />
 );
@@ -312,7 +363,8 @@ const renderFloatField = (
   spec: InferenceFieldSpec,
   value: unknown,
   onChange: (next: unknown) => void,
-  disabled: boolean
+  disabled: boolean,
+  placeholder?: string
 ) => (
   <InputNumber
     className="w-full"
@@ -322,6 +374,7 @@ const renderFloatField = (
     step={0.1}
     min={spec.range ? spec.range[0] : undefined}
     max={spec.range ? spec.range[1] : undefined}
+    placeholder={placeholder}
     onChange={(next) => onChange(next === null ? undefined : next)}
   />
 );
@@ -332,11 +385,23 @@ const renderBoolField = (
   onChange: (next: unknown) => void,
   disabled: boolean
 ) => (
-  <Switch
-    checked={Boolean(value)}
-    disabled={disabled}
-    onChange={(checked) => onChange(checked)}
-  />
+  <span className="inline-flex items-center gap-2">
+    <Switch
+      // An unset boolean renders ON: hybrid-thinking models (Qwen3,
+      // DeepSeek-V3.x) default to thinking enabled, so "empty = inherit"
+      // must not look like "off". Toggling stores an explicit value.
+      checked={value === undefined || value === null ? true : Boolean(value)}
+      disabled={disabled}
+      onChange={(checked) => onChange(checked)}
+    />
+    {value === undefined || value === null ? (
+      <span className="text-xs text-gray-400">
+        <Tooltip title="默认开启（跟随模型默认）。切换开关以显式启用或禁用。">
+          <span>默认</span>
+        </Tooltip>
+      </span>
+    ) : null}
+  </span>
 );
 
 /** Chinese display labels for STT/TTS provider option values. The option
@@ -391,16 +456,17 @@ const renderFieldControl = (
   spec: InferenceFieldSpec,
   value: unknown,
   onChange: (next: unknown) => void,
-  disabled: boolean
+  disabled: boolean,
+  placeholder?: string
 ) => {
   const type: InferenceFieldType = spec.type;
   switch (type) {
     case "str":
-      return renderStringField(spec, value, onChange, disabled);
+      return renderStringField(spec, value, onChange, disabled, placeholder);
     case "int":
-      return renderIntField(spec, value, onChange, disabled);
+      return renderIntField(spec, value, onChange, disabled, placeholder);
     case "float":
-      return renderFloatField(spec, value, onChange, disabled);
+      return renderFloatField(spec, value, onChange, disabled, placeholder);
     case "bool":
       return renderBoolField(spec, value, onChange, disabled);
     case "select":
@@ -418,6 +484,7 @@ const renderFieldControl = (
 // Renders a list of (key, value) input pairs the user can freely add/remove.
 // Validation is intentionally minimal: duplicate keys show a red hint but do
 // NOT block save — the user is responsible for parameter correctness.
+// Values are parsed as JSON on commit and fall back to strings when invalid.
 // On commit, empty keys are dropped and duplicate keys collapse (last-wins).
 
 type TFunc = ReturnType<typeof useTranslation>["t"];
@@ -486,7 +553,7 @@ const renderCustomParamsSection = ({
               k !== "" &&
               customEntries.filter(([ek]) => ek === k).length > 1;
             return (
-                <div key={`${k || "empty"}-${idx}`} className="flex items-center gap-2">
+              <div key={`custom-param-${idx}`} className="flex items-center gap-2">
                 <Input
                   className="flex-1"
                   size="small"
@@ -498,14 +565,15 @@ const renderCustomParamsSection = ({
                   status={isDuplicate ? "error" : undefined}
                   onChange={(e) => onKeyChange(idx, e.target.value)}
                 />
-                <Input
+                <Input.TextArea
                   className="flex-1"
                   size="small"
                   placeholder={t("model.advanced.customValuePlaceholder", {
-                    defaultValue: "参数值",
+                    defaultValue: "JSON 或字符串",
                   })}
                   value={v}
                   disabled={disabled}
+                  autoSize={{ minRows: 1, maxRows: 4 }}
                   onChange={(e) => onValueChange(idx, e.target.value)}
                 />
                 <Button
@@ -544,6 +612,7 @@ export const ModelAdvancedSettings = ({
   onChange,
   mode = "default",
   disabled = false,
+  inheritedDefaults,
 }: ModelAdvancedSettingsProps) => {
   const { t } = useTranslation();
   // STT/TTS auth fields (AppID, Access Token) only apply to Volcano Engine.
@@ -698,7 +767,15 @@ export const ModelAdvancedSettings = ({
                 spec,
                 fieldValue,
                 (next) => handleFieldChange(spec.key, next),
-                disabled
+                disabled,
+                // Show what an empty field inherits (model-level defaults in
+                // override mode) so "empty" is an informed choice.
+                fieldValue === undefined || fieldValue === null || fieldValue === ""
+                  ? inheritedDefaults?.[spec.key] !== undefined &&
+                    inheritedDefaults?.[spec.key] !== null
+                    ? String(inheritedDefaults[spec.key])
+                    : undefined
+                  : undefined
               )}
             </div>
           );

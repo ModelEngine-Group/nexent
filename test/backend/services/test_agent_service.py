@@ -1180,6 +1180,7 @@ async def test_update_agent_info_impl_exception_handling(
     assert "Failed to update agent info" in str(context.value)
 
 
+@patch("management.services.agent.service.query_tools_by_ids")
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
 @patch("management.services.agent.service.query_tool_instances_by_agent_id")
 @patch("management.services.agent.service.update_agent")
@@ -1190,6 +1191,7 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     mock_update_agent,
     mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool,
+    mock_query_tools_by_ids,
 ):
     """
     Test update_agent_info_impl with enabled_tool_ids parameter.
@@ -1205,6 +1207,10 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     # Mock existing tool instances for this agent
     mock_query_tool_instances_by_agent_id.return_value = [
         {"tool_id": 1, "params": {"key1": "value1"}},  # Existing tool with params
+    ]
+    mock_query_tools_by_ids.return_value = [
+        {"tool_id": 1, "is_available": True},
+        {"tool_id": 2, "is_available": True},
     ]
 
     request = MagicMock()
@@ -1238,6 +1244,41 @@ async def test_update_agent_info_impl_with_enabled_tool_ids(
     assert tool_info.params == {}
 
 
+@patch("management.services.agent.service.query_tools_by_ids")
+@patch("management.services.agent.service.create_or_update_tool_by_tool_info")
+@patch("management.services.agent.service.query_tool_instances_by_agent_id")
+@patch("management.services.agent.service.update_agent")
+@patch("management.services.agent.service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_skips_unavailable_enabled_tools(
+    mock_get_current_user_info,
+    mock_update_agent,
+    mock_query_tool_instances_by_agent_id,
+    mock_create_or_update_tool,
+    mock_query_tools_by_ids,
+):
+    """Unavailable tools must not be recreated from a stale Agent save."""
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_query_tool_instances_by_agent_id.return_value = []
+    mock_query_tools_by_ids.return_value = [
+        {"tool_id": 2, "is_available": False},
+    ]
+
+    request = MagicMock()
+    request.agent_id = 123
+    request.enabled_tool_ids = [2]
+    request.related_agent_ids = None
+    apply_default_prompt_template_request_fields(request)
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 123
+    mock_update_agent.assert_called_once()
+    mock_query_tools_by_ids.assert_called_once_with([2])
+    mock_create_or_update_tool.assert_not_called()
+
+
+@patch("management.services.agent.service.query_tools_by_ids")
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
 @patch("management.services.agent.service.query_tool_instances_by_agent_id")
 @patch("management.services.agent.service.update_agent")
@@ -1248,6 +1289,7 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null
     mock_update_agent,
     mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool,
+    mock_query_tools_by_ids,
 ):
     """
     Test update_agent_info_impl when existing tool instance has null tool_id.
@@ -1266,6 +1308,9 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null
             "tool_id": None,
             "params": {},
         },  # Instance with null tool_id - should be skipped
+    ]
+    mock_query_tools_by_ids.return_value = [
+        {"tool_id": 1, "is_available": True},
     ]
 
     request = MagicMock()
@@ -1289,6 +1334,7 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_instance_having_null
     assert tool_info.enabled is True
 
 
+@patch("management.services.agent.service.query_tools_by_ids")
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
 @patch("management.services.agent.service.query_tool_instances_by_agent_id")
 @patch("management.services.agent.service.update_agent")
@@ -1299,6 +1345,7 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_disabled_existing_to
     mock_update_agent,
     mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool,
+    mock_query_tools_by_ids,
 ):
     """
     Test that existing tools not in enabled_tool_ids are disabled.
@@ -1313,6 +1360,9 @@ async def test_update_agent_info_impl_with_enabled_tool_ids_disabled_existing_to
     # Mock existing tool instances: tool 1 exists, tool 2 is new
     mock_query_tool_instances_by_agent_id.return_value = [
         {"tool_id": 1, "params": {"key1": "value1"}},  # Existing tool 1
+    ]
+    mock_query_tools_by_ids.return_value = [
+        {"tool_id": 2, "is_available": True},
     ]
 
     request = MagicMock()
@@ -1430,6 +1480,7 @@ async def test_update_agent_info_impl_circular_dependency_detection(
         await update_agent_info_impl(request, authorization="Bearer token")
 
 
+@patch("management.services.agent.service.query_tools_by_ids")
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
 @patch("management.services.agent.service.query_tool_instances_by_agent_id")
 @patch("management.services.agent.service.update_related_agents")
@@ -1444,6 +1495,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     mock_update_related_agents,
     mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool,
+    mock_query_tools_by_ids,
 ):
     """
     Test update_agent_info_impl with both enabled_tool_ids and related_agent_ids.
@@ -1455,6 +1507,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_query_tool_instances_by_agent_id.return_value = []  # No existing instances
+    mock_query_tools_by_ids.return_value = [{"tool_id": 1, "is_available": True}]
     mock_query_sub_agents_id_list.return_value = []
 
     request = MagicMock()
@@ -1479,6 +1532,7 @@ async def test_update_agent_info_impl_with_both_tool_and_related_agents(
     )
 
 
+@patch("management.services.agent.service.query_tools_by_ids")
 @patch("management.services.agent.service.create_or_update_tool_by_tool_info")
 @patch("management.services.agent.service.query_tool_instances_by_agent_id")
 @patch("management.services.agent.service.update_agent")
@@ -1489,6 +1543,7 @@ async def test_update_agent_info_impl_tool_update_exception(
     mock_update_agent,
     mock_query_tool_instances_by_agent_id,
     mock_create_or_update_tool,
+    mock_query_tools_by_ids,
 ):
     """
     Test update_agent_info_impl exception handling for tool updates.
@@ -1499,6 +1554,7 @@ async def test_update_agent_info_impl_tool_update_exception(
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_query_tool_instances_by_agent_id.return_value = []
+    mock_query_tools_by_ids.return_value = [{"tool_id": 1, "is_available": True}]
     mock_create_or_update_tool.side_effect = Exception("Tool update failed")
 
     request = MagicMock()
