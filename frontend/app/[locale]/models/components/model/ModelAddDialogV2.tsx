@@ -1712,7 +1712,14 @@ export const ModelAddDialogV2 = ({
         open={customAdvancedOpen}
         onCancel={() => setCustomAdvancedOpen(false)}
         onOk={() => setCustomAdvancedOpen(false)}
-        title={`${t("model.advanced.title", { defaultValue: "高级设置" })} - ${(customAdvanced.display_name as string) || defaultDisplayName(customForm.name) || customForm.type}`}
+        title={`${t("model.advanced.title", { defaultValue: "高级设置" })} - ${
+          (customAdvanced.display_name as string) ||
+          // Empty model name falls back to the type label, NOT a generated
+          // "custom-modelXXXXX" placeholder -- a synthetic name in the title
+          // reads like garbage (that suffix only makes sense at save time).
+          (customForm.name ? defaultDisplayName(customForm.name) : "") ||
+          customForm.type
+        }`}
         okText={t("common.confirm", { defaultValue: "确定" })}
         cancelText={t("common.cancel", { defaultValue: "取消" })}
         width={640}
