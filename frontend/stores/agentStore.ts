@@ -344,6 +344,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.example_questions !== undefined
     ? { example_questions: patch.example_questions }
     : {}),
+  ...(patch.model_params_override !== undefined
+    ? { model_params_override: patch.model_params_override }
+    : {}),
 });
 
 const toToolParams = (tool: Tool): Record<string, unknown> =>
