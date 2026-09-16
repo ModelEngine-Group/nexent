@@ -2246,6 +2246,7 @@
   "agentSharePage.stopFailed": "Unable to stop this Agent response.",
   "agentSharePage.stopResponse": "Stop response",
   "agentSharePage.sendMessage": "Send message",
+  "agentSharePage.inputPlaceholder": "Ask a question",
   "agentRepository.mine.menu.delete": "Delete",
   "agentRepository.mine.reviewModal.title": "Listing review status",
   "agentRepository.mine.reviewModal.reviewUpdateTitle": "Update review status",

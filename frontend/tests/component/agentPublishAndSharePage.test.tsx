@@ -16,7 +16,10 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: (key: string, fallback?: string) =>
+      key === "agentSharePage.inputPlaceholder"
+        ? "Ask this shared Agent"
+        : (fallback ?? key),
   }),
 }));
 vi.mock("@/components/providers/AuthenticationProvider", () => ({
@@ -151,6 +154,14 @@ describe("publish navigation component contract", () => {
 });
 
 describe("minimal authenticated Agent share page", () => {
+  it("uses the dedicated localized placeholder for shared Agent input", async () => {
+    renderApp(<AgentSharePage />);
+
+    expect(
+      await screen.findByRole("textbox", { name: "Ask this shared Agent" })
+    ).toBeInTheDocument();
+  });
+
   it("UT-FE-AGUG-014 performs no metadata, history, session, or run side effect before login", async () => {
     authenticated = false;
     renderApp(<AgentSharePage />);
@@ -173,7 +184,9 @@ describe("minimal authenticated Agent share page", () => {
     expect(
       screen.queryByText(/repository|automation|conversation list/i)
     ).not.toBeInTheDocument();
-    const input = screen.getByRole("textbox", { name: "Ask a question" });
+    const input = screen.getByRole("textbox", {
+      name: "Ask this shared Agent",
+    });
     await user.type(input, "Hello{Shift>}{Enter}{/Shift}world");
     expect(agentShareRuntimeService.run).not.toHaveBeenCalled();
     await user.keyboard("{Enter}");

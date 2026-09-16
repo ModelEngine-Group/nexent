@@ -2229,6 +2229,7 @@
   "agentSharePage.stopFailed": "无法停止此智能体的回答。",
   "agentSharePage.stopResponse": "停止回答",
   "agentSharePage.sendMessage": "发送消息",
+  "agentSharePage.inputPlaceholder": "请输入你的问题",
   "agentRepository.mine.menu.delete": "删除",
   "agentRepository.mine.reviewModal.title": "上架审核状态",
   "agentRepository.mine.reviewModal.reviewUpdateTitle": "更新审核状态",

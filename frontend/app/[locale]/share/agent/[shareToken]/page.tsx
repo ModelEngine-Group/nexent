@@ -289,10 +289,10 @@ export default function AgentSharePage() {
       <footer className="border-t border-slate-200 bg-white px-5 py-4">
         <div className="mx-auto flex w-full max-w-3xl items-end gap-3">
           <Textarea
-            aria-label={t("chatInterface.inputPlaceholder", "Ask a question")}
+            aria-label={t("agentSharePage.inputPlaceholder", "Ask a question")}
             value={input}
             disabled={isStreaming}
-            placeholder={t("chatInterface.inputPlaceholder", "Ask a question")}
+            placeholder={t("agentSharePage.inputPlaceholder", "Ask a question")}
             className="min-h-[48px] resize-none"
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {

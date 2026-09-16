@@ -24,6 +24,7 @@ test("keeps Agent usage guide locale keys aligned and complete", () => {
   assert.deepEqual(chineseKeys, englishKeys);
   assert.deepEqual(
     [
+      "agentSharePage.inputPlaceholder",
       "agentSharePage.unavailable",
       "agentSharePage.noAnswer",
       "agentSharePage.runFailed",
