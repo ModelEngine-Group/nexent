@@ -811,7 +811,7 @@ class TestListDocuments:
 
 
 class TestAidpDocumentFileOperations:
-    def test_remove_forwards_only_uuids_and_cleans_tags_for_successes(self):
+    def test_remove_forwards_only_uuids(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -821,9 +821,6 @@ class TestAidpDocumentFileOperations:
             "success_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
             "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000002"}],
         }
-        tag_service = MagicMock()
-        tag_module = types.ModuleType("services.tag_management_service")
-        tag_module.TagManagementService = tag_service
         with patch.object(
             aidp_permission_service,
             "require_permission",
@@ -832,20 +829,14 @@ class TestAidpDocumentFileOperations:
             aidp_mgmt_app,
             "remove_aidp_docs_impl",
             return_value=aidp_result,
-        ) as mock_remove, patch.object(aidp_mgmt_app, "TagManagementService", tag_service):
+        ) as mock_remove:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
                 json={
-                    "documents": [
-                        {
-                            "file_uuid": "00000000-0000-4000-8000-000000000001",
-                            "file_ino_no": "ino-1",
-                        },
-                        {
-                            "file_uuid": "00000000-0000-4000-8000-000000000002",
-                            "file_ino_no": "ino-2",
-                        },
+                    "file_uuids": [
+                        "00000000-0000-4000-8000-000000000001",
+                        "00000000-0000-4000-8000-000000000002",
                     ]
                 },
             )
@@ -856,15 +847,8 @@ class TestAidpDocumentFileOperations:
             "00000000-0000-4000-8000-000000000001",
             "00000000-0000-4000-8000-000000000002",
         ]
-        tag_service.cleanup_document_assignments.assert_called_once_with(
-            TENANT_ID,
-            "aidp",
-            "kb-1",
-            "ino-1",
-            USER_ID,
-        )
 
-    def test_remove_requires_document_identity_pair(self):
+    def test_remove_requires_file_uuids(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
 
@@ -872,11 +856,7 @@ class TestAidpDocumentFileOperations:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
-                json={
-                    "documents": [
-                        {"file_uuid": "00000000-0000-4000-8000-000000000001"},
-                    ]
-                },
+                json={},
             )
 
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
@@ -890,11 +870,7 @@ class TestAidpDocumentFileOperations:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
-                json={
-                    "documents": [
-                        {"file_uuid": "uuid-1", "file_ino_no": "ino-1"},
-                    ]
-                },
+                json={"file_uuids": ["uuid-1"]},
             )
 
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
@@ -947,46 +923,6 @@ class TestAidpDocumentFileOperations:
         )
         assert "x-file-name" not in response.headers
 
-    def test_remove_continues_when_tag_cleanup_fails(self):
-        client = _client()
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        aidp_result = {
-            "summary": {"total": 1, "success": 1, "failed": 0},
-            "success_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
-            "failed_list": [],
-        }
-        tag_service = MagicMock()
-        tag_service.cleanup_document_assignments.side_effect = RuntimeError("tag database unavailable")
-        tag_module = types.ModuleType("services.tag_management_service")
-        tag_module.TagManagementService = tag_service
-        with patch.object(
-            aidp_permission_service,
-            "require_permission",
-            return_value=MagicMock(permission="EDIT"),
-        ), patch.object(
-            aidp_mgmt_app,
-            "remove_aidp_docs_impl",
-            return_value=aidp_result,
-        ), patch.object(aidp_mgmt_app, "TagManagementService", tag_service):
-            response = client.post(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
-                headers=_bearer(),
-                json={
-                    "documents": [
-                        {
-                            "file_uuid": "00000000-0000-4000-8000-000000000001",
-                            "file_ino_no": "ino-1",
-                        }
-                    ]
-                },
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        assert response.json() == aidp_result
-        tag_service.cleanup_document_assignments.assert_called_once()
-
     def test_remove_does_not_invalidate_cache_when_no_file_succeeds(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
@@ -997,8 +933,6 @@ class TestAidpDocumentFileOperations:
             "success_list": [],
             "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
         }
-        tag_module = types.ModuleType("services.tag_management_service")
-        tag_module.TagManagementService = MagicMock()
         with patch.object(
             aidp_permission_service,
             "require_permission",
@@ -1009,18 +943,11 @@ class TestAidpDocumentFileOperations:
             return_value=aidp_result,
         ), patch.object(aidp_mgmt_app, "invalidate_aidp_kb_detail_cache") as mock_kb_cache, patch.object(
             aidp_mgmt_app, "invalidate_aidp_doc_count_cache"
-        ) as mock_count_cache, patch.object(aidp_mgmt_app, "TagManagementService", tag_module.TagManagementService):
+        ) as mock_count_cache:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
                 headers=_bearer(),
-                json={
-                    "documents": [
-                        {
-                            "file_uuid": "00000000-0000-4000-8000-000000000001",
-                            "file_ino_no": "ino-1",
-                        }
-                    ]
-                },
+                json={"file_uuids": ["00000000-0000-4000-8000-000000000001"]},
             )
 
         assert response.status_code == HTTPStatus.OK

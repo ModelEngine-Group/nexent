@@ -65,7 +65,6 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from services.tag_management_service import TagManagementService
 from utils import auth_utils as auth_utils_module
 
 
@@ -190,17 +189,9 @@ class SetPermissionRequest(BaseModel):
     )
 
 
-class AidpDocumentIdentity(BaseModel):
-    """The two IDs needed to remove an AIDP file and its tag assignments."""
-
-    file_uuid: UUID = Field(..., description="AIDP file UUID")
-    file_ino_no: str = Field(..., min_length=1, description="Nexent document identity")
-
-
 class RemoveAidpDocumentsRequest(BaseModel):
-    """Documents selected by the frontend for batch removal."""
 
-    documents: List[AidpDocumentIdentity] = Field(..., min_length=1)
+    file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
 
 
 class DownloadAidpDocumentRequest(BaseModel):
@@ -267,33 +258,6 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
 
 def _credentials() -> tuple[str, str]:
     return AIDP_SERVER_URL, AIDP_API_KEY
-
-
-def _cleanup_deleted_aidp_document_tags(
-    tenant_id: str,
-    knowledge_base_id: str,
-    actor_id: str,
-    documents: List[AidpDocumentIdentity],
-    result: dict,
-) -> None:
-    """Remove tag assignments only for files AIDP confirmed as deleted."""
-    success_uuids = {
-        item["file_uuid"]
-        for item in result["success_list"]
-    }
-    for document in documents:
-        if str(document.file_uuid) not in success_uuids:
-            continue
-        try:
-            TagManagementService.cleanup_document_assignments(
-                tenant_id,
-                "aidp",
-                knowledge_base_id,
-                document.file_ino_no,
-                actor_id,
-            )
-        except Exception:  # noqa: BLE001 - upstream deletion already succeeded
-            logger.warning("Failed to clean AIDP document tag assignments")
 
 
 def _is_user_role(user_id: str, tenant_id: str) -> bool:
@@ -835,7 +799,7 @@ async def remove_documents(
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     body: RemoveAidpDocumentsRequest,
 ) -> JSONResponse:
-    """Remove AIDP documents and clean their Nexent tag assignments."""
+    """Remove AIDP documents."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
@@ -846,16 +810,9 @@ async def remove_documents(
         server_url,
         api_key,
         kds_id,
-        [str(document.file_uuid) for document in body.documents],
+        [str(file_uuid) for file_uuid in body.file_uuids],
         lane="control-io",
         owner="config",
-    )
-    _cleanup_deleted_aidp_document_tags(
-        tenant_id,
-        kds_id,
-        user_id,
-        body.documents,
-        result,
     )
 
     success_list = result["success_list"]

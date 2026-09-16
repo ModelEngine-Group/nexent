@@ -125,10 +125,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           try {
             const result = await aidpKnowledgeService.removeDoc(
               activeKb.kds_id,
-              {
-                file_uuid: document.file_uuid,
-                file_ino_no: document.file_ino_no,
-              }
+              document.file_uuid
             );
             if (result.summary.success > 0) {
               message.success(t("aidpKnowledge.deleteDocSuccess"));

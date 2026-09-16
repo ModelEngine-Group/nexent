@@ -34,7 +34,7 @@ export interface AidpKbDetail {
 
 export interface AidpDocumentItem {
   file_uuid: string;
-  file_ino_no: string;
+  file_ino_no: number;
   file_name: string;
   file_size?: number;
   file_type?: string;
@@ -56,7 +56,7 @@ export interface AidpUploadSuccessItem {
   file_name: string;
   file_type: string;
   file_size: number;
-  file_ino_no: string;
+  file_ino_no: number;
   first_upload_time: number;
 }
 
@@ -74,11 +74,6 @@ export interface AidpUploadResponse {
   };
   success_list: AidpUploadSuccessItem[];
   failed_list: AidpUploadFailedItem[];
-}
-
-export interface AidpDocumentIdentity {
-  file_uuid: string;
-  file_ino_no: string;
 }
 
 export interface AidpDocumentOperationItem {
@@ -495,12 +490,10 @@ class AidpKnowledgeService {
   /**
    * Remove one document from an AIDP knowledge base.
    * The AIDP API accepts an array, so the single-document UI sends one item.
-   * The file_ino_no is kept with the UUID so the backend can clean tag
-   * assignments without issuing a second document-list request.
    */
   async removeDoc(
     id: string,
-    document: AidpDocumentIdentity
+    fileUuid: string
   ): Promise<AidpDocumentRemoveResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.removeKbDocuments(id), {});
     const response = await fetchWithErrorHandling(url, {
@@ -509,7 +502,7 @@ class AidpKnowledgeService {
         ...getAuthHeaders(),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ documents: [document] }),
+      body: JSON.stringify({ file_uuids: [fileUuid] }),
     });
     const result =
       (await response.json()) as Partial<AidpDocumentRemoveResponse>;
