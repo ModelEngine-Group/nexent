@@ -2,6 +2,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { KNOWLEDGE_BASE_MAX_FILE_SIZE_MB } from "@/const/knowledgeBase";
 import { Upload, Progress } from "antd";
 import { WarningFilled } from "@ant-design/icons";
 import { Inbox } from "lucide-react";
@@ -182,7 +183,9 @@ const UploadAreaUI: React.FC<UploadAreaUIProps> = ({
                       {t("knowledgeBase.upload.supportedFormats")}
                     </p>
                     <p className="ant-upload-hint !mt-1 text-gray-500">
-                      {t("knowledgeBase.upload.fileSizeLimit")}
+                      {t("knowledgeBase.upload.fileSizeLimit", {
+                        limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+                      })}
                     </p>
                   </div>
                 </Dragger>

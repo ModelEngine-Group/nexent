@@ -130,6 +130,9 @@ def create_new_index(
         )
     except HTTPException:
         raise
+    except AppException:
+        # Keep structured knowledge-resource errors (including HTTP 429) intact.
+        raise
     except DuplicateError as e:
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,

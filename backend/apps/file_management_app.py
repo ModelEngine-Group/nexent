@@ -194,9 +194,9 @@ async def upload_files(
             )
     except HTTPException:
         raise
-    except QuotaExceededError:
-        raise
     except AppException:
+        raise
+    except QuotaExceededError:
         raise
     except Exception as e:
         logger.error(f"File upload error: {str(e)}")
