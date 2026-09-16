@@ -83,6 +83,19 @@ class _ThreadQueueTimedOut(RuntimeError):
         self.timeout_seconds = timeout_seconds
 
 
+class _RunCancellationScope:
+    """Keep the service test double aligned with run cancellation behavior."""
+
+    def __init__(self, stop_event):
+        self.stop_event = stop_event
+        self.cancelled = False
+
+    def cancel(self):
+        if not self.cancelled:
+            self.cancelled = True
+            self.stop_event.set()
+
+
 async def _run_blocking(_task_name, fn, *args, **kwargs):
     kwargs.pop("lane", None)
     kwargs.pop("owner", None)
@@ -95,6 +108,7 @@ async def _run_managed(_lane, _spec, fn, *args, **kwargs):
 
 _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
 _concurrency_module.ManagedExecution = MagicMock
+_concurrency_module.RunCancellationScope = _RunCancellationScope
 _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
@@ -14128,8 +14142,9 @@ async def test_stream_agent_chunks_logs_search_placeholder_persistence_failure(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hitl", [False, True])
 async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
-    monkeypatch, caplog
+    monkeypatch, caplog, hitl
 ):
     """A failed final batch emits a safe error and marks the message failed."""
     from management.services.agent import service as agent_service
@@ -14160,12 +14175,14 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
     monkeypatch.setattr(
         agent_run_service, "update_message_status", fallback_status, raising=False
     )
+    run_info = MagicMock()
+    run_info.human_interaction = object() if hitl else None
+    run_info.attempt_outcome = "completed" if hitl else None
 
     with caplog.at_level("ERROR", logger=agent_service.logger.name):
         collected = [
-            chunk
-            async for chunk in agent_run_service._stream_agent_chunks(
-                agent_request, "user", "tenant", MagicMock(), MagicMock()
+            chunk async for chunk in agent_run_service._stream_agent_chunks(
+                agent_request, "user", "tenant", run_info, MagicMock()
             )
         ]
 
@@ -14174,6 +14191,8 @@ async def test_stream_agent_chunks_logs_streaming_unit_persistence_failure(
     assert SAFE_AGENT_STREAM_ERROR_MESSAGE in collected[-1]
     assert "Failed to persist assistant stream batch" in caplog.text
     fallback_status.assert_called_once_with(4242, "failed", "user")
+    if hitl:
+        assert run_info.attempt_outcome == "recovery_required"
 
 
 @pytest.mark.asyncio
@@ -15915,6 +15934,25 @@ async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
         user_id="user1", conversation_id=123
     )
     assert sleeps == [agent_service.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_be_ut_tlm_036_runtime_signal_closes_run_resources(monkeypatch):
+    """A Redis cancel signal must close resources before a blocked worker exits."""
+    from management.services.agent import run as agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    stop_event = asyncio.Event()
+    cancellation_scope = MagicMock()
+
+    await agent_service._poll_runtime_cancel_signal(
+        123, "user1", stop_event, cancellation_scope
+    )
+
+    assert stop_event.is_set()
+    cancellation_scope.cancel.assert_called_once_with()
 
 
 @pytest.mark.asyncio

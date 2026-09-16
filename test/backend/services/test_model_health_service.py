@@ -219,7 +219,8 @@ async def test_perform_connectivity_check_llm():
         assert result is True
         mock_build.assert_called_once_with(
             {"base_url": "https://api.openai.com", "api_key": "test-key",
-             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None,
+             "temperature": None, "top_p": None, "extra_params": None},
             "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
@@ -411,7 +412,7 @@ async def test_perform_connectivity_check_rerank():
         # Assert
         assert result is True
         mock_build.assert_called_once_with(
-            {"base_url": "https://api.example.com", "api_key": "test-key",
+            {"base_url": "https://api.example.com/rerank", "api_key": "test-key",
              "ssl_verify": True},
             "rerank", "rerank", None, model_name="rerank-model",
         )
@@ -443,7 +444,8 @@ async def test_perform_connectivity_check_base_url_normalization_localhost():
         # Ensure api_base has been normalized when calling the adapter builder
         mock_build.assert_called_once_with(
             {"base_url": "http://host.docker.internal:8080", "api_key": "test-key",
-             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None,
+             "temperature": None, "top_p": None, "extra_params": None},
             "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
@@ -477,7 +479,8 @@ async def test_perform_connectivity_check_base_url_normalization_127001():
         # Ensure api_base has been normalized when calling the adapter builder
         mock_build.assert_called_once_with(
             {"base_url": "http://host.docker.internal:8000", "api_key": "test-key",
-             "ssl_verify": True, "timeout_seconds": None, "display_name": None},
+             "ssl_verify": True, "timeout_seconds": None, "display_name": None,
+             "temperature": None, "top_p": None, "extra_params": None},
             "llm", "llm", None,
             observer=mock_observer_instance,
             model_name="gpt-4",
@@ -693,6 +696,7 @@ async def test_verify_model_config_connectivity_success():
         mock_connectivity_check.assert_called_once_with(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
             "openai", None, None, None, None,
+            temperature=None, top_p=None, extra_params=None,
         )
 
 
@@ -1336,10 +1340,12 @@ async def test_verify_model_config_connectivity_ssl_verify_fallback():
         mock_connectivity.assert_any_call(
             "gpt-4", "llm", "https://api.openai.com", "test-key", True,
             "openai", None, None, None, None,
+            temperature=None, top_p=None, extra_params=None,
         )
         mock_connectivity.assert_any_call(
             "gpt-4", "llm", "https://api.openai.com", "test-key", False,
             "openai", None, None, None, None,
+            temperature=None, top_p=None, extra_params=None,
         )
 
 

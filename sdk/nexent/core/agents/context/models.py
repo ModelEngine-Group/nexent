@@ -139,6 +139,13 @@ class ContextItem(BaseModel):
 
     @property
     def layout_key(self) -> tuple[int, int, int, str]:
+        # Current-run tasks, plans and actions share one timeline. Grouping them
+        # by type moves later human input ahead of the actions it was correcting.
+        run_order = self.metadata.get("run_order")
+        if isinstance(run_order, int) and self.type in {
+            ContextItemType.CURRENT_TASK, ContextItemType.CURRENT_PLANNING, ContextItemType.CURRENT_ACTION,
+        }:
+            return int(ContextSection.CURRENT_TASK), run_order, -self.priority, self.id
         order = self.metadata.get("layout_order", 0)
         return int(self.SECTION), int(order), -self.priority, self.id
 

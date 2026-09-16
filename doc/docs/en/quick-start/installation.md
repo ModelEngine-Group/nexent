@@ -285,7 +285,7 @@ Do not change the isolation level to `local` in production. Redeploy the Runtime
 
 ### Monitoring Configuration
 
-Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`. The frontend monitoring entry is visible in speed mode when a dashboard URL is configured; in standard mode, only the super administrator can see it.
+Select the `monitoring` component in the deployment script UI to enable OpenTelemetry monitoring. The script synchronizes `ENABLE_TELEMETRY`, `MONITORING_PROVIDER`, `MONITORING_DASHBOARD_URL`, OTLP endpoints, and provider defaults in `deploy/env/monitoring.env`, then starts the matching observability services from `deploy/docker/compose/docker-compose-monitoring.yml`. Configure `MONITORING_DASHBOARD_ALLOWED_ROLES` to choose which roles see the frontend monitoring entry; its default is `SU,SPEED`.
 
 ```bash
 cd nexent
@@ -316,6 +316,7 @@ Common variables:
 | Variable | Description |
 |----------|-------------|
 | `MONITORING_PROVIDER` | Default monitoring provider; updated when you choose a provider in the deployment script |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | Comma-separated roles that can see the monitoring dashboard entry; for example `SU,ADMIN,SPEED` |
 | `OTEL_COLLECTOR_HTTP_PORT` / `OTEL_COLLECTOR_GRPC_PORT` | Published OTLP HTTP/gRPC ports |
 | `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith forwarding configuration |
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | Local Langfuse bootstrap admin |

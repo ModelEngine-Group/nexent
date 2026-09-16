@@ -383,7 +383,8 @@ async def start_streaming_chat(
     meta_data: Optional[Dict[str, Any]] = None,
     tool_params: Optional[ToolParamsRequest] = None,
     model_id: Optional[int] = None,
-    idempotency_key: Optional[str] = None
+    idempotency_key: Optional[str] = None,
+    enable_hitl: bool = False,
 ) -> StreamingResponse:
     new_conversation_data: Optional[Dict[str, Any]] = None
     try:
@@ -447,6 +448,7 @@ async def start_streaming_chat(
             version_no=latest_version_no,
             metadata=metadata,
             enable_automation_tool=False,
+            enable_hitl=enable_hitl,
         )
         agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
 
@@ -504,7 +506,7 @@ async def start_streaming_chat(
     response.headers["conversation_id"] = str(conversation_id)
     response.headers["X-Accel-Buffering"] = "no"
 
-    if new_conversation_data is not None:
+    if new_conversation_data is not None and response.status_code < 400:
         original_body_iterator = response.body_iterator
 
         async def body_iterator_with_conversation_created():
@@ -876,6 +878,7 @@ async def generate_conversation_title(
     conversation_id: int,
     question: str,
     language: str,
+    model_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Generate and persist a conversation title from the user's question."""
     title = await generate_conversation_title_service(
@@ -884,5 +887,6 @@ async def generate_conversation_title(
         user_id=ctx.user_id,
         tenant_id=ctx.tenant_id,
         language=language,
+        model_id=model_id,
     )
     return {"message": "success", "data": title, "requestId": ctx.request_id}

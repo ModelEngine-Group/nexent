@@ -338,6 +338,10 @@ async def _async_iter(items):
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
+# The HITL router is exercised separately with its real API-key boundary.
+hitl_app_module = types.ModuleType("apps.northbound_human_interaction_app")
+hitl_app_module.router = APIRouter()
+sys.modules["apps.northbound_human_interaction_app"] = hitl_app_module
 import apps.northbound_base_app as northbound_base_app_module  # noqa: E402
 from apps.northbound_base_app import A2AServerSettings, northbound_app as app  # noqa: E402
 from fastapi import HTTPException  # noqa: E402

@@ -281,7 +281,7 @@ v2.5.0 的部署模板默认使用 Docker 沙箱，并复用系统级容器以�
 
 ### 监控配置
 
-部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会在 `deploy/env/monitoring.env` 中同步更新 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER`、`MONITORING_DASHBOARD_URL`、OTLP endpoint 和 provider 默认值，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。前端监控入口在 speed 模式下配置 dashboard URL 后可见；标准模式下仅超级管理员可见。
+部署时在脚本交互界面中选择 `monitoring` 组件即可启用 OpenTelemetry 监控。脚本会在 `deploy/env/monitoring.env` 中同步更新 `ENABLE_TELEMETRY`、`MONITORING_PROVIDER`、`MONITORING_DASHBOARD_URL`、OTLP endpoint 和 provider 默认值，并启动 `deploy/docker/compose/docker-compose-monitoring.yml` 中对应的观测组件。通过 `MONITORING_DASHBOARD_ALLOWED_ROLES` 可配置哪些角色看到前端监控入口，默认值为 `SU,SPEED`。
 
 ```bash
 cd nexent
@@ -312,6 +312,7 @@ cp deploy/env/monitoring.env.example deploy/env/monitoring.env
 | 变量 | 说明 |
 |------|------|
 | `MONITORING_PROVIDER` | 默认监控 provider；部署脚本中手动选择 provider 后会同步更新 |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | 可看到监控面板入口的角色，使用逗号分隔，例如 `SU,ADMIN,SPEED` |
 | `OTEL_COLLECTOR_HTTP_PORT` / `OTEL_COLLECTOR_GRPC_PORT` | Collector 对外暴露的 OTLP HTTP/gRPC 端口 |
 | `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` | LangSmith 转发配置 |
 | `LANGFUSE_INIT_USER_EMAIL` / `LANGFUSE_INIT_USER_PASSWORD` | 本地 Langfuse 初始管理员账号 |

@@ -813,6 +813,7 @@ class NexentAgent:
                     session_container_group=_sandbox_tree_context.get(
                         "session_container_group"
                     ),
+                    cancellation_scope=self.cancellation_scope,
                 )
                 session_container_group = None
                 if (

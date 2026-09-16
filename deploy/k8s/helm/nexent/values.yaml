@@ -58,6 +58,7 @@ global:
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"

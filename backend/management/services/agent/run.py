@@ -12,8 +12,10 @@ from nexent.core.agents.run_agent import DeferredAgentRun, agent_run
 from nexent.core.concurrency import (
     ManagedExecution,
     ManagedTaskSpec,
+    RunCancellationScope,
     ThreadCapacityExceeded,
     ThreadQueueTimedOut,
+    run_blocking,
 )
 from nexent.memory.models import MemoryIngestUnit
 from nexent.core.models import OpenAIModel
@@ -316,7 +318,7 @@ async def _consume_agent_stream_producer(
 
 
 async def _poll_runtime_cancel_signal(
-    conversation_id: int, user_id: str, stop_event
+    conversation_id: int, user_id: str, stop_event, cancellation_scope=None
 ) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
@@ -324,6 +326,8 @@ async def _poll_runtime_cancel_signal(
             user_id=user_id, conversation_id=conversation_id
         ):
             stop_event.set()
+            if cancellation_scope is not None:
+                cancellation_scope.cancel()
             logger.info(
                 "Runtime cancel signal received, user_id=%s, conversation_id=%s",
                 user_id,
@@ -456,11 +460,14 @@ async def _stream_agent_chunks(
             conversation_id=agent_request.conversation_id, user_id=user_id
         )
 
+    if agent_run_info.cancellation_scope is None:
+        agent_run_info.cancellation_scope = RunCancellationScope(agent_run_info.stop_event)
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
             conversation_id=agent_request.conversation_id,
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
+            cancellation_scope=agent_run_info.cancellation_scope,
         )
     )
 
@@ -480,12 +487,19 @@ async def _stream_agent_chunks(
             (),
         ):
             yield json.dumps(event, ensure_ascii=False)
-        async for agent_chunk in agent_run(
+        source = agent_run(
             agent_run_info,
             thread_manager=runtime_thread_manager,
             execution=execution,
             deferred_run=deferred_run,
-        ):
+        )
+        interaction = getattr(agent_run_info, "human_interaction", None)
+        port = getattr(interaction, "port", None)
+        if callable(getattr(port, "visible_guidance", None)):
+            from services.human_interaction.stream import stream_with_guidance
+
+            source = stream_with_guidance(source, port)
+        async for agent_chunk in source:
             yield agent_chunk
 
     try:
@@ -800,6 +814,10 @@ async def _stream_agent_chunks(
             if stream_completed_normally
             else "failed"
         )
+        outcome = getattr(agent_run_info, "attempt_outcome", None)
+        if getattr(agent_run_info, "human_interaction", None) is not None and isinstance(outcome, str):
+            terminal_status = outcome if stream_completed_normally else "recovery_required"
+            agent_run_info.attempt_outcome = terminal_status
 
         try:
             skill_file_payloads = list(captured_skill_files.values())
@@ -912,6 +930,8 @@ async def _stream_agent_chunks(
             except Exception:
                 persistence_failed = True
                 terminal_status = "failed"
+                if getattr(agent_run_info, "human_interaction", None) is not None:
+                    agent_run_info.attempt_outcome = "recovery_required"
                 logger.exception(
                     "Failed to persist assistant stream batch conversation=%s message=%s",
                     agent_request.conversation_id,
@@ -1487,6 +1507,32 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if isinstance(agent_request.hitl_run_id, str) and agent_request.hitl_run_id:
+        from services.human_interaction.application import stream_run
+
+        return await stream_run(
+            agent_request.hitl_run_id,
+            resolved_tenant_id,
+            resolved_user_id,
+            after=agent_request.hitl_after_event,
+        )
+
+    from consts.const import HITL_ENABLED
+
+    if HITL_ENABLED and not agent_request.is_debug and agent_request.conversation_id:
+        from services.human_interaction.application import get_service, stream_run
+        from services.human_interaction.models import InteractionError
+
+        active_hitl = await run_blocking(
+            "hitl-get_service-repository-latest", get_service().repository.latest, resolved_tenant_id,
+            resolved_user_id, agent_request.conversation_id, active_only=True, lane="control-io",
+            owner=__name__,
+        )
+        if active_hitl:
+            if resume:
+                return await stream_run(active_hitl, resolved_tenant_id, resolved_user_id)
+            raise InteractionError("This conversation has a paused or active human interaction run")
+
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -1717,6 +1763,15 @@ async def run_agent_stream(
             agent_id=agent_request.agent_id,
             user_id=resolved_user_id,
         )
+
+    if agent_request.enable_hitl is True and not resume:
+        from services.human_interaction.application import start_run
+
+        human_response = await start_run(
+            agent_request, resolved_tenant_id, resolved_user_id, language, skip_user_save=skip_user_save,
+        )
+        if human_response is not None:
+            return human_response
 
     # Resume mode: check for existing streaming message
     if resume:
@@ -2232,4 +2287,13 @@ def stop_agent_tasks(conversation_id: int | str, user_id: str):
 
 
 def is_agent_running(conversation_id: int, user_id: str) -> bool:
-    return agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None
+    if agent_run_manager.get_agent_run_info(conversation_id, user_id) is not None:
+        return True
+
+    from consts.const import HITL_ENABLED
+
+    if not HITL_ENABLED:
+        return False
+    from services.human_interaction.application import is_conversation_running
+
+    return is_conversation_running(conversation_id, user_id)
