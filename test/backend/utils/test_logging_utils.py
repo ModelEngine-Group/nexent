@@ -332,6 +332,11 @@ class TestGetUvicornLoggingConfig:
         assert cfg["filters"]["redact_agent_share_token"]["()"].endswith("AgentShareAccessLogFilter")
         for handler in cfg["handlers"].values():
             assert "redact_agent_share_token" in handler["filters"]
+        assert cfg["loggers"]["uvicorn.access"] == {
+            "handlers": ["console", "file_runtime"],
+            "level": cfg["root"]["level"],
+            "propagate": False,
+        }
 
 
 # ---------------------------------------------------------------------------

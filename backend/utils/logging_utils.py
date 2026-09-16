@@ -233,6 +233,13 @@ def get_uvicorn_logging_config(categories: list[str] | None = None) -> dict:
         "formatters": formatters,
         "handlers": {**{"console": console_handler}, **file_handlers},
         "root": {"level": level, "handlers": handler_names},
+        "loggers": {
+            "uvicorn.access": {
+                "handlers": handler_names,
+                "level": level,
+                "propagate": False,
+            }
+        },
     }
     return config
 
