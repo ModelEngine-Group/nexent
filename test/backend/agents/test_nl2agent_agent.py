@@ -598,6 +598,15 @@ def test_prompt_uses_backend_owned_serial_resource_actions(language):
     assert "combine two uncovered sets" in prompt or "拼接两份 uncovered 集合" in prompt
 
 
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_prompt_does_not_accept_first_resource_for_every_requirement(language):
+    prompt = build_nl2agent_system_prompt(language)
+
+    assert 'verification_result["resources"][0]["candidate_ref"]' not in prompt
+    assert 'for item in verification_result["requirements"]' in prompt
+    assert '"accepted_candidate_refs": []' in prompt
+
+
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
     prompt_loader = mocker.patch(
         "agents.nl2agent_agent.get_prompt_template",
