@@ -78,12 +78,21 @@ async def _embedding_dimension_check(
     ssl_verify: bool = True,
     model_factory: Optional[str] = None,
     timeout_seconds: Optional[float] = None,
+    extra_params: Optional[dict] = None,
 ):
     effective_timeout = timeout_seconds if timeout_seconds else 5.0
 
     if model_type == "embedding":
+        adapter_config = {
+            "base_url": model_base_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_type": "embedding",
+        }
+        if extra_params is not None:
+            adapter_config["extra_params"] = extra_params
         embedding = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "embedding"},
+            adapter_config,
             "embedding", "embedding", None, model_name=model_name,
         ).dimension_check(timeout=effective_timeout)
         if len(embedding) > 0:
@@ -92,8 +101,17 @@ async def _embedding_dimension_check(
             f"Embedding dimension check for {model_name} gets empty response")
         return 0
     elif model_type == "multi_embedding":
+        adapter_config = {
+            "model_factory": model_factory,
+            "base_url": model_base_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_type": "multi_embedding",
+        }
+        if extra_params is not None:
+            adapter_config["extra_params"] = extra_params
         embedding = await build_adapter_fresh(
-            {"model_factory": model_factory, "base_url": model_base_url, "api_key": model_api_key, "ssl_verify": ssl_verify, "model_type": "multi_embedding"},
+            adapter_config,
             "multi_embedding", "multiEmbedding", None, model_name=model_name,
         ).dimension_check(timeout=effective_timeout)
         if isinstance(embedding, list) and len(embedding) > 0 and isinstance(embedding[0], list):
@@ -221,9 +239,15 @@ async def _perform_connectivity_check(
             )
         elif not rerank_url.lower().endswith("/rerank") and "text-rerank" not in rerank_url:
             rerank_url = f"{rerank_url}/rerank"
+        rerank_config = {
+            "base_url": rerank_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+        }
+        if extra_params is not None:
+            rerank_config["extra_params"] = extra_params
         connectivity = await build_adapter_fresh(
-            {"base_url": rerank_url, "api_key": model_api_key,
-             "ssl_verify": ssl_verify},
+            rerank_config,
             "rerank", "rerank", None, model_name=model_name,
         ).health_check()
     elif model_type in ("vlm", "vlm2", "vlm3", "vlm4"):
@@ -238,9 +262,20 @@ async def _perform_connectivity_check(
         observer = MessageObserver()
         set_monitoring_operation("connectivity_check",
                                  display_name=display_name)
+        vlm_config = {
+            "base_url": model_base_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_factory": model_factory,
+        }
+        if temperature is not None:
+            vlm_config["temperature"] = temperature
+        if top_p is not None:
+            vlm_config["top_p"] = top_p
+        if extra_params is not None:
+            vlm_config["extra_params"] = extra_params
         connectivity = await build_adapter_fresh(
-            {"base_url": model_base_url, "api_key": model_api_key,
-             "ssl_verify": ssl_verify, "model_factory": model_factory},
+            vlm_config,
             "vlm", model_type, None, model_name=model_name,
             observer=observer, display_name=display_name,
         ).health_check()
@@ -327,20 +362,32 @@ async def check_model_connectivity(display_name: str, tenant_id: str, model_type
         model_appid = model.get("model_appid")
         access_token = model.get("access_token")
         timeout_seconds = model.get("timeout_seconds")
+        temperature = model.get("temperature")
+        top_p = model.get("top_p")
+        extra_params = model.get("extra_params")
 
         try:
             set_monitoring_context(tenant_id=tenant_id)
 
             ssl_verify_fallback = False
+            connectivity_kwargs = {}
+            if temperature is not None:
+                connectivity_kwargs["temperature"] = temperature
+            if top_p is not None:
+                connectivity_kwargs["top_p"] = top_p
+            if extra_params is not None:
+                connectivity_kwargs["extra_params"] = extra_params
             connectivity = await _perform_connectivity_check(
                 model_name, model_type, model_base_url, model_api_key, ssl_verify,
                 model_factory, model_appid, access_token, display_name, timeout_seconds,
+                **connectivity_kwargs,
             )
             if not connectivity and ssl_verify:
                 ssl_verify_fallback = True
                 connectivity = await _perform_connectivity_check(
                     model_name, model_type, model_base_url, model_api_key, False,
                     model_factory, model_appid, access_token, display_name, timeout_seconds,
+                    **connectivity_kwargs,
                 )
         except Exception as e:
             update_data = {
@@ -462,15 +509,21 @@ async def embedding_dimension_check(model_config: dict):
         ssl_verify = model_config.get("ssl_verify", True)
         model_factory = _infer_model_factory(model_type, model_base_url, model_config.get("model_factory"))
         timeout_seconds = model_config.get("timeout_seconds")
+        embedding_check_kwargs = {
+            "model_factory": model_factory,
+            "timeout_seconds": timeout_seconds,
+        }
+        if model_config.get("extra_params") is not None:
+            embedding_check_kwargs["extra_params"] = model_config["extra_params"]
         dimension = await _embedding_dimension_check(
             model_name, model_type, model_base_url, model_api_key, ssl_verify,
-            model_factory=model_factory, timeout_seconds=timeout_seconds
+            **embedding_check_kwargs,
         )
         # Fallback to ssl_verify=False if initial check fails
         if dimension == 0 and ssl_verify:
             dimension = await _embedding_dimension_check(
                 model_name, model_type, model_base_url, model_api_key, False,
-                model_factory=model_factory, timeout_seconds=timeout_seconds
+                **embedding_check_kwargs,
             )
         if dimension == 0:
             logger.error(f"Embedding dimension check returned 0 for model: {model_name}")

@@ -103,7 +103,7 @@ if grep -Eq '^COMMENT ON COLUMN .*conversation_message_unit_t.*step_index' "$DEP
   fail "init SQL should not comment conversation_message_unit_t.step_index before its migration adds the column"
 fi
 
-UNIFIED_TAG_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.5.2_unified_tag_management.sql"
+UNIFIED_TAG_MIGRATION="$DEPLOY_ROOT/sql/migrations/v2.6.0_merged_migrations.sql"
 [ -f "$UNIFIED_TAG_MIGRATION" ] || fail "PR #3809 SQL should be consolidated into one v2.5.2 migration"
 
 for superseded_migration in \

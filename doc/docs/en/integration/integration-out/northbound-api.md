@@ -314,7 +314,7 @@ The existing `GET /nb/v1/chat/stop/{conversation_id}` also terminates the API us
 | 503 | Runtime HITL disabled for run queries and decisions |
 | 502 / 504 | Runtime unavailable / timeout |
 
-Apply `deploy/sql/migrations/v2.5.1_001_human_interaction.sql`, configure a valid runtime `HITL_ENCRYPTION_KEY`, and enable `HITL_ENABLED` and `HITL_ACCEPT_NEW_RUNS`. Tool approval is independently controlled by `HITL_TOOL_APPROVAL_ENABLED`. The default `native-live-v1` mode preserves the live execution state; loss of its worker can require recovery instead of automatic replay. These northbound endpoints preserve the existing execution modes' limits.
+Apply `deploy/sql/migrations/v2.6.0_merged_migrations.sql`, configure a valid runtime `HITL_ENCRYPTION_KEY`, and enable `HITL_ENABLED` and `HITL_ACCEPT_NEW_RUNS`. Tool approval is independently controlled by `HITL_TOOL_APPROVAL_ENABLED`. The default `native-live-v1` mode preserves the live execution state; loss of its worker can require recovery instead of automatic replay. These northbound endpoints preserve the existing execution modes' limits.
 
 ## Upload Conversation Attachments
 
