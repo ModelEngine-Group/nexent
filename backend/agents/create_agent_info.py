@@ -1,4 +1,3 @@
-﻿import asyncio
 import copy
 import json
 import logging
@@ -11,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
@@ -25,24 +25,27 @@ from nexent.core.models.capacity_resolver import (
     resolve_capacity,
 )
 from nexent.core.models.capacity_budget import (
+    ContextBudgetCalculator,
+    ContextBudgetSnapshot,
     RequestBudgetOverrides,
-    SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.sandbox import SandboxConfig
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import validate_urls_access
-from services.vectordatabase_service import (
+from management.services.model.resolver import get_rerank_model, is_model_available
+from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
-    get_rerank_model,
 )
 from services.remote_mcp_service import get_remote_mcp_server_list
+from services.memory_external_provider_service import get_memory_external_provider_service
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
@@ -79,18 +82,41 @@ from consts.const import (
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
+    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
+
 
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
     from nexent.core.tools.search_memory_tool import SearchMemoryTool
 
     return SearchMemoryTool()
+
+
+def _select_agent_model_id(
+    agent_model_ids: List[int],
+    override_model_id: int | None,
+    tenant_id: str,
+) -> int | None:
+    """Select the request override or the first configured available model."""
+    if override_model_id is not None:
+        return override_model_id
+    for model_id in agent_model_ids:
+        if is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
+            return model_id
+    return agent_model_ids[0] if agent_model_ids else None
+
+
+def _get_external_provider_service_for_search():
+    """Resolve the external provider service used to search enabled providers."""
+    return get_memory_external_provider_service()
 
 
 def _build_long_term_memory_items(search_context: Any) -> list[dict[str, Any]]:
@@ -122,7 +148,8 @@ def _build_effective_knowledge_base_summary(
         for tool in tool_list:
             if tool.class_name != "KnowledgeBaseSearchTool":
                 continue
-            index_names = tool.params.get("index_names") or []
+            metadata = tool.metadata if isinstance(tool.metadata, dict) else {}
+            index_names = metadata.get("allowed_index_names") or []
             if not index_names:
                 if not include_empty_message:
                     return "", []
@@ -132,11 +159,7 @@ def _build_effective_knowledge_base_summary(
                     else "No knowledge base indexes are currently available.\n"
                 )
                 return empty_message, []
-            display_map = (
-                tool.metadata.get("index_name_to_display_map", {})
-                if isinstance(tool.metadata, dict)
-                else {}
-            )
+            display_map = metadata.get("index_name_to_display_map", {})
             for index_name in index_names:
                 try:
                     display_name = display_map.get(index_name, index_name)
@@ -175,6 +198,22 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "default_output_reserve_tokens",
     "tokenizer_family",
 )
+
+
+def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Build extra_body for ModelConfig from model_record_t.extra_params.
+
+    Merges __custom__ user-defined params into the top level so they flow
+    into OpenAI chat.completions.create request body. Returns None when
+    there is nothing to pass through so production behaviour is unchanged.
+    """
+    if not extra_params or not isinstance(extra_params, dict):
+        return None
+    extra_body = dict(extra_params)
+    custom = extra_body.pop("__custom__", None)
+    if custom and isinstance(custom, dict):
+        extra_body.update(custom)
+    return extra_body if extra_body else None
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -263,18 +302,14 @@ def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
     }
 
 
-def _safe_input_budget_for_monitoring(snapshot: Any) -> dict:
-    return snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
-
-
-def _resolve_safe_input_budget(
+def _resolve_context_budget(
     *,
     capacity_snapshot: Optional[ModelCapacitySnapshot],
     tenant_id: str,
     agent_requested_output_tokens: Optional[int],
     request_requested_output_tokens: Optional[int],
-) -> Optional[dict]:
-    """Resolve the W2 budget snapshot before context assembly begins."""
+) -> Optional[ContextBudgetSnapshot]:
+    """Resolve the complete canonical W2 snapshot before context assembly."""
     if capacity_snapshot is None:
         return None
 
@@ -288,7 +323,7 @@ def _resolve_safe_input_budget(
         "agent" if agent_requested_output_tokens is not None else "model_default"
     )
     try:
-        snapshot = SafeInputBudgetCalculator().calculate_safe_input_budget(
+        snapshot = ContextBudgetCalculator().calculate_context_budget(
             capacity_snapshot=capacity_snapshot,
             reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
             request_overrides=request_overrides,
@@ -303,7 +338,7 @@ def _resolve_safe_input_budget(
         # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
         # caller already handles (falls back to W1 input_budget).
         logger.warning(
-            "W2 safe input budget unavailable (tenant_id=%s model=%s): %s - "
+            "W2 context budget unavailable (tenant_id=%s model=%s): %s - "
             "falling back to W1 input_budget. Fill context_window_tokens on the "
             "model record to enable W2 enforcement.",
             tenant_id,
@@ -312,17 +347,18 @@ def _resolve_safe_input_budget(
         )
         return None
     logger.debug(
-        "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
-        "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
+        "W2 context budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
+        "compaction_trigger_threshold_tokens=%s compaction_target_tokens=%s "
+        "fingerprint=%s warnings=%s",
         tenant_id,
         snapshot.model_name,
         snapshot.requested_output_tokens,
-        snapshot.soft_input_budget_tokens,
-        snapshot.hard_input_budget_tokens,
+        snapshot.compaction_trigger_threshold_tokens,
+        snapshot.compaction_target_tokens,
         snapshot.fingerprint,
         list(snapshot.warnings),
     )
-    return _safe_input_budget_for_monitoring(snapshot)
+    return snapshot
 
 
 def _resolve_input_budget(
@@ -547,7 +583,7 @@ def _get_skills_for_template(
         List of skill dicts with name and description
     """
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
         skill_service = SkillService()
         enabled_skills = skill_service.get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -738,7 +774,7 @@ def _get_skill_script_tools(
 
     skill_config_values: Dict[str, Dict[str, Any]] = {}
     try:
-        from services.skill_service import SkillService
+        from management.services.skill.service import SkillService
 
         enabled_skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
             agent_id=agent_id,
@@ -758,12 +794,23 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="RunSkillScriptTool",
                 name="run_skill_script",
-                description="Execute a skill script with given parameters. Use this to run Python or shell scripts that are part of a skill.",
-                inputs='{"skill_name": "str", "script_path": "str", "params": "str"}',
+                description=(
+                    "Execute an enabled skill's bundled script, or a generated Python/Node.js "
+                    "script in the current run workspace, inside the Docker sandbox. For "
+                    "workspace scripts written as bare filenames by the code executor, pass "
+                    "script_path='outputs/<filename>'. Ordinary agent code must not use "
+                    "subprocess, os.system, or shell calls for system commands; use a "
+                    "skill-bundled wrapper or a shell-free language API."
+                ),
+                inputs=(
+                    '{"skill_name": "str", "script_path": "str", '
+                    '"params": "str", "source": "str"}'
+                ),
                 output_type="string",
                 params={
                     "local_skills_dir": CONTAINER_SKILLS_PATH,
                     "workspace_path": file_context.get("workspace_path"),
+                    "authorized_skill_names": sorted(skill_config_values),
                 },
                 source="builtin",
                 usage="builtin",
@@ -797,7 +844,10 @@ def _get_skill_script_tools(
             ToolConfig(
                 class_name="WriteSkillFileTool",
                 name="write_skill_file",
-                description="Write content to a file within a skill directory. Creates parent directories if they do not exist.",
+                description=(
+                    "Edit an installed tenant-scoped skill file. This does not create files in "
+                    "the current run workspace or outputs directory."
+                ),
                 inputs='{"skill_name": "str", "file_path": "str", "content": "str"}',
                 output_type="string",
                 params={"local_skills_dir": CONTAINER_SKILLS_PATH},
@@ -883,7 +933,11 @@ async def create_model_config_list(tenant_id):
                         tokenizer_family=record.get("tokenizer_family"),
                         capacity_source=record.get("capacity_source"),
                         capability_profile_version=record.get("capability_profile_version"),
-                        extra_body=extra_body))
+                        # v2.6.0: pass inference params so model-level
+                        # temperature/top_p/extra_params flow into SDK.
+                        temperature=record.get("temperature"),
+                        top_p=record.get("top_p"),
+                        extra_body=_build_extra_body(record.get("extra_params"))))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -1062,13 +1116,6 @@ async def create_agent_config(
 
     is_manager = len(managed_agents) > 0 or len(external_a2a_agents) > 0
 
-    # Get app information
-    default_app_description = 'Nexent 是一个开源智能体SDK和平台' if language == 'zh' else 'Nexent is an open-source agent SDK and platform'
-    app_name = tenant_config_manager.get_app_config(
-        'APP_NAME', tenant_id=tenant_id) or "Nexent"
-    app_description = tenant_config_manager.get_app_config(
-        'APP_DESCRIPTION', tenant_id=tenant_id) or default_app_description
-
     # Memory list population: in the new Memory system this is performed by
     # the backend's ``memory_context_service`` via the
     # ``MemoryService.search_memory`` facade. The legacy
@@ -1153,6 +1200,65 @@ async def create_agent_config(
 
             if memory_context_service is not None:
                 try:
+                    external_results = None
+                    try:
+                        provider_service = _get_external_provider_service_for_search()
+                        if provider_service is not None:
+                            top_k = memory_context.user_config.external_provider_top_k
+                            logger.info(
+                                "event=external_provider_search_started tenant_id=%s "
+                                "agent_id=%s top_k=%d",
+                                tenant_id,
+                                agent_id,
+                                top_k,
+                            )
+
+                            search_request = memory_models.MemorySearchRequest(
+                                query=last_user_query or "",
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                user_id=str(memory_context.user_id or ""),
+                                agent_id=str(memory_context.agent_id or "") or None,
+                                conversation_id=(
+                                    str(conversation_id) if conversation_id is not None else None
+                                ),
+                                top_k=top_k,
+                            )
+
+                            ext_search_results = await provider_service.search_all_enabled(
+                                tenant_id=str(memory_context.tenant_id or ""),
+                                request=search_request,
+                                limit=top_k,
+                            )
+
+                            if ext_search_results:
+                                external_results = [
+                                    memory_models.ExternalMemoryItem(
+                                        id=str(r.memory_id or r.external_id or ""),
+                                        content=r.content,
+                                        score=r.score,
+                                        provider=r.source or "external",
+                                        metadata=r.metadata or {},
+                                        created_at=None,
+                                    )
+                                    for r in ext_search_results
+                                ]
+                            logger.info(
+                                "event=external_provider_search_completed tenant_id=%s "
+                                "agent_id=%s results_count=%d",
+                                tenant_id,
+                                agent_id,
+                                len(external_results or []),
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "event=external_provider_search_failed tenant_id=%s user_id=%s "
+                            "agent_id=%s error_type=%s",
+                            tenant_id,
+                            user_id,
+                            agent_id,
+                            type(exc).__name__,
+                        )
+
                     long_term_search_context = await memory_context_service.build_context(
                         tenant_id=str(memory_context.tenant_id or ""),
                         user_id=str(memory_context.user_id or ""),
@@ -1160,6 +1266,7 @@ async def create_agent_config(
                         conversation_id=(str(conversation_id) if conversation_id is not None else None),
                         query=None,
                         layers=["tenant", "user"],
+                        external_results=external_results,
                     )
                     long_term_memory_items = _build_long_term_memory_items(long_term_search_context)
                 except Exception as exc:
@@ -1179,13 +1286,12 @@ async def create_agent_config(
                     description=(
                         "Store one model-selected and summarized short-term memory extracted only "
                         "from the conversation between the user and the current agent. Eligible "
-                        "information is limited to user preferences, task goals, action plans and "
-                        "latest progress, or reflections on user feedback and errors. Consider the "
-                        "user question, tool or code execution results, and the final answer. Do not "
-                        "store whole conversations, transient calculations, unverified guesses, "
-                        "duplicates, secrets, or information the user asks to forget. Before every "
-                        "final answer, assess whether an eligible memory was added or updated; if so, "
-                        "calling this tool is mandatory."
+                        "information is limited to process-level observations made during intermediate "
+                        "action steps: user preferences, task goals, action plans and latest progress, "
+                        "or reflections on user feedback and errors. Do not store whole conversations, "
+                        "transient calculations, unverified guesses, duplicates, secrets, or information "
+                        "the user asks to forget. Call this tool only during intermediate action steps, "
+                        "not when generating the final answer."
                     ),
                     inputs=json.dumps({
                         "content": {
@@ -1217,10 +1323,14 @@ async def create_agent_config(
                     str(conversation_id) if conversation_id is not None else ""
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
-                fixed_search_result = await asyncio.to_thread(
+                fixed_search_tool.external_results = external_results
+                fixed_search_result = await run_blocking(
+                    "memory-presearch",
                     fixed_search_tool.forward,
                     last_user_query or "",
                     5,
+                    lane="model-tool-io",
+                    owner="runtime",
                 )
             else:
                 fixed_search_result = (
@@ -1302,15 +1412,10 @@ async def create_agent_config(
         "skills": skills,
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
-        "APP_NAME": app_name,
-        "APP_DESCRIPTION": app_description,
-        "memory_list": memory_list,
-        "knowledge_base_summary": knowledge_base_summary,
-        "user_id": user_id,
     }
-    # AgentInfo stores model_ids (a list); pick the first for the primary model lookup
-    agent_model_ids = agent_info.get("model_ids")
-    model_id_to_use = override_model_id if override_model_id else (agent_model_ids[0] if agent_model_ids else None)
+    # AgentInfo stores model_ids (a list); pick the first available model.
+    agent_model_ids = agent_info.get("model_ids") or []
+    model_id_to_use = _select_agent_model_id(agent_model_ids, override_model_id, tenant_id)
     model_info = None
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
@@ -1329,19 +1434,23 @@ async def create_agent_config(
         resolved_capacity_snapshot = None
 
     requested_output_tokens = agent_info.get("requested_output_tokens")
-    safe_input_budget_snapshot = _resolve_safe_input_budget(
+    context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
         agent_requested_output_tokens=requested_output_tokens,
         request_requested_output_tokens=request_requested_output_tokens,
     )
-    if safe_input_budget_snapshot is not None:
-        soft_input_budget_tokens = safe_input_budget_snapshot["soft_input_budget_tokens"]
-        hard_input_budget_tokens = safe_input_budget_snapshot["hard_input_budget_tokens"]
-        context_token_threshold = soft_input_budget_tokens
+    if context_budget_snapshot is not None:
+        effective_input_limit_tokens = context_budget_snapshot.effective_input_limit_tokens
+        compaction_trigger_threshold_tokens = (
+            context_budget_snapshot.compaction_trigger_threshold_tokens
+        )
+        compaction_target_tokens = context_budget_snapshot.compaction_target_tokens
+        context_token_threshold = compaction_trigger_threshold_tokens
     else:
-        soft_input_budget_tokens = 0
-        hard_input_budget_tokens = 0
+        effective_input_limit_tokens = 0
+        compaction_trigger_threshold_tokens = 0
+        compaction_target_tokens = 0
         context_token_threshold = input_budget
 
     context_window_tokens = (
@@ -1364,9 +1473,6 @@ async def create_agent_config(
         duty=duty_prompt,
         constraint=constraint_prompt,
         few_shots=few_shots_prompt,
-        app_name=app_name,
-        app_description=app_description,
-        user_id=user_id,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,
@@ -1421,8 +1527,9 @@ async def create_agent_config(
     cm_config = ContextManagerConfig(
         token_threshold=context_token_threshold,
         context_window_tokens=context_window_tokens,
-        soft_input_budget_tokens=soft_input_budget_tokens,
-        hard_input_budget_tokens=hard_input_budget_tokens,
+        effective_input_limit_tokens=effective_input_limit_tokens,
+        compaction_trigger_threshold_tokens=compaction_trigger_threshold_tokens,
+        compaction_target_tokens=compaction_target_tokens,
         policy_layers=policy_layers,
     )
 
@@ -1447,7 +1554,7 @@ async def create_agent_config(
         context_items=context_items,
         pre_run_tool_events=pre_run_tool_events,
         capacity_snapshot=capacity_snapshot,
-        safe_input_budget_snapshot=safe_input_budget_snapshot,
+        context_budget_snapshot=context_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
     )
@@ -1553,6 +1660,10 @@ async def create_tool_config_list(
     tool_keys_seen = set()
     for tool in tools_list:
         tool_identifier = tool.get("name") or tool.get("class_name")
+        # System-managed tools are injected below with run-scoped metadata. Ignore
+        # legacy agent bindings so they cannot create duplicate tool definitions.
+        if tool_identifier in SYSTEM_MANAGED_TOOL_NAMES:
+            continue
         if tool_identifier in tool_keys_seen:
             raise ValidationError(
                 f"Duplicate tool identifier '{tool_identifier}' found in agent '{agent_name or agent_id}'."
@@ -1604,15 +1715,18 @@ async def create_tool_config_list(
                 from ext_components.aidp.services.aidp_access_service import (
                     resolve_current_aidp_access,
                 )
-                _snapshot = resolve_current_aidp_access(
+                snapshot = resolve_current_aidp_access(
                     server_url=AIDP_SERVER_URL,
                     api_key=AIDP_API_KEY,
                     user_id=user_id,
                     tenant_id=tenant_id,
                     aidp_tenant_id=AIDP_TENANT_ID,
                 )
-                _allowed_kds_set = set(_snapshot.accessible_id_set)
-                _kds_name_to_id_map = dict(_snapshot.name_to_id)
+                _allowed_kds_set = set(snapshot.accessible_id_set)
+                _kds_name_to_id_map = {
+                    **snapshot.name_to_id,
+                    **snapshot.tenant_name_to_id,
+                }
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "AIDP access snapshot lookup failed: %s", exc,
@@ -1627,17 +1741,18 @@ async def create_tool_config_list(
             if not isinstance(configured_kds, list):
                 configured_kds = []
             configured_kds = [str(kds_id) for kds_id in configured_kds]
+            configured_kds_set = set(configured_kds)
             # The execution whitelist is the effective tool range, not every
             # KDS the user could access. This prevents model-supplied arguments
             # from expanding a conversation-scoped selection.
-            _allowed_kds_set.intersection_update(configured_kds)
-            param_dict["kds_list"] = [
-                kds_id for kds_id in configured_kds if kds_id in _allowed_kds_set
-            ]
+            _allowed_kds_set.intersection_update(configured_kds_set)
+            # Keep the full per-run scope in params so the SDK can distinguish
+            # configured-but-denied knowledge bases from unavailable ones.
+            param_dict["kds_list"] = configured_kds
             _kds_name_to_id_map = {
                 name: kds_id
                 for name, kds_id in _kds_name_to_id_map.items()
-                if kds_id in _allowed_kds_set
+                if kds_id in configured_kds_set
             }
 
         tool_config = ToolConfig(
@@ -1714,27 +1829,24 @@ async def create_tool_config_list(
 
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
-            index_names = tool_config.params.get("index_names", [])
+            configured_index_names = tool_config.params.get("index_names", [])
 
             # Enforce knowledge-base-level read permission for the chatting user.
             # Agent-level permission controls "who can use this agent", but each knowledge
             # base has its own "who can read" permission (group_ids + ingroup_permission).
-            # Filter out any index the current user does NOT have at least read access to,
-            # so the tool, its display-name mapping, and the injected KB summary all honour
-            # the per-KB ACL.
-            if index_names:
-                index_names = ElasticSearchService.filter_accessible_indices(
-                    index_names, user_id=user_id, tenant_id=tenant_id,
+            # Keep the complete configured scope in params so the SDK can distinguish
+            # configured-but-denied indices from unconfigured ones.
+            allowed_index_names = configured_index_names
+            if configured_index_names:
+                allowed_index_names = ElasticSearchService.filter_accessible_indices(
+                    configured_index_names, user_id=user_id, tenant_id=tenant_id,
                 )
-                # Persist the filtered list back into params so downstream consumers
-                # (knowledge_base_summary builder, metadata) see only accessible indices.
-                tool_config.params["index_names"] = index_names
 
             display_name_to_index_map = {}
             index_name_to_display_map = {}
-            if index_names:
+            if configured_index_names:
                 knowledge_name_map = get_knowledge_name_map_by_index_names(
-                    index_names,
+                    configured_index_names,
                     tenant_id=tenant_id,
                 )
                 # Reverse the mapping: display_name (knowledge_name) -> index_name
@@ -1752,16 +1864,11 @@ async def create_tool_config_list(
                 "document_paths": document_paths,
                 # Defense-in-depth whitelist: forward() will reject any index not in this list,
                 # even if the LLM fabricates an unauthorized index name.
-                "allowed_index_names": list(index_names),
+                "allowed_index_names": list(allowed_index_names),
             }
 
-            if not index_names:
-                # Empty after permission filtering means the current user has no read access
-                # to any of the agent's configured knowledge bases. Instead of skipping the tool
-                # (which would cause the LLM to hallucinate tool calls against a non-existent tool),
-                # we keep the tool in the list with empty index_names. The SDK forward() will return
-                # a clear "no accessible knowledge base" message, allowing the LLM to explain
-                # the situation to the user instead of entering a retry loop.
+            if not allowed_index_names:
+                # Keep the tool so the SDK can report which configured indices lack read access.
                 logger.warning(
                     "Keeping knowledge_base_search tool for agent '%s' with no accessible "
                     "knowledge bases for user '%s' after permission filtering. "
@@ -1772,10 +1879,13 @@ async def create_tool_config_list(
                 tool_config_list.append(tool_config)
                 continue
 
-            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, _, _ = get_embedding_model_by_index_name(
+                tenant_id,
+                allowed_index_names[0],
+            )
             if not embedding_model:
                 raise ValidationError(
-                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"No embedding model found for index '{allowed_index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
@@ -2159,6 +2269,45 @@ async def create_agent_run_info(
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
+    # v2.6.0: Apply per-agent model params override to model_config_list.
+    # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
+    # stored on ag_tenant_agent_t. We match each override entry to a ModelConfig
+    # by display_name (the cite_name used in model_config_list) and merge the
+    # override values on top of the model-level defaults.
+    _agent_info_for_override = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    if model_params_override:
+        for model_id_str, override_entry in model_params_override.items():
+            if not isinstance(override_entry, dict):
+                continue
+            try:
+                override_model_id = int(model_id_str)
+            except (ValueError, TypeError):
+                continue
+            override_model_info = get_model_by_model_id(override_model_id, tenant_id=tenant_id)
+            if not override_model_info:
+                continue
+            display_name = override_model_info.get("display_name")
+            if not display_name:
+                continue
+            for mc in model_list:
+                if mc.cite_name == display_name:
+                    if override_entry.get("temperature") is not None:
+                        mc.temperature = override_entry["temperature"]
+                    if override_entry.get("top_p") is not None:
+                        mc.top_p = override_entry["top_p"]
+                    override_extra = override_entry.get("extra_params")
+                    if override_extra and isinstance(override_extra, dict):
+                        merged = dict(mc.extra_body or {})
+                        for k, v in override_extra.items():
+                            if k == "__custom__" and isinstance(v, dict):
+                                merged.update(v)
+                            else:
+                                merged[k] = v
+                        mc.extra_body = merged if merged else None
+                    break
+
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     remote_mcp_list.append({
@@ -2209,7 +2358,7 @@ async def create_agent_run_info(
     # Resolve sandbox config: DB policy overrides env-var defaults.
     # build_sandbox_policy returns None when level=local (backward-compatible).
     # Import inside function body to avoid circular dependency.
-    from services.agent_service import build_sandbox_policy, get_sandbox_minio_client
+    from management.services.agent.service import build_sandbox_policy, get_sandbox_minio_client
     sandbox_policy = build_sandbox_policy(tenant_id=tenant_id, agent_type="")
     agent_db_policy = getattr(agent_config, "sandbox_policy", None)
     merged_policy = sandbox_policy if sandbox_policy else agent_db_policy
@@ -2243,10 +2392,12 @@ async def create_agent_run_info(
         mcp_host=mcp_host,
         history=converted_history,
         stop_event=threading.Event(),
+        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
-        safe_input_budget_snapshot=getattr(
+        context_budget_snapshot=getattr(
             agent_config,
-            "safe_input_budget_snapshot",
+            "context_budget_snapshot",
             None,
         ),
         sandbox_config=sandbox_config,

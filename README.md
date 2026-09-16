@@ -66,9 +66,9 @@ cd nexent
 bash deploy.sh k8s
 ```
 
-The native Kubernetes implementation is `bash deploy/k8s/deploy.sh`. It reads the same `deploy/env/.env` as Docker and renders explicit values into Helm ConfigMap and Secret overrides. Use `--persistence-mode local|dynamic|existing`, `--storage-class`/`--sc`, `--local-path`, `--local-node-name`, and `--existing-claim-prefix` to control PVC behavior. Local mode renders `hostPath` PVs and does not require node affinity.
+The native Kubernetes implementation is `bash deploy/k8s/deploy.sh`. It installs two independent Helm releases: `nexent-infrastructure` for Elasticsearch, PostgreSQL, Redis, and MinIO, then `nexent` for application services after infrastructure and the Elasticsearch API key are ready. Use `--release-scope all|infrastructure|nexent` to operate both releases or either side independently. The script reads `deploy/env/.env` and renders explicit Helm ConfigMap and Secret overrides. Use `--persistence-mode local|dynamic|existing`, `--storage-class`/`--sc`, `--local-path`, `--local-node-name`, and `--existing-claim-prefix` to control PVC behavior.
 
-Kubernetes uninstall is handled by `bash uninstall.sh k8s`. It removes the Helm release first, then can optionally delete the namespace and local PV data. Use `--delete-namespace true|false`, `--delete-local-data true|false`, or `bash uninstall.sh k8s delete-all`; pass `--keep-local-data` with `delete-all` to preserve local volume contents.
+Kubernetes uninstall is handled by `bash uninstall.sh k8s`. By default it removes `nexent` first and `nexent-infrastructure` second. The same `--release-scope` option supports application-only removal and dependency-protected infrastructure removal.
 
 Kubernetes offline packages use the same builder with `--target k8s` or `--target all`. Run `load-images.sh` on every cluster node that needs the images, or use `--push-images --image-registry-prefix registry.example.com/nexent` to push the images to an internal registry before deploying with the same version, image source, and image registry prefix.
 

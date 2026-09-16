@@ -98,10 +98,10 @@ class TestListModelsEndpoint:
 
         import types
 
-        if "services.vectordatabase_service" not in sys.modules:
-            mod = types.ModuleType("services.vectordatabase_service")
+        if "management.services.knowledge_base.service" not in sys.modules:
+            mod = types.ModuleType("management.services.knowledge_base.service")
             mod.get_vector_db_core = lambda: object()
-            sys.modules["services.vectordatabase_service"] = mod
+            sys.modules["management.services.knowledge_base.service"] = mod
 
         from apps.monitoring_app import router
 
@@ -158,6 +158,25 @@ class TestListModelsEndpoint:
 class TestMonitoringStatus:
     """Verify monitoring status endpoint used by the frontend top bar."""
 
+    @pytest.mark.parametrize(
+        ("configured_roles", "expected_roles"),
+        [
+            ("SU,SPEED", ["SU", "SPEED"]),
+            (" su, ADMIN, su, , speed ", ["SU", "ADMIN", "SPEED"]),
+            ("", []),
+            (None, []),
+        ],
+    )
+    def test_dashboard_allowed_roles_are_normalized(
+        self, configured_roles, expected_roles
+    ):
+        from apps.monitoring_app import _normalize_monitoring_dashboard_allowed_roles
+
+        assert (
+            _normalize_monitoring_dashboard_allowed_roles(configured_roles)
+            == expected_roles
+        )
+
     def test_dashboard_url_comes_from_configuration(self, monkeypatch):
         from apps.monitoring_app import get_monitoring_status
 
@@ -166,6 +185,10 @@ class TestMonitoringStatus:
         monkeypatch.setattr(
             "apps.monitoring_app.MONITORING_DASHBOARD_URL",
             "http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1",
+        )
+        monkeypatch.setattr(
+            "apps.monitoring_app.MONITORING_DASHBOARD_ALLOWED_ROLES",
+            "SU,ADMIN,SPEED",
         )
 
         status = get_monitoring_status()
@@ -176,6 +199,7 @@ class TestMonitoringStatus:
             status["dashboard_url"]
             == "http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1"
         )
+        assert status["dashboard_allowed_roles"] == ["SU", "ADMIN", "SPEED"]
         assert status["dashboard_port"] is None
         assert status["dashboard_path"] is None
 
@@ -249,6 +273,10 @@ class TestMonitoringStatus:
             "apps.monitoring_app.MONITORING_DASHBOARD_URL",
             "http://localhost:6006",
         )
+        monkeypatch.setattr(
+            "apps.monitoring_app.MONITORING_DASHBOARD_ALLOWED_ROLES",
+            "SU,ADMIN,SPEED",
+        )
 
         app = FastAPI()
         app.include_router(router)
@@ -260,6 +288,11 @@ class TestMonitoringStatus:
         body = response.json()
         assert body["code"] == 0
         assert body["data"]["dashboard_url"] == "http://localhost:6006"
+        assert body["data"]["dashboard_allowed_roles"] == [
+            "SU",
+            "ADMIN",
+            "SPEED",
+        ]
 
     @patch("apps.monitoring_app.get_current_user_id")
     def test_endpoint_returns_401_on_token_expired(self, mock_auth):

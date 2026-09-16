@@ -16,11 +16,15 @@ import { NotificationBell } from "./NotificationBell";
 import { useAuthorizationContext } from "../providers/AuthorizationProvider";
 import { useDeployment } from "../providers/deploymentProvider";
 import { monitoringService } from "@/services/monitoringService";
-import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/hooks/useNotifications";
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+} from "@/hooks/useNotifications";
 import type { MonitoringStatus } from "@/types/monitoring";
-import { USER_ROLES } from "@/const/auth";
 import { useGlobalConfigStore } from "@/stores/global";
 import { publicAsset } from "@/lib/publicAsset";
+import { canViewMonitoringDashboard } from "@/lib/monitoringAccess";
 
 const { Header } = Layout;
 
@@ -38,8 +42,12 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   const [monitoringStatus, setMonitoringStatus] =
     useState<MonitoringStatus | null>(null);
   const { config } = useGlobalConfigStore();
-  const canViewMonitoringDashboard =
-    isSpeedMode || user?.role === USER_ROLES.SU;
+  const shouldFetchMonitoringStatus = isSpeedMode || !!user;
+  const canViewMonitoring = canViewMonitoringDashboard(
+    user?.role,
+    isSpeedMode,
+    monitoringStatus?.dashboard_allowed_roles
+  );
 
   const showNotificationBell = !isSpeedMode && !!user;
   const {
@@ -51,7 +59,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   const markAllNotificationsReadMutation = useMarkAllNotificationsRead();
 
   useEffect(() => {
-    if (!canViewMonitoringDashboard) {
+    if (!shouldFetchMonitoringStatus) {
       setMonitoringStatus(null);
       return;
     }
@@ -67,9 +75,9 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
     return () => {
       mounted = false;
     };
-  }, [canViewMonitoringDashboard]);
+  }, [shouldFetchMonitoringStatus]);
 
-  const monitoringUrl = canViewMonitoringDashboard
+  const monitoringUrl = canViewMonitoring
     ? buildMonitoringUrl(monitoringStatus)
     : null;
 
@@ -88,7 +96,11 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
         // style={{ width: SIDER_CONFIG.EXPANDED_WIDTH - 17 }}
       >
         <Flex align="center" gap={8}>
-          <img src={publicAsset("/modelengine-logo.png")} alt="logo" className="h-7" />
+          <img
+            src={publicAsset("/modelengine-logo.png")}
+            alt="logo"
+            className="h-7"
+          />
           <span
             className="text-blue-600 dark:text-blue-500 font-bold"
             style={{
@@ -131,7 +143,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
       )}
 
       {/* GitHub link */}
-      { config.aboutConfig === 'open' && (
+      {config.aboutConfig === "open" && (
         <Link
           href="https://github.com/ModelEngine-Group/nexent"
           target="_blank"
@@ -156,7 +168,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
       )}
 
       {/* ModelEngine link */}
-      { config.aboutConfig === 'open' && (
+      {config.aboutConfig === "open" && (
         <Link
           href="http://modelengine-ai.net"
           className="text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors no-underline"
@@ -209,7 +221,7 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
             </span>
           ) : user ? (
             <span className="text-xs font-medium text-slate-600 max-w-[150px] truncate">
-              {user.email}
+              {user.username?.trim() || user.email?.trim() || "-"}
             </span>
           ) : null}
           <AvatarDropdown />
@@ -221,7 +233,11 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   return (
     <Header
       className="w-full py-3 border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm fixed top-0 z-50"
-      style={{ height: HEADER_CONFIG.DISPLAY_HEIGHT, background: "#ffffff", paddingInline: 16 }}
+      style={{
+        height: HEADER_CONFIG.DISPLAY_HEIGHT,
+        background: "#ffffff",
+        paddingInline: 16,
+      }}
     >
       <div className="h-full flex items-center justify-between">
         {/* Left section - Logo + additional title */}

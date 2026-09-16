@@ -17,11 +17,11 @@ class _ProcessParams:
 
 
 @pytest.fixture(autouse=True)
-def stub_project_modules(monkeypatch):
+def stub_project_modules(monkeypatch, tmp_path):
     # consts.const
     const_mod = types.ModuleType("consts.const")
     setattr(const_mod, "DATA_PROCESS_SERVICE", "http://data-process")
-    setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(Path.cwd() / ".test-lo-profile"))
+    setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(tmp_path / "lo-profile"))
     sys.modules["consts.const"] = const_mod
 
     # consts.model

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 import requests
 
 from ...monitor.monitoring import record_model_call
+from ..concurrency import run_blocking
 
 # Path to test assets directory
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "assets")
@@ -363,7 +364,12 @@ class JinaEmbedding(MultimodalEmbedding):
             ]
 
             # Try to get embedding vectors, setting a timeout
-            embeddings = await asyncio.to_thread(self.get_multimodal_embeddings, test_inputs, timeout=timeout)
+            embeddings = await run_blocking(
+                "embedding-connectivity",
+                self.get_multimodal_embeddings,
+                test_inputs,
+                timeout=timeout,
+            )
 
             # If embedding vectors are successfully obtained, the connection is normal
             return embeddings
@@ -500,7 +506,12 @@ class DashScopeMultimodalEmbedding(MultimodalEmbedding):
                 {"text": "Hello, nexent!"},
                 {"image": f"data:image/png;base64,{image_base64}"}
             ]
-            embeddings = await asyncio.to_thread(self.get_multimodal_embeddings, test_inputs, timeout=timeout)
+            embeddings = await run_blocking(
+                "embedding-connectivity",
+                self.get_multimodal_embeddings,
+                test_inputs,
+                timeout=timeout,
+            )
             return embeddings
         except requests.exceptions.Timeout:
             logging.error(f"DashScopeMultimodalEmbedding connection timed out ({timeout} seconds)")
@@ -633,7 +644,12 @@ class SiliconflowMultimodalEmbedding(MultimodalEmbedding):
                 {"text": "Hello, nexent!"},
                 {"image": image_data}
             ]
-            embeddings = await asyncio.to_thread(self.get_multimodal_embeddings, test_inputs, timeout=timeout)
+            embeddings = await run_blocking(
+                "embedding-connectivity",
+                self.get_multimodal_embeddings,
+                test_inputs,
+                timeout=timeout,
+            )
             return embeddings
         except requests.exceptions.Timeout:
             logging.error(f"SiliconflowMultimodalEmbedding connection timed out ({timeout} seconds)")
@@ -740,7 +756,12 @@ class OpenAICompatibleEmbedding(TextEmbedding):
             test_input = "Hello, nexent!"
 
             # Try to get embedding vectors in a background thread, setting a timeout
-            embeddings = await asyncio.to_thread(self.get_embeddings, test_input, timeout=timeout)
+            embeddings = await run_blocking(
+                "embedding-connectivity",
+                self.get_embeddings,
+                test_input,
+                timeout=timeout,
+            )
 
             # If embedding vectors are successfully obtained, the connection is normal
             return embeddings

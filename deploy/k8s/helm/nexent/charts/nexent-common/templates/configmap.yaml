@@ -50,6 +50,13 @@ data:
   RUNTIME_CANCEL_TTL_SECONDS: {{ .Values.config.runtimeState.cancelTtlSeconds | quote }}
   RUNTIME_COMPLETED_TTL_SECONDS: {{ .Values.config.runtimeState.completedTtlSeconds | quote }}
   RUNTIME_CANCEL_POLL_INTERVAL_SECONDS: {{ .Values.config.runtimeState.cancelPollIntervalSeconds | quote }}
+
+  # Human Interaction
+  HITL_ENABLED: {{ .Values.config.humanInteraction.enabled | quote }}
+  HITL_ACCEPT_NEW_RUNS: {{ .Values.config.humanInteraction.acceptNewRuns | quote }}
+  HITL_TOOL_APPROVAL_ENABLED: {{ .Values.config.humanInteraction.toolApprovalEnabled | quote }}
+  HITL_WAIT_SECONDS: {{ .Values.config.humanInteraction.waitSeconds | quote }}
+  HITL_MAX_CONCURRENCY: {{ .Values.config.humanInteraction.maxConcurrency | quote }}
   NORTHBOUND_IDEMPOTENCY_TTL_SECONDS: {{ .Values.config.northbound.idempotencyTtlSeconds | quote }}
   NORTHBOUND_RATE_LIMIT_ENABLED: {{ .Values.config.northbound.rateLimitEnabled | quote }}
   NORTHBOUND_RATE_LIMIT_PER_MINUTE: {{ .Values.config.northbound.rateLimitPerMinute | quote }}
@@ -141,18 +148,18 @@ data:
   MONITORING_FASTAPI_EXCLUDED_URLS: {{ default .Values.config.telemetry.fastapiExcludedUrls $monitoring.fastapiExcludedUrls | quote }}
   MONITORING_FASTAPI_EXCLUDE_SPANS: {{ default .Values.config.telemetry.fastapiExcludeSpans $monitoring.fastapiExcludeSpans | quote }}
   MONITORING_DASHBOARD_URL: {{ default .Values.config.telemetry.dashboardUrl $monitoring.dashboardUrl | quote }}
+  MONITORING_DASHBOARD_ALLOWED_ROLES: {{ ternary (get $monitoring "dashboardAllowedRoles") .Values.config.telemetry.dashboardAllowedRoles (hasKey $monitoring "dashboardAllowedRoles") | quote }}
   TELEMETRY_SAMPLE_RATE: {{ default .Values.config.telemetry.telemetrySampleRate $monitoring.telemetrySampleRate | quote }}
   MONITORING_TRACE_CONTENT_MODE: {{ default .Values.config.telemetry.traceContentMode $monitoring.traceContentMode | quote }}
   MONITORING_TRACE_MAX_CHARS: {{ default .Values.config.telemetry.traceMaxChars $monitoring.traceMaxChars | quote }}
   MONITORING_TRACE_MAX_ITEMS: {{ default .Values.config.telemetry.traceMaxItems $monitoring.traceMaxItems | quote }}
 
-  # Market Backend Address
-  MARKET_BACKEND: {{ .Values.config.marketBackend | quote }}
-
   # Skip proxy
   skip_proxy: {{ .Values.config.skipProxy | quote }}
   UMASK: {{ .Values.config.umask | quote }}
   SKILLS_PATH: {{ .Values.config.skillsPath | quote }}
+  MEMORY_PROVIDER_PLUGINS_DIR: {{ .Values.config.memoryProviderPluginsDir | quote }}
+  LOG_DIR: {{ .Values.config.logDir | quote }}
 
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}

@@ -17,6 +17,14 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { Chat } from "./assistant-ui/chat";
+import {
+  HumanInteractionCards,
+  useHumanInteractionController,
+} from "@/features/humanInteraction";
+import {
+  RunMessageQueueContext,
+  useRunMessageQueue,
+} from "@/features/humanInteraction/useRunMessageQueue";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
 import {
@@ -513,6 +521,45 @@ const HomeContent: FC<{
     setSelectedAgent,
   ]);
 
+  const [enableHitl, setEnableHitl] = useState(false);
+  const hitlIsRunning = useAuiState((state) => state.thread.isRunning);
+  const continueHitl = useCallback(
+    (runId: string, after: number) => {
+      if (!activeConversationId || runtime.thread.getState().isRunning) return;
+      const messages = runtime.thread.getState().messages;
+      runtime.thread.resumeRun({
+        parentId: messages.at(-1)?.id ?? null,
+        sourceId: null,
+        runConfig: {
+          custom: {
+            threadId: String(activeConversationId),
+            hitlRunId: runId,
+            hitlAfterEvent: after,
+            resume: true,
+            onGenerationStopped: handleGenerationStopped,
+          },
+        },
+        stream: async function* (options) {
+          const result = remoteChatModelAdapter.run(options);
+          if (Symbol.asyncIterator in result) yield* result;
+          else yield await result;
+        },
+      });
+    },
+    [activeConversationId, runtime, handleGenerationStopped]
+  );
+  const hitlController = useHumanInteractionController({
+    conversationId: Number(activeConversationId) || undefined,
+    onEnabledChange: setEnableHitl,
+    isRunning: hitlIsRunning,
+    onContinue: continueHitl,
+  });
+  const runMessageQueue = useRunMessageQueue({
+    scope: activeThreadId || runtimeMainThreadId || "new",
+    runtime,
+    controller: hitlController,
+  });
+
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
   // `onServerConversationId` lets the adapter report back the server-issued
@@ -536,7 +583,9 @@ const HomeContent: FC<{
         onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         onGenerationStopped: handleGenerationStopped,
+        onHumanInteractionEvent: hitlController.refresh,
         enablePlan: chatMode === "planning",
+        enableHitl,
         ...(activeThreadId
           ? {
               onServerConversationId: (
@@ -566,6 +615,8 @@ const HomeContent: FC<{
     handleKnowledgeScopeResolved,
     handleGenerationStopped,
     handleServerConversationId,
+    hitlController.refresh,
+    enableHitl,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail
@@ -680,10 +731,11 @@ const HomeContent: FC<{
     return () => setServerConversationIdState(null);
   }, [serverConversationIdsRef, activeThreadId]);
 
-  const handleThreadBack = useCallback(() => {
+  const handleThreadBack = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
+    await runtime.threads.switchToNewThread();
     onBack();
-  }, [onBack]);
+  }, [onBack, runtime]);
 
   const handlePrepareNewConversation = useCallback(() => {
     // Do not restore the agent from the thread that is being left.
@@ -700,6 +752,11 @@ const HomeContent: FC<{
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
       await runtime.threads.switchToNewThread();
+      const thread = runtime.threads.getItemById(
+        runtime.threads.getState().mainThreadId
+      );
+      await thread.initialize();
+      await thread.updateCustom({ agentId: agent.id });
       onAgentSelected(agent);
     },
     [runtime, onAgentSelected]
@@ -726,30 +783,37 @@ const HomeContent: FC<{
         </SidebarProvider>
       </div>
 
-      <div className="flex-1 min-w-0">
-        <Chat
-          generatedTitle={
-            activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-          }
-          conversationId={
-            activeConversationId && Number(activeConversationId) > 0
-              ? Number(activeConversationId)
-              : undefined
-          }
-          isLoadingAgents={isLoadingAgents}
-          selectedAgent={selectedAgent}
-          onAgentSelected={handleAgentSelectedFromLanding}
-          onBack={handleThreadBack}
-          chatMode={chatMode}
-          onChatModeChange={handleChatModeChange}
-          isDictationConfigured={isDictationConfigured}
-          knowledgeScope={knowledgeScope}
-          knowledgePreview={knowledgePreview}
-          knowledgeCapabilities={knowledgeCapabilities}
-          onKnowledgeScopeChange={handleKnowledgeScopeChange}
-          runtimeMetadata={runtimeMetadata}
-          onRuntimeMetadataChange={handleRuntimeMetadataChange}
-        />
+      <div className="flex min-h-0 flex-1 min-w-0 flex-col">
+        <div className="min-h-0 flex-1">
+          <RunMessageQueueContext.Provider value={runMessageQueue}>
+            <Chat
+              generatedTitle={
+                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+              }
+              conversationId={
+                activeConversationId && Number(activeConversationId) > 0
+                  ? Number(activeConversationId)
+                  : undefined
+              }
+              isLoadingAgents={isLoadingAgents}
+              selectedAgent={selectedAgent}
+              interactionContent={
+                <HumanInteractionCards controller={hitlController} />
+              }
+              onAgentSelected={handleAgentSelectedFromLanding}
+              onBack={handleThreadBack}
+              chatMode={chatMode}
+              onChatModeChange={handleChatModeChange}
+              isDictationConfigured={isDictationConfigured}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={handleKnowledgeScopeChange}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={handleRuntimeMetadataChange}
+            />
+          </RunMessageQueueContext.Provider>
+        </div>
       </div>
     </div>
   );

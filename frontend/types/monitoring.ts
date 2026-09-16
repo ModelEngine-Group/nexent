@@ -21,6 +21,7 @@ export interface MonitoringStatus {
   telemetry_enabled: boolean;
   provider: string;
   dashboard_url?: string | null;
+  dashboard_allowed_roles?: string[];
   dashboard_port?: string | number | null;
   dashboard_path?: string | null;
 }

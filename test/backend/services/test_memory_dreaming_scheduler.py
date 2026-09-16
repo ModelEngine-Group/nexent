@@ -27,11 +27,13 @@ def mock_consts(monkeypatch):
 def inline_to_thread(monkeypatch):
     """Keep adapter unit tests deterministic and free of executor threads."""
 
-    async def run_inline(func, *args, **kwargs):
+    async def run_inline(_task_name, func, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.asyncio.to_thread",
+        "services.memory_dreaming_scheduler.run_blocking",
         run_inline,
     )
 
@@ -54,7 +56,7 @@ async def test_lease_store_recover(monkeypatch, inline_to_thread):
     store = DreamingLeaseStore()
     await store.recover()
 
-    mock_recover.assert_called_once()
+    mock_recover.assert_called_once_with(True)
 
 
 @pytest.mark.asyncio

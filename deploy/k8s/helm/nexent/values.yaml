@@ -15,9 +15,21 @@ global:
       size: "5Gi"
       localPath: "/var/lib/nexent-data/skills"
       existingClaim: "nexent-skills"
+    memoryPlugins:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/memory-provider-plugins"
+      existingClaim: "nexent-memory-plugins"
+    logs:
+      size: "5Gi"
+      localPath: "/var/lib/nexent-data/logs"
+      existingClaim: "nexent-logs"
+    projectConfig:
+      size: "1Gi"
+      localPath: "/var/lib/nexent-data/project-config"
+      existingClaim: "nexent-project-config"
   deploymentVersion: "full"
   deploymentComponents:
-    infrastructure: true
+    infrastructure: false
     application: true
     data-process: true
     supabase: true
@@ -46,6 +58,7 @@ global:
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"
@@ -85,14 +98,6 @@ nexent-common:
       sslVerify: "true"
       caBundle: ""
 
-nexent-elasticsearch:
-  enabled: true
-nexent-postgresql:
-  enabled: true
-nexent-redis:
-  enabled: true
-nexent-minio:
-  enabled: true
 nexent-config:
   enabled: true
   replicaCount: 1
@@ -107,6 +112,8 @@ nexent-northbound:
 nexent-web:
   enabled: true
   replicaCount: 1
+  config:
+    fileUploadSizeLimit: "10"
 nexent-data-process:
   enabled: true
 nexent-supabase-kong:

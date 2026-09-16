@@ -3,11 +3,6 @@ Unit tests for backend.apps.agent_app module.
 
 Tests all agent management API endpoints including runtime and configuration operations.
 """
-from apps.agent_app import (
-    agent_config_router,
-    agent_runtime_router,
-    nl2agent_run_api,
-)
 import atexit
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
 
@@ -24,7 +19,13 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.exceptions import ForbiddenError, UnauthorizedError, ValidationError
+from consts.exceptions import (
+    ForbiddenError,
+    RuntimeCapacityExceededError,
+    RuntimeQueueTimeoutError,
+    UnauthorizedError,
+    ValidationError,
+)
 from consts.model import NL2AgentRunRequest
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
@@ -131,13 +132,20 @@ sys.modules['utils.monitoring'].monitoring_manager = monitoring_manager_mock
 sys.modules['utils.monitoring'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['agents.agent_run_manager'] = MagicMock()
-sys.modules['services.agent_service'] = MagicMock()
-sys.modules['services.skill_service'] = MagicMock()
+sys.modules['management.services.agent.service'] = MagicMock()
+sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['services.conversation_management_service'] = MagicMock()
 sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.agent_version_service'] = MagicMock()
+sys.modules['services.prompt_service'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
+from apps.agent_app import (
+    agent_config_router,
+    agent_runtime_router,
+    nl2agent_run_api,
+)
+
 
 
 # Create FastAPI apps for runtime and config routers
@@ -195,10 +203,45 @@ async def test_agent_run_api(mocker, mock_auth_header):
     mock_run_agent_stream.assert_called_once()
     assert "text/event-stream" in response.headers["content-type"]
 
-    # Check streamed content
     content = response.content.decode()
     assert "data: chunk1" in content
     assert "data: chunk2" in content
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code", "expected_retry_after"),
+    [
+        (RuntimeCapacityExceededError(), "RUNTIME_CAPACITY_FULL", "1"),
+        (RuntimeQueueTimeoutError(2.2), "RUNTIME_QUEUE_TIMEOUT", "3"),
+    ],
+)
+def test_ut_be_tlm_027_agent_run_overload_is_json_before_sse(
+    mocker,
+    mock_auth_header,
+    error,
+    expected_code,
+    expected_retry_after,
+):
+    mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock, side_effect=error)
+
+    response = runtime_client.post(
+        "/agent/run",
+        json={"agent_id": 1, "query": "test", "is_debug": True},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == expected_retry_after
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {
+        "code": expected_code,
+        "message": (
+            "Agent runtime is at capacity."
+            if expected_code == "RUNTIME_CAPACITY_FULL"
+            else "Agent runtime queue wait timed out."
+        ),
+        "retryable": True,
+    }
 
 
 @pytest.mark.asyncio
@@ -1603,16 +1646,16 @@ async def test_export_agent_api_empty_response(mocker, mock_auth_header):
 
 def _alias_services_for_tests():
     """
-    Provide fallback aliases for dynamic `services.agent_service` imports used by the routers.
+    Provide fallback aliases for dynamic `management.services.agent.service` imports used by the routers.
     Map `backend.services.*` modules to `services.*` so mocker.patch can locate them.
     """
     import sys
     try:
         import backend.services as b_services
-        import backend.services.agent_service as b_agent_service
+        import management.services.agent.service as b_agent_service
         # Map both the package and submodule for compatibility
         sys.modules['services'] = b_services
-        sys.modules['services.agent_service'] = b_agent_service
+        sys.modules['management.services.agent.service'] = b_agent_service
     except Exception:
         # If the project already supports direct imports, ignore the failure
         pass
@@ -2733,3 +2776,27 @@ def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Agent icon retrieval error."
+
+
+@pytest.mark.parametrize("status", [404, 409, 410, 422, 503])
+def test_northbound_run_preserves_hitl_errors(mocker, status):
+    from services.human_interaction.models import InteractionError
+
+    mocker.patch("apps.agent_app.verify_internal_runtime_jwt", return_value=("owner", "tenant"))
+    mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock, side_effect=InteractionError("HITL", status))
+    response = runtime_client.post("/agent/internal/northbound/run", json={"query": "hello", "enable_hitl": True})
+    assert response.status_code == status
+
+
+def test_northbound_stop_terminates_waiting_durable_run(mocker):
+    mocker.patch("consts.const.HITL_ENABLED", True)
+    mocker.patch("apps.agent_app.verify_internal_runtime_jwt", return_value=("owner", "tenant"))
+    service = MagicMock()
+    service.repository.latest.return_value = "durable-run"
+    mocker.patch("services.human_interaction.application.get_service", return_value=service)
+    stop = mocker.patch("apps.agent_app.stop_agent_tasks", return_value={"message": "stopped"})
+    response = runtime_client.post("/agent/internal/northbound/stop/7")
+    assert response.status_code == 200
+    service.repository.latest.assert_called_once_with("tenant", "owner", 7, active_only=True)
+    service.control.assert_called_once_with("durable-run", "tenant", "owner", "terminate")
+    stop.assert_called_once_with(7, "owner")

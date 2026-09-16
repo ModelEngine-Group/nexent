@@ -8,7 +8,8 @@ time settings only; Agent/runtime fields are applied after extraction.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
+
+from utils.time_context_utils import strip_current_time_prefix
 import json
 import logging
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from typing import Any, Callable, Dict, Optional
 
 from database import agent_automation_db
 from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
 from nexent.core.tools.create_scheduled_task_tool import (
     CreateScheduledTaskProposalTool,
 )
@@ -34,14 +36,6 @@ logger = logging.getLogger("agent_automation.tool_adapter")
 DEFAULT_AUTOMATION_TIMEZONE = "Asia/Shanghai"
 
 
-def _strip_runtime_time_prefix(message: str) -> str:
-    """Remove the runtime-only current-time header from the user request."""
-    normalized = str(message or "")
-    if normalized.startswith("[Current time:"):
-        close_index = normalized.find("]", len("[Current time:"))
-        if close_index >= 0:
-            return normalized[close_index + 1:].lstrip("\n").strip()
-    return normalized
 
 
 def _run_coroutine(coro):
@@ -49,8 +43,20 @@ def _run_coroutine(coro):
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+    manager = get_current_thread_manager()
+    if manager is None:
+        from nexent.core.agents.run_agent import _get_default_agent_thread_manager
+
+        manager = _get_default_agent_thread_manager()
+    return manager.run_sync(
+        "model-tool-io",
+        ManagedTaskSpec(
+            task_name="automation-tool-coroutine",
+            owner="runtime",
+        ),
+        asyncio.run,
+        coro,
+    )
 
 
 @dataclass(frozen=True)
@@ -140,7 +146,7 @@ class AgentLoopAutomationToolAdapter:
         # The model argument is intentionally not forwarded to extraction. The
         # persisted current user message is the authoritative business input.
         del request_text
-        user_message = _strip_runtime_time_prefix(context.user_message)
+        user_message = strip_current_time_prefix(str(context.user_message or ""))
         language = detect_instruction_language(user_message)
         if context.source_message_id is None:
             message = (

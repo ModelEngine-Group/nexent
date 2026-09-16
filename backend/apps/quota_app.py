@@ -88,7 +88,7 @@ def _require_platform_quota_manager(authorization: Optional[str]) -> str:
 
 def _get_manageable_index_names(tenant_id: str, user_id: str) -> set[str]:
     """Return KB index names the current user can manage."""
-    from services.vectordatabase_service import (
+    from management.services.knowledge_base.service import (
         ElasticSearchService,
         get_vector_db_core,
     )

@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -394,6 +395,174 @@ class TestHardDeleteEvaluationSet:
         assert deleted == 2
         assert q.delete.call_count == 2
         session.commit.assert_called_once()
+
+
+class TestStartupRecovery:
+    def test_interrupted_generation_keeps_baseline_and_deletes_appended_cases(
+        self, session_factory
+    ):
+        from backend.database import evaluation_set_db
+
+        session, _ = session_factory
+        evaluation_set = SimpleNamespace(
+            evaluation_set_id=7,
+            tenant_id="tenant-1",
+            case_count=2,
+            generation_status="GENERATING",
+            generation_progress=80,
+        )
+        set_query = MagicMock(name="set_query")
+        set_query.filter.return_value = set_query
+        set_query.with_for_update.return_value = set_query
+        set_query.all.return_value = [evaluation_set]
+        case_query = MagicMock(name="case_query")
+        case_query.filter.return_value = case_query
+        case_query.order_by.return_value = case_query
+        case_query.all.return_value = [(10,), (11,), (12,), (13,)]
+        delete_query = MagicMock(name="delete_query")
+        delete_query.filter.return_value = delete_query
+        delete_query.delete.return_value = 2
+        session.query.side_effect = [set_query, case_query, delete_query]
+
+        assert evaluation_set_db.recover_interrupted_generations() == 1
+        assert evaluation_set.generation_status == "FAILED"
+        assert evaluation_set.generation_progress == 0
+        delete_query.delete.assert_called_once_with(synchronize_session=False)
+
+    def test_interrupted_generation_without_appended_cases_skips_delete(
+        self, session_factory
+    ):
+        from backend.database import evaluation_set_db
+
+        session, _ = session_factory
+        evaluation_set = SimpleNamespace(
+            evaluation_set_id=7,
+            tenant_id="tenant-1",
+            case_count=2,
+            generation_status="GENERATING",
+            generation_progress=20,
+        )
+        set_query = MagicMock(name="set_query")
+        set_query.filter.return_value = set_query
+        set_query.with_for_update.return_value = set_query
+        set_query.all.return_value = [evaluation_set]
+        case_query = MagicMock(name="case_query")
+        case_query.filter.return_value = case_query
+        case_query.order_by.return_value = case_query
+        case_query.all.return_value = [(10,), (11,)]
+        session.query.side_effect = [set_query, case_query]
+
+        assert evaluation_set_db.recover_interrupted_generations() == 1
+        assert evaluation_set.generation_status == "FAILED"
+        assert evaluation_set.generation_progress == 0
+        assert session.query.call_count == 2
+
+    def test_cleans_virtual_sets_that_were_never_linked_to_a_run(
+        self, session_factory
+    ):
+        from backend.database import evaluation_set_db
+
+        session, _ = session_factory
+        referenced_query = MagicMock(name="referenced_query")
+        referenced_query.filter.return_value = referenced_query
+        orphan_query = MagicMock(name="orphan_query")
+        orphan_query.filter.return_value = orphan_query
+        orphan_query.all.return_value = [(30, "tenant-1"), (31, "tenant-2")]
+        case_delete = MagicMock(name="case_delete")
+        case_delete.filter.return_value = case_delete
+        set_delete = MagicMock(name="set_delete")
+        set_delete.filter.return_value = set_delete
+        session.query.side_effect = [
+            referenced_query,
+            orphan_query,
+            case_delete,
+            set_delete,
+        ]
+
+        assert evaluation_set_db.cleanup_orphaned_virtual_evaluation_sets() == 2
+        case_delete.delete.assert_called_once_with(synchronize_session=False)
+        set_delete.delete.assert_called_once_with(synchronize_session=False)
+
+    def test_cleanup_virtual_sets_skips_delete_when_none_are_orphaned(
+        self, session_factory
+    ):
+        from backend.database import evaluation_set_db
+
+        session, _ = session_factory
+        referenced_query = MagicMock(name="referenced_query")
+        referenced_query.filter.return_value = referenced_query
+        orphan_query = MagicMock(name="orphan_query")
+        orphan_query.filter.return_value = orphan_query
+        orphan_query.all.return_value = []
+        session.query.side_effect = [referenced_query, orphan_query]
+
+        assert evaluation_set_db.cleanup_orphaned_virtual_evaluation_sets() == 0
+        assert session.query.call_count == 2
+
+    def test_materializes_virtual_set_and_links_pending_run_in_one_session(
+        self, session_factory
+    ):
+        from backend.database import evaluation_set_db
+
+        session, _ = session_factory
+        run = SimpleNamespace(
+            evaluation_set_id=0,
+            progress_total=0,
+            updated_by=None,
+        )
+        query = MagicMock(name="run_query")
+        query.filter.return_value = query
+        query.with_for_update.return_value = query
+        query.first.return_value = run
+        session.query.return_value = query
+
+        def assign_primary_key():
+            for invocation in session.add.call_args_list:
+                record = invocation.args[0]
+                if isinstance(record, evaluation_set_db.EvaluationSet):
+                    record.evaluation_set_id = 99
+
+        session.flush.side_effect = assign_primary_key
+
+        set_id = evaluation_set_db.materialize_virtual_evaluation_set_for_run(
+            tenant_id="tenant-1",
+            name="[No-Set] recovery",
+            cases=[
+                {"inputs": {"query": "q1"}, "label": {"answer": ""}},
+                {"inputs": {"query": "q2"}, "label": {"answer": ""}},
+            ],
+            created_by="user-1",
+            agent_evaluation_id=5,
+        )
+
+        assert set_id == 99
+        assert run.evaluation_set_id == 99
+        assert run.progress_total == 2
+        assert run.updated_by == "user-1"
+        assert session.add.call_count == 3
+
+    def test_materialize_virtual_set_rejects_missing_pending_run(
+        self, session_factory
+    ):
+        from backend.database import evaluation_set_db
+
+        session, _ = session_factory
+        query = MagicMock(name="run_query")
+        query.filter.return_value = query
+        query.with_for_update.return_value = query
+        query.first.return_value = None
+        session.query.return_value = query
+
+        with pytest.raises(evaluation_set_db.AppException):
+            evaluation_set_db.materialize_virtual_evaluation_set_for_run(
+                tenant_id="tenant-1",
+                name="[No-Set] recovery",
+                cases=[],
+                created_by="user-1",
+                agent_evaluation_id=5,
+            )
+
+        session.add.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -125,6 +125,7 @@ class ConversationMessage:
     minio_files = MagicMock(name="ConversationMessage.minio_files")
     opinion_flag = MagicMock(name="ConversationMessage.opinion_flag")
     create_time = MagicMock(name="ConversationMessage.create_time")
+    update_time = MagicMock(name="ConversationMessage.update_time")
     created_by = MagicMock(name="ConversationMessage.created_by")
 
 
@@ -211,6 +212,7 @@ from backend.database.conversation_db import (
     delete_conversations_batch,
     delete_source_image,
     delete_source_search,
+    fail_streaming_assistant_messages,
     get_conversation,
     get_conversation_history,
     get_historical_context,
@@ -246,6 +248,50 @@ from consts.exceptions import (
     ConversationNotFoundError,
     RuntimeMetadataVersionConflict,
 )
+
+
+def test_fail_streaming_assistant_messages_returns_runtime_identities(
+    monkeypatch, mock_session_ctx
+):
+    """Startup recovery fails only the rows it locked as streaming."""
+    from types import SimpleNamespace
+
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = [
+        SimpleNamespace(message_id=7, conversation_id=11, created_by="user-1"),
+        SimpleNamespace(message_id=8, conversation_id=12, created_by="user-2"),
+    ]
+    query.update.return_value = 2
+    session.query.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    rows = fail_streaming_assistant_messages()
+
+    assert rows == [
+        {"message_id": 7, "conversation_id": 11, "user_id": "user-1"},
+        {"message_id": 8, "conversation_id": 12, "user_id": "user-2"},
+    ]
+    updates = query.update.call_args.args[0]
+    assert updates["status"] == "failed"
+    assert query.with_for_update.called
+
+
+def test_fail_streaming_assistant_messages_returns_empty_without_rows(
+    monkeypatch, mock_session_ctx
+):
+    session, ctx = mock_session_ctx
+    query = MagicMock(name="query")
+    query.filter.return_value = query
+    query.with_for_update.return_value = query
+    query.all.return_value = []
+    session.query.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+
+    assert fail_streaming_assistant_messages() == []
+    query.update.assert_not_called()
 
 
 @pytest.fixture(autouse=True)
@@ -2090,6 +2136,7 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
             "score_overall": 0.95,
             "score_accuracy": 0.90,
             "score_semantic": 0.88,
+            "retrieval_highlight_terms": ["RFT-2026-042"],
         },
         user_id="actor",
     )
@@ -2097,6 +2144,7 @@ def test_create_source_search_with_optional_fields(monkeypatch, fresh_insert_moc
     assert search_id == 89
     assert fresh_insert_mock["score_overall"] == 0.95
     assert fresh_insert_mock["score_accuracy"] == 0.90
+    assert fresh_insert_mock["retrieval_highlight_terms"] == ["RFT-2026-042"]
 
 
 # =============================================================================
@@ -3239,7 +3287,13 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
 
     unit_id = save_history_summary(
         1, "user-a", "tenant-a", {"task_overview": "done"}, 24,
-        trigger="soft_budget_exceeded")
+        trigger="compaction_trigger_threshold_exceeded",
+        history_tokens_before=9000,
+        history_tokens_after=5000,
+        compaction_attempts=2,
+        compaction_trigger_threshold_tokens=8000,
+        compaction_target_tokens=6000,
+    )
 
     assert unit_id == 1001
     assert fresh_insert_mock["message_id"] == 24
@@ -3248,7 +3302,12 @@ def test_save_history_summary_appends_after_last_unit(monkeypatch, mock_session_
     assert fresh_insert_mock["unit_status"] == "completed"
     payload = __import__("json").loads(fresh_insert_mock["unit_content"])
     assert payload["covered_through_message_id"] == 24
-    assert payload["trigger"] == "soft_budget_exceeded"
+    assert payload["trigger"] == "compaction_trigger_threshold_exceeded"
+    assert payload["history_tokens_before"] == 9000
+    assert payload["history_tokens_after"] == 5000
+    assert payload["compaction_attempts"] == 2
+    assert payload["compaction_trigger_threshold_tokens"] == 8000
+    assert payload["compaction_target_tokens"] == 6000
 
 
 def test_save_history_summary_rejects_incomplete_covered_range(

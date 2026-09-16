@@ -23,20 +23,28 @@ from rapidfuzz import fuzz
 
 from agents.create_agent_info import (
     _resolve_input_budget,
-    _resolve_safe_input_budget,
+    _resolve_context_budget,
     create_model_config_list,
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
+from consts.const import (
+    ENABLE_AIDP_KNOWLEDGE,
+    LOCAL_MCP_SERVER,
+    MODEL_CONFIG_MAPPING,
+)
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import update_agent_draft_fields
+from database.agent_db import (
+    query_all_agent_info_by_tenant_id,
+    update_agent_draft_fields,
+)
 from database.skill_db import query_enabled_skill_instances
 from database.tool_db import query_all_enabled_tool_instances, query_all_tools
 from services.agent_draft_permission_service import (
     AgentDraftEditError,
     require_agent_draft_edit,
 )
+from services.thread_lifecycle_service import runtime_thread_manager
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
@@ -63,6 +71,21 @@ logger = logging.getLogger(__name__)
 MINIMUM_RECOMMENDATION_SCORE = 0.45
 MAX_RECOMMENDATIONS = 5
 MAX_BINDING_CANDIDATES = 12
+
+_LOCAL_KNOWLEDGE_TOOL_NAMES = frozenset({
+    "knowledge_base_search",
+    "ind_aidp_search",
+})
+_AIDP_KNOWLEDGE_TOOL_NAME = "aidp_search"
+
+
+def _is_nl2agent_recommendable_tool(name: str) -> bool:
+    """Return whether a deployment permits NL2Agent to recommend a tool."""
+    if ENABLE_AIDP_KNOWLEDGE:
+        return name not in _LOCAL_KNOWLEDGE_TOOL_NAMES
+    return name != _AIDP_KNOWLEDGE_TOOL_NAME
+
+
 STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
 UNINSTALLED_SOURCE_PAGE_SIZE = 100
@@ -99,7 +122,7 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
     def add_message(self, agent_name, process_type, content, **kwargs):
         if self.boundary_reached and (
             (process_type == ProcessType.FINAL_ANSWER and content == self._STOP_FINAL_ANSWER)
-            or (process_type == ProcessType.ERROR and content == self._STOP_ERROR)
+            or (process_type == ProcessType.WARNING and content == self._STOP_ERROR)
         ):
             return
 
@@ -146,7 +169,7 @@ def _update_agent_draft_from_fields(
     user_id: str,
 ) -> dict[str, Any]:
     try:
-        require_agent_draft_edit(
+        draft = require_agent_draft_edit(
             agent_id=agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -155,6 +178,16 @@ def _update_agent_draft_from_fields(
         raise Nl2AgentDraftSaveError(exc.code) from exc
 
     patch = fields.model_dump(mode="python", exclude_unset=True)
+    generated_name = patch.get("name")
+    if generated_name is not None:
+        if str(draft.get("name") or "").strip():
+            raise Nl2AgentDraftSaveError("agent_name_already_set")
+        if any(
+            agent.get("agent_id") != agent_id
+            and agent.get("name") == generated_name
+            for agent in query_all_agent_info_by_tenant_id(tenant_id)
+        ):
+            raise Nl2AgentDraftSaveError("agent_name_duplicate", retryable=True)
     try:
         rowcount = update_agent_draft_fields(
             agent_id=agent_id,
@@ -423,7 +456,7 @@ async def _load_installed_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.skill_service import SkillService
+    from management.services.skill.service import SkillService
     from services.tool_configuration_service import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
@@ -444,6 +477,7 @@ async def _load_installed_resource_catalog(
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or tool.get("is_available") is not True
             or name in internal_names
+            or not _is_nl2agent_recommendable_tool(name)
         ):
             continue
         tool_id = tool.get("tool_id")
@@ -760,7 +794,7 @@ async def _load_internal_uninstalled_resource_catalog(
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )
-    from services.skill_service import get_official_skills_with_status
+    from management.services.skill.service import get_official_skills_with_status
 
     catalog: list[dict[str, Any]] = []
     for skill in get_official_skills_with_status(tenant_id=tenant_id):
@@ -1234,6 +1268,12 @@ async def validate_agent_generation_complete_impl(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    name = draft.get("name")
+    if (
+        not isinstance(name, str)
+        or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,59}", name)
+    ):
+        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"])
     description = draft.get("description")
     if not isinstance(description, str) or not description.strip():
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
@@ -1308,23 +1348,23 @@ async def build_nl2agent_run_info(
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
         _resolve_input_budget(default_model)
     )
-    safe_input_budget_snapshot = _resolve_safe_input_budget(
+    context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
         agent_requested_output_tokens=None,
         request_requested_output_tokens=None,
     )
-    if safe_input_budget_snapshot is not None:
-        soft_input_budget_tokens = safe_input_budget_snapshot[
-            "soft_input_budget_tokens"
-        ]
-        hard_input_budget_tokens = safe_input_budget_snapshot[
-            "hard_input_budget_tokens"
-        ]
-        token_threshold = soft_input_budget_tokens
+    if context_budget_snapshot is not None:
+        effective_input_limit_tokens = context_budget_snapshot.effective_input_limit_tokens
+        compaction_trigger_threshold_tokens = (
+            context_budget_snapshot.compaction_trigger_threshold_tokens
+        )
+        compaction_target_tokens = context_budget_snapshot.compaction_target_tokens
+        token_threshold = compaction_trigger_threshold_tokens
     else:
-        soft_input_budget_tokens = 0
-        hard_input_budget_tokens = 0
+        effective_input_limit_tokens = 0
+        compaction_trigger_threshold_tokens = 0
+        compaction_target_tokens = 0
         token_threshold = input_budget
 
     context_window_tokens = (
@@ -1336,11 +1376,12 @@ async def build_nl2agent_run_info(
     agent_config.context_manager_config = ContextManagerConfig(
         token_threshold=token_threshold,
         context_window_tokens=context_window_tokens,
-        soft_input_budget_tokens=soft_input_budget_tokens,
-        hard_input_budget_tokens=hard_input_budget_tokens,
+        effective_input_limit_tokens=effective_input_limit_tokens,
+        compaction_trigger_threshold_tokens=compaction_trigger_threshold_tokens,
+        compaction_target_tokens=compaction_target_tokens,
     )
     agent_config.capacity_snapshot = capacity_snapshot
-    agent_config.safe_input_budget_snapshot = safe_input_budget_snapshot
+    agent_config.context_budget_snapshot = context_budget_snapshot
     mcp_config: dict[str, Any] = {
         "url": urljoin(LOCAL_MCP_SERVER, "sse"),
         "transport": "sse",
@@ -1367,7 +1408,7 @@ async def build_nl2agent_run_info(
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,
-        safe_input_budget_snapshot=safe_input_budget_snapshot,
+        context_budget_snapshot=context_budget_snapshot,
         enable_planning=False,
         sandbox_config=None,
         redis_client=None,
@@ -1394,7 +1435,10 @@ async def create_nl2agent_stream(
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
-            async for chunk in agent_run(run_info):
+            async for chunk in agent_run(
+                run_info,
+                thread_manager=runtime_thread_manager,
+            ):
                 if boundary_delivered:
                     continue
                 yield f"data: {chunk}\n\n"

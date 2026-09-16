@@ -119,12 +119,13 @@ cd deploy
 bash deploy.sh docker --components infrastructure,monitoring --monitoring-provider grafana
 ```
 
-`deploy/env/monitoring.env` 中的 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口。speed 模式下配置 URL 后即可显示；标准模式下只有超级管理员可见。
+`deploy/env/monitoring.env` 中的 `MONITORING_DASHBOARD_URL` 控制前端顶栏监控入口地址，`MONITORING_DASHBOARD_ALLOWED_ROLES` 控制入口对哪些角色可见。默认值 `SU,SPEED` 保持标准模式下超级管理员可见、speed 模式下可见的现有行为。
 
 ```bash
 ENABLE_TELEMETRY=true
 MONITORING_PROVIDER=grafana
 MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
+MONITORING_DASHBOARD_ALLOWED_ROLES=SU,ADMIN,SPEED
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
@@ -211,15 +212,18 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 - 用户反馈收集
 - 模型成本追踪
 
+> v2.5.0 起额外暴露上下文管理与提示词缓存命中指标（context/cache metrics），可用于评估压缩效果与缓存收益。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 启用/禁用监控 |
 | `MONITORING_PROVIDER` | `otlp` | 平台配置和本地部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
-| `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址；speed 模式下可见，标准模式下仅超级管理员可见 |
+| `MONITORING_DASHBOARD_URL` | （空） | 前端顶栏监控入口跳转 URL，需配置为浏览器可访问地址 |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | `SU,SPEED` | 可看到监控入口的角色，使用逗号分隔；配置为空时对所有角色隐藏 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 监控平台项目名 |
-| `MONITORING_TRACE_CONTENT_MODE` | `full` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
+| `MONITORING_TRACE_CONTENT_MODE` | `summary` | Trace payload 记录模式：`summary` 写入有界预览和结构元数据，`metrics` 只写结构/大小元数据，`full` 在 `MONITORING_TRACE_MAX_CHARS` 限制内保留完整 payload |
 | `MONITORING_TRACE_MAX_CHARS` | `4000` | 每个 payload 预览最多写入的字符数 |
 | `MONITORING_TRACE_MAX_ITEMS` | `20` | dict/list 预览最多写入的 key 或 item 数 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | 服务标识 |
@@ -238,7 +242,7 @@ echo -n "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span；默认关闭，避免 AI trace 被普通 HTTP 请求刷屏 |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | （空） | FastAPI 自动埋点排除 URL，逗号分隔正则；例如只看 agent 业务 span 时可设为 `/agent/run` |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span；流式接口建议保持默认值 |
-| `OTEL_COLLECTOR_VERSION` | `0.150.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
+| `OTEL_COLLECTOR_VERSION` | `0.151.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
 | `PHOENIX_VERSION` | `15` | 本地 Phoenix 镜像版本 |
 | `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
 | `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
@@ -288,7 +292,7 @@ Agent 上下文指标由 SDK 生命周期自动写入。每个 action step 会�
 
 ```python
 @monitoring_manager.monitor_llm_call("gpt-4", "chat_completion")
-def call_llm(messages):
+def call_llm(messages, **kwargs):
     return llm_response
 ```
 

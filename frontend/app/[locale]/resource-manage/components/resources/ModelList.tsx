@@ -32,8 +32,7 @@ import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
-import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
+import { ModelAddDialogV2 } from "../../../models/components/model/ModelAddDialogV2";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
 interface UnifiedModelRow extends ModelOption {
   request_count?: number;
@@ -540,14 +539,14 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         className="flex-1 [&_.ant-table]:h-full [&_.ant-table-thead>tr>th]:whitespace-nowrap [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-title]:mr-3 [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-sorter]:shrink-0"
       />
 
-      <ModelAddDialog
+      <ModelAddDialogV2
         isOpen={addDialogVisible}
         onClose={handleAddDialogClose}
         onSuccess={handleAddDialogSuccess}
         tenantId={tenantId || undefined}
       />
 
-      <ModelEditDialog
+      <ModelAddDialogV2
         isOpen={editDialogVisible}
         model={editingModel}
         onClose={handleEditDialogClose}

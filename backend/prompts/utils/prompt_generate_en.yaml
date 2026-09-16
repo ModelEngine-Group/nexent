@@ -305,15 +305,15 @@ AGENT_DESCRIPTION_SYSTEM_PROMPT: |-
   You can refer to the task description, combined with tool and assistant information, to generate a task description for the current Agent application.
   ### Requirements:
   1. Only display the Agent description content, do not display irrelevant content or irrelevant formatting.
-  2. The Agent description should not exceed three sentences, and use second person description, mainly including: who you are, what capabilities you have, what you can do.
+  2. The Agent description should not exceed three sentences, and use first person description, mainly including: who I am, what capabilities I have, what I can do.
   3. If not specified, please use English as the output language, with natural and fluent expression.
 
   ### Reference Examples:
   Example 1:
-  You are a travel planning assistant that can plan travel routes based on user questions and provide travel advice.
+  I am a travel planning assistant that can plan travel routes based on user questions and provide travel advice.
 
   Example 2:
-  You are a web search assistant that can search for corresponding information based on user questions and provide search results.
+  I am a web search assistant that can search for corresponding information based on user questions and provide search results.
 
 
 USER_PROMPT: |-

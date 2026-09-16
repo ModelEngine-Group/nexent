@@ -240,8 +240,6 @@ def run_async(coro):
             nest_asyncio.apply()
             return loop.run_until_complete(coro)
         except ImportError:
-            import concurrent.futures
-
             def run_in_thread():
                 new_loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(new_loop)
@@ -250,9 +248,18 @@ def run_async(coro):
                 finally:
                     new_loop.close()
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(run_in_thread)
-                return future.result()
+            from nexent.core.agents.run_agent import _get_default_agent_thread_manager
+            from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
+
+            manager = get_current_thread_manager() or _get_default_agent_thread_manager()
+            return manager.run_sync(
+                "model-tool-io",
+                ManagedTaskSpec(
+                    task_name="jiuwen-coroutine",
+                    owner="runtime",
+                ),
+                run_in_thread,
+            )
 
     return loop.run_until_complete(coro)
 
