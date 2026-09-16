@@ -581,6 +581,18 @@ export default function AgentPrompt() {
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
               disabled={!canManage && !isSpeedMode}
+              // Show the model-level defaults as placeholders so "empty =
+              // inherit" is visible (the override form starts blank).
+              inheritedDefaults={{
+                display_name: configuringModel.displayName ?? configuringModel.name,
+                context_window_tokens: (configuringModel as any).contextWindowTokens,
+                max_input_tokens: (configuringModel as any).maxInputTokens,
+                max_output_tokens: (configuringModel as any).maxOutputTokens,
+                default_output_reserve_tokens: (configuringModel as any).defaultOutputReserveTokens,
+                tokenizer_family: (configuringModel as any).tokenizerFamily,
+                temperature: (configuringModel as any).temperature,
+                top_p: (configuringModel as any).topP,
+              }}
             />
             {Object.keys(modelParamsOverride[String(configuringModel.id)] ?? {}).length > 0 && (
               <div className="flex justify-end pt-1">
