@@ -180,12 +180,17 @@ export default function CollaborativeAgentSelectorModal({
       ? (agent as Agent).display_name || agent.name
       : agent.name;
     const internalAgent = agent as Agent;
+    const internalVersionName = internalAgent.version_name
+      ? t("agent.collaborative.selector.versionName", {
+          name: internalAgent.version_name,
+        })
+      : undefined;
     const version = isInternal
       ? internalAgent.current_version_no != null
         ? `V${internalAgent.current_version_no}${
-            internalAgent.version_name ? ` · ${internalAgent.version_name}` : ""
+            internalVersionName ? ` · ${internalVersionName}` : ""
           }`
-        : internalAgent.version_name
+        : internalVersionName
       : (agent as A2AExternalAgent).version;
     const isSelected = selectedIds.includes(agentId);
     const AgentIcon = isInternal ? Bot : Globe;

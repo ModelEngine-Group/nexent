@@ -5073,6 +5073,7 @@
   "agent.collaborative.label.external": "外部",
   "agent.collaborative.emptyHint": "暂未选择协作智能体，点击「选择智能体」添加",
   "agent.collaborative.selector.noDescription": "暂无描述",
+  "agent.collaborative.selector.versionName": "名称：{{name}}",
   "agent.collaborative.selector.title": "选择协作智能体",
   "agent.collaborative.selector.tab.internal": "内部协作智能体",
   "agent.collaborative.selector.tab.external": "外部协作智能体",

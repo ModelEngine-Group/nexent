@@ -5059,6 +5059,7 @@
   "agent.collaborative.label.external": "External",
   "agent.collaborative.emptyHint": "No collaborative agent selected. Click 'Select Agent' to add one.",
   "agent.collaborative.selector.noDescription": "No description",
+  "agent.collaborative.selector.versionName": "Name: {{name}}",
   "agent.collaborative.selector.title": "Select Collaborative Agent",
   "agent.collaborative.selector.tab.internal": "Internal Collaborative Agents",
   "agent.collaborative.selector.tab.external": "External Collaborative Agents",
