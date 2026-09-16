@@ -1,3 +1,4 @@
+import math
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Any, List, Dict, Literal
@@ -2392,8 +2393,44 @@ def get_extra_param_keys_for_type(model_type: str) -> List[str]:
     return [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
 
 
+_INVALID_CUSTOM_VALUE = object()
+
+
+def _clean_custom_json_value(value: Any) -> Any:
+    """Return a JSON-compatible copy of a custom parameter value.
+
+    Custom provider parameters intentionally accept the complete JSON value
+    space, not only scalar values. Non-finite floats and Python-only values
+    are rejected because PostgreSQL JSONB and the model request body cannot
+    represent them reliably.
+    """
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else _INVALID_CUSTOM_VALUE
+    if isinstance(value, list):
+        cleaned_list = []
+        for item in value:
+            cleaned_item = _clean_custom_json_value(item)
+            if cleaned_item is _INVALID_CUSTOM_VALUE:
+                return _INVALID_CUSTOM_VALUE
+            cleaned_list.append(cleaned_item)
+        return cleaned_list
+    if isinstance(value, dict):
+        cleaned_dict: Dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                return _INVALID_CUSTOM_VALUE
+            cleaned_item = _clean_custom_json_value(item)
+            if cleaned_item is _INVALID_CUSTOM_VALUE:
+                return _INVALID_CUSTOM_VALUE
+            cleaned_dict[key] = cleaned_item
+        return cleaned_dict
+    return _INVALID_CUSTOM_VALUE
+
+
 def _clean_custom_params(value: Any, logger) -> Optional[Dict[str, Any]]:
-    """Validate the ``__custom__`` payload as string -> primitive.
+    """Validate the ``__custom__`` payload as string -> JSON value.
 
     Returns the cleaned dict (None when empty); malformed entries are dropped
     with a warning so a bad payload cannot corrupt the JSONB column.
@@ -2406,13 +2443,20 @@ def _clean_custom_params(value: Any, logger) -> Optional[Dict[str, Any]]:
         return None
     clean_custom: Dict[str, Any] = {}
     for ck, cv in value.items():
-        if not isinstance(ck, str) or not isinstance(cv, (str, int, float, bool)):
+        if not isinstance(ck, str):
             logger.warning(
-                "__custom__ entry %r must be string -> primitive, dropping",
+                "__custom__ entry %r must have a string key, dropping",
                 ck,
             )
             continue
-        clean_custom[ck] = cv
+        clean_value = _clean_custom_json_value(cv)
+        if clean_value is _INVALID_CUSTOM_VALUE:
+            logger.warning(
+                "__custom__ entry %r must contain JSON-compatible values, dropping",
+                ck,
+            )
+            continue
+        clean_custom[ck] = clean_value
     return clean_custom or None
 
 
@@ -2423,9 +2467,9 @@ def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]])
 
     The reserved key ``__custom__`` is always allowed through: it carries
     user-defined key/value pairs edited in the advanced-settings UI. It is
-    validated to be a dict of string -> primitive (str/int/float/bool);
-    anything else is dropped with a warning so a malformed payload cannot
-    corrupt the JSONB column.
+    validated to be a dict of string -> JSON-compatible value; anything else
+    is dropped with a warning so a malformed payload cannot corrupt the JSONB
+    column. Nested objects and arrays are preserved.
     """
     if not extra_params:
         return None

@@ -170,6 +170,30 @@ async def test_perform_connectivity_check_embedding():
 
 
 @pytest.mark.asyncio
+async def test_perform_connectivity_check_embedding_ignores_custom_json():
+    custom = {
+        "dimensions": 512,
+        "metadata": {"tenant": "demo"},
+        "flags": [True, False],
+    }
+    with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:
+        mock_adapter = mock.MagicMock()
+        mock_adapter.dimension_check = mock.AsyncMock(return_value=[[1]])
+        mock_build.return_value = mock_adapter
+
+        result = await _perform_connectivity_check(
+            "text-embedding-ada-002",
+            "embedding",
+            "https://api.openai.com",
+            "test-key",
+            extra_params={"__custom__": custom},
+        )
+
+    assert result is True
+    assert "extra_params" not in mock_build.call_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_perform_connectivity_check_multi_embedding():
     # Setup
     with mock.patch("backend.services.model_health_service.build_adapter_fresh") as mock_build:

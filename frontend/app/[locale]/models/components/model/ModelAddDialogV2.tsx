@@ -25,6 +25,7 @@ import {
   InferenceFieldSpecsByType,
   ModelCatalogFullPayload,
   ModelCatalogProviderInfo,
+  ModelConfig,
   ModelOption,
   ModelType,
   SingleModelConfig,
@@ -335,7 +336,7 @@ export const ModelAddDialogV2 = ({
 }: ModelAddDialogV2Props) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { updateModelConfig, saveConfig } = useConfig();
+  const { modelConfig, updateModelConfig, saveConfig } = useConfig();
 
   // ---------- shared state ----------
   const [activeTab, setActiveTab] = useState<"batch" | "custom">("batch");
@@ -851,12 +852,12 @@ export const ModelAddDialogV2 = ({
       message.warning(t("model.dialog.v2.warn.urlRequired", { defaultValue: "请填写 Base URL" }));
       return false;
     }
-    if (!isVoiceType(customForm.type) && !customForm.apiKey.trim()) {
+    if (!model && !isVoiceType(customForm.type) && !customForm.apiKey.trim()) {
       message.warning(t("model.dialog.v2.warn.apiKeyRequired", { defaultValue: "请填写 API Key" }));
       return false;
     }
     return true;
-  }, [customForm, message, t]);
+  }, [customForm, model, message, t]);
 
   // Shared payload/context builder for the custom-tab handlers: the
   // connectivity probe and the submit paths resolve the same fields from the
@@ -972,7 +973,9 @@ export const ModelAddDialogV2 = ({
           ? { displayName: displayNameValue }
           : {}),
         url: customForm.url,
-        apiKey: customForm.apiKey.trim() === "" ? "sk-no-api-key" : customForm.apiKey,
+        // Stored API keys are not returned to the browser. Keep the existing
+        // key when editing and only send a key when it is replaced.
+        ...(customForm.apiKey.trim() ? { apiKey: customForm.apiKey } : {}),
         ...(isEmbedding
           ? buildEmbeddingChunkFields(
               customForm.chunkSizeRange,
@@ -1055,20 +1058,30 @@ export const ModelAddDialogV2 = ({
   // Persist the custom-tab model into the local config (best-effort).
   const persistCustomLocalConfig = useCallback(
     async (ctx: ReturnType<typeof buildCustomRequestContext>, displayNameValue: string) => {
-      const modelConfig: SingleModelConfig = {
+      const configKey: keyof ModelConfig =
+        ctx.resolvedModelType === MODEL_TYPES.MULTI_EMBEDDING
+          ? "multiEmbedding"
+          : ctx.resolvedModelType;
+      const existingApiKey = modelConfig?.[configKey]?.apiConfig?.apiKey || "";
+      const nextModelConfig: SingleModelConfig = {
         id: 0,
         modelName: customForm.name,
         displayName: displayNameValue,
-        apiConfig: { apiKey: customForm.apiKey, modelUrl: customForm.url },
+        apiConfig: {
+          apiKey: model
+            ? customForm.apiKey || existingApiKey
+            : customForm.apiKey,
+          modelUrl: customForm.url,
+        },
         ...ctx.capacityPayload,
       };
-      updateModelConfig({ [ctx.resolvedModelType]: modelConfig });
+      updateModelConfig({ [configKey]: nextModelConfig });
       const ok = await saveConfig();
       if (!ok) {
         log.warn("Failed to persist model config after custom add");
       }
     },
-    [customForm, updateModelConfig, saveConfig]
+    [customForm, model, modelConfig, updateModelConfig, saveConfig]
   );
 
   const handleCustomSubmit = useCallback(async () => {
@@ -1490,7 +1503,11 @@ export const ModelAddDialogV2 = ({
                         onChange={(e) =>
                           setCustomForm((prev) => ({ ...prev, apiKey: e.target.value }))
                         }
-                        placeholder="sk-..."
+                        placeholder={
+                          model
+                            ? t("model.dialog.placeholder.apiKeyKeepExisting")
+                            : t("model.dialog.placeholder.apiKey")
+                        }
                       />
                     </div>
                   )}

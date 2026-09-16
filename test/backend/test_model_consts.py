@@ -161,11 +161,22 @@ def test_filter_extra_params_passes_through_custom_object():
     the existing allow-listed keys like enable_thinking."""
     result = model_consts.filter_extra_params(
         "llm",
-        {"enable_thinking": True, "__custom__": {"my_key": "my_value"}},
+        {
+            "enable_thinking": True,
+            "__custom__": {
+                "my_key": "my_value",
+                "nested": {"limit": 3, "flags": [True, False]},
+                "nullable": None,
+            },
+        },
     )
     assert result is not None
     assert result["enable_thinking"] is True
-    assert result["__custom__"] == {"my_key": "my_value"}
+    assert result["__custom__"] == {
+        "my_key": "my_value",
+        "nested": {"limit": 3, "flags": [True, False]},
+        "nullable": None,
+    }
 
 
 def test_filter_extra_params_passes_through_custom_for_all_types():
@@ -190,13 +201,25 @@ def test_filter_extra_params_drops_invalid_custom_shape():
 
 
 def test_filter_extra_params_drops_invalid_custom_entries():
-    """Inside __custom__: non-string keys and non-primitive values are dropped
+    """Inside __custom__: non-string keys and non-JSON values are dropped
     individually; valid siblings survive."""
     result = model_consts.filter_extra_params(
         "llm",
-        {"__custom__": {1: "int-key-dropped", "ok": "ok-value", "bad": {"nested": "dict"}}},
+        {
+            "__custom__": {
+                1: "int-key-dropped",
+                "ok": "ok-value",
+                "nested": {"accepted": [1, {"enabled": True}]},
+                "bad": {"unsupported": object()},
+            }
+        },
     )
-    assert result == {"__custom__": {"ok": "ok-value"}}
+    assert result == {
+        "__custom__": {
+            "ok": "ok-value",
+            "nested": {"accepted": [1, {"enabled": True}]},
+        }
+    }
 
 
 def test_filter_extra_params_keeps_custom_alongside_allowed_keys():
@@ -213,7 +236,7 @@ def test_filter_extra_params_drops_empty_custom():
     """An empty __custom__ dict (or all-invalid entries) yields no __custom__ key."""
     assert model_consts.filter_extra_params("llm", {"__custom__": {}}) is None
     assert model_consts.filter_extra_params(
-        "llm", {"__custom__": {"bad": {"nested": "dict"}}}
+        "llm", {"__custom__": {"bad": {"nested": object()}}}
     ) is None
 
 def test_user_sign_up_request_validation():
