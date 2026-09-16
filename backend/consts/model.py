@@ -2318,9 +2318,9 @@ class FieldSpec(BaseModel):
 # model type's spec list cannot leak into another.
 _COMMON_CAPACITY_FIELD_SPECS = [
     FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
-    FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
-    FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
-    FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
+    FieldSpec(key="max_input_tokens", label="最大输入Token数", type="int"),
+    FieldSpec(key="max_output_tokens", label="最大输出Token数", type="int"),
+    FieldSpec(key="default_output_reserve_tokens", label="输出预留Token数", type="int"),
     FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
 ]
 
