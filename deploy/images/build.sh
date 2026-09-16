@@ -148,7 +148,7 @@ prompt_choice() {
 add_image_if_missing() {
   local image="$1"
   local existing
-  for existing in "${SELECTED_IMAGES[@]}"; do
+  for existing in "${SELECTED_IMAGES[@]-}"; do
     [ "$existing" = "$image" ] && return 0
   done
   SELECTED_IMAGES+=("$image")
@@ -503,31 +503,35 @@ build_one() {
   elif [ "$LOAD" = true ]; then
     cmd+=(--load)
   fi
-  cmd+=("$@" "$PROJECT_ROOT")
+  local build_arg
+  for build_arg in "$@"; do
+    [ -n "$build_arg" ] && cmd+=("$build_arg")
+  done
+  cmd+=("$PROJECT_ROOT")
   run_cmd "${cmd[@]}"
 }
 
 build_selected_image() {
   case "$1" in
-    main) build_one nexent "$DOCKERFILE_DIR/main/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
-    web) build_one nexent-web "$DOCKERFILE_DIR/web/Dockerfile" "${WEB_MIRROR_ARGS[@]}" ;;
-    docs) build_one nexent-docs "$DOCKERFILE_DIR/docs/Dockerfile" "${WEB_MIRROR_ARGS[@]}" ;;
+    main) build_one nexent "$DOCKERFILE_DIR/main/Dockerfile" "${PY_MIRROR_ARGS[@]-}" ;;
+    web) build_one nexent-web "$DOCKERFILE_DIR/web/Dockerfile" "${WEB_MIRROR_ARGS[@]-}" ;;
+    docs) build_one nexent-docs "$DOCKERFILE_DIR/docs/Dockerfile" "${WEB_MIRROR_ARGS[@]-}" ;;
     data-process)
       local image_name="nexent-data-process"
       [ "$DEPENDENCY_VARIANT" = "gpu" ] && image_name="${image_name}-gpu"
       prepare_model_assets
       build_one "$image_name" "$DOCKERFILE_DIR/data-process/Dockerfile" \
         --build-arg DATA_PROCESS_DEPENDENCY_VARIANT="$DEPENDENCY_VARIANT" \
-        "${PY_MIRROR_ARGS[@]}"
+        "${PY_MIRROR_ARGS[@]-}"
       ;;
-    mcp) build_one nexent-mcp "$DOCKERFILE_DIR/mcp/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
+    mcp) build_one nexent-mcp "$DOCKERFILE_DIR/mcp/Dockerfile" "${PY_MIRROR_ARGS[@]-}" ;;
     terminal)
       local image_name="nexent-ubuntu-terminal"
       [ "$TERMINAL_VARIANT" = "conda" ] && image_name="nexent-ubuntu-terminal-conda"
       build_one "$image_name" "$DOCKERFILE_DIR/terminal/Dockerfile" --build-arg TERMINAL_VARIANT="$TERMINAL_VARIANT"
       ;;
-    sandbox) build_one nexent-sandbox "$DOCKERFILE_DIR/sandbox/Dockerfile" "${PY_MIRROR_ARGS[@]}" ;;
-    sandbox-full) build_one nexent-sandbox-full "$DOCKERFILE_DIR/sandbox-full/Dockerfile" "${PY_MIRROR_ARGS[@]}" "${NPM_MIRROR_ARGS[@]}" ;;
+    sandbox) build_one nexent-sandbox "$DOCKERFILE_DIR/sandbox/Dockerfile" "${PY_MIRROR_ARGS[@]-}" ;;
+    sandbox-full) build_one nexent-sandbox-full "$DOCKERFILE_DIR/sandbox-full/Dockerfile" "${PY_MIRROR_ARGS[@]-}" "${NPM_MIRROR_ARGS[@]-}" ;;
     *)
       if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "不支持的镜像：$1" >&2
@@ -587,7 +591,6 @@ select_images_from_image_arg() {
   fi
 }
 
-SELECTED_IMAGES=()
 if [ "${#REQUESTED_IMAGES[@]}" -gt 0 ]; then
   select_images_from_csv "$(deployment_join_csv "${REQUESTED_IMAGES[@]}")"
 elif [ -n "$IMAGES" ]; then
