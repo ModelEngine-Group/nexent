@@ -1,3 +1,386 @@
+-- Nexent merged SQL migrations: v2.6.0
+-- Previous release tag: v2.5.1
+-- Source bodies are embedded byte-for-byte in deployment order.
+-- Do not reorder or rewrite sections without equivalence validation.
+
+-- Source migration: v2.5.0_0813_conversation_source_search_citation.sql
+-- Source SHA-256: 3e966de142e02a5cb4e42b20a267026583802f116cf2bc38338fe2c9c2de9fcf
+
+-- Citation support for conversation source search records:
+-- 1. Preserve exact lexical retrieval terms so source-card highlighting survives
+--    conversation history reloads without changing the search index or query count.
+-- 2. Elasticsearch accurate-search scores are raw relevance scores and may exceed
+--    9.999999, so widen score_overall before saving conversation source records.
+
+SET search_path TO nexent;
+
+ALTER TABLE nexent.conversation_source_search_t
+    ADD COLUMN IF NOT EXISTS retrieval_highlight_terms JSONB;
+
+COMMENT ON COLUMN nexent.conversation_source_search_t.retrieval_highlight_terms IS
+    'Exact lexical terms returned by retrieval for source highlighting.';
+
+ALTER TABLE nexent.conversation_source_search_t
+    ALTER COLUMN score_overall TYPE numeric(14, 6);
+
+-- Source migration: v2.5.0_0904_external_memory_provider.sql
+-- Source SHA-256: 4dabed00c7e17b84f75ecbe1f0cd2a716f81302c8dc84bf143086137614364e8
+
+-- Phase 3: External Memory Provider schema
+-- Provider configuration, EAV parameters, and ingest event logging.
+
+-- 7.1 Provider configuration main table
+CREATE TABLE IF NOT EXISTS nexent.memory_provider_config_t (
+    provider_config_id  SERIAL PRIMARY KEY,
+    tenant_id           VARCHAR(100) NOT NULL,
+    provider_name       VARCHAR(100) NOT NULL,
+    connection_type     VARCHAR(20)  NOT NULL DEFAULT 'plugin',
+    enabled             BOOLEAN      NOT NULL DEFAULT FALSE,
+    timeout_seconds     INTEGER      NOT NULL DEFAULT 30,
+    last_error_code     VARCHAR(50),
+    create_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    created_by          VARCHAR(100),
+    updated_by          VARCHAR(100),
+    delete_flag         VARCHAR(1)   NOT NULL DEFAULT 'N'
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_provider_config_tenant_name
+    ON nexent.memory_provider_config_t (tenant_id, provider_name)
+    WHERE delete_flag = 'N';
+
+CREATE INDEX IF NOT EXISTS idx_memory_provider_config_enabled
+    ON nexent.memory_provider_config_t (tenant_id, enabled)
+    WHERE delete_flag = 'N';
+
+COMMENT ON TABLE nexent.memory_provider_config_t IS 'External memory provider configuration';
+COMMENT ON COLUMN nexent.memory_provider_config_t.provider_config_id IS 'Provider configuration ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.provider_name IS 'Provider name, unique per tenant';
+COMMENT ON COLUMN nexent.memory_provider_config_t.connection_type IS 'Connection type: plugin (Phase 3)';
+COMMENT ON COLUMN nexent.memory_provider_config_t.enabled IS 'Whether this provider is enabled';
+COMMENT ON COLUMN nexent.memory_provider_config_t.timeout_seconds IS 'Request timeout in seconds';
+COMMENT ON COLUMN nexent.memory_provider_config_t.last_error_code IS 'Last error code from test-search or test-ingest';
+COMMENT ON COLUMN nexent.memory_provider_config_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.memory_provider_config_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.memory_provider_config_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.memory_provider_config_t.delete_flag IS 'Soft delete flag: Y/N';
+
+-- 7.2 Provider configuration parameter table (EAV)
+CREATE TABLE IF NOT EXISTS nexent.memory_provider_config_param_t (
+    param_id            SERIAL PRIMARY KEY,
+    provider_config_id  INTEGER      NOT NULL,
+    param_name          VARCHAR(200) NOT NULL,
+    param_value         TEXT,
+    create_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    created_by          VARCHAR(100),
+    updated_by          VARCHAR(100),
+    delete_flag         VARCHAR(1)   NOT NULL DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_config_param_provider
+    ON nexent.memory_provider_config_param_t (provider_config_id)
+    WHERE delete_flag = 'N';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_provider_config_param_name
+    ON nexent.memory_provider_config_param_t (provider_config_id, param_name)
+    WHERE delete_flag = 'N';
+
+COMMENT ON TABLE nexent.memory_provider_config_param_t IS 'External memory provider configuration parameters (EAV)';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.param_id IS 'Parameter ID';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.provider_config_id IS 'Foreign key to memory_provider_config_t';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.param_name IS 'Parameter name';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.param_value IS 'Parameter value';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.memory_provider_config_param_t.delete_flag IS 'Soft delete flag: Y/N';
+
+-- 7.3 Ingest event log table
+CREATE TABLE IF NOT EXISTS nexent.memory_external_ingest_event_log_t (
+    log_id              SERIAL PRIMARY KEY,
+    provider            VARCHAR(100),
+    tenant_id           VARCHAR(100),
+    user_id             VARCHAR(100),
+    agent_id            VARCHAR(100),
+    conversation_id     VARCHAR(100),
+    event_id            VARCHAR(255),
+    idempotency_key     TEXT,
+    unit_ids            TEXT,
+    response_status     VARCHAR(30),
+    response_summary    TEXT,
+    sent_at             TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    create_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    created_by          VARCHAR(100),
+    updated_by          VARCHAR(100),
+    delete_flag         VARCHAR(1)   NOT NULL DEFAULT 'N'
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_ingest_log_tenant
+    ON nexent.memory_external_ingest_event_log_t (tenant_id, user_id, agent_id, sent_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ingest_log_idem
+    ON nexent.memory_external_ingest_event_log_t (idempotency_key)
+    WHERE delete_flag = 'N';
+
+COMMENT ON TABLE nexent.memory_external_ingest_event_log_t IS 'External memory ingest event log';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.log_id IS 'Log ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.provider IS 'Provider name';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.tenant_id IS 'Tenant ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.user_id IS 'User ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.agent_id IS 'Agent ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.conversation_id IS 'Conversation ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.event_id IS 'Event ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.idempotency_key IS 'Idempotency key for deduplication';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.unit_ids IS 'Comma-separated unit ID list';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.response_status IS 'Response status';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.response_summary IS 'Response summary';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.sent_at IS 'Timestamp when the event was sent';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.created_by IS 'Creator ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.updated_by IS 'Last updater ID';
+COMMENT ON COLUMN nexent.memory_external_ingest_event_log_t.delete_flag IS 'Soft delete flag: Y/N';
+
+-- 8. Permission seed data: MEM.PROVIDER (CREATE, READ, UPDATE, DELETE)
+-- Granted to ADMIN and SPEED roles only (per Functional Design §14.5)
+INSERT INTO nexent.role_permission_t (
+    role_permission_id, user_role, permission_category, permission_type, permission_subtype
+) VALUES
+    (1122, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'CREATE'),
+    (1119, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'READ'),
+    (1120, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'UPDATE'),
+    (1121, 'ADMIN', 'RESOURCE', 'MEM.PROVIDER', 'DELETE'),
+    (1415, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'CREATE'),
+    (1416, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'READ'),
+    (1417, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'UPDATE'),
+    (1418, 'SPEED', 'RESOURCE', 'MEM.PROVIDER', 'DELETE')
+ON CONFLICT (role_permission_id) DO UPDATE SET
+    user_role = EXCLUDED.user_role, permission_category = EXCLUDED.permission_category,
+    permission_type = EXCLUDED.permission_type, permission_subtype = EXCLUDED.permission_subtype;
+
+-- Source migration: v2.5.1_001_human_interaction.sql
+-- Source SHA-256: 69b0587b10d497a4546136ac70dc4a56c832f1ac056f2baeed9afd2cc9559e49
+
+-- Human interaction schema for a new database.
+-- Technical keys and internal references use INT4; public identifiers use UUID strings.
+-- Services validate business states, references and uniqueness under transaction locks.
+
+CREATE TABLE IF NOT EXISTS nexent.human_run_t (
+    run_record_id SERIAL PRIMARY KEY,
+    run_id VARCHAR(36) NOT NULL,
+    tenant_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    conversation_id INTEGER NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    request_payload TEXT NOT NULL,
+    checkpoint TEXT,
+    catalog_digest VARCHAR(64),
+    executor_digest VARCHAR(64),
+    plan TEXT,
+    plan_version INTEGER DEFAULT 0 NOT NULL,
+    fence INTEGER DEFAULT 0 NOT NULL,
+    lock_owner VARCHAR(200),
+    lock_until TIMESTAMP WITH TIME ZONE,
+    pause_requested INTEGER DEFAULT 0 NOT NULL,
+    event_seq BIGINT DEFAULT 0 NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nexent.human_request_t (
+    request_record_id SERIAL PRIMARY KEY,
+    request_id VARCHAR(36) NOT NULL,
+    run_record_id INTEGER NOT NULL,
+    kind VARCHAR(30) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    version INTEGER DEFAULT 1 NOT NULL,
+    slot VARCHAR(100) NOT NULL,
+    digest VARCHAR(64) NOT NULL,
+    payload TEXT NOT NULL,
+    decision TEXT,
+    idempotency_key VARCHAR(100),
+    decision_digest VARCHAR(64),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nexent.human_execution_t (
+    execution_id SERIAL PRIMARY KEY,
+    run_record_id INTEGER NOT NULL,
+    slot VARCHAR(100) NOT NULL,
+    tool VARCHAR(200) NOT NULL,
+    digest VARCHAR(64) NOT NULL,
+    arguments TEXT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    result TEXT,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nexent.human_event_t (
+    event_id SERIAL PRIMARY KEY,
+    run_record_id INTEGER NOT NULL,
+    seq BIGINT NOT NULL,
+    payload JSONB NOT NULL,
+    create_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    update_time TIMESTAMP WITHOUT TIME ZONE DEFAULT timezone('UTC', now()) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
+);
+
+-- Keep raw SQL and ORM updates consistent; callers supply the updating actor.
+DO $create_function$
+BEGIN
+    IF to_regprocedure('nexent.human_interaction_audit_timestamp()') IS NULL THEN
+        CREATE FUNCTION nexent.human_interaction_audit_timestamp()
+        RETURNS TRIGGER LANGUAGE plpgsql AS $function$
+        BEGIN
+            IF TG_OP = 'INSERT' THEN
+                NEW.create_time := COALESCE(NEW.create_time, timezone('UTC', clock_timestamp()));
+            ELSE
+                NEW.create_time := OLD.create_time;
+                NEW.created_by := OLD.created_by;
+            END IF;
+            NEW.update_time := timezone('UTC', clock_timestamp());
+            RETURN NEW;
+        END;
+        $function$;
+    END IF;
+END;
+$create_function$;
+
+DO $create_triggers$
+DECLARE
+    target_table REGCLASS;
+BEGIN
+    FOREACH target_table IN ARRAY ARRAY[
+        'nexent.human_run_t'::regclass,
+        'nexent.human_request_t'::regclass,
+        'nexent.human_execution_t'::regclass,
+        'nexent.human_event_t'::regclass
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgrelid = target_table AND tgname = 'human_audit_timestamp'
+        ) THEN
+            EXECUTE format(
+                'CREATE TRIGGER human_audit_timestamp BEFORE INSERT OR UPDATE ON %s '
+                'FOR EACH ROW EXECUTE FUNCTION nexent.human_interaction_audit_timestamp()',
+                target_table
+            );
+        END IF;
+    END LOOP;
+END;
+$create_triggers$;
+
+-- Non-unique indexes support public lookup, owner conversation history,
+-- scheduler claims, pending requests, call-slot replay and ordered SSE pagination.
+-- Advisory locks protect creation; the parent row lock protects dependent writes.
+
+CREATE INDEX IF NOT EXISTS human_run_claim_idx ON nexent.human_run_t (status, lock_until, create_time) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_run_conversation_idx ON nexent.human_run_t (tenant_id, user_id, conversation_id, create_time) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_run_public_id_idx ON nexent.human_run_t (run_id);
+COMMENT ON COLUMN nexent.human_run_t.run_record_id IS 'Technical run record identifier';
+COMMENT ON COLUMN nexent.human_run_t.run_id IS 'Public UUID retained by HTTP, checkpoints and event payloads; service enforces uniqueness';
+COMMENT ON COLUMN nexent.human_run_t.tenant_id IS 'Tenant owning this run and its dependent records';
+COMMENT ON COLUMN nexent.human_run_t.user_id IS 'User owning this run within the tenant';
+COMMENT ON COLUMN nexent.human_run_t.conversation_id IS 'Logical conversation_record_t.conversation_id; service validates the active owner';
+COMMENT ON COLUMN nexent.human_run_t.status IS 'Run lifecycle state validated by the human interaction service';
+COMMENT ON COLUMN nexent.human_run_t.request_payload IS 'Fernet encrypted JSON run input and context snapshot; private service-owned payload';
+COMMENT ON COLUMN nexent.human_run_t.checkpoint IS 'Fernet encrypted SDK checkpoint; null until the first durable boundary';
+COMMENT ON COLUMN nexent.human_run_t.catalog_digest IS 'SHA-256 identity of the agent, model and tool catalog';
+COMMENT ON COLUMN nexent.human_run_t.executor_digest IS 'SHA-256 identity of the registered executor implementation';
+COMMENT ON COLUMN nexent.human_run_t.plan IS 'Fernet encrypted SDK plan snapshot; null when no plan exists';
+COMMENT ON COLUMN nexent.human_run_t.plan_version IS 'Monotonic revision of the saved plan';
+COMMENT ON COLUMN nexent.human_run_t.fence IS 'Lease generation rejecting stale worker writes';
+COMMENT ON COLUMN nexent.human_run_t.lock_owner IS 'Scheduler worker identity, bounded to 200 characters';
+COMMENT ON COLUMN nexent.human_run_t.lock_until IS 'UTC lease deadline; null when no worker owns the run';
+COMMENT ON COLUMN nexent.human_run_t.pause_requested IS 'Pause request marker: 0 or 1, validated by the service';
+COMMENT ON COLUMN nexent.human_run_t.event_seq IS '64-bit SSE event counter; not a record identifier, allocated under the run lock';
+COMMENT ON COLUMN nexent.human_run_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_run_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_run_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_run_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_run_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE INDEX IF NOT EXISTS human_request_run_idx ON nexent.human_request_t (run_record_id, status) WHERE delete_flag = 'N';
+COMMENT ON COLUMN nexent.human_request_t.request_record_id IS 'Technical human request record identifier';
+COMMENT ON COLUMN nexent.human_request_t.request_id IS 'Public request UUID; uniqueness is scoped to the owning run by the service';
+COMMENT ON COLUMN nexent.human_request_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
+COMMENT ON COLUMN nexent.human_request_t.kind IS 'CLARIFICATION, ACTION_APPROVAL or USER_STEERING; service validated';
+COMMENT ON COLUMN nexent.human_request_t.status IS 'PENDING, DECIDED, CANCELLED or EXPIRED; service validated';
+COMMENT ON COLUMN nexent.human_request_t.version IS 'Positive request revision used for decision compare-and-set';
+COMMENT ON COLUMN nexent.human_request_t.slot IS 'SDK action slot or composer guidance identity within the run';
+COMMENT ON COLUMN nexent.human_request_t.digest IS 'SHA-256 action identity required when submitting a decision';
+COMMENT ON COLUMN nexent.human_request_t.payload IS 'Fernet encrypted clarification, approval or steering payload, validated by the service';
+COMMENT ON COLUMN nexent.human_request_t.decision IS 'Fernet encrypted validated DecisionCommand or composer decision; null before a decision';
+COMMENT ON COLUMN nexent.human_request_t.idempotency_key IS 'Decision retry key scoped to this request, or composer message identity scoped to the run';
+COMMENT ON COLUMN nexent.human_request_t.decision_digest IS 'SHA-256 of the accepted decision, detecting conflicting retries';
+COMMENT ON COLUMN nexent.human_request_t.expires_at IS 'UTC deadline after which a pending decision cannot authorize execution';
+COMMENT ON COLUMN nexent.human_request_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_request_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_request_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_request_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_request_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE INDEX IF NOT EXISTS human_execution_slot_idx ON nexent.human_execution_t (run_record_id, slot) WHERE delete_flag = 'N';
+COMMENT ON COLUMN nexent.human_execution_t.execution_id IS 'Technical execution receipt identifier';
+COMMENT ON COLUMN nexent.human_execution_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
+COMMENT ON COLUMN nexent.human_execution_t.slot IS 'Stable SDK call slot; one active receipt per run and slot is enforced by the service';
+COMMENT ON COLUMN nexent.human_execution_t.tool IS 'Registered tool name, bounded to 200 characters';
+COMMENT ON COLUMN nexent.human_execution_t.digest IS 'HMAC-SHA-256 of the frozen action and execution context';
+COMMENT ON COLUMN nexent.human_execution_t.arguments IS 'Fernet encrypted frozen tool arguments; variable SDK-owned JSON structure';
+COMMENT ON COLUMN nexent.human_execution_t.status IS 'PREPARED, STARTED, SUCCEEDED, REJECTED or UNKNOWN; service validated';
+COMMENT ON COLUMN nexent.human_execution_t.result IS 'Fernet encrypted result or rejection; null before a conclusive receipt';
+COMMENT ON COLUMN nexent.human_execution_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_execution_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_execution_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_execution_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_execution_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+CREATE INDEX IF NOT EXISTS human_event_replay_idx ON nexent.human_event_t (run_record_id, seq) WHERE delete_flag = 'N';
+COMMENT ON COLUMN nexent.human_event_t.event_id IS 'Technical replay event identifier';
+COMMENT ON COLUMN nexent.human_event_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
+COMMENT ON COLUMN nexent.human_event_t.seq IS '64-bit SSE cursor allocated from the owning run event_seq under its row lock';
+COMMENT ON COLUMN nexent.human_event_t.payload IS 'Service-owned event envelope: either chunk_cipher string or type string and content object; no plaintext stream chunks';
+COMMENT ON COLUMN nexent.human_event_t.create_time IS 'Creation time';
+COMMENT ON COLUMN nexent.human_event_t.update_time IS 'Update time';
+COMMENT ON COLUMN nexent.human_event_t.created_by IS 'Creator';
+COMMENT ON COLUMN nexent.human_event_t.updated_by IS 'Updater';
+COMMENT ON COLUMN nexent.human_event_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
+
+-- Source migration: v2.5.1_upload_owner_service.sql
+-- Source SHA-256: 759eb21f32c9dd696f723452c504e3fa93e5565a128945435688ac99c3405d3e
+
+-- Scope interrupted-upload recovery to the service that created the upload.
+
+ALTER TABLE nexent.knowledge_file_lifecycle_t
+    ADD COLUMN IF NOT EXISTS upload_owner_service VARCHAR(32);
+
+COMMENT ON COLUMN nexent.knowledge_file_lifecycle_t.upload_owner_service IS
+    'Service responsible for recovering an in-progress upload';
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_file_lifecycle_upload_recovery
+    ON nexent.knowledge_file_lifecycle_t (upload_owner_service, create_time)
+    WHERE delete_flag = 'N' AND status = 'UPLOADING';
+
+-- Source migration: v2.5.2_unified_tag_management.sql
+-- Source SHA-256: 3cecfb180ff2efd54d808f00de5e00e93df1626ffa388d4ea9421e2ebddd5f00
+
 BEGIN;
 
 -- Unified tag management migration for Nexent v2.5.2.
@@ -1431,3 +1814,290 @@ ALTER TABLE nexent.tag_definition
     CHECK (selection_mode IN ('single_select', 'multi_select', 'no_value'));
 
 COMMIT;
+
+-- Source migration: v2.5.3_database_bootstrap_idempotency.sql
+-- Source SHA-256: 80024a28cda73853a96b124aff695db65d7f92e09335bfe2976cbc10ba21fe72
+
+BEGIN;
+
+-- Explicit seeded IDs do not advance SERIAL sequences. Re-synchronize the
+-- sequence after every currently shipped migration and keep re-runs safe.
+SELECT setval(
+    pg_get_serial_sequence('nexent.role_permission_t', 'role_permission_id'),
+    COALESCE(MAX(role_permission_id), 1),
+    MAX(role_permission_id) IS NOT NULL
+)
+FROM nexent.role_permission_t;
+
+-- The platform super-admin mapping intentionally uses an empty tenant ID. It
+-- is not a tenant to provision, so ignore only that reserved mapping while
+-- retaining normal provisioning for active tenant rows.
+CREATE OR REPLACE FUNCTION nexent.provision_unified_tag_management_after_user_tenant_insert()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF COALESCE(NEW.delete_flag, 'N') <> 'Y'
+       AND NULLIF(btrim(NEW.tenant_id), '') IS NOT NULL THEN
+        PERFORM nexent.provision_unified_tag_management(
+            NEW.tenant_id,
+            COALESCE(NEW.created_by, 'system')
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+COMMIT;
+
+-- Source migration: v2.5.4_0910_context_budget_v2.sql
+-- Source SHA-256: e7dde0d222911eb12752b9e276bc98d6dd629673d6a57dfd23ea6499d4241cdc
+
+-- Context Budget V2 final-state migration.
+-- Deployment contract: stop all application instances before applying this file.
+BEGIN;
+
+DO $$
+DECLARE
+    table_exists BOOLEAN;
+    schema_name CONSTANT TEXT := 'nexent';
+    monitoring_table_name CONSTANT TEXT := 'model_monitoring_record_t';
+BEGIN
+    SELECT to_regclass('nexent.model_monitoring_record_t') IS NOT NULL
+      INTO table_exists;
+    IF NOT table_exists THEN
+        RAISE EXCEPTION 'nexent.model_monitoring_record_t must exist before Context Budget V2 migration';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'provider_input_limit_tokens'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'effective_input_limit_tokens'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN provider_input_limit_tokens TO effective_input_limit_tokens;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_provider_input_limit_tokens'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_effective_input_limit_tokens'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN budget_provider_input_limit_tokens
+            TO budget_effective_input_limit_tokens;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_soft_limit_ratio'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_compaction_trigger_ratio'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN budget_soft_limit_ratio
+            TO budget_compaction_trigger_ratio;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_soft_input_budget_tokens'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = schema_name
+           AND table_name = monitoring_table_name
+           AND column_name = 'budget_compaction_trigger_threshold_tokens'
+    ) THEN
+        ALTER TABLE nexent.model_monitoring_record_t
+            RENAME COLUMN budget_soft_input_budget_tokens
+            TO budget_compaction_trigger_threshold_tokens;
+    END IF;
+END $$;
+
+-- Fresh installs create the final columns in init.sql, while historical
+-- migrations may subsequently add the legacy columns. Merge and remove those
+-- duplicate legacy columns before backfilling the V2 metadata.
+DO $$
+DECLARE
+    schema_name CONSTANT TEXT := 'nexent';
+    monitoring_table_name CONSTANT TEXT := 'model_monitoring_record_t';
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='provider_input_limit_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='effective_input_limit_tokens') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET effective_input_limit_tokens = provider_input_limit_tokens
+         WHERE effective_input_limit_tokens IS NULL
+           AND provider_input_limit_tokens IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN provider_input_limit_tokens;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_provider_input_limit_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_effective_input_limit_tokens') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET budget_effective_input_limit_tokens = budget_provider_input_limit_tokens
+         WHERE budget_effective_input_limit_tokens IS NULL
+           AND budget_provider_input_limit_tokens IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_provider_input_limit_tokens;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_soft_limit_ratio')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_compaction_trigger_ratio') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET budget_compaction_trigger_ratio = budget_soft_limit_ratio
+         WHERE budget_compaction_trigger_ratio IS NULL
+           AND budget_soft_limit_ratio IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_soft_limit_ratio;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_soft_input_budget_tokens')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=schema_name AND table_name=monitoring_table_name AND column_name='budget_compaction_trigger_threshold_tokens') THEN
+        UPDATE nexent.model_monitoring_record_t
+           SET budget_compaction_trigger_threshold_tokens = budget_soft_input_budget_tokens
+         WHERE budget_compaction_trigger_threshold_tokens IS NULL
+           AND budget_soft_input_budget_tokens IS NOT NULL;
+        ALTER TABLE nexent.model_monitoring_record_t DROP COLUMN budget_soft_input_budget_tokens;
+    END IF;
+END $$;
+
+ALTER TABLE nexent.model_monitoring_record_t
+    ADD COLUMN IF NOT EXISTS budget_schema_version INTEGER,
+    ADD COLUMN IF NOT EXISTS budget_compaction_trigger_ratio_source VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS budget_compaction_target_ratio FLOAT,
+    ADD COLUMN IF NOT EXISTS budget_compaction_target_ratio_source VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS budget_compaction_target_tokens INTEGER;
+
+UPDATE nexent.model_monitoring_record_t
+SET budget_schema_version = COALESCE(budget_schema_version, 1),
+    budget_compaction_trigger_ratio_source = COALESCE(
+        budget_compaction_trigger_ratio_source,
+        'legacy_payload'
+    ),
+    budget_compaction_target_ratio = COALESCE(budget_compaction_target_ratio, 0.6),
+    budget_compaction_target_ratio_source = COALESCE(
+        budget_compaction_target_ratio_source,
+        'code_default'
+    ),
+    budget_compaction_target_tokens = COALESCE(
+        budget_compaction_target_tokens,
+        FLOOR(budget_effective_input_limit_tokens * 0.6)::INTEGER
+    )
+WHERE budget_schema_version IS NULL
+  AND (
+      budget_fingerprint IS NOT NULL
+      OR budget_effective_input_limit_tokens IS NOT NULL
+      OR budget_compaction_trigger_threshold_tokens IS NOT NULL
+  );
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM nexent.model_monitoring_record_t
+        WHERE budget_schema_version = 1
+          AND (budget_fingerprint IS NOT NULL
+            OR budget_effective_input_limit_tokens IS NOT NULL
+            OR budget_compaction_trigger_threshold_tokens IS NOT NULL)
+          AND (
+              budget_schema_version IS NULL
+              OR budget_compaction_target_ratio IS DISTINCT FROM 0.6
+              OR (
+                  budget_effective_input_limit_tokens IS NOT NULL
+                  AND budget_compaction_target_tokens IS DISTINCT FROM
+                      FLOOR(budget_effective_input_limit_tokens * 0.6)::INTEGER
+              )
+          )
+    ) THEN
+        RAISE EXCEPTION 'Context Budget V2 historical backfill consistency check failed';
+    END IF;
+END $$;
+
+ALTER TABLE nexent.model_monitoring_record_t
+    DROP COLUMN IF EXISTS budget_hard_input_budget_tokens;
+
+COMMENT ON COLUMN nexent.model_monitoring_record_t.effective_input_limit_tokens
+    IS 'Resolved effective provider input-token limit used by context management';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_schema_version
+    IS 'Persisted context-budget contract schema version; 1 denotes migrated V1 history';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_effective_input_limit_tokens
+    IS 'Effective Input Limit after applying the output reserve';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_trigger_ratio
+    IS 'Compaction Trigger Threshold ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_trigger_ratio_source
+    IS 'Source of the Compaction Trigger Threshold ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_trigger_threshold_tokens
+    IS 'Effective input token threshold that triggers compaction';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_target_ratio
+    IS 'Compaction Target ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_target_ratio_source
+    IS 'Source of the Compaction Target ratio';
+COMMENT ON COLUMN nexent.model_monitoring_record_t.budget_compaction_target_tokens
+    IS 'Desired effective input token count after compaction';
+
+COMMIT;
+
+-- Source migration: v2.6.0_0806_add_model_inference_params.sql
+-- Source SHA-256: d7b4d7303b68e6f3a6c29212e919e70ced3172c27a82cc79ca8d433f1991b78d
+
+-- Migration kind: REQUIRED_SCHEMA
+-- Required for: model inference params (temperature/top_p) defaults on model_record_t
+--                + extra_params JSONB for fixed inference params without dedicated columns
+--                and per-agent model param overrides on ag_tenant_agent_t.
+-- Reason: new code reads/writes these inference parameter columns and per-agent overrides.
+
+SET search_path TO nexent;
+
+-- ============================================================
+-- model_record_t: 推理参数默认值（常用，独立列便于校验/查询）
+-- ============================================================
+
+ALTER TABLE nexent.model_record_t
+ADD COLUMN IF NOT EXISTS temperature FLOAT DEFAULT NULL;
+
+ALTER TABLE nexent.model_record_t
+ADD COLUMN IF NOT EXISTS top_p FLOAT DEFAULT NULL;
+
+COMMENT ON COLUMN nexent.model_record_t.temperature IS
+  'Default sampling temperature for LLM/VLM models. NULL means provider default. Nullable.';
+COMMENT ON COLUMN nexent.model_record_t.top_p IS
+  'Default nucleus sampling probability for LLM/VLM models. NULL means provider default. Nullable.';
+
+-- ============================================================
+-- model_record_t: 其他固定推理参数（frequency_penalty/presence_penalty/stop/seed/voice/speed 等）
+-- 无独立列的固定字段统一收纳到此 JSONB 列，键集合由后端 FIXED_INFERENCE_FIELDS_BY_TYPE 约束
+-- ============================================================
+
+ALTER TABLE nexent.model_record_t
+ADD COLUMN IF NOT EXISTS extra_params JSONB DEFAULT NULL;
+
+COMMENT ON COLUMN nexent.model_record_t.extra_params IS
+  'Fixed inference params without dedicated columns (key-value pairs constrained by '
+  'FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.';
+
+-- ============================================================
+-- ag_tenant_agent_t: per-agent 模型参数覆盖（含预定义字段与 extra_params）
+-- Shape: {"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}
+-- ============================================================
+
+ALTER TABLE nexent.ag_tenant_agent_t
+ADD COLUMN IF NOT EXISTS model_params_override JSONB DEFAULT NULL;
+
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.model_params_override IS
+  'Per-agent overrides for model inference params. Shape: '
+  '{"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}. '
+  'NULL means inherit model defaults.';
