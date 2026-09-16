@@ -22,7 +22,7 @@ from database.knowledge_db import (
     get_knowledge_info_by_tenant_id,
     get_knowledge_name_map_by_index_names,
 )
-from services.vectordatabase_service import ElasticSearchService
+from management.services.knowledge_base.service import ElasticSearchService
 
 
 LOCAL_TOOL_CLASS = "KnowledgeBaseSearchTool"

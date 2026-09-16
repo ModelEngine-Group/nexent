@@ -17,9 +17,9 @@ from consts.exceptions import (
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
-from services.vectordatabase_service import (
+from management.services.model.resolver import get_embedding_model_by_id
+from management.services.knowledge_base.service import (
     ElasticSearchService,
-    get_embedding_model_by_id,
     get_vector_db_core,
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
@@ -159,7 +159,18 @@ async def delete_index(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
+        from services.tag_management_service import TagManagementService
+
+        TagManagementService.cleanup_resource_assignments(
+            tenant_id, "knowledge_base", index_name, user_id
+        )
+        TagManagementService.cleanup_document_assignments_for_knowledge_base(
+            tenant_id, "local", index_name, user_id
+        )
         return result
+    except AppException:
+        # Preserve the EDS code/details for the common application handler.
+        raise
     except HTTPException:
         raise
     except TokenExpiredError as e:
@@ -672,43 +683,64 @@ async def delete_documents(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail="Either path_or_url or file_id is required",
             )
+        # Pass the durable ID when available so deletion cannot select an older
+        # tombstone that happens to reuse the same object path.  The optional
+        # arguments keep path-only clients on the legacy contract.
+        delete_kwargs = {}
+        if file_id:
+            delete_kwargs = {"file_id": file_id, "requested_by": user_id}
         result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core
+            index_name, path_or_url, scope, vdb_core, **delete_kwargs
         )
 
         if scope == "full":
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(
-                    index_name, path_or_url
-                )
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for document %s in index %s: %s",
-                    path_or_url,
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}, but Redis cleanup encountered an error: "
-                    f"{str(redis_error)}"
-                )
+            from services.tag_management_service import TagManagementService
+
+            TagManagementService.cleanup_document_assignments(
+                tenant_id, "local", index_name, path_or_url, user_id
+            )
+            # The deletion service performs Redis cleanup for new callers. Keep
+            # the legacy fallback only when an older service implementation did
+            # not include that result, and avoid duplicate deletion calls.
+            if "redis_cleanup" not in result and not result.get("deletion_pending"):
+                try:
+                    redis_service = get_redis_service()
+                    redis_cleanup_result = redis_service.delete_document_records(
+                        index_name, path_or_url
+                    )
+                    result["redis_cleanup"] = redis_cleanup_result
+                    if redis_cleanup_result.get("errors"):
+                        result["redis_warnings"] = redis_cleanup_result["errors"]
+                except Exception as redis_error:
+                    logger.warning(
+                        "Redis cleanup failed for document %s in index %s: %s",
+                        path_or_url,
+                        index_name,
+                        redis_error,
+                    )
+                    result["redis_cleanup_error"] = str(redis_error)
+
+            # Preserve the response message contract used by existing clients.
+            # The new deletion service may already provide redis_cleanup, while
+            # the fallback above adds it for older service implementations.
+            # Only terminal responses receive the summary; pending responses
+            # must keep their retry-oriented message.
+            if not result.get("deletion_pending"):
+                original_message = result.get("message", "Documents deleted successfully")
+                if result.get("redis_cleanup_error"):
+                    if "Redis cleanup encountered an error" not in original_message:
+                        result["message"] = (
+                            f"{original_message}, but Redis cleanup encountered an error: "
+                            f"{result['redis_cleanup_error']}"
+                        )
+                elif result.get("redis_cleanup") and "Cleaned up" not in original_message:
+                    redis_cleanup = result["redis_cleanup"]
+                    result["message"] = (
+                        f"{original_message}. "
+                        f"Cleaned up {redis_cleanup.get('total_deleted', 0)} Redis records "
+                        f"({redis_cleanup.get('celery_tasks_deleted', 0)} tasks, "
+                        f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
+                    )
 
         return result
 
@@ -1056,14 +1088,17 @@ async def hybrid_search(
                 index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
             )
             resolved_index_names.append(resolved_name)
-        result = ElasticSearchService.search_hybrid(
-            index_names=resolved_index_names,
-            query=payload.query,
-            tenant_id=tenant_id,
-            top_k=payload.top_k,
-            weight_accurate=payload.weight_accurate,
-            vdb_core=vdb_core,
-        )
+        search_kwargs = {
+            "index_names": resolved_index_names,
+            "query": payload.query,
+            "tenant_id": tenant_id,
+            "top_k": payload.top_k,
+            "weight_accurate": payload.weight_accurate,
+            "vdb_core": vdb_core,
+        }
+        if payload.tag_predicates:
+            search_kwargs["tag_predicates"] = payload.tag_predicates
+        result = ElasticSearchService.search_hybrid(**search_kwargs)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except KnowledgeBaseNeedsModelConfigError as exc:
         # Return a specific error that frontend can detect to show the config dialog

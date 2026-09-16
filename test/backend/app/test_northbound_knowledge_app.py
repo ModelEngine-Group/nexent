@@ -49,7 +49,7 @@ redis_service_module = types.ModuleType("services.redis_service")
 redis_service_module.get_redis_service = MagicMock()
 sys.modules["services.redis_service"] = redis_service_module
 
-vectordb_service_module = types.ModuleType("services.vectordatabase_service")
+vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
 
 
 class KnowledgeBaseNeedsModelConfigError(Exception):
@@ -108,7 +108,7 @@ vectordb_service_module.KnowledgeBaseNeedsModelConfigError = (
     KnowledgeBaseNeedsModelConfigError
 )
 vectordb_service_module.get_vector_db_core = MagicMock()
-sys.modules["services.vectordatabase_service"] = vectordb_service_module
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_module
 
 database_pkg = types.ModuleType("database")
 database_pkg.__path__ = [os.path.join(backend_dir, "database")]
@@ -125,8 +125,28 @@ consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules["consts"] = consts_module
 
 consts_exceptions_module = types.ModuleType("consts.exceptions")
+class AppException(Exception):
+    def __init__(self, error_code, message=None, details=None):
+        self.error_code = error_code
+        self.message = message or str(error_code)
+        self.details = details or {}
+        super().__init__(self.message)
+
+    @property
+    def http_status(self):
+        return 500
+
+    def to_dict(self):
+        return {
+            "code": str(getattr(self.error_code, "value", self.error_code)),
+            "message": self.message,
+            "details": self.details or None,
+        }
+
+
 consts_exceptions_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_exceptions_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
+consts_exceptions_module.AppException = AppException
 sys.modules["consts.exceptions"] = consts_exceptions_module
 
 from pydantic import BaseModel, Field  # noqa: E402
@@ -597,6 +617,23 @@ class TestIndexManagement:
         assert response.json() == {"status": "success"}
         mock_delete.assert_awaited_once()
 
+    def test_delete_index_preserves_app_exception(self, client, mock_northbound_context):
+        """EDS deletion errors keep their structured code and details."""
+        mock_northbound_context.return_value = ASSET_CTX
+        expected = AppException(
+            "KNOWLEDGE_DELETE_BLOCKED",
+            details={"index_name": "kb1", "blocking_files": []},
+        )
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.full_delete_knowledge_base",
+            new_callable=AsyncMock,
+            side_effect=expected,
+        ):
+            with pytest.raises(AppException) as exc_info:
+                client.delete("/nb/v1/knowledge/indices/kb1")
+
+        assert exc_info.value is expected
+
     @pytest.mark.parametrize(
         ("exception", "status_code"),
         [
@@ -634,6 +671,7 @@ class TestIndexManagement:
 class TestUploadAndDownload:
     def test_upload_success_returns_created_payload(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
+        file_mgmt_module.upload_files_impl.reset_mock()
         file_mgmt_module.upload_files_impl.return_value = (
             [], ["docs/guide.txt"], ["guide.txt"]
         )
@@ -647,6 +685,9 @@ class TestUploadAndDownload:
 
         assert response.status_code == 201
         assert response.json()["process_tasks"] == {"status": "queued"}
+        assert file_mgmt_module.upload_files_impl.await_args.kwargs[
+            "upload_owner_service"
+        ] == "nexent-northbound"
 
     def test_upload_processing_error_returns_detail(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX

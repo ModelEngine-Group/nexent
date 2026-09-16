@@ -797,14 +797,14 @@ class TestDeleteUserAndCleanup:
         mock_get_admin.return_value = mock_admin
 
     def _install_fake_vdb(self, mocker, delete_side_effect=None):
-        fake_vdb = types.ModuleType("services.vectordatabase_service")
+        fake_vdb = types.ModuleType("management.services.knowledge_base.service")
         fake_vdb.get_vector_db_core = MagicMock(return_value="vdb-core")
         fake_vdb.ElasticSearchService = MagicMock()
         fake_vdb.ElasticSearchService.full_delete_knowledge_base = AsyncMock(
             side_effect=delete_side_effect
         )
         mocker.patch.dict(
-            sys.modules, {"services.vectordatabase_service": fake_vdb}
+            sys.modules, {"management.services.knowledge_base.service": fake_vdb}
         )
         return fake_vdb
 

@@ -8,6 +8,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from consts.exceptions import ValidationError
+
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
@@ -535,6 +537,7 @@ async def test_generate_title_success(conversation_mocks):
     request_obj = MagicMock()
     request_obj.conversation_id = conversation_id
     request_obj.question = question
+    request_obj.model_id = 7
 
     http_request = MagicMock()
 
@@ -542,7 +545,7 @@ async def test_generate_title_success(conversation_mocks):
 
     assert result.code == 0 and result.data == dummy_title
     conversation_mocks['generate_title_service'].assert_called_once_with(
-        conversation_id, question, "user_id", tenant_id="tenant_id", language="en")
+        conversation_id, question, "user_id", tenant_id="tenant_id", language="en", model_id=7)
 
 
 @pytest.mark.asyncio
@@ -551,6 +554,7 @@ async def test_generate_title_failure(conversation_mocks):
     request_obj = MagicMock()
     request_obj.conversation_id = 1
     request_obj.question = "Test question"
+    request_obj.model_id = None
     http_request = MagicMock()
 
     conversation_mocks['get_user_info'].side_effect = Exception("auth fail")
@@ -560,6 +564,20 @@ async def test_generate_title_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_title_validation_error(conversation_mocks):
+    request_obj = MagicMock(conversation_id=1, question="Question", model_id=7)
+    conversation_mocks['get_user_info'].return_value = ("user_id", "tenant_id", "en")
+    conversation_mocks['generate_title_service'].side_effect = ValidationError(
+        "Selected model is unavailable")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_conversation_title_endpoint(
+            request_obj, MagicMock(), authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 422
 
 
 # update_opinion_endpoint

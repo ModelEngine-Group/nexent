@@ -5,7 +5,7 @@ import logging
 import re
 import uuid
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from datetime import datetime
 from math import isfinite
 from statistics import mean
@@ -21,6 +21,7 @@ except ModuleNotFoundError:
 
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.agents.sandbox import _scan_shell_calls
+from nexent.core.concurrency import ManagedTaskSpec
 
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import (
@@ -53,19 +54,17 @@ from database.agent_evaluation_db import (
     update_agent_evaluation_status,
 )
 from database.client import get_db_session
-from database.db_models import AgentEvaluation, ModelRecord
+from database.db_models import ModelRecord
 from database.evaluation_set_db import (
-    create_evaluation_set,
     get_evaluation_set_cases_all,
-    insert_evaluation_set_cases,
-    update_evaluation_set_case_count,
+    materialize_virtual_evaluation_set_for_run,
 )
 from database.evaluator_db import get_evaluator
-from services.agent_service import prepare_agent_run
+from management.services.agent.service import prepare_agent_run
 from services.evaluation_set_service import resolve_latest_published_version_no
+from services.thread_lifecycle_service import runtime_thread_manager
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template
-from utils.thread_utils import pool
 
 
 _QUERY_FORMAT_ERR_MSG = "AI returned invalid format for test queries"
@@ -173,10 +172,6 @@ def _scan_evaluator_introspection(code: str) -> list[str]:
 # Filename shown in syntax errors / tracebacks for evaluator code. Kept in one
 # constant so SonarCloud S1192 does not flag the literal as duplicated.
 _EVALUATOR_FILENAME = "<evaluator>"
-
-
-# Thread pool for parallel LLM evaluator calls (one case, multiple evaluators)
-_LLM_EVAL_EXECUTOR = ThreadPoolExecutor(max_workers=5)
 
 
 def validate_code_evaluator(code: str) -> None:
@@ -448,7 +443,10 @@ async def _run_agent_to_final_answer(
         )
         final_answer_parts: list[str] = []
         runtime_events: list[dict] = []
-        async for chunk in agent_run(agent_run_info):
+        async for chunk in agent_run(
+            agent_run_info,
+            thread_manager=runtime_thread_manager,
+        ):
             try:
                 data = json.loads(chunk)
                 if isinstance(data, dict):
@@ -998,7 +996,7 @@ def _score_with_evaluators(
     conversation_history: list[dict[str, Any]] | None = None,
 ) -> tuple:
     """Score one case with all evaluators. Code evaluators run serially (fast);
-    LLM evaluators run in parallel via ThreadPoolExecutor (I/O-bound)."""
+    LLM evaluators run in parallel through the Runtime evaluation lane."""
     code_evals = {
         eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") == "code"
     }
@@ -1014,12 +1012,17 @@ def _score_with_evaluators(
         return scores, reasons
 
     futures = {
-        _LLM_EVAL_EXECUTOR.submit(
+        runtime_thread_manager.submit(
+            "evaluation",
+            ManagedTaskSpec(
+                task_name="agent-evaluation-judge",
+                owner="runtime",
+            ),
             _call_one_llm_evaluator,
             eid, ev, judge_system_prompt, tenant_id,
             query, expected, actual, judge_model_id,
             runtime_events, context_window, conversation_history,
-        ): eid
+        ).future: eid
         for eid, ev in llm_evals.items()
     }
     llm_scores, llm_reasons = _collect_llm_results(futures, llm_evals)
@@ -1051,8 +1054,18 @@ def _check_run_limits(tenant_id: str) -> None:
 def _run_in_background(
     fn, *fn_args, tenant_id, user_id, agent_evaluation_id, language="zh"
 ):
-    """Submit fn to the thread pool and attach a failure-cleanup callback."""
-    future = pool.submit(fn, *fn_args)
+    """Submit fn to the Runtime evaluation lane and attach failure cleanup."""
+    execution = runtime_thread_manager.submit(
+        "evaluation",
+        ManagedTaskSpec(
+            task_name="agent-evaluation-run",
+            owner="runtime",
+            run_id=str(agent_evaluation_id),
+        ),
+        fn,
+        *fn_args,
+    )
+    future = execution.future
     future.add_done_callback(
         _make_background_done_callback(
             tenant_id, user_id, agent_evaluation_id, language
@@ -1461,11 +1474,9 @@ def _execute_single_case(
     --------
     1. Mark the case RUNNING (so the UI shows it as in-progress and subsequent
        scheduler sweeps do not re-pick it).
-    2. Run the target agent via ``_evaluate_query`` — the function is async
-       but the per-case worker runs from a ThreadPoolExecutor thread, so we
-       use ``asyncio.run()`` to build a one-off event loop per invocation.
-       ``_evaluate_query`` internally fans out multiple LLM/code evaluators
-       using ``_LLM_EVAL_EXECUTOR``.
+    2. Run the target agent via ``_evaluate_query``. The per-case managed
+       worker is synchronous, so ``asyncio.run()`` provides its event loop.
+       LLM evaluators fan out through the runtime evaluation lane.
     3. Build the ``{evaluator_name: pass_threshold}`` map from the evaluator
        rows already loaded for this run (one-time map per case, zero DB calls
        here).  Names missing from the map fall back to ``DEFAULT_PASS_THRESHOLD``
@@ -1636,28 +1647,16 @@ def _setup_no_set_and_execute(
         # Create virtual evaluation set
         timestamp = datetime.now().strftime("%m-%d %H:%M")
         set_name = f"[No-Set] {timestamp}-{uuid.uuid4().hex[:4]}"
-        set_meta = create_evaluation_set(
-            tenant_id=tenant_id,
-            name=set_name,
-            description=None,
-            source_filename="__no_set_virtual__",
-            created_by=user_id,
-        )
-        evaluation_set_id = set_meta["evaluation_set_id"]
-
-        # Insert cases
         cases = [
             {"inputs": {"query": q.strip()}, "label": {"answer": ""}, "order_no": i}
             for i, q in enumerate(queries)
         ]
-        insert_evaluation_set_cases(
+        evaluation_set_id = materialize_virtual_evaluation_set_for_run(
             tenant_id=tenant_id,
-            evaluation_set_id=evaluation_set_id,
+            name=set_name,
             cases=cases,
             created_by=user_id,
-        )
-        update_evaluation_set_case_count(
-            evaluation_set_id, len(cases), updated_by=user_id
+            agent_evaluation_id=agent_evaluation_id,
         )
         set_cases = get_evaluation_set_cases_all(
             evaluation_set_id=evaluation_set_id, tenant_id=tenant_id
@@ -1670,21 +1669,6 @@ def _setup_no_set_and_execute(
             set_cases=set_cases,
             created_by=user_id,
         )
-
-        # Update the run with correct evaluation_set_id and total
-        with get_db_session() as session:
-            session.query(AgentEvaluation).filter(
-                AgentEvaluation.agent_evaluation_id == agent_evaluation_id,
-                AgentEvaluation.tenant_id == tenant_id,
-            ).update(
-                {
-                    "evaluation_set_id": evaluation_set_id,
-                    "progress_total": len(cases),
-                    "status": EvalRunStatus.PENDING,
-                },
-                synchronize_session=False,
-            )
-            session.commit()
 
         # Execute in the runtime process, which owns the shared workspace
         # volume mounted by the sandbox container.

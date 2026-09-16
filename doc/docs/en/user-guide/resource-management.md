@@ -1,6 +1,6 @@
 # Resource Management
 
-This page provides a detailed explanation of the Nexent platform's user role system, data visibility scope, operation permissions for various resources, and practical examples of permission configuration.
+This page explains Nexent's role system, data visibility, and resource permissions, including API key management, personal knowledge-base capacity, and common resource filters.
 
 ⚠️ **Important Note**: When deploying v1.8.0 or later for the first time, Nexent creates the `suadmin@nexent.com` super administrator account with the default password `Nexent@123` and displays it in the terminal after successful creation. Override it before the first deployment with `NEXENT_SUPER_ADMIN_PASSWORD`; an offline package launched with `--config` uses the interactively entered password instead and does not display it.
 
@@ -9,7 +9,7 @@ This page provides a detailed explanation of the Nexent platform's user role sys
 - [I. Role System](#i-role-system) - Definitions and responsibilities of four core roles
 - [II. Tab Access Permissions](#ii-tab-access-permissions) - System pages accessible to each role
 - [III. Resource Permission Comparison](#iii-resource-permission-comparison) - Detailed operation permissions for various resources
-- [IV. Permission Configuration](#iv-permission-configuration) - Permission management for agents and knowledge bases
+- [IV. Permission Configuration](#iv-permission-configuration) - Agent and knowledge-base permissions, API keys, and capacity management
 - [V. Invitation Code Mechanism](#v-invitation-code-mechanism) - User registration and invitation process
 - [VI. Practical Examples](#vi-practical-examples) - Recommendations for permission configuration
 
@@ -191,6 +191,41 @@ The following tables show the operation permissions of four roles for various ty
   <img src="./assets/user-management/kb-permission-2.png" alt="Knowledge Base Permission Settings 2" style="width: 45%;">
 </div>
 
+Regular users' knowledge bases are always **Private**. They cannot add user groups or convert a private knowledge base into a shared one. Administrators and developers can select user groups and group permissions when creating a knowledge base.
+
+### 4.3 API Key Management
+
+Tenant administrators can open **Tenant Resources → API Key** to manage credentials for the current tenant. The list includes the API key, user, role, creator, creation time, last-used time, and usage count. Records without an associated email address are marked as **Virtual API Account**.
+
+Available actions include:
+
+- **Refresh**: Invalidates the user's current valid API key and generates a new one. The new value appears only in the success dialog, so copy it immediately to a secure credential system.
+- **Delete**: Revokes all valid API keys for that user. External calls that depend on them are affected immediately.
+
+API keys are sensitive credentials. Do not place real values in screenshots, documentation, logs, conversation Metadata, or source repositories. Mask keys and real email addresses in documentation screenshots.
+
+### 4.4 Personal Knowledge Base Capacity
+
+Super administrators and tenant administrators can open **Tenant Resources → Knowledge Base** and switch between **Shared Knowledge Bases** and **Personal Knowledge Bases**. The personal view provides:
+
+- The number of users with personal knowledge bases, total knowledge-base count, total usage, and total allocated quota
+- Search by username or email, sorting by usage or quota, and pagination
+- Per-user details including document count, chunk count, and storage usage for each personal knowledge base
+- A tenant default personal quota and an optional user-specific quota
+
+The default applies only to users without a specific quota; a user-specific quota takes precedence. A quota cannot be lower than current usage. After the default changes, affected users are checked against the new value on their next upload, and existing files are not deleted automatically.
+
+### 4.5 Filter and Locate Resources
+
+Use the search and filter controls provided by each resource list instead of browsing page by page:
+
+- Search users by username, email, or role.
+- Search user-group selectors by group name.
+- Filter knowledge bases by name, user group, and other available fields; search the personal-capacity view by user.
+- Filter agents, MCP services, and skills by name, status, tag, or scope where available on the current page.
+
+Filters only narrow resources the current account can already view. They do not expand permissions or reveal data from another tenant.
+
 ## V. Invitation Code Mechanism
 
 Nexent platform uses an invitation code mechanism to control new user registration, ensuring platform security and controllability.
@@ -315,7 +350,7 @@ In the scenario of XX City People's Hospital, the correspondence between Nexent 
   - ❌ Doctor's diagnostic system (no permission)
   - ❌ Other patients' data (completely isolated)
 
-## 💡 Get Help
+### 💡 Get Help
 
 If you encounter any issues while using the platform:
 

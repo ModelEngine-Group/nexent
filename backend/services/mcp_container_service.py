@@ -7,7 +7,6 @@ interface while using the standardized SDK container management module.
 
 import logging
 import asyncio
-import threading
 from typing import Dict, List, Optional, AsyncGenerator
 
 from consts.exceptions import MCPConnectionError, MCPContainerError
@@ -19,6 +18,8 @@ from nexent.container import (
     ContainerError,
     ContainerConnectionError,
 )
+from nexent.core.concurrency import ManagedTaskSpec, ManagedThreadSpec
+from services.thread_lifecycle_service import config_thread_manager
 
 logger = logging.getLogger("mcp_container_service")
 
@@ -31,7 +32,7 @@ class MCPContainerManager:
     while delegating to the SDK's standardized container management module.
     """
 
-    def __init__(self, docker_socket_path: Optional[str] = None):
+    def __init__(self, docker_socket_path: Optional[str] = None, thread_manager=None):
         """
         Initialize container manager using SDK
 
@@ -40,6 +41,9 @@ class MCPContainerManager:
                 For container access, mount docker socket: -v /var/run/docker.sock:/var/run/docker.sock
                 Only used when running in Docker mode.
         """
+        self.thread_manager = thread_manager or config_thread_manager
+        if getattr(getattr(self.thread_manager, "state", None), "value", None) == "created":
+            self.thread_manager.start()
         try:
             if IS_DEPLOYED_BY_KUBERNETES:
                 logger.info("Initializing Kubernetes container client")
@@ -318,9 +322,9 @@ class MCPContainerManager:
                     # (same pattern as Docker)
                     loop = asyncio.get_event_loop()
                     log_queue = asyncio.Queue()
-                    stop_flag = [False]
+                    stream_holder = {}
 
-                    def _stream_logs_sync():
+                    def _stream_logs_sync(cancel_event):
                         """Run blocking Kubernetes log stream in thread"""
                         try:
                             # Kubernetes log API with follow=True returns a generator
@@ -333,8 +337,9 @@ class MCPContainerManager:
                                 _preload_content=False,
                                 tail_lines=0,  # Only new logs after initial batch
                             )
+                            stream_holder["stream"] = log_stream
                             for log_line in log_stream:
-                                if stop_flag[0]:
+                                if cancel_event.is_set():
                                     break
                                 # Kubernetes API returns bytes, decode to string
                                 if isinstance(log_line, bytes):
@@ -354,11 +359,22 @@ class MCPContainerManager:
                                 log_queue.put(None), loop
                             )
 
-                    # Start streaming in background thread
-                    stream_thread = threading.Thread(
-                        target=_stream_logs_sync, daemon=True
+                    def _close_stream():
+                        stream = stream_holder.get("stream")
+                        close = getattr(stream, "close", None)
+                        if callable(close):
+                            close()
+
+                    execution = self.thread_manager.register_service(
+                        ManagedThreadSpec(
+                            task_name="kubernetes-mcp-log-stream",
+                            owner="config",
+                            lane="background-service",
+                            close_hook=_close_stream,
+                        ),
+                        _stream_logs_sync,
                     )
-                    stream_thread.start()
+                    self.thread_manager.start_service(execution.execution_id)
 
                     # Process log lines from queue
                     try:
@@ -369,15 +385,23 @@ class MCPContainerManager:
                             if log_line.strip():
                                 yield log_line
                     finally:
-                        stop_flag[0] = True
+                        self.thread_manager.cancel(
+                            execution.execution_id,
+                            reason="Kubernetes log consumer closed",
+                            wait_timeout=5,
+                        )
             else:
                 # Docker mode: use native Docker API for streaming
                 container = self.client.client.containers.get(container_id)
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
 
                 # First, get initial logs in a thread pool to avoid blocking
-                initial_logs = await loop.run_in_executor(
-                    None,
+                initial_logs = await self.thread_manager.run(
+                    "control-io",
+                    ManagedTaskSpec(
+                        task_name="docker-mcp-initial-logs",
+                        owner="config",
+                    ),
                     lambda: container.logs(
                         tail=tail, stdout=True, stderr=True, timestamps=False
                     )
@@ -392,10 +416,9 @@ class MCPContainerManager:
                 if follow:
                     # Create a queue to pass log chunks from thread to async generator
                     log_queue = asyncio.Queue()
-                    # Use list to allow modification from nested function
-                    stop_flag = [False]
+                    stream_holder = {}
 
-                    def _stream_logs_sync():
+                    def _stream_logs_sync(cancel_event):
                         """Run blocking log stream in thread"""
                         try:
                             log_stream = container.logs(
@@ -406,8 +429,9 @@ class MCPContainerManager:
                                 timestamps=False,
                                 tail=0,  # Only new logs
                             )
+                            stream_holder["stream"] = log_stream
                             for log_chunk in log_stream:
-                                if stop_flag[0]:
+                                if cancel_event.is_set():
                                     break
                                 # Put chunks in queue (will be processed in async context)
                                 asyncio.run_coroutine_threadsafe(
@@ -423,10 +447,22 @@ class MCPContainerManager:
                                 log_queue.put(None), loop
                             )
 
-                    # Start streaming in background thread
-                    stream_thread = threading.Thread(
-                        target=_stream_logs_sync, daemon=True)
-                    stream_thread.start()
+                    def _close_stream():
+                        stream = stream_holder.get("stream")
+                        close = getattr(stream, "close", None)
+                        if callable(close):
+                            close()
+
+                    execution = self.thread_manager.register_service(
+                        ManagedThreadSpec(
+                            task_name="docker-mcp-log-stream",
+                            owner="config",
+                            lane="background-service",
+                            close_hook=_close_stream,
+                        ),
+                        _stream_logs_sync,
+                    )
+                    self.thread_manager.start_service(execution.execution_id)
 
                     # Process log chunks from queue
                     try:
@@ -440,7 +476,11 @@ class MCPContainerManager:
                                 if line.strip():  # Only yield non-empty lines
                                     yield line
                     finally:
-                        stop_flag[0] = True
+                        self.thread_manager.cancel(
+                            execution.execution_id,
+                            reason="Docker log consumer closed",
+                            wait_timeout=5,
+                        )
         except Exception as e:
             logger.error(f"Failed to stream container logs: {e}")
             yield f"Error retrieving logs: {e}"

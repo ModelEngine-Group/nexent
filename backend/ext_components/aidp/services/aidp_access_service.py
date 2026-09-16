@@ -14,6 +14,7 @@ from typing import Any, Callable, TypeVar
 from ext_components.aidp.services import aidp_permission_service
 from ext_components.aidp.services.aidp_service import fetch_all_aidp_knowledge_bases_impl
 
+
 logger = logging.getLogger("aidp_access_service")
 
 _CATALOG_CACHE_TTL_SECONDS = 30.0
@@ -46,6 +47,7 @@ class AidpAccessSnapshot:
     accessible_ids: list[str]
     accessible_id_set: set[str]
     name_to_id: dict[str, str]
+    tenant_name_to_id: dict[str, str]
 
 
 def _normalize_server_url(server_url: str) -> str:
@@ -213,10 +215,12 @@ def resolve_current_aidp_access(
     )
     remote_ms = (time.perf_counter() - remote_started_at) * 1000
     permission_started_at = time.perf_counter()
-    accessible_rows = aidp_permission_service.intersect_accessible_kbs(
-        remote_items=remote_items,
-        user_id=user_id,
-        tenant_id=tenant_id,
+    accessible_rows, tenant_name_to_id = (
+        aidp_permission_service.intersect_accessible_kbs_with_name_map(
+            remote_items=remote_items,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
     )
     permission_ms = (time.perf_counter() - permission_started_at) * 1000
 
@@ -244,6 +248,7 @@ def resolve_current_aidp_access(
         accessible_ids=accessible_ids,
         accessible_id_set=accessible_id_set,
         name_to_id=name_to_id,
+        tenant_name_to_id=tenant_name_to_id,
     )
     logger.info(
         "AIDP access snapshot timing: total_ms=%.1f remote_ms=%.1f permission_ms=%.1f "

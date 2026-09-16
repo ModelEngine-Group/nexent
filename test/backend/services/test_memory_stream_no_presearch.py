@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from backend.consts.model import AgentRequest
-from backend.services import agent_service
+from management.services.agent import run as agent_service
 
 
 @pytest.mark.asyncio
@@ -91,10 +91,14 @@ async def test_fixed_search_is_streamed_and_persisted_as_structured_tool(monkeyp
     run_info.agent_config.pre_run_tool_events = pre_run_events
     run_info.stop_event.is_set.return_value = False
 
-    async def fake_agent_run(_run_info):
+    async def fake_agent_run(_run_info, **_kwargs):
         yield json.dumps({"type": "final_answer", "content": "Done"})
 
+    async def run_inline(_lane, _spec, func, *args, **kwargs):
+        return func(*args, **kwargs)
+
     monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_service.runtime_thread_manager, "run", run_inline)
     monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 42)
     monkeypatch.setattr(
         agent_service.agent_run_manager,

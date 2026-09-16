@@ -1,3 +1,4 @@
+import json
 import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
@@ -6,13 +7,18 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from consts.exceptions import SkillDuplicateError, UnauthorizedError
-from consts.model import AgentRepositoryListingCreateRequest, SkillResolution
+from consts.model import (
+    AgentRepositoryListingCreateRequest,
+    SkillResolution,
+    TagAssignmentFilter,
+)
 from services.agent_repository_service import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
     get_agent_repository_listing_detail_impl,
     import_agent_from_repository_impl,
     list_agent_repository_listings_impl,
+    list_agent_repository_tag_stats_impl,
     list_my_editable_agents_impl,
     update_agent_repository_status_impl,
 )
@@ -20,6 +26,18 @@ from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
+
+
+def _parse_tag_predicates(raw: str | None) -> list[TagAssignmentFilter]:
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ValueError("tag_predicates must be valid JSON") from error
+    if not isinstance(payload, list):
+        raise ValueError("tag_predicates must be a list")
+    return [TagAssignmentFilter.model_validate(item) for item in payload]
 
 
 @agent_repository_router.get("")
@@ -33,19 +51,36 @@ async def list_agent_repository_listings_api(
     search: Optional[str] = Query(
         None, description="Filter by name, description, author, or tags"
     ),
+    search_tag_predicates: Optional[str] = Query(
+        None,
+        description="Structured tag predicates that expand text search matches",
+    ),
+    tag_predicates: Optional[str] = Query(
+        None,
+        description="Structured tag predicates encoded as JSON",
+    ),
+    tag: Optional[str] = Query(None, description="Filter by an exact tag"),
     authorization: str = Header(None),
 ):
     """List all marketplace repository listings with optional status filter."""
     try:
         _, tenant_id = get_current_user_id(authorization)
-        result = list_agent_repository_listings_impl(
-            tenant_id,
-            status=status,
-            agent_id=agent_id,
-            page=page,
-            page_size=page_size,
-            search=search,
-        )
+        filters = {
+            "status": status,
+            "agent_id": agent_id,
+            "page": page,
+            "page_size": page_size,
+            "search": search,
+        }
+        search_predicates = _parse_tag_predicates(search_tag_predicates)
+        if search_predicates:
+            filters["search_tag_predicates"] = search_predicates
+        predicates = _parse_tag_predicates(tag_predicates)
+        if predicates:
+            filters["tag_predicates"] = predicates
+        if tag:
+            filters["tag"] = tag
+        result = list_agent_repository_listings_impl(tenant_id, **filters)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(
@@ -57,6 +92,20 @@ async def list_agent_repository_listings_api(
             f"Invalid agent repository listings request parameters: {str(e)}"
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+
+
+@agent_repository_router.get("/tags")
+async def list_agent_repository_tag_stats_api(authorization: str = Header(None)):
+    """List shared repository tag values with counts for the caller tenant."""
+    try:
+        _, tenant_id = get_current_user_id(authorization)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={"items": list_agent_repository_tag_stats_impl(tenant_id)},
+        )
+    except UnauthorizedError as e:
+        logger.warning(f"Unauthorized agent repository tag-stat access: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
 
 
 @agent_repository_router.get("/mine")
@@ -80,21 +129,36 @@ async def list_my_editable_agents_api(
         None,
         description="Filter to a single agent by agent_id",
     ),
+    tag_predicates: Optional[str] = Query(
+        None,
+        description="Structured tag predicates encoded as JSON",
+    ),
+    search_tag_predicates: Optional[str] = Query(
+        None,
+        description="Structured tag predicates that expand text search matches",
+    ),
     authorization: str = Header(None),
 ):
     """List editable draft agents for the current user with repository listing info."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        result = await list_my_editable_agents_impl(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            ownership=ownership or "all",
-            page=page,
-            page_size=page_size,
-            search=search,
-            new_agent_padding=new_agent_padding,
-            agent_id=agent_id,
-        )
+        filters = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "ownership": ownership or "all",
+            "page": page,
+            "page_size": page_size,
+            "search": search,
+            "new_agent_padding": new_agent_padding,
+            "agent_id": agent_id,
+        }
+        predicates = _parse_tag_predicates(tag_predicates)
+        if predicates:
+            filters["tag_predicates"] = predicates
+        search_predicates = _parse_tag_predicates(search_tag_predicates)
+        if search_predicates:
+            filters["search_tag_predicates"] = search_predicates
+        result = await list_my_editable_agents_impl(**filters)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except UnauthorizedError as e:
         logger.warning(

@@ -1,9 +1,10 @@
-import asyncio
 import hashlib
 import logging
 import socket
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+from nexent.core.concurrency import ManagedTaskSpec, ThreadManager
 
 try:
     import redis
@@ -28,6 +29,25 @@ class RuntimeStateService:
     def __init__(self):
         self._client: Optional[Any] = None
         self._pod_name = socket.gethostname()
+        self._thread_manager: Optional[ThreadManager] = None
+
+    def set_thread_manager(self, thread_manager: ThreadManager) -> None:
+        """Inject the process-local manager used for blocking Redis calls."""
+        self._thread_manager = thread_manager
+
+    async def _run_managed(self, task_name: str, fn, *args, **kwargs):
+        if self._thread_manager is None:
+            return fn(*args, **kwargs)
+        return await self._thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name=task_name,
+                owner="services.runtime_state_service",
+            ),
+            fn,
+            *args,
+            **kwargs,
+        )
 
     @property
     def enabled(self) -> bool:
@@ -89,7 +109,7 @@ class RuntimeStateService:
             logger.warning("Failed to reset runtime stream state: %s", exc)
 
     async def reset_stream_async(self, user_id: str, conversation_id: int) -> None:
-        await asyncio.to_thread(self.reset_stream, user_id, conversation_id)
+        await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id)
 
     def register_run(self, user_id: str, conversation_id: int, message_id: Optional[int] = None) -> None:
         if not self.enabled:
@@ -134,7 +154,7 @@ class RuntimeStateService:
             return {}
 
     async def get_run_state_async(self, user_id: str, conversation_id: int) -> Dict[str, str]:
-        return await asyncio.to_thread(self.get_run_state, user_id, conversation_id)
+        return await self._run_managed("runtime-state-get-run", self.get_run_state, user_id, conversation_id)
 
     def set_cancel_signal(self, user_id: str, conversation_id: int) -> bool:
         if not self.enabled:
@@ -156,7 +176,7 @@ class RuntimeStateService:
             return False
 
     async def is_cancelled_async(self, user_id: str, conversation_id: int) -> bool:
-        return await asyncio.to_thread(self.is_cancelled, user_id, conversation_id)
+        return await self._run_managed("runtime-state-is-cancelled", self.is_cancelled, user_id, conversation_id)
 
     def append_stream_event(self, user_id: str, conversation_id: int, chunk: str) -> Optional[str]:
         if not self.enabled:
@@ -176,7 +196,13 @@ class RuntimeStateService:
             return None
 
     async def append_stream_event_async(self, user_id: str, conversation_id: int, chunk: str) -> Optional[str]:
-        return await asyncio.to_thread(self.append_stream_event, user_id, conversation_id, chunk)
+        return await self._run_managed(
+            "runtime-state-append-event",
+            self.append_stream_event,
+            user_id,
+            conversation_id,
+            chunk,
+        )
 
     def mark_stream_completed(
         self,
@@ -207,7 +233,14 @@ class RuntimeStateService:
         status: str,
         error: Optional[str] = None,
     ) -> None:
-        await asyncio.to_thread(self.mark_stream_completed, user_id, conversation_id, status, error)
+        await self._run_managed(
+            "runtime-state-mark-stream-completed",
+            self.mark_stream_completed,
+            user_id,
+            conversation_id,
+            status,
+            error,
+        )
 
     def get_stream_status(self, user_id: str, conversation_id: int) -> Dict[str, str]:
         if not self.enabled:
@@ -219,7 +252,12 @@ class RuntimeStateService:
             return {}
 
     async def get_stream_status_async(self, user_id: str, conversation_id: int) -> Dict[str, str]:
-        return await asyncio.to_thread(self.get_stream_status, user_id, conversation_id)
+        return await self._run_managed(
+            "runtime-state-get-stream-status",
+            self.get_stream_status,
+            user_id,
+            conversation_id,
+        )
 
     def read_stream_events(
         self,
@@ -243,7 +281,13 @@ class RuntimeStateService:
         conversation_id: int,
         after_id: Optional[str] = None,
     ) -> List[Tuple[str, str]]:
-        return await asyncio.to_thread(self.read_stream_events, user_id, conversation_id, after_id)
+        return await self._run_managed(
+            "runtime-state-read-stream-events",
+            self.read_stream_events,
+            user_id,
+            conversation_id,
+            after_id,
+        )
 
     def wait_for_stream_events(
         self,
@@ -277,7 +321,8 @@ class RuntimeStateService:
         block_ms: int = 1000,
         count: int = 100,
     ) -> List[Tuple[str, str]]:
-        return await asyncio.to_thread(
+        return await self._run_managed(
+            "runtime-state-wait-stream-events",
             self.wait_for_stream_events,
             user_id,
             conversation_id,
@@ -292,13 +337,22 @@ class RuntimeStateService:
         return bool(acquired)
 
     async def acquire_idempotency_async(self, key: str, ttl_seconds: int) -> bool:
-        return await asyncio.to_thread(self.acquire_idempotency, key, ttl_seconds)
+        return await self._run_managed(
+            "runtime-state-acquire-idempotency",
+            self.acquire_idempotency,
+            key,
+            ttl_seconds,
+        )
 
     def release_idempotency(self, key: str) -> None:
         self.client.delete(self._idempotency_key(key))
 
     async def release_idempotency_async(self, key: str) -> None:
-        await asyncio.to_thread(self.release_idempotency, key)
+        await self._run_managed(
+            "runtime-state-release-idempotency",
+            self.release_idempotency,
+            key,
+        )
 
     def consume_rate_limit(self, tenant_id: str, limit_per_minute: int) -> int:
         minute_bucket = str(int(time.time() // 60))
@@ -313,7 +367,12 @@ class RuntimeStateService:
         return count
 
     async def consume_rate_limit_async(self, tenant_id: str, limit_per_minute: int) -> int:
-        return await asyncio.to_thread(self.consume_rate_limit, tenant_id, limit_per_minute)
+        return await self._run_managed(
+            "runtime-state-consume-rate-limit",
+            self.consume_rate_limit,
+            tenant_id,
+            limit_per_minute,
+        )
 
 
 runtime_state_service = RuntimeStateService()

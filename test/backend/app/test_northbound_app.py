@@ -12,7 +12,10 @@ from fastapi.testclient import TestClient
 from io import BytesIO
 
 # Import from conftest (which sets up mocks automatically)
-from apps.northbound_app import router
+# Agent management is outside the HTTP boundary exercised in this module.
+with pytest.MonkeyPatch.context() as import_mocks:
+    import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
+    from apps.northbound_app import router
 from consts.exceptions import (
     ConversationNotFoundError,
     ForbiddenError,
@@ -761,7 +764,7 @@ def test_generate_title_success():
         resp = client.post(
             "/nb/v1/generate_title",
             headers=_build_headers(),
-            json={"conversation_id": 42, "question": "Summarize this conversation"},
+            json={"conversation_id": 42, "question": "Summarize this conversation", "model_id": 7},
         )
 
     assert resp.status_code == 200
@@ -771,7 +774,23 @@ def test_generate_title_success():
         conversation_id=42,
         question="Summarize this conversation",
         language="en",
+        model_id=7,
     )
+
+
+def test_generate_title_validation_error():
+    with patch('apps.northbound_app._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
+            patch('apps.northbound_app.generate_conversation_title', new_callable=AsyncMock) as mock_generate:
+        mock_ctx.return_value = MagicMock()
+        mock_generate.side_effect = ValidationError("Selected model is unavailable")
+
+        resp = client.post(
+            "/nb/v1/generate_title",
+            headers=_build_headers(),
+            json={"conversation_id": 42, "question": "Question", "model_id": 7},
+        )
+
+    assert resp.status_code == 422
 
 
 # =============================================================================
@@ -1718,3 +1737,20 @@ def test_get_agent_knowledge_bases_http_exception_passthrough():
 
         assert resp.status_code == 403
         assert resp.json()["detail"] == "forbidden"
+
+
+@pytest.mark.parametrize("enable_hitl", [False, True])
+def test_run_chat_passes_hitl_flag(enable_hitl):
+    from fastapi.responses import StreamingResponse
+
+    async def chunks():
+        yield b'data: {"type":"human_run","content":{}}\n\n'
+
+    with patch("apps.northbound_app._get_northbound_context", new_callable=AsyncMock), \
+            patch("apps.northbound_app.start_streaming_chat", new_callable=AsyncMock) as start:
+        start.return_value = StreamingResponse(chunks())
+        response = client.post("/nb/v1/chat/run", json={
+            "agent_name": "assistant", "query": "help", "enable_hitl": enable_hitl,
+        })
+    assert response.status_code == 200
+    assert start.call_args.kwargs["enable_hitl"] is enable_hitl

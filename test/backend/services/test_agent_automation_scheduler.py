@@ -23,11 +23,19 @@ def _load_scheduler_with_runner_stub(monkeypatch):
     runner_module.agent_automation_runner = _Runner()
     monkeypatch.setitem(sys.modules, "services.agent_automation.runner", runner_module)
     sys.modules.pop("services.agent_automation.scheduler", None)
-    return importlib.import_module("services.agent_automation.scheduler")
+    module = importlib.import_module("services.agent_automation.scheduler")
+
+    async def run_inline(_task_name, func, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(module, "run_blocking", run_inline)
+    return module
 
 
 @pytest.mark.asyncio
-async def test_store_recovers_orphans_before_releasing_expired_locks(monkeypatch):
+async def test_store_recovers_orphans_before_releasing_all_locks(monkeypatch):
     scheduler_module = _load_scheduler_with_runner_stub(monkeypatch)
     calls = []
     monkeypatch.setattr(
@@ -37,7 +45,7 @@ async def test_store_recovers_orphans_before_releasing_expired_locks(monkeypatch
     )
     monkeypatch.setattr(
         scheduler_module.agent_automation_db,
-        "release_expired_locks",
+        "release_all_task_locks",
         lambda: calls.append("release"),
     )
     await scheduler_module.AgentAutomationLeaseStore().recover()
@@ -69,7 +77,7 @@ async def test_store_skips_missed_recurring_fires_on_restart(monkeypatch):
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: recovery_time)
     monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: None)
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_expired_locks", lambda: None)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_all_task_locks", lambda: None)
     monkeypatch.setattr(
         scheduler_module.agent_automation_db,
         "claim_due_tasks",
@@ -114,7 +122,7 @@ async def test_store_keeps_once_and_post_recovery_occurrences_runnable(monkeypat
 
     monkeypatch.setattr(scheduler_module, "_utcnow", lambda: recovery_time)
     monkeypatch.setattr(scheduler_module.agent_automation_db, "recover_orphaned_runs", lambda: None)
-    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_expired_locks", lambda: None)
+    monkeypatch.setattr(scheduler_module.agent_automation_db, "release_all_task_locks", lambda: None)
     monkeypatch.setattr(
         scheduler_module.agent_automation_db,
         "claim_due_tasks",

@@ -400,10 +400,17 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
 
+    managed_calls = []
+
+    class FakeThreadManager:
+        async def run(self, lane, spec, func, *args, **kwargs):
+            managed_calls.append((lane, spec.task_name))
+            return func(*args, **kwargs)
+
+    service.set_thread_manager(FakeThreadManager())
+
     async def fake_to_thread(func, *args, **kwargs):
         return func(*args, **kwargs)
-
-    monkeypatch.setattr(runtime_state_module.asyncio, "to_thread", fake_to_thread)
     monkeypatch.setattr(
         service,
         "reset_stream",
@@ -442,3 +449,5 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
         assert await service.consume_rate_limit_async("tenant-1", 2) == 1
 
     asyncio.run(run_checks())
+    assert len(managed_calls) == 11
+    assert {lane for lane, _ in managed_calls} == {"control-io"}

@@ -26,8 +26,6 @@ minio_client_mock.client = MagicMock()
 minio_config_mock = MagicMock()
 minio_config_mock.validate = MagicMock()
 
-if 'consts.const' in sys.modules and not hasattr(sys.modules['consts.const'], 'APP_DESCRIPTION'):
-    sys.modules.pop('consts.const', None)
 if 'consts' in sys.modules and not hasattr(sys.modules['consts'], '__path__'):
     sys.modules.pop('consts', None)
 
@@ -71,7 +69,8 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
         load_config_impl,
         build_models_config,
         build_app_config,
-        build_model_config
+        build_model_config,
+        get_model_id_for_config,
     )
 
 
@@ -699,14 +698,14 @@ class TestSaveConfigImpl:
         service_mocks['get_model_id'].assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_save_config_impl_app_config_updates(self, service_mocks):
-        """Test app configuration updates"""
+    async def test_save_config_impl_ignores_legacy_app_identity(self, service_mocks):
+        """Legacy app identity fields must never reach tenant config persistence."""
         # Setup
         config = MagicMock()
         config_dict = {
             "app": {
-                "name": "New App Name",
-                "description": "New Description"
+                "appName": "New App Name",
+                "appDescription": "New Description"
             }
         }
         config.model_dump.return_value = config_dict
@@ -721,7 +720,10 @@ class TestSaveConfigImpl:
         }
 
         # Mock get_env_key
-        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
+        service_mocks['get_env_key'].side_effect = {
+            "appName": "APP_NAME",
+            "appDescription": "APP_DESCRIPTION",
+        }.get
 
         # Mock safe_value to return the same value consistently
         def mock_safe_value(value):
@@ -734,113 +736,9 @@ class TestSaveConfigImpl:
 
         # Assert
         assert result is None
-
-    @pytest.mark.asyncio
-    async def test_save_config_impl_app_config_same_values(self, service_mocks):
-        """Test app configuration when values are the same"""
-        # Setup
-        config = MagicMock()
-        config_dict = {
-            "app": {
-                "name": "Same App Name",
-                "description": "Same Description"
-            }
-        }
-        config.model_dump.return_value = config_dict
-
-        tenant_id = "test_tenant_id"
-        user_id = "test_user_id"
-
-        # Mock tenant config with same values
-        service_mocks['tenant_config_manager'].load_config.return_value = {
-            "APP_NAME": "Same App Name",
-            "APP_DESCRIPTION": "Same Description"
-        }
-
-        # Mock get_env_key
-        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
-
-        # Mock safe_value
-        service_mocks['safe_value'].side_effect = lambda value: str(
-            value) if value is not None else ""
-
-        # Execute
-        result = await save_config_impl(config, tenant_id, user_id)
-
-        # Assert
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_save_config_impl_app_config_empty_values(self, service_mocks):
-        """Test app configuration when values are empty"""
-        # Setup
-        config = MagicMock()
-        config_dict = {
-            "app": {
-                "name": "",
-                "description": ""
-            }
-        }
-        config.model_dump.return_value = config_dict
-
-        tenant_id = "test_tenant_id"
-        user_id = "test_user_id"
-
-        # Mock tenant config with non-empty values
-        service_mocks['tenant_config_manager'].load_config.return_value = {
-            "APP_NAME": "Old App Name",
-            "APP_DESCRIPTION": "Old Description"
-        }
-
-        # Mock get_env_key
-        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
-
-        # Mock safe_value
-        service_mocks['safe_value'].side_effect = lambda value: str(
-            value) if value is not None else ""
-
-        # Execute
-        result = await save_config_impl(config, tenant_id, user_id)
-
-        # Assert
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_save_config_impl_app_config_new_keys(self, service_mocks):
-        """Test app configuration when keys don't exist in tenant config"""
-        # Setup
-        config = MagicMock()
-        config_dict = {
-            "app": {
-                "name": "New App Name",
-                "description": "New Description"
-            }
-        }
-        config.model_dump.return_value = config_dict
-
-        tenant_id = "test_tenant_id"
-        user_id = "test_user_id"
-
-        # Mock tenant config with no existing keys
-        service_mocks['tenant_config_manager'].load_config.return_value = {}
-
-        # Mock get_env_key
-        service_mocks['get_env_key'].side_effect = lambda key: key.upper()
-
-        # Mock safe_value
-        service_mocks['safe_value'].side_effect = lambda value: str(
-            value) if value is not None else ""
-
-        # Execute
-        result = await save_config_impl(config, tenant_id, user_id)
-
-        # Assert
-        assert result is None
-
-        # Verify that set_single_config is called for new keys
-        assert service_mocks['tenant_config_manager'].set_single_config.call_count == 2
-        service_mocks['tenant_config_manager'].delete_single_config.assert_not_called()
+        service_mocks['tenant_config_manager'].set_single_config.assert_not_called()
         service_mocks['tenant_config_manager'].update_single_config.assert_not_called()
+        service_mocks['tenant_config_manager'].delete_single_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_save_config_impl_model_dump_exception(self, service_mocks):
@@ -1076,8 +974,6 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        assert result["app"]["name"] == "Custom App Name"
-        assert result["app"]["description"] == "Custom description"
         assert result["app"]["tenantName"] == "Test Tenant"
         assert result["app"]["defaultGroupId"] == "default-group-123"
         assert result["app"]["icon"]["type"] == "preset"
@@ -1106,8 +1002,6 @@ class TestLoadConfigImpl:
         result = await load_config_impl(language, tenant_id)
 
         # Check Chinese default values
-        assert result["app"]["name"] == "Nexent 智能体"
-        assert result["app"]["description"] == "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
         assert result["app"]["tenantName"] == ""
         assert result["app"]["defaultGroupId"] == ""
         assert result["app"]["icon"]["type"] == "preset"
@@ -1164,9 +1058,7 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Check app config (should use defaults)
-        assert result["app"]["name"] == "Nexent Agent"
-        assert result["app"]["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
+        # Check app config
         assert result["app"]["tenantName"] == ""
         assert result["app"]["defaultGroupId"] == ""
 
@@ -1193,9 +1085,7 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Check app config (should use defaults)
-        assert result["app"]["name"] == "Nexent Agent"
-        assert result["app"]["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
+        # Check app config
         assert result["app"]["tenantName"] == ""
         assert result["app"]["defaultGroupId"] == ""
 
@@ -1245,8 +1135,7 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Assert - should use English defaults when language is empty
-        assert result["app"]["name"] == "Nexent Agent"  # DEFAULT_APP_NAME_EN
+        # Assert
         assert result["models"]["llm"]["name"] == ""
 
     @pytest.mark.asyncio
@@ -1266,8 +1155,7 @@ class TestLoadConfigImpl:
         # Execute
         result = await load_config_impl(language, tenant_id)
 
-        # Assert - should use English defaults when language is invalid
-        assert result["app"]["name"] == "Nexent Agent"  # DEFAULT_APP_NAME_EN
+        # Assert
         assert result["models"]["llm"]["name"] == ""
 
     @pytest.mark.asyncio
@@ -1288,7 +1176,6 @@ class TestLoadConfigImpl:
         result = await load_config_impl(language, tenant_id)
 
         # Assert - should still work with empty tenant_id
-        assert result["app"]["name"] == "Nexent Agent"
         assert result["models"]["llm"]["name"] == ""
 
     @pytest.mark.asyncio
@@ -1484,8 +1371,8 @@ class TestBuildAppConfig:
             result = build_app_config(language, tenant_id)
 
             # Assert
-            assert result["name"] == "Custom App Name"
-            assert result["description"] == "Custom description"
+            assert "name" not in result
+            assert "description" not in result
             assert result["tenantName"] == ""  # None returns default empty string
             assert result["defaultGroupId"] == ""  # None returns default empty string
             assert result["icon"]["type"] == "custom"
@@ -1496,8 +1383,6 @@ class TestBuildAppConfig:
 
         # Verify calls
         expected_calls = [
-            ("APP_NAME", tenant_id),
-            ("APP_DESCRIPTION", tenant_id),
             ("TENANT_NAME", tenant_id),
             ("DEFAULT_GROUP_ID", tenant_id),
             ("ICON_TYPE", tenant_id),
@@ -1506,7 +1391,7 @@ class TestBuildAppConfig:
             ("CUSTOM_ICON_URL", tenant_id),
             ("DATAMATE_URL", tenant_id)
         ]
-        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 9
+        assert service_mocks['tenant_config_manager'].get_app_config.call_count == 7
         service_mocks['tenant_config_manager'].get_app_config.assert_has_calls(
             [call(key, tenant_id=tenant_id)
              for key, _ in expected_calls]
@@ -1526,10 +1411,7 @@ class TestBuildAppConfig:
             # Execute
             result = build_app_config(language, tenant_id)
 
-            # Assert - should use Chinese defaults
-            assert result["name"] == "Nexent 智能体"  # DEFAULT_APP_NAME_ZH
-            # DEFAULT_APP_DESCRIPTION_ZH
-            assert result["description"] == "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
+            # Assert
             assert result["icon"]["type"] == "preset"
             assert result["icon"]["iconKey"] == "search"  # Default value
             assert result["icon"]["avatarUri"] == ""
@@ -1550,10 +1432,7 @@ class TestBuildAppConfig:
             # Execute
             result = build_app_config(language, tenant_id)
 
-            # Assert - should use English defaults
-            assert result["name"] == "Nexent Agent"  # DEFAULT_APP_NAME_EN
-            # DEFAULT_APP_DESCRIPTION_EN
-            assert result["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
+            # Assert
             assert result["icon"]["type"] == "preset"
             assert result["icon"]["iconKey"] == "search"  # Default value
             assert result["icon"]["avatarUri"] == ""
@@ -1586,9 +1465,6 @@ class TestBuildAppConfig:
             result = build_app_config(language, tenant_id)
 
             # Assert
-            assert result["name"] == "Custom App Name"
-            # Default
-            assert result["description"] == "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
             assert result["icon"]["type"] == "custom"
             assert result["icon"]["iconKey"] == "globe2"
             assert result["icon"]["avatarUri"] == ""  # Default empty
@@ -1640,7 +1516,6 @@ class TestBuildAppConfig:
             result = build_app_config(language, tenant_id)
 
             # Assert - verify iconKey is returned correctly
-            assert result["name"] == "Custom App Name"
             assert result["icon"]["type"] == "preset"
             assert result["icon"]["iconKey"] == "keyboard"
             assert result["icon"]["avatarUri"] == "avatar-uri"
@@ -1680,7 +1555,6 @@ class TestBuildAppConfig:
             result = build_app_config(language, tenant_id)
 
             # Assert - verify iconKey defaults to "search"
-            assert result["name"] == "Test App"
             assert result["icon"]["type"] == "preset"
             assert result["icon"]["iconKey"] == "search"  # Default value
 
@@ -1892,3 +1766,82 @@ class TestBuildModelConfig:
         assert result["apiConfig"]["apiKey"] == "test-key"
         # Should have dimension since model_type contains 'embedding'
         assert result["dimension"] == 512
+
+
+class TestAdditionalConfigSyncCoverage:
+    """Cover lookup and application configuration persistence branches."""
+
+    def test_get_model_id_for_config_prefers_matching_model_record(self, service_mocks):
+        service_mocks["get_model_records"].return_value = [{"model_id": 42}]
+
+        result = get_model_id_for_config("embedding", "text-embedding", "tenant-id")
+
+        assert result == 42
+        service_mocks["get_model_records"].assert_called_once_with(
+            {"display_name": "text-embedding", "model_type": "embedding"},
+            "tenant-id",
+        )
+        service_mocks["get_model_id"].assert_not_called()
+
+    def test_get_model_id_for_config_returns_none_for_empty_display_name(
+        self,
+        service_mocks,
+    ):
+        assert get_model_id_for_config("embedding", "", "tenant-id") is None
+        service_mocks["get_model_records"].assert_not_called()
+        service_mocks["get_model_id"].assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("existing_value", "new_value", "expected_calls"),
+        [
+            (None, "created", [call("user-id", "tenant-id", "CUSTOM_URL", "created")]),
+            ("unchanged", "unchanged", [call("tenant-id", "CUSTOM_URL")]),
+            ("present", "", [call("tenant-id", "CUSTOM_URL")]),
+            (
+                "old",
+                "replacement",
+                [
+                    call("tenant-id", "CUSTOM_URL"),
+                    call("user-id", "tenant-id", "CUSTOM_URL", "replacement"),
+                ],
+            ),
+        ],
+    )
+    async def test_save_config_impl_persists_app_configuration_changes(
+        self,
+        service_mocks,
+        existing_value,
+        new_value,
+        expected_calls,
+    ):
+        config = MagicMock()
+        config.model_dump.return_value = {
+            "app": {"customUrl": new_value},
+            "models": {},
+        }
+        service_mocks["get_env_key"].return_value = "CUSTOM_URL"
+        service_mocks["safe_value"].side_effect = lambda value: value or ""
+        service_mocks["tenant_config_manager"].load_config.return_value = (
+            {} if existing_value is None else {"CUSTOM_URL": existing_value}
+        )
+
+        await save_config_impl(config, "tenant-id", "user-id")
+
+        manager = service_mocks["tenant_config_manager"]
+        if existing_value == new_value:
+            manager.update_single_config.assert_has_calls(expected_calls)
+            manager.delete_single_config.assert_not_called()
+            manager.set_single_config.assert_not_called()
+        elif existing_value == "":
+            manager.delete_single_config.assert_has_calls(expected_calls)
+            manager.update_single_config.assert_not_called()
+            manager.set_single_config.assert_not_called()
+        elif existing_value is None:
+            manager.set_single_config.assert_has_calls(expected_calls)
+            manager.delete_single_config.assert_not_called()
+            manager.update_single_config.assert_not_called()
+        else:
+            manager.delete_single_config.assert_has_calls(expected_calls[:1])
+            manager.set_single_config.assert_has_calls(expected_calls[1:])
+            manager.update_single_config.assert_not_called()

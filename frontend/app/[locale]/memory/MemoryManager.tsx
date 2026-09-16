@@ -39,9 +39,12 @@ import { useTranslation } from "react-i18next";
 import { Can } from "@/components/permission/Can";
 import { DreamingConfigCards } from "./DreamingConfigCards";
 import { LongTermMemoryPanel } from "./LongTermMemoryPanel";
+import { ProviderConfigCard } from "./ProviderConfigCard";
 import {
   loadMemoryConfig,
+  setExternalProviderTopK,
   setMemorySwitch,
+  subscribeMemorySwitch,
   type MemoryConfig,
 } from "@/services/memoryService";
 import {
@@ -102,6 +105,7 @@ const defaultConfig: MemoryConfig = {
   shareOption: "always",
   disableAgentIds: [],
   disableUserAgentIds: [],
+  externalProviderTopK: 20,
 };
 
 const memoryScopes = Object.keys(scopeMeta) as MemoryScope[];
@@ -260,6 +264,12 @@ export function MemoryManager() {
       ...Array.from(options, ([value, label]) => ({ value, label })),
     ];
   }, [recordsByScope.agent]);
+
+  useEffect(() => {
+    return subscribeMemorySwitch((enabled) => {
+      setConfig((current) => ({ ...current, memoryEnabled: enabled }));
+    });
+  }, []);
 
   const updateMemoryEnabled = async (enabled: boolean) => {
     const previous = config.memoryEnabled;
@@ -491,6 +501,22 @@ export function MemoryManager() {
         </Flex>
       </Card>
       <DreamingConfigCards />
+      <ProviderConfigCard
+        memoryEnabled={config.memoryEnabled}
+        topK={config.externalProviderTopK}
+        savingTopK={savingConfig}
+        onTopKChange={(value) =>
+          setConfig((current) => ({ ...current, externalProviderTopK: value }))
+        }
+        onTopKSave={async () => {
+          setSavingConfig(true);
+          try {
+            await setExternalProviderTopK(config.externalProviderTopK);
+          } finally {
+            setSavingConfig(false);
+          }
+        }}
+      />
     </div>
   );
 

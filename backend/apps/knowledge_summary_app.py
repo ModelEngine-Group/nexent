@@ -8,7 +8,7 @@ from nexent.vector_database.base import VectorDatabaseCore
 from consts.model import ChangeSummaryRequest
 from consts.exceptions import TokenExpiredError
 from apps.permission_utils import require_knowledge_base_edit_permission
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
+from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from utils.auth_utils import get_current_user_id, get_current_user_info
 from utils.config_utils import tenant_config_manager
 

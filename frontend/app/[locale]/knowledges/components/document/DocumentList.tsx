@@ -14,12 +14,15 @@ import {
   Button,
   App,
   Select,
+  Popover,
   Segmented,
   Space,
+  Modal,
+  Tooltip,
 } from "antd";
 import { useStorageQuotaBlocked } from "@/hooks/useStorageQuotaBlocked";
 const { TextArea } = Input;
-import { InfoCircleFilled } from "@ant-design/icons";
+import { FilterOutlined, InfoCircleFilled } from "@ant-design/icons";
 import {
   BookText,
   Pilcrow,
@@ -28,6 +31,8 @@ import {
   Glasses,
   CircleOff,
   AlertCircle,
+  Settings2,
+  Tag,
 } from "lucide-react";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
@@ -46,15 +51,31 @@ import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
 import { extractObjectNameFromUrl } from "@/services/storageService";
 import { Document } from "@/types/knowledgeBase";
+import type {
+  TagDocumentPredicate,
+  TagDocumentBatchStatusEntry,
+} from "@/types/tagManagement";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
 import log from "@/lib/logger";
+import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import {
+  ModelAdvancedSettings,
+  ModelAdvancedSettingsValue,
+  advancedSettingsValueFromRecord,
+  buildModelOverrideEntry,
+} from "../../../models/components/model/ModelAdvancedSettings";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 
 import DocumentStatus from "./DocumentStatus";
 import DocumentChunk from "./DocumentChunk";
 import UploadArea from "../upload/UploadArea";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import { tagManagementApi } from "@/services/tagManagementService";
 import { useDocumentContext } from "../../contexts/DocumentContext";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
@@ -99,6 +120,26 @@ interface DocumentListProps {
   availableEmbeddingModels?: ModelOption[];
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
+  // v2.6.0: per-KB embedding model params override
+  // Shape: { "<model_id>": { temperature?, top_p?, extra_params? } }
+  embeddingModelParamsOverride?: Record<
+    string,
+    {
+      temperature?: number | null;
+      top_p?: number | null;
+      extra_params?: Record<string, unknown> | null;
+    }
+  >;
+  onEmbeddingModelParamsOverrideChange?: (
+    value: Record<
+      string,
+      {
+        temperature?: number | null;
+        top_p?: number | null;
+        extra_params?: Record<string, unknown> | null;
+      }
+    >
+  ) => void;
   isMultimodal?: boolean;
   quotaLimitBytes?: number | null;
   onQuotaLimitBytesChange?: (value: number | null) => void;
@@ -152,6 +193,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       availableEmbeddingModels,
       selectedEmbeddingModel,
       onEmbeddingModelChange,
+      // v2.6.0: per-KB embedding model params override
+      embeddingModelParamsOverride,
+      onEmbeddingModelParamsOverrideChange,
       isMultimodal = false,
       onMultimodalChange,
       permission,
@@ -211,6 +255,85 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
     const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
+    const [assignTarget, setAssignTarget] = useState<{
+      docId: string;
+      canEdit: boolean;
+    } | null>(null);
+    const { data: tagLibraries } = useTagLibraries();
+    const documentLibrary =
+      tagLibraries?.find((lib) => lib.bucket_key === "knowledge_content") ??
+      null;
+    const {
+      data: assignDefinitions,
+      refresh: refreshAssignDefinitions,
+    } = useTagDefinitions(documentLibrary?.bucket_id ?? null);
+
+    const [tagManagementOpen, setTagManagementOpen] = useState(false);
+    const [documentPredicates, setDocumentPredicates] = useState<
+      TagDocumentPredicate[]
+    >([]);
+    const [documentBatchStatus, setDocumentBatchStatus] = useState<
+      TagDocumentBatchStatusEntry[]
+    >([]);
+
+    const activeDocumentIds = useMemo(() => {
+      if (documentPredicates.length === 0) return null;
+      return new Set(documentBatchStatus.map((entry) => entry.document_id));
+    }, [documentBatchStatus, documentPredicates]);
+
+    const projectionByDocument = useMemo(() => {
+      const map = new Map<string, TagDocumentBatchStatusEntry>();
+      for (const entry of documentBatchStatus) {
+        map.set(entry.document_id, entry);
+      }
+      return map;
+    }, [documentBatchStatus]);
+
+    // Batch-fetch document tag assignment and projection status for the
+    // currently visible knowledge base; empty when no library context exists.
+    useEffect(() => {
+      const visibleIds = documents.map((doc) => doc.id);
+      if (
+        isCreatingMode ||
+        !knowledgeBaseId ||
+        !documentLibrary ||
+        visibleIds.length === 0
+      ) {
+        setDocumentBatchStatus([]);
+        return;
+      }
+      let cancelled = false;
+      const timeoutId = window.setTimeout(() => {
+        void tagManagementApi
+          .getDocumentBatchStatus(
+            {
+              provider: "local",
+              knowledgeBaseId,
+              documentIds: visibleIds.slice(0, 200),
+            },
+            documentPredicates
+          )
+          .then((entries) => {
+            if (!cancelled) setDocumentBatchStatus(entries);
+          })
+          .catch((error) => {
+            if (!cancelled) {
+              log.error("Failed to load document tag status:", error);
+              setDocumentBatchStatus([]);
+            }
+          });
+      }, 250);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timeoutId);
+      };
+    }, [
+      documentLibrary,
+      documentPredicates,
+      documents,
+      isCreatingMode,
+      knowledgeBaseId,
+    ]);
 
     // Sort documents by create_time (latest first)
     const sortedDocuments = [...documents].sort((a, b) => {
@@ -285,13 +408,86 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [frequencyOptions, setFrequencyOptions] = useState<FrequencyOption[]>(
       []
     );
+    // v2.6.0: embedding model advanced settings modal state
+    const [embeddingAdvancedOpen, setEmbeddingAdvancedOpen] = useState(false);
+    const [embeddingAdvancedValue, setEmbeddingAdvancedValue] =
+      useState<ModelAdvancedSettingsValue>({});
     const { t } = useTranslation();
+    const { specs: inferenceSpecs } = useInferenceFieldSpecs({
+      enabled: embeddingAdvancedOpen,
+    });
     const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
     const canToggleMultimodal =
       isCreatingMode && typeof onMultimodalChange === "function";
+
+    // v2.6.0: resolve the currently selected embedding model to a ModelOption
+    // for the advanced settings modal. The Select value is "displayName::type".
+    const selectedEmbeddingModelOption = React.useMemo<ModelOption | undefined>(
+      () => {
+        if (!selectedEmbeddingModel || !availableEmbeddingModels) return undefined;
+        const delimiterIndex = selectedEmbeddingModel.lastIndexOf("::");
+        if (delimiterIndex < 0) return undefined;
+        const displayName = selectedEmbeddingModel.slice(0, delimiterIndex);
+        const modelType = selectedEmbeddingModel.slice(delimiterIndex + 2);
+        return availableEmbeddingModels.find(
+          (m) => m.displayName === displayName && m.type === modelType
+        );
+      },
+      [selectedEmbeddingModel, availableEmbeddingModels]
+    );
+
+    // Sync the advanced settings form value when opening the modal or switching models
+    React.useEffect(() => {
+      if (!embeddingAdvancedOpen) return;
+      if (!selectedEmbeddingModelOption) {
+        setEmbeddingAdvancedValue({});
+        return;
+      }
+      const existingOverride =
+        embeddingModelParamsOverride?.[String(selectedEmbeddingModelOption.id)] ?? {};
+      const hasOverride = Object.keys(existingOverride).length > 0;
+      // When no per-KB override exists yet, fall back to the model-level defaults
+      // (temperature/top_p/extra_params, including __custom__) so the user can
+      // see the currently effective values. Once an override exists, it takes
+      // precedence.
+      const formRecord = hasOverride
+        ? existingOverride
+        : {
+            temperature: selectedEmbeddingModelOption.temperature,
+            top_p: selectedEmbeddingModelOption.topP,
+            extra_params: selectedEmbeddingModelOption.extraParams,
+          };
+      setEmbeddingAdvancedValue(
+        advancedSettingsValueFromRecord(
+          formRecord,
+          inferenceSpecs,
+          selectedEmbeddingModelOption.type
+        )
+      );
+    }, [
+      embeddingAdvancedOpen,
+      selectedEmbeddingModelOption,
+      embeddingModelParamsOverride,
+      inferenceSpecs,
+    ]);
+
+    const handleEmbeddingAdvancedChange = (next: ModelAdvancedSettingsValue) => {
+      setEmbeddingAdvancedValue(next);
+      if (!selectedEmbeddingModelOption || !onEmbeddingModelParamsOverrideChange)
+        return;
+      const entry = buildModelOverrideEntry(next);
+      const current = embeddingModelParamsOverride ?? {};
+      const updated = { ...current };
+      if (Object.keys(entry).length === 0) {
+        delete updated[String(selectedEmbeddingModelOption.id)];
+      } else {
+        updated[String(selectedEmbeddingModelOption.id)] = entry;
+      }
+      onEmbeddingModelParamsOverrideChange(updated);
+    };
 
     // Permission options with icons shown inside dropdown
     const permissionOptions = [
@@ -569,6 +765,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
+    const filteredDocuments = activeDocumentIds
+      ? sortedDocuments.filter((doc) => activeDocumentIds.has(doc.id))
+      : sortedDocuments;
+
     const containerHeightClass =
       CONTAINER_HEIGHT_CLASS_MAP[containerHeight] ?? "h-full";
     const titleBarHeightClass =
@@ -636,45 +836,58 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   >
                     {/* Embedding model selection - first position in create mode */}
                     {isCreatingMode && onEmbeddingModelChange && (
-                      <Select
-                        value={selectedEmbeddingModel}
-                        onChange={onEmbeddingModelChange}
-                        style={{
-                          flex: "1 1 200px",
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
-                        placeholder={
-                          t("knowledgeBase.create.embeddingModelPlaceholder") ||
-                          "Select embedding model"
-                        }
-                        allowClear={false}
-                        options={[
-                          {
-                            label: t("modelConfig.option.embeddingModel"),
-                            options: embeddingModelsForOptions
-                              .filter((model) => model.type === "embedding")
-                              .map((model) => ({
-                                value: `${model.displayName}::${model.type}`,
-                                label: model.displayName,
-                                disabled: !isEmbeddingModelSelectable(model),
-                              })),
-                          },
-                          {
-                            label: t("modelConfig.option.multiEmbeddingModel"),
-                            options: embeddingModelsForOptions
-                              .filter(
-                                (model) => model.type === "multi_embedding"
-                              )
-                              .map((model) => ({
-                                value: `${model.displayName}::${model.type}`,
-                                label: model.displayName,
-                                disabled: !isEmbeddingModelSelectable(model),
-                              })),
-                          },
-                        ].filter((group) => group.options.length > 0)}
-                      />
+                      <div
+                        className="flex items-center"
+                        style={{ flex: "1 1 200px", minWidth: 200, gap: 4 }}
+                      >
+                        <Select
+                          value={selectedEmbeddingModel}
+                          onChange={onEmbeddingModelChange}
+                          style={{ flex: 1 }}
+                          placeholder={
+                            t("knowledgeBase.create.embeddingModelPlaceholder") ||
+                            "Select embedding model"
+                          }
+                          allowClear={false}
+                          options={[
+                            {
+                              label: t("modelConfig.option.embeddingModel"),
+                              options: embeddingModelsForOptions
+                                .filter((model) => model.type === "embedding")
+                                .map((model) => ({
+                                  value: `${model.displayName}::${model.type}`,
+                                  label: model.displayName,
+                                  disabled: !isEmbeddingModelSelectable(model),
+                                })),
+                            },
+                            {
+                              label: t("modelConfig.option.multiEmbeddingModel"),
+                              options: embeddingModelsForOptions
+                                .filter(
+                                  (model) => model.type === "multi_embedding"
+                                )
+                                .map((model) => ({
+                                  value: `${model.displayName}::${model.type}`,
+                                  label: model.displayName,
+                                  disabled: !isEmbeddingModelSelectable(model),
+                                })),
+                            },
+                          ].filter((group) => group.options.length > 0)}
+                        />
+                        <Button
+                          size="small"
+                          icon={<Settings2 size={14} />}
+                          onClick={() => setEmbeddingAdvancedOpen(true)}
+                          disabled={
+                            !selectedEmbeddingModel ||
+                            !availableEmbeddingModels ||
+                            availableEmbeddingModels.length === 0
+                          }
+                          title={t("knowledgeBase.create.embeddingAdvancedSettings", {
+                            defaultValue: "高级设置",
+                          })}
+                        />
+                      </div>
                     )}
                     {/* User groups multi-select */}
                     <Can permission="kb.groups:update">
@@ -788,9 +1001,50 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               )}
             </div>
-            {/* Right: overview and detail buttons */}
+            {/* Right: tag filter, Tag Management, overview and detail buttons */}
             {!isCreatingMode && !isDataMate && (
               <div className="flex gap-2 flex-shrink-0 ml-3">
+                {documentLibrary && assignDefinitions && (
+                  <Popover
+                    trigger="click"
+                    placement="bottomRight"
+                    title={t("document.tagFilter.placeholder")}
+                    content={
+                      <div className="w-64">
+                        <TagFilterControls
+                          definitions={assignDefinitions}
+                          value={documentPredicates}
+                          onChange={setDocumentPredicates}
+                        />
+                        {documentPredicates.length > 0 && (
+                          <Button
+                            size="small"
+                            block
+                            className="mt-2"
+                            onClick={() => setDocumentPredicates([])}
+                          >
+                            {t("document.tagFilter.clear")}
+                          </Button>
+                        )}
+                      </div>
+                    }
+                  >
+                    <Button
+                      icon={<FilterOutlined />}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {t("document.tagFilter.placeholder")}
+                    </Button>
+                  </Popover>
+                )}
+                {!isReadOnlyMode && (
+                  <Button
+                    icon={<Tag size={16} />}
+                    onClick={() => setTagManagementOpen(true)}
+                  >
+                    {t("knowledgeBase.button.tagManagement")}
+                  </Button>
+                )}
                 <Button
                   type="primary"
                   icon={<BookText size={16} />}
@@ -1042,7 +1296,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 </div>
               </div>
             )
-          ) : sortedDocuments.length > 0 ? (
+          ) : filteredDocuments.length > 0 ? (
             <div className="overflow-y-auto border border-gray-200 rounded-md h-full">
               <table className="min-w-full bg-white">
                 <thead
@@ -1081,7 +1335,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   </tr>
                 </thead>
                 <tbody className={LAYOUT.TABLE_ROW_DIVIDER}>
-                  {sortedDocuments.map((doc) => (
+                  {filteredDocuments.map((doc) => (
                     <tr key={doc.id} className={LAYOUT.TABLE_ROW_HOVER}>
                       <td className={LAYOUT.CELL_PADDING}>
                         <div className="flex items-center">
@@ -1096,6 +1350,32 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                           >
                             {doc.name}
                           </span>
+                          {(() => {
+                            const entry = projectionByDocument.get(doc.id);
+                            const status = entry?.projection_status?.status;
+                            if (status === "pending" || status === "failed") {
+                              return (
+                                <Tooltip
+                                  title={t(
+                                    status === "failed"
+                                      ? "document.tagProjection.failed"
+                                      : "document.tagProjection.pending"
+                                  )}
+                                >
+                                  <span
+                                    className={`ml-1 inline-flex items-center rounded px-1 text-[10px] leading-4 ${
+                                      status === "failed"
+                                        ? "bg-red-100 text-red-700"
+                                        : "bg-amber-100 text-amber-700"
+                                    }`}
+                                  >
+                                    {status}
+                                  </span>
+                                </Tooltip>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </td>
                       <td className={LAYOUT.CELL_PADDING}>
@@ -1150,6 +1430,19 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                               title={t("common.preview")}
                             >
                               {t("common.preview")}
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (!knowledgeBaseId) return;
+                                setAssignTarget({
+                                  docId: doc.id,
+                                  canEdit: !isReadOnlyMode,
+                                });
+                              }}
+                              className={LAYOUT.ACTION_PREVIEW_TEXT}
+                              title={t("document.action.assignTags")}
+                            >
+                              {t("document.action.assignTags")}
                             </button>
                             {!isReadOnlyMode && (
                               <button
@@ -1229,6 +1522,31 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           ))}
 
         {/* File preview drawer */}
+        <TagDefinitionManagementModal
+          open={tagManagementOpen}
+          onClose={() => {
+            setTagManagementOpen(false);
+            void refreshAssignDefinitions();
+          }}
+          bucketId={documentLibrary?.bucket_id ?? 0}
+          bucketName={documentLibrary?.bucket_name ?? ""}
+          canManage={!isReadOnlyMode}
+        />
+
+        <ResourceTagAssignmentModal
+          open={assignTarget !== null}
+          onClose={() => setAssignTarget(null)}
+          resourceType="knowledge_document"
+          resourceId={assignTarget?.docId ?? ""}
+          definitions={assignDefinitions ?? []}
+          canEdit={assignTarget?.canEdit ?? false}
+          provider="local"
+          knowledgeBaseId={knowledgeBaseId}
+          onManageDefinitions={() => {
+            setTagManagementOpen(true);
+          }}
+        />
+
         {selectedFile && (
           <FilePreviewDrawer
             open={!!selectedFile}
@@ -1240,6 +1558,38 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             onClose={() => setSelectedFile(null)}
           />
         )}
+
+        {/* v2.6.0: Embedding model advanced settings modal */}
+        <Modal
+          open={embeddingAdvancedOpen}
+          onCancel={() => setEmbeddingAdvancedOpen(false)}
+          onOk={() => setEmbeddingAdvancedOpen(false)}
+          title={t("knowledgeBase.create.embeddingAdvancedSettings", {
+            defaultValue: "Embedding 模型高级设置",
+          })}
+          okText={t("common.confirm", { defaultValue: "确定" })}
+          cancelText={t("common.cancel", { defaultValue: "取消" })}
+          width={720}
+          centered
+          destroyOnClose={false}
+          styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
+        >
+          {selectedEmbeddingModelOption ? (
+            <ModelAdvancedSettings
+              modelType={selectedEmbeddingModelOption.type}
+              specs={inferenceSpecs}
+              value={embeddingAdvancedValue}
+              onChange={handleEmbeddingAdvancedChange}
+              mode="override"
+            />
+          ) : (
+            <div className="text-gray-500 text-sm">
+              {t("knowledgeBase.create.noEmbeddingModelSelected", {
+                defaultValue: "请先选择 Embedding 模型",
+              })}
+            </div>
+          )}
+        </Modal>
       </div>
     );
   }

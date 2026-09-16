@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,7 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
 from services.agent_automation import conversation_adapter as adapter_module
 from services.agent_automation import facade as facade_module
-from services.agent_automation import runner as runner_module
+# Exercise the real automation runner with Agent execution isolated.
+with pytest.MonkeyPatch.context() as import_mocks:
+    import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
+    from services.agent_automation import runner as runner_module
 from services.agent_automation.facade import AgentAutomationFacade
 from services.agent_automation.models import (
     AutomationProposalConfirmRequest,

@@ -4,23 +4,28 @@ import { GitBranch, GitCompare, Rocket, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Card, Flex, Button, Tag, Empty, Spin, message } from "antd";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
 import { useAgentStore } from "@/stores/agentStore"
 import { VersionCardItem } from "./versions/agent-version-card";
 import log from "@/lib/logger";
 import AgentVersionCompareModal from "./versions/AgentVersionCompareModal";
 import { compareVersions, type VersionCompareResponse } from "@/services/agentVersionService";
+import type { Agent } from "@/types/agentConfig";
 
 interface AgentVersionManageProps {
   onClose?: () => void;
+  currentVersionNo?: number;
+  onRefreshAgentInfo: () => Promise<Agent | null>;
 }
 
-export default function AgentVersionManage({ onClose }: AgentVersionManageProps) {
+export default function AgentVersionManage({
+  onClose,
+  currentVersionNo,
+  onRefreshAgentInfo,
+}: AgentVersionManageProps) {
   const { t } = useTranslation("common");
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
 
   const { agentVersionList, total, isLoading, invalidate: invalidateAgentVersionList } = useAgentVersionList(currentAgentId);
-  const { agentInfo } = useAgentInfo(currentAgentId);
   
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [compareLoading, setCompareLoading] = useState(false);
@@ -129,7 +134,8 @@ export default function AgentVersionManage({ onClose }: AgentVersionManageProps)
                     key={version.version_no}
                     version={version}
                     agentId={currentAgentId || 0}
-                    currentVersionNo={agentInfo?.current_version_no}
+                    currentVersionNo={currentVersionNo}
+                    onRefreshAgentInfo={onRefreshAgentInfo}
                   />
                 ))}
               </div>
@@ -151,7 +157,7 @@ export default function AgentVersionManage({ onClose }: AgentVersionManageProps)
         open={compareModalOpen}
         loading={compareLoading}
         versionList={agentVersionList}
-        currentVersionNo={agentInfo?.current_version_no}
+        currentVersionNo={currentVersionNo}
         compareData={compareData}
         onCancel={() => setCompareModalOpen(false)}
         agentId={currentAgentId ?? undefined}

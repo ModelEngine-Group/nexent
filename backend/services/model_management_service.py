@@ -1,6 +1,8 @@
 import logging
 import threading
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+
+from fastapi import HTTPException
 
 from consts.const import (
     CAPACITY_SUGGESTION_ENABLED,
@@ -8,8 +10,9 @@ from consts.const import (
     LOCALHOST_IP,
     LOCALHOST_NAME,
     DOCKER_INTERNAL_HOST,
+    MODEL_CONFIG_MAPPING,
 )
-from consts.model import ModelConnectStatusEnum
+from consts.model import ModelConnectStatusEnum, _infer_model_type_from_name
 from consts.provider import (
     ProviderEnum,
     SILICON_BASE_URL,
@@ -21,24 +24,43 @@ from consts.provider import (
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
+    get_model_by_model_id,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record
 )
+from database.tenant_config_db import (
+    get_single_config_info,
+    insert_config,
+    update_config_by_tenant_config_id,
+)
 from services.model_provider_service import (
     prepare_model_dict,
     merge_existing_model_attributes,
     get_provider_models,
 )
-from services.model_health_service import embedding_dimension_check, _infer_model_factory
+from services.model_health_service import (
+    embedding_dimension_check,
+    _embedding_url_candidates,
+    _infer_model_factory,
+)
 from services.model_capacity_suggestion_service import CapacitySuggestionMatchKind, suggest_capacity
 from utils.model_name_utils import (
     add_repo_to_name,
     split_repo_name,
     sort_models_by_id,
 )
+# Model Catalog - 预置模型目录，自动填充默认配置
+try:
+    from configs.model_catalog_loader import apply_catalog_defaults
+except Exception as _exc:  # noqa: BLE001
+    logger_catalog_import = logging.getLogger("model_catalog")
+    logger_catalog_import.warning("model_catalog_loader import failed: %s. Catalog auto-fill disabled.", _exc)
+
+    def apply_catalog_defaults(_model_data: Dict[str, Any], _provider_hint: Optional[str]) -> bool:  # type: ignore[no-redef]
+        return False
 
 logger = logging.getLogger("model_management_service")
 
@@ -270,12 +292,45 @@ def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
     }
 
 
+async def resolve_embedding_base_url(model_data: Dict[str, Any]) -> Tuple[Optional[str], Optional[int]]:
+    """Return the first candidate URL that served embeddings, plus its dimension.
+
+    Returns (None, None) when no candidate answered.
+    """
+    base_url = model_data.get("base_url") or ""
+    if LOCALHOST_NAME in base_url or LOCALHOST_IP in base_url:
+        base_url = base_url.replace(
+            LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
+    for candidate_url in _embedding_url_candidates(base_url):
+        dimension = await embedding_dimension_check({**model_data, "base_url": candidate_url})
+        if dimension is not None:
+            return candidate_url, dimension
+    return None, None
+
+
 async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict[str, Any]):
     """Create a single model record for the given tenant.
 
     Raises ValueError on display name conflict or invalid input.
     """
     try:
+        # ================================================================
+        # Model Catalog - fill defaults from preset catalog.
+        # This runs BEFORE any URL normalization / repo-splitting so the
+        # provider hint is still whatever the caller sent (e.g. "silicon").
+        # ================================================================
+        _provider_hint = (
+            model_data.get("provider_hint")
+            or model_data.get("model_factory")
+        )
+        _catalog_applied = apply_catalog_defaults(model_data, _provider_hint)
+        if _catalog_applied:
+            logging.debug(
+                "Model catalog defaults applied to model=%s provider=%s",
+                model_data.get("model_name"),
+                _provider_hint,
+            )
+
         # Replace localhost with host.docker.internal for local llm
         model_base_url = model_data.get("base_url", "")
         if LOCALHOST_NAME in model_base_url or LOCALHOST_IP in model_base_url:
@@ -331,29 +386,18 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
                     f"Name {model_data['display_name']} is already in use, please choose another display name")
 
         # If embedding or multi_embedding, verify connectivity and get dimension.
-        # Try the user-provided URL first; if that fails, fall back to
-        # appending /embeddings (some providers serve embeddings at the
-        # bare base URL while others require the explicit endpoint).
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
-            base_url = model_data.get("base_url", "")
-            # Infer model_factory from base_url if not set
-            model_data["model_factory"] = _infer_model_factory(
-                model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
-            )
-            # Try original URL first
-            dimension = await embedding_dimension_check(model_data)
-            # If failed and URL doesn't already contain /embeddings, retry with it appended
-            if dimension is None and base_url and "/embeddings" not in base_url:
-                model_data["base_url"] = f"{base_url.rstrip('/')}/embeddings"
-                model_data["model_factory"] = _infer_model_factory(
-                    model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
-                )
-                dimension = await embedding_dimension_check(model_data)
+            resolved_url, dimension = await resolve_embedding_base_url(model_data)
             if dimension is None:
                 raise ValueError(
                     f"Failed to get embedding dimension for model '{model_data.get('display_name', model_data.get('model_name'))}'. "
                     "Please verify the URL, API key, and network connection."
                 )
+            model_data["base_url"] = resolved_url
+            # Infer model_factory from base_url if not set
+            model_data["model_factory"] = _infer_model_factory(
+                model_data["model_type"], resolved_url, model_data.get("model_factory")
+            )
             model_data["max_tokens"] = dimension
             # Set default chunk_batch if not provided
             if model_data.get("chunk_batch") is None:
@@ -378,6 +422,10 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             create_model_record(model_data, user_id, tenant_id)
             logging.debug(
                 f"Model {model_data['display_name']} created successfully")
+
+        # Auto-configure default-model slots that the tenant never set.
+        auto_configured = _backfill_default_model_slots(user_id, tenant_id)
+        return {"auto_configured_defaults": auto_configured}
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise Exception(f"Failed to create model: {str(e)}")
@@ -387,14 +435,44 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
     """Create/refresh provider models in memory and merge existing attributes.
 
     Returns content dict with list data. Does not persist new records.
+
+    v2.6.0: When model_type is None/empty, the provider returns all models
+    and each model's type is inferred from its name via
+    _infer_model_type_from_name. merge_existing_model_attributes is skipped
+    in this case because it filters by a single model_type.
     """
     try:
         # Get provider model list
         model_list = await get_provider_models(provider_request)
 
-        # Merge existing model's attributes (max_tokens, api_key, timeout_seconds, concurrency_limit)
-        model_list = merge_existing_model_attributes(
-            model_list, tenant_id, provider_request["provider"], provider_request["model_type"])
+        # Detect provider error entries (e.g. authentication_failed, access_forbidden)
+        # returned by _classify_provider_error. These must surface as HTTP errors
+        # instead of being embedded in the response data as fake "models".
+        if model_list and isinstance(model_list[0], dict) and "_error" in model_list[0]:
+            err = model_list[0]
+            error_code = err.get("_error", "provider_error")
+            error_message = err.get("_message", "Provider API error")
+            http_code = err.get("_http_code")
+            status_code = http_code if http_code and 400 <= http_code < 600 else 502
+            raise HTTPException(
+                status_code=status_code,
+                detail=f"{error_code}: {error_message}"
+            )
+
+        model_type = provider_request.get("model_type")
+
+        # v2.6.0: When model_type is not specified, infer each model's type
+        # from its name so the frontend can display/edit it per-row.
+        if not model_type:
+            for model in model_list:
+                if not model.get("model_type"):
+                    model_id = model.get("id", "")
+                    model["model_type"] = _infer_model_type_from_name(model_id)
+        else:
+            # Merge existing model's attributes (max_tokens, api_key, timeout_seconds, concurrency_limit)
+            # Only merge when model_type is specified; skip for multi-type discovery
+            model_list = merge_existing_model_attributes(
+                model_list, tenant_id, provider_request["provider"], model_type)
 
         # Sort model list by ID
         model_list = sort_models_by_id(model_list)
@@ -405,6 +483,123 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
     except Exception as e:
         logging.error(f"Failed to create provider models: {str(e)}")
         raise Exception(f"Failed to create provider models: {str(e)}")
+
+
+# Default-model slots that may be auto-configured after a create/import.
+# Maps MODEL_CONFIG_MAPPING keys to the model_type each slot consumes. Only
+# slots whose tenant_config row does NOT exist yet are filled, so anything a
+# user has ever configured (even if the value was later cleared) is never
+# touched -- this also protects embedding swaps that would break existing
+# knowledge-base index compatibility.
+_AUTO_CONFIGURABLE_MODEL_SLOTS = {
+    "llm": "llm",
+    "embedding": "embedding",
+    "multiEmbedding": "multi_embedding",
+    "rerank": "rerank",
+    "vlm": "vlm",
+    "vlm2": "vlm2",
+    "vlm3": "vlm3",
+    "vlm4": "vlm4",
+    "stt": "stt",
+    "tts": "tts",
+}
+
+
+def _default_model_candidate_sort_key(record: Dict[str, Any]):
+    """Rank candidates for auto-configuring a default-model slot.
+
+    Preference order: available models first, then larger context windows,
+    then stable model_id ordering for determinism.
+    """
+    is_available = 1 if record.get("connect_status") == ModelConnectStatusEnum.AVAILABLE.value else 0
+    context_tokens = record.get("context_window_tokens") or 0
+    return (-is_available, -int(context_tokens or 0), record.get("model_id") or 0)
+
+
+def _resolve_existing_slot_config(tenant_id: str, config_key: str):
+    """Classify a default-model slot's existing config row.
+
+    Returns (live_model_id, stale_row):
+    - live_model_id set: the configured default still exists -- backfill must
+      skip (user's explicit choice).
+    - stale_row set: a row exists but its model has been deleted (dangling
+      default) -- backfill repairs that row in place.
+    - both None: the slot was never configured -- backfill inserts a row.
+    """
+    row = get_single_config_info(tenant_id, config_key)
+    # Note: the DB helper returns {} (not None) when no row matches.
+    if not row:
+        return None, None
+    raw_id = row.get("config_value")
+    try:
+        model_id = int(raw_id) if raw_id else None
+    except (TypeError, ValueError):
+        model_id = None
+    if model_id is not None and get_model_by_model_id(model_id, tenant_id):
+        return model_id, None
+    return None, row
+
+
+def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+    """Auto-configure default-model slots after models are created.
+
+    A slot is skipped only when its config row points at a still-existing
+    model; empty slots and dangling rows (model deleted) are (re)filled. The
+    candidate pool is the tenant's live models of the matching type, ranked by
+    availability then context size. Failures are logged and skipped so
+    backfill can never break the create flow.
+
+    Returns a list of {"config_key", "model_id", "display_name", "model_type"}
+    entries describing what was auto-configured (empty when nothing changed).
+    """
+    auto_configured: List[Dict[str, Any]] = []
+    try:
+        for slot_name, model_type in _AUTO_CONFIGURABLE_MODEL_SLOTS.items():
+            config_key = MODEL_CONFIG_MAPPING[slot_name]
+            live_model_id, stale_row = _resolve_existing_slot_config(
+                tenant_id, config_key)
+            if live_model_id is not None:
+                # A live, user-configured default: never touch it.
+                continue
+
+            candidates = get_model_records({"model_type": model_type}, tenant_id)
+            if not candidates:
+                continue
+
+            selected = sorted(candidates, key=_default_model_candidate_sort_key)[0]
+            if stale_row is not None:
+                # Dangling row (model deleted): repair it in place instead of
+                # appending another row to the key's history.
+                success = update_config_by_tenant_config_id(
+                    stale_row["tenant_config_id"], str(selected["model_id"])
+                )
+            else:
+                success = insert_config({
+                    "tenant_id": tenant_id,
+                    "config_key": config_key,
+                    "config_value": str(selected["model_id"]),
+                    "created_by": user_id,
+                    "updated_by": user_id,
+                })
+            if not success:
+                logging.warning(
+                    "Auto-configure default model failed: write returned "
+                    "False for key=%s tenant=%s", config_key, tenant_id)
+                continue
+
+            logging.info(
+                "Auto-configured default %s model to '%s' (model_id=%s) for tenant %s",
+                model_type, selected.get("display_name"), selected["model_id"], tenant_id)
+            auto_configured.append({
+                "config_key": config_key,
+                "model_id": selected["model_id"],
+                "display_name": selected.get("display_name"),
+                "model_type": model_type,
+            })
+    except Exception as exc:
+        # Backfill is a best-effort enhancement: never fail the create flow.
+        logging.error("Default-model backfill failed for tenant %s: %s", tenant_id, exc)
+    return auto_configured
 
 
 async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_payload: Dict[str, Any]):
@@ -512,8 +707,18 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                 model_url=model_url,
                 model_api_key=model_api_key,
             )
+            # ============================================================
+            # Model Catalog - auto-fill defaults for batch-imported models.
+            # Use the top-level provider as the hint (it's always explicit in
+            # the batch_create call).
+            # ============================================================
+            apply_catalog_defaults(model_dict, provider)
             create_model_record(model_dict, user_id, tenant_id)
             logging.debug(f"Model {model['id']} created successfully")
+
+        # Auto-configure default-model slots that the tenant never set.
+        auto_configured = _backfill_default_model_slots(user_id, tenant_id)
+        return {"auto_configured_defaults": auto_configured}
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise Exception(f"Failed to batch create models: {str(e)}")
@@ -595,6 +800,31 @@ async def update_single_model_for_tenant(
         if model_data.get("max_output_tokens") is not None and \
                 existing_model_type not in ("embedding", "multi_embedding"):
             model_data["max_tokens"] = model_data["max_output_tokens"]
+
+        # The list endpoints return model_name as add_repo_to_name(repo, name)
+        # -- a repo-qualified full name. When such a value is written back
+        # verbatim, the model_name column accumulates a repo prefix on every
+        # save ("deepseek-ai/X" -> "deepseek-ai/deepseek-ai/X" -> ...), which
+        # breaks provider catalog matching and connectivity probes. Split the
+        # incoming name the same way the create paths do.
+        if "model_name" in model_data and model_data.get("model_name"):
+            incoming_repo, incoming_name = split_repo_name(str(model_data["model_name"]))
+            if incoming_repo:
+                model_data["model_repo"] = incoming_repo
+            model_data["model_name"] = incoming_name
+
+        # Re-probe a changed URL so the stored value is the one that was validated.
+        if "base_url" in model_data \
+                and existing_model_type in ("embedding", "multi_embedding") \
+                and model_data["base_url"] != existing_models[0].get("base_url"):
+            probe_config = {**existing_models[0], **model_data, "model_type": existing_model_type}
+            resolved_url, _ = await resolve_embedding_base_url(probe_config)
+            if resolved_url is None:
+                raise ValueError(
+                    f"Failed to connect to embedding model at '{model_data['base_url']}'. "
+                    "Please verify the URL, API key, and network connection."
+                )
+            model_data["base_url"] = resolved_url
 
         if has_multi_embedding:
             # Update both embedding and multi_embedding records

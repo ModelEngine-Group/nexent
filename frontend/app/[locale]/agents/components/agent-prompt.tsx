@@ -1,11 +1,35 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Button, Col, Form, Input, Row, Select, Tooltip } from "antd";
-import { Maximize2 } from "lucide-react";
+import { Button, Col, Form, Input, Modal, Popover, Row, Select, Tooltip } from "antd";
+import { GripVertical, ListOrdered, Maximize2, Settings2 } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import {
+  ModelAdvancedSettings,
+  ModelAdvancedSettingsValue,
+  advancedSettingsValueFromRecord,
+  buildModelOverrideEntry,
+} from "../../models/components/model/ModelAdvancedSettings";
+import type { ModelOverrideMap } from "../../models/components/model/ModelOverrideModal";
 import { canManageModels } from "@/lib/auth";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -13,15 +37,77 @@ import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExpandEditModal from "@/components/common/ExpandEditModal";
+import {
+  reorderModelIds,
+  resolveModelSelection,
+} from "@/lib/agent/modelPriority";
 
 const { TextArea } = Input;
 
 type PromptTab = "duty" | "constraint" | "few-shots";
 
+type SortableModelItemProps = {
+  disabled: boolean;
+  displayName: string;
+  isPrimary: boolean;
+  modelId: number;
+  primaryLabel: string;
+  reorderLabel: string;
+};
+
+function SortableModelItem({
+  disabled,
+  displayName,
+  isPrimary,
+  modelId,
+  primaryLabel,
+  reorderLabel,
+}: SortableModelItemProps) {
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({
+    id: modelId,
+    disabled,
+  });
+
+  return (
+    <li
+      ref={setNodeRef}
+      className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5"
+      style={{
+        opacity: isDragging ? 0.5 : 1,
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <button
+        type="button"
+        className="flex cursor-grab touch-none text-muted-foreground disabled:cursor-default"
+        aria-label={reorderLabel}
+        disabled={disabled}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={16} />
+      </button>
+      <span className="min-w-0 flex-1 truncate">{displayName}</span>
+      {isPrimary && (
+        <span className="text-xs text-muted-foreground">{primaryLabel}</span>
+      )}
+    </li>
+  );
+}
+
 export default function AgentPrompt() {
   const { t } = useTranslation("common");
+  const form = Form.useFormInstance();
   const { user } = useAuthorizationContext();
-  const { llmModels } = useModelList();
+  const { availableLlmModels, isSuccess: modelListLoaded } = useModelList();
   const { isSpeedMode } = useDeployment();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
@@ -33,6 +119,7 @@ export default function AgentPrompt() {
 
   const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
   const [activePromptTab, setActivePromptTab] = useState<PromptTab>("duty");
+  const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const requestedPromptTab =
     configFocusRequest?.agentId === agentId &&
     configFocusRequest.target.section === "role_model"
@@ -58,14 +145,140 @@ export default function AgentPrompt() {
   );
 
   const modelOptions = useMemo(() => {
-    return (llmModels ?? []).map((m) => ({
+    return (availableLlmModels ?? []).map((m) => ({
       value: m.id,
       label: m.displayName ?? m.name,
       displayName: m.displayName ?? m.name,
     }));
-  }, [llmModels]);
+  }, [availableLlmModels]);
+
+  const availableModelIds = useMemo(
+    () => new Set(modelOptions.map((option) => option.value)),
+    [modelOptions]
+  );
+
+  const selectedModelIds = useMemo(() => {
+    const configuredModelIds = editedAgent.model_ids ?? [];
+    if (configuredModelIds.length > 0) {
+      return configuredModelIds.filter((id) => availableModelIds.has(id));
+    }
+    return defaultLlmConfig?.id && availableModelIds.has(defaultLlmConfig.id)
+      ? [defaultLlmConfig.id]
+      : [];
+  }, [availableModelIds, defaultLlmConfig?.id, editedAgent.model_ids]);
+
+  useEffect(() => {
+    if (!modelListLoaded || !editedAgent.model_ids?.length) return;
+
+    const nextModelIds = editedAgent.model_ids.filter((id) =>
+      availableModelIds.has(id)
+    );
+    if (nextModelIds.length === editedAgent.model_ids.length) return;
+
+    const modelNames = nextModelIds.map((id) => {
+      const option = modelOptions.find((model) => model.value === id);
+      return option?.displayName ?? "";
+    });
+    const primaryModel = modelOptions.find(
+      (option) => option.value === nextModelIds[0]
+    );
+    updateAgent({
+      model_ids: nextModelIds,
+      model: primaryModel?.displayName ?? "",
+      model_names: modelNames,
+    });
+  }, [
+    availableModelIds,
+    editedAgent.model_ids,
+    modelListLoaded,
+    modelOptions,
+    updateAgent,
+  ]);
+
+  const { specs: inferenceSpecs } = useInferenceFieldSpecs({ enabled: true });
+  const [configuringModelId, setConfiguringModelId] = useState<number | null>(null);
+  const [editingOverrideValue, setEditingOverrideValue] = useState<ModelAdvancedSettingsValue | null>(null);
+  const modelParamsOverride = (editedAgent.model_params_override ?? {}) as ModelOverrideMap;
+  const configuringModel = useMemo(
+    () => (availableLlmModels ?? []).find((m) => m.id === configuringModelId) ?? null,
+    [availableLlmModels, configuringModelId]
+  );
+  useEffect(() => {
+    if (!configuringModel) {
+      setEditingOverrideValue(null);
+      return;
+    }
+    const modelDefaults: Record<string, unknown> = {
+      temperature: (configuringModel as any).temperature,
+      top_p: (configuringModel as any).topP,
+      extra_params: (configuringModel as any).extraParams,
+    };
+    const overrideEntry = modelParamsOverride[String(configuringModel.id)] ?? {};
+    const formRecord: Record<string, unknown> = { ...modelDefaults, ...overrideEntry };
+    if (overrideEntry.extra_params && modelDefaults.extra_params) {
+      formRecord.extra_params = {
+        ...(modelDefaults.extra_params as Record<string, unknown>),
+        ...(overrideEntry.extra_params as Record<string, unknown>),
+      };
+    }
+    setEditingOverrideValue(
+      advancedSettingsValueFromRecord(formRecord as any, inferenceSpecs, (configuringModel as any).type ?? "llm")
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configuringModelId]);
+
+  const handleModelParamsOverrideChange = (modelId: number, next: ModelAdvancedSettingsValue) => {
+    const entry = buildModelOverrideEntry(next);
+    const updated: ModelOverrideMap = { ...modelParamsOverride };
+    if (Object.keys(entry).length === 0) {
+      delete updated[String(modelId)];
+    } else {
+      updated[String(modelId)] = entry;
+    }
+    updateAgent({ model_params_override: Object.keys(updated).length > 0 ? updated : null });
+  };
+
+  const handleClearModelParamsOverride = (modelId: number) => {
+    const updated: ModelOverrideMap = { ...modelParamsOverride };
+    delete updated[String(modelId)];
+    updateAgent({ model_params_override: Object.keys(updated).length > 0 ? updated : null });
+  };
 
   const canManage = canManageModels(user?.role ?? "");
+  const isModelSelectionDisabled = !canManage && !isSpeedMode;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const selectedModels = selectedModelIds.map((id) =>
+    modelOptions.find((option) => option.value === id)
+  );
+
+  useEffect(() => {
+    if (selectedModels.length < 2) setIsModelPriorityOpen(false);
+  }, [selectedModels.length]);
+
+  const updateModelSelection = useCallback(
+    (modelIds: number[]) => {
+      form.setFieldValue("model_ids", modelIds);
+      updateAgent(resolveModelSelection(modelIds, modelOptions));
+    },
+    [form, modelOptions, updateAgent]
+  );
+
+  const handleModelPriorityChange = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      if (!over) return;
+
+      const modelIds = reorderModelIds(
+        selectedModelIds,
+        Number(active.id),
+        Number(over.id)
+      );
+      updateModelSelection(modelIds);
+    },
+    [selectedModelIds, updateModelSelection]
+  );
 
   const expandedPromptConfig = {
     duty: {
@@ -97,6 +310,56 @@ export default function AgentPrompt() {
     </Tooltip>
   );
 
+  const modelPriorityContent = (
+    <div className="w-72 space-y-2">
+      <div>
+        <p className="text-sm font-medium">{t("agent.field.modelPriority")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("agent.field.modelPriorityHint")}
+        </p>
+      </div>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleModelPriorityChange}
+      >
+        <SortableContext
+          items={selectedModelIds}
+          strategy={verticalListSortingStrategy}
+        >
+          <ul className="space-y-2">
+            {selectedModels.map((model, index) =>
+              model ? (
+                <SortableModelItem
+                  key={model.value}
+                  modelId={model.value}
+                  displayName={model.displayName}
+                  isPrimary={index === 0}
+                  disabled={isModelSelectionDisabled}
+                  primaryLabel={t("agent.field.primaryModel")}
+                  reorderLabel={t("agent.field.reorderModel")}
+                />
+              ) : null
+            )}
+          </ul>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+
+  const modelPriorityTrigger = (
+    <Tooltip title={t("agent.field.adjustModelPriority")}>
+      <span className="inline-flex">
+        <Button
+          type="default"
+          icon={<ListOrdered size={16} />}
+          aria-label={t("agent.field.adjustModelPriority")}
+          disabled={selectedModels.length < 2 || isModelSelectionDisabled}
+        />
+      </span>
+    </Tooltip>
+  );
+
   return (
     <div className="w-full">
       {/* Model Selection */}
@@ -106,48 +369,60 @@ export default function AgentPrompt() {
             label={t("agent.field.model")}
             className="mb-3"
             layout="horizontal"
-            name="model_ids"
-            rules={[
-              {
-                required: true,
-                message: t("agent.validation.modelRequired"),
-              },
-            ]}
           >
-            <Select
-              mode="multiple"
-              placeholder={t("agent.field.modelPlaceholder")}
-              options={modelOptions}
-              value={
-                editedAgent.model_ids?.length
-                  ? editedAgent.model_ids
-                  : defaultLlmConfig?.id
-                    ? [defaultLlmConfig.id]
-                    : []
-              }
-              onChange={(values: number[]) => {
-                const model_names = values.map((id) => {
-                  const option = modelOptions.find((opt) => opt.value === id);
-                  return option?.displayName ?? "";
-                });
-                const primaryModel = modelOptions.find(
-                  (option) => option.value === values[0]
-                );
-                updateAgent({
-                  model_ids: values,
-                  model: primaryModel?.displayName ?? "",
-                  model_names,
-                });
-              }}
-              maxTagCount={3}
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? "")
-                  .toLowerCase()
-                  .includes(input.toLowerCase())
-              }
-              disabled={!canManage && !isSpeedMode}
-            />
+            <div className="flex w-full items-start gap-2">
+              <Form.Item
+                noStyle
+                name="model_ids"
+                rules={[
+                  {
+                    required: true,
+                    message: t("agent.validation.modelRequired"),
+                  },
+                ]}
+              >
+                <Select
+                  className="min-w-0 flex-1"
+                  mode="multiple"
+                  placeholder={t("agent.field.modelPlaceholder")}
+                  options={modelOptions}
+                  value={selectedModelIds}
+                  onChange={updateModelSelection}
+                  maxTagCount={3}
+                  showSearch={{
+                    filterOption: (input, option) =>
+                      (option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase()),
+                  }}
+                  disabled={isModelSelectionDisabled}
+                />
+              </Form.Item>
+              {selectedModels.length > 1 && !isModelSelectionDisabled ? (
+                <Popover
+                  content={modelPriorityContent}
+                  trigger="click"
+                  placement="bottomRight"
+                  open={isModelPriorityOpen}
+                  onOpenChange={setIsModelPriorityOpen}
+                >
+                  {modelPriorityTrigger}
+                </Popover>
+              ) : (
+                modelPriorityTrigger
+              )}
+              <Tooltip title={t("agent.modelParamsOverride.button", { defaultValue: "模型参数覆盖" })}>
+                <span className="inline-flex">
+                  <Button
+                    type="default"
+                    icon={<Settings2 size={16} />}
+                    aria-label={t("agent.modelParamsOverride.button", { defaultValue: "模型参数覆盖" })}
+                    disabled={isModelSelectionDisabled || !editedAgent.model_ids?.length}
+                    onClick={() => setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)}
+                  />
+                </span>
+              </Tooltip>
+            </div>
           </Form.Item>
         </Col>
       </Row>
@@ -155,7 +430,7 @@ export default function AgentPrompt() {
       <Tabs
         value={activePromptTab}
         onValueChange={handlePromptTabChange}
-        className="w-full"
+        className="relative z-0 w-full"
       >
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="duty">{t("agent.field.dutyPrompt")}</TabsTrigger>
@@ -251,6 +526,78 @@ export default function AgentPrompt() {
           }
         />
       )}
+
+      {/* v2.6.0: per-model parameter override popup */}
+      <Modal
+        open={configuringModelId !== null}
+        onCancel={() => setConfiguringModelId(null)}
+        onOk={() => {
+          if (editingOverrideValue && configuringModel) {
+            const modelDefaults = advancedSettingsValueFromRecord(
+              {
+                temperature: (configuringModel as any).temperature,
+                top_p: (configuringModel as any).topP,
+                extra_params: (configuringModel as any).extraParams,
+              },
+              inferenceSpecs,
+              (configuringModel as any).type ?? "llm"
+            );
+            const diffValue: ModelAdvancedSettingsValue = {};
+            for (const [key, val] of Object.entries(editingOverrideValue)) {
+              const modelVal = modelDefaults[key];
+              if (JSON.stringify(modelVal) !== JSON.stringify(val)) {
+                diffValue[key] = val;
+              }
+            }
+            handleModelParamsOverrideChange(configuringModel.id, diffValue);
+          }
+          setConfiguringModelId(null);
+        }}
+        title={configuringModel ? `${configuringModel.displayName ?? configuringModel.name} - ${t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}` : t("model.advanced.overrideTitle", { defaultValue: "模型参数覆盖" })}
+        okText={t("common.confirm", { defaultValue: "确定" })}
+        cancelText={t("common.cancel", { defaultValue: "取消" })}
+        okButtonProps={{ disabled: !canManage && !isSpeedMode }}
+        width={600}
+        centered
+        destroyOnClose={false}
+        styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
+      >
+        {configuringModel && (
+          <div className="space-y-3">
+            <Select
+              className="mb-2 w-full"
+              value={configuringModelId}
+              options={modelOptions}
+              onChange={(v: number) => setConfiguringModelId(v)}
+              disabled={!canManage && !isSpeedMode}
+            />
+            <ModelAdvancedSettings
+              modelType={(configuringModel as any).type ?? "llm"}
+              specs={Object.fromEntries(
+                Object.entries(inferenceSpecs).map(([type, specs]) => [
+                  type,
+                  (specs as any[]).filter((s) => s.key !== "tokenizer_family"),
+                ])
+              )}
+              value={editingOverrideValue ?? advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm")}
+              onChange={(next) => setEditingOverrideValue(next)}
+              mode="override"
+              disabled={!canManage && !isSpeedMode}
+              // Show the model-level defaults as placeholders so "empty =
+              // inherit" is visible (the override form starts blank).
+              inheritedDefaults={{
+                display_name: configuringModel.displayName ?? configuringModel.name,
+                context_window_tokens: (configuringModel as any).contextWindowTokens,
+                max_input_tokens: (configuringModel as any).maxInputTokens,
+                max_output_tokens: (configuringModel as any).maxOutputTokens,
+                default_output_reserve_tokens: (configuringModel as any).defaultOutputReserveTokens,
+                temperature: (configuringModel as any).temperature,
+                top_p: (configuringModel as any).topP,
+              }}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -120,6 +120,7 @@ class _MockProcessType:
     TOKEN_COUNT = "token_count"
     FINAL_ANSWER = "final_answer"
     ERROR = "error"
+    WARNING = "warning"
     NL2A = "nl2a"
     FILE_ARTIFACT = "file_artifact"
 
@@ -1754,7 +1755,7 @@ def test_agent_run_with_observer_emits_model_context_window(nexent_agent_instanc
         context_manager=context_manager,
         token_threshold=24576,
         context_window_tokens=32768,
-        hard_input_budget_tokens=28672,
+        effective_input_limit_tokens=28672,
         processing_mode="adaptive_compact",
     )
 
@@ -1955,9 +1956,9 @@ def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_
     # Execute
     nexent_agent_instance.agent_run_with_observer("test query")
 
-    # Verify error message was added
+    # Recoverable action-step errors must not imply that the run terminated.
     mock_core_agent.observer.add_message.assert_any_call(
-        "", ProcessType.ERROR, "Test error occurred")
+        "", ProcessType.WARNING, "Test error occurred")
 
 
 def test_agent_run_with_observer_skips_non_action_step(nexent_agent_instance, mock_core_agent):
@@ -2007,7 +2008,7 @@ def test_agent_run_with_observer_with_stop_event_set(nexent_agent_instance, mock
 
     # Verify stop event message was added
     mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.ERROR, "Agent execution interrupted by external stop signal"
+        "test_agent", ProcessType.WARNING, "Agent execution interrupted by external stop signal"
     )
 
 
@@ -4239,6 +4240,7 @@ class TestSandboxWarmUp:
             managed_agents_exist=False,
             host_tools_exist=False,
             session_container_group=None,
+            cancellation_scope=None,
         )
 
 
@@ -4483,6 +4485,7 @@ class TestCreateBuiltinTool:
                 tenant_id="tenant_456",
                 version_no=1,
                 observer=nexent_agent_instance.observer,
+                authorized_skill_names=None,
             )
 
 
@@ -4627,6 +4630,9 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         assert "Run workspace" in result
         assert "Use bare relative paths" in result
         assert "not 'outputs/report.pdf'" in result
+        assert "script_path='outputs/build.js'" in result
+        assert "Direct subprocess, os.system, and shell calls" in result
+        assert "sys.executable -m pip install" in result
         push.assert_called_once_with()
 
     def test_initialize_sandbox_workspaces_sets_cwd_for_every_docker_kernel(
@@ -4982,7 +4988,18 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
         skill_file = workspace / "skills" / "probe" / "scripts" / "probe.py"
         uploaded_file = workspace / "outputs" / "uploaded.txt"
         failed_file = workspace / "outputs" / "failed.txt"
-        for path in (input_file, skill_file, uploaded_file, failed_file):
+        dependency_file = workspace / "outputs" / "app" / "node_modules" / "pkg" / "index.js"
+        cache_file = workspace / "outputs" / "app" / ".parcel-cache" / "state"
+        virtualenv_file = workspace / "outputs" / ".venv" / "lib" / "module.py"
+        for path in (
+            input_file,
+            skill_file,
+            uploaded_file,
+            failed_file,
+            dependency_file,
+            cache_file,
+            virtualenv_file,
+        ):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("data", encoding="utf-8")
         upload_tool = MagicMock()
@@ -4998,7 +5015,7 @@ class TestCreateBuiltinToolAndFileWorkspaceLifecycle:
 
         upload_tool.forward.assert_called_once_with(str(failed_file), "outputs/failed.txt")
         assert any(
-            call_args.args[1] == ProcessType.ERROR
+            call_args.args[1] == ProcessType.WARNING
             for call_args in nexent_agent_instance.observer.add_message.call_args_list
         )
 
@@ -6506,6 +6523,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
         mock_sandbox_config.level = SandboxLevel(level_value)
         mock_sandbox_config.scope = MagicMock()
         mock_sandbox_config.scope.value = scope_value
+        mock_sandbox_config.network_disabled = True
         return mock_sandbox_config
 
     def test_sandbox_build_local_level_skips_warmup(self, nexent_agent_instance, mock_model_config, mock_core_agent):
@@ -6643,6 +6661,7 @@ class TestCreateSingleAgentSandboxAndPlanning:
             executor,
             timeout_seconds=300,
             workspace_path=nexent_agent_instance.workspace_path,
+            network_enabled=False,
         )
         tool.bind_execution_backend.assert_called_once_with(
             runner,

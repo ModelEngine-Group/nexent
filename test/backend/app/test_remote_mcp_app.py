@@ -39,7 +39,7 @@ sys.modules['services.mcp_container_service'] = _mcp_container_svc_stub
 # (docker SDK, jieba, mcpadapt, …).
 sys.modules['services.tool_configuration_service'] = MagicMock()
 sys.modules['services.file_management_service'] = MagicMock()
-sys.modules['services.vectordatabase_service'] = MagicMock()
+sys.modules['management.services.knowledge_base.service'] = MagicMock()
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
 minio_mock._ensure_bucket_exists = MagicMock()

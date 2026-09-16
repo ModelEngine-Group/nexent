@@ -148,7 +148,12 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "result" in c:
         parts.append(f"recorded_result:\n{c['result']}")
     parts.extend(["</completed_action>", "</completed_action_history>"])
-    return [_text_message("user", "\n".join(parts))]
+    # This record describes work already performed by the assistant in the
+    # current run.  Rendering it as ``user`` gives framework-generated history
+    # the authority of a fresh user request and can prompt smaller models to
+    # repeat the completed tool call.  Keep the neutral, read-only envelope but
+    # preserve the actual speaker semantics.
+    return [_text_message("assistant", "\n".join(parts))]
 
 
 class ContextItemRenderer:

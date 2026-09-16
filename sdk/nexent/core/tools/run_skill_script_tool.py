@@ -3,23 +3,52 @@ import json
 import logging
 import os
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
 
 
+class SkillScriptExecutionError(RuntimeError):
+    """Raised when a sandboxed skill script exits unsuccessfully."""
+
+
 class RunSkillScriptTool(Tool):
     """Tool for executing skill scripts."""
     name = "run_skill_script"
-    description = "Execute a Python or shell script that belongs to an enabled skill."
+    description = (
+        "Execute a script for an enabled skill inside the configured Docker sandbox. "
+        "Use source='skill' for scripts bundled with the skill and source='workspace' "
+        "only for Python or Node.js scripts generated in the current run workspace. "
+        "For source='workspace', script_path is workspace-root-relative: a script written "
+        "as bare 'build.js' by the code executor is located at 'outputs/build.js'. "
+        "Scripts run with the current run's outputs directory as CWD, so bare output "
+        "filenames are created where artifact upload expects them. A failed script raises "
+        "an execution error; repair the script and rerun it before validating or uploading. "
+        "Do not use subprocess, os.system, or shell calls from ordinary agent code for system "
+        "commands; use a skill-bundled wrapper or a shell-free language API."
+    )
     inputs = {
         "skill_name": {"type": "string", "description": "Name of the skill containing the script."},
-        "script_path": {"type": "string", "description": "Path to the script relative to the skill root."},
+        "script_path": {
+            "type": "string",
+            "description": (
+                "For source='skill', path relative to the skill root. For "
+                "source='workspace', path relative to the current run workspace; use "
+                "'outputs/name.py' or 'outputs/name.js' for scripts written as bare "
+                "filenames by the code executor."
+            ),
+        },
         "params": {
             "type": "string",
             "description": "Optional raw command-line arguments for the script.",
+            "nullable": True,
+        },
+        "source": {
+            "type": "string",
+            "description": "Script source: 'skill' (default) or 'workspace'.",
+            "default": "skill",
             "nullable": True,
         },
     }
@@ -35,6 +64,7 @@ class RunSkillScriptTool(Tool):
         workspace_path: Optional[str] = None,
         on_complete: Optional[Any] = None,
         execution_backend: Optional[Any] = None,
+        authorized_skill_names: Optional[Sequence[str]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -59,6 +89,11 @@ class RunSkillScriptTool(Tool):
         self.workspace_path = workspace_path
         self.on_complete = on_complete
         self.execution_backend = execution_backend
+        self.authorized_skill_names = (
+            frozenset(name for name in (authorized_skill_names or []) if name)
+            if authorized_skill_names is not None
+            else None
+        )
 
     def bind_execution_backend(
         self,
@@ -180,6 +215,7 @@ class RunSkillScriptTool(Tool):
         skill_name: str,
         script_path: str,
         params: Optional[str] = None,
+        source: str = "skill",
     ) -> str:
         """Execute a skill script with given parameters.
         ``script_path`` is always resolved relative to the skill's root
@@ -202,9 +238,16 @@ class RunSkillScriptTool(Tool):
         """
         from nexent.skills.skill_manager import SkillNotFoundError, SkillScriptNotFoundError
         try:
+            normalized_source = (source or "skill").strip().lower()
+            if normalized_source not in {"skill", "workspace"}:
+                raise ValueError("source must be either 'skill' or 'workspace'")
+            if self.authorized_skill_names is not None and skill_name not in self.authorized_skill_names:
+                raise PermissionError(
+                    f"Skill '{skill_name}' is not enabled for agent {self.agent_id}"
+                )
             manager = self._get_skill_manager()
             if self.execution_backend is not None:
-                result = self.execution_backend(
+                backend_kwargs = dict(
                     manager=manager,
                     skill_name=skill_name,
                     script_path=script_path,
@@ -212,7 +255,24 @@ class RunSkillScriptTool(Tool):
                     tenant_id=self.tenant_id,
                     working_directory=self.workspace_path,
                 )
+                if normalized_source != "skill":
+                    backend_kwargs["source"] = normalized_source
+                result = self.execution_backend(**backend_kwargs)
+                if isinstance(result, str):
+                    try:
+                        result_data = json.loads(result)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        result_data = None
+                    if isinstance(result_data, dict) and result_data.get("error"):
+                        raise SkillScriptExecutionError(
+                            "Sandbox script failed. Repair the script and rerun "
+                            f"run_skill_script before continuing: {result_data['error']}"
+                        )
             else:
+                if normalized_source == "workspace":
+                    raise RuntimeError(
+                        "Workspace scripts require an available Docker sandbox execution backend"
+                    )
                 run_kwargs = {"tenant_id": self.tenant_id}
                 if self.workspace_path:
                     run_kwargs["working_directory"] = self.workspace_path
@@ -224,7 +284,11 @@ class RunSkillScriptTool(Tool):
                 )
             if self.on_complete is not None:
                 self.on_complete(result)
-            artifacts = self._extract_file_artifacts(manager, skill_name, script_path, result)
+            artifacts = (
+                self._extract_file_artifacts(manager, skill_name, script_path, result)
+                if normalized_source == "skill"
+                else []
+            )
             self._publish_artifacts(skill_name, script_path, artifacts)
             return str(result)
         except SkillNotFoundError as e:
@@ -241,6 +305,8 @@ class RunSkillScriptTool(Tool):
         except TimeoutError as e:
             logger.error(f"Script execution timed out: {e}")
             return f"[TimeoutError] Script execution timed out: {e}"
+        except SkillScriptExecutionError:
+            raise
         except Exception as e:
             logger.error(f"Failed to execute skill script: {e}")
             return f"[UnexpectedError] Failed to execute skill script: {type(e).__name__}: {str(e)}"
@@ -249,9 +315,10 @@ class RunSkillScriptTool(Tool):
         skill_name: str,
         script_path: str,
         params: Optional[str] = None,
+        source: str = "skill",
     ) -> str:
         """Execute a tenant-scoped skill script."""
-        return self.execute(skill_name, script_path, params)
+        return self.execute(skill_name, script_path, params, source)
 
 def _uncached_run_skill_script_tool(
     local_skills_dir: Optional[str] = None,

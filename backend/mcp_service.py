@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import re
-from threading import Thread
 from typing import Any, Callable, Dict, List, Optional
 
 import httpx
@@ -12,14 +11,21 @@ from fastmcp.tools.tool import ToolResult
 
 from database.outer_api_tool_db import query_available_openapi_services
 from mcp.types import Tool as MCPTool
+from nexent.core.concurrency import (
+    ManagedThreadSpec,
+    clear_default_thread_manager,
+    set_default_thread_manager,
+)
+from services.thread_lifecycle_service import mcp_thread_manager
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
-from utils.logging_utils import configure_logging
+from utils.logging_utils import get_uvicorn_logging_config
 
-configure_logging(logging.INFO)
-logger = logging.getLogger("mcp_service")
+
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["mcp"]))
+logger = logging.getLogger("mcp")
 
 """
 hierarchical proxy architecture:
@@ -428,16 +434,48 @@ def refresh_single_openapi_service(service_name: str, tenant_id: str) -> Dict[st
 def run_mcp_server_with_management():
     """Run MCP server with management API."""
     app = get_mcp_management_app()
+    mcp_thread_manager.start()
+    set_default_thread_manager(mcp_thread_manager)
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=5015,
+        log_level="info",
+        log_config=get_uvicorn_logging_config(categories=["mcp"]),
+    )
+    server = uvicorn.Server(config)
 
-    def run_fastapi():
+    def run_fastapi(cancel_event):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        uvicorn.run(app, host="0.0.0.0", port=5015, log_level="info")
+        try:
+            loop.run_until_complete(server.serve())
+        finally:
+            loop.close()
 
-    fastapi_thread = Thread(target=run_fastapi, daemon=True)
-    fastapi_thread.start()
+    management_execution = mcp_thread_manager.register_service(
+        ManagedThreadSpec(
+            task_name="mcp-management-api",
+            owner="api-to-mcp",
+            lane="background-service",
+            close_hook=lambda: setattr(server, "should_exit", True),
+        ),
+        run_fastapi,
+    )
+    mcp_thread_manager.start_service(management_execution.execution_id)
 
-    nexent_mcp.run(transport="sse", host="0.0.0.0", port=5011)
+    try:
+        nexent_mcp.run(transport="sse", host="0.0.0.0", port=5011)
+    finally:
+        mcp_thread_manager.cancel(
+            management_execution.execution_id,
+            reason="MCP server stopping",
+            wait_timeout=5,
+        )
+        try:
+            asyncio.run(mcp_thread_manager.shutdown(timeout=15))
+        finally:
+            clear_default_thread_manager(mcp_thread_manager)
 
 
 if __name__ == "__main__":
