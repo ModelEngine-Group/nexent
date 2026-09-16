@@ -595,11 +595,6 @@ export default function AgentPrompt() {
                 top_p: (configuringModel as any).topP,
               }}
             />
-            {/*
-              // "清空该模型的覆盖" button temporarily hidden per product
-              // feedback (2026-09). Clearing overrides remains reachable by
-              // emptying the fields individually and confirming.
-            */}
           </div>
         )}
       </Modal>
