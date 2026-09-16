@@ -1009,6 +1009,10 @@ class TestGetModelsPath:
         path = aidp_service_module._get_models_path("my-tenant")
         assert "/ModelService/Tenants/my-tenant/Service" == path
 
+    def test_new_query_path(self, aidp_service_module):
+        path = aidp_service_module._get_model_query_path("my-tenant")
+        assert "/ModelService/Tenants/my-tenant/Query" == path
+
 
 # ---------------------------------------------------------------------------
 # _is_kb_applicable tests
@@ -1100,6 +1104,32 @@ def _make_http_error(status_code, method="GET"):
         request=request,
         response=response,
     )
+
+
+def _make_endpoint_response(json_data, status_code=200):
+    """Create a mock endpoint response with realistic HTTP error behavior."""
+    mock_resp = _make_success_response(json_data, status_code=status_code)
+    if status_code >= 400:
+        mock_resp.raise_for_status.side_effect = _make_http_error(status_code)
+    return mock_resp
+
+
+def _setup_model_endpoint_responses(aidp_service_module, service_response, query_response):
+    """Wire endpoint-specific responses into the mocked HTTP client."""
+    mock_client = MagicMock()
+
+    def get_response(url, *args, **kwargs):
+        if url.endswith("/Service"):
+            return service_response
+        if url.endswith("/Query"):
+            return query_response
+        raise AssertionError(f"Unexpected model endpoint URL: {url}")
+
+    mock_client.get.side_effect = get_response
+    mock_manager = MagicMock()
+    mock_manager.get_sync_client.return_value = mock_client
+    aidp_service_module.http_client_manager = mock_manager
+    return mock_client
 
 
 def _make_success_response(json_data, status_code=200):
@@ -2085,7 +2115,7 @@ class TestListAidpDocsImpl:
 # list_aidp_models_impl tests
 # ---------------------------------------------------------------------------
 class TestListAidpModelsImpl:
-    """Tests for list_aidp_models_impl (GET .../ModelService/... endpoint)."""
+    """Tests for both compatible AIDP model-list endpoint contracts."""
 
     @pytest.mark.parametrize(
         "server_url,api_key",
@@ -2099,7 +2129,7 @@ class TestListAidpModelsImpl:
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
     def test_success_filters_models(self, aidp_service_module):
-        mock_resp = _make_success_response({
+        service_resp = _make_endpoint_response({
             "models": [
                 {"model_name": "gpt-4", "application": "All"},
                 {"model_name": "gpt-3.5", "application": "KnowledgeBase"},
@@ -2107,7 +2137,10 @@ class TestListAidpModelsImpl:
                 {"model_name": "no-app"},
             ],
         })
-        _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
+        query_resp = _make_endpoint_response([])
+        mock_client = _setup_model_endpoint_responses(
+            aidp_service_module, service_resp, query_resp
+        )
 
         result = aidp_service_module.list_aidp_models_impl(
             server_url="http://127.0.0.1:30081", api_key="jwt-token"
@@ -2116,6 +2149,133 @@ class TestListAidpModelsImpl:
         names = [m["model_name"] for m in result["models"]]
         assert "gpt-4" in names
         assert "gpt-3.5" in names
+        assert aidp_service_module._MODEL_ENDPOINT == aidp_service_module._ModelEndpoint.SERVICE
+        assert mock_client.get.call_count == 2
+        service_call = mock_client.get.call_args_list[0]
+        query_call = mock_client.get.call_args_list[1]
+        assert service_call.kwargs["params"] == {"service": "llm", "app": "KnowledgeBase"}
+        assert query_call.kwargs["params"] == {
+            "model_type": "llm",
+            "application_filter": "KnowledgeBase",
+        }
+
+    def test_new_query_endpoint_selected_and_array_parsed(self, aidp_service_module):
+        service_resp = _make_endpoint_response({}, status_code=404)
+        query_resp = _make_endpoint_response([
+            {"model_name": "gpt-4", "application": "All"},
+            {"model_name": "embedding", "application": "KnowledgeBase"},
+            {"model_name": "chat", "application": "ChatBot"},
+        ])
+        mock_client = _setup_model_endpoint_responses(
+            aidp_service_module, service_resp, query_resp
+        )
+
+        result = aidp_service_module.list_aidp_models_impl(
+            server_url="http://127.0.0.1:30081", api_key="jwt-token"
+        )
+
+        assert result["total_count"] == 2
+        assert [model["model_name"] for model in result["models"]] == ["gpt-4", "embedding"]
+        assert aidp_service_module._MODEL_ENDPOINT == aidp_service_module._ModelEndpoint.QUERY
+        assert mock_client.get.call_count == 2
+
+    def test_probe_does_not_retry_and_selects_non_404_service_response(self, aidp_service_module):
+        service_resp = _make_endpoint_response({}, status_code=503)
+        query_resp = _make_endpoint_response({}, status_code=404)
+        mock_client = _setup_model_endpoint_responses(
+            aidp_service_module, service_resp, query_resp
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_models_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        assert aidp_service_module._MODEL_ENDPOINT == aidp_service_module._ModelEndpoint.SERVICE
+        assert mock_client.get.call_count == 2
+
+    def test_cached_endpoint_skips_probe_and_retries(self, aidp_service_module, mocker):
+        aidp_service_module._MODEL_ENDPOINT = aidp_service_module._ModelEndpoint.QUERY
+        retry_responses = [
+            _make_endpoint_response([], status_code=503),
+            _make_endpoint_response([], status_code=503),
+            _make_endpoint_response([
+                {"model_name": "gpt-4", "application": "All"},
+            ]),
+        ]
+        mock_client = MagicMock()
+        mock_client.get.side_effect = retry_responses
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+        mocker.patch.object(aidp_service_module.time, "sleep")
+
+        result = aidp_service_module.list_aidp_models_impl(
+            server_url="http://127.0.0.1:30081", api_key="jwt-token"
+        )
+
+        assert result["total_count"] == 1
+        assert mock_client.get.call_count == 3
+        assert all(
+            call.args[0].endswith("/Query")
+            for call in mock_client.get.call_args_list
+        )
+
+    def test_cached_legacy_endpoint_skips_probe_and_retries(self, aidp_service_module, mocker):
+        aidp_service_module._MODEL_ENDPOINT = aidp_service_module._ModelEndpoint.SERVICE
+        retry_responses = [
+            _make_endpoint_response({"models": []}, status_code=503),
+            _make_endpoint_response({
+                "models": [{"model_name": "gpt-4", "application": "All"}],
+            }),
+        ]
+        mock_client = MagicMock()
+        mock_client.get.side_effect = retry_responses
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+        mocker.patch.object(aidp_service_module.time, "sleep")
+
+        result = aidp_service_module.list_aidp_models_impl(
+            server_url="http://127.0.0.1:30081", api_key="jwt-token"
+        )
+
+        assert result["total_count"] == 1
+        assert mock_client.get.call_count == 2
+        assert all(
+            call.args[0].endswith("/Service")
+            for call in mock_client.get.call_args_list
+        )
+
+    def test_both_404_keeps_endpoint_cache_empty(self, aidp_service_module):
+        service_resp = _make_endpoint_response({}, status_code=404)
+        query_resp = _make_endpoint_response([], status_code=404)
+        mock_client = _setup_model_endpoint_responses(
+            aidp_service_module, service_resp, query_resp
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_models_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        assert aidp_service_module._MODEL_ENDPOINT is None
+        assert mock_client.get.call_count == 2
+
+    def test_query_endpoint_requires_direct_array_response(self, aidp_service_module):
+        service_resp = _make_endpoint_response({}, status_code=404)
+        query_resp = _make_endpoint_response({"models": []})
+        _setup_model_endpoint_responses(aidp_service_module, service_resp, query_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_models_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+        assert aidp_service_module._MODEL_ENDPOINT == aidp_service_module._ModelEndpoint.QUERY
 
     def test_empty_models_list(self, aidp_service_module):
         mock_resp = _make_success_response({"models": []})
