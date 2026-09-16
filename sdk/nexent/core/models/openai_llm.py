@@ -49,6 +49,21 @@ from .retry import (
 
 logger = logging.getLogger("openai_llm")
 
+
+def _bad_request_error_type() -> Optional[type]:
+    """Resolve openai.BadRequestError lazily; None when unavailable.
+
+    Test doubles may stub the openai package with a non-module object where
+    the import fails; in that case sampling-fallback judgement is disabled
+    and the original exception propagates unchanged.
+    """
+    try:
+        from openai import BadRequestError
+
+        return BadRequestError
+    except ImportError:
+        return None
+
 # Raised (with this message) when a model invocation is aborted because the
 # caller's stop event was set. Reused at every stop_event check site so the
 # message stays consistent and is easy to assert against in tests.
@@ -175,9 +190,11 @@ class OpenAIModel(OpenAIServerModel):
         client_kwargs = kwargs.get("client_kwargs", {})
         if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
+            from openai._base_client import httpx2
+
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=httpx.Timeout(
+                timeout=httpx2.Timeout(
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
@@ -843,7 +860,50 @@ class OpenAIModel(OpenAIServerModel):
                 default=str,
             ),
         )
-        return self.client.chat.completions.create(**completion_kwargs)
+        try:
+            return self.client.chat.completions.create(**completion_kwargs)
+        except Exception as exc:
+            # Reasoning-only models (kimi-k3, o1-mini, ...) reject any
+            # sampling value other than their enforced default, which makes
+            # the instance-level default temperature/top_p (possibly just a
+            # generic 0.2 the operator never configured) fail the whole
+            # request. On a 400 that names temperature/top_p, strip the
+            # sampling params once and retry so the provider default applies.
+            # User-supplied __custom__ params (extra_body) are NOT touched, so
+            # a genuinely invalid custom param still surfaces as an error.
+            retry_kwargs = self._sampling_fallback_kwargs(exc, completion_kwargs)
+            if retry_kwargs is None:
+                raise
+            logger.warning(
+                "event=chat_completion_sampling_fallback model_id=%s error=%s",
+                self.model_id,
+                exc,
+            )
+            return self.client.chat.completions.create(**retry_kwargs)
+
+    def _sampling_fallback_kwargs(
+        self, exc: Exception, completion_kwargs: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Sampling-param retry plan for a provider 400, or None to re-raise.
+
+        The retry plan is only built when the error is a 400-class rejection
+        that names temperature/top_p AND the request actually carried those
+        params. Anything else (auth, quota, custom-param validation, ...) is
+        returned to the caller untouched.
+        """
+        error_type = _bad_request_error_type()
+        if error_type is None or not isinstance(exc, error_type):
+            return None
+        message = str(exc).lower()
+        if "temperature" not in message and "top_p" not in message:
+            return None
+        if "temperature" not in completion_kwargs and "top_p" not in completion_kwargs:
+            return None
+        return {
+            k: v
+            for k, v in completion_kwargs.items()
+            if k not in ("temperature", "top_p")
+        }
 
     @staticmethod
     def _verify_w1_w2_consistency(
@@ -934,12 +994,20 @@ class OpenAIModel(OpenAIServerModel):
             # Construct a simple test message
             test_message = [{"role": "user", "content": "Hello"}]
 
-            # Directly send a short chat request to test the connection
+            # Directly send a short chat request to test the connection.
+            # Sampling params (temperature / top_p) are intentionally NOT
+            # sent: reasoning-only models (kimi-k3, DeepSeek-R1 family)
+            # reject any value other than their fixed default, and the model
+            # instance may carry a generic default (0.2) the operator never
+            # configured. The probe validates connectivity and custom params
+            # (extra_body incl. __custom__) still surface as a 400 here.
             completion_kwargs = self._prepare_completion_kwargs(
                 messages=test_message,
                 model=self.model_id,
                 max_tokens=5,
             )
+            if self.extra_body:
+                completion_kwargs["extra_body"] = self.extra_body
 
             # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
             await run_blocking(

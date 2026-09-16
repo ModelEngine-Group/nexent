@@ -573,11 +573,24 @@ module_mocks = {
     "nexent.core.utils.token_estimation": nexent_core_utils_mock.token_estimation,
 }
 
-# Ensure openai package exists with DefaultHttpxClient for patches
-import types as __types
+# Ensure the OpenAI package stub matches the submodule used by OpenAIModel.
+class StubSDKTimeout:
+    def __init__(self, *, connect, read, write, pool):
+        self.connect = connect
+        self.read = read
+        self.write = write
+        self.pool = pool
+
+
 openai_mod = types.ModuleType("openai")
+openai_mod.__path__ = []
 openai_mod.DefaultHttpxClient = lambda *a, **k: None
+openai_base_client_mod = types.ModuleType("openai._base_client")
+openai_base_client_mod.httpx2 = types.SimpleNamespace(Timeout=StubSDKTimeout)
+openai_mod._base_client = openai_base_client_mod
 sys.modules["openai"] = openai_mod
+sys.modules["openai._base_client"] = openai_base_client_mod
+module_mocks["openai._base_client"] = openai_base_client_mod
 
 # Dynamically load the module directly by file path
 MODULE_NAME = "nexent.core.models.openai_llm"
@@ -700,6 +713,92 @@ def test_check_connectivity_failure(openai_model_instance):
     ):
         result = __import__("asyncio").run(openai_model_instance.check_connectivity())
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Tests for sampling-parameter fallback in _dispatch_chat_completion
+# ---------------------------------------------------------------------------
+
+
+class _FakeBadRequest(Exception):
+    """Stand-in for openai.BadRequestError with an injectable message."""
+
+
+def _sampling_fallback_setup(model, message: str, sampled: bool):
+    """Prepare the model for a _dispatch_chat_completion fallback test.
+
+    Returns the mocked ``create`` callable; the first call raises the given
+    400 message, the second one succeeds.
+    """
+    kwargs = {"messages": [{"role": "user", "content": "hi"}], "stream": True}
+    if sampled:
+        kwargs["temperature"] = 0.2
+        kwargs["top_p"] = 0.95
+
+    create = MagicMock()
+    create.side_effect = [
+        _FakeBadRequest(message),
+        MagicMock(name="second_response"),
+    ]
+    model.client.chat.completions.create = create
+    return create, kwargs
+
+
+def test_dispatch_sampling_fallback_strips_params_on_temperature_400(openai_model_instance):
+    """A 400 naming temperature must retry once without temperature/top_p."""
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid temperature: only 1 is allowed for this model",
+        sampled=True,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        result = openai_model_instance._dispatch_chat_completion(**kwargs)
+
+    assert create.call_count == 2
+    retried_kwargs = create.call_args_list[1].kwargs
+    assert "temperature" not in retried_kwargs
+    assert "top_p" not in retried_kwargs
+    # Non-sampling params must survive the retry.
+    assert retried_kwargs["stream"] is True
+
+
+def test_dispatch_sampling_fallback_reraises_non_sampling_400(openai_model_instance):
+    """A 400 that does not name temperature must surface unchanged."""
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid request: model not found",
+        sampled=True,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        with pytest.raises(_FakeBadRequest):
+            openai_model_instance._dispatch_chat_completion(**kwargs)
+    assert create.call_count == 1
+
+
+def test_dispatch_sampling_fallback_reraises_when_params_absent(openai_model_instance):
+    """A temperature 400 on a request WITHOUT sampling params must surface.
+
+    The params can only come from the user's __custom__ extra_body in that
+    case, and silently altering user-supplied config is worse than the error.
+    """
+    create, kwargs = _sampling_fallback_setup(
+        openai_model_instance,
+        "Error code: 400 - invalid temperature: only 1 is allowed for this model",
+        sampled=False,
+    )
+
+    with patch.object(
+        openai_llm_module, "_bad_request_error_type", lambda: _FakeBadRequest
+    ):
+        with pytest.raises(_FakeBadRequest):
+            openai_model_instance._dispatch_chat_completion(**kwargs)
+    assert create.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1346,6 +1445,31 @@ def test_init_with_ssl_verify_true():
         kwargs = mock_httpx_client.call_args.kwargs
         assert kwargs["verify"] is True
         assert kwargs["timeout"].read == 60.0
+
+
+def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
+    """Use the Timeout class owned by the HTTP implementation behind OpenAI."""
+
+    class SDKTimeout:
+        def __init__(self, *, connect, read, write, pool):
+            self.connect = connect
+            self.read = read
+            self.write = write
+            self.pool = pool
+
+    sdk_httpx = types.SimpleNamespace(Timeout=SDKTimeout)
+    openai_base_client = types.ModuleType("openai._base_client")
+    openai_base_client.httpx2 = sdk_httpx
+
+    with patch.dict(sys.modules, {"openai._base_client": openai_base_client}), \
+            patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        ImportedOpenAIModel(observer=MagicMock(), ssl_verify=True)
+
+    timeout = mock_httpx_client.call_args.kwargs["timeout"]
+    assert isinstance(timeout, SDKTimeout)
+    assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
+        10.0, 60.0, 30.0, 10.0,
+    )
 
 
 # ---------------------------------------------------------------------------

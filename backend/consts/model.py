@@ -565,6 +565,12 @@ class ModelRequest(BaseModel):
     tokenizer_family: Optional[str] = None
     capacity_source: Optional[str] = None
     capability_profile_version: Optional[str] = None
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    # v2.6.0 fixed inference params without dedicated columns (key-value pairs
+    # constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.
+    extra_params: Optional[Dict[str, Any]] = None
     # W11 accept-signal fields (audit/metrics only — never persisted). Sent by
     # the frontend when the operator clicks "Use suggestion" and saves; the
     # app layer pops them before the dict reaches the service/DB layer and
@@ -591,7 +597,7 @@ class ModelCapacitySuggestionRequest(BaseModel):
 
 class ModelCapacitySuggestionResponse(BaseModel):
     suggestions: Optional[CapacitySuggestionFields] = None
-    match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "none"]
+    match_kind: Literal["catalog_exact", "catalog_fuzzy", "provider_discovery", "litellm_lookup", "none"]
     match_confidence: Optional[Literal["high", "medium", "low"]] = None
     match_explanation: str
     suggested_provider: Optional[str] = None
@@ -617,9 +623,17 @@ class CapacityCoverageResponse(BaseModel):
 
 class ProviderModelRequest(BaseModel):
     provider: str
-    model_type: str
+    # v2.6.0: model_type is now optional. When omitted, the backend fetches all
+    # models from the OpenAI-compatible /v1/models endpoint and infers each
+    # model's type from its name via _infer_model_type_from_name. When provided,
+    # behavior is unchanged (filter by type).
+    model_type: Optional[str] = None
     api_key: Optional[str] = ''
     base_url: Optional[str] = ''
+    # TLS certificate verification for the discovery fetch. Defaults to the
+    # safe value; operators pointing at self-signed internal endpoints must
+    # opt out explicitly instead of verification being silently disabled.
+    ssl_verify: bool = True
 
 
 class BatchCreateModelsRequest(BaseModel):
@@ -795,6 +809,9 @@ class ConversationKnowledgeScopeUpdateRequest(BaseModel):
 
 class AgentRequest(BaseModel):
     query: str
+    enable_hitl: bool = False
+    hitl_run_id: Optional[str] = Field(default=None, min_length=36, max_length=36)
+    hitl_after_event: int = Field(default=0, ge=0)
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
@@ -1089,6 +1106,7 @@ class OptimizePromptFromDebugRequest(BaseModel):
 class GenerateTitleRequest(BaseModel):
     conversation_id: int
     question: str
+    model_id: Optional[int] = Field(default=None, gt=0)
 
 
 class AgentSkillInstanceRequest(BaseModel):
@@ -1138,6 +1156,10 @@ class AgentInfoRequest(BaseModel):
     is_a2a: Optional[bool] = None
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
+    # v2.6.0 per-agent model inference param overrides.
+    # Shape: {"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}.
+    # NULL means inherit model defaults.
+    model_params_override: Optional[Dict[str, Any]] = None
     allow_chat_metadata: Optional[bool] = None
 
     greeting_message: Optional[str] = None
@@ -1248,6 +1270,8 @@ class ExportAndImportAgentInfo(BaseModel):
     skill_names: Optional[List[str]] = None
     prompt_template_id: Optional[int] = None
     prompt_template_name: Optional[str] = None
+    # v2.6.0 per-agent model inference param overrides (mirrors AgentInfo column).
+    model_params_override: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
 
@@ -1860,16 +1884,12 @@ class ManageTenantModelListResponse(BaseModel):
     total_pages: int = Field(0, description="Total number of pages")
 
 
-class ManageTenantModelCreateRequest(BaseModel):
-    """Request model for creating a model in a specific tenant (admin/manage operation)"""
-    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create model for")
-    model_repo: Optional[str] = Field('', description="Model repository path")
-    model_name: str = Field(..., description="Model name")
-    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'stt')")
-    api_key: Optional[str] = Field('', description="API key for the model")
-    base_url: Optional[str] = Field('', description="Base URL for the model API")
-    max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
-    display_name: Optional[str] = Field('', description="Display name for the model")
+class _ManageTenantModelCommonFields(BaseModel):
+    """Optional fields shared by the tenant manage create/update requests.
+
+    Kept as a mixin so the two request models cannot drift apart; the wire
+    contract (all Optional, default None) is identical for both operations.
+    """
     model_factory: Optional[str] = Field(None, description="Model factory/vendor for the model")
     expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
     maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
@@ -1887,6 +1907,10 @@ class ManageTenantModelCreateRequest(BaseModel):
     tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
     capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
     capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature: Optional[float] = Field(None, description="Default sampling temperature for LLM/VLM models")
+    top_p: Optional[float] = Field(None, description="Default nucleus sampling probability for LLM/VLM models")
+    extra_params: Optional[Dict[str, Any]] = Field(None, description="Fixed inference params without dedicated columns (constrained by FIXED_INFERENCE_FIELDS_BY_TYPE)")
     # W11 accept-signal fields. Same audit-only contract as ModelRequest:
     # the app layer pops them off model_data before the dict reaches the
     # service/DB layer and forwards them to
@@ -1898,7 +1922,19 @@ class ManageTenantModelCreateRequest(BaseModel):
     accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
-class ManageTenantModelUpdateRequest(BaseModel):
+class ManageTenantModelCreateRequest(_ManageTenantModelCommonFields):
+    """Request model for creating a model in a specific tenant (admin/manage operation)"""
+    tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create model for")
+    model_repo: Optional[str] = Field('', description="Model repository path")
+    model_name: str = Field(..., description="Model name")
+    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding', 'vlm', 'stt')")
+    api_key: Optional[str] = Field('', description="API key for the model")
+    base_url: Optional[str] = Field('', description="Base URL for the model API")
+    max_tokens: Optional[int] = Field(0, description="Maximum tokens for the model")
+    display_name: Optional[str] = Field('', description="Display name for the model")
+
+
+class ManageTenantModelUpdateRequest(_ManageTenantModelCommonFields):
     """Request model for updating a model in a specific tenant (admin/manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to update model for")
     current_display_name: str = Field(..., description="Current display name of the model to update")
@@ -1909,28 +1945,6 @@ class ManageTenantModelUpdateRequest(BaseModel):
     base_url: Optional[str] = Field(None, description="Base URL for the model API")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens for the model")
     display_name: Optional[str] = Field(None, description="New display name for the model")
-    model_factory: Optional[str] = Field(None, description="Model factory/vendor for the model")
-    expected_chunk_size: Optional[int] = Field(None, description="Expected chunk size for embedding models")
-    maximum_chunk_size: Optional[int] = Field(None, description="Maximum chunk size for embedding models")
-    chunk_batch: Optional[int] = Field(None, description="Batch size for chunking")
-    # STT specific fields
-    model_appid: Optional[str] = Field(None, description="Application ID for STT models")
-    access_token: Optional[str] = Field(None, description="Access token for STT models")
-    timeout_seconds: Optional[int] = Field(None, description="Request timeout in seconds")
-    concurrency_limit: Optional[int] = Field(None, description="Maximum concurrent requests for this model")
-    # W1 capacity fields (see W1 ADR). All nullable; resolver applies precedence.
-    context_window_tokens: Optional[int] = Field(None, description="Total combined input/output context window in tokens")
-    max_input_tokens: Optional[int] = Field(None, description="Provider hard input-token limit")
-    max_output_tokens: Optional[int] = Field(None, description="Provider-supported completion output cap")
-    default_output_reserve_tokens: Optional[int] = Field(None, description="Default output allowance reserved per request")
-    tokenizer_family: Optional[str] = Field(None, description="Token-counting strategy or tokenizer identifier")
-    capacity_source: Optional[str] = Field(None, description="Source of the persisted capacity value")
-    capability_profile_version: Optional[str] = Field(None, description="Version of the approved capability profile")
-    # W11 accept-signal fields. See ManageTenantModelCreateRequest for the
-    # contract. The app layer pops them before calling the service so
-    # update_model_record never sees them.
-    accepted_suggestion_match_kind: Optional[str] = Field(None, description="Audit-only: catalog match_kind the operator accepted")
-    accepted_capability_profile_version: Optional[str] = Field(None, description="Audit-only: capability profile version of the accepted suggestion")
 
 
 class ManageTenantModelDeleteRequest(BaseModel):
@@ -1969,7 +1983,9 @@ class ManageProviderModelCreateRequest(BaseModel):
     """Request model for creating provider models in a specific tenant (admin/manage operation)"""
     tenant_id: str = Field(..., min_length=1, description="Target tenant ID to create provider models for")
     provider: str = Field(..., description="Model provider (e.g., 'silicon', 'modelengine')")
-    model_type: str = Field(..., description="Model type (e.g., 'llm', 'embedding')")
+    # v2.6.0: model_type is now optional. When omitted, returns all models and
+    # infers type from model name. When provided, behavior is unchanged.
+    model_type: Optional[str] = Field(None, description="Model type (e.g., 'llm', 'embedding'). Optional since v2.6.0.")
     api_key: Optional[str] = Field('', description="API key for the provider")
     base_url: Optional[str] = Field('', description="Base URL for the provider API")
 
@@ -2365,3 +2381,340 @@ class CommunityStatusUpdateRequest(BaseModel):
 class DeleteMcpServiceRequest(BaseModel):
     """Request model for deleting an MCP service"""
     mcp_id: int = Field(..., gt=0, description="MCP record ID to delete")
+
+
+# =============================================================================
+# Model Catalog (预置模型目录) 相关数据模型
+# =============================================================================
+
+
+class ModelCatalogProfile(BaseModel):
+    """从预置模型目录中读取的单个模型的完整配置描述。
+
+    字段设计与 ModelRecord 表列一一对应，但去掉了 api_key（用户输入）、
+    tenant_id（多租户隔离）、connect_status（运行时状态）等运行时字段。
+    """
+    model_type: str = Field(..., description="Model type: llm / embedding / multi_embedding / rerank / vlm / vlm2 / vlm3 / stt / tts")
+    display_name: Optional[str] = Field(None, description="UI display name (fallback to model_name)")
+    base_url: Optional[str] = Field(None, description="Provider-level base_url or model-level override")
+    model_factory: Optional[str] = Field(None, description="Model factory / compatibility format, e.g. OpenAI-API-Compatible, VolcEngine-STT")
+    context_window_tokens: Optional[int] = Field(None, gt=0, description="Combined input+output context window in tokens")
+    max_input_tokens: Optional[int] = Field(None, gt=0, description="Maximum input tokens allowed by the provider")
+    max_output_tokens: Optional[int] = Field(None, gt=0, description="Maximum output / completion tokens")
+    default_output_reserve_tokens: Optional[int] = Field(None, gt=0, description="Default output token reserve before input budget calc")
+    tokenizer_family: Optional[str] = Field(None, description="Tokenizer family identifier mapped via tokenizer_registry")
+    expected_chunk_size: Optional[int] = Field(None, gt=0, description="Expected chunk size (embedding / multi_embedding models)")
+    maximum_chunk_size: Optional[int] = Field(None, gt=0, description="Maximum chunk size (embedding / multi_embedding models)")
+    chunk_batch: Optional[int] = Field(None, gt=0, description="Concurrent batch size for embedding requests during chunking")
+    dimension: Optional[int] = Field(None, gt=0, description="Embedding vector dimension")
+    timeout_seconds: Optional[int] = Field(None, gt=0, description="Per-request timeout in seconds")
+    concurrency_limit: Optional[int] = Field(None, gt=0, description="Maximum concurrent requests for this model")
+    capability_profile_version: Optional[str] = Field(None, description="Approved provider/model capability profile version")
+    requires_appid: bool = Field(False, description="Whether the model requires model_appid auth (STT/TTS)")
+    requires_access_token: bool = Field(False, description="Whether the model requires access_token auth (STT/TTS)")
+    forced_temperature: Optional[float] = Field(
+        None,
+        description=(
+            "Sampling temperature the provider enforces for this model "
+            "(reasoning-only models like kimi-k3 reject any other value). "
+            "Auto-filled into model records as the default temperature."
+        ),
+    )
+
+
+class ModelCatalogProviderInfo(BaseModel):
+    """某个 provider 在预置目录中的摘要信息，用于 API 返回给前端做展示。"""
+    id: str = Field(..., description="Provider id key (silicon / dashscope / openai / ...)")
+    display_name: str = Field(..., description="Human-readable provider name shown in UI")
+    base_url: str = Field(..., description="Provider-level default base_url")
+    supported_types: List[str] = Field(default_factory=list, description="Model types the catalog provides for this provider (llm/vlm/embedding/...)")
+    model_count: int = Field(0, description="Number of models in catalog for this provider")
+
+
+# =============================================================================
+# v2.6.0: 按类型固定字段规格 (前后端共用)
+# =============================================================================
+
+
+class FieldSpec(BaseModel):
+    """Specification of a single fixed inference field for advanced settings UI.
+
+    Shared by backend validation and frontend dynamic rendering so the field
+    set is defined in exactly one place.
+    """
+
+    key: str = Field(..., description="Field key (snake_case), e.g. 'temperature', 'top_p'")
+    label: str = Field(..., description="Human-readable label shown in UI")
+    type: str = Field(
+        ...,
+        description="Field type: 'str' | 'int' | 'float' | 'bool' | 'select' | 'array_str'",
+    )
+    range: Optional[List[float]] = Field(
+        None, description="For numeric fields: [min, max]. None means no range constraint."
+    )
+    default: Optional[Any] = Field(None, description="Default value when user does not set it")
+    options: Optional[List[str]] = Field(
+        None, description="For 'select' type: allowed option values"
+    )
+    max_items: Optional[int] = Field(
+        None, description="For 'array_str' type: maximum number of items"
+    )
+
+
+# Shared FieldSpec groups reused across model types. Keeping them as module
+# constants removes the duplicated spec blocks that previously appeared
+# verbatim in the llm/vlm/vlm2/vlm3, embedding/multi_embedding and stt/tts
+# entries below. Each entry below copies the lists so runtime mutation of one
+# model type's spec list cannot leak into another.
+_COMMON_CAPACITY_FIELD_SPECS = [
+    FieldSpec(key="context_window_tokens", label="上下文窗口", type="int"),
+    FieldSpec(key="max_input_tokens", label="最大输入", type="int"),
+    FieldSpec(key="max_output_tokens", label="最大输出", type="int"),
+    FieldSpec(key="default_output_reserve_tokens", label="输出预留", type="int"),
+    FieldSpec(key="tokenizer_family", label="Tokenizer", type="str"),
+]
+
+_DISPLAY_NAME_FIELD_SPEC = FieldSpec(key="display_name", label="显示名称", type="str")
+
+_EMBEDDING_FIELD_SPECS = [
+    FieldSpec(key="display_name", label="显示名称", type="str"),
+    FieldSpec(key="dimension", label="向量维度", type="int"),
+    FieldSpec(key="expected_chunk_size", label="期望块大小", type="int"),
+    FieldSpec(key="maximum_chunk_size", label="最大块大小", type="int"),
+    FieldSpec(key="chunk_batch", label="块批大小", type="int"),
+]
+
+# Fixed inference field specs by model type. Each model type has its own set of
+# fixed advanced-settings fields. Fields with dedicated DB columns
+# (see _FIELDS_WITH_DEDICATED_COLUMN) are persisted as top-level columns; the
+# rest are persisted to the extra_params JSONB column. enable_thinking is
+# stored in extra_params to avoid a DB migration — the runtime adapter is
+# responsible for translating it to the provider-specific request shape
+# (e.g. Qwen3 chat_template_kwargs={"enable_thinking": ...}).
+FIXED_INFERENCE_FIELDS_BY_TYPE: Dict[str, List[FieldSpec]] = {
+    "llm": [
+        _DISPLAY_NAME_FIELD_SPEC,
+        *list(_COMMON_CAPACITY_FIELD_SPECS),
+        FieldSpec(key="temperature", label="温度", type="float", range=[0.0, 2.0]),
+        FieldSpec(key="top_p", label="Top P", type="float", range=[0.0, 1.0]),
+        FieldSpec(key="enable_thinking", label="深度思考", type="bool"),
+    ],
+    "vlm": [_DISPLAY_NAME_FIELD_SPEC, *list(_COMMON_CAPACITY_FIELD_SPECS)],
+    "vlm2": [_DISPLAY_NAME_FIELD_SPEC, *list(_COMMON_CAPACITY_FIELD_SPECS)],
+    "vlm3": [_DISPLAY_NAME_FIELD_SPEC, *list(_COMMON_CAPACITY_FIELD_SPECS)],
+    "embedding": list(_EMBEDDING_FIELD_SPECS),
+    "multi_embedding": list(_EMBEDDING_FIELD_SPECS),
+    "rerank": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="max_tokens", label="最大Token数", type="int"),
+    ],
+    "stt": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="model_factory", label="STT服务商", type="select", options=["dashscope", "volcengine"]),
+        FieldSpec(key="model_appid", label="AppID", type="str"),
+        FieldSpec(key="access_token", label="Access Token", type="str"),
+    ],
+    "tts": [
+        FieldSpec(key="display_name", label="显示名称", type="str"),
+        FieldSpec(key="model_factory", label="TTS服务商", type="select", options=["dashscope", "volcengine"]),
+        FieldSpec(key="model_appid", label="AppID", type="str"),
+        FieldSpec(key="access_token", label="Access Token", type="str"),
+        FieldSpec(key="max_tokens", label="最大Token数", type="int"),
+    ],
+}
+
+
+# Fields with dedicated DB columns. The remaining fields in
+# FIXED_INFERENCE_FIELDS_BY_TYPE are persisted to extra_params JSONB.
+_FIELDS_WITH_DEDICATED_COLUMN = frozenset({
+    "display_name", "temperature", "top_p",
+    "context_window_tokens", "max_input_tokens", "max_output_tokens",
+    "default_output_reserve_tokens", "tokenizer_family",
+    "dimension", "expected_chunk_size", "maximum_chunk_size", "chunk_batch",
+    "model_factory", "model_appid", "access_token", "max_tokens",
+})
+
+
+def get_extra_param_keys_for_type(model_type: str) -> List[str]:
+    """Return the list of field keys that should be stored in extra_params JSONB
+    for the given model type (i.e., fields without a dedicated DB column).
+    """
+    specs = FIXED_INFERENCE_FIELDS_BY_TYPE.get(model_type, [])
+    return [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
+
+
+def _clean_custom_params(value: Any, logger) -> Optional[Dict[str, Any]]:
+    """Validate the ``__custom__`` payload as string -> primitive.
+
+    Returns the cleaned dict (None when empty); malformed entries are dropped
+    with a warning so a bad payload cannot corrupt the JSONB column.
+    """
+    if not isinstance(value, dict):
+        logger.warning(
+            "__custom__ must be a dict, got %s; dropping",
+            type(value).__name__,
+        )
+        return None
+    clean_custom: Dict[str, Any] = {}
+    for ck, cv in value.items():
+        if not isinstance(ck, str) or not isinstance(cv, (str, int, float, bool)):
+            logger.warning(
+                "__custom__ entry %r must be string -> primitive, dropping",
+                ck,
+            )
+            continue
+        clean_custom[ck] = cv
+    return clean_custom or None
+
+
+def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Filter extra_params to only keep keys allowed for the given model type.
+
+    Logs a warning for any disallowed keys. Returns None if the result is empty.
+
+    The reserved key ``__custom__`` is always allowed through: it carries
+    user-defined key/value pairs edited in the advanced-settings UI. It is
+    validated to be a dict of string -> primitive (str/int/float/bool);
+    anything else is dropped with a warning so a malformed payload cannot
+    corrupt the JSONB column.
+    """
+    if not extra_params:
+        return None
+    import logging
+    logger = logging.getLogger(__name__)
+
+    allowed = set(get_extra_param_keys_for_type(model_type))
+    filtered = {}
+    dropped = []
+    for key, value in extra_params.items():
+        if key == "__custom__":
+            if not isinstance(value, dict):
+                logger.warning(
+                    "__custom__ must be a dict, got %s; dropping",
+                    type(value).__name__,
+                )
+                dropped.append(key)
+                continue
+            clean_custom = _clean_custom_params(value, logger)
+            if clean_custom is not None:
+                filtered["__custom__"] = clean_custom
+            continue
+        if key in allowed:
+            filtered[key] = value
+        else:
+            dropped.append(key)
+    if dropped:
+        logger.warning(
+            "Dropped extra_params keys not in fixed field set for model_type=%s: %s",
+            model_type, dropped,
+        )
+    return filtered if filtered else None
+
+
+# =============================================================================
+# v2.6.0: Model type inference from model name (for custom provider discovery)
+# =============================================================================
+
+
+def _name_matches(name: str, final_segment: str, *prefixes: str) -> bool:
+    """True when the full name or its final path segment starts with any prefix."""
+    return name.startswith(prefixes) or final_segment.startswith(prefixes)
+
+
+def _name_contains_any(name: str, final_segment: str, *tokens: str) -> bool:
+    """True when any token is a substring of the full name or its final path segment."""
+    return any(tok in name or tok in final_segment for tok in tokens)
+
+
+def _infer_visual_model_type(name: str, final_segment: str) -> Optional[str]:
+    """Classify the multimodal families from a lower-cased model name.
+
+    Returns "vlm3" / "vlm2" / "vlm" or None when the name does not look
+    multimodal. Evaluation order matters:
+    - Video understanding (vlm3) — keywords aligned with develop's TokenPony
+      provider classification (TOKENPONY_VIDEO_UNDERSTANDING_KEYWORDS).
+    - Image generation (vlm2) — keywords aligned with develop's TokenPony
+      provider classification (TOKENPONY_IMAGE_GENERATION_KEYWORDS): catches
+      Tongyi-MAI/Z-Image-Turbo, baidu/ERNIE-Image-Turbo, flux/sdxl/wanx/
+      seedream/ideogram/recraft families. Checked BEFORE image understanding
+      because develop's classifier gives generation keywords priority.
+    - Image understanding (vlm) — keywords aligned with develop's TokenPony
+      provider (TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS) plus the legacy
+      prefix rules: qwen-vl-*, glm-v*, internvl-*, llava-*, gpt-4o-*.
+      "vl" as a standalone dash-segment covers Qwen/Qwen3-VL-* naming.
+    """
+    if _name_contains_any(name, final_segment, "omni", "video"):
+        return "vlm3"
+    if _name_contains_any(
+        name, final_segment,
+        "image", "dall", "flux", "stable-diffusion", "sdxl",
+        "midjourney", "wanx", "kolors", "seedream", "ideogram", "recraft",
+    ):
+        return "vlm2"
+    if (
+        _name_matches(name, final_segment, "qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
+        or "vl" in final_segment.split("-")
+        or _name_contains_any(name, final_segment, "vision", "visual", "ocr")
+    ):
+        return "vlm"
+    return None
+
+
+def _infer_model_type_from_name(model_name: str) -> str:
+    """Infer a model's type from its name prefix.
+
+    Used when ProviderModelRequest.model_type is None (custom provider discovery
+    via OpenAI-compatible /v1/models). Preset providers do not need this because
+    their types come from the catalog.
+
+    Matching runs against BOTH the full name and its final path segment so that
+    repo-prefixed ids from aggregators (SiliconFlow "BAAI/bge-m3", OpenRouter
+    "deepseek/deepseek-v4-flash", "Pro/..." tiers) classify the same as their
+    bare names.
+
+    Mapping rules (see design doc Phase 2.6):
+    - gpt-* / o1-* / o3-* / o4-* / claude-* / glm-* / qwen-* (non-vl) /
+      deepseek-* / llama-* / mistral-* / yi-* / moonshot-* / gemini-* → llm
+    - qwen-vl-* / glm-v* / internvl-* / llava-* → vlm
+    - text-embedding-* / embedding-* / bge-* (non-reranker) → embedding
+    - rerank-* / bge-reranker-* / jina-reranker-* → rerank
+    - whisper-* / paraformer-* / sensevoice-* → stt
+    - tts-* / cosyvoice-* / speech-* → tts
+    - other unmatched → llm (default; user can manually correct in UI)
+    """
+    if not model_name:
+        return "llm"
+    name = model_name.lower()
+    # Final path segment (after the last "/"): "BAAI/bge-m3" -> "bge-m3",
+    # "Pro/deepseek-ai/DeepSeek-V3" -> "deepseek-v3". Checked alongside the
+    # full name so repo prefixes on aggregators don't break prefix rules.
+    final_segment = name.rsplit("/", 1)[-1]
+
+    # Embedding (check before generic patterns). Besides prefix rules, also
+    # match names that merely CONTAIN "embedding" — covers Qwen3-Embedding-*,
+    # text-embedding-* variants and similar mid-name conventions on
+    # aggregators. "reranker" wins over "embedding" when both appear
+    # (bge-reranker-v2-m3 style names).
+    if not _name_contains_any(name, final_segment, "reranker") and (
+        _name_matches(name, final_segment, "text-embedding-", "embedding-", "bge-")
+        or _name_contains_any(name, final_segment, "embedding")
+    ):
+        return "embedding"
+    # Rerank. Also catch names containing "rerank" (Qwen3-Reranker-0.6B style);
+    # any name containing "reranker" also contains "rerank", so one token covers both.
+    if _name_matches(name, final_segment, "rerank-", "bge-reranker-", "jina-reranker-") or _name_contains_any(name, final_segment, "rerank"):
+        return "rerank"
+    # STT. Also catch "sensevoice" mid-name (FunAudioLLM/SenseVoiceSmall).
+    if _name_matches(name, final_segment, "whisper-", "paraformer-", "sensevoice-") or _name_contains_any(name, final_segment, "sensevoice"):
+        return "stt"
+    # TTS. Also catch "tts" / "cosyvoice" mid-name (IndexTeam/IndexTTS-2,
+    # FunAudioLLM/CosyVoice2-0.5B style aggregator names).
+    if _name_matches(name, final_segment, "tts-", "cosyvoice-", "speech-") or _name_contains_any(name, final_segment, "cosyvoice"):
+        return "tts"
+
+    visual = _infer_visual_model_type(name, final_segment)
+    if visual:
+        return visual
+    # LLM prefixes and the fallback both resolve to "llm" — unmatched names
+    # default to llm so the user can manually correct the type in the UI.
+    return "llm"

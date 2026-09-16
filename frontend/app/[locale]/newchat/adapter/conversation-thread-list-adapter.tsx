@@ -24,7 +24,10 @@ import {
 } from "@/services/conversationService";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
+import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import { stripAnsiControlSequences } from "@/lib/ansi";
+import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
+import { appendGuidanceMessage } from "@/features/humanInteraction/guidanceMessage";
 
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
@@ -457,7 +460,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           .join("\n");
         if (text) content.push({ type: "text", text });
       } else {
-        let reasoningText = "";
+        const parentReasoning = createReasoningAccumulator(content);
         // Per-invocation map of currently-open sub-agent runs reconstructed
         // from persisted ``subagent_start`` / ``subagent_end`` units. We do
         // not route inner parts into a separate ``subagent-group`` array;
@@ -535,14 +538,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             });
             entry.reasoningText = "";
           }
-          if (!invocationId && reasoningText) {
-            content.push({
-              type: "reasoning",
-              text: reasoningText,
-              status: { type: "done" },
-            });
-            reasoningText = "";
-          }
+          if (!invocationId) parentReasoning.close();
         };
 
         const answerImageKeys = persistedAnswerImageKeys;
@@ -589,6 +585,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
+          if (part.type === "user_steering") {
+            appendGuidanceMessage(content, part.content);
+            continue;
+          }
           // Note: do NOT early-return on `!part.content` at the top level —
           // `tool` items stored in the database have an empty `content` field
           // and only carry `tool_name` + `tool_arguments` (see the
@@ -831,10 +831,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "step_count") {
+            flushReasoning(part.invocation_id);
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
               if (top) top.reasoningText += part.content;
-              else reasoningText += part.content;
+              else parentReasoning.append(part.content);
             }
             continue;
           }
@@ -843,7 +844,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
               if (top) top.reasoningText += part.content;
-              else reasoningText += part.content;
+              else parentReasoning.append(part.content);
             }
             continue;
           }
@@ -1079,7 +1080,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // always include the field and only set the token bucket when we have
       // historical step data.
       const createdAt = toMessageCreatedAt(msg.create_time);
+      const timing =
+        msg.role === "assistant"
+          ? buildHistoricalMessageTiming(stepTokenCounts)
+          : undefined;
       const metadata = {
+        ...(timing ? { timing } : {}),
         custom: {
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
           ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),

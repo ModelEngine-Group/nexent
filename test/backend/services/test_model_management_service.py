@@ -73,6 +73,7 @@ class _EnumItem:
 
 
 class _ModelConnectStatusEnum:
+    AVAILABLE = _EnumItem("available")
     OPERATIONAL = _EnumItem("operational")
     NOT_DETECTED = _EnumItem("not_detected")
     DETECTING = _EnumItem("detecting")
@@ -96,9 +97,52 @@ class _ProcessParams:
         return dict(self.__dict__)
 
 
+def _infer_model_type_from_name(model_name: str) -> str:
+    """Mock implementation mirroring the real consts.model._infer_model_type_from_name."""
+    if not model_name:
+        return "llm"
+    name = model_name.lower()
+    final_segment = name.rsplit("/", 1)[-1]
+
+    def _matches(*prefixes: str) -> bool:
+        return name.startswith(prefixes) or final_segment.startswith(prefixes)
+
+    def _contains(token: str) -> bool:
+        return token in name or token in final_segment
+
+    if not _contains("reranker") and (
+        _matches("text-embedding-", "embedding-", "bge-") or _contains("embedding")
+    ):
+        return "embedding"
+    if _matches("rerank-", "bge-reranker-", "jina-reranker-") or _contains("rerank"):
+        return "rerank"
+    if _matches("whisper-", "paraformer-", "sensevoice-") or _contains("sensevoice"):
+        return "stt"
+    if _matches("tts-", "cosyvoice-", "speech-") or _contains("cosyvoice"):
+        return "tts"
+    if _contains("omni") or _contains("video"):
+        return "vlm3"
+    if any(
+        _contains(token)
+        for token in (
+            "image", "dall", "flux", "stable-diffusion", "sdxl",
+            "midjourney", "wanx", "kolors", "seedream", "ideogram", "recraft",
+        )
+    ):
+        return "vlm2"
+    if (
+        _matches("qwen-vl-", "glm-v", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
+        or "vl" in final_segment.split("-")
+        or any(_contains(token) for token in ("vision", "visual", "ocr"))
+    ):
+        return "vlm"
+    return "llm"
+
+
 consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
 consts_model_mod.ToolValidateRequest = _ToolValidateRequest
 consts_model_mod.ProcessParams = _ProcessParams
+consts_model_mod._infer_model_type_from_name = _infer_model_type_from_name
 sys.modules["consts.model"] = consts_model_mod
 if "consts" not in sys.modules:
     sys.modules["consts"] = types.ModuleType("consts")
@@ -129,7 +173,10 @@ consts_const_mod.DEBUG_JWT_EXPIRE_SECONDS = 3600
 consts_const_mod.LANGUAGE = "zh"
 # Fields required by utils.memory_utils and management.services.knowledge_base.service
 consts_const_mod.MODEL_CONFIG_MAPPING = {
-    "llm": "LLM_ID", "embedding": "EMBEDDING_ID"}
+    "llm": "LLM_ID", "embedding": "EMBEDDING_ID", "multiEmbedding": "MULTI_EMBEDDING_ID",
+    "rerank": "RERANK_ID", "vlm": "VLM_ID", "vlm2": "VLM2_ID", "vlm3": "VLM3_ID",
+    "vlm4": "VLM4_ID", "stt": "STT_ID", "tts": "TTS_ID",
+}
 consts_const_mod.ES_HOST = "http://localhost:9200"
 consts_const_mod.ES_API_KEY = ""
 consts_const_mod.ES_USERNAME = ""
@@ -2458,3 +2505,167 @@ async def test_usm_embedding_localhost_replaced_before_url_resolution():
 
         assert mock_dim.call_args[0][0]["base_url"] == "http://host.docker.internal:11434/v1/embeddings"
         assert mock_update.call_args[0][1]["base_url"] == "http://host.docker.internal:11434/v1/embeddings"
+
+
+# ============================================================================
+# Tests for default-model slot backfill after create/import
+# ============================================================================
+
+
+def _model_row(model_id, model_type, display_name, connect_status="available", context=None):
+    return {
+        "model_id": model_id,
+        "model_type": model_type,
+        "display_name": display_name,
+        "connect_status": connect_status,
+        "context_window_tokens": context,
+    }
+
+
+def _run_backfill(svc, existing_rows, existing_config, live_model_ids=None, updated=None):
+    inserted = []
+    updated = updated if updated is not None else []
+    live_ids = live_model_ids if live_model_ids is not None else {
+        m["model_id"] for m in existing_rows
+    }
+
+    def fake_get_records(filters, tenant_id):
+        return [m for m in existing_rows if filters.get("model_type") == m["model_type"]]
+
+    def fake_get_single_config(tenant_id, key):
+        # Mirror the real DB helper: {} when no row matches (NOT None).
+        return existing_config.get(key, {})
+
+    def fake_insert_config(data):
+        inserted.append(data)
+        return True
+
+    def fake_update_config(config_row_id, value):
+        updated.append((config_row_id, value))
+        return True
+
+    def fake_get_model_by_model_id(model_id, tenant_id=None):
+        return {"model_id": model_id} if model_id in live_ids else None
+
+    with mock.patch.object(svc, "get_model_records", side_effect=fake_get_records), \
+            mock.patch.object(svc, "get_single_config_info", side_effect=fake_get_single_config), \
+            mock.patch.object(svc, "insert_config", side_effect=fake_insert_config), \
+            mock.patch.object(svc, "update_config_by_tenant_config_id", side_effect=fake_update_config), \
+            mock.patch.object(svc, "get_model_by_model_id", side_effect=fake_get_model_by_model_id):
+        result = svc._backfill_default_model_slots("u1", "t1")
+    return result, inserted, updated
+
+
+def test_backfill_fills_empty_slots_with_best_candidate():
+    svc = import_svc()
+    rows = [
+        _model_row(1, "llm", "small-ctx", context=32000),
+        _model_row(2, "llm", "big-ctx", context=1048576),
+        _model_row(3, "embedding", "bge-m3"),
+    ]
+    result, inserted, _ = _run_backfill(svc, rows, {})
+
+    assert {e["config_key"] for e in result} == {"LLM_ID", "EMBEDDING_ID"}
+    # The larger-context llm wins over the smaller one.
+    llm_entry = next(e for e in result if e["config_key"] == "LLM_ID")
+    assert llm_entry["model_id"] == 2
+    assert {d["config_key"] for d in inserted} == {"LLM_ID", "EMBEDDING_ID"}
+
+
+def test_backfill_prefers_available_models():
+    svc = import_svc()
+    rows = [
+        _model_row(1, "rerank", "unavailable-rerank", connect_status="unavailable"),
+        _model_row(2, "rerank", "available-rerank"),
+    ]
+    result, _, _ = _run_backfill(svc, rows, {})
+
+    rerank_entry = next(e for e in result if e["config_key"] == "RERANK_ID")
+    assert rerank_entry["model_id"] == 2
+
+
+def test_backfill_never_touches_configured_slots():
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "llm-one"), _model_row(2, "embedding", "emb-one")]
+    # LLM_ID row exists and points at a live model (id 1) -- must not be
+    # overwritten even though a "better" candidate exists.
+    result, inserted, updated = _run_backfill(
+        svc, rows, {"LLM_ID": {"config_value": "1", "tenant_config_id": 100}},
+        live_model_ids={1, 2})
+
+    assert {e["config_key"] for e in result} == {"EMBEDDING_ID"}
+    assert all(d["config_key"] != "LLM_ID" for d in inserted)
+    assert all(cid != 100 for cid, _ in updated)
+
+
+def test_backfill_handles_db_helper_empty_dict_for_missing_row():
+    """Regression: get_single_config_info returns {} (not None) when the slot
+    has no row -- the empty dict must be treated as never-configured, not as a
+    dangling row (KeyError on tenant_config_id in earlier builds)."""
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "llm-one")]
+    # Simulate the real helper: every missing key yields {}.
+    result, inserted, updated = _run_backfill(
+        svc, rows,
+        existing_config={},  # default .get(key, {}) -> {} for every slot
+    )
+
+    assert {e["config_key"] for e in result} == {"LLM_ID"}
+    assert len(inserted) == 1
+    assert updated == []
+
+
+def test_backfill_repairs_dangling_config_rows():
+    """A config row whose model was deleted counts as empty and is repaired
+    in place (update, not another insert)."""
+    svc = import_svc()
+    rows = [_model_row(5, "llm", "fresh-llm")]
+    # LLM_ID row points at model 99 which no longer exists.
+    result, inserted, updated = _run_backfill(
+        svc, rows, {"LLM_ID": {"config_value": "99", "tenant_config_id": 42}},
+        live_model_ids={5})
+
+    assert {e["config_key"] for e in result} == {"LLM_ID"}
+    assert result[0]["model_id"] == 5
+    # The stale row is updated, not appended to.
+    assert (42, "5") in updated
+    assert all(d["config_key"] != "LLM_ID" for d in inserted)
+
+
+def test_backfill_skips_slots_without_candidates():
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "only-llm")]
+    result, inserted, _ = _run_backfill(svc, rows, {})
+
+    assert {e["config_key"] for e in result} == {"LLM_ID"}
+    assert len(inserted) == 1
+
+
+def test_backfill_survives_insert_failure():
+    svc = import_svc()
+    rows = [_model_row(1, "llm", "llm-one"), _model_row(2, "embedding", "emb-one")]
+
+    def fail_insert(data):
+        return False
+
+    with mock.patch.object(svc, "get_model_records", side_effect=lambda f, t: [m for m in rows if f.get("model_type") == m["model_type"]]), \
+            mock.patch.object(svc, "get_single_config_info", return_value=None), \
+            mock.patch.object(svc, "insert_config", side_effect=fail_insert):
+        result = svc._backfill_default_model_slots("u1", "t1")
+
+    assert result == []
+
+
+def test_create_model_for_tenant_returns_backfill_result():
+    svc = import_svc()
+    model_data = {
+        "display_name": "m1", "model_name": "m1", "model_type": "llm",
+        "api_key": "k", "base_url": "http://x", "connect_status": "available",
+        "model_repo": "",
+    }
+    backfill_result = [{"config_key": "LLM_ID", "model_id": 7, "display_name": "m1", "model_type": "llm"}]
+    with mock.patch.object(svc, "create_model_record", return_value=True), \
+            mock.patch.object(svc, "_backfill_default_model_slots", return_value=backfill_result):
+        result = __import__("asyncio").run(
+            svc.create_model_for_tenant("u1", "t1", model_data))
+    assert result == {"auto_configured_defaults": backfill_result}

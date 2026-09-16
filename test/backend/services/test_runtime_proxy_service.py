@@ -421,3 +421,92 @@ async def test_forward_agent_stop_rejects_invalid_success_payload(
 
     with pytest.raises(RuntimeServiceUnavailableError, match=expected_message):
         await proxy.forward_agent_stop(123, "user-a", "tenant-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path,result", [("capabilities", {"enabled": True}), ("conversation/7", None)])
+async def test_human_interaction_forwards_internal_identity_and_nullable_snapshot(monkeypatch, path, result):
+    captured = []
+
+    def handler(request):
+        captured.append(request)
+        return httpx.Response(200, content=json.dumps(result), headers={"content-type": "application/json"})
+
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda user, tenant: f"{user}:{tenant}")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **kwargs: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), headers=kwargs["headers"],
+    ))
+    assert await proxy.forward_human_interaction("GET", path, "owner", "tenant-a") == result
+    assert captured[0].url.path == f"/api/agent/internal/northbound/human-interactions/{path}"
+    assert captured[0].headers["authorization"] == "Bearer owner:tenant-a"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [404, 409, 410, 422, 503])
+async def test_human_interaction_preserves_decision_errors(monkeypatch, status):
+    captured = []
+
+    def handler(request):
+        captured.append(request)
+        return httpx.Response(status, content=b'{"message":"rejected"}', headers={"connection": "close"})
+
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with pytest.raises(RuntimeUpstreamError) as error:
+        await proxy.forward_human_interaction(
+            "POST", "run/requests/card/decisions", "owner", "tenant", payload={"decision": "answer"},
+        )
+    assert json.loads(captured[0].content) == {"decision": "answer"}
+    assert error.value.status_code == status
+    assert error.value.content == b'{"message":"rejected"}'
+    assert "connection" not in error.value.headers
+
+
+@pytest.mark.asyncio
+async def test_human_events_streams_without_buffering_and_closes_on_disconnect(monkeypatch):
+    stream = TrackingStream([b'id: 1\ndata: {"type":"human_interaction"}\n\n', b"id: 2\ndata: {}\n\n"])
+    captured = []
+
+    def handler(request):
+        captured.append(request)
+        return httpx.Response(200, stream=stream, headers={"content-type": "text/event-stream", "run_id": "run"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
+    response = await proxy.forward_human_interaction_events("run", "owner", "tenant", after_event=7)
+    first = await anext(response.body_iterator)
+    assert first.startswith(b"id: 1\n")
+    assert not stream.closed
+    await response.body_iterator.aclose()
+    assert stream.closed and client.is_closed
+    assert captured[0].method == "GET"
+    assert captured[0].url.params["after_event"] == "7"
+    assert response.headers["run_id"] == "run"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,expected", [
+    (httpx.ReadTimeout("timeout"), RuntimeServiceTimeoutError),
+    (httpx.ConnectError("unreachable"), RuntimeServiceUnavailableError),
+])
+async def test_human_interaction_maps_transport_errors(monkeypatch, error, expected):
+    def handler(request):
+        error.request = request
+        raise error
+
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with pytest.raises(expected):
+        await proxy.forward_human_interaction("GET", "capabilities", "owner", "tenant")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [b"not-json", b"[]", b"null"])
+async def test_human_interaction_rejects_invalid_runtime_payload(monkeypatch, content):
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, content=content)),
+    ))
+    with pytest.raises(RuntimeServiceUnavailableError):
+        await proxy.forward_human_interaction("GET", "capabilities", "owner", "tenant")
