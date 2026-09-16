@@ -412,13 +412,15 @@ export default function AgentPrompt() {
                 modelPriorityTrigger
               )}
               <Tooltip title={t("agent.modelParamsOverride.button", { defaultValue: "模型参数覆盖" })}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<Settings2 size={14} />}
-                  disabled={isModelSelectionDisabled || !editedAgent.model_ids?.length}
-                  onClick={() => setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)}
-                />
+                <span className="inline-flex">
+                  <Button
+                    type="default"
+                    icon={<Settings2 size={16} />}
+                    aria-label={t("agent.modelParamsOverride.button", { defaultValue: "模型参数覆盖" })}
+                    disabled={isModelSelectionDisabled || !editedAgent.model_ids?.length}
+                    onClick={() => setConfiguringModelId(editedAgent.model_ids?.[0] ?? null)}
+                  />
+                </span>
               </Tooltip>
             </div>
           </Form.Item>

@@ -31,11 +31,11 @@ def get_fallback_thread_manager():
                     for name, workers, queue_size in (
                         ("agent-run", 4, 16),
                         ("model-tool-io", 4, 16),
-                        ("control-io", 2, 8),
+                        ("control-io", 16, 8),
                         ("evaluation", 2, 8),
-                        ("background-service", 2, 4),
+                        ("background-service", 12, 4),
                         ("mcp-session", 4, 0),
-                        ("sandbox", 2, 4),
+                        ("sandbox", 200, 4),
                     )
                 }
                 manager = ThreadManager(service_name="sdk-fallback", lane_policies=policies)

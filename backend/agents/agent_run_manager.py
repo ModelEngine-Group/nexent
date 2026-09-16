@@ -194,6 +194,9 @@ class AgentRunManager:
         agent_run_info = self.get_agent_run_info(conversation_id, user_id)
         if agent_run_info is not None:
             agent_run_info.stop_event.set()
+            cancellation_scope = getattr(agent_run_info, "cancellation_scope", None)
+            if cancellation_scope is not None:
+                cancellation_scope.cancel()
             thread_manager = getattr(agent_run_info, "thread_manager", None)
             execution_id = getattr(agent_run_info, "thread_execution_id", None)
             if thread_manager is not None and execution_id:

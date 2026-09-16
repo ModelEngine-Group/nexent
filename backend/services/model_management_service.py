@@ -10,6 +10,7 @@ from consts.const import (
     LOCALHOST_IP,
     LOCALHOST_NAME,
     DOCKER_INTERNAL_HOST,
+    MODEL_CONFIG_MAPPING,
 )
 from consts.model import ModelConnectStatusEnum, _infer_model_type_from_name
 from consts.provider import (
@@ -23,11 +24,17 @@ from consts.provider import (
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
+    get_model_by_model_id,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
     update_model_record
+)
+from database.tenant_config_db import (
+    get_single_config_info,
+    insert_config,
+    update_config_by_tenant_config_id,
 )
 from services.model_provider_service import (
     prepare_model_dict,
@@ -415,6 +422,10 @@ async def create_model_for_tenant(user_id: str, tenant_id: str, model_data: Dict
             create_model_record(model_data, user_id, tenant_id)
             logging.debug(
                 f"Model {model_data['display_name']} created successfully")
+
+        # Auto-configure default-model slots that the tenant never set.
+        auto_configured = _backfill_default_model_slots(user_id, tenant_id)
+        return {"auto_configured_defaults": auto_configured}
     except Exception as e:
         logging.error(f"Failed to create model: {str(e)}")
         raise Exception(f"Failed to create model: {str(e)}")
@@ -472,6 +483,123 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
     except Exception as e:
         logging.error(f"Failed to create provider models: {str(e)}")
         raise Exception(f"Failed to create provider models: {str(e)}")
+
+
+# Default-model slots that may be auto-configured after a create/import.
+# Maps MODEL_CONFIG_MAPPING keys to the model_type each slot consumes. Only
+# slots whose tenant_config row does NOT exist yet are filled, so anything a
+# user has ever configured (even if the value was later cleared) is never
+# touched -- this also protects embedding swaps that would break existing
+# knowledge-base index compatibility.
+_AUTO_CONFIGURABLE_MODEL_SLOTS = {
+    "llm": "llm",
+    "embedding": "embedding",
+    "multiEmbedding": "multi_embedding",
+    "rerank": "rerank",
+    "vlm": "vlm",
+    "vlm2": "vlm2",
+    "vlm3": "vlm3",
+    "vlm4": "vlm4",
+    "stt": "stt",
+    "tts": "tts",
+}
+
+
+def _default_model_candidate_sort_key(record: Dict[str, Any]):
+    """Rank candidates for auto-configuring a default-model slot.
+
+    Preference order: available models first, then larger context windows,
+    then stable model_id ordering for determinism.
+    """
+    is_available = 1 if record.get("connect_status") == ModelConnectStatusEnum.AVAILABLE.value else 0
+    context_tokens = record.get("context_window_tokens") or 0
+    return (-is_available, -int(context_tokens or 0), record.get("model_id") or 0)
+
+
+def _resolve_existing_slot_config(tenant_id: str, config_key: str):
+    """Classify a default-model slot's existing config row.
+
+    Returns (live_model_id, stale_row):
+    - live_model_id set: the configured default still exists -- backfill must
+      skip (user's explicit choice).
+    - stale_row set: a row exists but its model has been deleted (dangling
+      default) -- backfill repairs that row in place.
+    - both None: the slot was never configured -- backfill inserts a row.
+    """
+    row = get_single_config_info(tenant_id, config_key)
+    # Note: the DB helper returns {} (not None) when no row matches.
+    if not row:
+        return None, None
+    raw_id = row.get("config_value")
+    try:
+        model_id = int(raw_id) if raw_id else None
+    except (TypeError, ValueError):
+        model_id = None
+    if model_id is not None and get_model_by_model_id(model_id, tenant_id):
+        return model_id, None
+    return None, row
+
+
+def _backfill_default_model_slots(user_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+    """Auto-configure default-model slots after models are created.
+
+    A slot is skipped only when its config row points at a still-existing
+    model; empty slots and dangling rows (model deleted) are (re)filled. The
+    candidate pool is the tenant's live models of the matching type, ranked by
+    availability then context size. Failures are logged and skipped so
+    backfill can never break the create flow.
+
+    Returns a list of {"config_key", "model_id", "display_name", "model_type"}
+    entries describing what was auto-configured (empty when nothing changed).
+    """
+    auto_configured: List[Dict[str, Any]] = []
+    try:
+        for slot_name, model_type in _AUTO_CONFIGURABLE_MODEL_SLOTS.items():
+            config_key = MODEL_CONFIG_MAPPING[slot_name]
+            live_model_id, stale_row = _resolve_existing_slot_config(
+                tenant_id, config_key)
+            if live_model_id is not None:
+                # A live, user-configured default: never touch it.
+                continue
+
+            candidates = get_model_records({"model_type": model_type}, tenant_id)
+            if not candidates:
+                continue
+
+            selected = sorted(candidates, key=_default_model_candidate_sort_key)[0]
+            if stale_row is not None:
+                # Dangling row (model deleted): repair it in place instead of
+                # appending another row to the key's history.
+                success = update_config_by_tenant_config_id(
+                    stale_row["tenant_config_id"], str(selected["model_id"])
+                )
+            else:
+                success = insert_config({
+                    "tenant_id": tenant_id,
+                    "config_key": config_key,
+                    "config_value": str(selected["model_id"]),
+                    "created_by": user_id,
+                    "updated_by": user_id,
+                })
+            if not success:
+                logging.warning(
+                    "Auto-configure default model failed: write returned "
+                    "False for key=%s tenant=%s", config_key, tenant_id)
+                continue
+
+            logging.info(
+                "Auto-configured default %s model to '%s' (model_id=%s) for tenant %s",
+                model_type, selected.get("display_name"), selected["model_id"], tenant_id)
+            auto_configured.append({
+                "config_key": config_key,
+                "model_id": selected["model_id"],
+                "display_name": selected.get("display_name"),
+                "model_type": model_type,
+            })
+    except Exception as exc:
+        # Backfill is a best-effort enhancement: never fail the create flow.
+        logging.error("Default-model backfill failed for tenant %s: %s", tenant_id, exc)
+    return auto_configured
 
 
 async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_payload: Dict[str, Any]):
@@ -587,6 +715,10 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             apply_catalog_defaults(model_dict, provider)
             create_model_record(model_dict, user_id, tenant_id)
             logging.debug(f"Model {model['id']} created successfully")
+
+        # Auto-configure default-model slots that the tenant never set.
+        auto_configured = _backfill_default_model_slots(user_id, tenant_id)
+        return {"auto_configured_defaults": auto_configured}
     except Exception as e:
         logging.error(f"Failed to batch create models: {str(e)}")
         raise Exception(f"Failed to batch create models: {str(e)}")

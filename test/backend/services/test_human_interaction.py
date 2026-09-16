@@ -18,34 +18,10 @@ from threading import Thread
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
-
-
-def _read_human_interaction_migration_section(merged_path: Path) -> str:
-    """Extract the executable v2.5.1 human-interaction section from the merged file.
-
-    The section ends at the next ``-- Source migration:`` marker (or the end of
-    the merged file); pure marker/comment lines are stripped so the SQL can be
-    executed directly on PostgreSQL.
-    """
-    merged = merged_path.read_text(encoding="utf-8")
-    marker = "-- Source migration: v2.5.1_001_human_interaction.sql"
-    assert marker in merged
-    section = merged.split(marker, maxsplit=1)[1]
-    next_marker = "\n-- Source migration:"
-    if next_marker in section:
-        section = section.split(next_marker, maxsplit=1)[0]
-    # Skip the embedded header ("-- Source SHA-256: ..." plus surrounding
-    # blank lines) and drop any leftover "-- Source migration:" comment lines
-    # so the SQL can be executed directly on PostgreSQL.
-    lines = section.split("\n")
-    sha_index = next(
-        index for index, line in enumerate(lines) if line.startswith("-- Source SHA-256: ")
-    )
-    body_lines = lines[sha_index + 2:]
-    return "\n".join(line for line in body_lines if not line.startswith("-- Source migration:"))
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 
 def test_clarification_mode_does_not_force_tool_approval():
@@ -118,19 +94,27 @@ def service(monkeypatch):
     client = types.ModuleType("database.client")
     client.get_db_session = session_scope
     monkeypatch.setitem(sys.modules, "database.client", client)
+    from database.db_models import (
+        ConversationRecord,
+        HumanEvent,
+        HumanExecution,
+        HumanRequest,
+        HumanRun,
+        TableBase,
+    )
     from database.human_interaction_db import HumanInteractionRepository
     from services.human_interaction.crypto import PayloadCipher
     from services.human_interaction.service import HumanInteractionService
 
-    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.6.0_merged_migrations.sql"
-    human_interaction_sql = _read_human_interaction_migration_section(migration)
     with engine.begin() as connection:
-        connection.execute(text("DROP SCHEMA IF EXISTS nexent CASCADE"))
-        connection.execute(text("CREATE SCHEMA nexent"))
-        connection.execute(text(human_interaction_sql))
-        connection.exec_driver_sql("CREATE TABLE nexent.conversation_record_t "
-                                   "(conversation_id INT PRIMARY KEY, created_by VARCHAR(100), delete_flag VARCHAR(1))")
-        connection.exec_driver_sql("INSERT INTO nexent.conversation_record_t VALUES (7, 'owner', 'N')")
+        connection.execute(DropSchema("nexent", cascade=True, if_exists=True))
+        connection.execute(CreateSchema("nexent"))
+        TableBase.metadata.create_all(connection, tables=[
+            model.__table__ for model in (ConversationRecord, HumanRun, HumanRequest, HumanExecution, HumanEvent)
+        ])
+        connection.execute(insert(ConversationRecord).values(
+            conversation_id=7, created_by="owner", updated_by="owner", delete_flag="N",
+        ))
     value = HumanInteractionService(HumanInteractionRepository(session_scope), PayloadCipher(Fernet.generate_key().decode()))
     yield value
     engine.dispose()

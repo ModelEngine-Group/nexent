@@ -43,6 +43,7 @@ from typing import Any, Optional
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagedThreadSpec,
+    RunCancellationScope,
     get_current_thread_manager,
     get_default_thread_manager,
 )
@@ -1038,17 +1039,29 @@ class _ToolBridge:
 
         self._server = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
         self.port = self._server.server_port
-        self._thread_manager = _get_sandbox_thread_manager()
-        self._execution = self._thread_manager.register_service(
-            ManagedThreadSpec(
-                task_name="sandbox-tool-bridge",
-                owner="runtime",
-                lane="background-service",
-                close_hook=self._close_server,
-            ),
-            lambda cancel_event: self._server.serve_forever(),
-        )
-        self._thread_manager.start_service(self._execution.execution_id)
+        execution = None
+        try:
+            self._thread_manager = _get_sandbox_thread_manager()
+            execution = self._thread_manager.register_service(
+                ManagedThreadSpec(
+                    task_name="sandbox-tool-bridge",
+                    owner="runtime",
+                    lane="sandbox",
+                    close_hook=self._close_server,
+                ),
+                lambda cancel_event: self._server.serve_forever(),
+            )
+            self._thread_manager.start_service(execution.execution_id)
+        except Exception:
+            if execution is not None:
+                self._thread_manager.cancel(
+                    execution.execution_id,
+                    reason="sandbox tool bridge startup failed",
+                    wait_timeout=0,
+                )
+            self._server.server_close()
+            raise
+        self._execution = execution
         self._thread = self._execution.thread_ref()
 
     def register(self, tools: dict[str, Any]) -> None:
@@ -1158,12 +1171,18 @@ def _install_host_tool_bridge(
     executor: Any,
     logger_: logging.Logger,
     request_timeout_seconds: Optional[float] = None,
+    cancellation_scope: Optional[RunCancellationScope] = None,
 ) -> Any:
     """Keep Nexent tools local while code runs in a remote executor."""
     if getattr(executor, "_nexent_tool_bridge_installed", False):
         return executor
 
     bridge = _ToolBridge(logger_, request_timeout_seconds=request_timeout_seconds)
+    closer_token = (
+        cancellation_scope.register_closer(bridge.close)
+        if cancellation_scope is not None
+        else None
+    )
     original_send_tools = executor.send_tools
     original_cleanup = getattr(executor, "cleanup", None)
 
@@ -1194,6 +1213,8 @@ def _install_host_tool_bridge(
 
     def cleanup() -> None:
         try:
+            if closer_token is not None:
+                cancellation_scope.unregister_closer(closer_token)
             bridge.close()
         finally:
             if callable(original_cleanup):
@@ -2120,6 +2141,7 @@ class SandboxPoolManager:
         logger_: logging.Logger,
         host_tools_exist: bool = False,
         session_container_group: Optional[_SessionDockerContainerGroup] = None,
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ) -> Any:
         """
         Acquire a warm executor from the pool, or create a new one if the pool
@@ -2134,10 +2156,13 @@ class SandboxPoolManager:
                 logger_,
                 host_tools_exist,
                 session_container_group=session_container_group,
+                cancellation_scope=cancellation_scope,
             )
 
         if config.level == SandboxLevel.DOCKER:
-            return self._acquire_shared_docker_kernel(config, logger_, host_tools_exist)
+            return self._acquire_shared_docker_kernel(
+                config, logger_, host_tools_exist, cancellation_scope=cancellation_scope
+            )
 
         pool_key = (
             f"{config.docker_image}|host_tools=true"
@@ -2177,6 +2202,7 @@ class SandboxPoolManager:
         config: SandboxConfig,
         logger_: logging.Logger,
         host_tools_exist: bool,
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ) -> Any:
         """Create one Docker container per system pool and lease one kernel per run."""
         # A system sandbox has one fixed Docker container and network regardless
@@ -2268,6 +2294,7 @@ class SandboxPoolManager:
                 lease,
                 logger_,
                 request_timeout_seconds=config.host_tool_timeout_seconds,
+                cancellation_scope=cancellation_scope,
             )
         lease = _wrap_executor(lease, config, logger_)
         lease._nexent_sandbox_config = config
@@ -2382,6 +2409,7 @@ class SandboxPoolManager:
         logger_: logging.Logger,
         host_tools_exist: bool = False,
         session_container_group: Optional[_SessionDockerContainerGroup] = None,
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ) -> Any:
         """Construct and (for docker) eagerly start a container."""
         level = config.level
@@ -2400,6 +2428,7 @@ class SandboxPoolManager:
                 logger_,
                 host_tools_exist,
                 session_container_group=session_container_group,
+                cancellation_scope=cancellation_scope,
             )
 
         if level == SandboxLevel.WASM:
@@ -2762,6 +2791,7 @@ class SandboxPoolManager:
         logger_: logging.Logger,
         host_tools_exist: bool = False,
         session_container_group: Optional[_SessionDockerContainerGroup] = None,
+        cancellation_scope: Optional[RunCancellationScope] = None,
     ) -> Any:
         """Construct a Docker executor with Nexent hardening."""
         try:
@@ -2887,6 +2917,7 @@ class SandboxPoolManager:
                 executor,
                 logger_,
                 request_timeout_seconds=config.host_tool_timeout_seconds,
+                cancellation_scope=cancellation_scope,
             )
         return _wrap_executor(executor, config, logger_)
 
@@ -3041,6 +3072,7 @@ def build_python_executor(
     managed_agents_exist: bool = False,
     host_tools_exist: bool = False,
     session_container_group: Optional[_SessionDockerContainerGroup] = None,
+    cancellation_scope: Optional[RunCancellationScope] = None,
 ) -> Any:
     """
     Factory function: build a python_executor from ``SandboxConfig``.
@@ -3069,18 +3101,23 @@ def build_python_executor(
         # Per-run fresh executor — pool manager still calls _build_executor
         # but we immediately destroy it when release() is called.
         if session_container_group is None:
-            executor = pool.acquire(config, logger_, host_tools_exist)
+            executor = pool.acquire(
+                config, logger_, host_tools_exist, cancellation_scope=cancellation_scope
+            )
         else:
             executor = pool.acquire(
                 config,
                 logger_,
                 host_tools_exist,
                 session_container_group=session_container_group,
+                cancellation_scope=cancellation_scope,
             )
         return executor
 
     # SYSTEM scope — pool manager handles lifecycle.
-    return pool.acquire(config, logger_, host_tools_exist)
+    return pool.acquire(
+        config, logger_, host_tools_exist, cancellation_scope=cancellation_scope
+    )
 
 
 def release_python_executor(executor: Any, logger_: logging.Logger) -> None:

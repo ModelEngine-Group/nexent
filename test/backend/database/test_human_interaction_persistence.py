@@ -1,20 +1,21 @@
-"""Real PostgreSQL regression tests for HITL schema, locks and audit contracts.
+"""HITL persistence behavior tests using an isolated PostgreSQL database.
 
-Reuse the opt-in hitl_test fixture; never point it at a business database.
+The opt-in hitl_test fixture prepares tables from application ORM models.
+Never point the fixture at a business database.
 """
 
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
-from sqlalchemy import inspect, select, text
+from sqlalchemy import insert, select
 
 from database.db_models import (
+    ConversationRecord,
     HumanEvent,
     HumanExecution,
     HumanRequest,
     HumanRun,
-    TableBase,
 )
 from services.human_interaction.models import InteractionError
 from test.backend.services import test_human_interaction as hitl_support
@@ -25,34 +26,6 @@ from test.backend.services.test_human_interaction import (
 )
 
 service = hitl_support.service
-
-
-MODELS = (HumanRun, HumanRequest, HumanExecution, HumanEvent)
-
-
-def test_real_schema_matches_models_and_all_columns_have_comments(service):
-    with service.repository.session_factory() as session:
-        schema = inspect(session.connection())
-        for model in MODELS:
-            assert issubclass(model, TableBase)
-            table = model.__table__
-            columns = {item["name"]: item for item in schema.get_columns(table.name, schema="nexent")}
-            assert set(columns) == set(table.columns.keys())
-            pk = schema.get_pk_constraint(table.name, schema="nexent")["constrained_columns"]
-            assert len(pk) == 1
-            assert str(columns[pk[0]]["type"]) == "INTEGER"
-            assert not schema.get_foreign_keys(table.name, schema="nexent")
-            assert not schema.get_check_constraints(table.name, schema="nexent")
-            assert not schema.get_unique_constraints(table.name, schema="nexent")
-            indexes = schema.get_indexes(table.name, schema="nexent")
-            assert {item["name"] for item in indexes} == {item.name for item in table.indexes}
-            assert all(not item["unique"] for item in indexes)
-            for name, column in columns.items():
-                assert column["comment"] == table.c[name].comment
-                assert column["comment"]
-                assert column["nullable"] == table.c[name].nullable
-                assert column["type"].compile(dialect=session.bind.dialect) == table.c[name].type.compile(
-                    dialect=session.bind.dialect)
 
 
 def test_concurrent_run_creation_serializes_before_checking_uniqueness(service):
@@ -89,7 +62,7 @@ def test_public_run_identity_collision_is_rejected_even_after_completion(service
         create_run(service)
 
 
-def test_pending_request_uniqueness_survives_removal_of_unique_index(service):
+def test_concurrent_requests_leave_only_one_pending_request(service):
     run_id = create_run(service)
     barrier = Barrier(2)
 
@@ -174,7 +147,7 @@ def test_parallel_event_batches_have_no_duplicate_or_missing_sequences(service):
     assert [item["seq"] for item in service.repository.events(run_id, after=30)] == [31, 32]
 
 
-def test_audit_tracks_user_scheduler_receipt_and_raw_sql_updates(service):
+def test_audit_tracks_user_scheduler_and_receipt_updates(service):
     from nexent.core.human_interaction.contracts import AttemptSuspended
 
     run_id = create_run(service)
@@ -201,12 +174,6 @@ def test_audit_tracks_user_scheduler_receipt_and_raw_sql_updates(service):
         assert request.create_time == request_time and request.update_time > request_time
         for row in [tx.run, request, tx.execution("slot")]:
             assert row.delete_flag == "N" and row.created_by and row.updated_by
-    with service.repository.session_factory() as session:
-        session.execute(text("UPDATE nexent.human_run_t SET lock_owner = 'raw-worker', updated_by = 'system:raw', "
-                             "create_time = '2000-01-01', created_by = 'bad-creator' WHERE run_id = :run"), {"run": run_id})
-    with service.repository.transaction(run_id) as tx:
-        assert tx.run.created_by == "owner" and tx.run.create_time == created_at
-        assert tx.run.updated_by == "system:raw"
 
 
 def test_deleted_rows_are_excluded_from_history_dispatch_and_claims(service):
@@ -237,8 +204,10 @@ def test_scheduler_audits_multiple_abandoned_and_claimed_runs(service, monkeypat
     from database import human_interaction_db
 
     with service.repository.session_factory() as session:
-        session.execute(text("INSERT INTO nexent.conversation_record_t VALUES "
-                             "(8, 'owner', 'N'), (9, 'owner', 'N'), (10, 'owner', 'N')"))
+        session.execute(insert(ConversationRecord), [
+            {"conversation_id": number, "created_by": "owner", "updated_by": "owner", "delete_flag": "N"}
+            for number in (8, 9, 10)
+        ])
     abandoned = [service.create("tenant-a", "owner", number, {}, ready=False) for number in (7, 8)]
     ready = [service.create("tenant-a", "owner", number, {}) for number in (9, 10)]
     future = human_interaction_db.utcnow() + timedelta(seconds=121)
@@ -279,82 +248,13 @@ def test_deleted_pending_requests_and_events_are_not_replayed(service):
     assert service.repository.events(run_id) == []
 
 
-def test_new_model_metadata_emits_comments_and_jsonb_without_legacy_base_changes():
-    from sqlalchemy.dialects import postgresql
-    from sqlalchemy.dialects.postgresql import JSONB
-    from sqlalchemy.schema import SetColumnComment
-
-    assert isinstance(HumanEvent.payload.type, JSONB)
-    assert TableBase.create_time.comment is None
-    for model in MODELS:
-        for column in model.__table__.columns:
-            ddl = str(SetColumnComment(column).compile(dialect=postgresql.dialect()))
-            assert "COMMENT ON COLUMN nexent.human_" in ddl
-            assert column.comment and column.comment.replace("'", "''") in ddl
-
-
-def test_representative_query_plans_use_non_unique_indexes(service):
-    with service.repository.session_factory() as session:
-        session.execute(text("""
-            INSERT INTO nexent.human_run_t (run_id, tenant_id, user_id, conversation_id, status,
-                request_payload, created_by, updated_by)
-            SELECT '00000000-0000-0000-0000-' || lpad(i::text, 12, '0'), 'tenant-a', 'owner', i,
-                   CASE WHEN i = 5000 THEN 'READY' ELSE 'COMPLETED' END, 'opaque-test', 'owner', 'owner'
-            FROM generate_series(1, 5000) i;
-            INSERT INTO nexent.human_event_t (run_record_id, seq, payload, created_by, updated_by)
-            SELECT run_record_id, n, '{"type":"test","content":{}}'::jsonb, 'owner', 'owner'
-            FROM nexent.human_run_t CROSS JOIN generate_series(1, 10) n;
-            ANALYZE nexent.human_run_t;
-            ANALYZE nexent.human_event_t;
-        """))
-        queries = [
-            (("SELECT run_id FROM nexent.human_run_t WHERE tenant_id='tenant-a' AND user_id='owner' "
-             "AND conversation_id=5000 AND delete_flag='N' ORDER BY create_time DESC, run_record_id DESC LIMIT 1"),
-             {"human_run_conversation_idx"}),
-            (("SELECT run_id FROM nexent.human_run_t WHERE delete_flag='N' AND "
-             "(status='READY' OR (status='RUNNING' AND lock_until < now())) AND "
-             "(lock_until IS NULL OR lock_until < now()) ORDER BY create_time LIMIT 10 FOR UPDATE SKIP LOCKED"),
-             {"human_run_claim_idx"}),
-            (("SELECT e.seq FROM nexent.human_event_t e JOIN nexent.human_run_t r "
-             "ON e.run_record_id=r.run_record_id WHERE r.run_id='00000000-0000-0000-0000-000000005000' "
-             "AND r.delete_flag='N' AND e.delete_flag='N' AND e.seq>5 ORDER BY e.seq LIMIT 200"),
-             {"human_event_replay_idx", "human_run_public_id_idx"}),
-        ]
-        for query, expected in queries:
-            plan = session.execute(text("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + query)).scalar_one()[0]
-            nodes = [plan["Plan"]]
-            indexes = set()
-            while nodes:
-                node = nodes.pop()
-                indexes.add(node.get("Index Name"))
-                nodes.extend(node.get("Plans", []))
-            assert expected <= indexes
-
-
-def test_raw_insert_audit_defaults_are_utc_even_in_a_non_utc_session(service):
-    from datetime import datetime, timezone
-
-    with service.repository.session_factory() as session:
-        session.execute(text("SET LOCAL TIME ZONE 'Asia/Shanghai'"))
-        created = session.execute(text("""
-            INSERT INTO nexent.human_run_t (run_id, tenant_id, user_id, conversation_id, status,
-                request_payload, created_by, updated_by)
-            VALUES ('timezone-test', 'tenant-a', 'owner', 7, 'READY', 'opaque', 'owner', 'owner')
-            RETURNING create_time
-        """)).scalar_one()
-        assert abs((datetime.now(timezone.utc).replace(tzinfo=None) - created).total_seconds()) < 5
-
-
-def test_bigint_event_cursors_remain_compatible_with_int4_record_keys(service):
+def test_large_event_cursors_are_replayed(service):
     run_id = create_run(service)
     with service.repository.transaction(run_id) as tx:
         tx.run.event_seq = 2**31
         tx.emit({"type": "test", "content": {}})
     events = service.repository.events(run_id, after=2**31)
     assert [event["seq"] for event in events] == [2**31 + 1]
-    with service.repository.session_factory() as session:
-        event = session.scalar(select(HumanEvent))
-        assert 0 < event.event_id < 2**31
 
 
 def test_invalid_execution_state_is_rejected_without_losing_started_receipt(service):

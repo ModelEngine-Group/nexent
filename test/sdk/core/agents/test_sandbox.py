@@ -1631,7 +1631,12 @@ class TestPoolManagerLogic:
         leased_executors = []
         bridge_timeouts = []
 
-        def install_bridge(executor, logger_, request_timeout_seconds=None):
+        def install_bridge(
+            executor,
+            logger_,
+            request_timeout_seconds=None,
+            cancellation_scope=None,
+        ):
             leased_executors.append(executor)
             bridge_timeouts.append(request_timeout_seconds)
             return executor
@@ -2992,7 +2997,9 @@ class TestBuildPythonExecutor:
 
         assert executor is expected_executor
         assert cfg.level == SandboxLevel.DOCKER
-        acquire.assert_called_once_with(cfg, logger, True)
+        acquire.assert_called_once_with(
+            cfg, logger, True, cancellation_scope=None
+        )
 
     def test_session_container_group_is_forwarded_to_pool(self, mocker):
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
@@ -3015,6 +3022,22 @@ class TestBuildPythonExecutor:
             logger,
             True,
             session_container_group=group,
+            cancellation_scope=None,
+        )
+
+    def test_sdk_ut_tlm_038_run_scope_is_forwarded_to_pool(self, mocker):
+        cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
+        logger = sandbox_module.logging.getLogger("test")
+        scope = MagicMock()
+        pool = SandboxPoolManager.get_instance()
+        acquire = mocker.patch.object(pool, "acquire", return_value=MagicMock())
+
+        sandbox_module.build_python_executor(
+            cfg, logger, host_tools_exist=True, cancellation_scope=scope
+        )
+
+        acquire.assert_called_once_with(
+            cfg, logger, True, cancellation_scope=scope
         )
 
     def test_session_scope_creates_fresh_executor(self):
@@ -4288,7 +4311,7 @@ class TestPoolManagerMultipleSystemContainers:
         monkeypatch.setattr(
             sandbox_module,
             "_install_host_tool_bridge",
-            lambda ex, _logger, request_timeout_seconds=None: ex,
+            lambda ex, _logger, request_timeout_seconds=None, cancellation_scope=None: ex,
         )
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
@@ -4482,7 +4505,9 @@ class TestAcquireSharedDockerKernelHostTools:
 
         bridge_installed = [False]
 
-        def mock_install_bridge(ex, l, request_timeout_seconds=None):
+        def mock_install_bridge(
+            ex, l, request_timeout_seconds=None, cancellation_scope=None
+        ):
             bridge_installed[0] = True
             return ex
 
@@ -5364,6 +5389,7 @@ class TestTargetedSandboxCoverage:
             executor,
             ANY,
             request_timeout_seconds=None,
+            cancellation_scope=None,
         )
 
     def test_build_docker_executor_leases_from_existing_session_group(self, monkeypatch):

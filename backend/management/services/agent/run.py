@@ -12,6 +12,7 @@ from nexent.core.agents.run_agent import DeferredAgentRun, agent_run
 from nexent.core.concurrency import (
     ManagedExecution,
     ManagedTaskSpec,
+    RunCancellationScope,
     ThreadCapacityExceeded,
     ThreadQueueTimedOut,
     run_blocking,
@@ -317,7 +318,7 @@ async def _consume_agent_stream_producer(
 
 
 async def _poll_runtime_cancel_signal(
-    conversation_id: int, user_id: str, stop_event
+    conversation_id: int, user_id: str, stop_event, cancellation_scope=None
 ) -> None:
     """Mirror Redis cancel signal into the local agent stop_event."""
     while not stop_event.is_set():
@@ -325,6 +326,8 @@ async def _poll_runtime_cancel_signal(
             user_id=user_id, conversation_id=conversation_id
         ):
             stop_event.set()
+            if cancellation_scope is not None:
+                cancellation_scope.cancel()
             logger.info(
                 "Runtime cancel signal received, user_id=%s, conversation_id=%s",
                 user_id,
@@ -457,11 +460,14 @@ async def _stream_agent_chunks(
             conversation_id=agent_request.conversation_id, user_id=user_id
         )
 
+    if agent_run_info.cancellation_scope is None:
+        agent_run_info.cancellation_scope = RunCancellationScope(agent_run_info.stop_event)
     cancel_poll_task = asyncio.create_task(
         _poll_runtime_cancel_signal(
             conversation_id=agent_request.conversation_id,
             user_id=user_id,
             stop_event=agent_run_info.stop_event,
+            cancellation_scope=agent_run_info.cancellation_scope,
         )
     )
 
