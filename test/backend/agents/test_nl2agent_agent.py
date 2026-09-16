@@ -599,12 +599,16 @@ def test_prompt_uses_backend_owned_serial_resource_actions(language):
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
-def test_prompt_does_not_accept_first_resource_for_every_requirement(language):
+def test_prompt_observes_resource_candidates_before_verification(language):
     prompt = build_nl2agent_system_prompt(language)
+    first_resolution_example = prompt.split(
+        'verification_result = json.loads(raw_resource_result)', 1
+    )[1].split("</code>", 1)[0]
 
     assert 'verification_result["resources"][0]["candidate_ref"]' not in prompt
-    assert 'for item in verification_result["requirements"]' in prompt
-    assert '"accepted_candidate_refs": []' in prompt
+    assert "print(verification_result)" in first_resolution_example
+    assert "capability_verifications = [" not in first_resolution_example
+    assert '"accepted_candidate_refs": []' not in first_resolution_example
 
 
 def test_build_nl2agent_system_prompt_rejects_unknown_template_variables(mocker):
