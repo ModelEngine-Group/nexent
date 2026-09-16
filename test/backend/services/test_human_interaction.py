@@ -18,9 +18,10 @@ from threading import Thread
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 
 def test_clarification_mode_does_not_force_tool_approval():
@@ -93,18 +94,27 @@ def service(monkeypatch):
     client = types.ModuleType("database.client")
     client.get_db_session = session_scope
     monkeypatch.setitem(sys.modules, "database.client", client)
+    from database.db_models import (
+        ConversationRecord,
+        HumanEvent,
+        HumanExecution,
+        HumanRequest,
+        HumanRun,
+        TableBase,
+    )
     from database.human_interaction_db import HumanInteractionRepository
     from services.human_interaction.crypto import PayloadCipher
     from services.human_interaction.service import HumanInteractionService
 
-    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.5.1_001_human_interaction.sql"
     with engine.begin() as connection:
-        connection.execute(text("DROP SCHEMA IF EXISTS nexent CASCADE"))
-        connection.execute(text("CREATE SCHEMA nexent"))
-        connection.execute(text(migration.read_text()))
-        connection.exec_driver_sql("CREATE TABLE nexent.conversation_record_t "
-                                   "(conversation_id INT PRIMARY KEY, created_by VARCHAR(100), delete_flag VARCHAR(1))")
-        connection.exec_driver_sql("INSERT INTO nexent.conversation_record_t VALUES (7, 'owner', 'N')")
+        connection.execute(DropSchema("nexent", cascade=True, if_exists=True))
+        connection.execute(CreateSchema("nexent"))
+        TableBase.metadata.create_all(connection, tables=[
+            model.__table__ for model in (ConversationRecord, HumanRun, HumanRequest, HumanExecution, HumanEvent)
+        ])
+        connection.execute(insert(ConversationRecord).values(
+            conversation_id=7, created_by="owner", updated_by="owner", delete_flag="N",
+        ))
     value = HumanInteractionService(HumanInteractionRepository(session_scope), PayloadCipher(Fernet.generate_key().decode()))
     yield value
     engine.dispose()

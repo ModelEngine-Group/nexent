@@ -145,7 +145,7 @@ class TestAgentRunManager:
         retrieved_info = self.manager.get_agent_run_info(conversation_id, user2_id)
         assert retrieved_info is None
 
-    def test_stop_agent_run(self):
+    def test_be_ut_tlm_037_stop_agent_run_cancels_scope(self):
         """Test stopping an agent run"""
         conversation_id = 123
         user_id = "user1"
@@ -161,6 +161,7 @@ class TestAgentRunManager:
 
         assert result is True
         mock_stop_event.set.assert_called_once()
+        mock_run_info.cancellation_scope.cancel.assert_called_once_with()
 
     def test_tc_tlm_010_stop_agent_run_cancels_managed_execution(self):
         """A business cancellation reaches the matching managed execution."""

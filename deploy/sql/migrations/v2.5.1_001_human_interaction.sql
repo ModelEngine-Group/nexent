@@ -2,7 +2,7 @@
 -- Technical keys and internal references use INT4; public identifiers use UUID strings.
 -- Services validate business states, references and uniqueness under transaction locks.
 
-CREATE TABLE nexent.human_run_t (
+CREATE TABLE IF NOT EXISTS nexent.human_run_t (
     run_record_id SERIAL PRIMARY KEY,
     run_id VARCHAR(36) NOT NULL,
     tenant_id VARCHAR(100) NOT NULL,
@@ -27,7 +27,7 @@ CREATE TABLE nexent.human_run_t (
     delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
 );
 
-CREATE TABLE nexent.human_request_t (
+CREATE TABLE IF NOT EXISTS nexent.human_request_t (
     request_record_id SERIAL PRIMARY KEY,
     request_id VARCHAR(36) NOT NULL,
     run_record_id INTEGER NOT NULL,
@@ -48,7 +48,7 @@ CREATE TABLE nexent.human_request_t (
     delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
 );
 
-CREATE TABLE nexent.human_execution_t (
+CREATE TABLE IF NOT EXISTS nexent.human_execution_t (
     execution_id SERIAL PRIMARY KEY,
     run_record_id INTEGER NOT NULL,
     slot VARCHAR(100) NOT NULL,
@@ -64,7 +64,7 @@ CREATE TABLE nexent.human_execution_t (
     delete_flag VARCHAR(1) DEFAULT 'N' NOT NULL
 );
 
-CREATE TABLE nexent.human_event_t (
+CREATE TABLE IF NOT EXISTS nexent.human_event_t (
     event_id SERIAL PRIMARY KEY,
     run_record_id INTEGER NOT NULL,
     seq BIGINT NOT NULL,
@@ -77,39 +77,57 @@ CREATE TABLE nexent.human_event_t (
 );
 
 -- Keep raw SQL and ORM updates consistent; callers supply the updating actor.
-CREATE FUNCTION nexent.human_interaction_audit_timestamp()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DO $create_function$
 BEGIN
-    IF TG_OP = 'INSERT' THEN
-        NEW.create_time := COALESCE(NEW.create_time, timezone('UTC', clock_timestamp()));
-    ELSE
-        NEW.create_time := OLD.create_time;
-        NEW.created_by := OLD.created_by;
+    IF to_regprocedure('nexent.human_interaction_audit_timestamp()') IS NULL THEN
+        CREATE FUNCTION nexent.human_interaction_audit_timestamp()
+        RETURNS TRIGGER LANGUAGE plpgsql AS $function$
+        BEGIN
+            IF TG_OP = 'INSERT' THEN
+                NEW.create_time := COALESCE(NEW.create_time, timezone('UTC', clock_timestamp()));
+            ELSE
+                NEW.create_time := OLD.create_time;
+                NEW.created_by := OLD.created_by;
+            END IF;
+            NEW.update_time := timezone('UTC', clock_timestamp());
+            RETURN NEW;
+        END;
+        $function$;
     END IF;
-    NEW.update_time := timezone('UTC', clock_timestamp());
-    RETURN NEW;
 END;
-$$;
+$create_function$;
 
-CREATE TRIGGER human_audit_timestamp BEFORE INSERT OR UPDATE ON nexent.human_run_t
-    FOR EACH ROW EXECUTE FUNCTION nexent.human_interaction_audit_timestamp();
-
-CREATE TRIGGER human_audit_timestamp BEFORE INSERT OR UPDATE ON nexent.human_request_t
-    FOR EACH ROW EXECUTE FUNCTION nexent.human_interaction_audit_timestamp();
-
-CREATE TRIGGER human_audit_timestamp BEFORE INSERT OR UPDATE ON nexent.human_execution_t
-    FOR EACH ROW EXECUTE FUNCTION nexent.human_interaction_audit_timestamp();
-
-CREATE TRIGGER human_audit_timestamp BEFORE INSERT OR UPDATE ON nexent.human_event_t
-    FOR EACH ROW EXECUTE FUNCTION nexent.human_interaction_audit_timestamp();
+DO $create_triggers$
+DECLARE
+    target_table REGCLASS;
+BEGIN
+    FOREACH target_table IN ARRAY ARRAY[
+        'nexent.human_run_t'::regclass,
+        'nexent.human_request_t'::regclass,
+        'nexent.human_execution_t'::regclass,
+        'nexent.human_event_t'::regclass
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgrelid = target_table AND tgname = 'human_audit_timestamp'
+        ) THEN
+            EXECUTE format(
+                'CREATE TRIGGER human_audit_timestamp BEFORE INSERT OR UPDATE ON %s '
+                'FOR EACH ROW EXECUTE FUNCTION nexent.human_interaction_audit_timestamp()',
+                target_table
+            );
+        END IF;
+    END LOOP;
+END;
+$create_triggers$;
 
 -- Non-unique indexes support public lookup, owner conversation history,
 -- scheduler claims, pending requests, call-slot replay and ordered SSE pagination.
 -- Advisory locks protect creation; the parent row lock protects dependent writes.
 
-CREATE INDEX human_run_claim_idx ON nexent.human_run_t (status, lock_until, create_time) WHERE delete_flag = 'N';
-CREATE INDEX human_run_conversation_idx ON nexent.human_run_t (tenant_id, user_id, conversation_id, create_time) WHERE delete_flag = 'N';
-CREATE INDEX human_run_public_id_idx ON nexent.human_run_t (run_id);
+CREATE INDEX IF NOT EXISTS human_run_claim_idx ON nexent.human_run_t (status, lock_until, create_time) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_run_conversation_idx ON nexent.human_run_t (tenant_id, user_id, conversation_id, create_time) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_run_public_id_idx ON nexent.human_run_t (run_id);
 COMMENT ON COLUMN nexent.human_run_t.run_record_id IS 'Technical run record identifier';
 COMMENT ON COLUMN nexent.human_run_t.run_id IS 'Public UUID retained by HTTP, checkpoints and event payloads; service enforces uniqueness';
 COMMENT ON COLUMN nexent.human_run_t.tenant_id IS 'Tenant owning this run and its dependent records';
@@ -133,7 +151,7 @@ COMMENT ON COLUMN nexent.human_run_t.created_by IS 'Creator';
 COMMENT ON COLUMN nexent.human_run_t.updated_by IS 'Updater';
 COMMENT ON COLUMN nexent.human_run_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 
-CREATE INDEX human_request_run_idx ON nexent.human_request_t (run_record_id, status) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_request_run_idx ON nexent.human_request_t (run_record_id, status) WHERE delete_flag = 'N';
 COMMENT ON COLUMN nexent.human_request_t.request_record_id IS 'Technical human request record identifier';
 COMMENT ON COLUMN nexent.human_request_t.request_id IS 'Public request UUID; uniqueness is scoped to the owning run by the service';
 COMMENT ON COLUMN nexent.human_request_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
@@ -153,7 +171,7 @@ COMMENT ON COLUMN nexent.human_request_t.created_by IS 'Creator';
 COMMENT ON COLUMN nexent.human_request_t.updated_by IS 'Updater';
 COMMENT ON COLUMN nexent.human_request_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 
-CREATE INDEX human_execution_slot_idx ON nexent.human_execution_t (run_record_id, slot) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_execution_slot_idx ON nexent.human_execution_t (run_record_id, slot) WHERE delete_flag = 'N';
 COMMENT ON COLUMN nexent.human_execution_t.execution_id IS 'Technical execution receipt identifier';
 COMMENT ON COLUMN nexent.human_execution_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
 COMMENT ON COLUMN nexent.human_execution_t.slot IS 'Stable SDK call slot; one active receipt per run and slot is enforced by the service';
@@ -168,7 +186,7 @@ COMMENT ON COLUMN nexent.human_execution_t.created_by IS 'Creator';
 COMMENT ON COLUMN nexent.human_execution_t.updated_by IS 'Updater';
 COMMENT ON COLUMN nexent.human_execution_t.delete_flag IS 'Whether it is deleted. Optional values: Y/N';
 
-CREATE INDEX human_event_replay_idx ON nexent.human_event_t (run_record_id, seq) WHERE delete_flag = 'N';
+CREATE INDEX IF NOT EXISTS human_event_replay_idx ON nexent.human_event_t (run_record_id, seq) WHERE delete_flag = 'N';
 COMMENT ON COLUMN nexent.human_event_t.event_id IS 'Technical replay event identifier';
 COMMENT ON COLUMN nexent.human_event_t.run_record_id IS 'Logical human_run_t.run_record_id; validated under the parent run lock';
 COMMENT ON COLUMN nexent.human_event_t.seq IS '64-bit SSE cursor allocated from the owning run event_seq under its row lock';

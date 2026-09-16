@@ -83,6 +83,19 @@ class _ThreadQueueTimedOut(RuntimeError):
         self.timeout_seconds = timeout_seconds
 
 
+class _RunCancellationScope:
+    """Keep the service test double aligned with run cancellation behavior."""
+
+    def __init__(self, stop_event):
+        self.stop_event = stop_event
+        self.cancelled = False
+
+    def cancel(self):
+        if not self.cancelled:
+            self.cancelled = True
+            self.stop_event.set()
+
+
 async def _run_blocking(_task_name, fn, *args, **kwargs):
     kwargs.pop("lane", None)
     kwargs.pop("owner", None)
@@ -95,6 +108,7 @@ async def _run_managed(_lane, _spec, fn, *args, **kwargs):
 
 _concurrency_module.ManagedTaskSpec = _ManagedTaskSpec
 _concurrency_module.ManagedExecution = MagicMock
+_concurrency_module.RunCancellationScope = _RunCancellationScope
 _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
@@ -15848,6 +15862,25 @@ async def test_poll_runtime_cancel_signal_sets_stop_event(monkeypatch):
         user_id="user1", conversation_id=123
     )
     assert sleeps == [agent_service.RUNTIME_CANCEL_POLL_INTERVAL_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_be_ut_tlm_036_runtime_signal_closes_run_resources(monkeypatch):
+    """A Redis cancel signal must close resources before a blocked worker exits."""
+    from management.services.agent import run as agent_service
+
+    fake_runtime_state = MagicMock()
+    fake_runtime_state.is_cancelled_async = AsyncMock(return_value=True)
+    monkeypatch.setattr(agent_service, "runtime_state_service", fake_runtime_state)
+    stop_event = asyncio.Event()
+    cancellation_scope = MagicMock()
+
+    await agent_service._poll_runtime_cancel_signal(
+        123, "user1", stop_event, cancellation_scope
+    )
+
+    assert stop_event.is_set()
+    cancellation_scope.cancel.assert_called_once_with()
 
 
 @pytest.mark.asyncio

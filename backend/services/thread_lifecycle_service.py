@@ -26,7 +26,7 @@ runtime_thread_manager = ThreadManager(
         ),
         "control-io": LanePolicy(
             name="control-io",
-            max_workers=4,
+            max_workers=16,
             max_queue_size=32,
             queue_timeout_seconds=0,
             cancel_grace_seconds=2,
@@ -50,7 +50,7 @@ runtime_thread_manager = ThreadManager(
         ),
         "sandbox": LanePolicy(
             name="sandbox",
-            max_workers=2,
+            max_workers=200,
             max_queue_size=8,
             queue_timeout_seconds=0,
             cancel_grace_seconds=5,
@@ -58,7 +58,7 @@ runtime_thread_manager = ThreadManager(
         ),
         "background-service": LanePolicy(
             name="background-service",
-            max_workers=4,
+            max_workers=12,
             max_queue_size=8,
             queue_timeout_seconds=0,
             cancel_grace_seconds=RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
@@ -81,7 +81,7 @@ config_thread_manager = ThreadManager(
     lane_policies={
         "control-io": LanePolicy(
             name="control-io",
-            max_workers=4,
+            max_workers=16,
             max_queue_size=32,
             queue_timeout_seconds=0,
             cancel_grace_seconds=2,
@@ -89,8 +89,8 @@ config_thread_manager = ThreadManager(
         ),
         "background-service": LanePolicy(
             name="background-service",
-            max_workers=2,
-            max_queue_size=4,
+            max_workers=12,
+            max_queue_size=8,
             queue_timeout_seconds=0,
             cancel_grace_seconds=5,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
@@ -128,8 +128,8 @@ northbound_thread_manager = ThreadManager(
         ),
         "background-service": LanePolicy(
             name="background-service",
-            max_workers=2,
-            max_queue_size=4,
+            max_workers=12,
+            max_queue_size=8,
             queue_timeout_seconds=0,
             cancel_grace_seconds=2,
             shutdown_grace_seconds=NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS,
@@ -143,7 +143,7 @@ mcp_thread_manager = ThreadManager(
     lane_policies={
         "control-io": LanePolicy(
             name="control-io",
-            max_workers=4,
+            max_workers=8,
             max_queue_size=16,
             queue_timeout_seconds=0,
             cancel_grace_seconds=5,
@@ -151,8 +151,8 @@ mcp_thread_manager = ThreadManager(
         ),
         "background-service": LanePolicy(
             name="background-service",
-            max_workers=2,
-            max_queue_size=4,
+            max_workers=12,
+            max_queue_size=8,
             queue_timeout_seconds=0,
             cancel_grace_seconds=5,
             shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,

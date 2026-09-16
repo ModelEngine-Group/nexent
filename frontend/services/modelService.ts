@@ -300,7 +300,7 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
-  }): Promise<void> => {
+  }): Promise<any> => {
     try {
       const requestBody: any = {
         model_repo: "",
@@ -345,6 +345,7 @@ export const modelService = {
           response.status
         );
       }
+      return result;
     } catch (error) {
       if (error instanceof ModelError) throw error;
       throw new ModelError("添加自定义模型失败", 500);
@@ -1105,7 +1106,7 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
-  }): Promise<void> => {
+  }): Promise<any> => {
     try {
       const requestBody: any = {
         tenant_id: params.tenantId,
@@ -1158,6 +1159,7 @@ export const modelService = {
           response.status
         );
       }
+      return result;
     } catch (error) {
       if (error instanceof ModelError) throw error;
       log.warn("Failed to create manage tenant model:", error);
