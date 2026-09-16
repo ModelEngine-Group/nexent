@@ -177,8 +177,12 @@ const generateRandomSuffix = (length: number = 5): string => {
   return result;
 };
 
-const defaultDisplayName = (modelName: string): string =>
-  `${modelName}${generateRandomSuffix(5)}`;
+const defaultDisplayName = (modelName: string): string => {
+  // A nameless model must not degrade to a bare random suffix ("tvj17") --
+  // the random string carries no meaning and looks like garbage in titles.
+  const base = modelName?.trim() || "custom-model";
+  return `${base}${generateRandomSuffix(5)}`;
+};
 
 // =============================================================================
 // Per-row state shape for the batch table
@@ -615,12 +619,18 @@ export const ModelAddDialogV2 = ({
             apiKey,
             ...(baseUrl ? { baseUrl } : {}),
           });
-      const rows = (result || []).map((m: any) => ({
-        id: m.id || m.model_name,
-        model_name: m.id || m.model_name,
-        model_type: (m.model_type || MODEL_TYPES.LLM) as ModelType,
-        max_tokens: m.max_tokens,
-      }));
+      // Provider /models responses occasionally carry nameless entries
+      // (empty id) -- gateway internals or soft-deleted endpoints. They carry
+      // no usable identity, so drop them instead of letting a bare random
+      // suffix become the model's display name.
+      const rows = (result || [])
+        .filter((m: any) => !!(m.id || m.model_name))
+        .map((m: any) => ({
+          id: m.id || m.model_name,
+          model_name: m.id || m.model_name,
+          model_type: (m.model_type || MODEL_TYPES.LLM) as ModelType,
+          max_tokens: m.max_tokens,
+        }));
       await applyRows(rows);
     } catch (error: any) {
       message.error(
