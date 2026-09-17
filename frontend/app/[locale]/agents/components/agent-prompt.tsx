@@ -571,32 +571,30 @@ export default function AgentPrompt() {
               onChange={(v: number) => setConfiguringModelId(v)}
               disabled={!canManage && !isSpeedMode}
             />
-            <div className="text-xs text-gray-500 pb-2 border-b border-gray-100">
-              {t("model.advanced.overrideHint", { defaultValue: "留空表示继承模型默认值。" })}
-            </div>
             <ModelAdvancedSettings
               modelType={(configuringModel as any).type ?? "llm"}
-              specs={inferenceSpecs}
+              specs={Object.fromEntries(
+                Object.entries(inferenceSpecs).map(([type, specs]) => [
+                  type,
+                  (specs as any[]).filter((s) => s.key !== "tokenizer_family"),
+                ])
+              )}
               value={editingOverrideValue ?? advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm")}
               onChange={(next) => setEditingOverrideValue(next)}
               mode="override"
               disabled={!canManage && !isSpeedMode}
+              // Show the model-level defaults as placeholders so "empty =
+              // inherit" is visible (the override form starts blank).
+              inheritedDefaults={{
+                display_name: configuringModel.displayName ?? configuringModel.name,
+                context_window_tokens: (configuringModel as any).contextWindowTokens,
+                max_input_tokens: (configuringModel as any).maxInputTokens,
+                max_output_tokens: (configuringModel as any).maxOutputTokens,
+                default_output_reserve_tokens: (configuringModel as any).defaultOutputReserveTokens,
+                temperature: (configuringModel as any).temperature,
+                top_p: (configuringModel as any).topP,
+              }}
             />
-            {Object.keys(modelParamsOverride[String(configuringModel.id)] ?? {}).length > 0 && (
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleClearModelParamsOverride(configuringModel.id);
-                    setEditingOverrideValue(advancedSettingsValueFromRecord({}, inferenceSpecs, (configuringModel as any).type ?? "llm"));
-                  }}
-                  disabled={!canManage && !isSpeedMode}
-                  className="text-xs text-red-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {t("model.advanced.clearOverride", { defaultValue: "清空该模型的覆盖" })}
-                </button>
-              </div>
-            )}
           </div>
         )}
       </Modal>

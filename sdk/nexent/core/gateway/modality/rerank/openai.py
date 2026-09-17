@@ -62,13 +62,21 @@ class OpenAICompatibleRerankAdapter(RerankAdapter, HttpTransportMixin):
         the ``input``/``parameters`` wrapper; otherwise the flat OpenAI format
         is used.
         """
+        custom = self._context.extra_body or {}
         if "dashscope" in (self._base_url or "").lower():
+            custom_parameters = custom.get("parameters")
+            parameters = {
+                **(custom_parameters if isinstance(custom_parameters, dict) else {}),
+                "top_n": top_n or len(documents),
+            }
             return {
+                **custom,
                 "model": self._model_name,
                 "input": {"query": query, "documents": documents},
-                "parameters": {"top_n": top_n or len(documents)},
+                "parameters": parameters,
             }
         return {
+            **custom,
             "model": self._model_name,
             "query": query,
             "documents": documents,

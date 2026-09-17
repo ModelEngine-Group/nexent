@@ -86,7 +86,8 @@ def _custom_extra_body(extra_params: Optional[dict]) -> Optional[dict]:
 
     ``extra_params`` is the nexent field ({"__custom__": {...}, ...}); the
     ``__custom__`` sub-dict holds user-entered provider-specific params that
-    must reach the chat request's ``extra_body``. Returns None when absent so
+    must reach the chat request's ``extra_body``. JSON-compatible nested
+    values are deliberately returned unchanged. Returns None when absent so
     default behaviour is unchanged.
     """
     if not extra_params:
@@ -103,7 +104,6 @@ def _llm_construct_kwargs(construct_extras: Dict[str, Any], cfg: dict) -> Dict[s
         "stream": construct_extras.pop("stream", None),
         "max_output_tokens": _coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
         "frequency_penalty": cfg.get("frequency_penalty"),
-        "extra_body": cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
     }
 
 
@@ -141,6 +141,7 @@ def _config_to_context(
         "observer": observer,
         "display_name": _coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
         "timeout_seconds": _coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
+        "extra_body": cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
     }
 
     # ---- modality-specific subclass construction ----
