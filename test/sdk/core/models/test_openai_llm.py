@@ -1472,6 +1472,69 @@ def test_ut_sdk_tlm_035_uses_openai_http_implementation_timeout():
     )
 
 
+def test_httpx_fallback_when_httpx2_missing():
+    """ImportError on httpx2 → code falls back to httpx from openai._base_client.
+
+    Covers openai >= 2.50 where the ``httpx2`` shim was removed.
+    """
+    import types as _types
+
+    class FallbackTimeout:
+        def __init__(self, *, connect, read, write, pool):
+            self.connect = connect
+            self.read = read
+            self.write = write
+            self.pool = pool
+
+    fallback_httpx = _types.SimpleNamespace(Timeout=FallbackTimeout)
+    openai_base_client = _types.ModuleType("openai._base_client")
+    # NOTE: httpx2 attribute intentionally missing — triggers ImportError path.
+    openai_base_client.httpx = fallback_httpx
+
+    with patch.dict(sys.modules, {"openai._base_client": openai_base_client}), \
+            patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        ImportedOpenAIModel(observer=MagicMock(), ssl_verify=True)
+
+    timeout = mock_httpx_client.call_args.kwargs["timeout"]
+    assert isinstance(timeout, FallbackTimeout)
+    assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
+        10.0, 60.0, 30.0, 10.0,
+    )
+
+
+def test_httpx2_still_takes_precedence_when_present():
+    """httpx2 wins when both httpx2 and httpx are available — preserves old behavior."""
+    import types as _types
+
+    class PreferredTimeout:
+        def __init__(self, *, connect, read, write, pool):
+            self.connect = connect
+            self.read = read
+            self.write = write
+            self.pool = pool
+
+    class FallbackTimeout:
+        def __init__(self, *, connect, read, write, pool):
+            self.connect = connect * 10
+            self.read = read * 10
+            self.write = write * 10
+            self.pool = pool * 10
+
+    openai_base_client = _types.ModuleType("openai._base_client")
+    openai_base_client.httpx2 = _types.SimpleNamespace(Timeout=PreferredTimeout)
+    openai_base_client.httpx = _types.SimpleNamespace(Timeout=FallbackTimeout)
+
+    with patch.dict(sys.modules, {"openai._base_client": openai_base_client}), \
+            patch("openai.DefaultHttpxClient") as mock_httpx_client:
+        ImportedOpenAIModel(observer=MagicMock(), ssl_verify=True)
+
+    timeout = mock_httpx_client.call_args.kwargs["timeout"]
+    assert isinstance(timeout, PreferredTimeout)
+    assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
+        10.0, 60.0, 30.0, 10.0,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests for monitoring and token_tracker integration
 # ---------------------------------------------------------------------------
