@@ -764,7 +764,11 @@ class VerificationController:
     """Layered verification for critical ReAct events and final answers."""
 
     _ERROR_RE = re.compile(
-        r"(traceback|exception|error:|failed|timeout|unauthorized|permission denied)",
+        r"(\btraceback\b|\bexception\b|\berror\s*:|\bfailed\b|\btimeout\b|\bunauthorized\b|permission denied)",
+        re.IGNORECASE,
+    )
+    _JSON_ERROR_RE = re.compile(
+        r"""["']error["']\s*:\s*(?!null\b|none\b|false\b|0\b|["']{2})""",
         re.IGNORECASE,
     )
     _EMPTY_RE = re.compile(r"^\s*(execution logs:\s*)?(last output from code snippet:\s*)?\s*$", re.IGNORECASE)
@@ -983,6 +987,7 @@ class VerificationController:
             return self._pass(event)
 
         observation_text = observation or ""
+        has_error_signal = self._contains_error_signal(observation_text)
         checks = [
             VerificationCheck(
                 name="observation_present",
@@ -992,8 +997,8 @@ class VerificationController:
             ),
             VerificationCheck(
                 name="tool_error_handled",
-                passed=not self._ERROR_RE.search(observation_text),
-                reason="The observation contains an error signal." if self._ERROR_RE.search(observation_text) else "",
+                passed=not has_error_signal,
+                reason="The observation contains an error signal." if has_error_signal else "",
                 fix_hint="Do not ignore this tool error. Diagnose it, retry safely, or state the limitation.",
             ),
         ]
@@ -1405,7 +1410,12 @@ class VerificationController:
 
     def _has_recent_error_signal(self, text: str) -> bool:
         clean_text = self._strip_internal_verification_feedback(text or "")
-        return bool(self._ERROR_RE.search(clean_text))
+        return self._contains_error_signal(clean_text)
+
+    @classmethod
+    def _contains_error_signal(cls, text: str) -> bool:
+        clean_text = text or ""
+        return bool(cls._ERROR_RE.search(clean_text) or cls._JSON_ERROR_RE.search(clean_text))
 
     def _classify_step_event(self, code_action: str, is_final_answer: bool) -> str:
         if is_final_answer:
@@ -1427,6 +1437,17 @@ class VerificationController:
 
     def _looks_empty_handoff(self, text: str) -> bool:
         lowered = (text or "").lower()
+        substantive_markers = [
+            '"evidence_used"',
+            '"citations"',
+            '"task_id"',
+            '"graph_file"',
+            '"report_html"',
+            "成功率",
+            "三元组",
+        ]
+        if any(marker in lowered for marker in substantive_markers):
+            return False
         return any(marker in lowered for marker in ["cannot help", "unable", "no answer", "无法", "不能", "空"])
 
     def _mentions_limitation(self, answer: str) -> bool:
