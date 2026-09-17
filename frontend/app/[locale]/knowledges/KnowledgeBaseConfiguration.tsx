@@ -997,14 +997,8 @@ function DataConfig({ isActive }: DataConfigProps) {
 
       knowledgeBasePollingService.startDocumentStatusPolling(
         kbId,
-        (documents) => {
-          knowledgeBasePollingService.triggerDocumentsUpdate(kbId, documents);
-          window.dispatchEvent(
-            new CustomEvent("documentsUpdated", {
-              detail: { kbId, documents },
-            })
-          );
-        }
+        (documents) =>
+          knowledgeBasePollingService.triggerDocumentsUpdate(kbId, documents)
       );
     } catch (error) {
       message.error(getKnowledgeBaseUploadErrorMessage(error, t));

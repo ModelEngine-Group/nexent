@@ -8,8 +8,6 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import log from "@/lib/logger";
-
 import { Button, Input, Popover, Progress, Select, Tooltip } from "antd";
 import {
   SyncOutlined,
@@ -339,13 +337,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Filter knowledge bases based on search and filters
   const filteredKnowledgeBases = useMemo(() => {
-    log.log("Filtering knowledge bases:", {
-      totalCount: knowledgeBases.length,
-      searchKeyword: effectiveSearchKeyword,
-      sourceFilter: effectiveSelectedSources,
-      modelFilter: effectiveSelectedModels,
-    });
-
     const result = serverFiltered
       ? sortedKnowledgeBases
       : sortedKnowledgeBases.filter((kb) => {
@@ -376,17 +367,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           const matches =
             matchesSearch && matchesSource && matchesModel && matchesTag;
 
-          if (!matches) {
-            log.log("KB filtered out:", {
-              name: kb.name,
-              source: kb.source,
-              embeddingModel: kb.embeddingModel,
-              matchesSearch,
-              matchesSource,
-              matchesModel,
-            });
-          }
-
           return matches;
         });
 
@@ -396,7 +376,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
         : result.filter((knowledgeBase) =>
             matchedTagIds.has(String(knowledgeBase.id))
           );
-    log.log("Filtered result:", tagFilteredResult.length, "items");
     return tagFilteredResult;
   }, [
     sortedKnowledgeBases,
