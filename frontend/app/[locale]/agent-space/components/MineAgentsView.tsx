@@ -4,7 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Popover, Spin } from "antd";
-import { ChevronLeft, ChevronRight, Plus, Search, Tag, Upload } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Search,
+  Tag,
+  Upload,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal, {
@@ -43,8 +50,12 @@ import { MineApplyListingModal } from "./MineApplyListingModal";
 import { MineReviewStatusModal } from "./MineReviewStatusModal";
 import { CreateNewAgentCard } from "./CreateNewAgentCard";
 import { MyAgentCard } from "./MyAgentCard";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -388,7 +399,9 @@ export function MineAgentsView({
   };
 
   const hasActiveFilter =
-    ownership !== "all" || normalizedQuery.length > 0 || tagPredicates.length > 0;
+    ownership !== "all" ||
+    normalizedQuery.length > 0 ||
+    tagPredicates.length > 0;
   const showFilteredEmpty = !isLoading && !isError && agents.length === 0;
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
   const showPagination = !isLoading && !isError && totalPages > 1;
@@ -509,40 +522,41 @@ export function MineAgentsView({
         />
       ) : (
         <>
-          <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {agents.map((agent) =>
+          <ResourceCardGrid
+            items={agents}
+            columns={3}
+            paginateItems={false}
+            showToolbar={false}
+            renderItem={(agent) =>
               isNewAgentPaddingItem(agent) ? (
-                <div key="new-agent-padding" className="h-full">
-                  <CreateNewAgentCard onClick={handleCreateAgent} />
-                </div>
+                <CreateNewAgentCard
+                  key="new-agent-padding"
+                  onClick={handleCreateAgent}
+                />
               ) : (
-                <div key={agent.agent_id} className="h-full">
-                  <MyAgentCard
-                    agent={agent}
-                    onEdit={() => handleEdit(agent.agent_id, agent.permission)}
-                    onView={() =>
-                      onViewDetail(
-                        agent.agent_id,
-                        agent.current_version_no ?? 0
-                      )
-                    }
-                    onApplyListing={() => handleApplyListing(agent)}
-                    onViewReview={(mode) => handleViewReview(agent, mode)}
-                    onDelete={() => handleDeleteAgent(agent)}
-                    onEvaluate={() => handleEvaluate(agent)}
-                    isApplying={
-                      applyingAgentId === agent.agent_id &&
-                      createListingMutation.isPending
-                    }
-                    isDeleting={
-                      deleteAgentMutation.isPending &&
-                      deleteAgentMutation.variables === agent.agent_id
-                    }
-                  />
-                </div>
+                <MyAgentCard
+                  key={agent.agent_id}
+                  agent={agent}
+                  onEdit={() => handleEdit(agent.agent_id, agent.permission)}
+                  onView={() =>
+                    onViewDetail(agent.agent_id, agent.current_version_no ?? 0)
+                  }
+                  onApplyListing={() => handleApplyListing(agent)}
+                  onViewReview={(mode) => handleViewReview(agent, mode)}
+                  onDelete={() => handleDeleteAgent(agent)}
+                  onEvaluate={() => handleEvaluate(agent)}
+                  isApplying={
+                    applyingAgentId === agent.agent_id &&
+                    createListingMutation.isPending
+                  }
+                  isDeleting={
+                    deleteAgentMutation.isPending &&
+                    deleteAgentMutation.variables === agent.agent_id
+                  }
+                />
               )
-            )}
-          </div>
+            }
+          />
 
           {showPagination ? (
             <div className="flex items-center justify-center gap-1.5 pt-2">

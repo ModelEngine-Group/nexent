@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import { MineApplyListingModal } from "./MineApplyListingModal";
 import { SkillReviewStatusModal } from "./SkillReviewStatusModal";
 import {
@@ -43,7 +44,10 @@ import type {
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -362,12 +366,17 @@ export function MineSkillsView({
         emptyDescription={t("skillRepository.mine.empty")}
       >
         <>
-          <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {skills.map((skill) =>
+          <ResourceCardGrid
+            items={skills}
+            columns={3}
+            paginateItems={false}
+            showToolbar={false}
+            renderItem={(skill) =>
               isNewSkillPaddingItem(skill) ? (
-                <div key="new-skill-padding" className="h-full">
-                  <CreateNewSkillCard onClick={onCreateSkill} />
-                </div>
+                <CreateNewSkillCard
+                  key="new-skill-padding"
+                  onClick={onCreateSkill}
+                />
               ) : (
                 <MineSkillCard
                   key={skill.skill_id}
@@ -379,8 +388,8 @@ export function MineSkillsView({
                   onViewReview={() => openReviewModal(skill)}
                 />
               )
-            )}
-          </div>
+            }
+          />
           <PaginationBar
             page={page}
             pageSize={pageSize}
