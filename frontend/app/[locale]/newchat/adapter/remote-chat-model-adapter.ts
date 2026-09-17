@@ -2034,11 +2034,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let firstTokenTime: number | undefined;
     let toolCallCount = 0;
     let storedTiming: ReturnType<typeof buildTimingResult> | null = null;
+    let hitlTerminal: boolean | undefined = undefined;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || hitlTerminal) break;
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -2058,6 +2059,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (value && typeof value.run_id === "string")
               humanRunId = value.run_id;
             custom?.onHumanInteractionEvent?.();
+            // If the HITL run has reached a terminal status (COMPLETED,
+            // FAILED, STOPPED, EXPIRED) the backend stream_run loop breaks
+            // and closes the SSE. However a stream_run opened while the run
+            // was still WAITING_HUMAN may hang on heartbeat forever if the
+            // event cursor never catches up (e.g. stale after_event on a
+            // continueHitl fired mid-flight). Detect terminal here and
+            // break our read loop so the generator returns and Assistant-UI's
+            // isRunning flips false — no need to wait for the server to close.
+            if (
+              value &&
+              typeof value.status === "string" &&
+              ["COMPLETED", "FAILED", "STOPPED", "EXPIRED"].includes(value.status)
+            ) {
+              hitlTerminal = true;
+              break;
+            }
             continue;
           }
           if (
