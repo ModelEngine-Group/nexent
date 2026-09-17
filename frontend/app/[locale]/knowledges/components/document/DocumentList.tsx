@@ -5,6 +5,7 @@ import React, {
   useImperativeHandle,
   useEffect,
   useMemo,
+  useCallback,
 } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -251,6 +252,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       fileType?: string;
       fileSize?: number;
     } | null>(null);
+    const handlePreviewClose = useCallback(() => {
+      setSelectedFile(null);
+    }, []);
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
@@ -1555,7 +1559,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             fileType={selectedFile.fileType}
             fileSize={selectedFile.fileSize}
             previewContext="knowledgeBase"
-            onClose={() => setSelectedFile(null)}
+            onClose={handlePreviewClose}
           />
         )}
 
