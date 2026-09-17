@@ -32,7 +32,8 @@ import tarfile
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from contextlib import closing
+from contextlib import closing, contextmanager
+from contextvars import Context, copy_context
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -996,6 +997,9 @@ class _ToolBridge:
         self._request_timeout_seconds = request_timeout_seconds
         self._token = secrets.token_urlsafe(32)
         self._tools: dict[str, Any] = {}
+        self._execution_contexts: dict[str, tuple[Context, dict[str, Any]]] = {}
+        self._context_lock = threading.Lock()
+        self._closed = False
         bridge = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1011,17 +1015,7 @@ class _ToolBridge:
                     if content_length <= 0 or content_length > 1024 * 1024:
                         raise ValueError("Invalid request size")
                     payload = json.loads(self.rfile.read(content_length))
-                    tool_name = payload.get("tool")
-                    tool = bridge._tools.get(tool_name)
-                    if tool is None:
-                        raise ValueError(f"Unknown local tool: {tool_name}")
-                    args = _deserialize_tool_bridge_value(
-                        payload.get("args", []), bridge._tools
-                    )
-                    kwargs = _deserialize_tool_bridge_value(
-                        payload.get("kwargs", {}), bridge._tools
-                    )
-                    result = tool(*args, **kwargs)
+                    result = bridge._invoke_tool(payload)
                     serialized_result = _serialize_tool_bridge_value(result)
                     body = json.dumps({"result": serialized_result}, ensure_ascii=False).encode("utf-8")
                     self.send_response(200)
@@ -1067,6 +1061,54 @@ class _ToolBridge:
     def register(self, tools: dict[str, Any]) -> None:
         self._tools = dict(tools)
 
+    @contextmanager
+    def execution_context(self):
+        """Retain the current Python execution context only while it is active."""
+        execution_id = secrets.token_hex(16)
+        with self._context_lock:
+            if self._closed:
+                raise ValueError("Tool bridge execution context is closed")
+            self._execution_contexts[execution_id] = (copy_context(), dict(self._tools))
+        try:
+            yield execution_id
+        finally:
+            with self._context_lock:
+                self._execution_contexts.pop(execution_id, None)
+
+    def _invoke_tool(self, payload: dict[str, Any]) -> Any:
+        """Restore host-owned context rather than accepting sandbox trace metadata."""
+        execution_id = payload.get("execution_id")
+        with self._context_lock:
+            entry = self._execution_contexts.get(execution_id) if isinstance(execution_id, str) else None
+            if entry is None:
+                raise ValueError("Unknown or expired tool bridge execution context")
+            context, tools = entry
+            # A Context cannot be entered concurrently. Each callback gets its
+            # own copy, including the submitting run's ThreadManager binding.
+            context = context.copy()
+
+        def invoke():
+            tool_name = payload.get("tool")
+            tool = tools.get(tool_name)
+            if tool is None:
+                raise ValueError(f"Unknown local tool: {tool_name}")
+            args = _deserialize_tool_bridge_value(payload.get("args", []), tools)
+            kwargs = _deserialize_tool_bridge_value(payload.get("kwargs", {}), tools)
+            return tool(*args, **kwargs)
+
+        return context.run(invoke)
+
+    def execution_proxy_code(self, execution_id: str) -> str:
+        """Bind fresh proxy closures so saved callables retain their original ID."""
+        with self._context_lock:
+            entry = self._execution_contexts.get(execution_id)
+            if entry is None:
+                raise ValueError("Unknown or expired tool bridge execution context")
+            tools = entry[1]
+        return "\n".join(
+            f"{name} = _nexent_make_host_tool({name!r}, {execution_id!r})" for name in tools
+        )
+
     def _bridge_host(self) -> str:
         """Return the runtime address reachable from the sandbox container."""
         return "nexent-runtime" if _is_containerized_runtime() else "host.docker.internal"
@@ -1075,9 +1117,7 @@ class _ToolBridge:
         definitions = []
         for name in tools:
             definitions.append(
-                f"def {name}(*args, **kwargs):\n"
-                f"    return _nexent_call_host_tool({name!r}, args, kwargs)\n"
-                f"{name}._nexent_tool_bridge_name = {name!r}"
+                f"{name} = _nexent_make_host_tool({name!r}, None)"
             )
         host = bridge_host or self._bridge_host()
         return (
@@ -1128,9 +1168,15 @@ class _ToolBridge:
             f"_NEXENT_TOOL_BRIDGE_URL = 'http://{host}:{self.port}/invoke'\n"
             f"_NEXENT_TOOL_BRIDGE_TOKEN = {self._token!r}\n"
             f"_NEXENT_TOOL_BRIDGE_TIMEOUT = {self._request_timeout_seconds!r}\n"
-            "def _nexent_call_host_tool(name, args, kwargs):\n"
+            "def _nexent_make_host_tool(name, execution_id):\n"
+            "    def call(*args, **kwargs):\n"
+            "        return _nexent_call_host_tool(name, args, kwargs, execution_id)\n"
+            "    call.__name__ = name\n"
+            "    call._nexent_tool_bridge_name = name\n"
+            "    return call\n"
+            "def _nexent_call_host_tool(name, args, kwargs, execution_id):\n"
             "    payload = _nexent_json.dumps(\n"
-            "        {'tool': name, 'args': args, 'kwargs': kwargs},\n"
+            "        {'tool': name, 'args': args, 'kwargs': kwargs, 'execution_id': execution_id},\n"
             "        default=_nexent_encode_tool_bridge_value,\n"
             "    ).encode('utf-8')\n"
             "    request = _nexent_urllib.Request(_NEXENT_TOOL_BRIDGE_URL, data=payload, headers={\n"
@@ -1163,6 +1209,9 @@ class _ToolBridge:
         )
 
     def _close_server(self) -> None:
+        with self._context_lock:
+            self._closed = True
+            self._execution_contexts.clear()
         self._server.shutdown()
         self._server.server_close()
 
@@ -1225,6 +1274,18 @@ def _install_host_tool_bridge(
     executor._nexent_tool_bridge = bridge
     executor._nexent_tool_bridge_installed = True
     return executor
+
+
+def _execute_with_tool_context(executor: Any, code: str) -> Any:
+    """Bind remote callbacks to the caller's active Python tool span."""
+    bridge = getattr(executor, "_nexent_tool_bridge", None)
+    if not isinstance(bridge, _ToolBridge):
+        return executor(code)
+    with bridge.execution_context() as execution_id:
+        # Keep the submitted source intact: a prepended assignment would break
+        # future imports and shift user-code traceback line numbers.
+        executor.run_code_raise_errors(bridge.execution_proxy_code(execution_id))
+        return executor(code)
 
 
 # ----------------------------------------------------------------------

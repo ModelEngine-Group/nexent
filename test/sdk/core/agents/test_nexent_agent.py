@@ -129,6 +129,7 @@ class _MockProcessType:
 class _MockAgentRunMetadata:
     agent_name: str | None = None
     query: str | None = None
+    agent_display_name: str | None = None
 
 
 MessageObserver = _MockMessageObserver

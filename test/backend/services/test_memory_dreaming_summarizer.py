@@ -82,10 +82,19 @@ def test_ac078_small_chunk_set_is_returned_without_repartitioning():
     assert chunks[0].startswith("## Current Active User Memory")
 
 
+@pytest.fixture(autouse=True)
+def monitoring_email(monkeypatch):
+    monkeypatch.setattr(memory_dreaming_summarizer, "resolve_monitoring_user_email",
+                        lambda user, tenant: "person@example.com", raising=False)
+
+
 def test_ac057_under_limit_uses_exactly_one_model_call():
     class Model:
         def __init__(self): self.calls = []
         def __call__(self, messages):
+            from nexent.monitor import get_agent_monitoring_context, get_monitoring_context
+            assert get_agent_monitoring_context().user_email == "person@example.com"
+            assert get_monitoring_context()["user_id"] == "u"
             self.calls.append(messages)
             return SimpleNamespace(content="<summary>## Work Preferences\n\n- old\n- new</summary>")
     model = Model()

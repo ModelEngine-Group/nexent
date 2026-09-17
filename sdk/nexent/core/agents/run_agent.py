@@ -2,16 +2,28 @@ import asyncio
 import json
 import logging
 import threading
+from contextvars import Context, copy_context
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any, Dict, Union
 
 import httpx
 
 from ...monitor import (
+    AgentRunMetadata,
+    get_agent_monitoring_context,
+    get_monitoring_manager,
     set_monitoring_capacity_snapshot,
     set_monitoring_context_budget_snapshot,
 )
-from ..concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
+from ..concurrency import (
+    ManagedExecution,
+    ManagedTaskSpec,
+    RunCancellationScope,
+    ThreadManager,
+    get_current_thread_manager,
+)
+from ..concurrency.context import _reset_current_thread_manager, _set_current_thread_manager
 from ..concurrency.helpers import (
     get_fallback_thread_manager,
     shutdown_fallback_thread_manager,
@@ -33,6 +45,7 @@ class DeferredAgentRun:
         self._ready = threading.Event()
         self._lock = threading.Lock()
         self._agent_run_info: AgentRunInfo | None = None
+        self._context: Context | None = None
         self._cancelled = False
 
     def bind(self, agent_run_info: AgentRunInfo) -> None:
@@ -40,6 +53,7 @@ class DeferredAgentRun:
             if self._agent_run_info is not None:
                 raise RuntimeError("Deferred agent run is already bound")
             self._agent_run_info = agent_run_info
+            self._context = copy_context()
             cancelled = self._cancelled
             self._ready.set()
         if cancelled:
@@ -60,13 +74,27 @@ class DeferredAgentRun:
                 return
         with self._lock:
             agent_run_info = self._agent_run_info
+            context = self._context
+            self._context = None
             cancelled = self._cancelled or cancel_event.is_set()
         if agent_run_info is None:
             return
         if cancelled:
             agent_run_info.cancellation_scope.cancel()
             return
-        agent_run_thread(agent_run_info)
+        # Admission precedes request preparation. Use the binding-time trace
+        # and metadata without shadowing the worker's managed execution owner.
+        manager = get_current_thread_manager()
+
+        def run_bound():
+            token = _set_current_thread_manager(manager)
+            try:
+                agent_run_thread(agent_run_info)
+            finally:
+                _reset_current_thread_manager(token)
+
+        if context is not None:
+            context.run(run_bound)
 
 
 def _get_default_agent_thread_manager() -> ThreadManager:
@@ -259,6 +287,19 @@ def _normalize_mcp_config(mcp_host_item: Union[str, Dict[str, Any]]) -> Dict[str
 
 
 def agent_run_thread(agent_run_info: AgentRunInfo):
+    """Trace the complete SDK worker, including setup and resource cleanup."""
+    current = get_agent_monitoring_context() or AgentRunMetadata()
+    metadata = replace(
+        current,
+        agent_name=current.agent_name or getattr(agent_run_info.agent_config, "name", None),
+        agent_display_name=current.agent_display_name or getattr(agent_run_info.agent_config, "display_name", None),
+        query=current.query if current.query is not None else agent_run_info.query,
+    )
+    with get_monitoring_manager().start_agent_run(metadata):
+        _agent_run_thread(agent_run_info)
+
+
+def _agent_run_thread(agent_run_info: AgentRunInfo):
     try:
         set_monitoring_capacity_snapshot(
             getattr(agent_run_info, "capacity_snapshot", None)

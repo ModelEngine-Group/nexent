@@ -3,13 +3,10 @@
 import asyncio
 import json
 import time
+from contextlib import ExitStack
 from functools import lru_cache
 
 from fastapi.responses import StreamingResponse
-from nexent.core.concurrency import run_blocking
-from nexent.core.human_interaction.contracts import RecoveryRequired, RunTerminated
-from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
-from nexent.core.human_interaction.runtime import HumanInteractionRuntime
 
 from consts.const import (
     HITL_ACCEPT_NEW_RUNS,
@@ -20,12 +17,19 @@ from consts.const import (
     HITL_WAIT_SECONDS,
 )
 from database.human_interaction_db import HumanInteractionRepository
+from nexent.core.concurrency import run_blocking
+from nexent.core.human_interaction.contracts import RecoveryRequired, RunTerminated
+from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
+from nexent.core.human_interaction.runtime import HumanInteractionRuntime
+from nexent.monitor import AgentRunMetadata, agent_monitoring_context
 from nexent.scheduler import ClaimedJob, LeaseScheduler, SchedulerConfig
+from utils.monitoring_identity import resolve_monitoring_user_email
 
 from .crypto import PayloadCipher
 from .models import InteractionError
 from .runtime_port import RuntimeInteractionPort
 from .service import TERMINAL_STATUSES, HumanInteractionService
+from .telemetry import capture_trace_context, restore_trace_context
 
 
 @lru_cache(maxsize=1)
@@ -101,6 +105,7 @@ async def execute_attempt(job, lease):
     loop = asyncio.get_running_loop()
     run_info = None
     port = None
+    monitoring_scope = ExitStack()
     try:
         # Authorization is re-evaluated on every dispatch, including result replay.
         def authorize():
@@ -113,9 +118,24 @@ async def execute_attempt(job, lease):
 
         port = RuntimeInteractionPort(service, identity, lease.owner_id, authorize, live_resume=True)
         saved = port.request_payload
+        monitoring_scope.enter_context(restore_trace_context(saved.get("telemetry_context")))
         if saved.get("runtime_mode") == "native-live-v1" and port.checkpoint:
             raise RecoveryRequired("The original native execution is no longer available")
         request = AgentRequest.model_validate(saved["request"])
+        monitoring_scope.enter_context(agent_monitoring_context(AgentRunMetadata(
+            tenant_id=identity["tenant_id"], user_id=identity["user_id"],
+            user_email=await run_blocking(
+                "hitl-monitoring-user-email", resolve_monitoring_user_email,
+                identity["user_id"], identity["tenant_id"], lane="control-io", owner=__name__,
+            ),
+            agent_id=request.agent_id, conversation_id=identity["conversation_id"],
+            query=request.query, is_debug=request.is_debug, language=saved["language"],
+            history_count=len(request.history or ()), minio_files_count=len(request.minio_files or ()),
+            extra_metadata={
+                "run_id": identity["run_id"],
+                "attempt_id": f"{identity['run_id']}:{identity['fence']}",
+            },
+        )))
         request.__dict__["_runtime_metadata_snapshot"] = saved["runtime_metadata"]
         request.__dict__["_runtime_metadata_version"] = saved["runtime_metadata_version"]
         request.__dict__["_runtime_knowledge_context"] = saved.get("runtime_knowledge_context")
@@ -208,11 +228,14 @@ async def execute_attempt(job, lease):
             await run_blocking("hitl-port-finish", port.finish, "failed", lane="control-io", owner=__name__)
         raise
     finally:
-        if run_info is not None:
-            _unregister_agent_run_after_execution(
-                identity["conversation_id"], identity["user_id"],
-                run_info.attempt_outcome or "failed", agent_run_info=run_info,
-            )
+        try:
+            if run_info is not None:
+                _unregister_agent_run_after_execution(
+                    identity["conversation_id"], identity["user_id"],
+                    run_info.attempt_outcome or "failed", agent_run_info=run_info,
+                )
+        finally:
+            monitoring_scope.close()
 
 
 def is_conversation_running(conversation_id, user_id):
@@ -319,6 +342,7 @@ async def start_run(request, tenant_id, user_id, language, *, skip_user_save=Fal
         "runtime_metadata": getattr(request, "_runtime_metadata_snapshot", {}),
         "runtime_metadata_version": getattr(request, "_runtime_metadata_version", None),
         "runtime_knowledge_context": getattr(request, "_runtime_knowledge_context", None),
+        "telemetry_context": capture_trace_context(),
     }
     await authorize_run(payload["request"], tenant_id, user_id)
     if service.repository.latest(tenant_id, user_id, request.conversation_id, active_only=True):

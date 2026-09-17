@@ -69,7 +69,7 @@ RUN --mount=type=cache,id=nexent-web-apk-${TARGETARCH},target=/var/cache/apk,sha
     mkdir -p /var/cache/apk && \
     apk update && \
     (apk upgrade busybox || true) && \
-    apk add --no-scripts curl
+    apk add --no-scripts curl vim
 
 WORKDIR /opt/frontend-dist
 

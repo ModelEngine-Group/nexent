@@ -22,6 +22,7 @@ from nexent.monitor import (
 )
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 from services.thread_lifecycle_service import config_thread_manager
+from utils.monitoring_identity import resolve_monitoring_user_email
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class TenantDreamingSummarizer:
     def __call__(self, request: DreamingSummarizationRequest) -> DreamingSummarizationOutput:
         metadata = AgentRunMetadata(
             tenant_id=self.tenant_id, user_id=self.user_id,
+            user_email=resolve_monitoring_user_email(self.user_id, self.tenant_id),
             agent_id=int(request.agent_id) if request.agent_id and request.agent_id.isdigit() else None,
             extra_metadata={"dreaming_run_id": request.run_id, "dreaming_attempt": request.attempt},
         )

@@ -203,6 +203,7 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
 
     dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
     dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
+    dependency(monkeypatch, "utils.monitoring_identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
     module = load_source(monkeypatch, "backend/management/services/agent/run_context.py", "slimming_run_context")
     request = types.SimpleNamespace(
         agent_id=3, conversation_id=4, query="hello", is_debug=debug, history=[1, 2], minio_files=[]
@@ -211,6 +212,8 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
     assert context.enable_memory is (enabled and not debug)
     assert calls == [(("user", "tenant", 3), {"skip_query": debug})]
     assert context.metadata.memory_enabled is enabled
+    assert context.metadata.user_id == "user"
+    assert context.metadata.user_email == "person@example.com"
     assert context.metadata.history_count == 2
     assert context.metadata.minio_files_count == 0
     assert context.metadata.extra_metadata == {"agent_share_option": "private", "background": True}
