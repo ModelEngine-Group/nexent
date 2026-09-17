@@ -5,17 +5,31 @@ Handles API calls to AIDP for paginated knowledge base listing.
 import logging
 import time
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Callable, Dict, List
 from urllib.parse import urljoin
 
 import httpx
+from nexent.utils.http_client_manager import http_client_manager
 
 from consts.const import AIDP_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from nexent.utils.http_client_manager import http_client_manager
+
 
 logger = logging.getLogger("aidp_service")
+
+
+class _ModelEndpoint(str, Enum):
+    """Supported AIDP model-list endpoint variants."""
+
+    SERVICE = "SERVICE"
+    QUERY = "QUERY"
+
+
+# AIDP does not expose an API-version endpoint. Keep the detected model-list
+# endpoint in process memory and probe again only when no endpoint is known.
+_MODEL_ENDPOINT: _ModelEndpoint | None = None
 
 _MAX_UPSTREAM_ERROR_REASON_LENGTH = 1000
 _UPSTREAM_ERROR_KEYS = (
@@ -1172,10 +1186,15 @@ def list_aidp_docs_impl(
         )
 
 
-# AIDP ModelService endpoint for listing applicable models.
+# AIDP ModelService endpoints for listing applicable models.
 def _get_models_path(tenant_id: str | None = None) -> str:
-    """Build the tenant-scoped model service API path."""
+    """Build the legacy tenant-scoped model service API path."""
     return f"/ModelService/Tenants/{_resolve_tenant_id(tenant_id)}/Service"
+
+
+def _get_model_query_path(tenant_id: str | None = None) -> str:
+    """Build the new tenant-scoped model query API path."""
+    return f"/ModelService/Tenants/{_resolve_tenant_id(tenant_id)}/Query"
 
 
 def _is_kb_applicable(model: Dict[str, Any]) -> bool:
@@ -1198,18 +1217,229 @@ def _is_kb_applicable(model: Dict[str, Any]) -> bool:
     return False
 
 
+def _request_model_endpoint(
+    client: Any,
+    normalized_url: str,
+    headers: Dict[str, str],
+    endpoint: _ModelEndpoint,
+    service: str,
+    app: str,
+    max_attempts: int,
+) -> httpx.Response:
+    """Request one AIDP model endpoint using its version-specific contract."""
+    if endpoint is _ModelEndpoint.SERVICE:
+        path = _get_models_path()
+        params = {"service": service, "app": app}
+    else:
+        path = _get_model_query_path()
+        params = {
+            "model_type": service,
+            "application_filter": app,
+        }
+
+    models_url = urljoin(f"{normalized_url}/", path.lstrip("/"))
+    logger.info(
+        "Fetching AIDP models via %s from %s with params=%s",
+        endpoint.value,
+        models_url,
+        params,
+    )
+    return _request_with_retry(
+        lambda: client.get(models_url, headers=headers, params=params),
+        context=f"list-models:{endpoint.value.lower()}:service={service},app={app}",
+        max_attempts=max_attempts,
+    )
+
+
+def _request_model_service(
+    client: Any,
+    normalized_url: str,
+    headers: Dict[str, str],
+    service: str,
+    app: str,
+    max_attempts: int = _AIDP_RETRY_MAX_ATTEMPTS,
+) -> httpx.Response:
+    """Request the legacy AIDP ``Service`` model endpoint."""
+    return _request_model_endpoint(
+        client,
+        normalized_url,
+        headers,
+        _ModelEndpoint.SERVICE,
+        service,
+        app,
+        max_attempts,
+    )
+
+
+def _request_model_query(
+    client: Any,
+    normalized_url: str,
+    headers: Dict[str, str],
+    service: str,
+    app: str,
+    max_attempts: int = _AIDP_RETRY_MAX_ATTEMPTS,
+) -> httpx.Response:
+    """Request the new AIDP ``Query`` model endpoint."""
+    return _request_model_endpoint(
+        client,
+        normalized_url,
+        headers,
+        _ModelEndpoint.QUERY,
+        service,
+        app,
+        max_attempts,
+    )
+
+
+def _parse_model_endpoint_response(
+    response: httpx.Response,
+    endpoint: _ModelEndpoint,
+) -> List[Any]:
+    """Parse an AIDP model response into a common raw-model list."""
+    response.raise_for_status()
+    result = response.json()
+
+    if endpoint is _ModelEndpoint.SERVICE:
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP models response format",
+            )
+        raw_models = result.get("models") or []
+        if not isinstance(raw_models, list):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "AIDP models response: 'models' field is not a list",
+            )
+        return raw_models
+
+    if not isinstance(result, list):
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            "AIDP models response: response body is not a list",
+        )
+    return result
+
+
+def _probe_model_endpoint(
+    client: Any,
+    normalized_url: str,
+    headers: Dict[str, str],
+    service: str,
+    app: str,
+) -> tuple[_ModelEndpoint, httpx.Response]:
+    """Probe both model endpoints once and return the selected response.
+
+    A non-404 HTTP response proves that the route exists under the compatibility
+    contract. Transport failures do not prove route existence. The legacy
+    endpoint is preferred when both routes are present. The returned response
+    is reused by the caller so probing does not cause a third request.
+    """
+    service_response: httpx.Response | None = None
+    service_error: httpx.RequestError | None = None
+    try:
+        service_response = _request_model_service(
+            client,
+            normalized_url,
+            headers,
+            service,
+            app,
+            max_attempts=1,
+        )
+    except httpx.RequestError as exc:
+        service_error = exc
+
+    query_response: httpx.Response | None = None
+    query_error: httpx.RequestError | None = None
+    try:
+        query_response = _request_model_query(
+            client,
+            normalized_url,
+            headers,
+            service,
+            app,
+            max_attempts=1,
+        )
+    except httpx.RequestError as exc:
+        query_error = exc
+
+    if service_response is not None and service_response.status_code != 404:
+        return _ModelEndpoint.SERVICE, service_response
+    if query_response is not None and query_response.status_code != 404:
+        return _ModelEndpoint.QUERY, query_response
+
+    # Preserve deterministic legacy-first error behavior when neither endpoint
+    # can be selected. The cache remains empty because the caller only updates
+    # it after this function returns successfully.
+    if service_response is not None:
+        service_response.raise_for_status()
+    if service_error is not None:
+        raise service_error
+    if query_response is not None:
+        query_response.raise_for_status()
+    if query_error is not None:
+        raise query_error
+
+    raise AppException(
+        ErrorCode.AIDP_SERVICE_ERROR,
+        "AIDP model endpoints did not return a usable response",
+    )
+
+
+def _get_model_endpoint_response(
+    client: Any,
+    normalized_url: str,
+    headers: Dict[str, str],
+    service: str,
+    app: str,
+) -> tuple[_ModelEndpoint, httpx.Response]:
+    """Get a model endpoint response using detection or the cached variant."""
+    global _MODEL_ENDPOINT
+
+    if _MODEL_ENDPOINT is None:
+        endpoint, response = _probe_model_endpoint(
+            client,
+            normalized_url,
+            headers,
+            service,
+            app,
+        )
+        _MODEL_ENDPOINT = endpoint
+        return endpoint, response
+
+    if _MODEL_ENDPOINT is _ModelEndpoint.SERVICE:
+        response = _request_model_service(
+            client,
+            normalized_url,
+            headers,
+            service,
+            app,
+            max_attempts=_AIDP_RETRY_MAX_ATTEMPTS,
+        )
+    else:
+        response = _request_model_query(
+            client,
+            normalized_url,
+            headers,
+            service,
+            app,
+            max_attempts=_AIDP_RETRY_MAX_ATTEMPTS,
+        )
+    return _MODEL_ENDPOINT, response
+
+
 def list_aidp_models_impl(
     server_url: str,
     api_key: str,
     service: str = "llm",
     app: str = "KnowledgeBase",
 ) -> Dict[str, Any]:
-    """Fetch available models from AIDP ModelService.
+    """Fetch available models from either supported AIDP ModelService contract.
 
-    Queries ``GET /ModelService/Tenants/{tenant_id}/Service?service=<service>&app=<app>``
-    and post-filters the response to only include models whose ``application``
-    field matches ``All`` or the requested ``app`` (AIDP's query parameter is
-    advisory; it does not enforce filtering on its own).
+    The legacy endpoint accepts ``service`` and ``app`` and returns an object
+    with a ``models`` field. The new ``Query`` endpoint accepts
+    ``model_type`` and ``application_filter`` and returns the model list
+    directly. Both responses are normalized before application filtering.
 
     Returns:
         {
@@ -1226,33 +1456,20 @@ def list_aidp_models_impl(
         "Content-Type": "application/json",
     }
 
-    models_path = f"{_get_models_path()}?service={service}&app={app}"
-    models_url = urljoin(f"{normalized_url}/", models_path.lstrip("/"))
-    logger.info("Fetching AIDP models from %s", models_url)
-
     try:
         client = http_client_manager.get_sync_client(
             base_url=normalized_url,
             timeout=60.0,
             verify_ssl=False,
         )
-        response = _request_with_retry(
-            lambda: client.get(models_url, headers=headers),
-            context=f"list-models:service={service},app={app}",
+        endpoint, response = _get_model_endpoint_response(
+            client,
+            normalized_url,
+            headers,
+            service,
+            app,
         )
-        response.raise_for_status()
-        result = response.json()
-        if not isinstance(result, dict):
-            raise AppException(
-                ErrorCode.AIDP_RESPONSE_ERROR,
-                "Unexpected AIDP models response format",
-            )
-        raw_models = result.get("models") or []
-        if not isinstance(raw_models, list):
-            raise AppException(
-                ErrorCode.AIDP_RESPONSE_ERROR,
-                "AIDP models response: 'models' field is not a list",
-            )
+        raw_models = _parse_model_endpoint_response(response, endpoint)
         filtered = [
             m for m in raw_models
             if isinstance(m, dict) and _is_kb_applicable(m)

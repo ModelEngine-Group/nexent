@@ -10,6 +10,8 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Upload  (upload docs)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles         (list docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
+   - GET    /ModelService/Tenants/{tenant}/Service                 (legacy model list)
+   - GET    /ModelService/Tenants/{tenant}/Query                   (new model list)
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
@@ -17,7 +19,10 @@ tests or frontend sessions survive across restarts without re-creation
 (which was otherwise the cause of spurious 404s in list endpoints against
 stale Nexent permission rows). ``POST /_reset`` clears the file and
 rebuilds the seed data. Run with:
-    python aidp_mgmt_mock_server.py --port 30081
+     python aidp_mgmt_mock_server.py --port 30081 --model-api-version both
+
+Use ``--model-api-version service`` or ``query`` to emulate an AIDP deployment
+that exposes only one of the two model-list contracts.
 """
 import argparse
 import json
@@ -55,7 +60,11 @@ app.add_middleware(
 EXPECTED_API_KEY = "mock-aidp-key"
 TENANT = "aidp"  # tenant segment used in all path prefixes
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
-_MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
+_MODELS_SERVICE_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
+_MODELS_QUERY_PREFIX = f"/ModelService/Tenants/{TENANT}/Query"
+# Keep the legacy name available for existing local scripts importing it.
+_MODELS_PREFIX = _MODELS_SERVICE_PREFIX
+_MODEL_API_VERSION = "both"
 
 # Directory for persisted runtime state. Lives next to this file so the mock
 # is self-contained (no absolute paths) and stays out of version control via
@@ -766,23 +775,52 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
 ]
 
 
-@app.get(_MODELS_PREFIX)
-def list_models(
+def _model_endpoint_enabled(version: str) -> bool:
+    """Return whether the configured mock mode exposes an endpoint variant."""
+    return _MODEL_API_VERSION in ("both", version)
+
+
+@app.get(_MODELS_SERVICE_PREFIX)
+def list_models_service(
     service: str = Query("llm"),
     app: str = Query("KnowledgeBase"),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """Return the list of registered models. Real AIDP does NOT filter by the
-    ``app`` query param — callers must post-filter by ``application``. The
-    backend (aidp_service._is_kb_applicable) does this, so we just dump the
-    raw seed data here.
-    """
+    """Return the legacy object-wrapped model response."""
+    if not _model_endpoint_enabled("service"):
+        raise HTTPException(status_code=404, detail="Legacy model endpoint disabled")
     _check_auth(authorization)
-    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(_MOCK_MODELS))
+    logger.info("LIST MODELS SERVICE  service=%s app=%s returned=%d", service, app, len(_MOCK_MODELS))
     return JSONResponse(content={
         "service": service,
         "models": _MOCK_MODELS,
     })
+
+
+@app.get(_MODELS_QUERY_PREFIX)
+def list_models_query(
+    model_type: str = Query("llm"),
+    application_filter: str = Query("KnowledgeBase"),
+    model_name_filter: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Return the new direct-array model response.
+
+    The mock intentionally returns the complete seed list so the backend's
+    application-scope post-filter remains covered for both API versions.
+    ``model_name_filter`` is accepted to mirror the optional AIDP contract.
+    """
+    if not _model_endpoint_enabled("query"):
+        raise HTTPException(status_code=404, detail="New model endpoint disabled")
+    _check_auth(authorization)
+    logger.info(
+        "LIST MODELS QUERY  model_type=%s application_filter=%s model_name_filter=%s returned=%d",
+        model_type,
+        application_filter,
+        model_name_filter,
+        len(_MOCK_MODELS),
+    )
+    return JSONResponse(content=_MOCK_MODELS)
 
 
 # =============================================================================
@@ -825,14 +863,22 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=30081, help="Bind port (default: 30081)")
     parser.add_argument("--api-key", default=EXPECTED_API_KEY, help="Expected Bearer API key")
+    parser.add_argument(
+        "--model-api-version",
+        choices=("both", "service", "query"),
+        default="both",
+        help="Model API variant to expose (default: both)",
+    )
     args = parser.parse_args()
 
+    _MODEL_API_VERSION = args.model_api_version
     EXPECTED_API_KEY = args.api_key
 
     import uvicorn
 
     print(f"\nAIDP Mock Server starting on http://{args.host}:{args.port}")
     print(f"  Tenant path prefix: {_KB_PREFIX}")
+    print(f"  Model API version:  {_MODEL_API_VERSION}")
     # Don't print the full credential — secret scanners flag this even for
     # mock/test-only keys. The key is a fixed literal visible in this file's
     # source; operators who need it can read it there.
