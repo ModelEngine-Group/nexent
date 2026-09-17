@@ -626,10 +626,6 @@ app.prepare().then(() => {
           socket.destroy();
         }
       );
-    } else {
-      console.log(
-        `[Proxy] Ignoring non-voice WebSocket upgrade for: ${pathname}`
-      );
     }
   });
 
