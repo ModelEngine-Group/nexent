@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 
 export interface ResourceCardProps {
   title: ReactNode;
+  /** Secondary text displayed directly below the title. */
+  subtitle?: ReactNode;
   description?: ReactNode;
   icon?: ReactNode;
   /** Status or lifecycle content displayed beside the title. */
@@ -19,6 +21,7 @@ export interface ResourceCardProps {
   actions?: ReactNode;
   footer?: ReactNode;
   onClick?: () => void;
+  onDoubleClick?: () => void;
   selected?: boolean;
   className?: string;
   containerRef?: Ref<HTMLDivElement>;
@@ -26,6 +29,7 @@ export interface ResourceCardProps {
 
 export default function ResourceCard({
   title,
+  subtitle,
   description,
   icon,
   badge,
@@ -35,6 +39,7 @@ export default function ResourceCard({
   actions,
   footer,
   onClick,
+  onDoubleClick,
   selected,
   className,
   containerRef,
@@ -49,12 +54,13 @@ export default function ResourceCard({
     <div
       ref={containerRef}
       className={cn(
-        "group relative flex min-h-[240px] flex-col rounded-lg border bg-white text-left transition",
-        "p-5 shadow-sm hover:border-blue-300 hover:shadow-md",
-        selected && "border-blue-400 ring-1 ring-blue-200",
-        !selected && "border-slate-200",
+        "group relative flex min-h-[240px] flex-col rounded-xl border bg-white text-left transition",
+        "p-5 shadow-sm hover:border-blue-300 hover:shadow-md dark:bg-slate-900",
+        selected && "border-blue-400 ring-1 ring-blue-200 dark:ring-blue-900",
+        !selected && "border-slate-200 dark:border-slate-700",
         className
       )}
+      onDoubleClick={onDoubleClick}
     >
       {isInteractive ? (
         <button
@@ -76,10 +82,15 @@ export default function ResourceCard({
           <div className="min-w-0 flex-1">
             <h2
               id={titleId}
-              className="truncate text-base font-semibold text-slate-900"
+              className="truncate text-base font-semibold text-slate-900 dark:text-slate-100"
             >
               {title}
             </h2>
+            {subtitle ? (
+              <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                {subtitle}
+              </div>
+            ) : null}
             {badge ? (
               <div className="mt-1 flex flex-wrap gap-2">{badge}</div>
             ) : null}
@@ -91,6 +102,7 @@ export default function ResourceCard({
                 "flex shrink-0 items-center gap-1",
                 actionClassName
               )}
+              onDoubleClick={(event) => event.stopPropagation()}
             >
               {headerActions}
               {actions}
@@ -99,7 +111,7 @@ export default function ResourceCard({
         </div>
         <div className="flex flex-1 flex-col">
           {description ? (
-            <div className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600">
+            <div className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
               {description}
             </div>
           ) : null}
@@ -114,14 +126,20 @@ export default function ResourceCard({
             </div>
           ) : null}
           <div className="mt-auto">
-            {meta || footer ? (
-              <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
-                <div className="min-w-0">{meta}</div>
-                {footer ? (
-                  <div data-resource-card-action className={actionClassName}>
-                    {footer}
-                  </div>
-                ) : null}
+            {meta ? (
+              <div className="flex min-h-7 items-center border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                <div className="flex w-full items-center justify-between gap-3">
+                  {meta}
+                </div>
+              </div>
+            ) : null}
+            {footer ? (
+              <div
+                data-resource-card-action
+                className={cn("mt-4", actionClassName)}
+                onDoubleClick={(event) => event.stopPropagation()}
+              >
+                {footer}
               </div>
             ) : null}
           </div>

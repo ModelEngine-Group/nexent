@@ -81,6 +81,7 @@ import McpCommunityDetailModal from "./components/add/community/McpCommunityDeta
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
 import McpToolsPagination from "./components/McpToolsPagination";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import MineMcpServiceCard, {
   type MineMcpCardItem,
 } from "./components/MineMcpServiceCard";
@@ -526,7 +527,9 @@ function RepositoryView({
         searchActions={
           <RepositoryTagFilter
             value={
-              browser.filters.tag === FILTER_ALL ? undefined : browser.filters.tag
+              browser.filters.tag === FILTER_ALL
+                ? undefined
+                : browser.filters.tag
             }
             tags={browser.tagStats}
             onChange={(value) =>
@@ -550,8 +553,12 @@ function RepositoryView({
           <Empty description={t("mcpTools.repository.empty")} />
         </PlaceholderBox>
       ) : (
-        <ResponsiveCardGrid>
-          {filteredServices.map((service, index) => (
+        <ResourceCardGrid
+          items={filteredServices}
+          columns={3}
+          paginateItems={false}
+          showToolbar={false}
+          renderItem={(service, index) => (
             <RepositoryMcpCard
               key={`${service.communityId || service.name}-${index}`}
               service={service}
@@ -561,8 +568,8 @@ function RepositoryView({
               onSelect={onSelect}
               onOffline={onOffline}
             />
-          ))}
-        </ResponsiveCardGrid>
+          )}
+        />
       )}
 
       {filteredServices.length > 0 ? (
@@ -618,9 +625,8 @@ function MineView({
     []
   );
   const [matchedTagIds, setMatchedTagIds] = useState<Set<string> | null>(null);
-  const [matchedSearchTagIds, setMatchedSearchTagIds] = useState<
-    Set<string> | null
-  >(null);
+  const [matchedSearchTagIds, setMatchedSearchTagIds] =
+    useState<Set<string> | null>(null);
   const [page, setPage] = useState(1);
   const [publishingKey, setPublishingKey] = useState<string | null>(null);
   const [unpublishingKey, setUnpublishingKey] = useState<string | null>(null);
@@ -791,13 +797,17 @@ function MineView({
     let cancelled = false;
     Promise.all(
       searchTagPredicates.map((predicate) =>
-        tagManagementApi.filterResourceIds("mcp_service", localItems, [predicate])
+        tagManagementApi.filterResourceIds("mcp_service", localItems, [
+          predicate,
+        ])
       )
     )
       .then((results) => {
         if (cancelled) return;
         setMatchedSearchTagIds(
-          new Set(results.flatMap((result) => result.matched_resource_ids ?? []))
+          new Set(
+            results.flatMap((result) => result.matched_resource_ids ?? [])
+          )
         );
       })
       .catch(() => {

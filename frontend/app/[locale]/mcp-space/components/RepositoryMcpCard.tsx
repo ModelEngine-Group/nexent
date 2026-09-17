@@ -1,11 +1,13 @@
 import { Button, Dropdown, type MenuProps } from "antd";
 import { Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { CommunityMcpCard } from "@/types/mcpTools";
+
+import ResourceCard from "@/components/resource/ResourceCard";
 import {
   getDeploymentTypeLabelKey,
   resolveDeploymentType,
 } from "@/lib/mcpTools";
+import type { CommunityMcpCard } from "@/types/mcpTools";
 import TransportIcon from "./shared/TransportIcon";
 
 interface RepositoryMcpCardProps {
@@ -31,106 +33,101 @@ export default function RepositoryMcpCard({
   const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
   const installCount = Number(service.installCount || 0);
   const toolCount = resolveToolCount(service);
-
-  const actionItems: MenuProps["items"] = [];
-  if (isAdmin) {
-    actionItems.push({
-      key: "offline",
-      label: t("mcpTools.repository.offline"),
-      icon: <Trash2 className="h-3.5 w-3.5" />,
-      danger: true,
-      onClick: () => onOffline(service),
-    });
-  }
+  const actionItems: MenuProps["items"] = isAdmin
+    ? [
+        {
+          key: "offline",
+          label: t("mcpTools.repository.offline"),
+          icon: <Trash2 className="size-3.5" />,
+          danger: true,
+          onClick: () => onOffline(service),
+        },
+      ]
+    : [];
 
   return (
-    <div className="group flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <TransportIcon
-            transportType={service.transportType}
-            deploymentType={deploymentType}
-            label={deploymentLabel}
-            seed={service.name}
-            className="!h-10 !w-10 rounded-xl"
-          />
-          <div className="min-w-0">
-            <h3
-              className="line-clamp-1 text-base font-semibold text-slate-900"
-              title={service.name}
+    <ResourceCard
+      className="h-full"
+      title={service.name}
+      icon={
+        <TransportIcon
+          transportType={service.transportType}
+          deploymentType={deploymentType}
+          label={deploymentLabel}
+          seed={service.name}
+          className="!size-10 rounded-xl"
+        />
+      }
+      description={service.description || t("mcpTools.detail.noDescription")}
+      tags={
+        <>
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            {deploymentLabel}
+          </span>
+          {tags.slice(0, 3).map((tag) => (
+            <span
+              key={`${service.communityId || service.name}-${tag}`}
+              className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
             >
-              {service.name}
-            </h3>
-          </div>
-        </div>
-        {actionItems.length > 0 ? (
-          <Dropdown menu={{ items: actionItems }} trigger={["click"]} placement="bottomRight">
+              {tag}
+            </span>
+          ))}
+          {tags.length > 3 ? (
+            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+              +{tags.length - 3}
+            </span>
+          ) : null}
+          <span className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {t("mcpTools.repository.toolCount", { count: toolCount })}
+          </span>
+        </>
+      }
+      meta={
+        <span className="inline-flex items-center gap-1">
+          <Download className="size-3.5 text-slate-400" />
+          {installCount}
+        </span>
+      }
+      headerActions={
+        actionItems.length > 0 ? (
+          <Dropdown
+            menu={{ items: actionItems }}
+            trigger={["click"]}
+            placement="bottomRight"
+          >
             <Button
               type="text"
               size="small"
-              icon={<MoreHorizontal className="h-4 w-4" />}
+              icon={<MoreHorizontal className="size-4" />}
               aria-label={t("mcpTools.mine.moreActions")}
               className="-mt-1 text-slate-500 hover:!text-slate-700"
             />
           </Dropdown>
-        ) : null}
-      </div>
-
-      <p
-        className="mt-4 line-clamp-2 min-h-[44px] text-sm leading-6 text-slate-600"
-        title={service.description}
-      >
-        {service.description || t("mcpTools.detail.noDescription")}
-      </p>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-          {deploymentLabel}
-        </span>
-        {tags.slice(0, 3).map((tag) => (
-          <span
-            key={`${service.communityId || service.name}-${tag}`}
-            className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
+        ) : undefined
+      }
+      footer={
+        <div className="flex items-center gap-2">
+          <Button
+            type={installed ? "default" : "primary"}
+            disabled={installed}
+            className="flex-1"
+            icon={<Download className="size-3.5" />}
+            onClick={() => onInstall(service)}
           >
-            {tag}
-          </span>
-        ))}
-        {tags.length > 3 ? (
-          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">+{tags.length - 3}</span>
-        ) : null}
-        <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">
-          {t("mcpTools.repository.toolCount", { count: toolCount })}
-        </span>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 pt-3 text-xs font-medium text-slate-600">
-        <span className="inline-flex items-center gap-1">
-          <Download className="h-3.5 w-3.5 text-slate-400" />
-          {installCount}
-        </span>
-      </div>
-
-      <div className="mt-auto flex items-center gap-2 pt-4">
-        <Button
-          type={installed ? "default" : "primary"}
-          disabled={installed}
-          className="flex-1"
-          icon={<Download className="h-3.5 w-3.5" />}
-          onClick={() => onInstall(service)}
-        >
-          {installed
-            ? t("mcpTools.repository.installed")
-            : t("mcpTools.repository.install")}
-        </Button>
-        <Button
-          className="flex-1"
-          icon={<Eye className="h-3.5 w-3.5" />}
-          onClick={() => onSelect(service)}
-        >
-          {t("mcpTools.repository.details")}
-        </Button>
-      </div>
-    </div>
+            {installed
+              ? t("mcpTools.repository.installed")
+              : t("mcpTools.repository.install")}
+          </Button>
+          <Button
+            className="flex-1"
+            icon={<Eye className="size-3.5" />}
+            onClick={() => onSelect(service)}
+          >
+            {t("mcpTools.repository.details")}
+          </Button>
+        </div>
+      }
+    />
   );
 }
 

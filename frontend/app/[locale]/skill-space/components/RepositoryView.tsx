@@ -4,11 +4,15 @@ import { Button, Input } from "antd";
 import { Copy, Eye, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 
 import { SkillRepositoryCard } from "./SkillRepositoryCard";
 import { AsyncContent, PaginationBar } from "./SkillRepositoryControls";
 import type { SkillRepositoryListingItem } from "@/types/skillRepository";
-import type { TagDefinition, TagResourcePredicate } from "@/types/tagManagement";
+import type {
+  TagDefinition,
+  TagResourcePredicate,
+} from "@/types/tagManagement";
 
 export function RepositoryView({
   searchQuery,
@@ -87,8 +91,12 @@ export function RepositoryView({
         emptyDescription={t("skillRepository.repository.empty")}
       >
         <>
-          <div className="grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {listings.map((listing) => (
+          <ResourceCardGrid
+            items={listings}
+            columns={3}
+            paginateItems={false}
+            showToolbar={false}
+            renderItem={(listing) => (
               <SkillRepositoryCard
                 key={listing.skill_repository_id}
                 listing={listing}
@@ -122,8 +130,8 @@ export function RepositoryView({
                   </div>
                 }
               />
-            ))}
-          </div>
+            )}
+          />
           <PaginationBar
             page={page}
             pageSize={pageSize}
