@@ -1091,9 +1091,12 @@ export default function EvaluationDetailPage() {
               title: (
                 <button
                   type="button"
-                  onClick={() =>
-                    router.push(`/evaluation?agent_id=${run?.agent_id || ""}`)
-                  }
+                  onClick={() => {
+                    const agentIds = run?.agent_id ? [run.agent_id] : [];
+                    router.push(
+                      `/evaluation?agent_ids=${encodeURIComponent(JSON.stringify(agentIds))}`
+                    );
+                  }}
                   style={{ cursor: "pointer" }}
                 >
                   {t("agentEvaluation.breadcrumbEval")}

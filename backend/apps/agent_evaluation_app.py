@@ -1,3 +1,4 @@
+import json
 import logging
 from http import HTTPStatus
 from typing import Any
@@ -69,6 +70,31 @@ class TrialRunRequest(BaseModel):
 # New Code Reliability Rating from A to C when flagged as Critical.
 _AUTH_REQUIRED_MSG = "Authentication required"
 _UNKNOWN_ID = "<unknown>"
+
+
+def _parse_agent_ids(raw_agent_ids: str | None) -> list[int]:
+    """Validate an optional JSON list query parameter of agent IDs."""
+    if raw_agent_ids is None:
+        return []
+
+    try:
+        agent_ids = json.loads(raw_agent_ids)
+    except json.JSONDecodeError as exc:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "agent_ids must be a JSON list of integers",
+        ) from exc
+
+    if not isinstance(agent_ids, list) or any(
+        not isinstance(agent_id, int) or isinstance(agent_id, bool)
+        for agent_id in agent_ids
+    ):
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "agent_ids must be a JSON list of integers",
+        )
+
+    return list(dict.fromkeys(agent_ids))
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
@@ -165,27 +191,26 @@ async def create_agent_evaluation_api(
 
 @router.get("")
 async def list_agent_evaluations_by_agent_api(
-    agent_id: int = Query(...),
+    agent_ids: str | None = Query(None),
     limit: int = Query(50, ge=0, le=200),
     offset: int = Query(0, ge=0),
     authorization: str | None = Header(None),
 ):
-    """List evaluation runs belonging to a specific agent (most-recent first).
+    """List tenant evaluation runs, optionally filtered by agent IDs.
 
-    Used by the agent detail page's "Evaluations" tab.  Result rows are
-    pre-sorted by the DB layer and are tenant-scoped: callers never see
-    rows created by a different tenant even if they can guess the
-    ``agent_id``.
+    Result rows are pre-sorted by the DB layer and are tenant-scoped: callers
+    never see rows created by a different tenant. ``agent_ids`` is an optional
+    JSON array encoded as one query parameter, such as ``[1,2]``.
 
-    ``limit == 0`` requests the FULL result set for the agent (the run
-    window is bounded by the tenant-level run cap, so this stays small);
-    any other value is hard-clamped to [1, 200] at the FastAPI level
+    ``limit == 0`` requests the full result set for the tenant or selected
+    agents; the run window is bounded by the tenant-level run cap.
+    Any other value is hard-clamped to [1, 200] at the FastAPI level
     (``le=200``) so no second clamp is needed inside the handler.
     """
     try:
         _, tenant_id = get_current_user_id(authorization)
         data = list_agent_evaluations_by_agent_impl(
-            agent_id=agent_id,
+            agent_ids=_parse_agent_ids(agent_ids),
             tenant_id=tenant_id,
             limit=limit,
             offset=offset,
@@ -197,9 +222,9 @@ async def list_agent_evaluations_by_agent_api(
         raise AppException(ErrorCode.COMMON_UNAUTHORIZED, _AUTH_REQUIRED_MSG)
     except Exception as exc:
         logger.exception(
-            "list_agent_evaluations_by_agent_api ERROR: tenant=%s agent_id=%s window=%s..%s err=%r",
+            "list_agent_evaluations_by_agent_api ERROR: tenant=%s agent_ids=%s window=%s..%s err=%r",
             _safe_extract_tenant(authorization),
-            agent_id,
+            agent_ids,
             offset,
             offset + limit,
             exc,
