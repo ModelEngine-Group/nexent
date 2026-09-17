@@ -1,5 +1,6 @@
 """Fenced tool dispatch adapter. Approval and STARTED are consumed under one run lock."""
 
+import threading
 import time
 from contextlib import contextmanager
 from datetime import timezone
@@ -29,9 +30,67 @@ class RuntimeInteractionPort:
         self.allowed_tools = frozenset(allowed_tools)
         self.live_resume = live_resume
         self.stop_event = stop_event
+        # Thread-safe shared buffer for already-processed observer chunks
+        # (model_output_thinking / parse ...). The async consumer loop in
+        # application.py calls ``add_chunk`` after every processed chunk; the
+        # worker thread calls ``flush_chunks_until_idle`` right before emitting
+        # any HITL event so chunks always land in DB before the corresponding
+        # human_interaction / human_execution row.
+        self._chunk_buffer: list[str] = []
+        self._chunk_buffer_lock = threading.Lock()
         with self.transaction() as tx:
             self.checkpoint = self.cipher.open(tx.run.checkpoint)
             self.request_payload = self.cipher.open(tx.run.request_payload)
+
+    # --- Shared chunk buffer (async-producer ↔ worker-consumer) --------
+
+    def add_chunk(self, chunk: str) -> None:
+        """Append a processed chunk from the async consumer to the shared buffer."""
+        with self._chunk_buffer_lock:
+            self._chunk_buffer.append(chunk)
+
+    def take_chunks(self) -> list[str]:
+        """Atomically drain the shared buffer for immediate persistence."""
+        with self._chunk_buffer_lock:
+            chunks = self._chunk_buffer
+            self._chunk_buffer = []
+        return chunks
+
+    def flush_chunks_until_idle(self, *, max_wait_ms: int = 500, settle_ms: int = 20) -> None:
+        """Wait for the async consumer to drain the observer queue, then persist.
+
+        **Worker-thread only.** The worker is the sole producer of observer
+        messages. Once ``model()`` returns and the worker enters ask_user, no
+        more tokens are pushed — every remaining chunk in the observer queue
+        will eventually reach the shared buffer via ``port.add_chunk`` (async
+        loop). This method polls the shared buffer: if it stays empty for
+        ``settle_ms`` the async loop has fully consumed the observer and
+        everything is either in DB (flushed) or about to be drained one last
+        time. We run a final flush before returning. ``max_wait_ms`` bounds
+        the loop if something unexpected stalls.
+        """
+        deadline = time.monotonic() + max_wait_ms / 1000.0
+        idle_since: float | None = None
+
+        while True:
+            now = time.monotonic()
+            chunks = self.take_chunks()
+            if chunks:
+                self.emit_chunks(chunks)
+                idle_since = None
+                deadline = now + max_wait_ms / 1000.0
+            elif idle_since is None:
+                idle_since = now
+            elif now - idle_since >= settle_ms / 1000.0:
+                # Buffer has been empty long enough — observer must be drained.
+                break
+
+            if now >= deadline:
+                break
+
+            time.sleep(settle_ms / 1000.0)
+
+    # -------------------------------------------------------------------
 
     @contextmanager
     def transaction(self, *, receipt=False):
@@ -75,6 +134,9 @@ class RuntimeInteractionPort:
         self.authorize()
         suspended = False
         feedback = None
+        # Wait for async to drain observer queue, then flush so model_output_thinking /
+        # parse rows precede the human_run status transition below.
+        self.flush_chunks_until_idle()
         with self.transaction() as tx:
             tx.run.checkpoint = self.cipher.seal(checkpoint)
             if tx.run.pause_requested:
@@ -139,6 +201,9 @@ class RuntimeInteractionPort:
                     raise RunTerminated("Execution lease is no longer valid")
                 self.service._expire(tx)
                 if tx.run.status == "READY":
+                    # Wait for async to drain observer queue, then flush so
+                    # any lingering batched chunks precede the human_run row.
+                    self.flush_chunks_until_idle()
                     tx.run.status = "RUNNING"
                     tx.emit({"type": "human_run", "content": {
                         "run_id": self.run_id, "status": "RUNNING",
@@ -156,6 +221,10 @@ class RuntimeInteractionPort:
         suspended = False
         steering_requested = False
         outcome = None
+        # Wait for async to drain observer queue, then flush BEFORE opening the
+        # HITL transaction so that model_output_thinking / parse rows land in DB
+        # with lower seq numbers than any subsequent human_interaction row.
+        self.flush_chunks_until_idle()
         with self.transaction() as tx:
             if tx.run.pause_requested:
                 self.service._request_steering(tx)
@@ -234,6 +303,9 @@ class RuntimeInteractionPort:
         return outcome
 
     def receipt(self, slot, result, *, uncertain=False):
+        # Wait for async to drain observer queue, then flush before recording
+        # execution outcome so the DB event order is chunks → human_execution.
+        self.flush_chunks_until_idle()
         with self.transaction(receipt=True) as tx:
             execution = tx.execution(slot)
             if execution is None or execution.status != "STARTED":
@@ -274,6 +346,9 @@ class RuntimeInteractionPort:
             ]
 
     def finish(self, outcome):
+        # Wait for async to drain observer queue, then flush remaining batched
+        # chunks before the final human_run status row.
+        self.flush_chunks_until_idle()
         with self.transaction(receipt=True) as tx:
             if tx.run.status in {"STOPPED", "EXPIRED"}:
                 return

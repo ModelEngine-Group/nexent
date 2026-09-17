@@ -165,31 +165,34 @@ async def execute_attempt(job, lease):
         run_info.human_interaction = runtime_type(port)
 
         # Flush strategy: 50ms interval + 16-chunk batch.
-        # A short interval (vs. the original 250ms) is critical because the
-        # worker thread writes human_interaction events (tx.emit) synchronously
-        # via SQLAlchemy, while model_output_thinking / parse chunks flow
-        # through this async consumer and are only persisted on flush. If the
-        # worker suspends in ask_user before this loop flushes, the
-        # human_interaction row gains a lower seq number than the already-buffered
-        # chunks, and the SSE replay surface shows them in the wrong order.
+        # Processed chunks go into port.add_chunk() (a shared buffer that the
+        # worker thread can drain before emitting HITL events), giving us
+        # two layers of safety:
+        #   1. The async loop flushes frequently on its own (timed / batched).
+        #   2. The worker thread flushes before opening every HITL transaction,
+        #      guaranteeing chunk rows precede human_interaction in DB order.
         _FLUSH_INTERVAL = 0.05
         _FLUSH_BATCH = 16
 
-        buffered_chunks: list[str] = []
         last_flush = time.monotonic()
 
         async def _flush_if_due() -> None:
-            nonlocal buffered_chunks, last_flush
-            if buffered_chunks and (
-                len(buffered_chunks) >= _FLUSH_BATCH
+            nonlocal last_flush
+            # Read buffer size lock-free — accurate enough for the threshold check.
+            buffered = port.take_chunks()
+            if buffered and (
+                len(buffered) >= _FLUSH_BATCH
                 or time.monotonic() - last_flush >= _FLUSH_INTERVAL
             ):
                 await run_blocking(
-                    "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks,
+                    "hitl-port-emit_chunks", port.emit_chunks, buffered,
                     lane="control-io", owner=__name__,
                 )
-                buffered_chunks = []
                 last_flush = time.monotonic()
+            elif buffered:
+                # Not yet due — put them back and try again later.
+                for chunk in buffered:
+                    port.add_chunk(chunk)
 
         chunk_iter = _stream_agent_chunks(
             agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
@@ -221,7 +224,7 @@ async def execute_attempt(job, lease):
                     chunk = task.result()
                 except StopAsyncIteration:
                     break
-                buffered_chunks.append(chunk)
+                port.add_chunk(chunk)
                 await _flush_if_due()
                 anext_task = asyncio.create_task(chunk_iter.__anext__())
         finally:
@@ -235,9 +238,10 @@ async def execute_attempt(job, lease):
                 pass
             # Final flush — any leftover buffered chunks must precede finish()
             # in the DB event sequence.
-            if buffered_chunks:
+            leftover = port.take_chunks()
+            if leftover:
                 await run_blocking(
-                    "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks,
+                    "hitl-port-emit_chunks", port.emit_chunks, leftover,
                     lane="control-io", owner=__name__,
                 )
         await run_blocking(
