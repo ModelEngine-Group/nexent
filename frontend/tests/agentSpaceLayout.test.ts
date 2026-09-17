@@ -24,14 +24,13 @@ const reviewCenterPath = new URL(
 );
 
 test("agent repository displays up to twelve unified cards in four desktop columns", async () => {
-  const [page, card, agentSpace, mineAgent] = await Promise.all([
-    readFile(pagePath, "utf8"),
+  const [card, agentSpace, mineAgent] = await Promise.all([
     readFile(cardPath, "utf8"),
     readFile(agentSpacePath, "utf8"),
     readFile(mineAgentPath, "utf8"),
   ]);
 
-  assert.match(page, /const REPOSITORY_PAGE_SIZE = 12;/);
+  assert.match(agentSpace, /const REPOSITORY_PAGE_SIZE = 12;/);
   assert.match(
     agentSpace,
     /<ResourceCardGrid\s+items=\{listings\}\s+columns=\{4\}/

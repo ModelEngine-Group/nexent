@@ -1,58 +1,68 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { App, Button, Empty, Spin } from "antd";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
+import {
+  useAgentRepositoryListingDetail,
+  useAgentRepositoryListings,
+  useUpdateAgentRepositoryStatus,
+} from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { mapRepositoryListingDetail } from "@/lib/agentRepositoryDetail";
 
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 import { ReviewAgentList } from "./components/ReviewAgentList";
+import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 import {
   AgentRepositoryReviewConfirmModal,
   type AgentRepositoryReviewAction,
 } from "./components/AgentRepositoryReviewConfirmModal";
 
-interface ReviewCenterProps {
-  listings: AgentRepositoryListingItem[];
-  currentUserEmail?: string | null;
-  isLoading: boolean;
-  isError: boolean;
-  isFetching: boolean;
-  onRetry: () => void;
-  page: number;
-  pageSize: number;
-  total: number;
-  onPageChange: (page: number) => void;
-  updatingRepositoryId: number | null;
-  onDetailClick: (listing: AgentRepositoryListingItem) => void;
-  onApprove: (
-    listing: AgentRepositoryListingItem,
-    content?: string
-  ) => Promise<unknown>;
-  onReject: (
-    listing: AgentRepositoryListingItem,
-    content?: string
-  ) => Promise<unknown>;
-}
+const REVIEW_PAGE_SIZE = 10;
 
-export function ReviewCenter({
-  listings,
-  currentUserEmail,
-  isLoading,
-  isError,
-  isFetching,
-  onRetry,
-  page,
-  pageSize,
-  total,
-  onPageChange,
-  updatingRepositoryId,
-  onDetailClick,
-  onApprove,
-  onReject,
-}: ReviewCenterProps) {
+export function ReviewCenter({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
+  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const currentUserEmail = user?.email;
+  const [page, setPage] = useState(1);
+  const pageSize = REVIEW_PAGE_SIZE;
+  const reviewListParams = useMemo(
+    () => ({ status: "pending_review" as const, page, page_size: pageSize }),
+    [page, pageSize]
+  );
+  const { data, isLoading, isError, isFetching, refetch } =
+    useAgentRepositoryListings(reviewListParams, isAdmin && active);
+  const updateStatusMutation = useUpdateAgentRepositoryStatus();
+  const listings = data?.items ?? [];
+  const total = data?.pagination?.total ?? 0;
+  const updatingRepositoryId = updateStatusMutation.isPending
+    ? (updateStatusMutation.variables?.agentRepositoryId ?? null)
+    : null;
+  const [detailListingId, setDetailListingId] = useState<number | null>(null);
+  const {
+    data: repositoryDetail,
+    isLoading: isDetailLoading,
+    isError: isDetailError,
+    isFetching: isDetailFetching,
+    refetch: refetchDetail,
+  } = useAgentRepositoryListingDetail(
+    detailListingId,
+    active && detailListingId != null
+  );
+  const detail = useMemo(
+    () =>
+      repositoryDetail
+        ? mapRepositoryListingDetail(repositoryDetail)
+        : detailListingId != null
+          ? undefined
+          : null,
+    [detailListingId, repositoryDetail]
+  );
   const [reviewAction, setReviewAction] =
     useState<AgentRepositoryReviewAction | null>(null);
   const [reviewListing, setReviewListing] =
@@ -72,9 +82,11 @@ export function ReviewCenter({
       t("agentRepository.card.untitled");
     const isApprove = reviewAction === "approve";
     try {
-      await (isApprove
-        ? onApprove(reviewListing, content)
-        : onReject(reviewListing, content));
+      await updateStatusMutation.mutateAsync({
+        agentRepositoryId: reviewListing.agent_repository_id,
+        status: isApprove ? "shared" : "rejected",
+        content,
+      });
       message.success(
         isApprove
           ? t("repository.review.approveSuccess", { name: title })
@@ -105,7 +117,7 @@ export function ReviewCenter({
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {t("repository.review.loadError")}
           </p>
-          <Button type="primary" onClick={onRetry} loading={isFetching}>
+          <Button type="primary" onClick={() => refetch()} loading={isFetching}>
             {t("repository.common.retry")}
           </Button>
         </div>
@@ -117,7 +129,9 @@ export function ReviewCenter({
             listings={listings}
             currentUserEmail={currentUserEmail}
             updatingRepositoryId={updatingRepositoryId}
-            onDetailClick={onDetailClick}
+            onDetailClick={(listing) =>
+              setDetailListingId(listing.agent_repository_id)
+            }
             onApprove={(listing) => {
               setReviewListing(listing);
               setReviewAction("approve");
@@ -128,7 +142,7 @@ export function ReviewCenter({
             }}
           />
           <AgentRepositoryReviewConfirmModal
-            open={reviewAction != null && reviewListing != null}
+            open={active && reviewAction != null && reviewListing != null}
             action={reviewAction}
             listing={reviewListing}
             loading={isReviewModalLoading}
@@ -141,7 +155,7 @@ export function ReviewCenter({
                 type="default"
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page <= 1}
-                onClick={() => onPageChange(Math.max(1, page - 1))}
+                onClick={() => setPage(Math.max(1, page - 1))}
                 aria-label={t("repository.pagination.prev")}
               >
                 <ChevronLeft className="size-4" aria-hidden />
@@ -152,7 +166,7 @@ export function ReviewCenter({
                     key={pageNumber}
                     type={pageNumber === page ? "primary" : "default"}
                     className="flex size-9 items-center justify-center rounded-lg p-0"
-                    onClick={() => onPageChange(pageNumber)}
+                    onClick={() => setPage(pageNumber)}
                     aria-label={t("repository.pagination.page", {
                       page: pageNumber,
                     })}
@@ -166,7 +180,7 @@ export function ReviewCenter({
                 type="default"
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page >= totalPages}
-                onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
                 aria-label={t("repository.pagination.next")}
               >
                 <ChevronRight className="size-4" aria-hidden />
@@ -175,6 +189,15 @@ export function ReviewCenter({
           ) : null}
         </>
       )}
+      <AgentRepositoryDetailModal
+        open={active && detailListingId != null}
+        onClose={() => setDetailListingId(null)}
+        detail={detail}
+        isLoading={isDetailLoading}
+        isError={isDetailError}
+        isFetching={isDetailFetching}
+        onRetry={() => refetchDetail()}
+      />
     </div>
   );
 }

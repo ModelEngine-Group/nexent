@@ -4,61 +4,84 @@ import { useMemo, useState } from "react";
 import { App, Button, Empty, Input, Modal, Spin } from "antd";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
+import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
-import type {
-  TagDefinition,
-  TagResourcePredicate,
-} from "@/types/tagManagement";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
-import { useAgentRepositoryListingDetail } from "@/hooks/agentRepository/useAgentRepositoryListings";
+import {
+  useAgentRepositoryListingDetail,
+  useAgentRepositoryListings,
+  useUpdateAgentRepositoryStatus,
+} from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { mapRepositoryListingDetail } from "@/lib/agentRepositoryDetail";
 
-interface AgentSpaceProps {
-  searchQuery: string;
-  onSearchChange: (value: string) => void;
-  tagDefinitions: TagDefinition[];
-  tagPredicates: TagResourcePredicate[];
-  onTagPredicatesChange: (value: TagResourcePredicate[]) => void;
-  isLoading: boolean;
-  isError: boolean;
-  isFetching: boolean;
-  onRetry: () => void;
-  listings: AgentRepositoryListingItem[];
-  page: number;
-  pageSize: number;
-  total: number;
-  onPageChange: (page: number) => void;
-  showAdminMenu: boolean;
-  updatingRepositoryId: number | null;
-  onTakeDown: (listing: AgentRepositoryListingItem) => Promise<unknown>;
-}
+const REPOSITORY_PAGE_SIZE = 12;
 
-export function AgentSpace({
-  searchQuery,
-  onSearchChange,
-  tagDefinitions,
-  tagPredicates,
-  onTagPredicatesChange,
-  isLoading,
-  isError,
-  isFetching,
-  onRetry,
-  listings,
-  page,
-  pageSize,
-  total,
-  onPageChange,
-  showAdminMenu,
-  updatingRepositoryId,
-  onTakeDown,
-}: AgentSpaceProps) {
+export function AgentSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
+  const showAdminMenu = user?.role === USER_ROLES.ADMIN;
+  const [searchQuery, setSearchQuery] = useState("");
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [page, setPage] = useState(1);
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(tagDefinitions, searchQuery, t),
+    [tagDefinitions, searchQuery, t]
+  );
+  const listingParams = useMemo(
+    () => ({
+      status: "shared" as const,
+      page,
+      page_size: REPOSITORY_PAGE_SIZE,
+      ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+      ...(searchTagPredicates.length > 0
+        ? { search_tag_predicates: searchTagPredicates }
+        : {}),
+      ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
+    }),
+    [page, searchQuery, searchTagPredicates, tagPredicates]
+  );
+  const { data, isLoading, isError, isFetching, refetch } =
+    useAgentRepositoryListings(listingParams, active);
+  const updateStatusMutation = useUpdateAgentRepositoryStatus();
+  const listings = data?.items ?? [];
+  const total = data?.pagination?.total ?? 0;
+  const pageSize = REPOSITORY_PAGE_SIZE;
+  const updatingRepositoryId = updateStatusMutation.isPending
+    ? (updateStatusMutation.variables?.agentRepositoryId ?? null)
+    : null;
+  const onSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+  };
+  const onTagPredicatesChange = (value: TagResourcePredicate[]) => {
+    setTagPredicates(value);
+    setPage(1);
+  };
+  const onTakeDown = (listing: AgentRepositoryListingItem) =>
+    updateStatusMutation.mutateAsync({
+      agentRepositoryId: listing.agent_repository_id,
+      status: "not_shared",
+    });
   const [copyListing, setCopyListing] =
     useState<AgentRepositoryListingItem | null>(null);
   const [detailListingId, setDetailListingId] = useState<number | null>(null);
@@ -68,7 +91,10 @@ export function AgentSpace({
     isError: isDetailError,
     isFetching: isDetailFetching,
     refetch: refetchDetail,
-  } = useAgentRepositoryListingDetail(detailListingId, detailListingId != null);
+  } = useAgentRepositoryListingDetail(
+    detailListingId,
+    active && detailListingId != null
+  );
   const detail = useMemo(
     () =>
       repositoryDetail
@@ -121,7 +147,7 @@ export function AgentSpace({
           />
         </div>
         <TagFilterPopover
-          definitions={tagDefinitions}
+          definitions={tagDefinitions ?? []}
           value={tagPredicates}
           onChange={onTagPredicatesChange}
         />
@@ -138,7 +164,7 @@ export function AgentSpace({
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {t("agentRepository.page.loadError")}
           </p>
-          <Button type="primary" onClick={onRetry} loading={isFetching}>
+          <Button type="primary" onClick={() => refetch()} loading={isFetching}>
             {t("repository.common.retry")}
           </Button>
         </div>
@@ -174,13 +200,13 @@ export function AgentSpace({
             <PaginationControls
               page={page}
               totalPages={totalPages}
-              onPageChange={onPageChange}
+              onPageChange={setPage}
             />
           ) : null}
         </>
       )}
       <AgentRepositoryDetailModal
-        open={detailListingId != null}
+        open={active && detailListingId != null}
         onClose={() => setDetailListingId(null)}
         detail={detail}
         isLoading={isDetailLoading}
@@ -190,7 +216,7 @@ export function AgentSpace({
       />
       <AgentRepositoryCopyDialog
         listing={copyListing}
-        open={copyListing != null}
+        open={active && copyListing != null}
         onOpenChange={(open) => {
           if (!open) setCopyListing(null);
         }}

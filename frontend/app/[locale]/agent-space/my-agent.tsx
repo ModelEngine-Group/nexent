@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Popover, Spin } from "antd";
 import {
@@ -23,8 +23,12 @@ import {
   AGENTS_LIST_QUERY_KEY,
   invalidateAgentRepositoryCaches,
   useCreateAgentRepositoryListing,
+  useMyEditableAgents,
   useUpdateAgentRepositoryStatus,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
+import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import {
   openImportWizardWithFile,
   type ImportAgentData,
@@ -43,8 +47,6 @@ import {
   type MineOwnershipFilter,
   type MyAgentRepositoryInfoItem,
   type MyEditableAgentItem,
-  type MyEditableAgentListItem,
-  type MyEditableAgentOwnershipCounts,
 } from "@/types/agentRepository";
 import { MineApplyListingModal } from "./components/MineApplyListingModal";
 import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
@@ -52,10 +54,7 @@ import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
 import { MyAgentCard } from "./components/MyAgentCard";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterControls from "@/components/tag/TagFilterControls";
-import type {
-  TagDefinition,
-  TagResourcePredicate,
-} from "@/types/tagManagement";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { mapAgentVersionDetail } from "@/lib/agentRepositoryDetail";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
@@ -65,66 +64,95 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "created",
   "others",
 ];
+const MINE_PAGE_SIZE = 12;
 
-export interface ReviewDeepLinkTarget {
-  agentRepositoryId: number;
-  agentId: number;
-}
-
-interface MyAgentProps {
-  agents: MyEditableAgentListItem[];
-  counts: MyEditableAgentOwnershipCounts;
-  ownership: MineOwnershipFilter;
-  onOwnershipChange: (ownership: MineOwnershipFilter) => void;
-  searchQuery: string;
-  onSearchChange: (value: string) => void;
-  tagDefinitions: TagDefinition[];
-  tagPredicates: TagResourcePredicate[];
-  onTagPredicatesChange: (predicates: TagResourcePredicate[]) => void;
-  page: number;
-  pageSize: number;
-  total: number;
-  onPageChange: (page: number) => void;
-  isLoading: boolean;
-  isError: boolean;
-  isFetching: boolean;
-  onRetry: () => void;
-  reviewDeepLink?: ReviewDeepLinkTarget | null;
-  deepLinkFallbackAgent?: MyEditableAgentItem | null;
-  deepLinkFallbackLoading?: boolean;
-  onReviewDeepLinkConsumed?: () => void;
-}
-
-export function MyAgent({
-  agents,
-  counts,
-  ownership,
-  onOwnershipChange,
-  searchQuery,
-  onSearchChange,
-  tagDefinitions,
-  tagPredicates,
-  onTagPredicatesChange,
-  page,
-  pageSize,
-  total,
-  onPageChange,
-  isLoading,
-  isError,
-  isFetching,
-  onRetry,
-  reviewDeepLink = null,
-  deepLinkFallbackAgent = null,
-  deepLinkFallbackLoading = false,
-  onReviewDeepLinkConsumed,
-}: MyAgentProps) {
+export function MyAgent({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
+  const [ownership, setOwnership] = useState<MineOwnershipFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [page, setPage] = useState(1);
+  const pageSize = MINE_PAGE_SIZE;
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(tagDefinitions, searchQuery, t),
+    [tagDefinitions, searchQuery, t]
+  );
+  const listParams = useMemo(
+    () => ({
+      ownership,
+      page,
+      page_size: pageSize,
+      ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+      ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
+      ...(searchTagPredicates.length > 0
+        ? { search_tag_predicates: searchTagPredicates }
+        : {}),
+      ...(ownership === "all" &&
+      !searchQuery.trim() &&
+      tagPredicates.length === 0
+        ? { new_agent_padding: true }
+        : {}),
+    }),
+    [ownership, page, pageSize, searchQuery, tagPredicates, searchTagPredicates]
+  );
+  const { data, isLoading, isError, isFetching, refetch } = useMyEditableAgents(
+    listParams,
+    active
+  );
+  const agents = useMemo(() => data?.items ?? [], [data?.items]);
+  const counts = data?.counts ?? { all: 0, created: 0, others: 0 };
+  const total = data?.pagination?.total ?? 0;
+  const reviewDeepLink = useMemo(
+    () => parseReviewDeepLinkParams(searchParams),
+    [searchParams]
+  );
+  const { data: deepLinkMineData, isLoading: deepLinkFallbackLoading } =
+    useMyEditableAgents(
+      {
+        ownership: "all",
+        agent_id: reviewDeepLink?.agentId,
+        page: 1,
+        page_size: 1,
+        new_agent_padding: false,
+      },
+      active && reviewDeepLink != null
+    );
+  const deepLinkFallbackAgent = useMemo(() => {
+    const item = deepLinkMineData?.items?.[0];
+    return item && !isNewAgentPaddingItem(item) ? item : null;
+  }, [deepLinkMineData]);
+  const onReviewDeepLinkConsumed = useCallback(() => {
+    router.replace(`/${locale}/agent-space?tab=mine`);
+  }, [locale, router]);
+  const onOwnershipChange = (value: MineOwnershipFilter) => {
+    setOwnership(value);
+    setPage(1);
+  };
+  const onSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+  };
+  const onTagPredicatesChange = (value: TagResourcePredicate[]) => {
+    setTagPredicates(value);
+    setPage(1);
+  };
   const [importWizardVisible, setImportWizardVisible] = useState(false);
   const [importWizardData, setImportWizardData] =
     useState<ImportAgentData | null>(null);
@@ -151,7 +179,7 @@ export function MyAgent({
   } = useAgentVersionDetail(
     detailTarget?.agentId ?? null,
     detailTarget?.versionNo ?? null,
-    detailTarget != null
+    active && detailTarget != null
   );
   const detail = useMemo(
     () =>
@@ -322,6 +350,7 @@ export function MyAgent({
   };
 
   useEffect(() => {
+    if (!active) return;
     if (!reviewDeepLink) {
       consumedDeepLinkRef.current = null;
       return;
@@ -373,10 +402,12 @@ export function MyAgent({
     consumedDeepLinkRef.current = reviewDeepLink.agentRepositoryId;
     onReviewDeepLinkConsumed?.();
   }, [
+    active,
     agents,
     deepLinkFallbackAgent,
     deepLinkFallbackLoading,
     isLoading,
+    message,
     onReviewDeepLinkConsumed,
     reviewDeepLink,
     t,
@@ -496,7 +527,7 @@ export function MyAgent({
             content={
               <div className="w-72">
                 <TagFilterControls
-                  definitions={tagDefinitions}
+                  definitions={tagDefinitions ?? []}
                   value={tagPredicates}
                   onChange={onTagPredicatesChange}
                 />
@@ -532,7 +563,7 @@ export function MyAgent({
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {t("agentRepository.mine.loadError")}
           </p>
-          <Button type="primary" onClick={onRetry} loading={isFetching}>
+          <Button type="primary" onClick={() => refetch()} loading={isFetching}>
             {t("repository.common.retry")}
           </Button>
         </div>
@@ -592,7 +623,7 @@ export function MyAgent({
                 type="default"
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page <= 1}
-                onClick={() => onPageChange(Math.max(1, page - 1))}
+                onClick={() => setPage(Math.max(1, page - 1))}
                 aria-label={t("repository.pagination.prev")}
               >
                 <ChevronLeft className="size-4" aria-hidden />
@@ -603,7 +634,7 @@ export function MyAgent({
                     key={pageNumber}
                     type={pageNumber === page ? "primary" : "default"}
                     className="flex size-9 items-center justify-center rounded-lg p-0"
-                    onClick={() => onPageChange(pageNumber)}
+                    onClick={() => setPage(pageNumber)}
                     aria-label={t("repository.pagination.page", {
                       page: pageNumber,
                     })}
@@ -617,7 +648,7 @@ export function MyAgent({
                 type="default"
                 className="flex size-9 items-center justify-center rounded-lg p-0"
                 disabled={page >= totalPages}
-                onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
                 aria-label={t("repository.pagination.next")}
               >
                 <ChevronRight className="size-4" aria-hidden />
@@ -628,7 +659,7 @@ export function MyAgent({
       )}
 
       <MineApplyListingModal
-        open={applyModalOpen}
+        open={active && applyModalOpen}
         agent={applyModalAgent}
         isSubmitting={createListingMutation.isPending}
         onClose={closeApplyModal}
@@ -636,7 +667,7 @@ export function MyAgent({
       />
 
       <MineReviewStatusModal
-        open={reviewModalOpen}
+        open={active && reviewModalOpen}
         agent={reviewModalAgent}
         repositoryInfo={reviewModalInfo}
         mode={reviewModalMode}
@@ -646,13 +677,13 @@ export function MyAgent({
       />
 
       <CreateAgentModal
-        open={createAgentModalVisible}
+        open={active && createAgentModalVisible}
         onCancel={() => setCreateAgentModalVisible(false)}
         onCreated={handleAgentCreated}
       />
 
       <AgentImportWizard
-        visible={importWizardVisible}
+        visible={active && importWizardVisible}
         onCancel={() => {
           setImportWizardVisible(false);
           setImportWizardData(null);
@@ -670,7 +701,7 @@ export function MyAgent({
         }}
       />
       <AgentRepositoryDetailModal
-        open={detailTarget != null}
+        open={active && detailTarget != null}
         onClose={() => setDetailTarget(null)}
         detail={detail}
         isLoading={isDetailLoading}
