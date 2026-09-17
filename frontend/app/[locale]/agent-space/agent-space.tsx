@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { App, Button, Empty, Input, Modal, Spin } from "antd";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -12,6 +13,10 @@ import type {
 } from "@/types/tagManagement";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
+import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
+import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
+import { useAgentRepositoryListingDetail } from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { mapRepositoryListingDetail } from "@/lib/agentRepositoryDetail";
 
 interface AgentSpaceProps {
   searchQuery: string;
@@ -28,8 +33,6 @@ interface AgentSpaceProps {
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
-  onCopyClick: (listing: AgentRepositoryListingItem) => void;
-  onDetailClick: (listing: AgentRepositoryListingItem) => void;
   showAdminMenu: boolean;
   updatingRepositoryId: number | null;
   onTakeDown: (listing: AgentRepositoryListingItem) => Promise<unknown>;
@@ -50,14 +53,31 @@ export function AgentSpace({
   pageSize,
   total,
   onPageChange,
-  onCopyClick,
-  onDetailClick,
   showAdminMenu,
   updatingRepositoryId,
   onTakeDown,
 }: AgentSpaceProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const [copyListing, setCopyListing] =
+    useState<AgentRepositoryListingItem | null>(null);
+  const [detailListingId, setDetailListingId] = useState<number | null>(null);
+  const {
+    data: repositoryDetail,
+    isLoading: isDetailLoading,
+    isError: isDetailError,
+    isFetching: isDetailFetching,
+    refetch: refetchDetail,
+  } = useAgentRepositoryListingDetail(detailListingId, detailListingId != null);
+  const detail = useMemo(
+    () =>
+      repositoryDetail
+        ? mapRepositoryListingDetail(repositoryDetail)
+        : detailListingId != null
+          ? undefined
+          : null,
+    [detailListingId, repositoryDetail]
+  );
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
   const showPagination = !isLoading && !isError && totalPages > 1;
 
@@ -142,8 +162,10 @@ export function AgentSpace({
                 isTakingDown={
                   updatingRepositoryId === listing.agent_repository_id
                 }
-                onCopyClick={onCopyClick}
-                onDetailClick={onDetailClick}
+                onCopyClick={setCopyListing}
+                onDetailClick={(item) =>
+                  setDetailListingId(item.agent_repository_id)
+                }
                 onTakeDown={() => confirmTakeDown(listing)}
               />
             )}
@@ -157,6 +179,22 @@ export function AgentSpace({
           ) : null}
         </>
       )}
+      <AgentRepositoryDetailModal
+        open={detailListingId != null}
+        onClose={() => setDetailListingId(null)}
+        detail={detail}
+        isLoading={isDetailLoading}
+        isError={isDetailError}
+        isFetching={isDetailFetching}
+        onRetry={() => refetchDetail()}
+      />
+      <AgentRepositoryCopyDialog
+        listing={copyListing}
+        open={copyListing != null}
+        onOpenChange={(open) => {
+          if (!open) setCopyListing(null);
+        }}
+      />
     </div>
   );
 }

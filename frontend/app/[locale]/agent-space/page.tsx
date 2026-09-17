@@ -468,8 +468,6 @@ export default function AgentRepositoryPage() {
                   pageSize={REPOSITORY_PAGE_SIZE}
                   total={repositoryTotal}
                   onPageChange={setRepositoryPage}
-                  onCopyClick={handleCopyClick}
-                  onDetailClick={handleDetailClick}
                   showAdminMenu={isAdmin}
                   updatingRepositoryId={updatingRepositoryId}
                   onTakeDown={handleRepositoryTakeDown}
@@ -531,7 +529,6 @@ export default function AgentRepositoryPage() {
                   isError={isMineError}
                   isFetching={isMineFetching}
                   onRetry={() => refetchMine()}
-                  onViewDetail={handleMineViewDetail}
                   reviewDeepLink={reviewDeepLink}
                   deepLinkFallbackAgent={deepLinkFallbackAgent}
                   deepLinkFallbackLoading={isDeepLinkMineLoading}
@@ -542,26 +539,6 @@ export default function AgentRepositoryPage() {
           </motion.div>
         </div>
       </div>
-      <AgentRepositoryDetailModal
-        open={detailOpen}
-        onClose={handleDetailClose}
-        detail={detail}
-        isLoading={isDetailLoading}
-        isError={isDetailError}
-        isFetching={isDetailFetching}
-        onRetry={() => refetchDetail()}
-      />
-      <AgentRepositoryCopyDialog
-        listing={copyListing}
-        open={copyOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            handleCopyClose();
-          } else {
-            setCopyOpen(true);
-          }
-        }}
-      />
     </ConfigProvider>
   );
 }

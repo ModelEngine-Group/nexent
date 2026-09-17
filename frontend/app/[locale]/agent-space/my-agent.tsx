@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Empty, Input, Popover, Spin } from "antd";
@@ -56,6 +56,9 @@ import type {
   TagDefinition,
   TagResourcePredicate,
 } from "@/types/tagManagement";
+import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
+import { mapAgentVersionDetail } from "@/lib/agentRepositoryDetail";
+import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 
 const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "all",
@@ -86,7 +89,6 @@ interface MyAgentProps {
   isError: boolean;
   isFetching: boolean;
   onRetry: () => void;
-  onViewDetail: (agentId: number, versionNo: number) => void;
   reviewDeepLink?: ReviewDeepLinkTarget | null;
   deepLinkFallbackAgent?: MyEditableAgentItem | null;
   deepLinkFallbackLoading?: boolean;
@@ -111,7 +113,6 @@ export function MyAgent({
   isError,
   isFetching,
   onRetry,
-  onViewDetail,
   reviewDeepLink = null,
   deepLinkFallbackAgent = null,
   deepLinkFallbackLoading = false,
@@ -137,6 +138,30 @@ export function MyAgent({
     "review" | "reviewUpdate"
   >("review");
   const [applyingAgentId, setApplyingAgentId] = useState<number | null>(null);
+  const [detailTarget, setDetailTarget] = useState<{
+    agentId: number;
+    versionNo: number;
+  } | null>(null);
+  const {
+    data: versionDetail,
+    isLoading: isDetailLoading,
+    isError: isDetailError,
+    isFetching: isDetailFetching,
+    refetch: refetchDetail,
+  } = useAgentVersionDetail(
+    detailTarget?.agentId ?? null,
+    detailTarget?.versionNo ?? null,
+    detailTarget != null
+  );
+  const detail = useMemo(
+    () =>
+      versionDetail
+        ? mapAgentVersionDetail(versionDetail)
+        : detailTarget
+          ? undefined
+          : null,
+    [detailTarget, versionDetail]
+  );
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [applyModalAgent, setApplyModalAgent] =
     useState<MyEditableAgentItem | null>(null);
@@ -539,7 +564,10 @@ export function MyAgent({
                   agent={agent}
                   onEdit={() => handleEdit(agent.agent_id, agent.permission)}
                   onView={() =>
-                    onViewDetail(agent.agent_id, agent.current_version_no ?? 0)
+                    setDetailTarget({
+                      agentId: agent.agent_id,
+                      versionNo: agent.current_version_no ?? 0,
+                    })
                   }
                   onApplyListing={() => handleApplyListing(agent)}
                   onViewReview={(mode) => handleViewReview(agent, mode)}
@@ -640,6 +668,15 @@ export function MyAgent({
             }),
           ]);
         }}
+      />
+      <AgentRepositoryDetailModal
+        open={detailTarget != null}
+        onClose={() => setDetailTarget(null)}
+        detail={detail}
+        isLoading={isDetailLoading}
+        isError={isDetailError}
+        isFetching={isDetailFetching}
+        onRetry={() => refetchDetail()}
       />
     </div>
   );
