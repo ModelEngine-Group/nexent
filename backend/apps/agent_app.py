@@ -126,8 +126,8 @@ class AgentShareRoute(APIRoute):
                     content={"detail": jsonable_encoder(exc.errors())},
                     headers=AGENT_SHARE_SECURITY_HEADERS,
                 )
-            except Exception:
-                logger.error("Agent share request failed")
+            except Exception as exc:
+                logger.error("Agent share request failed: %s", type(exc).__name__)
                 return JSONResponse(
                     status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                     content={"detail": "Agent share is unavailable."},
@@ -878,14 +878,19 @@ async def run_agent_share_api(
     authorization: Optional[str] = Header(None),
 ):
     """Run only the Agent and session resolved from the authenticated share link."""
+    stage = "authenticate_visitor"
     try:
         visitor_user_id, visitor_tenant_id = get_current_user_id(authorization)
+        stage = "resolve_share"
         share_resource = resolve_agent_share_context(share_token)
+        stage = "consume_rate_limit"
         await consume_agent_share_rate_limits(
             agent_share_id=share_resource["agent_share_id"],
             visitor_user_id=visitor_user_id,
         )
+        stage = "resolve_session"
         share_context = resolve_agent_share_run_context(share_token, visitor_user_id=visitor_user_id)
+        stage = "build_agent_request"
         agent_request = AgentRequest(
             query=share_request.query,
             agent_id=share_context["agent_id"],
@@ -901,6 +906,7 @@ async def run_agent_share_api(
             entrypoint="agent-share",
             disable_personal_memory=True,
         )
+        stage = "start_agent_stream"
         response = await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
@@ -929,6 +935,9 @@ async def run_agent_share_api(
         raise _agent_share_unavailable_error(exc) from exc
     except ForbiddenError as exc:
         raise _agent_share_unavailable_error(AgentShareError("agent_share_unavailable")) from exc
+    except Exception as exc:
+        logger.error("Agent share run failed at %s: %s", stage, type(exc).__name__)
+        raise
 
 
 @agent_share_router.post("/{share_token}/stop")

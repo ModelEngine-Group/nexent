@@ -404,6 +404,22 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(
             request_arg.message[0].content, "What is machine learning?")
 
+    @patch('backend.services.conversation_management_service.save_message')
+    def test_save_conversation_user_treats_none_history_as_empty(self, mock_save_message):
+        """Share requests omit history but must still persist their first user message."""
+        agent_request = AgentRequest(
+            conversation_id=456,
+            query="Share session test",
+            minio_files=[],
+            history=None,
+        )
+
+        save_conversation_user(agent_request, self.user_id, self.tenant_id)
+
+        request_arg = mock_save_message.call_args.args[0]
+        self.assertEqual(request_arg.message_idx, 0)
+        self.assertEqual(request_arg.message[0].content, "Share session test")
+
     def test_save_conversation_assistant_is_removed(self):
         """save_conversation_assistant has been replaced by the incremental
         save_message / save_message_unit flow used by _stream_agent_chunks."""

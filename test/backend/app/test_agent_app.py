@@ -1985,6 +1985,7 @@ def test_agent_share_hides_unexpected_errors_and_keeps_security_headers(
     assert response.json()["detail"] == "Agent share is unavailable."
     assert "internal token detail" not in response.text
     assert "internal token detail" not in caplog.text
+    assert "RuntimeError" in caplog.text
     assert_agent_share_security_headers(response)
 
 
