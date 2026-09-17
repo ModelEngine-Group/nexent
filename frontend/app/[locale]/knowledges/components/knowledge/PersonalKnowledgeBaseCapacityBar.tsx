@@ -58,7 +58,7 @@ export default function PersonalKnowledgeBaseCapacityBar() {
         <Alert
           type="warning"
           showIcon
-          message={t("knowledgeBase.personalCapacity.loadFailed")}
+          title={t("knowledgeBase.personalCapacity.loadFailed")}
         />
       </div>
     );

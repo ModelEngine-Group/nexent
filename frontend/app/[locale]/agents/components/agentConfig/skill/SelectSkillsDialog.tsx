@@ -354,7 +354,6 @@ export default function SelectSkillsDialog({
       footer={null}
       width={1100}
       zIndex={1000}
-      maskClosable
       mask={{ closable: true }}
       destroyOnHidden
     >

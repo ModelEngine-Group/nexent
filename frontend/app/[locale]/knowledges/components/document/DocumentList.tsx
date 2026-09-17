@@ -1571,7 +1571,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           cancelText={t("common.cancel", { defaultValue: "取消" })}
           width={720}
           centered
-          destroyOnClose={false}
+          destroyOnHidden={false}
           styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
         >
           {selectedEmbeddingModelOption ? (
