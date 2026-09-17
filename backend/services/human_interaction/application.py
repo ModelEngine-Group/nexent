@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from contextlib import suppress
 from functools import lru_cache
 
 from fastapi.responses import StreamingResponse
@@ -162,25 +163,83 @@ async def execute_attempt(job, lease):
         # Deployments opt into the conservative approval gate independently.
         port.allowed_tools = _allowed_tool_names(config.tools)
         run_info.human_interaction = runtime_type(port)
-        buffered_chunks = []
+
+        # Flush strategy: 50ms interval + 16-chunk batch.
+        # A short interval (vs. the original 250ms) is critical because the
+        # worker thread writes human_interaction events (tx.emit) synchronously
+        # via SQLAlchemy, while model_output_thinking / parse chunks flow
+        # through this async consumer and are only persisted on flush. If the
+        # worker suspends in ask_user before this loop flushes, the
+        # human_interaction row gains a lower seq number than the already-buffered
+        # chunks, and the SSE replay surface shows them in the wrong order.
+        _FLUSH_INTERVAL = 0.05
+        _FLUSH_BATCH = 16
+
+        buffered_chunks: list[str] = []
         last_flush = time.monotonic()
-        async for chunk in _stream_agent_chunks(
-            agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
-            agent_run_info=run_info, memory_ctx=memory_context,
-        ):
-            buffered_chunks.append(chunk)
-            if len(buffered_chunks) >= 32 or time.monotonic() - last_flush >= 0.25:
+
+        async def _flush_if_due() -> None:
+            nonlocal buffered_chunks, last_flush
+            if buffered_chunks and (
+                len(buffered_chunks) >= _FLUSH_BATCH
+                or time.monotonic() - last_flush >= _FLUSH_INTERVAL
+            ):
                 await run_blocking(
-                    "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks, lane="control-io",
-                    owner=__name__,
+                    "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks,
+                    lane="control-io", owner=__name__,
                 )
                 buffered_chunks = []
                 last_flush = time.monotonic()
-        if buffered_chunks:
-            await run_blocking(
-                "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks, lane="control-io",
-                owner=__name__,
-            )
+
+        chunk_iter = _stream_agent_chunks(
+            agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
+            agent_run_info=run_info, memory_ctx=memory_context,
+        ).__aiter__()
+
+        anext_task: asyncio.Task | None = None
+        try:
+            anext_task = asyncio.create_task(chunk_iter.__anext__())
+            while True:
+                # asyncio.wait does NOT cancel the task on timeout, so the same
+                # pending anext keeps running if the worker later resumes and
+                # produces more chunks.
+                done, pending = await asyncio.wait(
+                    {anext_task},
+                    timeout=_FLUSH_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if pending:
+                    # Timeout — no new chunk yet. Flush what we have so the DB
+                    # ordering stays correct when the worker next emits a
+                    # human_interaction / human_execution row synchronously.
+                    await _flush_if_due()
+                    continue
+
+                # anext_task completed
+                task = done.pop()
+                try:
+                    chunk = task.result()
+                except StopAsyncIteration:
+                    break
+                buffered_chunks.append(chunk)
+                await _flush_if_due()
+                anext_task = asyncio.create_task(chunk_iter.__anext__())
+        finally:
+            if anext_task is not None:
+                anext_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await anext_task
+            try:
+                await chunk_iter.aclose()
+            except Exception:
+                pass
+            # Final flush — any leftover buffered chunks must precede finish()
+            # in the DB event sequence.
+            if buffered_chunks:
+                await run_blocking(
+                    "hitl-port-emit_chunks", port.emit_chunks, buffered_chunks,
+                    lane="control-io", owner=__name__,
+                )
         await run_blocking(
             "hitl-port-finish", port.finish, run_info.attempt_outcome or "failed", lane="control-io",
             owner=__name__,
