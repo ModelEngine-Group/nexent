@@ -334,7 +334,7 @@ human_run_scheduler = LeaseScheduler(HumanRunLeaseStore(), execute_attempt, Sche
 async def stream_run(run_id, tenant_id, user_id, *, after=0):
     service = require_enabled()
     snapshot = await run_blocking(
-        "hitl-service-snapshot", service.snapshot, run_id, tenant_id, user_id, lane="control-io",
+        "hitl-service-snapshot", service.light_snapshot, run_id, tenant_id, user_id, lane="control-io",
         owner=__name__,
     )
     if after > snapshot["event_seq"]:
@@ -346,7 +346,7 @@ async def stream_run(run_id, tenant_id, user_id, *, after=0):
         while True:
             # Re-check ownership and deadlines for reconnecting subscribers.
             current = await run_blocking(
-                "hitl-service-snapshot", service.snapshot, run_id, tenant_id, user_id, lane="control-io",
+                "hitl-service-snapshot", service.light_snapshot, run_id, tenant_id, user_id, lane="control-io",
                 owner=__name__,
             )
             rows = await run_blocking(

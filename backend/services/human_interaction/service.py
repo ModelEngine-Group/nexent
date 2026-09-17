@@ -96,13 +96,35 @@ class HumanInteractionService:
         return expired
 
     def snapshot(self, run_id, tenant_id, user_id):
+        """Writer-path snapshot: takes a lock and may expire stale requests.
+
+        Kept for the SSE stream's initial handshake where a terminal-status
+        request needs a lock-held check. Prefer :meth:`light_snapshot` for
+        read-only callers that do not need to mutate state.
+        """
         with self.repository.transaction(run_id, tenant_id, user_id) as tx:
             run = self.require(tx)
             self._expire(tx)
-            return {"run_id": run.run_id, "conversation_id": run.conversation_id, "status": run.status,
-                    "event_seq": run.event_seq, "pause_requested": bool(run.pause_requested),
-                    "attempt_active": bool(run.lock_until and run.lock_until > utcnow()),
-                    "requests": [self._project_request(item, run.run_id) for item in tx.requests() if item.status == "PENDING"]}
+            return self._build_snapshot(run, tx)
+
+    def light_snapshot(self, run_id, tenant_id, user_id):
+        """Read-only snapshot: no lock, no writes, no expiration scan.
+
+        Used by the polling endpoint, SSE reconnects, and any caller that
+        only needs current state without contending with write paths.
+        Expiration is handled separately by :meth:`expire_waiting` and
+        inline inside :meth:`decide`.
+        """
+        with self.repository.read_only(run_id, tenant_id, user_id) as tx:
+            if tx is None:
+                raise InteractionError("Human interaction run was not found", 404)
+            return self._build_snapshot(tx.run, tx)
+
+    def _build_snapshot(self, run, tx):
+        return {"run_id": run.run_id, "conversation_id": run.conversation_id, "status": run.status,
+                "event_seq": run.event_seq, "pause_requested": bool(run.pause_requested),
+                "attempt_active": bool(run.lock_until and run.lock_until > utcnow()),
+                "requests": [self._project_request(item, run.run_id) for item in tx.requests() if item.status == "PENDING"]}
 
     def request(self, tx, *, kind, slot, action_digest, payload):
         request = HumanRequest(
