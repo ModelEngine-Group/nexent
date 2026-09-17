@@ -208,21 +208,13 @@ export default function AgentPrompt() {
       setEditingOverrideValue(null);
       return;
     }
-    const modelDefaults: Record<string, unknown> = {
-      temperature: (configuringModel as any).temperature,
-      top_p: (configuringModel as any).topP,
-      extra_params: (configuringModel as any).extraParams,
-    };
+    // Only override values are editable in this dialog; model-level defaults
+    // show up as placeholders via inheritedDefaults. Merging model defaults
+    // into the editing state made "deleted" overrides reappear (the model
+    // value was being re-merged as if the user had set it in the override).
     const overrideEntry = modelParamsOverride[String(configuringModel.id)] ?? {};
-    const formRecord: Record<string, unknown> = { ...modelDefaults, ...overrideEntry };
-    if (overrideEntry.extra_params && modelDefaults.extra_params) {
-      formRecord.extra_params = {
-        ...(modelDefaults.extra_params as Record<string, unknown>),
-        ...(overrideEntry.extra_params as Record<string, unknown>),
-      };
-    }
     setEditingOverrideValue(
-      advancedSettingsValueFromRecord(formRecord as any, inferenceSpecs, (configuringModel as any).type ?? "llm")
+      advancedSettingsValueFromRecord(overrideEntry as any, inferenceSpecs, (configuringModel as any).type ?? "llm")
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configuringModelId]);
