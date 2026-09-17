@@ -123,30 +123,38 @@ def test_flush_until_idle_persists_then_waits_for_settle():
     assert port.take_chunks() == []
 
 
-def test_flush_until_idle_resets_deadline_on_new_chunks():
-    """If chunks arrive during the poll loop, the max_wait deadline resets."""
+def test_flush_until_idle_hard_deadline_never_resets():
+    """max_wait_ms is a hard absolute cap measured from function entry.
+
+    Even if new chunks keep arriving, the worker must break within
+    max_wait_ms. Before the fix the deadline was re-set after every
+    drained chunk — that could keep the worker spinning indefinitely.
+    """
     port = _make_port()
     port.add_chunk("initial")
 
-    sleep_calls: list[float] = []
-    monotonic_values = iter([0.0, 0.02, 0.03, 0.04, 0.06, 0.07, 0.09, 0.11])
+    # monotonic timeline: 0.0 (start), 0.010, 0.020, 0.030 (past 30ms cap), 0.030
+    fake_monotonic = iter([0.0, 0.010, 0.020, 0.030, 0.030])
 
-    def fake_sleep(secs):
-        sleep_calls.append(secs)
-        # Simulate a chunk arriving in the middle of the loop.
-        if len(sleep_calls) == 1:
-            port.add_chunk("late")
+    # emit_chunks keeps re-seeding the buffer so it never empties —
+    # without a hard deadline the loop would never break.
+    def fake_emit(chunks):
+        port.add_chunk("still-more")
+    port.emit_chunks.side_effect = fake_emit
 
-    with patch("services.human_interaction.runtime_port.time.monotonic", side_effect=lambda: next(monotonic_values)), \
-         patch("services.human_interaction.runtime_port.time.sleep", side_effect=fake_sleep):
-        port.flush_chunks_until_idle(max_wait_ms=100, settle_ms=20)
+    with patch("services.human_interaction.runtime_port.time.monotonic", side_effect=lambda: next(fake_monotonic)), \
+         patch("services.human_interaction.runtime_port.time.sleep") as mock_sleep:
+        # Hard cap 30ms, settle 500ms. settle is unreachable because the
+        # buffer is never empty — we rely purely on the hard_deadline.
+        port.flush_chunks_until_idle(max_wait_ms=30, settle_ms=500)
 
-    # emit_chunks called twice: once for initial, once for late
-    assert port.emit_chunks.call_count == 2
-    first = port.emit_chunks.call_args_list[0].args[0]
-    second = port.emit_chunks.call_args_list[1].args[0]
-    assert first == ["initial"]
-    assert second == ["late"]
+    # emit_chunks was called a few times but NOT infinitely — the hard
+    # deadline cut it off.
+    assert port.emit_chunks.call_count >= 1
+    # The last sleep call should be clipped to the remaining time (≤30ms).
+    if mock_sleep.call_args_list:
+        last_sleep = mock_sleep.call_args_list[-1].args[0]
+        assert last_sleep <= 0.031  # ≤ 30ms with tiny float slack
 
 
 def test_flush_until_idle_timeout_wins_over_settle():

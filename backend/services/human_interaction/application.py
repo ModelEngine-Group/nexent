@@ -178,21 +178,24 @@ async def execute_attempt(job, lease):
 
         async def _flush_if_due() -> None:
             nonlocal last_flush
-            # Read buffer size lock-free — accurate enough for the threshold check.
-            buffered = port.take_chunks()
-            if buffered and (
-                len(buffered) >= _FLUSH_BATCH
-                or time.monotonic() - last_flush >= _FLUSH_INTERVAL
-            ):
-                await run_blocking(
-                    "hitl-port-emit_chunks", port.emit_chunks, buffered,
-                    lane="control-io", owner=__name__,
-                )
-                last_flush = time.monotonic()
-            elif buffered:
-                # Not yet due — put them back and try again later.
-                for chunk in buffered:
-                    port.add_chunk(chunk)
+            # Peek first — only drain when we actually intend to persist.
+            # Never take-put-back: that creates a transiently-empty window
+            # that the worker's 20ms idle poll can mistake for "async is
+            # done". peek_chunks() keeps the buffer intact, so a concurrent
+            # drain always sees consistent state.
+            if (time.monotonic() - last_flush >= _FLUSH_INTERVAL
+                    or port.peek_chunks() >= _FLUSH_BATCH):
+                buffered = port.take_chunks()
+                if buffered:
+                    try:
+                        port.begin_emit()
+                        await run_blocking(
+                            "hitl-port-emit_chunks", port.emit_chunks, buffered,
+                            lane="control-io", owner=__name__,
+                        )
+                        last_flush = time.monotonic()
+                    finally:
+                        port.end_emit()
 
         chunk_iter = _stream_agent_chunks(
             agent_request=request, user_id=identity["user_id"], tenant_id=identity["tenant_id"],
@@ -240,10 +243,14 @@ async def execute_attempt(job, lease):
             # in the DB event sequence.
             leftover = port.take_chunks()
             if leftover:
-                await run_blocking(
-                    "hitl-port-emit_chunks", port.emit_chunks, leftover,
-                    lane="control-io", owner=__name__,
-                )
+                try:
+                    port.begin_emit()
+                    await run_blocking(
+                        "hitl-port-emit_chunks", port.emit_chunks, leftover,
+                        lane="control-io", owner=__name__,
+                    )
+                finally:
+                    port.end_emit()
         await run_blocking(
             "hitl-port-finish", port.finish, run_info.attempt_outcome or "failed", lane="control-io",
             owner=__name__,

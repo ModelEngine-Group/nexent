@@ -38,6 +38,12 @@ class RuntimeInteractionPort:
         # human_interaction / human_execution row.
         self._chunk_buffer: list[str] = []
         self._chunk_buffer_lock = threading.Lock()
+        # Set by the async consumer (application.py's _flush_if_due) right
+        # before it hands buffered chunks to run_blocking(emit_chunks). The
+        # worker's flush_chunks_until_idle uses this to distinguish "buffer
+        # empty because async just handed chunks to the DB thread" from
+        # "buffer empty because async is truly idle".
+        self._emit_in_flight = threading.Event()
         with self.transaction() as tx:
             self.checkpoint = self.cipher.open(tx.run.checkpoint)
             self.request_payload = self.cipher.open(tx.run.request_payload)
@@ -56,6 +62,24 @@ class RuntimeInteractionPort:
             self._chunk_buffer = []
         return chunks
 
+    def peek_chunks(self) -> int:
+        """Return the number of buffered chunks without draining them.
+
+        Used by the async consumer loop to decide whether to hand chunks
+        to the DB thread — the buffer stays intact so a concurrent drain
+        never sees a transiently-empty buffer.
+        """
+        with self._chunk_buffer_lock:
+            return len(self._chunk_buffer)
+
+    def begin_emit(self) -> None:
+        """Signal that the async consumer is handing chunks to run_blocking(emit_chunks)."""
+        self._emit_in_flight.set()
+
+    def end_emit(self) -> None:
+        """Signal that the async consumer's run_blocking(emit_chunks) has returned."""
+        self._emit_in_flight.clear()
+
     def flush_chunks_until_idle(self, *, max_wait_ms: int = 500, settle_ms: int = 20) -> None:
         """Wait for the async consumer to drain the observer queue, then persist.
 
@@ -64,31 +88,46 @@ class RuntimeInteractionPort:
         more tokens are pushed — every remaining chunk in the observer queue
         will eventually reach the shared buffer via ``port.add_chunk`` (async
         loop). This method polls the shared buffer: if it stays empty for
-        ``settle_ms`` the async loop has fully consumed the observer and
-        everything is either in DB (flushed) or about to be drained one last
-        time. We run a final flush before returning. ``max_wait_ms`` bounds
-        the loop if something unexpected stalls.
+        ``settle_ms`` AND there is no in-flight emit (pending DB transaction
+        from the async consumer) the async loop has fully consumed the
+        observer. We run a final flush before returning.
+
+        ``max_wait_ms`` is a **hard upper bound** measured from function entry
+        — it is NOT reset when new chunks appear, so the worker cannot be
+        blocked indefinitely.
         """
-        deadline = time.monotonic() + max_wait_ms / 1000.0
+        hard_deadline = time.monotonic() + max_wait_ms / 1000.0
         idle_since: float | None = None
 
         while True:
             now = time.monotonic()
+            if now >= hard_deadline:
+                break
+
             chunks = self.take_chunks()
             if chunks:
-                self.emit_chunks(chunks)
+                try:
+                    self.emit_chunks(chunks)
+                except Exception:
+                    # Never lose drained chunks: put them back so a later
+                    # flush (or the caller's recovery path) can retry.
+                    for chunk in chunks:
+                        self.add_chunk(chunk)
+                    raise
                 idle_since = None
-                deadline = now + max_wait_ms / 1000.0
+            elif self._emit_in_flight.is_set():
+                # Buffer is empty but async is still handing chunks to the
+                # DB thread (emit_chunks in run_blocking). Treat as non-idle
+                # so settle_ms doesn't fire on a transient empty window.
+                idle_since = None
             elif idle_since is None:
                 idle_since = now
             elif now - idle_since >= settle_ms / 1000.0:
-                # Buffer has been empty long enough — observer must be drained.
+                # Buffer has been empty long enough and nothing is in-flight
+                # — observer must be drained.
                 break
 
-            if now >= deadline:
-                break
-
-            time.sleep(settle_ms / 1000.0)
+            time.sleep(min(settle_ms / 1000.0, hard_deadline - now))
 
     # -------------------------------------------------------------------
 
@@ -347,8 +386,13 @@ class RuntimeInteractionPort:
 
     def finish(self, outcome):
         # Wait for async to drain observer queue, then flush remaining batched
-        # chunks before the final human_run status row.
-        self.flush_chunks_until_idle()
+        # chunks before the final human_run status row. Chunk-flush failures
+        # must NOT prevent the terminal row from being written — wrap in
+        # try/except so we always attempt the status transaction.
+        try:
+            self.flush_chunks_until_idle()
+        except Exception:
+            pass
         with self.transaction(receipt=True) as tx:
             if tx.run.status in {"STOPPED", "EXPIRED"}:
                 return
