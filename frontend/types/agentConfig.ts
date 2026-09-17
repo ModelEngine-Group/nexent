@@ -528,6 +528,8 @@ export interface DebugConfigProps {
 export interface McpConfigModalProps {
   visible: boolean;
   onCancel: () => void;
+  onBeforeMcpDelete?: () => void | Promise<void>;
+  onMcpDeleted?: () => void | Promise<void>;
 }
 
 // ========== Agent Call Relationship Interfaces ==========

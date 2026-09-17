@@ -231,7 +231,10 @@ export const modelService = {
           type: model.model_type as ModelType,
           maxTokens: model.max_tokens || 0,
           source: model.model_factory as ModelSource,
-          apiKey: model.api_key,
+          // Model-management responses never include the stored API key.
+          // The key is only needed when creating or explicitly changing a
+          // model, so keep the client-side field empty for edit forms.
+          apiKey: "",
           apiUrl: model.base_url,
           displayName: model.display_name || model.model_name,
           connect_status:
@@ -507,7 +510,7 @@ export const modelService = {
     name?: string;
     displayName?: string;
     url: string;
-    apiKey: string;
+    apiKey?: string;
     maxTokens?: number;
     source?: ModelSource;
     expectedChunkSize?: number;
@@ -544,7 +547,7 @@ export const modelService = {
               : {}),
             ...(model.name !== undefined ? { model_name: model.name } : {}),
             base_url: model.url,
-            api_key: model.apiKey,
+            ...(model.apiKey?.trim() ? { api_key: model.apiKey } : {}),
             ...(model.maxTokens !== undefined
               ? { max_tokens: model.maxTokens }
               : {}),
@@ -596,7 +599,7 @@ export const modelService = {
   updateBatchModel: async (
     models: {
       model_id: string;
-      apiKey: string;
+      apiKey?: string;
       maxTokens?: number;
       timeoutSeconds?: number;
       concurrencyLimit?: number;
@@ -620,7 +623,7 @@ export const modelService = {
         body: JSON.stringify(
           models.map((m) => ({
             model_id: m.model_id,
-            api_key: m.apiKey,
+            ...(m.apiKey?.trim() ? { api_key: m.apiKey } : {}),
             ...(m.maxTokens !== undefined ? { max_tokens: m.maxTokens } : {}),
             ...(m.timeoutSeconds !== undefined
               ? { timeout_seconds: m.timeoutSeconds }
@@ -976,7 +979,7 @@ export const modelService = {
           type: MODEL_TYPES.LLM,
           maxTokens: model.max_tokens || 0,
           source: model.model_factory || MODEL_SOURCES.OPENAI_API_COMPATIBLE,
-          apiKey: model.api_key || "",
+          apiKey: "",
           apiUrl: model.base_url || "",
           displayName: model.display_name || model.model_name || model.name,
           connect_status: model.connect_status as ModelConnectStatus,
@@ -1028,7 +1031,7 @@ export const modelService = {
             type: model.model_type as ModelType,
             maxTokens: model.max_tokens || 0,
             source: model.model_factory as ModelSource,
-            apiKey: model.api_key || "",
+            apiKey: "",
             apiUrl: model.base_url || "",
             displayName: model.display_name || model.model_name,
             connect_status: model.connect_status as ModelConnectStatus,
@@ -1174,7 +1177,7 @@ export const modelService = {
     name?: string;
     displayName?: string;
     url: string;
-    apiKey: string;
+    apiKey?: string;
     maxTokens?: number;
     expectedChunkSize?: number;
     maximumChunkSize?: number;
@@ -1215,7 +1218,7 @@ export const modelService = {
               ? { display_name: params.displayName }
               : {}),
             base_url: params.url,
-            api_key: params.apiKey,
+            ...(params.apiKey?.trim() ? { api_key: params.apiKey } : {}),
             ...(params.maxTokens !== undefined
               ? { max_tokens: params.maxTokens }
               : {}),

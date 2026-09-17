@@ -2707,3 +2707,45 @@ def test_streaming_without_usage_falls_back_to_input_text(openai_model_instance)
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+# ---------------------------------------------------------------------------
+# Tests for enable_thinking wire-format translation
+# ---------------------------------------------------------------------------
+
+
+def test_translate_thinking_wraps_qwen_in_chat_template_kwargs(openai_model_instance):
+    """Qwen-family models only read chat_template_kwargs.enable_thinking."""
+    openai_model_instance.model_id = "Qwen/Qwen3-235B-A22B"
+    result = openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False}
+    )
+    assert result == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert "enable_thinking" not in result
+
+
+def test_translate_thinking_keeps_top_level_for_non_qwen(openai_model_instance):
+    """DeepSeek/DashScope-style providers read the top-level flag."""
+    openai_model_instance.model_id = "deepseek-ai/DeepSeek-V3"
+    result = openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": False}
+    )
+    assert result == {"enable_thinking": False}
+
+
+def test_translate_thinking_merges_existing_chat_template_kwargs(openai_model_instance):
+    """Existing chat_template_kwargs must survive the merge."""
+    openai_model_instance.model_id = "qwen3-max"
+    result = openai_model_instance._translate_thinking_flag(
+        {"enable_thinking": True, "chat_template_kwargs": {"custom": 1}}
+    )
+    assert result == {
+        "chat_template_kwargs": {"custom": 1, "enable_thinking": True}
+    }
+
+
+def test_translate_thinking_passthrough_without_flag(openai_model_instance):
+    """No enable_thinking in extra_body -> the dict is returned unchanged."""
+    openai_model_instance.model_id = "Qwen/Qwen3"
+    original = {"other_param": "x"}
+    assert openai_model_instance._translate_thinking_flag(original) == original

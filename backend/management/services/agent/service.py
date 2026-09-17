@@ -55,6 +55,7 @@ from database.tool_db import (
     query_all_enabled_tool_instances,
     query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tool_instances_by_agent_id,
+    query_tools_by_ids,
     search_tools_for_sub_agent,
 )
 from database import skill_db
@@ -795,7 +796,13 @@ async def update_agent_info_impl(
     # Handle enabled tools saving when provided
     try:
         if request.enabled_tool_ids is not None and agent_id is not None:
-            enabled_set = set(request.enabled_tool_ids)
+            requested_enabled_set = set(request.enabled_tool_ids)
+            available_tools = query_tools_by_ids(list(requested_enabled_set))
+            enabled_set = {
+                tool["tool_id"]
+                for tool in available_tools
+                if tool.get("is_available") is not False
+            }
             # Query existing tool instances for this agent
             existing_instances = query_tool_instances_by_agent_id(agent_id, tenant_id)
 

@@ -527,7 +527,10 @@ function AgentSetupContent() {
               }
             >
               <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentVersion />
+                <AgentVersion
+                  currentVersionNo={agentInfo?.current_version_no}
+                  onRefreshAgentInfo={refetchAgentInfo}
+                />
               </div>
             </PanelCard>
           )}

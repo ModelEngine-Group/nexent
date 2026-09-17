@@ -234,6 +234,24 @@ def test_include_builtin_plugins_uses_default_builtin_directory(tmp_path, monkey
     ]
 
 
+def test_builtin_plugin_entry_points_match_manifest_case_exactly():
+    builtin_dir = plugin_loader_module.BUILTIN_MEMORY_PROVIDER_PLUGINS_DIR
+
+    for plugin_dir in builtin_dir.iterdir():
+        if not plugin_dir.is_dir():
+            continue
+
+        manifest = plugin_loader_module.yaml.safe_load(
+            (plugin_dir / "plugin.yaml").read_text(encoding="utf-8")
+        )
+        directory_entries = {entry.name for entry in plugin_dir.iterdir()}
+
+        assert manifest["entry_point"] in directory_entries, (
+            f"{plugin_dir.name} entry_point {manifest['entry_point']!r} must "
+            "match the checked-in filename exactly"
+        )
+
+
 def test_empty_external_directory_argument_only_registers_builtin_source(tmp_path):
     builtin_dir = tmp_path / "builtin"
 
