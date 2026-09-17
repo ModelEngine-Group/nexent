@@ -42,18 +42,19 @@ import type {
 } from "@/types/agentRepository";
 import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
-import { cn } from "@/lib/utils";
 import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
-import { MineAgentsView } from "./components/MineAgentsView";
 import { ReviewAgentList } from "./components/ReviewAgentList";
 import {
   AgentRepositoryReviewConfirmModal,
   type AgentRepositoryReviewAction,
 } from "./components/AgentRepositoryReviewConfirmModal";
+import { AgentSpace } from "./agent-space";
+import { MyAgent } from "./my-agent";
+import { ReviewCenter } from "./review-center";
 
 enum AgentRepositoryTab {
   REPOSITORY = "repository",
@@ -61,8 +62,8 @@ enum AgentRepositoryTab {
   REVIEW = "review",
 }
 
-const MINE_PAGE_SIZE = 6;
-const REPOSITORY_PAGE_SIZE = 6;
+const MINE_PAGE_SIZE = 12;
+const REPOSITORY_PAGE_SIZE = 12;
 const REVIEW_PAGE_SIZE = 10;
 
 type AgentDetailSource =
@@ -402,7 +403,7 @@ export default function AgentRepositoryPage() {
             exit="out"
             variants={pageVariants}
             transition={pageTransition}
-            className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 sm:py-10"
+            className="w-full px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
           >
             <div className="flex flex-col gap-6">
               <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -426,15 +427,10 @@ export default function AgentRepositoryPage() {
                 onValueChange={(value) => setTab(value as AgentRepositoryTab)}
                 className="w-full"
               >
-                <TabsList
-                  className={cn(
-                    "mb-6 grid h-auto w-full gap-2 rounded-xl border border-border bg-secondary/60 px-2 py-2",
-                    isAdmin ? "grid-cols-3" : "grid-cols-2"
-                  )}
-                >
+                <TabsList className="mb-6 flex h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-slate-200 bg-transparent p-0 dark:border-slate-700">
                   <TabsTrigger
                     value={AgentRepositoryTab.REPOSITORY}
-                    className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                    className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
                   >
                     <Inbox className="size-4" aria-hidden />
                     {t("repository.page.tab.repository")}
@@ -444,7 +440,7 @@ export default function AgentRepositoryPage() {
                   </TabsTrigger>
                   <TabsTrigger
                     value={AgentRepositoryTab.MINE}
-                    className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                    className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
                   >
                     <User className="size-4" aria-hidden />
                     {t("agentRepository.page.tab.mine")}
@@ -455,7 +451,7 @@ export default function AgentRepositoryPage() {
                   {isAdmin ? (
                     <TabsTrigger
                       value={AgentRepositoryTab.REVIEW}
-                      className="w-full justify-center gap-1.5 rounded-lg px-[5px] py-2 text-sm data-[state=active]:shadow-sm"
+                      className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
                     >
                       <ShieldCheck className="size-4" aria-hidden />
                       {t("repository.page.tab.review")}
@@ -470,7 +466,7 @@ export default function AgentRepositoryPage() {
               </Tabs>
 
               {isRepositoryTab ? (
-                <RepositoryView
+                <AgentSpace
                   searchQuery={searchQuery}
                   onSearchChange={handleRepositorySearchChange}
                   tagDefinitions={mineTagDefinitions ?? []}
@@ -495,7 +491,7 @@ export default function AgentRepositoryPage() {
                   onTakeDown={handleRepositoryTakeDown}
                 />
               ) : isReviewTab ? (
-                <ReviewCenterView
+                <ReviewCenter
                   listings={reviewListings}
                   currentUserEmail={user?.email}
                   isLoading={isReviewLoading}
@@ -524,7 +520,7 @@ export default function AgentRepositoryPage() {
                   }
                 />
               ) : isMineTab ? (
-                <MineAgentsView
+                <MyAgent
                   agents={mineAgents}
                   counts={mineCounts}
                   ownership={mineOwnership}
@@ -586,7 +582,7 @@ export default function AgentRepositoryPage() {
   );
 }
 
-function RepositoryView({
+export function LegacyRepositoryView({
   searchQuery,
   onSearchChange,
   tagDefinitions,
@@ -707,7 +703,7 @@ function RepositoryView({
         <>
           <ResourceCardGrid
             items={listings}
-            columns={3}
+            columns={4}
             paginateItems={false}
             showToolbar={false}
             renderItem={(listing) => (
@@ -769,7 +765,7 @@ function RepositoryView({
   );
 }
 
-function ReviewCenterView({
+export function LegacyReviewCenterView({
   listings,
   currentUserEmail,
   isLoading,

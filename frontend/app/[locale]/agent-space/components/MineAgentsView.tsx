@@ -524,7 +524,7 @@ export function MineAgentsView({
         <>
           <ResourceCardGrid
             items={agents}
-            columns={3}
+            columns={4}
             paginateItems={false}
             showToolbar={false}
             renderItem={(agent) =>
