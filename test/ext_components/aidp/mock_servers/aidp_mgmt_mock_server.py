@@ -123,7 +123,7 @@ def _seed_initial_data() -> None:
     _DOCUMENTS_BY_KB["aidp-kb-faq"] = [
         {
             "file_uuid": "00000000-0000-4000-8000-000000000001",
-            "file_ino_no": "file-faq-001",
+            "file_ino_no": 1001,
             "file_name": "常见问题汇总.txt",
             "file_size": 2048,
             "file_type": "txt",
@@ -131,7 +131,7 @@ def _seed_initial_data() -> None:
         },
         {
             "file_uuid": "00000000-0000-4000-8000-000000000002",
-            "file_ino_no": "file-faq-002",
+            "file_ino_no": 1002,
             "file_name": "troubleshooting.md",
             "file_size": 4096,
             "file_type": "md",
@@ -565,7 +565,14 @@ async def upload_documents(
     for f in files:
         try:
             content = await f.read()
-            file_ino_no = f"file-{uuid.uuid4().hex[:12]}"
+            file_ino_no = max(
+                (
+                    document["file_ino_no"]
+                    for document in _DOCUMENTS_BY_KB.get(kds_id, [])
+                    if isinstance(document.get("file_ino_no"), int)
+                ),
+                default=0,
+            ) + 1
             doc = {
                 "file_uuid": str(uuid.uuid4()),
                 "file_ino_no": file_ino_no,
