@@ -14,7 +14,7 @@ import {
   useAgentRepositoryListings,
   useMyEditableAgents,
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
-import { AgentSpace } from "./agent-space";
+import { AgentSpace } from "./space";
 import { MyAgent } from "./my-agent";
 import { ReviewCenter } from "./review-center";
 

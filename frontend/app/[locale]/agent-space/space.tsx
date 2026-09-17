@@ -1,8 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { App, Button, Empty, Input, Modal, Spin } from "antd";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import type { MenuProps } from "antd";
+import { App, Button, Dropdown, Empty, Input, Modal, Spin } from "antd";
+import {
+  Bot,
+  Copy,
+  Download,
+  Eye,
+  MoreHorizontal,
+  PackageX,
+  Search,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -10,10 +19,11 @@ import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
+import ResourceCard from "@/components/resource/ResourceCard";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
-import { AgentRepositoryCard } from "./components/AgentRepositoryCard";
 import { AgentRepositoryCopyDialog } from "./components/AgentRepositoryCopyDialog";
 import { AgentRepositoryDetailModal } from "./components/AgentRepositoryDetailModal";
 import {
@@ -65,7 +75,6 @@ export function AgentSpace({ active }: { active: boolean }) {
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
   const listings = data?.items ?? [];
   const total = data?.pagination?.total ?? 0;
-  const pageSize = REPOSITORY_PAGE_SIZE;
   const updatingRepositoryId = updateStatusMutation.isPending
     ? (updateStatusMutation.variables?.agentRepositoryId ?? null)
     : null;
@@ -104,9 +113,6 @@ export function AgentSpace({ active }: { active: boolean }) {
           : null,
     [detailListingId, repositoryDetail]
   );
-  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
-  const showPagination = !isLoading && !isError && totalPages > 1;
-
   const confirmTakeDown = (listing: AgentRepositoryListingItem) => {
     const title =
       listing.display_name?.trim() ||
@@ -131,6 +137,126 @@ export function AgentSpace({ active }: { active: boolean }) {
         }
       },
     });
+  };
+
+  const renderListing = (listing: AgentRepositoryListingItem) => {
+    const title =
+      listing.display_name?.trim() ||
+      listing.name?.trim() ||
+      t("agentRepository.card.untitled");
+    const author = listing.author?.trim();
+    const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
+    const toolCount = listing.tool_count ?? 0;
+    const downloads = listing.downloads ?? 0;
+    const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
+    const menuItems: MenuProps["items"] = showAdminMenu
+      ? [
+          {
+            key: "takeDown",
+            label: t("repository.listingStatus.takeDown"),
+            icon: <PackageX className="size-3.5" aria-hidden />,
+            danger: true,
+            disabled: isTakingDown,
+            onClick: () => confirmTakeDown(listing),
+          },
+        ]
+      : [];
+
+    return (
+      <ResourceCard
+        key={listing.agent_repository_id}
+        className="h-full"
+        title={title}
+        subtitle={author}
+        icon={
+          <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
+            {listing.icon?.trim() ? (
+              <span aria-hidden>{listing.icon.trim()}</span>
+            ) : (
+              <Bot className="size-5" aria-hidden />
+            )}
+          </div>
+        }
+        description={
+          listing.description?.trim() || t("agentRepository.card.noDescription")
+        }
+        tags={
+          tags.length > 0 || toolCount > 0 ? (
+            <>
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  {getAgentRepositoryTagLabel(tag, t)}
+                </span>
+              ))}
+              {toolCount > 0 ? (
+                <span className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  {t("agentRepository.card.toolCount", { count: toolCount })}
+                </span>
+              ) : null}
+            </>
+          ) : undefined
+        }
+        meta={
+          <>
+            {listing.version_label ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span
+                  className="size-1.5 rounded-full bg-primary"
+                  aria-hidden
+                />
+                {listing.version_label}
+              </span>
+            ) : null}
+            <span
+              className="inline-flex items-center gap-1"
+              aria-label={t("agentRepository.detail.downloads", {
+                count: downloads.toLocaleString(),
+              })}
+            >
+              <Download className="size-3.5" aria-hidden />
+              {downloads.toLocaleString()}
+            </span>
+          </>
+        }
+        headerActions={
+          showAdminMenu ? (
+            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+              <Button
+                type="text"
+                size="small"
+                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                icon={<MoreHorizontal className="size-4" aria-hidden />}
+                loading={isTakingDown}
+                aria-label={t("agentRepository.mine.menu.more")}
+              />
+            </Dropdown>
+          ) : undefined
+        }
+        footer={
+          <div className="flex items-center gap-2">
+            <Button
+              type="primary"
+              className="min-w-0 flex-1"
+              icon={<Copy className="size-3.5" />}
+              onClick={() => setCopyListing(listing)}
+            >
+              {t("agentRepository.card.copy")}
+            </Button>
+            <Button
+              type="default"
+              className="min-w-0 flex-1"
+              icon={<Eye className="size-3.5" />}
+              onClick={() => setDetailListingId(listing.agent_repository_id)}
+            >
+              {t("agentRepository.card.detail")}
+            </Button>
+          </div>
+        }
+      />
+    );
   };
 
   return (
@@ -168,42 +294,24 @@ export function AgentSpace({ active }: { active: boolean }) {
             {t("repository.common.retry")}
           </Button>
         </div>
-      ) : listings.length === 0 ? (
-        <Empty
-          className="py-16"
-          description={t("agentRepository.page.empty")}
-        />
       ) : (
-        <>
-          <ResourceCardGrid
-            items={listings}
-            columns={4}
-            paginateItems={false}
-            showToolbar={false}
-            renderItem={(listing) => (
-              <AgentRepositoryCard
-                key={listing.agent_repository_id}
-                listing={listing}
-                showAdminMenu={showAdminMenu}
-                isTakingDown={
-                  updatingRepositoryId === listing.agent_repository_id
-                }
-                onCopyClick={setCopyListing}
-                onDetailClick={(item) =>
-                  setDetailListingId(item.agent_repository_id)
-                }
-                onTakeDown={() => confirmTakeDown(listing)}
-              />
-            )}
-          />
-          {showPagination ? (
-            <PaginationControls
-              page={page}
-              totalPages={totalPages}
-              onPageChange={setPage}
+        <ResourceCardGrid
+          items={listings}
+          columns={4}
+          rows={3}
+          page={page}
+          total={total}
+          onPageChange={setPage}
+          paginateItems={false}
+          showToolbar={false}
+          emptyState={
+            <Empty
+              className="py-16"
+              description={t("agentRepository.page.empty")}
             />
-          ) : null}
-        </>
+          }
+          renderItem={renderListing}
+        />
       )}
       <AgentRepositoryDetailModal
         open={active && detailListingId != null}
@@ -221,54 +329,6 @@ export function AgentSpace({ active }: { active: boolean }) {
           if (!open) setCopyListing(null);
         }}
       />
-    </div>
-  );
-}
-
-function PaginationControls({
-  page,
-  totalPages,
-  onPageChange,
-}: {
-  page: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
-}) {
-  const { t } = useTranslation("common");
-  return (
-    <div className="flex items-center justify-center gap-1.5 pt-2">
-      <Button
-        type="default"
-        className="flex size-9 items-center justify-center rounded-lg p-0"
-        disabled={page <= 1}
-        onClick={() => onPageChange(Math.max(1, page - 1))}
-        aria-label={t("repository.pagination.prev")}
-      >
-        <ChevronLeft className="size-4" aria-hidden />
-      </Button>
-      {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-        (pageNumber) => (
-          <Button
-            key={pageNumber}
-            type={pageNumber === page ? "primary" : "default"}
-            className="flex size-9 items-center justify-center rounded-lg p-0"
-            onClick={() => onPageChange(pageNumber)}
-            aria-label={t("repository.pagination.page", { page: pageNumber })}
-            aria-current={pageNumber === page ? "page" : undefined}
-          >
-            {pageNumber}
-          </Button>
-        )
-      )}
-      <Button
-        type="default"
-        className="flex size-9 items-center justify-center rounded-lg p-0"
-        disabled={page >= totalPages}
-        onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-        aria-label={t("repository.pagination.next")}
-      >
-        <ChevronRight className="size-4" aria-hidden />
-      </Button>
     </div>
   );
 }

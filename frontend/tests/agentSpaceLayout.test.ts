@@ -6,12 +6,8 @@ const pagePath = new URL(
   "../app/[locale]/agent-space/page.tsx",
   import.meta.url
 );
-const cardPath = new URL(
-  "../app/[locale]/agent-space/components/AgentRepositoryCard.tsx",
-  import.meta.url
-);
 const agentSpacePath = new URL(
-  "../app/[locale]/agent-space/agent-space.tsx",
+  "../app/[locale]/agent-space/space.tsx",
   import.meta.url
 );
 const mineAgentPath = new URL(
@@ -24,8 +20,7 @@ const reviewCenterPath = new URL(
 );
 
 test("agent repository displays up to twelve unified cards in four desktop columns", async () => {
-  const [card, agentSpace, mineAgent] = await Promise.all([
-    readFile(cardPath, "utf8"),
+  const [agentSpace, mineAgent] = await Promise.all([
     readFile(agentSpacePath, "utf8"),
     readFile(mineAgentPath, "utf8"),
   ]);
@@ -36,10 +31,12 @@ test("agent repository displays up to twelve unified cards in four desktop colum
     /<ResourceCardGrid\s+items=\{listings\}\s+columns=\{4\}/
   );
   assert.match(
-    card,
+    agentSpace,
     /import ResourceCard from "@\/components\/resource\/ResourceCard"/
   );
-  assert.match(card, /<ResourceCard\s/);
+  assert.match(agentSpace, /<ResourceCard\s/);
+  assert.match(agentSpace, /paginateItems=\{false\}/);
+  assert.match(agentSpace, /onPageChange=\{setPage\}/);
   assert.match(mineAgent, /export function MyAgent/);
   assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{4\}/);
 });
@@ -49,7 +46,7 @@ test("agent-space tabs load same-level content components", async () => {
     readFile(pagePath, "utf8"),
     readFile(reviewCenterPath, "utf8"),
   ]);
-  assert.match(page, /import \{ AgentSpace \} from "\.\/agent-space";/);
+  assert.match(page, /import \{ AgentSpace \} from "\.\/space";/);
   assert.match(page, /import \{ MyAgent \} from "\.\/my-agent";/);
   assert.match(page, /import \{ ReviewCenter \} from "\.\/review-center";/);
   assert.match(page, /<AgentSpace/);
