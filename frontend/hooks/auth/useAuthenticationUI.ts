@@ -10,6 +10,7 @@ import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import {
   buildAuthenticationReturnPath,
+  isAgentSharePath,
   isAnonymousConversationSharePath,
 } from "@/lib/agentUsageGuide";
 import { authEvents, authEventUtils } from "@/lib/authEvents";
@@ -42,6 +43,9 @@ export function useAuthenticationUI({
   // same navigation-free shell, but require a signed-in visitor.
   const isAnonymousConversationSharePage =
     isAnonymousConversationSharePath(effectivePath);
+  const isAgentSharePage = isAgentSharePath(effectivePath);
+  const preservesShareReturnPath =
+    isAnonymousConversationSharePage || isAgentSharePage;
   const authenticationReturnPath = buildAuthenticationReturnPath(
     pathname || "/",
     searchParams.toString()
@@ -60,7 +64,7 @@ export function useAuthenticationUI({
 
   const handleUnauthenticatedModalClose = useCallback(() => {
     // Only emit back to home event and redirect if user is not authenticated
-    if (!isAuthenticated && !isSpeedMode && !isAnonymousConversationSharePage) {
+    if (!isAuthenticated && !isSpeedMode && !preservesShareReturnPath) {
       // Emit event to notify SideNavigation to reset selected key
       authEventUtils.emitBackToHome();
       // Redirect to home page if not already there
@@ -72,7 +76,7 @@ export function useAuthenticationUI({
     effectivePath,
     isAuthenticated,
     isOAuthCompletePage,
-    isAnonymousConversationSharePage,
+    preservesShareReturnPath,
     isSpeedMode,
     router,
   ]);
@@ -85,7 +89,7 @@ export function useAuthenticationUI({
 
   // Modal control functions
   const openLoginModal = useCallback(() => {
-    if (isAnonymousConversationSharePage) {
+    if (preservesShareReturnPath) {
       setIsLoginModalOpen(true);
       return;
     }
@@ -95,7 +99,7 @@ export function useAuthenticationUI({
     });
   }, [
     authenticationReturnPath,
-    isAnonymousConversationSharePage,
+    preservesShareReturnPath,
     redirectToForcedLogin,
   ]);
 

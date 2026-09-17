@@ -118,6 +118,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
         >
           {children}
         </Content>
+        {!isSpeedMode && <AuthDialogs />}
       </Layout>
     );
   }

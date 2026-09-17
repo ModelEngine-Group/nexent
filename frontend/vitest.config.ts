@@ -4,7 +4,13 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   esbuild: { jsx: "automatic" },
   resolve: {
-    alias: { "@": path.resolve(__dirname) },
+    alias: [
+      {
+        find: "@/app/i18n",
+        replacement: path.resolve(__dirname, "tests/component/i18nStub.ts"),
+      },
+      { find: "@", replacement: path.resolve(__dirname) },
+    ],
   },
   test: {
     environment: "jsdom",
