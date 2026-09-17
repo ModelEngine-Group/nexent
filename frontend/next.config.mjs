@@ -25,6 +25,11 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
+  turbopack: {
+    resolveAlias: {
+      canvas: "./lib/empty-canvas.js",
+    },
+  },
   compress: true,
   // Fix workspace root detection for multiple lockfiles
   outputFileTracingRoot: process.cwd(),

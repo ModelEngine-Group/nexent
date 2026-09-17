@@ -44,6 +44,7 @@ dotenv.config({
 
 const app = next({
   dev,
+  turbo: dev,
   ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();
@@ -62,7 +63,7 @@ const PROJECT_CONFIG_DIR = path.resolve(
   process.env.PROJECT_CONFIG_DIR || BUILT_IN_PUBLIC_DIR
 );
 const ICON_UPLOAD_DIR = PROJECT_CONFIG_DIR;
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const PROJECT_CONFIG_ASSETS = {
   "/modelengine-logo.png": {
