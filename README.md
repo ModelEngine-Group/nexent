@@ -18,6 +18,8 @@ Nexent is a zero-code platform for auto-generating production-grade AI agents, b
 
 # 🚀 Get Started Now
 
+[![Listed on TakoAPI](https://takoapi.com/api/badge/modelengine-group-nexent)](https://takoapi.com/agents/modelengine-group-nexent)
+
 > ⭐ Before you get started, please star us on [GitHub](https://github.com/ModelEngine-Group/nexent) — your support drives us forward!
 
 ## Deploy on Your Own
