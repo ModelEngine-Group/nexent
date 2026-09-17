@@ -46,10 +46,10 @@ import {
   type MyEditableAgentListItem,
   type MyEditableAgentOwnershipCounts,
 } from "@/types/agentRepository";
-import { MineApplyListingModal } from "./MineApplyListingModal";
-import { MineReviewStatusModal } from "./MineReviewStatusModal";
-import { CreateNewAgentCard } from "./CreateNewAgentCard";
-import { MyAgentCard } from "./MyAgentCard";
+import { MineApplyListingModal } from "./components/MineApplyListingModal";
+import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
+import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
+import { MyAgentCard } from "./components/MyAgentCard";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterControls from "@/components/tag/TagFilterControls";
 import type {
@@ -68,7 +68,7 @@ export interface ReviewDeepLinkTarget {
   agentId: number;
 }
 
-interface MineAgentsViewProps {
+interface MyAgentProps {
   agents: MyEditableAgentListItem[];
   counts: MyEditableAgentOwnershipCounts;
   ownership: MineOwnershipFilter;
@@ -93,7 +93,7 @@ interface MineAgentsViewProps {
   onReviewDeepLinkConsumed?: () => void;
 }
 
-export function MineAgentsView({
+export function MyAgent({
   agents,
   counts,
   ownership,
@@ -116,7 +116,7 @@ export function MineAgentsView({
   deepLinkFallbackAgent = null,
   deepLinkFallbackLoading = false,
   onReviewDeepLinkConsumed,
-}: MineAgentsViewProps) {
+}: MyAgentProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();

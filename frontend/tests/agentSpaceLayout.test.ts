@@ -41,7 +41,8 @@ test("agent repository displays up to twelve unified cards in four desktop colum
     /import ResourceCard from "@\/components\/resource\/ResourceCard"/
   );
   assert.match(card, /<ResourceCard\s/);
-  assert.match(mineAgent, /MineAgentsView as MyAgent/);
+  assert.match(mineAgent, /export function MyAgent/);
+  assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{4\}/);
 });
 
 test("agent-space tabs load same-level content components", async () => {
