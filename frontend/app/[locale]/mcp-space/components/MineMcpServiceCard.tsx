@@ -1,5 +1,15 @@
 import { Button, Dropdown, Tooltip, type MenuProps } from "antd";
-import { ArrowDownFromLine, Clock, Edit3, MoreHorizontal, Power, RefreshCw, Share2, Trash2, Upload } from "lucide-react";
+import {
+  ArrowDownFromLine,
+  Clock,
+  Edit3,
+  MoreHorizontal,
+  Power,
+  RefreshCw,
+  Share2,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { McpServiceStatus, McpDeploymentType } from "@/const/mcpTools";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
@@ -10,6 +20,7 @@ import {
 } from "@/lib/mcpTools";
 import { getMineCardReviewBadge } from "@/lib/mcpToolsMine";
 import ResourceTagChips from "@/components/tag/ResourceTagChips";
+import ResourceCard from "@/components/resource/ResourceCard";
 import TransportIcon from "./shared/TransportIcon";
 
 export type MineMcpCardItem =
@@ -35,7 +46,10 @@ interface MineMcpServiceCardProps {
     onlineService: CommunityMcpCard
   ) => void;
   onDelete: (item: MineMcpCardItem) => void;
-  onViewReviewProgress?: (item: MineMcpCardItem, onlineService?: CommunityMcpCard) => void;
+  onViewReviewProgress?: (
+    item: MineMcpCardItem,
+    onlineService?: CommunityMcpCard
+  ) => void;
   onHealthCheck?: (item: MineMcpCardItem) => void;
 }
 
@@ -69,18 +83,23 @@ export default function MineMcpServiceCard({
     ? Boolean(onlineService) && onlineService?.reviewStatus === "approved"
     : reviewStatus === "approved";
   const hasOnlineRecord = isLocal
-    ? Boolean(onlineService) && (onlineService?.reviewStatus === "approved" || onlineService?.reviewStatus === "pending")
+    ? Boolean(onlineService) &&
+      (onlineService?.reviewStatus === "approved" ||
+        onlineService?.reviewStatus === "pending")
     : reviewStatus === "approved";
   const reviewBadge = getMineCardReviewBadge(item, onlineService);
-  const timeSource = (item.service as any);
+  const timeSource = item.service as any;
   const createDate = formatRegistryDate(
-    item.kind === "local" ? (timeSource.createTime || "") : (timeSource.createdAt || "")
+    item.kind === "local"
+      ? timeSource.createTime || ""
+      : timeSource.createdAt || ""
   );
   const toolCount = resolveToolCount(item);
 
   // Owned = user-created MCP can be published/updated; community-installed
   // or registry-installed MCPs only permit deletion.
-  const isOwned = item.kind === "community" || localService?.permission === "EDIT";
+  const isOwned =
+    item.kind === "community" || localService?.permission === "EDIT";
 
   const actionItems: MenuProps["items"] = (() => {
     if (!isOwned) {
@@ -98,7 +117,11 @@ export default function MineMcpServiceCard({
     const items: MenuProps["items"] = [];
 
     // Show "view review progress" for any submitted status (pending/approved/rejected)
-    if (reviewStatus === "pending" || reviewStatus === "approved" || reviewStatus === "rejected") {
+    if (
+      reviewStatus === "pending" ||
+      reviewStatus === "approved" ||
+      reviewStatus === "rejected"
+    ) {
       items.push({
         key: "view-review-progress",
         label: t("mcpTools.mine.viewReviewProgress"),
@@ -107,9 +130,11 @@ export default function MineMcpServiceCard({
       });
     }
 
-    if (reviewStatus !== "approved" && reviewStatus !== "pending" &&
+    if (
+      reviewStatus !== "approved" &&
+      reviewStatus !== "pending" &&
       (deploymentType === McpDeploymentType.REMOTE_LINK ||
-      deploymentType === McpDeploymentType.CONTAINER)
+        deploymentType === McpDeploymentType.CONTAINER)
     ) {
       // only remote link and container MCPs can be published to community
       items.push({
@@ -148,9 +173,11 @@ export default function MineMcpServiceCard({
   })();
 
   return (
-    <div className="group flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md">
+    <ResourceCard title={service.name} className="h-full">
       <div className="flex items-start justify-between gap-3">
-        <div className={`flex min-w-0 gap-3 ${isPending ? "items-center" : "items-start"}`}>
+        <div
+          className={`flex min-w-0 gap-3 ${isPending ? "items-center" : "items-start"}`}
+        >
           <TransportIcon
             transportType={service.transportType}
             deploymentType={deploymentType}
@@ -244,7 +271,9 @@ export default function MineMcpServiceCard({
           </span>
         ))}
         {tags.length > 3 ? (
-          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">+{tags.length - 3}</span>
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+            +{tags.length - 3}
+          </span>
         ) : null}
         {item.kind === "local" ? (
           <ResourceTagChips
@@ -291,10 +320,12 @@ export default function MineMcpServiceCard({
             {isEnabled ? t("mcpTools.mine.enabled") : t("mcpTools.mine.enable")}
           </Button>
         ) : (
-          <Button className="flex-1" disabled>{t("mcpTools.mine.publishedService")}</Button>
+          <Button className="flex-1" disabled>
+            {t("mcpTools.mine.publishedService")}
+          </Button>
         )}
       </div>
-    </div>
+    </ResourceCard>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Card, Dropdown } from "antd";
+import { Button, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
   Bot,
@@ -22,6 +22,7 @@ import {
   type MineCardMenuAction,
 } from "@/lib/agentRepositoryMine";
 import type { MyEditableAgentItem } from "@/types/agentRepository";
+import ResourceCard from "@/components/resource/ResourceCard";
 
 interface MyAgentCardProps {
   agent: MyEditableAgentItem;
@@ -115,17 +116,7 @@ export function MyAgentCard({
   });
 
   return (
-    <Card
-      className="h-full rounded-2xl border border-slate-200 shadow-sm dark:border-slate-700"
-      styles={{
-        body: {
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          padding: 20,
-        },
-      }}
-    >
+    <ResourceCard title={title} className="h-full">
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -254,6 +245,6 @@ export function MyAgentCard({
           </Button>
         </div>
       </div>
-    </Card>
+    </ResourceCard>
   );
 }

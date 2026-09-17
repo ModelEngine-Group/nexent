@@ -20,6 +20,8 @@ export interface ResourceCardProps {
   /** Actions displayed at the top-right (e.g., "..." menu). */
   actions?: ReactNode;
   footer?: ReactNode;
+  /** Use for legacy resource cards while their field mapping is migrated. */
+  children?: ReactNode;
   onClick?: () => void;
   onDoubleClick?: () => void;
   selected?: boolean;
@@ -38,6 +40,7 @@ export default function ResourceCard({
   headerActions,
   actions,
   footer,
+  children,
   onClick,
   onDoubleClick,
   selected,
@@ -62,89 +65,95 @@ export default function ResourceCard({
       )}
       onDoubleClick={onDoubleClick}
     >
-      {isInteractive ? (
-        <button
-          type="button"
-          aria-labelledby={titleId}
-          aria-pressed={selected}
-          onClick={onClick}
-          className="absolute inset-0 z-0 size-full cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset"
-        />
-      ) : null}
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col",
-          isInteractive && "pointer-events-none relative z-[1]"
-        )}
-      >
-        <div className="flex items-start gap-3">
-          {icon ? <span className="shrink-0">{icon}</span> : null}
-          <div className="min-w-0 flex-1">
-            <h2
-              id={titleId}
-              className="truncate text-base font-semibold text-slate-900 dark:text-slate-100"
-            >
-              {title}
-            </h2>
-            {subtitle ? (
-              <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                {subtitle}
+      {children ? (
+        children
+      ) : (
+        <>
+          {isInteractive ? (
+            <button
+              type="button"
+              aria-labelledby={titleId}
+              aria-pressed={selected}
+              onClick={onClick}
+              className="absolute inset-0 z-0 size-full cursor-pointer rounded-[inherit] border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset"
+            />
+          ) : null}
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col",
+              isInteractive && "pointer-events-none relative z-[1]"
+            )}
+          >
+            <div className="flex items-start gap-3">
+              {icon ? <span className="shrink-0">{icon}</span> : null}
+              <div className="min-w-0 flex-1">
+                <h2
+                  id={titleId}
+                  className="truncate text-base font-semibold text-slate-900 dark:text-slate-100"
+                >
+                  {title}
+                </h2>
+                {subtitle ? (
+                  <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                    {subtitle}
+                  </div>
+                ) : null}
+                {badge ? (
+                  <div className="mt-1 flex flex-wrap gap-2">{badge}</div>
+                ) : null}
               </div>
-            ) : null}
-            {badge ? (
-              <div className="mt-1 flex flex-wrap gap-2">{badge}</div>
-            ) : null}
-          </div>
-          {headerActions || actions ? (
-            <div
-              data-resource-card-action
-              className={cn(
-                "flex shrink-0 items-center gap-1",
-                actionClassName
-              )}
-              onDoubleClick={(event) => event.stopPropagation()}
-            >
-              {headerActions}
-              {actions}
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-1 flex-col">
-          {description ? (
-            <div className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-              {description}
-            </div>
-          ) : null}
-          {tags ? (
-            <div
-              className={cn(
-                "flex flex-wrap gap-2 pb-2 text-xs",
-                description ? "mt-3" : "mt-4"
-              )}
-            >
-              {tags}
-            </div>
-          ) : null}
-          <div className="mt-auto">
-            {meta ? (
-              <div className="flex min-h-7 items-center border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                <div className="flex w-full items-center justify-between gap-3">
-                  {meta}
+              {headerActions || actions ? (
+                <div
+                  data-resource-card-action
+                  className={cn(
+                    "flex shrink-0 items-center gap-1",
+                    actionClassName
+                  )}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                >
+                  {headerActions}
+                  {actions}
                 </div>
+              ) : null}
+            </div>
+            <div className="flex flex-1 flex-col">
+              {description ? (
+                <div className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  {description}
+                </div>
+              ) : null}
+              {tags ? (
+                <div
+                  className={cn(
+                    "flex flex-wrap gap-2 pb-2 text-xs",
+                    description ? "mt-3" : "mt-4"
+                  )}
+                >
+                  {tags}
+                </div>
+              ) : null}
+              <div className="mt-auto">
+                {meta ? (
+                  <div className="flex min-h-7 items-center border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    <div className="flex w-full items-center justify-between gap-3">
+                      {meta}
+                    </div>
+                  </div>
+                ) : null}
+                {footer ? (
+                  <div
+                    data-resource-card-action
+                    className={cn("mt-4", actionClassName)}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                  >
+                    {footer}
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-            {footer ? (
-              <div
-                data-resource-card-action
-                className={cn("mt-4", actionClassName)}
-                onDoubleClick={(event) => event.stopPropagation()}
-              >
-                {footer}
-              </div>
-            ) : null}
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

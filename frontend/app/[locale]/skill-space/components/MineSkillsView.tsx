@@ -21,6 +21,7 @@ import {
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
+import ResourceCard from "@/components/resource/ResourceCard";
 import { MineApplyListingModal } from "./MineApplyListingModal";
 import { SkillReviewStatusModal } from "./SkillReviewStatusModal";
 import {
@@ -520,7 +521,10 @@ function MineSkillCard({
   });
 
   return (
-    <article className="flex min-h-[200px] flex-col rounded-xl border border-border bg-background p-4 shadow-sm">
+    <ResourceCard
+      title={skill.name || t("skillRepository.common.untitled")}
+      className="h-full min-h-[200px] p-4"
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-start gap-3">
           <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -635,6 +639,6 @@ function MineSkillCard({
           </Tooltip>
         </div>
       </div>
-    </article>
+    </ResourceCard>
   );
 }
