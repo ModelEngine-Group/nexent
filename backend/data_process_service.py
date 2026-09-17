@@ -14,6 +14,10 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
+# MUST load .env BEFORE importing consts.const — its module-level variables
+# read os.getenv at import time and will miss values provided by .env.
+load_dotenv()
+
 from data_process.ray_config import RayConfig
 from utils.logging_utils import get_uvicorn_logging_config
 from consts.const import (
@@ -22,9 +26,6 @@ from consts.const import (
     DOCKER_ENVIRONMENT, RAY_OBJECT_STORE_MEMORY_GB, RAY_preallocate_plasma, RAY_TEMP_DIR,
     DP_PART_PROCESSOR_COUNT,
 )
-
-# Load environment variables
-load_dotenv()
 
 # Configure logging: console + file, both console and uvicorn share the same config
 import logging.config

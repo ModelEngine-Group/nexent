@@ -2,17 +2,19 @@ import logging
 import logging.config
 import warnings
 
+from dotenv import load_dotenv
+
+
+# MUST load .env BEFORE importing consts.const — its module-level variables
+# read os.getenv at import time and will miss values provided by .env.
+load_dotenv()
+
 import uvicorn
 
 from consts.const import APP_VERSION
 
 
 warnings.filterwarnings("ignore", category=UserWarning)
-
-from dotenv import load_dotenv
-
-
-load_dotenv()
 
 from apps.config_app import app
 from utils.logging_utils import (

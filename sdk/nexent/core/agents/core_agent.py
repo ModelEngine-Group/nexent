@@ -64,6 +64,180 @@ def _remove_parallel_executor_import(code: str) -> str:
     return PARALLEL_EXECUTOR_IMPORT_RE.sub("", code)
 
 
+def _normalize_ask_user_xml(text: str) -> str:
+    """Convert model-invented HITL interaction formats into smolagents code.
+
+    DeepSeek-V4-Pro and similar reasoning models occasionally invent their own
+    markup instead of using the required `<code>...</code>` block. We accept
+    five variants and collapse them to a single canonical `<code>
+    ask_user(questions=[...])</code>` form:
+
+    1. XML attr form:    `<ask_user questions='[JSON]'></ask_user>`
+    2. DISPLAY wrapper:  `<DISPLAY:python>ask_user(questions=[...])</DISPLAY>`
+    3. Plain wrapper:   `<DISPLAY>ask_user(questions=[...])</DISPLAY>`
+    4. XML container:    `<clarification><questions><question ...>` ...
+    5. XML container:    `<ask_user><questions><question ...>` ...
+
+    Variants 2 & 3 are commonly used when the model confuses the "display"
+    convention with the "execute" convention. We only convert DISPLAY bodies
+    that are ``ask_user(...)`` calls so legitimate display-only code is not
+    executed. Variants 4 & 5 share a common declarative XML schema and are
+    handled by the same generic container parser that looks for any outer
+    tag wrapping a ``<questions>...</questions>`` block.
+    """
+    import ast as _ast
+    import json as _json
+    import re as _re
+    import xml.etree.ElementTree as _ET
+
+    # ------------------------------------------------------------------
+    # Variant 1: <ask_user questions='[JSON|PYTHON_DICT]'> ... </ask_user> OR
+    #            <ask_user questions='[JSON|PYTHON_DICT]' /> (self-closing).
+    # Model may output standard JSON (double-quoted) or Python dict syntax
+    # (single-quoted); we try json.loads first and fall back to ast.literal_eval.
+    # ------------------------------------------------------------------
+    xml_attr_pattern = _re.compile(
+        r"<ask_user\s+questions=(['\"])(.+?)\1\s*(?:</ask_user>|/\s*>)",
+        _re.DOTALL | _re.IGNORECASE,
+    )
+
+    def _xml_attr_replace(match: _re.Match) -> str:
+        raw = match.group(2)
+        # Try JSON first (double-quotes, true/false/null), then Python literal.
+        questions = None
+        try:
+            questions = _json.loads(raw)
+        except _json.JSONDecodeError:
+            # Model sometimes mixes JSON-style bare identifiers (true/false/null)
+            # into otherwise Python-dict-syntax output (single-quoted strings).
+            # Use regex on word boundaries so we don't accidentally rewrite
+            # these words when they appear inside string values.
+            pyish = _re.sub(r"\btrue\b", "True", raw)
+            pyish = _re.sub(r"\bfalse\b", "False", pyish)
+            pyish = _re.sub(r"\bnull\b", "None", pyish)
+            try:
+                questions = _ast.literal_eval(pyish)
+            except (ValueError, SyntaxError):
+                pass
+        if questions is None:
+            return match.group(0)
+        return f"<code>\nask_user(questions={questions!r})\n</code>"
+
+    # ------------------------------------------------------------------
+    # Variants 2 & 3: DISPLAY wrapper containing an ask_user(...) call.
+    # We only convert when the body IS a call to ask_user; other DISPLAY
+    # content is preserved as display-only.
+    # ------------------------------------------------------------------
+    display_pattern = _re.compile(
+        r"<DISPLAY(?::\w+)?>(.+?)</DISPLAY>",
+        _re.DOTALL | _re.IGNORECASE,
+    )
+
+    def _display_replace(match: _re.Match) -> str:
+        body = match.group(1).strip()
+        if body.startswith("ask_user(") and body.endswith(")"):
+            return f"<code>\n{body}\n</code>"
+        return match.group(0)
+
+    # ------------------------------------------------------------------
+    # Variants 4 & 5 & 6: Declarative XML schemas from reasoning models.
+    # The outer wrapper tag varies (<clarification>, <ask_user>, or some
+    # future invention) and may or may not include a <questions>...</questions>
+    # grouping layer. The one invariant is that questions live in
+    # <question id="..." type="..." ...>...</question> siblings (optionally
+    # containing nested <options>/<option> and <allow_other>).
+    #
+    # Strategy: find ANY XML container that has <question> children, extract
+    # the inner XML, and parse all <question> elements from it. We do NOT
+    # require a specific outer tag or an intermediate <questions> wrapper.
+    # ------------------------------------------------------------------
+    # Greedy match: any opening tag (not <code> or </) that wraps content
+    # containing at least one <question ...> block. The greedy .+ ensures we
+    # capture up to the matching closing tag even if there are nested tags.
+    any_container_pattern = _re.compile(
+        r"<(\w+)\b[^>]*>(.+)</\1>",
+        _re.DOTALL | _re.IGNORECASE,
+    )
+    # But we only care if the content actually has <question> children.
+    has_questions_subpattern = _re.compile(r"<question\b", _re.IGNORECASE)
+
+    def _parse_all_questions(xml_fragment: str) -> list[dict] | None:
+        """Extract all <question>...</question> blocks from an arbitrary XML fragment."""
+        # Wrap in synthetic root so ET.fromstring accepts the fragment.
+        xml_source = f"<_root>{xml_fragment}</_root>"
+        try:
+            root = _ET.fromstring(xml_source)
+        except _ET.ParseError:
+            return None
+
+        questions: list[dict] = []
+        # Search at any depth — <question> may be direct children of the root
+        # or nested one level under <questions>.
+        for q_elem in root.iter("question"):
+            q: dict = {}
+            for attr in ("id", "type", "title", "required", "placeholder"):
+                val = q_elem.get(attr)
+                if val is None:
+                    continue
+                if attr == "required":
+                    q[attr] = val.lower() in ("true", "1", "yes")
+                else:
+                    q[attr] = val
+
+            # Fallback: missing type → default to text
+            if "type" not in q:
+                q["type"] = "text"
+
+            # Text content of <question> tag → placeholder if not set yet.
+            text_content = (q_elem.text or "").strip()
+            if text_content and "placeholder" not in q:
+                q["placeholder"] = text_content
+
+            # Parse <options><option id="" label=""/></options> children.
+            options_elem = q_elem.find("./options")
+            if options_elem is not None:
+                options: list[dict] = []
+                for opt in options_elem.findall("./option"):
+                    oid = opt.get("id")
+                    olabel = opt.get("label")
+                    if oid:
+                        options.append({"id": oid, "label": olabel or oid})
+                if options:
+                    q["options"] = options
+
+            # Parse <allow_other>true</allow_other> child text.
+            ao_elem = q_elem.find("./allow_other")
+            if ao_elem is not None and (ao_elem.text or "").strip().lower() in ("true", "1", "yes"):
+                q["allow_other"] = True
+
+            questions.append(q)
+
+        return questions if questions else None
+
+    def _container_replace(match: _re.Match) -> str:
+        # Skip <code> blocks — they're our own output (or existing valid code).
+        tag_name = match.group(1).lower()
+        if tag_name in ("code", "display"):
+            return match.group(0)
+        body = match.group(2)
+        if not has_questions_subpattern.search(body):
+            return match.group(0)
+        questions = _parse_all_questions(body)
+        if questions is None:
+            return match.group(0)
+        return f"<code>\nask_user(questions={questions!r})\n</code>"
+
+    # Apply transformations in order. Each step only replaces its own targets
+    # so later steps don't re-parse already-normalized <code> blocks.
+    normalized = xml_attr_pattern.sub(_xml_attr_replace, text)
+    normalized = display_pattern.sub(_display_replace, normalized)
+    normalized = any_container_pattern.sub(_container_replace, normalized)
+
+    if normalized != text:
+        logger.info("normalized_invented_ask_user_format")
+    return normalized
+
+
 def parse_code_blobs(text: str) -> str:
     """Extract code blocks from the LLM's output for execution.
 
@@ -911,6 +1085,21 @@ Additional Args:
                 self.logger.log_markdown(
                     content=model_output, title="MODEL OUTPUT", level=LogLevel.INFO)
             except Exception as e:
+                import traceback as _tb
+                ctx_summary = ""
+                try:
+                    msg_count = len(input_messages) if input_messages is not None else -1
+                    self.logger.error(
+                        "LLM call failed step=%s model=%s messages=%d error_type=%s error_msg=%s\n%s",
+                        self.step_number,
+                        getattr(self.model, "model_id", getattr(self.model, "model_name", "unknown")),
+                        msg_count,
+                        type(e).__name__,
+                        str(e)[:800],
+                        _tb.format_exc()[:2000],
+                    )
+                except Exception:
+                    self.logger.error("LLM call failed (diagnostic itself failed): %s", e)
                 raise AgentGenerationError(
                     f"Error in generating model output:\n{e}", self.logger) from e
 
@@ -919,6 +1108,10 @@ Additional Args:
 
             if hitl is not None:
                 hitl.generated(memory_step)
+
+        # Normalize model-invented tags (e.g. DeepSeek's <ask_user questions='...'>)
+        # into standard smolagents <code>...</code> format before any parsing.
+        model_output = _normalize_ask_user_xml(model_output)
 
         # Parse
         try:
@@ -1373,6 +1566,8 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
             else 1
         )
 
+        generation_error_retry_count = 0
+
         if self.enable_planning and (hitl is None or not hitl.restored):
             # v1.4: Plan creation happens lazily via the create_plan tool
             # during the first LLM code block. No upfront planning step here.
@@ -1497,6 +1692,12 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
                 raise
             except AgentError as e:
                 action_step.error = e
+                if isinstance(e, AgentGenerationError):
+                    generation_error_retry_count += 1
+                    logger.warning(
+                        "event=generation_error_retry count=%d step=%d error=%s",
+                        generation_error_retry_count, self.step_number, str(e)[:300],
+                    )
 
             finally:
                 if not interrupted and returned_final_answer and hitl is not None:

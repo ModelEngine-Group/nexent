@@ -190,11 +190,17 @@ class OpenAIModel(OpenAIServerModel):
         client_kwargs = kwargs.get("client_kwargs", {})
         if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
-            from openai._base_client import httpx2
+
+            # openai>=2.50 removed the httpx2 re-export; fall back to the
+            # standalone httpx package which both old and new openai versions depend on.
+            try:
+                from openai._base_client import httpx2 as _httpx_mod  # type: ignore[attr-defined]
+            except ImportError:
+                import httpx as _httpx_mod  # type: ignore[no-redef]
 
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=httpx2.Timeout(
+                timeout=_httpx_mod.Timeout(
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,

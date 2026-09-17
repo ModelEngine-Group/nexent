@@ -103,8 +103,17 @@ class LiveHumanInteractionRuntime(HumanInteractionRuntime):
     def ask(self, questions):
         try:
             form = ClarificationForm.model_validate({"questions": questions})
-        except ValidationError:
+        except ValidationError as exc:
             # Malformed model output is repairable tool feedback, not a chat failure.
+            import sys as _sys
+            import traceback as _tb
+            # Log via root logger (no category) so it's always captured.
+            _sys.stderr.write(
+                f"\n[HITL VALIDATION FAILED] errors={exc.errors()} "
+                f"questions={json.dumps(questions, default=str, ensure_ascii=False)[:2000]}\n"
+                f"traceback={_tb.format_exc()[:1000]}\n"
+            )
+            _sys.stderr.flush()
             return json.dumps({"status": "invalid_clarification", "instruction": (
                 "No card was created. If essential input is still missing, retry with 1-5 concise questions. "
                 "Each has a unique id, type (text/single_choice/multiple_choice), title and required. "

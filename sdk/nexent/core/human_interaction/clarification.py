@@ -33,13 +33,13 @@ CLARIFICATION_POLICY = (
 
 
 class ClarificationOption(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     id: Identifier
     label: str = Field(min_length=1, max_length=300)
 
 
 class ClarificationQuestion(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     id: Identifier
     type: Literal["text", "single_choice", "multiple_choice"]
     title: str = Field(min_length=1, max_length=500)
@@ -75,7 +75,7 @@ class ClarificationQuestion(BaseModel):
 
 
 class ClarificationForm(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="ignore")
     questions: list[ClarificationQuestion] = Field(min_length=1, max_length=5)
 
     @model_validator(mode="after")
