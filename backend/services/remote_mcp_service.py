@@ -1065,31 +1065,19 @@ async def delete_mcp_service(
                 user_id=user_id,
             )
             _refresh_openapi_services_in_mcp(tenant_id)
-            set_mcp_tools_unavailable(
-                tenant_id=tenant_id,
-                mcp_server_name="outer-apis",
-                user_id=user_id,
-            )
         except Exception as exc:
             logger.warning(
                 f"Failed to remove API-to-MCP service '{current_record.get('mcp_name')}': {exc}"
             )
-    else:
-        # Hide the deleted MCP's tools from the agent tool selection list so
-        # they no longer appear after deletion (tool rows are kept for agent references).
-        try:
-            set_mcp_tools_unavailable(
-                tenant_id=tenant_id,
-                mcp_server_name=current_record.get("mcp_name") or "",
-                user_id=user_id,
-            )
-        except Exception as exc:
-            logger.warning(f"Failed to mark MCP tools unavailable for '{current_record.get('mcp_name')}': {exc}")
     # Hide the deleted MCP's tools and remove their editable agent draft bindings.
     # Cleanup must succeed before the MCP record is deleted to avoid stale bindings.
     set_mcp_tools_unavailable(
         tenant_id=tenant_id,
-        mcp_server_name=current_record.get("mcp_name") or "",
+        mcp_server_name=(
+            "outer-apis"
+            if is_openapi_service
+            else current_record.get("mcp_name") or ""
+        ),
         user_id=user_id,
     )
 
