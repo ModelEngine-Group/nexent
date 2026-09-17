@@ -127,9 +127,10 @@ export function ProviderTestPanel({
       title={t("memory.external.test.title", {
         name: provider?.provider_name ?? "",
       })}
-      width={560}
+      size={560}
       onClose={onClose}
       destroyOnHidden
+      forceRender
       footer={
         <div className="external-provider-drawer-footer">
           <Button onClick={onClose}>
@@ -148,7 +149,7 @@ export function ProviderTestPanel({
       <Alert
         type="warning"
         showIcon
-        message={t("memory.external.test.sequenceWarning")}
+        title={t("memory.external.test.sequenceWarning")}
       />
       <Form
         form={form}
@@ -193,7 +194,7 @@ export function ProviderTestPanel({
           className="external-provider-test-result"
           type={result.success ? "success" : "error"}
           showIcon
-          message={
+          title={
             result.success
               ? t("memory.external.test.succeeded")
               : t("memory.external.test.failed")

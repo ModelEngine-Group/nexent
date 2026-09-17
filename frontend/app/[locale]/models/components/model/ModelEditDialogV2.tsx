@@ -996,7 +996,7 @@ export const ModelEditDialogV2 = ({
         cancelText={t("common.cancel", { defaultValue: "取消" })}
         width={640}
         centered
-        destroyOnClose={false}
+        destroyOnHidden={false}
         styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
       >
         <div className="space-y-4">

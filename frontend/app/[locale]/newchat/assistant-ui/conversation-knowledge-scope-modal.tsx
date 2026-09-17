@@ -753,7 +753,7 @@ export const ConversationKnowledgeScopeModal: FC<
             className="mb-3"
             type="warning"
             showIcon
-            message={t("chat.knowledgeScope.incompatible")}
+            title={t("chat.knowledgeScope.incompatible")}
           />
         )}
       {capabilities?.legacy_prompt_warning?.detected && (
@@ -761,7 +761,7 @@ export const ConversationKnowledgeScopeModal: FC<
           className="mb-3"
           type="warning"
           showIcon
-          message={t("chat.knowledgeScope.legacyPromptWarning")}
+          title={t("chat.knowledgeScope.legacyPromptWarning")}
           description={t("chat.knowledgeScope.affectedAgents", {
             ids: capabilities.legacy_prompt_warning.affected_agent_ids.join(
               ", "
@@ -787,7 +787,7 @@ export const ConversationKnowledgeScopeModal: FC<
           <Alert
             type="error"
             showIcon
-            message={t("chat.knowledgeScope.sourceConflict")}
+            title={t("chat.knowledgeScope.sourceConflict")}
           />
         ) : (
           <Empty description={t("chat.knowledgeScope.noTool")} />
