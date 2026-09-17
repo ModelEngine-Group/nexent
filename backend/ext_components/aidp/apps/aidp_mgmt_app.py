@@ -18,27 +18,25 @@ import logging
 import time
 from http import HTTPStatus
 from typing import Annotated, List, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, File, Path, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
-from nexent.core.concurrency import run_blocking
+from starlette.background import BackgroundTask
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
 from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
-    AidpKbConflictError,
-    AidpKbNotFoundError,
-    AidpKbPermissionDeniedError,
-    AidpKbSyncError,
     AidpGroupValidationError,
+    AidpKbConflictError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
-from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
 from ext_components.aidp.services.aidp_access_service import (
     get_cached_aidp_doc_count,
     get_cached_aidp_kb_detail,
@@ -46,6 +44,13 @@ from ext_components.aidp.services.aidp_access_service import (
     invalidate_aidp_doc_count_cache,
     invalidate_aidp_kb_detail_cache,
     resolve_current_aidp_access,
+)
+from ext_components.aidp.services.aidp_kb_update_service import save_kb_settings
+from ext_components.aidp.services.aidp_permission_service import (
+    EDIT,
+    PRIVATE,
+    READ_ONLY,
+    _validate_group_ids_strict,  # noqa: F401 - retained as a module-level compatibility symbol
 )
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
@@ -55,16 +60,13 @@ from ext_components.aidp.services.aidp_service import (
     get_aidp_kb_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
+    remove_aidp_docs_impl,
+    stream_aidp_doc_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from ext_components.aidp.services.aidp_permission_service import (
-    EDIT,
-    PRIVATE,
-    READ_ONLY,
-    _validate_group_ids_strict,
-)
 from utils import auth_utils as auth_utils_module
+
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
 logger = logging.getLogger("aidp_mgmt_app")
@@ -187,6 +189,17 @@ class SetPermissionRequest(BaseModel):
     )
 
 
+class RemoveAidpDocumentsRequest(BaseModel):
+
+    file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
+
+
+class DownloadAidpDocumentRequest(BaseModel):
+    """AIDP file selected for download."""
+
+    file_uuid: UUID = Field(..., description="AIDP file UUID")
+
+
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
@@ -241,11 +254,6 @@ def _raise_aidp_conflict(exc: IntegrityError) -> None:
         status_code=HTTPStatus.CONFLICT,
         detail="Knowledge base already exists for this tenant",
     )
-
-
-# HTTPException is imported lazily to keep FastAPI's exception handler in
-# control of the response body.
-from fastapi import HTTPException  # noqa: E402  (placed here to avoid editing mid-file)
 
 
 def _credentials() -> tuple[str, str]:
@@ -783,6 +791,65 @@ async def list_documents(
         count_reliable,
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/remove")
+async def remove_documents(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RemoveAidpDocumentsRequest,
+) -> JSONResponse:
+    """Remove AIDP documents."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-remove-documents",
+        remove_aidp_docs_impl,
+        server_url,
+        api_key,
+        kds_id,
+        [str(file_uuid) for file_uuid in body.file_uuids],
+        lane="control-io",
+        owner="config",
+    )
+
+    success_list = result["success_list"]
+    if success_list:
+        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/download")
+async def download_document(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: DownloadAidpDocumentRequest,
+) -> StreamingResponse:
+    """Proxy an AIDP document as a binary attachment."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+
+    server_url, api_key = _credentials()
+    aidp_response = await stream_aidp_doc_impl(
+        server_url,
+        api_key,
+        kds_id,
+        str(body.file_uuid),
+    )
+    response_headers = {
+        "Content-Disposition": aidp_response.headers["Content-Disposition"],
+        "X-File-Size": aidp_response.headers["X-File-Size"],
+    }
+
+    return StreamingResponse(
+        aidp_response.aiter_bytes(),
+        media_type=aidp_response.headers["Content-Type"],
+        headers=response_headers,
+        background=BackgroundTask(aidp_response.aclose),
+    )
 
 
 @aidp_mgmt_router.patch("/aidp-permissions/{kds_id}")

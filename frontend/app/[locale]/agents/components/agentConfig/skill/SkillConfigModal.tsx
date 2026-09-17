@@ -556,7 +556,7 @@ export default function SkillConfigModal({
       onCancel={onCancel}
       width={600}
       zIndex={zIndex}
-      maskClosable={maskClosable}
+      mask={{ closable: maskClosable }}
       destroyOnHidden
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

@@ -969,7 +969,7 @@ function TenantList({
           type="error"
           showIcon
           className="mb-4"
-          message={t("common.cannotBeUndone")}
+          title={t("common.cannotBeUndone")}
           description={
             <ul className="list-disc pl-4 mt-2 space-y-1">
               <li>

@@ -433,7 +433,7 @@ function RunsTab() {
           if (!trialRunning) setDrawer(false);
         }}
         size="large"
-        maskClosable={!trialRunning}
+        mask={{ closable: !trialRunning }}
         closable={!trialRunning}
       >
         <Spin
@@ -1410,7 +1410,7 @@ function EvaluatorsTab() {
         open={drawer}
         onClose={() => setDrawer(false)}
         size="large"
-        maskClosable={!busy}
+        mask={{ closable: !busy }}
         closable={!busy}
       >
         <Spin
@@ -2789,7 +2789,7 @@ function SetsTab() {
           setGenFiles([]);
         }}
         size="large"
-        maskClosable={!busy}
+        mask={{ closable: !busy }}
         closable={!busy}
       >
         <Spin spinning={busy} description={t("agentEvaluation.genRunningHint")}>

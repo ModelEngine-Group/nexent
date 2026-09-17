@@ -559,7 +559,7 @@ export default function AgentPrompt() {
         okButtonProps={{ disabled: !canManage && !isSpeedMode }}
         width={600}
         centered
-        destroyOnClose={false}
+        destroyOnHidden={false}
         styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
       >
         {configuringModel && (

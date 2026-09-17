@@ -561,7 +561,7 @@ export function PlatformQuotaPanel({
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message={t("quota.unmanagedTenants", {
+            title={t("quota.unmanagedTenants", {
               count: data.unmanaged_tenant_count,
               defaultValue: "{{count}} tenant(s) have no hard quota",
             })}
@@ -577,7 +577,7 @@ export function PlatformQuotaPanel({
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
-          message={t(
+          title={t(
             "quota.platformOversubscribed",
             "Tenant quotas exceed platform capacity"
           )}

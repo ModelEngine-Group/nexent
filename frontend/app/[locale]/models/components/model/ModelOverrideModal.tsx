@@ -141,7 +141,7 @@ export const ModelOverrideModal = ({
       cancelButtonProps={{ disabled }}
       width={760}
       centered
-      destroyOnClose={false}
+      destroyOnHidden={false}
       styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
     >
       {models.length === 0 ? (
