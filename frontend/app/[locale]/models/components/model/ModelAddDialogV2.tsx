@@ -906,6 +906,10 @@ export const ModelAddDialogV2 = ({
         modelType: resolvedModelType,
         baseUrl: customForm.url,
         apiKey: customForm.apiKey,
+        // Edit mode leaves apiKey empty to "keep existing"; pass the model
+        // id so the backend probes with the stored key instead of the
+        // "sk-no-api-key" placeholder.
+        modelId: model?.id,
         ...capacityPayload,
         ...inferencePayload,
         ...embeddingPayload,

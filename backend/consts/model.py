@@ -578,6 +578,11 @@ class ModelRequest(BaseModel):
     # forwards them to model_capacity_suggestion_accept_total.
     accepted_suggestion_match_kind: Optional[str] = None
     accepted_capability_profile_version: Optional[str] = None
+    # Edit-dialog connectivity probes omit the stored api_key (the backend
+    # never returns it to the client). When set, /temporary_healthcheck falls
+    # back to the persisted key for this model instead of probing with the
+    # "sk-no-api-key" placeholder.
+    model_id: Optional[int] = None
 
 
 class CapacitySuggestionFields(BaseModel):
