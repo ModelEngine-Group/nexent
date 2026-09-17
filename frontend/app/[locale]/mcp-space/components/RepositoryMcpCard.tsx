@@ -49,13 +49,14 @@ export default function RepositoryMcpCard({
     <ResourceCard
       className="h-full"
       title={service.name}
+      footerLayout="stacked"
       icon={
         <TransportIcon
           transportType={service.transportType}
           deploymentType={deploymentType}
           label={deploymentLabel}
           seed={service.name}
-          className="!size-10 rounded-xl"
+          className="!size-11 rounded-xl"
         />
       }
       description={service.description || t("mcpTools.detail.noDescription")}
@@ -110,7 +111,7 @@ export default function RepositoryMcpCard({
           <Button
             type={installed ? "default" : "primary"}
             disabled={installed}
-            className="flex-1"
+            className="min-w-0 flex-1"
             icon={<Download className="size-3.5" />}
             onClick={() => onInstall(service)}
           >
@@ -119,7 +120,7 @@ export default function RepositoryMcpCard({
               : t("mcpTools.repository.install")}
           </Button>
           <Button
-            className="flex-1"
+            className="min-w-0 flex-1"
             icon={<Eye className="size-3.5" />}
             onClick={() => onSelect(service)}
           >

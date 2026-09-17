@@ -64,6 +64,7 @@ export function SkillRepositoryCard({
     <ResourceCard
       className="h-full"
       title={listing.name}
+      footerLayout="stacked"
       icon={
         <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Bot className="size-5" aria-hidden />

@@ -110,7 +110,7 @@ export function RepositoryView({
                   <div className="flex items-center gap-2">
                     <Button
                       type="primary"
-                      className="flex-1 text-sm"
+                      className="min-w-0 flex-1 text-sm"
                       icon={<Copy className="size-3.5" />}
                       loading={
                         installingRepositoryId === listing.skill_repository_id
@@ -121,7 +121,7 @@ export function RepositoryView({
                     </Button>
                     <Button
                       type="default"
-                      className="flex-1 text-sm"
+                      className="min-w-0 flex-1 text-sm"
                       icon={<Eye className="size-3.5" />}
                       onClick={() => onDetailClick(listing)}
                     >

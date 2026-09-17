@@ -15,6 +15,8 @@ export interface ResourceCardProps {
   /** Resource tags displayed below the description. */
   tags?: ReactNode;
   meta?: ReactNode;
+  /** Display footer actions below metadata instead of beside it. */
+  footerLayout?: "inline" | "stacked";
   /** Status icons displayed beside the title, left of actions. */
   headerActions?: ReactNode;
   /** Actions displayed at the top-right (e.g., "..." menu). */
@@ -37,6 +39,7 @@ export default function ResourceCard({
   badge,
   tags,
   meta,
+  footerLayout = "stacked",
   headerActions,
   actions,
   footer,
@@ -133,20 +136,35 @@ export default function ResourceCard({
                 </div>
               ) : null}
               <div className="mt-auto">
-                {meta ? (
-                  <div className="flex min-h-7 items-center border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                    <div className="flex w-full items-center justify-between gap-3">
-                      {meta}
-                    </div>
-                  </div>
-                ) : null}
-                {footer ? (
-                  <div
-                    data-resource-card-action
-                    className={cn("mt-4", actionClassName)}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                  >
-                    {footer}
+                {footerLayout === "stacked" ? (
+                  <>
+                    {meta ? (
+                      <div className="flex min-h-7 items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                        {meta}
+                      </div>
+                    ) : null}
+                    {footer ? (
+                      <div
+                        data-resource-card-action
+                        className={cn("mt-4", actionClassName)}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                      >
+                        {footer}
+                      </div>
+                    ) : null}
+                  </>
+                ) : meta || footer ? (
+                  <div className="flex min-h-7 items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    <div className="min-w-0">{meta}</div>
+                    {footer ? (
+                      <div
+                        data-resource-card-action
+                        className={cn("shrink-0", actionClassName)}
+                        onDoubleClick={(event) => event.stopPropagation()}
+                      >
+                        {footer}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

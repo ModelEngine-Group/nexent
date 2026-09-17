@@ -63,6 +63,7 @@ export function AgentRepositoryCard({
     <ResourceCard
       className="h-full"
       title={title}
+      footerLayout="stacked"
       subtitle={author}
       icon={
         <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
@@ -131,17 +132,16 @@ export function AgentRepositoryCard({
       footer={
         <div className="flex items-center gap-2">
           <Button
-            size="small"
-            className="flex-1"
+            type="primary"
+            className="min-w-0 flex-1"
             icon={<Copy className="size-3.5" />}
             onClick={() => onCopyClick?.(listing)}
           >
             {t("agentRepository.card.copy")}
           </Button>
           <Button
-            size="small"
             type="default"
-            className="flex-1"
+            className="min-w-0 flex-1"
             icon={<Eye className="size-3.5" />}
             onClick={() => onDetailClick?.(listing)}
           >
