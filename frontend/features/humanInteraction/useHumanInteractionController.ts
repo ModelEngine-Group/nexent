@@ -124,17 +124,23 @@ export function useHumanInteractionController({
 
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
+    // When the live SSE stream is active the backend pushes human_interaction
+    // events directly — no polling is needed. We only poll while the stream
+    // is closed (e.g. after page load before the first run, or after a run
+    // finishes) so the frontend can still discover WAITING_HUMAN requests
+    // that were created while we were disconnected.
+    const intervalMs = isRunning ? 0 : 5000;
     const poll = async () => {
       if (!active) return;
       await refresh();
-      if (active) timer = setTimeout(poll, 1500);
+      if (active && intervalMs > 0) timer = setTimeout(poll, intervalMs);
     };
     void poll();
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [available, conversationId, refresh]);
+  }, [available, conversationId, isRunning, refresh]);
 
   useEffect(() => {
     if (isRunning || !resume.current) return;
