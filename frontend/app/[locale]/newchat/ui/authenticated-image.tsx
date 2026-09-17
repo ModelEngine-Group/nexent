@@ -60,9 +60,10 @@ export const AuthenticatedImage: React.FC<
   proxy = false,
   ...imgProps
 }) => {
-  const isAidpImage = src ? isAidpImageUrl(src) : false;
-  const isLocalKnowledgeBaseImage = src
-    ? isLocalKnowledgeBaseImageUrl(src)
+  const imageSrc = typeof src === "string" ? src : undefined;
+  const isAidpImage = imageSrc ? isAidpImageUrl(imageSrc) : false;
+  const isLocalKnowledgeBaseImage = imageSrc
+    ? isLocalKnowledgeBaseImageUrl(imageSrc)
     : false;
   const needsBackendFetch = proxy || isAidpImage || isLocalKnowledgeBaseImage;
 
@@ -82,7 +83,7 @@ export const AuthenticatedImage: React.FC<
   // Protected image: go through the authenticated backend path.
   return (
     <AuthenticatedRemoteImage
-      src={src!}
+      src={imageSrc!}
       alt={alt}
       className={className}
       fallback={fallback}
@@ -111,7 +112,7 @@ const PlainPreviewableImage: React.FC<
         onClick={handleClick}
         {...imgProps}
       />
-      {previewOpen && src ? (
+      {previewOpen && typeof src === "string" ? (
         <ImagePreviewOverlay
           src={src}
           alt={alt}

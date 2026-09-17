@@ -291,7 +291,7 @@ export function ProviderConfigCard({
             <Alert
               type="info"
               showIcon
-              message={t("memory.external.masterSwitchOff")}
+              title={t("memory.external.masterSwitchOff")}
             />
           )}
 
@@ -325,7 +325,7 @@ export function ProviderConfigCard({
             <Alert
               type="error"
               showIcon
-              message={t("memory.external.loadFailed")}
+              title={t("memory.external.loadFailed")}
               action={
                 <Button
                   size="small"
