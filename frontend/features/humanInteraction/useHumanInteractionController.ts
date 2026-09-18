@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { API_BASE_URL } from "@/services/api";
 import {
   humanInteractionClient,
   type HumanDecision,
@@ -18,6 +19,13 @@ const ACTIVE_STATUSES = new Set([
   "RECOVERY_REQUIRED",
 ]);
 const STREAM_RECONNECT_STATUSES = new Set(["READY", "RUNNING"]);
+const TERMINAL_STATUSES = new Set([
+  "COMPLETED",
+  "FAILED",
+  "STOPPED",
+  "EXPIRED",
+  "RECOVERY_REQUIRED",
+]);
 
 export interface HumanInteractionController {
   available: boolean;
@@ -59,7 +67,15 @@ export function useHumanInteractionController({
     new Map<string, { body: string; idempotencyKey: string }>()
   );
   const onEnabledChangeRef = useRef(onEnabledChange);
+  // Rate-limit snapshots: dedupe in-flight callers and enforce a 3s min interval.
+  const refreshInFlight = useRef(false);
+  const lastSnapshotAt = useRef(0);
+  const MIN_SNAPSHOT_INTERVAL_MS = 3000;
+  // Mirror of the latest `run` state; keeps `refresh` dependencies stable.
+  const runRef = useRef<HumanRun | null>(null);
   activeConversation.current = conversationId;
+
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
   useEffect(() => {
     onEnabledChangeRef.current = onEnabledChange;
@@ -84,11 +100,24 @@ export function useHumanInteractionController({
 
   const refresh = useCallback(async () => {
     const requestedConversation = conversationId;
-    const sequence = ++refreshSequence.current;
     if (!conversationId) {
+      runRef.current = null;
       setRun(null);
+      setActiveRunId(null);
       return null;
     }
+    // Guard 1: coalesce while a snapshot is in flight.
+    if (refreshInFlight.current) {
+      return runRef.current;
+    }
+    // Guard 2: respect the minimum snapshot interval.
+    const now = Date.now();
+    if (now - lastSnapshotAt.current < MIN_SNAPSHOT_INTERVAL_MS) {
+      return runRef.current;
+    }
+    refreshInFlight.current = true;
+    lastSnapshotAt.current = now;
+    const sequence = ++refreshSequence.current;
     try {
       const value = await humanInteractionClient.conversation(conversationId);
       if (
@@ -97,10 +126,13 @@ export function useHumanInteractionController({
       ) {
         return null;
       }
+      runRef.current = value;
       setRun(value);
       setError("");
-      if (!value || !STREAM_RECONNECT_STATUSES.has(value.status)) {
-        resume.current = null;
+      if (value) {
+        if (!STREAM_RECONNECT_STATUSES.has(value.status)) {
+          resume.current = null;
+        }
       }
       return value;
     } catch (cause) {
@@ -112,29 +144,107 @@ export function useHumanInteractionController({
       }
       setError(cause instanceof Error ? cause.message : String(cause));
       return null;
+    } finally {
+      refreshInFlight.current = false;
     }
   }, [conversationId]);
 
+  /**
+   * Discovery: one-shot snapshots at conversation change and agent pause.
+   * After a snapshot reveals a run, the SSE subscription below keeps it live.
+   */
+
   useEffect(() => {
+    runRef.current = null;
     setRun(null);
     setError("");
     resume.current = null;
     decisions.current.clear();
+    setActiveRunId(null);
     if (!available || !conversationId) return;
+    void refresh();
+    // One-shot fire on conversation change; do not re-run when refresh changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available, conversationId]);
 
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      if (!active) return;
-      await refresh();
-      if (active) timer = setTimeout(poll, 1500);
+  useEffect(() => {
+    // Agent stream paused → a HITL run may have just been created (ask_user).
+    if (isRunning || !available || !conversationId) return;
+    void refresh();
+  }, [isRunning, available, conversationId, refresh]);
+
+  // Retry tick for SSE resubscribe after transient network disconnects;
+  // terminal closes must not trigger a reconnect.
+  const [retryTick, setRetryTick] = useState(0);
+
+  /**
+   * SSE subscription to the run events stream; every event triggers one
+   * rate-limited refresh(). Native auto-reconnect handles transient drops.
+   */
+
+  useEffect(() => {
+    if (!activeRunId) return;
+
+    let tornDown = false;
+    let stoppedByUs = false;
+    const url = `${API_BASE_URL}/agent/human-interactions/${activeRunId}/events?after_event=${run?.event_seq ?? 0}`;
+    const es = new EventSource(url);
+
+    es.onmessage = (ev) => {
+      if (tornDown || stoppedByUs) return;
+      if (!ev.data) return;
+      // Close proactively on terminal status so EventSource stops
+      // auto-reconnecting against a run that already finished.
+      try {
+        const parsed = JSON.parse(ev.data);
+        if (
+          parsed.type === "human_run" &&
+          parsed.content &&
+          typeof parsed.content === "object" &&
+          TERMINAL_STATUSES.has(parsed.content.status)
+        ) {
+          stoppedByUs = true;
+          es.close();
+          void refresh();
+          return;
+        }
+      } catch {
+        // Not JSON — refresh without parsing.
+      }
+      void refresh();
     };
-    void poll();
+
+    es.onerror = () => {
+      if (tornDown || stoppedByUs) return;
+      // Let native auto-reconnect handle transient drops; fall back to a
+      // manual resubscribe once the browser gives up and the run is alive.
+      void refresh().then((latest) => {
+        if (tornDown || stoppedByUs) return;
+        if (!latest || TERMINAL_STATUSES.has(latest.status)) return;
+        es.close();
+        stoppedByUs = true;
+        setTimeout(() => {
+          if (!tornDown) setRetryTick((c) => c + 1);
+        }, 2000);
+      });
+    };
+
     return () => {
-      active = false;
-      clearTimeout(timer);
+      tornDown = true;
+      stoppedByUs = true;
+      es.close();
     };
-  }, [available, conversationId, refresh]);
+  }, [activeRunId, retryTick]);
+
+  // Subscribe to a discovered run's events stream; null tears it down.
+
+  useEffect(() => {
+    if (!run) {
+      setActiveRunId((prev) => (prev ? null : prev));
+      return;
+    }
+    setActiveRunId((prev) => (prev !== run.run_id ? run.run_id : prev));
+  }, [run]);
 
   useEffect(() => {
     if (isRunning || !resume.current) return;
@@ -168,6 +278,7 @@ export function useHumanInteractionController({
           action
         );
         refreshSequence.current += 1;
+        runRef.current = nextRun;
         setRun(nextRun);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -210,13 +321,15 @@ export function useHumanInteractionController({
             runId: currentRun.run_id,
             after: currentRun.event_seq,
           };
-          setRun({
+          const nextRun = {
             ...currentRun,
-            status: "READY",
+            status: "READY" as const,
             requests: currentRun.requests.filter(
               (request) => request.request_id !== item.request_id
             ),
-          });
+          };
+          runRef.current = nextRun;
+          setRun(nextRun);
         }
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);

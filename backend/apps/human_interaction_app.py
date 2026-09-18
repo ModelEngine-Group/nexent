@@ -50,12 +50,12 @@ def _build_router(prefix, identity_dependency, *, include_in_schema=True):
     async def conversation_snapshot(conversation_id: int, identity=Depends(identity_dependency)):
         def read(service, tenant_id, user_id):
             run_id = service.repository.latest(tenant_id, user_id, conversation_id)
-            return service.snapshot(run_id, tenant_id, user_id) if run_id else None
+            return service.light_snapshot(run_id, tenant_id, user_id) if run_id else None
         return await _call(identity, read)
 
     @result.get("/{run_id}")
     async def snapshot(run_id: str, identity=Depends(identity_dependency)):
-        return await _call(identity, lambda service, tenant, user: service.snapshot(run_id, tenant, user))
+        return await _call(identity, lambda service, tenant, user: service.light_snapshot(run_id, tenant, user))
 
     @result.get("/{run_id}/events")
     async def events(run_id: str, after_event: int = Query(0, ge=0), identity=Depends(identity_dependency)):
