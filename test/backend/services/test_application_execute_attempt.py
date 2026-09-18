@@ -169,17 +169,12 @@ async def test_flush_if_due_uses_peek_then_take_without_transiently_empty_buffer
         return fake_info, None
 
     with _patched_application(make_port, fake_stream, prepare_mock) as application:
-        try:
-            await application.execute_attempt(*_execute_attempt_args())
-        except StopAsyncIteration:
-            # The async consumer loop hit the StopAsyncIteration re-raised
-            # from the finally block — that's fine, we still ran through
-            # the entire consumer loop including _flush_if_due + final flush.
-            pass
-        except Exception as exc:
-            pytest.fail(f"execute_attempt raised unexpected {type(exc).__name__}: {exc!r}")
+        # A normally exhausted stream must NOT leak StopAsyncIteration — it
+        # used to escape the finally block and fail the claiming scheduler job.
+        await application.execute_attempt(*_execute_attempt_args())
 
     port = port_ref["p"]
+    assert calls == [("finish", "failed")], calls
     total_persisted = sum(len(batch) for batch in port._emits)
     # Timing-sensitive — the sleep in fake_stream may cause the "final" chunk
     # to land in either the timed _flush_if_due path or the final-flush path.
