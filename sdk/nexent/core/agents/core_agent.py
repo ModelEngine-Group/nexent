@@ -46,6 +46,8 @@ from ..human_interaction.contracts import AttemptSuspended, RecoveryRequired, Ru
 
 
 logger = logging.getLogger(__name__)
+# Model-call scoped logger routed to nexent_model_call.log by the runtime service.
+model_logger = logging.getLogger("model_call.core_agent")
 
 RUNTIME_METADATA_BLOCK_RE = re.compile(
     r'<runtime_metadata\b.*</runtime_metadata>',
@@ -790,6 +792,7 @@ Stop Sequences: [{stop_seq_str}]
 Additional Args:
 {args_str}"""
 
+            model_logger.debug("MODEL INPUT PARAMETERS\n%s", log_content)
             self.logger.log_markdown(
                 content=log_content,
                 title="MODEL INPUT PARAMETERS",

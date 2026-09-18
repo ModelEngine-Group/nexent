@@ -23,7 +23,6 @@ from .nexent_agent import NexentAgent, ProcessType, cleanup_run_workspace
 
 
 logger = logging.getLogger("run_agent")
-logger.setLevel(logging.DEBUG)
 
 
 class DeferredAgentRun:
