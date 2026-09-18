@@ -14,6 +14,7 @@ import asyncio
 import time
 import json
 import httpx
+import uuid
 from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -43,6 +44,8 @@ from .model_concurrency import ModelConcurrencyExceeded, model_concurrency_limit
 from .retry import (
     DEFAULT_MODEL_RETRY,
     ModelRetryConfig,
+    ModelErrorCode,
+    ModelInvocationTerminalError,
     classify_model_error,
     get_retry_after_seconds,
 )
@@ -188,13 +191,18 @@ class OpenAIModel(OpenAIServerModel):
         # Keep every streaming HTTP phase finite. Callers can still inject a
         # custom client through client_kwargs when they own its lifecycle.
         client_kwargs = kwargs.get("client_kwargs", {})
+        # The Agent retry budget counts physical provider requests. Disable
+        # the OpenAI client's hidden transport retries by default so one
+        # adapter attempt cannot fan out into multiple uncounted HTTP calls.
+        # A fully injected client remains under its caller's ownership, but
+        # clients constructed here must never exceed this adapter's budget.
+        client_kwargs["max_retries"] = 0
         if "http_client" not in client_kwargs:
             from openai import DefaultHttpxClient
-            from openai._base_client import httpx2
 
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=httpx2.Timeout(
+                timeout=httpx.Timeout(
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
@@ -240,6 +248,7 @@ class OpenAIModel(OpenAIServerModel):
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None,
                  _token_tracker=None, context_budget_snapshot: Optional[ContextBudgetSnapshot] = None,
                  context_rebuild=None, _overflow_recovery_ordinal: int = 0,
+                 _model_attempts_used: int = 0,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -282,6 +291,7 @@ class OpenAIModel(OpenAIServerModel):
                     context_budget_snapshot=context_budget_snapshot,
                     context_rebuild=context_rebuild,
                     _overflow_recovery_ordinal=_overflow_recovery_ordinal,
+                    _model_attempts_used=_model_attempts_used,
                     **kwargs,
                 )
 
@@ -413,13 +423,22 @@ class OpenAIModel(OpenAIServerModel):
                 }
             )
 
-        for attempt in range(1, self.retry_config.max_attempts + 1):
+        for attempt in range(_model_attempts_used + 1, self.retry_config.max_attempts + 1):
             first_token_received = False
             if self.stop_event.is_set():
                 if token_tracker:
                     self._monitoring.add_span_event("model_stopped", {
                         "reason": "stop_event_set"})
                 raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
+            attempt_id = uuid.uuid4().hex
+            begin_attempt = getattr(self.observer, "begin_model_attempt", None)
+            if callable(begin_attempt):
+                begin_attempt(attempt_id, attempt)
+            self._monitoring.add_span_event("model_attempt_begin", {
+                "attempt_id": attempt_id,
+                "attempt": attempt,
+                "max_attempts": self.retry_config.max_attempts,
+            })
             current_request = None
             stream_token = None
             close_stream_once = None
@@ -673,6 +692,13 @@ class OpenAIModel(OpenAIServerModel):
                         )
                     message.raw = current_request
                     message.role = MessageRole.ASSISTANT
+                    commit_attempt = getattr(self.observer, "commit_model_attempt", None)
+                    if callable(commit_attempt):
+                        commit_attempt(attempt_id, attempt)
+                    self._monitoring.add_span_event("model_attempt_commit", {
+                        "attempt_id": attempt_id,
+                        "attempt": attempt,
+                    })
                     return message
 
                 except Exception as e:
@@ -681,22 +707,29 @@ class OpenAIModel(OpenAIServerModel):
                             e).__name__, "error_message": str(e)})
 
                     raise e
-            except EmptyModelResponseError:
-                # Some reasoning-capable OpenAI-compatible providers
-                # occasionally finish with ``stop`` after emitting only
-                # reasoning chunks. Retry once inside the model adapter so an
-                # otherwise transient malformed stream does not consume a
-                # visible agent step. A ``length`` finish is deterministic
-                # truncation and must still surface immediately.
-                empty_retry_limit = min(self.retry_config.max_attempts, 2)
-                if self.last_finish_reason not in (None, "stop") or attempt >= empty_retry_limit:
-                    raise
+            except EmptyModelResponseError as empty_error:
+                rollback_attempt = getattr(self.observer, "rollback_model_attempt", None)
+                if callable(rollback_attempt):
+                    rollback_attempt(attempt_id, attempt)
+                self._monitoring.add_span_event("model_attempt_rollback", {
+                    "attempt_id": attempt_id,
+                    "attempt": attempt,
+                    "reason": "empty_response",
+                })
+                # Empty ``stop`` responses share the normal model attempt
+                # budget. Deterministic truncation (``length``) fails fast.
+                if self.last_finish_reason not in (None, "stop") or attempt >= self.retry_config.max_attempts:
+                    raise ModelInvocationTerminalError(
+                        ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED,
+                        attempt,
+                        cause=empty_error,
+                    ) from empty_error
                 backoff = self.retry_config.calculate_backoff(attempt)
                 logger.warning(
                     "event=retry_empty_model_response attempt=%d/%d finish_reason=%s "
                     "retrying_after_seconds=%.2f",
                     attempt,
-                    empty_retry_limit,
+                    self.retry_config.max_attempts,
                     self.last_finish_reason,
                     backoff,
                 )
@@ -706,6 +739,14 @@ class OpenAIModel(OpenAIServerModel):
                 self.stop_event.wait(backoff)
                 continue
             except Exception as e:
+                rollback_attempt = getattr(self.observer, "rollback_model_attempt", None)
+                if callable(rollback_attempt):
+                    rollback_attempt(attempt_id, attempt)
+                self._monitoring.add_span_event("model_attempt_rollback", {
+                    "attempt_id": attempt_id,
+                    "attempt": attempt,
+                    "error_type": type(e).__name__,
+                })
                 if self.stop_event.is_set() or self.cancellation_scope.cancelled:
                     raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE) from e
                 if isinstance(e, ModelConcurrencyExceeded):
@@ -717,13 +758,29 @@ class OpenAIModel(OpenAIServerModel):
                     })
                 if is_provider_context_overflow(e):
                     if first_token_received or context_rebuild is None:
-                        raise ProviderContextOverflowRetryUnsafe(
+                        overflow_error = ProviderContextOverflowRetryUnsafe(
                             "Provider context overflow cannot be safely rebuilt: "
                             f"{e}"
+                        )
+                        raise ModelInvocationTerminalError(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            attempt,
+                            cause=overflow_error,
+                        ) from e
+                    if attempt >= self.retry_config.max_attempts:
+                        raise ModelInvocationTerminalError(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            attempt,
+                            cause=e,
                         ) from e
                     if _overflow_recovery_ordinal >= 2:
-                        raise ProviderContextOverflowRetryExhausted(
+                        overflow_error = ProviderContextOverflowRetryExhausted(
                             "Provider context overflow persisted after two recovery dispatches"
+                        )
+                        raise ModelInvocationTerminalError(
+                            ModelErrorCode.CONTEXT_OVERFLOW,
+                            attempt,
+                            cause=overflow_error,
                         ) from e
                     rebuilt = context_rebuild()
                     rebuilt_messages = getattr(rebuilt, "messages", rebuilt)
@@ -752,6 +809,7 @@ class OpenAIModel(OpenAIServerModel):
                         context_budget_snapshot=trusted_budget_snapshot,
                         context_rebuild=context_rebuild,
                         _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
+                        _model_attempts_used=attempt,
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)
@@ -769,15 +827,28 @@ class OpenAIModel(OpenAIServerModel):
                         received_chunk_count,
                         type(e).__name__,
                     )
-                if classify_model_error(e) != "retryable":
-                    raise
+                classification = classify_model_error(e)
+                if not classification.retryable:
+                    raise ModelInvocationTerminalError(
+                        classification.error_code,
+                        attempt,
+                        cause=e,
+                    ) from e
                 if attempt >= self.retry_config.max_attempts:
                     if not is_timeout:
-                        logging.exception(
-                            "Model call failed after %d attempts: %s",
-                            attempt, str(e),
+                        logger.error(
+                            "event=model_retry_exhausted attempt=%d/%d "
+                            "error_type=%s error_code=%s",
+                            attempt,
+                            self.retry_config.max_attempts,
+                            type(e).__name__,
+                            classification.error_code.value,
                         )
-                    raise
+                    raise ModelInvocationTerminalError(
+                        classification.error_code,
+                        attempt,
+                        cause=e,
+                    ) from e
                 backoff = self.retry_config.calculate_backoff(attempt)
                 retry_after = get_retry_after_seconds(e)
                 if retry_after is not None:
@@ -796,9 +867,13 @@ class OpenAIModel(OpenAIServerModel):
                     )
                 else:
                     logger.warning(
-                        "Model call attempt %d/%d failed with retryable error (%s); "
-                        "retrying after %.2fs",
-                        attempt, self.retry_config.max_attempts, str(e), backoff,
+                        "event=model_retry attempt=%d/%d error_type=%s "
+                        "error_code=%s retrying_after_seconds=%.2f",
+                        attempt,
+                        self.retry_config.max_attempts,
+                        type(e).__name__,
+                        classification.error_code.value,
+                        backoff,
                     )
                 self.last_retry_count = attempt
                 if self.stop_event.is_set():
