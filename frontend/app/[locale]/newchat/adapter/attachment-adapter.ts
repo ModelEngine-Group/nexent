@@ -7,9 +7,15 @@ import type {
   PendingAttachment,
   ThreadUserMessagePart,
 } from "@assistant-ui/react";
+import { message } from "antd";
+import i18n from "i18next";
 import { storageService } from "@/services/storageService";
 import log from "@/lib/logger";
 import { getAttachmentType } from "../utils/attachment-type";
+import {
+  isNewChatFileTooLarge,
+  NEW_CHAT_MAX_FILE_SIZE_MB,
+} from "../utils/attachment-size";
 
 // assistant-ui's `fileMatchesAccept` treats "*" as a special wildcard that
 // matches every file. Note that "*/*" is NOT a valid wildcard here — the
@@ -31,23 +37,29 @@ interface UploadedFileMeta {
   size: number;
 }
 
+const createPendingAttachment = async ({
+  file,
+}: {
+  file: File;
+}): Promise<PendingAttachment> => {
+  const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const type = getAttachmentType(file);
+
+  return {
+    id,
+    status: { type: "running", reason: "uploading", progress: 0 },
+    type,
+    name: file.name,
+    contentType: file.type,
+    file,
+    content: [],
+  };
+};
+
 export const compositeAttachmentAdapter: AttachmentAdapter = {
   accept: ACCEPT_STRING,
 
-  async add({ file }: { file: File }): Promise<PendingAttachment> {
-    const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const type = getAttachmentType(file);
-
-    return {
-      id,
-      status: { type: "running", reason: "uploading", progress: 0 },
-      type,
-      name: file.name,
-      contentType: file.type,
-      file,
-      content: [],
-    };
-  },
+  add: createPendingAttachment,
 
   async remove(_attachment: Attachment): Promise<void> {
     log.log("[AttachmentAdapter] Remove attachment");
@@ -113,5 +125,22 @@ export const compositeAttachmentAdapter: AttachmentAdapter = {
         ? error
         : new Error("Failed to upload attachment");
     }
+  },
+};
+
+export const newChatAttachmentAdapter: AttachmentAdapter = {
+  ...compositeAttachmentAdapter,
+
+  async add({ file }: { file: File }): Promise<PendingAttachment> {
+    if (isNewChatFileTooLarge(file.size)) {
+      const errorMessage = i18n.t("newchat.fileSizeExceedsLimit", {
+        name: file.name,
+        maxSizeMB: NEW_CHAT_MAX_FILE_SIZE_MB,
+      });
+      message.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+
+    return createPendingAttachment({ file });
   },
 };
