@@ -52,6 +52,8 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.match(agentSpace, /Grid\.useBreakpoint\(\)/);
   assert.match(agentSpace, /gridHeight=\{/);
   assert.match(agentSpace, /descriptionLines=\{descriptionLines\}/);
+  assert.match(agentSpace, /const pageBottomPadding = screens\.sm \? 40 : 32;/);
+  assert.match(agentSpace, /viewportHeight - top - pageBottomPadding - 8/);
   assert.match(resourceCard, /descriptionLines\?: number/);
   assert.match(resourceCard, /WebkitLineClamp: descriptionLines/);
   assert.match(mineAgent, /export function MyAgent/);
@@ -81,5 +83,6 @@ test("agent space uses full-width content with inset, left-aligned line tabs", a
     page,
     /<TabsList[^>]*className="[^"]*justify-start[^"]*border-b[^"]*bg-transparent/
   );
+  assert.doesNotMatch(page, /<TabsList[^>]*className="[^"]*mb-6/);
   assert.match(page, /data-\[state=active\]:border-primary/);
 });

@@ -55,6 +55,7 @@ export function AgentSpace({ active }: { active: boolean }) {
         : screens.xs
           ? 1
           : 4;
+  const pageBottomPadding = screens.sm ? 40 : 32;
   const rows = getRowCount(
     Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
   );
@@ -64,8 +65,10 @@ export function AgentSpace({ active }: { active: boolean }) {
 
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
     const { top } = gridRegionRef.current.getBoundingClientRect();
-    setAvailableGridHeight(Math.max(0, Math.floor(viewportHeight - top - 24)));
-  }, [active]);
+    setAvailableGridHeight(
+      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
+    );
+  }, [active, pageBottomPadding]);
 
   useEffect(() => {
     if (!active) return;

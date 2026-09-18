@@ -112,7 +112,7 @@ export default function AgentRepositoryPage() {
                 onValueChange={(value) => setTab(value as AgentRepositoryTab)}
                 className="w-full"
               >
-                <TabsList className="mb-6 flex h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-slate-200 bg-transparent p-0 dark:border-slate-700">
+                <TabsList className="flex h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-slate-200 bg-transparent p-0 dark:border-slate-700">
                   <TabsTrigger
                     value={AgentRepositoryTab.REPOSITORY}
                     className="shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-1 py-2 text-sm text-slate-500 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
