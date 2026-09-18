@@ -1,5 +1,5 @@
 import { Button, Dropdown, type MenuProps } from "antd";
-import { Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, MoreHorizontal, Trash2, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import ResourceCard from "@/components/resource/ResourceCard";
@@ -33,6 +33,10 @@ export default function RepositoryMcpCard({
   const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
   const installCount = Number(service.installCount || 0);
   const toolCount = resolveToolCount(service);
+  const author =
+    service.authorDisplayName ||
+    service.authorName ||
+    t("mcpTools.repository.authorFallback");
   const actionItems: MenuProps["items"] = isAdmin
     ? [
         {
@@ -84,34 +88,47 @@ export default function RepositoryMcpCard({
         </>
       }
       meta={
-        <span className="inline-flex items-center gap-1">
-          <Download className="size-3.5 text-slate-400" />
-          {installCount}
+        <span
+          className="inline-flex min-w-0 items-center gap-1 truncate"
+          title={author}
+        >
+          <User className="size-3.5 shrink-0 text-slate-400" />
+          <span className="truncate">{author}</span>
         </span>
       }
       headerActions={
-        actionItems.length > 0 ? (
-          <Dropdown
-            menu={{ items: actionItems }}
-            trigger={["click"]}
-            placement="bottomRight"
+        <>
+          <span
+            className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400"
+            aria-label={t("mcpTools.repository.downloadCount", {
+              count: installCount,
+            })}
           >
-            <Button
-              type="text"
-              size="small"
-              icon={<MoreHorizontal className="size-4" />}
-              aria-label={t("mcpTools.mine.moreActions")}
-              className="-mt-1 text-slate-500 hover:!text-slate-700"
-            />
-          </Dropdown>
-        ) : undefined
+            <Download className="size-3.5" />
+            {installCount}
+          </span>
+          {actionItems.length > 0 ? (
+            <Dropdown
+              menu={{ items: actionItems }}
+              trigger={["click"]}
+              placement="bottomRight"
+            >
+              <Button
+                type="text"
+                size="small"
+                icon={<MoreHorizontal className="size-4" />}
+                aria-label={t("mcpTools.mine.moreActions")}
+                className="-mt-1 text-slate-500 hover:!text-slate-700"
+              />
+            </Dropdown>
+          ) : null}
+        </>
       }
       footer={
-        <div className="flex items-center gap-2">
+        <div className="flex justify-end">
           <Button
             type={installed ? "default" : "primary"}
             disabled={installed}
-            className="min-w-0 flex-1"
             icon={<Download className="size-3.5" />}
             onClick={() => onInstall(service)}
           >
@@ -119,15 +136,9 @@ export default function RepositoryMcpCard({
               ? t("mcpTools.repository.installed")
               : t("mcpTools.repository.install")}
           </Button>
-          <Button
-            className="min-w-0 flex-1"
-            icon={<Eye className="size-3.5" />}
-            onClick={() => onSelect(service)}
-          >
-            {t("mcpTools.repository.details")}
-          </Button>
         </div>
       }
+      onClick={() => onSelect(service)}
     />
   );
 }
