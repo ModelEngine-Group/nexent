@@ -187,6 +187,54 @@ def test_seed_pnpm_offline_store_reports_preparation_failure():
         seed_pnpm_offline_store(container)
 
 
+def test_docker_bridge_gateway_returns_concrete_ipv4_address():
+    network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "fd00::1"}, {"Gateway": "172.17.0.1"}]}})
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    assert sandbox_module._docker_bridge_gateway(client) == "172.17.0.1"
+    client.networks.get.assert_called_once_with("bridge")
+    network.reload.assert_called_once_with()
+
+
+def test_docker_bridge_gateway_rejects_missing_ipv4_address():
+    network = MagicMock(attrs={"IPAM": {"Config": [{"Gateway": "fd00::1"}]}})
+    client = SimpleNamespace(networks=SimpleNamespace(get=MagicMock(return_value=network)))
+
+    with pytest.raises(RuntimeError, match="does not expose an IPv4 gateway"):
+        sandbox_module._docker_bridge_gateway(client)
+
+
+@pytest.mark.parametrize("server_version", ["18.09.9", "19.03.15", "20.10.9-ce"])
+def test_legacy_docker_disables_seccomp_for_clone3_compatibility(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, MagicMock())
+
+    assert run_kwargs["security_opt"] == ["seccomp=unconfined"]
+
+
+@pytest.mark.parametrize("server_version", ["20.10.10", "20.10.24", "23.0.0", "29.1.0"])
+def test_modern_docker_preserves_default_seccomp_profile(server_version):
+    client = SimpleNamespace(version=lambda: {"Version": server_version})
+    run_kwargs = {}
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, MagicMock())
+
+    assert "security_opt" not in run_kwargs
+
+
+def test_unknown_docker_version_preserves_default_seccomp_profile():
+    client = SimpleNamespace(version=lambda: {"Version": "vendor-build"})
+    run_kwargs = {}
+    logger = MagicMock()
+
+    sandbox_module._apply_legacy_docker_seccomp_compatibility(client, run_kwargs, logger)
+
+    assert "security_opt" not in run_kwargs
+    logger.warning.assert_called_once()
+
+
 def _docker_available() -> bool:
     try:
         import docker
@@ -1631,7 +1679,12 @@ class TestPoolManagerLogic:
         leased_executors = []
         bridge_timeouts = []
 
-        def install_bridge(executor, logger_, request_timeout_seconds=None):
+        def install_bridge(
+            executor,
+            logger_,
+            request_timeout_seconds=None,
+            cancellation_scope=None,
+        ):
             leased_executors.append(executor)
             bridge_timeouts.append(request_timeout_seconds)
             return executor
@@ -1708,6 +1761,47 @@ class TestDockerIntegration:
     """End-to-end exercise of session + system scope with real Docker containers."""
 
     IMAGE = "nexent/nexent-sandbox:latest"
+
+    @pytest.fixture(autouse=True)
+    def isolated_docker_resources(self, monkeypatch, reset_singleton):
+        """Keep integration tests away from the deployment's stable sandbox."""
+        import socket
+        import uuid
+        from functools import partial
+
+        import docker
+
+        prefix = f"nexent-sandbox-test-{uuid.uuid4().hex[:12]}"
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        monkeypatch.setattr(sandbox_module, "SANDBOX_CONTAINER_NAME", prefix)
+        monkeypatch.setattr(sandbox_module, "SANDBOX_SESSION_CONTAINER_PREFIX", f"{prefix}-session")
+        monkeypatch.setattr(sandbox_module, "SANDBOX_NETWORK_NAME", f"{prefix}-network")
+        monkeypatch.setattr(sandbox_module, "SANDBOX_JUPYTER_PORT", port)
+        # The constructor's default port was bound before monkeypatching.
+        monkeypatch.setattr(
+            sandbox_module,
+            "_RecoveredDockerExecutor",
+            partial(sandbox_module._RecoveredDockerExecutor, port=port),
+        )
+        try:
+            yield
+        finally:
+            SandboxPoolManager.get_instance().shutdown(sandbox_module.logging.getLogger("test_sandbox"))
+            client = docker.from_env()
+            try:
+                for container in client.containers.list(all=True, filters={"name": prefix}):
+                    container.remove(force=True)
+                try:
+                    network = client.networks.get(f"{prefix}-network")
+                    if sandbox_module._is_containerized_runtime():
+                        network.disconnect(socket.gethostname(), force=True)
+                    network.remove()
+                except docker.errors.NotFound:
+                    pass
+            finally:
+                client.close()
 
     def test_skill_runner_passes_cli_arguments_and_demuxes_stdout(self, tmp_path):
         """A real sandbox receives argv and returns stdout, not Docker stream IDs."""
@@ -2951,7 +3045,9 @@ class TestBuildPythonExecutor:
 
         assert executor is expected_executor
         assert cfg.level == SandboxLevel.DOCKER
-        acquire.assert_called_once_with(cfg, logger, True)
+        acquire.assert_called_once_with(
+            cfg, logger, True, cancellation_scope=None
+        )
 
     def test_session_container_group_is_forwarded_to_pool(self, mocker):
         cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
@@ -2974,6 +3070,22 @@ class TestBuildPythonExecutor:
             logger,
             True,
             session_container_group=group,
+            cancellation_scope=None,
+        )
+
+    def test_sdk_ut_tlm_038_run_scope_is_forwarded_to_pool(self, mocker):
+        cfg = SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION)
+        logger = sandbox_module.logging.getLogger("test")
+        scope = MagicMock()
+        pool = SandboxPoolManager.get_instance()
+        acquire = mocker.patch.object(pool, "acquire", return_value=MagicMock())
+
+        sandbox_module.build_python_executor(
+            cfg, logger, host_tools_exist=True, cancellation_scope=scope
+        )
+
+        acquire.assert_called_once_with(
+            cfg, logger, True, cancellation_scope=scope
         )
 
     def test_session_scope_creates_fresh_executor(self):
@@ -4247,7 +4359,7 @@ class TestPoolManagerMultipleSystemContainers:
         monkeypatch.setattr(
             sandbox_module,
             "_install_host_tool_bridge",
-            lambda ex, _logger, request_timeout_seconds=None: ex,
+            lambda ex, _logger, request_timeout_seconds=None, cancellation_scope=None: ex,
         )
         monkeypatch.setattr(sandbox_module, "_wrap_executor", lambda ex, c, l: ex)
 
@@ -4294,7 +4406,8 @@ class TestEvictorThread:
         pm = SandboxPoolManager.get_instance()
 
         assert pm._evict_thread is not None
-        assert pm._evict_thread.daemon is True
+        assert pm._evict_thread.daemon is False
+        assert pm._evict_execution is not None
 
 
 class TestForbiddeShellCallsConstant:
@@ -4440,7 +4553,9 @@ class TestAcquireSharedDockerKernelHostTools:
 
         bridge_installed = [False]
 
-        def mock_install_bridge(ex, l, request_timeout_seconds=None):
+        def mock_install_bridge(
+            ex, l, request_timeout_seconds=None, cancellation_scope=None
+        ):
             bridge_installed[0] = True
             return ex
 
@@ -5289,7 +5404,9 @@ class TestTargetedSandboxCoverage:
         monkeypatch.setitem(sys.modules, "docker", docker_module)
         monkeypatch.setitem(sys.modules, "requests", SimpleNamespace(get=MagicMock(side_effect=RuntimeError("not ready"))))
         monkeypatch.setattr(sandbox_module, "_sandbox_connection_hosts", lambda item: ["host"])
-        monotonic = iter([0, 121])
+        import itertools
+
+        monotonic = itertools.count(0, 121)
         monkeypatch.setattr(sandbox_module.time, "monotonic", lambda: next(monotonic))
 
         with pytest.raises(RuntimeError, match="did not become ready"):
@@ -5320,6 +5437,7 @@ class TestTargetedSandboxCoverage:
             executor,
             ANY,
             request_timeout_seconds=None,
+            cancellation_scope=None,
         )
 
     def test_build_docker_executor_leases_from_existing_session_group(self, monkeypatch):

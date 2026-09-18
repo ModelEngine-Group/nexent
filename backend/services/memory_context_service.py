@@ -28,7 +28,6 @@ from nexent.memory.policy import MemoryRetrievalPolicy
 
 from consts.const import (
     AGENT_SHORT_TERM_HALF_LIFE_DAYS,
-    EXTERNAL_MEMORY_SEARCH_ENABLED,
     MMR_CANDIDATE_TOP_K,
     MMR_DUPLICATE_THRESHOLD,
     MMR_FINAL_TOP_K,
@@ -106,9 +105,8 @@ class MemoryContextService:
                 transparent proxy.  Signature:
                 ``async (query, tenant_id, user_id, agent_id, conversation_id)
                 -> List[ExternalMemoryItem]``.
-                When set and ``EXTERNAL_MEMORY_SEARCH_ENABLED`` is True,
-                ``build_context`` auto-queries external providers if
-                ``external_results`` was not explicitly passed.
+                When set, ``build_context`` auto-queries enabled external
+                providers if ``external_results`` was not explicitly passed.
         """
         self.retrieval_service = retrieval_service or get_memory_retrieval_service()
         self.pipeline_enabled = pipeline_enabled
@@ -208,11 +206,7 @@ class MemoryContextService:
             external_results is not None,
         )
 
-        if (
-            external_results is None
-            and EXTERNAL_MEMORY_SEARCH_ENABLED
-            and self._external_search_hook is not None
-        ):
+        if external_results is None and self._external_search_hook is not None:
             try:
                 external_results = await self._external_search_hook(
                     query=query or "",

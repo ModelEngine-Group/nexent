@@ -21,6 +21,7 @@ import { MermaidDiagram } from "./mermaid-diagram";
 import { SyntaxHighlighter } from "./shiki-highlighter";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { cn } from "@/lib/utils";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { remarkCite } from "./remark-cite";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
@@ -29,7 +30,7 @@ import {
   isLocalStorageObjectUrl,
 } from "@/services/storageService";
 import { useSourcesPanel } from "./sources-panel-context";
-import type { PanelSourceItem } from "./sources-panel";
+import { getCitationKey, getCitationLabel, type PanelSourceItem } from "./sources-panel";
 import {
   searchSourcesRegistry,
   searchImagesRegistry,
@@ -45,6 +46,7 @@ import {
 interface MessageSourcePart {
   type?: string;
   sourceType?: string;
+  publishedDate?: string;
   url?: string;
   title?: string;
   text?: string;
@@ -52,8 +54,10 @@ interface MessageSourcePart {
   downloadUrl?: string;
   objectName?: string;
   citeIndex?: number | string;
+  toolSign?: string;
   isImage?: boolean;
   imageKey?: string;
+  retrievalHighlightTerms?: string[];
 }
 
 const markdownUrlTransform: UrlTransform = (url) => {
@@ -80,20 +84,21 @@ function resolveCiteSources(
       return [];
     }
 
-    return [
-      {
-        citeIndex,
-        url: part.url ?? "",
-        title: part.title || part.filename || part.url || `Source ${citeIndex}`,
-        text: part.text,
-        sourceType: part.sourceType,
-        filename: part.filename,
-        downloadUrl: part.downloadUrl,
-        objectName: part.objectName,
-        isImage: part.isImage,
-        imageKey: part.imageKey,
-      },
-    ];
+    return [{
+      citeIndex,
+      url: part.url ?? "",
+      title: part.title || part.filename || part.url || `Source ${citeIndex}`,
+      text: part.text,
+      sourceType: part.sourceType,
+      publishedDate: part.publishedDate,
+      filename: part.filename,
+      downloadUrl: part.downloadUrl,
+      objectName: part.objectName,
+      toolSign: part.toolSign,
+      isImage: part.isImage,
+      imageKey: part.imageKey,
+      retrievalHighlightTerms: part.retrievalHighlightTerms,
+    }];
   });
 
   if (contentSources.length > 0) return contentSources;
@@ -110,6 +115,37 @@ function getCiteIndex(citekey: string): number | undefined {
   const numericPart = citekey.replace(/^[a-z]+/i, "");
   const citeIndex = Number.parseInt(numericPart, 10);
   return Number.isNaN(citeIndex) ? undefined : citeIndex;
+}
+
+function findCiteSource(sources: SearchSource[], citekey: string): SearchSource | undefined {
+  const normalizedKey = citekey.trim().toLowerCase();
+  const exactMatch = sources.find((source) =>
+    getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign }) === normalizedKey,
+  );
+  if (exactMatch) return exactMatch;
+
+  // Older persisted messages can contain numeric-only markers without a
+  // tool sign. Keep those conversations readable without weakening new
+  // `a1` / `b1` matching.
+  return /^\d+$/.test(normalizedKey)
+    ? sources.find((source) => source.citeIndex === getCiteIndex(normalizedKey))
+    : undefined;
+}
+
+const extractDomain = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+function getSourceLabel(source: PanelSourceItem | undefined): string | undefined {
+  if (!source) return undefined;
+  if (source.sourceType === "document" || !source.url) {
+    return "来源: Nexent";
+  }
+  return `来源: ${extractDomain(source.url)}`;
 }
 
 function buildCitationDisplayIndexMap(
@@ -140,12 +176,102 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     url: source.url,
     title: source.title,
     text: source.text,
+    publishedDate: source.publishedDate,
     filename: source.filename,
     downloadUrl: source.downloadUrl,
     objectName: source.objectName,
     citeIndex: source.citeIndex,
+    toolSign: source.toolSign,
     isImage: source.isImage,
+    retrievalHighlightTerms: source.retrievalHighlightTerms,
   };
+}
+
+/**
+ * A reference marker belongs to the one sentence immediately before it.
+ * Consecutive markers, such as [[a1]][[b2]], share that sentence.  Newlines
+ * and Markdown table cell separators also stop the scope so a marker never
+ * expands to a following paragraph or table.
+ */
+function getSentenceStartOffset(text: string, endOffset: number): number {
+  for (let offset = endOffset - 1; offset >= 0; offset -= 1) {
+    const character = text[offset];
+    if (character === "\n" || character === "|") return offset + 1;
+    if ("。！？!?".includes(character)) return offset + 1;
+    if (
+      character === "." &&
+      (offset + 1 === text.length || /\s|\[/.test(text[offset + 1]))
+    ) {
+      return offset + 1;
+    }
+  }
+  return 0;
+}
+
+function getCitationScopeText(
+  content: readonly MessageSourcePart[],
+  citekey: string,
+  citationElement: HTMLElement | null,
+): string {
+  const answerText = content
+    .filter(
+      (part) => part.type === "text" && typeof part.text === "string",
+    )
+    .map((part) => part.text)
+    .join("\n");
+  if (!answerText) return "";
+
+  const normalizedKey = citekey.trim().toLowerCase();
+  const markers = Array.from(answerText.matchAll(/\[\[([^\]]+)\]\]/g));
+  const matchingMarkers = markers.filter(
+    (marker) => marker[1].trim().toLowerCase() === normalizedKey,
+  );
+  if (!matchingMarkers.length) return "";
+
+  const renderedMarkers = citationElement
+    ? Array.from(
+        citationElement
+          .closest(".aui-md")
+          ?.querySelectorAll<HTMLElement>("[data-citekey]") || [],
+      ).filter((marker) => marker.dataset.citekey === normalizedKey)
+    : [];
+  const occurrence = Math.max(0, renderedMarkers.indexOf(citationElement!));
+  const selectedMarker =
+    matchingMarkers[Math.min(occurrence, matchingMarkers.length - 1)];
+  const selectedMarkerIndex = markers.indexOf(selectedMarker);
+  if (selectedMarker.index === undefined || selectedMarkerIndex < 0) return "";
+
+  let groupStart = selectedMarkerIndex;
+  while (
+    groupStart > 0 &&
+    !answerText
+      .slice(
+        (markers[groupStart - 1].index || 0) + markers[groupStart - 1][0].length,
+        markers[groupStart].index,
+      )
+      .trim()
+  ) {
+    groupStart -= 1;
+  }
+  let groupEnd = selectedMarkerIndex;
+  while (
+    groupEnd < markers.length - 1 &&
+    !answerText
+      .slice(
+        (markers[groupEnd].index || 0) + markers[groupEnd][0].length,
+        markers[groupEnd + 1].index,
+      )
+      .trim()
+  ) {
+    groupEnd += 1;
+  }
+
+  const groupStartOffset = markers[groupStart].index || 0;
+  const scopeStart = getSentenceStartOffset(answerText, groupStartOffset);
+  return answerText
+    .slice(scopeStart, groupStartOffset)
+    .replace(/\[\[[^\]]+\]\]/g, "")
+    .trim();
 }
 
 /**
@@ -160,13 +286,18 @@ const CiteComponent: FC<
     (s) => s.message.content as readonly MessageSourcePart[]
   );
   const { open } = useSourcesPanel();
+  const { t } = useTranslation();
 
   if (!citekey) return null;
 
-  const citeIndex = getCiteIndex(citekey);
   const messageSources = resolveCiteSources(messageId, content);
-  const source = messageSources.find((item) => item.citeIndex === citeIndex);
+  const source = findCiteSource(messageSources, citekey);
+  const panelSource = source ? toPanelSource(source) : undefined;
+  const citeIndex = getCiteIndex(citekey);
   const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const citationKey = source
+    ? getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign })
+    : citekey.trim().toLowerCase();
   const citationDisplayIndexMap = buildCitationDisplayIndexMap(content);
   const displayIndex = citationDisplayIndexMap.get(citekey) ?? sourceIndex;
   const panelItems = messageSources.map(toPanelSource);
@@ -178,19 +309,32 @@ const CiteComponent: FC<
       citekey={citekey}
       displayIndex={displayIndex}
       sourceIndex={sourceIndex}
-      url={source?.url}
-      title={source?.title ?? `Source ${sourceIndex}`}
-      text={source?.text}
+      label={source ? getCitationLabel(toPanelSource(source), {
+        knowledgeBase: t("chat.sources.knowledgeBase"),
+        web: t("chat.sources.web"),
+        source: t("chat.sources.source"),
+      }) : `${t("chat.sources.source")} ${displayIndex}`}
+      title={source?.title ?? `Source ${displayIndex}`}
+      text={panelSource?.text}
+      filename={panelSource?.filename}
+      url={panelSource?.url}
+      sourceType={panelSource?.sourceType}
+      sourceLabel={getSourceLabel(panelSource)}
       loading={!source}
       onClick={
         source && messageId
-          ? () =>
+          ? (citationElement) =>
               open({
                 messageId,
                 groupId: "citations",
                 sources,
                 images,
-                selectedCiteIndex: source.citeIndex,
+                selectedCitationKey: citationKey,
+                // The flag only gates sentence-level highlight terms; the
+                // panel still selects and scrolls to the source card.
+                citationContext: ENABLE_CITATION_CLICK_HIGHLIGHT
+                  ? getCitationScopeText(content, citekey, citationElement)
+                  : undefined,
               })
           : undefined
       }
@@ -319,6 +463,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   alt,
   ...props
 }) => {
+  const imageSrc = typeof src === "string" ? src : undefined;
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const messageContent = useAuiState(
     (s) => s.message.content as readonly MessageSourcePart[]
@@ -331,7 +476,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
           typeof part.url === "string"
       )
     : [];
-  const markerMatch = src?.match(/\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i);
+  const markerMatch = imageSrc?.match(/\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i);
   if (markerMatch) {
     const contentImage = trustedImages.find(
       (image) => image.imageKey === markerMatch[1]
@@ -359,12 +504,12 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   // through PICTURE_WEB. Local storage URLs can be resolved directly because
   // the authenticated file endpoint performs its own access check; this also
   // covers relevant S3 images that were omitted by optional image filtering.
-  const trustedImage = src
-    ? trustedImages.find((image) => image.url === src)
+  const trustedImage = imageSrc
+    ? trustedImages.find((image) => image.url === imageSrc)
     : undefined;
   const verifiedImageUrl =
     trustedImage?.url ||
-    (src && isLocalStorageObjectUrl(src) ? src : undefined);
+    (imageSrc && isLocalStorageObjectUrl(imageSrc) ? imageSrc : undefined);
   if (verifiedImageUrl) {
     return (
       <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
@@ -379,11 +524,11 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
     );
   }
 
-  if (trustedImages.length > 0 || !src) {
+  if (trustedImages.length > 0 || !imageSrc) {
     return null;
   }
 
-  return <AuthenticatedImage src={src} alt={alt} {...props} />;
+  return <AuthenticatedImage src={imageSrc} alt={alt} {...props} />;
 };
 
 const PermanentFileLink: FC<React.ComponentProps<"a">> = ({
@@ -549,6 +694,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
+  del: ({ children, ...props }) => <span {...props}>{children}</span>,
   sup: ({ className, ...props }) => (
     <sup
       className={cn("aui-md-sup [&>a]:text-xs [&>a]:no-underline", className)}

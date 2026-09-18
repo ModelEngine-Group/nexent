@@ -1168,6 +1168,10 @@ class TestListAllToolsWithLabels:
              "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
             {"tool_id": 4, "name": "postgres_database", "description": "d4", "source": "local",
              "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 5, "name": "download_from_s3", "description": "d5", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
+            {"tool_id": 6, "name": "upload_to_s3", "description": "d6", "source": "local",
+             "params": [], "inputs": "{}", "is_available": True, "create_time": "", "usage": ""},
         ]
         mock_descriptions.return_value = {}
 
@@ -1177,6 +1181,8 @@ class TestListAllToolsWithLabels:
         result_names = [t["name"] for t in result]
         assert "store_memory" not in result_names
         assert "search_memory" not in result_names
+        assert "download_from_s3" not in result_names
+        assert "upload_to_s3" not in result_names
         assert "tavily_search" in result_names
         assert "postgres_database" in result_names
         assert len(result) == 2
@@ -4346,6 +4352,117 @@ class TestGetLocalToolsDescriptionZhCoverage:
         import json
         inputs = json.loads(result[0].inputs)
         assert inputs == {"query": "string"}
+
+    @pytest.mark.parametrize(
+        ("enable_aidp_knowledge", "expected_selectability"),
+        [
+            (
+                True,
+                {
+                    "knowledge_base_search": False,
+                    "aidp_search": False,
+                    "ind_aidp_search": False,
+                },
+            ),
+            (
+                False,
+                {
+                    "knowledge_base_search": False,
+                    "aidp_search": False,
+                    "ind_aidp_search": True,
+                },
+            ),
+        ],
+    )
+    @patch('backend.services.tool_configuration_service.get_local_tools_classes')
+    def test_get_local_tools_applies_knowledge_tool_selectability_by_deployment(
+        self,
+        mock_get_classes,
+        monkeypatch,
+        enable_aidp_knowledge,
+        expected_selectability,
+    ):
+        class KnowledgeTool:
+            name = "knowledge_base_search"
+            description = "Knowledge search"
+            output_type = "string"
+            category = "knowledge-base"
+            inputs = {}
+
+            def __init__(self):
+                pass
+
+        class AidpTool(KnowledgeTool):
+            name = "aidp_search"
+            is_user_selectable = False
+
+        class IndependentAidpTool(KnowledgeTool):
+            name = "ind_aidp_search"
+
+        mock_get_classes.return_value = [
+            KnowledgeTool,
+            AidpTool,
+            IndependentAidpTool,
+        ]
+        monkeypatch.setattr(
+            _tool_cfg_service,
+            "ENABLE_AIDP_KNOWLEDGE",
+            enable_aidp_knowledge,
+        )
+
+        result = _tool_cfg_service.get_local_tools()
+
+        assert {
+            tool.name: tool.is_user_selectable
+            for tool in result
+        } == expected_selectability
+
+    @pytest.mark.parametrize(
+        ("enable_aidp_knowledge", "expected_selectability"),
+        [
+            (True, [False, False, False]),
+            (False, [False, False, True]),
+        ],
+    )
+    @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
+    @patch('backend.services.tool_configuration_service.query_all_tools')
+    @pytest.mark.asyncio
+    async def test_list_all_tools_applies_deployment_selectability_to_stale_records(
+        self,
+        mock_query,
+        mock_get_descriptions,
+        monkeypatch,
+        enable_aidp_knowledge,
+        expected_selectability,
+    ):
+        mock_query.return_value = [
+            {
+                "tool_id": tool_id,
+                "name": name,
+                "description": "Knowledge search",
+                "source": "local",
+                "is_available": True,
+                "is_user_selectable": True,
+            }
+            for tool_id, name in enumerate(
+                (
+                    "knowledge_base_search",
+                    "aidp_search",
+                    "ind_aidp_search",
+                ),
+                start=1,
+            )
+        ]
+        mock_get_descriptions.return_value = {}
+        monkeypatch.setattr(
+            _tool_cfg_service,
+            "ENABLE_AIDP_KNOWLEDGE",
+            enable_aidp_knowledge,
+        )
+
+        result = await _tool_cfg_service.list_all_tools("tenant-a")
+
+        assert [tool["is_user_selectable"] for tool in result] == expected_selectability
 
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')

@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     Computed,
+    DefaultClause,
     Float,
     ForeignKey,
     ForeignKeyConstraint,
@@ -21,7 +22,6 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql import func
-
 
 # Standard protocol labels used across A2A models
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
@@ -55,6 +55,200 @@ class TableBase(DeclarativeBase):
     delete_flag = Column(String(1), default="N",
                          doc="Whether it is deleted. Optional values: Y/N")
     pass
+
+
+class HumanRun(TableBase):
+    """Durable run with a technical key and a stable public UUID."""
+
+    __tablename__ = "human_run_t"
+    __table_args__ = (
+        Index("human_run_public_id_idx", "run_id"),
+        Index(
+            "human_run_conversation_idx",
+            "tenant_id",
+            "user_id",
+            "conversation_id",
+            "create_time",
+            postgresql_where=text("delete_flag = 'N'"),
+        ),
+        Index(
+            "human_run_claim_idx", "status", "lock_until", "create_time", postgresql_where=text("delete_flag = 'N'")
+        ),
+        {"schema": SCHEMA},
+    )
+
+    run_record_id = Column(Integer, primary_key=True, autoincrement=True, comment="Technical run record identifier")
+    run_id = Column(
+        String(36),
+        nullable=False,
+        comment="Public UUID retained by HTTP, checkpoints and event payloads; service enforces uniqueness",
+    )
+    tenant_id = Column(String(100), nullable=False, comment="Tenant owning this run and its dependent records")
+    user_id = Column(String(100), nullable=False, comment="User owning this run within the tenant")
+    conversation_id = Column(
+        Integer,
+        nullable=False,
+        comment="Logical conversation_record_t.conversation_id; service validates the active owner",
+    )
+    status = Column(
+        String(30), nullable=False, comment="Run lifecycle state validated by the human interaction service"
+    )
+    request_payload = Column(
+        Text,
+        nullable=False,
+        comment="Fernet encrypted JSON run input and context snapshot; private service-owned payload",
+    )
+    checkpoint = Column(Text, comment="Fernet encrypted SDK checkpoint; null until the first durable boundary")
+    catalog_digest = Column(String(64), comment="SHA-256 identity of the agent, model and tool catalog")
+    executor_digest = Column(String(64), comment="SHA-256 identity of the registered executor implementation")
+    plan = Column(Text, comment="Fernet encrypted SDK plan snapshot; null when no plan exists")
+    plan_version = Column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="Monotonic revision of the saved plan"
+    )
+    fence = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="Lease generation rejecting stale worker writes",
+    )
+    lock_owner = Column(String(200), comment="Scheduler worker identity, bounded to 200 characters")
+    lock_until = Column(TIMESTAMP(timezone=True), comment="UTC lease deadline; null when no worker owns the run")
+    pause_requested = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="Pause request marker: 0 or 1, validated by the service",
+    )
+    event_seq = Column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="64-bit SSE event counter; not a record identifier, allocated under the run lock",
+    )
+
+
+class HumanRequest(TableBase):
+    """Human decision associated with one integer run record identifier."""
+
+    __tablename__ = "human_request_t"
+    __table_args__ = (
+        Index("human_request_run_idx", "run_record_id", "status", postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    request_record_id = Column(
+        Integer, primary_key=True, autoincrement=True, comment="Technical human request record identifier"
+    )
+    request_id = Column(
+        String(36),
+        nullable=False,
+        comment="Public request UUID; uniqueness is scoped to the owning run by the service",
+    )
+    run_record_id = Column(
+        Integer, nullable=False, comment="Logical human_run_t.run_record_id; validated under the parent run lock"
+    )
+    kind = Column(
+        String(30), nullable=False, comment="CLARIFICATION, ACTION_APPROVAL or USER_STEERING; service validated"
+    )
+    status = Column(String(30), nullable=False, comment="PENDING, DECIDED, CANCELLED or EXPIRED; service validated")
+    version = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        comment="Positive request revision used for decision compare-and-set",
+    )
+    slot = Column(String(100), nullable=False, comment="SDK action slot or composer guidance identity within the run")
+    digest = Column(String(64), nullable=False, comment="SHA-256 action identity required when submitting a decision")
+    payload = Column(
+        Text,
+        nullable=False,
+        comment="Fernet encrypted clarification, approval or steering payload, validated by the service",
+    )
+    decision = Column(
+        Text, comment="Fernet encrypted validated DecisionCommand or composer decision; null before a decision"
+    )
+    idempotency_key = Column(
+        String(100),
+        comment="Decision retry key scoped to this request, or composer message identity scoped to the run",
+    )
+    decision_digest = Column(String(64), comment="SHA-256 of the accepted decision, detecting conflicting retries")
+    expires_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        comment="UTC deadline after which a pending decision cannot authorize execution",
+    )
+
+
+class HumanExecution(TableBase):
+    """Tool execution receipt; the service serializes each run and call slot."""
+
+    __tablename__ = "human_execution_t"
+    __table_args__ = (
+        Index("human_execution_slot_idx", "run_record_id", "slot", postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    execution_id = Column(
+        Integer, primary_key=True, autoincrement=True, comment="Technical execution receipt identifier"
+    )
+    run_record_id = Column(
+        Integer, nullable=False, comment="Logical human_run_t.run_record_id; validated under the parent run lock"
+    )
+    slot = Column(
+        String(100),
+        nullable=False,
+        comment="Stable SDK call slot; one active receipt per run and slot is enforced by the service",
+    )
+    tool = Column(String(200), nullable=False, comment="Registered tool name, bounded to 200 characters")
+    digest = Column(String(64), nullable=False, comment="HMAC-SHA-256 of the frozen action and execution context")
+    arguments = Column(
+        Text, nullable=False, comment="Fernet encrypted frozen tool arguments; variable SDK-owned JSON structure"
+    )
+    status = Column(
+        String(30), nullable=False, comment="PREPARED, STARTED, SUCCEEDED, REJECTED or UNKNOWN; service validated"
+    )
+    result = Column(Text, comment="Fernet encrypted result or rejection; null before a conclusive receipt")
+
+
+class HumanEvent(TableBase):
+    """Ordered replay event owned by a run."""
+
+    __tablename__ = "human_event_t"
+    __table_args__ = (
+        Index("human_event_replay_idx", "run_record_id", "seq", postgresql_where=text("delete_flag = 'N'")),
+        {"schema": SCHEMA},
+    )
+
+    event_id = Column(Integer, primary_key=True, autoincrement=True, comment="Technical replay event identifier")
+    run_record_id = Column(
+        Integer, nullable=False, comment="Logical human_run_t.run_record_id; validated under the parent run lock"
+    )
+    seq = Column(
+        BigInteger,
+        nullable=False,
+        comment="64-bit SSE cursor allocated from the owning run event_seq under its row lock",
+    )
+    payload = Column(
+        JSONB,
+        nullable=False,
+        comment="Service-owned event envelope: either chunk_cipher string or type string and content object; no plaintext stream chunks",
+    )
+
+
+# Customize only inherited HITL audit metadata; retain TableBase as the single declaration.
+for _human_model in (HumanRun, HumanRequest, HumanExecution, HumanEvent):
+    for _audit_name in ("created_by", "create_time", "updated_by", "update_time", "delete_flag"):
+        _audit_column = _human_model.__table__.c[_audit_name]
+        _audit_column.comment = _audit_column.doc
+        _audit_column.nullable = False
+        if _audit_name in {"create_time", "update_time"}:
+            _audit_column.server_default = DefaultClause(text("timezone('UTC', now())"))
+        elif _audit_name == "delete_flag":
+            _audit_column.server_default = DefaultClause(text("'N'"))
 
 
 class ConversationRecord(TableBase):
@@ -335,9 +529,13 @@ class ConversationSourceSearch(TableBase):
         String(400), doc="URL link or file path of the search source")
     source_content = Column(String, doc="Original text of the search source")
     score_overall = Column(Numeric(
-        7, 6), doc="Overall similarity score between the source and the user query, calculated by weighted average of details")
+        14, 6), doc="Overall retrieval score between the source and the user query")
     score_accuracy = Column(Numeric(7, 6), doc="Accuracy score")
     score_semantic = Column(Numeric(7, 6), doc="Semantic similarity score")
+    retrieval_highlight_terms = Column(
+        JSONB,
+        doc="Exact lexical terms returned by the retrieval engine for source highlighting",
+    )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")
     cite_index = Column(
@@ -461,6 +659,13 @@ class ModelRecord(TableBase):
         String(100), doc="Source of the persisted capacity value. Optional values: operator, profile, provider_candidate, legacy, default, unknown.")
     capability_profile_version = Column(
         String(100), doc="Version of the approved provider/model capability profile used by the request, e.g. openai/gpt-4o@1.")
+    # v2.6.0 inference params (model-level defaults). Nullable; NULL means provider default.
+    temperature = Column(
+        Float, doc="Default sampling temperature for LLM/VLM models. NULL means provider default. Nullable.")
+    top_p = Column(
+        Float, doc="Default nucleus sampling probability for LLM/VLM models. NULL means provider default. Nullable.")
+    extra_params = Column(
+        JSONB, doc="Fixed inference params without dedicated columns (key-value pairs constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
@@ -525,7 +730,7 @@ class ModelMonitoringRecord(SimpleTableBase):
     requested_output_tokens = Column(
         Integer, doc="Output tokens requested or reserved during capacity resolution"
     )
-    provider_input_limit_tokens = Column(
+    effective_input_limit_tokens = Column(
         Integer, doc="Resolved provider input-token limit used by context management"
     )
     tokenizer_family = Column(
@@ -552,8 +757,11 @@ class ModelMonitoringRecord(SimpleTableBase):
     budget_output_reserve_source = Column(
         String(32), doc="Source of the W2 requested output token reserve"
     )
-    budget_provider_input_limit_tokens = Column(
-        Integer, doc="Provider input limit after applying the W2 output reserve"
+    budget_schema_version = Column(
+        Integer, doc="Version of the persisted context-budget contract"
+    )
+    budget_effective_input_limit_tokens = Column(
+        Integer, doc="Effective input limit after applying the output reserve"
     )
     budget_uncertainty_reserve_tokens = Column(
         Integer, doc="Additional W2 uncertainty reserve deducted from input budget"
@@ -561,14 +769,23 @@ class ModelMonitoringRecord(SimpleTableBase):
     budget_uncertainty_reserve_basis = Column(
         String(64), doc="Basis used for the W2 uncertainty reserve"
     )
-    budget_soft_limit_ratio = Column(
-        Float, doc="W2 soft input budget ratio"
+    budget_compaction_trigger_ratio = Column(
+        Float, doc="Compaction Trigger Threshold ratio"
     )
-    budget_soft_input_budget_tokens = Column(
-        Integer, doc="W2 soft input budget where proactive compression begins"
+    budget_compaction_trigger_ratio_source = Column(
+        String(32), doc="Source of the Compaction Trigger Threshold ratio"
     )
-    budget_hard_input_budget_tokens = Column(
-        Integer, doc="W2 hard input budget consumed by W3 final fit"
+    budget_compaction_trigger_threshold_tokens = Column(
+        Integer, doc="Effective input token threshold that triggers compaction"
+    )
+    budget_compaction_target_ratio = Column(
+        Float, doc="Compaction Target ratio"
+    )
+    budget_compaction_target_ratio_source = Column(
+        String(32), doc="Source of the Compaction Target ratio"
+    )
+    budget_compaction_target_tokens = Column(
+        Integer, doc="Desired effective input token count after compaction"
     )
     budget_warnings = Column(
         JSONB, doc="Structured W2 budget warnings active for this request"
@@ -696,6 +913,9 @@ class AgentInfo(TableBase):
     is_a2a = Column(Boolean, default=False, nullable=False, doc="Whether to publish this agent as an A2A Server agent")
     verification_config = Column(JSONB, doc="Layered ReAct self-verification configuration")
     context_policy = Column(JSONB, doc="Agent-level context processing policy override")
+    # v2.6.0 per-agent model inference param overrides.
+    # Shape: {"<model_id>": {"temperature": 0.5, "top_p": null, "extra_params": {...}}}.
+    model_params_override = Column(JSONB, doc="Per-agent overrides for model inference params. NULL means inherit model defaults.")
     allow_chat_metadata = Column(
         Boolean,
         default=False,

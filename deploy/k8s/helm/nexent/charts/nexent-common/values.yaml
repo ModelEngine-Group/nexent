@@ -50,6 +50,12 @@ config:
     cancelTtlSeconds: "86400"
     completedTtlSeconds: "300"
     cancelPollIntervalSeconds: "1.0"
+  humanInteraction:
+    enabled: "true"
+    acceptNewRuns: "true"
+    toolApprovalEnabled: "false"
+    waitSeconds: "86400"
+    maxConcurrency: "2"
   northbound:
     idempotencyTtlSeconds: "600"
     rateLimitEnabled: "true"
@@ -70,7 +76,6 @@ config:
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
   memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
-  externalMemorySearchEnabled: "false"
   logDir: "/mnt/nexent-data/logs"
   modelEngine:
     enabled: "false"
@@ -152,6 +157,7 @@ config:
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"
@@ -225,6 +231,7 @@ config:
 secrets:
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
+  hitlEncryptionKey: ""
   minio:
     rootUser: "nexent"
     rootPassword: "nexent@4321"

@@ -1,4 +1,3 @@
-import asyncio
 import copy
 import json
 import logging
@@ -11,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 from nexent.core.utils.observer import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
@@ -25,8 +25,9 @@ from nexent.core.models.capacity_resolver import (
     resolve_capacity,
 )
 from nexent.core.models.capacity_budget import (
+    ContextBudgetCalculator,
+    ContextBudgetSnapshot,
     RequestBudgetOverrides,
-    SafeInputBudgetCalculator,
     UncertaintyReserveBasisUnknown,
 )
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
@@ -37,7 +38,7 @@ from nexent.memory import models as memory_models
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from services.file_management_service import validate_urls_access
-from management.services.model.resolver import get_rerank_model
+from management.services.model.resolver import get_rerank_model, is_model_available
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_vector_db_core,
@@ -75,19 +76,22 @@ from consts.const import (
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
-    EXTERNAL_MEMORY_SEARCH_ENABLED,
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
+    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
 )
 from consts.model import ToolParamsRequest
 from consts.exceptions import ValidationError
+from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
+
 
 def _create_fixed_search_memory_tool():
     """Create the internal search tool lazily to keep import boundaries stable."""
@@ -96,10 +100,22 @@ def _create_fixed_search_memory_tool():
     return SearchMemoryTool()
 
 
+def _select_agent_model_id(
+    agent_model_ids: List[int],
+    override_model_id: int | None,
+    tenant_id: str,
+) -> int | None:
+    """Select the request override or the first configured available model."""
+    if override_model_id is not None:
+        return override_model_id
+    for model_id in agent_model_ids:
+        if is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
+            return model_id
+    return agent_model_ids[0] if agent_model_ids else None
+
+
 def _get_external_provider_service_for_search():
-    """Resolve the external provider service only when the search kill switch is on."""
-    if not EXTERNAL_MEMORY_SEARCH_ENABLED:
-        return None
+    """Resolve the external provider service used to search enabled providers."""
     return get_memory_external_provider_service()
 
 
@@ -132,7 +148,8 @@ def _build_effective_knowledge_base_summary(
         for tool in tool_list:
             if tool.class_name != "KnowledgeBaseSearchTool":
                 continue
-            index_names = tool.params.get("index_names") or []
+            metadata = tool.metadata if isinstance(tool.metadata, dict) else {}
+            index_names = metadata.get("allowed_index_names") or []
             if not index_names:
                 if not include_empty_message:
                     return "", []
@@ -142,11 +159,7 @@ def _build_effective_knowledge_base_summary(
                     else "No knowledge base indexes are currently available.\n"
                 )
                 return empty_message, []
-            display_map = (
-                tool.metadata.get("index_name_to_display_map", {})
-                if isinstance(tool.metadata, dict)
-                else {}
-            )
+            display_map = metadata.get("index_name_to_display_map", {})
             for index_name in index_names:
                 try:
                     display_name = display_map.get(index_name, index_name)
@@ -185,6 +198,22 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "default_output_reserve_tokens",
     "tokenizer_family",
 )
+
+
+def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Build extra_body for ModelConfig from model_record_t.extra_params.
+
+    Merges __custom__ user-defined params into the top level so they flow
+    into OpenAI chat.completions.create request body. Returns None when
+    there is nothing to pass through so production behaviour is unchanged.
+    """
+    if not extra_params or not isinstance(extra_params, dict):
+        return None
+    extra_body = dict(extra_params)
+    custom = extra_body.pop("__custom__", None)
+    if custom and isinstance(custom, dict):
+        extra_body.update(custom)
+    return extra_body if extra_body else None
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -245,6 +274,45 @@ def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
     return overrides
 
 
+def _agent_capacity_overrides(
+    agent_info: Optional[dict],
+    model_id: Optional[int],
+) -> Dict[str, Any]:
+    """Extract per-agent capacity overrides for the selected model.
+
+    v2.6.0 model_params_override entries may carry capacity fields
+    (context_window_tokens / max_input_tokens / max_output_tokens /
+    default_output_reserve_tokens / tokenizer_family) next to inference
+    params. When present they win over the model-level capacity columns in
+    W1/W2 resolution, mirroring how temperature/top_p overrides win.
+    """
+    if not isinstance(agent_info, dict) or model_id is None:
+        return {}
+    override_map = agent_info.get("model_params_override")
+    if not isinstance(override_map, dict):
+        return {}
+    entry = override_map.get(str(model_id))
+    if not isinstance(entry, dict):
+        return {}
+    overrides: Dict[str, Any] = {}
+    for field in _OPERATOR_OVERRIDE_FIELDS:
+        value = entry.get(field)
+        if value is not None:
+            overrides[field] = value
+    # Per-agent override semantics: a filled value simply replaces the
+    # model-level value for THIS agent. "最大输出Token数" is the field users
+    # expect to control the actual per-request max_tokens, so mirror it into
+    # default_output_reserve_tokens unless the user set the reserve
+    # explicitly. Without this, the request would keep the model-level
+    # reserve (4096) and the filled cap alone would change nothing visible.
+    if (
+        "max_output_tokens" in overrides
+        and "default_output_reserve_tokens" not in overrides
+    ):
+        overrides["default_output_reserve_tokens"] = overrides["max_output_tokens"]
+    return overrides
+
+
 def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
     values = [value for value in field_sources.values() if value]
     if not values:
@@ -273,18 +341,14 @@ def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
     }
 
 
-def _safe_input_budget_for_monitoring(snapshot: Any) -> dict:
-    return snapshot.model_dump() if hasattr(snapshot, "model_dump") else dict(snapshot)
-
-
-def _resolve_safe_input_budget(
+def _resolve_context_budget(
     *,
     capacity_snapshot: Optional[ModelCapacitySnapshot],
     tenant_id: str,
     agent_requested_output_tokens: Optional[int],
     request_requested_output_tokens: Optional[int],
-) -> Optional[dict]:
-    """Resolve the W2 budget snapshot before context assembly begins."""
+) -> Optional[ContextBudgetSnapshot]:
+    """Resolve the complete canonical W2 snapshot before context assembly."""
     if capacity_snapshot is None:
         return None
 
@@ -298,7 +362,7 @@ def _resolve_safe_input_budget(
         "agent" if agent_requested_output_tokens is not None else "model_default"
     )
     try:
-        snapshot = SafeInputBudgetCalculator().calculate_safe_input_budget(
+        snapshot = ContextBudgetCalculator().calculate_context_budget(
             capacity_snapshot=capacity_snapshot,
             reserve_policy=tenant_config_manager.get_capacity_reserve_policy(tenant_id),
             request_overrides=request_overrides,
@@ -313,7 +377,7 @@ def _resolve_safe_input_budget(
         # SQL/legacy import. Degrade to the same "no W2 snapshot" branch the
         # caller already handles (falls back to W1 input_budget).
         logger.warning(
-            "W2 safe input budget unavailable (tenant_id=%s model=%s): %s - "
+            "W2 context budget unavailable (tenant_id=%s model=%s): %s - "
             "falling back to W1 input_budget. Fill context_window_tokens on the "
             "model record to enable W2 enforcement.",
             tenant_id,
@@ -322,21 +386,23 @@ def _resolve_safe_input_budget(
         )
         return None
     logger.debug(
-        "W2 safe input budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
-        "soft_input_budget_tokens=%s hard_input_budget_tokens=%s fingerprint=%s warnings=%s",
+        "W2 context budget resolved: tenant_id=%s model=%s requested_output_tokens=%s "
+        "compaction_trigger_threshold_tokens=%s compaction_target_tokens=%s "
+        "fingerprint=%s warnings=%s",
         tenant_id,
         snapshot.model_name,
         snapshot.requested_output_tokens,
-        snapshot.soft_input_budget_tokens,
-        snapshot.hard_input_budget_tokens,
+        snapshot.compaction_trigger_threshold_tokens,
+        snapshot.compaction_target_tokens,
         snapshot.fingerprint,
         list(snapshot.warnings),
     )
-    return _safe_input_budget_for_monitoring(snapshot)
+    return snapshot
 
 
 def _resolve_input_budget(
     model_info: Optional[dict],
+    capacity_overrides: Optional[Dict[str, Any]] = None,
 ) -> tuple[int, Optional[dict], Optional[ModelCapacitySnapshot]]:
     """Resolve the context-manager input budget for a model_record_t row.
 
@@ -345,6 +411,9 @@ def _resolve_input_budget(
     Falls back to _TOKEN_THRESHOLD_LEGACY_FALLBACK with no snapshot when
     capacity is unknown - this is the migration-window behavior before all
     model rows are backfilled.
+
+    capacity_overrides carries per-agent capacity fields (from
+    model_params_override) that win over the model-level columns.
     """
     if not isinstance(model_info, dict):
         return _TOKEN_THRESHOLD_LEGACY_FALLBACK, None, None
@@ -357,10 +426,13 @@ def _resolve_input_budget(
             "model_factory/provider is missing; capacity catalog matching is disabled"
         )
     try:
+        operator_overrides = _operator_overrides_from_model_info(model_info)
+        if capacity_overrides:
+            operator_overrides.update(capacity_overrides)
         snapshot = resolve_capacity(
             model_id=model_id,
             provider=provider,
-            operator_overrides=_operator_overrides_from_model_info(model_info),
+            operator_overrides=operator_overrides,
             capability_profiles=CAPABILITY_CATALOG,
         )
         logger.debug(
@@ -907,7 +979,11 @@ async def create_model_config_list(tenant_id):
                         tokenizer_family=record.get("tokenizer_family"),
                         capacity_source=record.get("capacity_source"),
                         capability_profile_version=record.get("capability_profile_version"),
-                        extra_body=extra_body))
+                        # v2.6.0: pass inference params so model-level
+                        # temperature/top_p/extra_params flow into SDK.
+                        temperature=record.get("temperature"),
+                        top_p=record.get("top_p"),
+                        extra_body=_build_extra_body(record.get("extra_params"))))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -1294,10 +1370,13 @@ async def create_agent_config(
                 )
                 fixed_search_tool.embedding_configured = embedding_configured
                 fixed_search_tool.external_results = external_results
-                fixed_search_result = await asyncio.to_thread(
+                fixed_search_result = await run_blocking(
+                    "memory-presearch",
                     fixed_search_tool.forward,
                     last_user_query or "",
                     5,
+                    lane="model-tool-io",
+                    owner="runtime",
                 )
             else:
                 fixed_search_result = (
@@ -1380,9 +1459,9 @@ async def create_agent_config(
         "managed_agents": {agent.name: agent for agent in managed_agents},
         "external_a2a_agents": {agent.agent_id: agent for agent in external_a2a_agents},
     }
-    # AgentInfo stores model_ids (a list); pick the first for the primary model lookup
-    agent_model_ids = agent_info.get("model_ids")
-    model_id_to_use = override_model_id if override_model_id else (agent_model_ids[0] if agent_model_ids else None)
+    # AgentInfo stores model_ids (a list); pick the first available model.
+    agent_model_ids = agent_info.get("model_ids") or []
+    model_id_to_use = _select_agent_model_id(agent_model_ids, override_model_id, tenant_id)
     model_info = None
     if model_id_to_use is not None:
         model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
@@ -1390,9 +1469,14 @@ async def create_agent_config(
         # W1 step 6: derive input budget via ModelCapacityResolver instead of
         # treating model_info["max_tokens"] (a deprecated output cap) as a
         # context threshold. Falls back to a safe constant when capacity is
-        # unknown during the migration window.
+        # unknown during the migration window. Per-agent capacity overrides
+        # (model_params_override) win over the model-level columns.
         input_budget, capacity_snapshot, resolved_capacity_snapshot = (
-            _resolve_input_budget(model_info)
+            _resolve_input_budget(
+                model_info,
+                capacity_overrides=_agent_capacity_overrides(
+                    agent_info, model_id_to_use),
+            )
         )
     else:
         model_name = "main_model"
@@ -1401,19 +1485,23 @@ async def create_agent_config(
         resolved_capacity_snapshot = None
 
     requested_output_tokens = agent_info.get("requested_output_tokens")
-    safe_input_budget_snapshot = _resolve_safe_input_budget(
+    context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
         agent_requested_output_tokens=requested_output_tokens,
         request_requested_output_tokens=request_requested_output_tokens,
     )
-    if safe_input_budget_snapshot is not None:
-        soft_input_budget_tokens = safe_input_budget_snapshot["soft_input_budget_tokens"]
-        hard_input_budget_tokens = safe_input_budget_snapshot["hard_input_budget_tokens"]
-        context_token_threshold = soft_input_budget_tokens
+    if context_budget_snapshot is not None:
+        effective_input_limit_tokens = context_budget_snapshot.effective_input_limit_tokens
+        compaction_trigger_threshold_tokens = (
+            context_budget_snapshot.compaction_trigger_threshold_tokens
+        )
+        compaction_target_tokens = context_budget_snapshot.compaction_target_tokens
+        context_token_threshold = compaction_trigger_threshold_tokens
     else:
-        soft_input_budget_tokens = 0
-        hard_input_budget_tokens = 0
+        effective_input_limit_tokens = 0
+        compaction_trigger_threshold_tokens = 0
+        compaction_target_tokens = 0
         context_token_threshold = input_budget
 
     context_window_tokens = (
@@ -1490,8 +1578,9 @@ async def create_agent_config(
     cm_config = ContextManagerConfig(
         token_threshold=context_token_threshold,
         context_window_tokens=context_window_tokens,
-        soft_input_budget_tokens=soft_input_budget_tokens,
-        hard_input_budget_tokens=hard_input_budget_tokens,
+        effective_input_limit_tokens=effective_input_limit_tokens,
+        compaction_trigger_threshold_tokens=compaction_trigger_threshold_tokens,
+        compaction_target_tokens=compaction_target_tokens,
         policy_layers=policy_layers,
     )
 
@@ -1516,7 +1605,7 @@ async def create_agent_config(
         context_items=context_items,
         pre_run_tool_events=pre_run_tool_events,
         capacity_snapshot=capacity_snapshot,
-        safe_input_budget_snapshot=safe_input_budget_snapshot,
+        context_budget_snapshot=context_budget_snapshot,
         verification_config=AgentVerificationConfig.model_validate(agent_info.get("verification_config") or {}),
         enable_planning=enable_planning,
     )
@@ -1622,6 +1711,10 @@ async def create_tool_config_list(
     tool_keys_seen = set()
     for tool in tools_list:
         tool_identifier = tool.get("name") or tool.get("class_name")
+        # System-managed tools are injected below with run-scoped metadata. Ignore
+        # legacy agent bindings so they cannot create duplicate tool definitions.
+        if tool_identifier in SYSTEM_MANAGED_TOOL_NAMES:
+            continue
         if tool_identifier in tool_keys_seen:
             raise ValidationError(
                 f"Duplicate tool identifier '{tool_identifier}' found in agent '{agent_name or agent_id}'."
@@ -1673,15 +1766,18 @@ async def create_tool_config_list(
                 from ext_components.aidp.services.aidp_access_service import (
                     resolve_current_aidp_access,
                 )
-                _snapshot = resolve_current_aidp_access(
+                snapshot = resolve_current_aidp_access(
                     server_url=AIDP_SERVER_URL,
                     api_key=AIDP_API_KEY,
                     user_id=user_id,
                     tenant_id=tenant_id,
                     aidp_tenant_id=AIDP_TENANT_ID,
                 )
-                _allowed_kds_set = set(_snapshot.accessible_id_set)
-                _kds_name_to_id_map = dict(_snapshot.name_to_id)
+                _allowed_kds_set = set(snapshot.accessible_id_set)
+                _kds_name_to_id_map = {
+                    **snapshot.name_to_id,
+                    **snapshot.tenant_name_to_id,
+                }
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "AIDP access snapshot lookup failed: %s", exc,
@@ -1696,17 +1792,18 @@ async def create_tool_config_list(
             if not isinstance(configured_kds, list):
                 configured_kds = []
             configured_kds = [str(kds_id) for kds_id in configured_kds]
+            configured_kds_set = set(configured_kds)
             # The execution whitelist is the effective tool range, not every
             # KDS the user could access. This prevents model-supplied arguments
             # from expanding a conversation-scoped selection.
-            _allowed_kds_set.intersection_update(configured_kds)
-            param_dict["kds_list"] = [
-                kds_id for kds_id in configured_kds if kds_id in _allowed_kds_set
-            ]
+            _allowed_kds_set.intersection_update(configured_kds_set)
+            # Keep the full per-run scope in params so the SDK can distinguish
+            # configured-but-denied knowledge bases from unavailable ones.
+            param_dict["kds_list"] = configured_kds
             _kds_name_to_id_map = {
                 name: kds_id
                 for name, kds_id in _kds_name_to_id_map.items()
-                if kds_id in _allowed_kds_set
+                if kds_id in configured_kds_set
             }
 
         tool_config = ToolConfig(
@@ -1783,28 +1880,25 @@ async def create_tool_config_list(
 
             # Build display_name to index_name mapping for LLM parameter conversion
             # Also build reverse mapping (index_name -> display_name) for knowledge_base_summary
-            index_names = tool_config.params.get("index_names") or []
-            tool_config.params["index_names"] = index_names
+            configured_index_names = tool_config.params.get("index_names") or []
+            tool_config.params["index_names"] = configured_index_names
 
             # Enforce knowledge-base-level read permission for the chatting user.
             # Agent-level permission controls "who can use this agent", but each knowledge
             # base has its own "who can read" permission (group_ids + ingroup_permission).
-            # Filter out any index the current user does NOT have at least read access to,
-            # so the tool, its display-name mapping, and the injected KB summary all honour
-            # the per-KB ACL.
-            if index_names:
-                index_names = ElasticSearchService.filter_accessible_indices(
-                    index_names, user_id=user_id, tenant_id=tenant_id,
+            # Keep the complete configured scope in params so the SDK can distinguish
+            # configured-but-denied indices from unconfigured ones.
+            allowed_index_names = configured_index_names
+            if configured_index_names:
+                allowed_index_names = ElasticSearchService.filter_accessible_indices(
+                    configured_index_names, user_id=user_id, tenant_id=tenant_id,
                 )
-                # Persist the filtered list back into params so downstream consumers
-                # (knowledge_base_summary builder, metadata) see only accessible indices.
-                tool_config.params["index_names"] = index_names
 
             display_name_to_index_map = {}
             index_name_to_display_map = {}
-            if index_names:
+            if configured_index_names:
                 knowledge_name_map = get_knowledge_name_map_by_index_names(
-                    index_names,
+                    configured_index_names,
                     tenant_id=tenant_id,
                 )
                 # Reverse the mapping: display_name (knowledge_name) -> index_name
@@ -1822,16 +1916,11 @@ async def create_tool_config_list(
                 "document_paths": document_paths,
                 # Defense-in-depth whitelist: forward() will reject any index not in this list,
                 # even if the LLM fabricates an unauthorized index name.
-                "allowed_index_names": list(index_names),
+                "allowed_index_names": list(allowed_index_names),
             }
 
-            if not index_names:
-                # Empty after permission filtering means the current user has no read access
-                # to any of the agent's configured knowledge bases. Instead of skipping the tool
-                # (which would cause the LLM to hallucinate tool calls against a non-existent tool),
-                # we keep the tool in the list with empty index_names. The SDK forward() will return
-                # a clear "no accessible knowledge base" message, allowing the LLM to explain
-                # the situation to the user instead of entering a retry loop.
+            if not allowed_index_names:
+                # Keep the tool so the SDK can report which configured indices lack read access.
                 logger.warning(
                     "Keeping knowledge_base_search tool for agent '%s' with no accessible "
                     "knowledge bases for user '%s' after permission filtering. "
@@ -1842,10 +1931,13 @@ async def create_tool_config_list(
                 tool_config_list.append(tool_config)
                 continue
 
-            embedding_model, _, _ = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, _, _ = get_embedding_model_by_index_name(
+                tenant_id,
+                allowed_index_names[0],
+            )
             if not embedding_model:
                 raise ValidationError(
-                    f"No embedding model found for index '{index_names[0]}'. "
+                    f"No embedding model found for index '{allowed_index_names[0]}'. "
                     f"Please configure an embedding model for this knowledge base.")
             tool_config.metadata["embedding_model"] = embedding_model
         elif tool_config.class_name in ["DifySearchTool", "DataMateSearchTool", "RAGFlowSearchTool"]:
@@ -2229,6 +2321,60 @@ async def create_agent_run_info(
 
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
+    # v2.6.0: Apply per-agent model params override to model_config_list.
+    # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
+    # stored on ag_tenant_agent_t. We match each override entry to a ModelConfig
+    # by display_name (the cite_name used in model_config_list) and merge the
+    # override values on top of the model-level defaults.
+    _agent_info_for_override = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    if model_params_override:
+        for model_id_str, override_entry in model_params_override.items():
+            if not isinstance(override_entry, dict):
+                continue
+            try:
+                override_model_id = int(model_id_str)
+            except (ValueError, TypeError):
+                continue
+            override_model_info = get_model_by_model_id(override_model_id, tenant_id=tenant_id)
+            if not override_model_info:
+                continue
+            display_name = override_model_info.get("display_name")
+            if not display_name:
+                continue
+            for mc in model_list:
+                if mc.cite_name == display_name:
+                    if override_entry.get("temperature") is not None:
+                        mc.temperature = override_entry["temperature"]
+                    if override_entry.get("top_p") is not None:
+                        mc.top_p = override_entry["top_p"]
+                    # v2.6.0: capacity fields are overridable per-agent. The
+                    # authoritative consumer for request shaping is the W1/W2
+                    # resolution (agent-selected model), this keeps each
+                    # ModelConfig consistent with its override entry.
+                    for field in _OPERATOR_OVERRIDE_FIELDS:
+                        if override_entry.get(field) is not None:
+                            setattr(mc, field, override_entry[field])
+                    override_extra = override_entry.get("extra_params")
+                    if override_extra and isinstance(override_extra, dict):
+                        merged = dict(mc.extra_body or {})
+                        for k, v in override_extra.items():
+                            if k == "__custom__" and isinstance(v, dict):
+                                for custom_key, custom_value in v.items():
+                                    # A null custom value is an explicit
+                                    # removal marker: the agent opts out of a
+                                    # model-level custom param instead of
+                                    # inheriting it.
+                                    if custom_value is None:
+                                        merged.pop(custom_key, None)
+                                    else:
+                                        merged[custom_key] = custom_value
+                            else:
+                                merged[k] = v
+                        mc.extra_body = merged if merged else None
+                    break
+
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
     remote_mcp_list.append({
@@ -2313,10 +2459,12 @@ async def create_agent_run_info(
         mcp_host=mcp_host,
         history=converted_history,
         stop_event=threading.Event(),
+        mcp_tool_timeout_seconds=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+        mcp_close_timeout_seconds=RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
         capacity_snapshot=getattr(agent_config, "capacity_snapshot", None),
-        safe_input_budget_snapshot=getattr(
+        context_budget_snapshot=getattr(
             agent_config,
-            "safe_input_budget_snapshot",
+            "context_budget_snapshot",
             None,
         ),
         sandbox_config=sandbox_config,

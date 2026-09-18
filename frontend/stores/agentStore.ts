@@ -23,6 +23,7 @@ export type AgentDraft = Pick<
   | "model"
   | "model_ids"
   | "model_names"
+  | "model_params_override"
   | "unavailable_reasons"
   | "max_step"
   | "requested_output_tokens"
@@ -138,6 +139,10 @@ const toDraft = (agent: Agent): AgentDraft => ({
   greeting_message: agent.greeting_message || "",
   example_questions: agent.example_questions || [],
   icon_url: agent.icon_url,
+  // v2.6.0 per-agent inference-param overrides. Without this line the value
+  // loaded from the API is dropped when the agent is converted to a draft,
+  // so the override dialog always reads back empty after reopening.
+  model_params_override: agent.model_params_override ?? null,
 });
 
 const cloneDraft = <T>(value: T): T => structuredClone(value);
@@ -342,6 +347,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.example_questions !== undefined
     ? { example_questions: patch.example_questions }
+    : {}),
+  ...(patch.model_params_override !== undefined
+    ? { model_params_override: patch.model_params_override }
     : {}),
 });
 

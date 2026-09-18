@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
 from nexent.vector_database.base import VectorDatabaseCore
+from nexent.core.concurrency import run_blocking
 
 from consts.const import (
     LANGUAGE,
@@ -154,14 +155,12 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 final_summary = merge_cluster_summaries(cluster_summaries)
                 return final_summary
 
-            # Run blocking operations in a thread pool to avoid blocking the event loop
-            # Use get_running_loop() for better compatibility with modern asyncio
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                # Fallback for edge cases
-                loop = asyncio.get_event_loop()
-            final_summary = await loop.run_in_executor(None, _generate_summary_sync)
+            final_summary = await run_blocking(
+                "knowledge-summary",
+                _generate_summary_sync,
+                lane="model-tool-io",
+                owner="config",
+            )
 
             # Stream the result
             async def generate_summary():
@@ -569,8 +568,15 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 document = dict(item.get("document", {}))
                 document["score"] = item.get("score")
                 document["index"] = item.get("index")
+                score_details = dict(document.get("score_details") or {})
                 if "scores" in item:
-                    document["score_details"] = item["scores"]
+                    score_details.update(item["scores"])
+                if item.get("highlight_terms"):
+                    score_details["retrieval_highlight_terms"] = item[
+                        "highlight_terms"
+                    ]
+                if score_details:
+                    document["score_details"] = score_details
                 formatted_results.append(document)
 
             if tag_predicates:

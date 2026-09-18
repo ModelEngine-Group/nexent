@@ -457,3 +457,18 @@ OAuthAccountNotFoundError = NotFoundException
 
 # Signature aliases
 # SignatureValidationError already defined above
+
+
+class RuntimeCapacityExceededError(RuntimeError):
+    """Raised when Runtime agent worker and queue capacity is full."""
+
+    retry_after_seconds = 1
+
+
+class RuntimeQueueTimeoutError(RuntimeError):
+    """Raised when an accepted Runtime agent request expires in the queue."""
+
+    def __init__(self, timeout_seconds: float):
+        self.timeout_seconds = timeout_seconds
+        self.retry_after_seconds = max(1, int(timeout_seconds + 0.999))
+        super().__init__("Agent runtime queue wait timed out")

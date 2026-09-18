@@ -81,6 +81,32 @@ def _coalesce(*vals: Any) -> Any:
     return None
 
 
+def _custom_extra_body(extra_params: Optional[dict]) -> Optional[dict]:
+    """Extract the operator's __custom__ KV pairs as the OpenAI extra_body.
+
+    ``extra_params`` is the nexent field ({"__custom__": {...}, ...}); the
+    ``__custom__`` sub-dict holds user-entered provider-specific params that
+    must reach the chat request's ``extra_body``. JSON-compatible nested
+    values are deliberately returned unchanged. Returns None when absent so
+    default behaviour is unchanged.
+    """
+    if not extra_params:
+        return None
+    custom = extra_params.get("__custom__")
+    return custom if isinstance(custom, dict) and custom else None
+
+
+def _llm_construct_kwargs(construct_extras: Dict[str, Any], cfg: dict) -> Dict[str, Any]:
+    """Per-call kwargs shared by every LLM-family context subclass."""
+    return {
+        "temperature": _coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+        "top_p": _coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
+        "stream": construct_extras.pop("stream", None),
+        "max_output_tokens": _coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+        "frequency_penalty": cfg.get("frequency_penalty"),
+    }
+
+
 def _config_to_context(
     cfg: Optional[dict],
     modality: str,
@@ -103,68 +129,50 @@ def _config_to_context(
         observer = MessageObserver()
 
     # ---- common kwargs (base class fields) ----
-    common: Dict[str, Any] = dict(
-        model_name=construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
-        base_url=cfg.get("base_url", ""),
-        api_key=cfg.get("api_key", ""),
-        modality=modality,
-        factory=factory,
-        tenant_id=tenant_id,
-        slot=slot,
-        ssl_verify=cfg.get("ssl_verify", True),
-        observer=observer,
-        display_name=_coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
-        timeout_seconds=_coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
-    )
+    common: Dict[str, Any] = {
+        "model_name": construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
+        "base_url": cfg.get("base_url", ""),
+        "api_key": cfg.get("api_key", ""),
+        "modality": modality,
+        "factory": factory,
+        "tenant_id": tenant_id,
+        "slot": slot,
+        "ssl_verify": cfg.get("ssl_verify", True),
+        "observer": observer,
+        "display_name": _coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
+        "timeout_seconds": _coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
+        "extra_body": cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
+    }
 
     # ---- modality-specific subclass construction ----
     if modality == "llm":
-        return LLMContext(
-            **common,
-            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
-            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
-            stream=construct_extras.pop("stream", None),
-            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-            frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body"),
-        )
-    elif modality == "llm_long_context":
+        return LLMContext(**common, **_llm_construct_kwargs(construct_extras, cfg))
+    if modality == "llm_long_context":
         return LongContextLLMContext(
             **common,
-            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
-            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
-            stream=construct_extras.pop("stream", None),
-            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-            frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body"),
+            **_llm_construct_kwargs(construct_extras, cfg),
             max_tokens=cfg.get("max_tokens"),
             truncation_strategy=cfg.get("truncation_strategy"),
         )
-    elif modality == "vlm":
+    if modality == "vlm":
         explicit_caps = construct_extras.pop("capabilities", None) or {}
         caps = {"audio": True, "video": False, "image": False} if slot == "vlm4" else {}
         caps.update(explicit_caps)
         return VLMContext(
             **common,
-            temperature=_coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
-            top_p=_coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
-            stream=construct_extras.pop("stream", None),
-            max_output_tokens=_coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
-            frequency_penalty=cfg.get("frequency_penalty"),
-            extra_body=cfg.get("extra_body"),
+            **_llm_construct_kwargs(construct_extras, cfg),
             max_tokens=cfg.get("max_tokens"),
             capabilities=caps,
         )
-    elif modality in ("embedding", "multi_embedding"):
+    if modality in ("embedding", "multi_embedding"):
         return EmbeddingContext(
             **common,
             embedding_dim=cfg.get("max_tokens", 1024),
             model_type=cfg.get("model_type"),
         )
-    elif modality == "rerank":
+    if modality == "rerank":
         return ModelContext(**common)
-    else:
-        raise ValueError(f"Unknown modality: {modality}")
+    raise ValueError(f"Unknown modality: {modality}")
 
 
 def get_adapter_from_config(
@@ -174,7 +182,7 @@ def get_adapter_from_config(
     tenant_id: Optional[str] = None,
     **construct_extras: Any,
 ):
-    """Resolve and return the adapter for ``cfg`` (cached by the gateway)."""
+    """Resolve and return the adapter for ``cfg``."""
     context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
     return get_gateway().get_adapter(context)
 
@@ -186,11 +194,11 @@ def build_adapter_fresh(
     tenant_id: Optional[str] = None,
     **construct_extras: Any,
 ):
-    """Build a fresh adapter for ``cfg`` WITHOUT the gateway instance cache.
+    """Build a fresh adapter for ``cfg``.
 
     Used by per-call construction sites (e.g. voice streaming sessions) where
     vendor config carries per-request params (api_key, ws_url, voice, …) that
-    must not collide across tenants under a shared cache key.
+    must not collide across tenants.
     """
     context = _config_to_context(cfg, modality, slot, tenant_id, **construct_extras)
     cls = get_registry().resolve(context.factory, modality)

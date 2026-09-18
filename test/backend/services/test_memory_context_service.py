@@ -337,7 +337,6 @@ consts_mod.MMR_LAMBDA = 0.7
 consts_mod.MEMORY_TOKEN_BUDGET = 2000
 consts_mod.W_AGENT_SHORT_TERM = 1.0
 consts_mod.W_EXTERNAL = 0.8
-consts_mod.EXTERNAL_MEMORY_SEARCH_ENABLED = True
 consts_mod.ES_API_KEY = ""
 consts_mod.ES_HOST = ""
 

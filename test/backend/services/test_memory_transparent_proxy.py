@@ -7,7 +7,6 @@ import pytest
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
 consts_const = types.ModuleType("consts.const")
-consts_const.EXTERNAL_MEMORY_SEARCH_ENABLED = True
 consts_const.AGENT_SHORT_TERM_HALF_LIFE_DAYS = 7.0
 consts_const.MMR_CANDIDATE_TOP_K = 10
 consts_const.MMR_DUPLICATE_THRESHOLD = 0.92
@@ -239,8 +238,7 @@ async def test_build_context_with_external_search_hook_called(mock_retrieval):
         external_search_hook=hook,
     )
 
-    with patch("backend.services.memory_context_service.EXTERNAL_MEMORY_SEARCH_ENABLED", True):
-        await svc.build_context(tenant_id="t1", user_id="u1", query="hello")
+    await svc.build_context(tenant_id="t1", user_id="u1", query="hello")
 
     hook.assert_awaited_once()
 
@@ -256,11 +254,10 @@ async def test_build_context_hook_not_called_when_external_results_provided(mock
 
     ext_items = [ExternalMemoryItem(id="ext1", content="ext", score=0.9)]
 
-    with patch("backend.services.memory_context_service.EXTERNAL_MEMORY_SEARCH_ENABLED", True):
-        await svc.build_context(
-            tenant_id="t1", user_id="u1", query="hello",
-            external_results=ext_items,
-        )
+    await svc.build_context(
+        tenant_id="t1", user_id="u1", query="hello",
+        external_results=ext_items,
+    )
 
     hook.assert_not_awaited()
 
@@ -274,8 +271,7 @@ async def test_build_context_hook_failure_doesnt_break(mock_retrieval):
         external_search_hook=hook,
     )
 
-    with patch("backend.services.memory_context_service.EXTERNAL_MEMORY_SEARCH_ENABLED", True):
-        ctx = await svc.build_context(tenant_id="t1", user_id="u1", query="hello")
+    ctx = await svc.build_context(tenant_id="t1", user_id="u1", query="hello")
 
     assert ctx is not None
 
@@ -288,25 +284,9 @@ async def test_build_context_no_hook_configured(mock_retrieval):
         external_search_hook=None,
     )
 
-    with patch("backend.services.memory_context_service.EXTERNAL_MEMORY_SEARCH_ENABLED", True):
-        ctx = await svc.build_context(tenant_id="t1", user_id="u1", query="hello")
+    ctx = await svc.build_context(tenant_id="t1", user_id="u1", query="hello")
 
     assert ctx is not None
-
-
-@pytest.mark.asyncio
-async def test_build_context_search_disabled(mock_retrieval):
-    hook = AsyncMock(return_value=[])
-    svc = MemoryContextService(
-        retrieval_service=mock_retrieval,
-        pipeline_enabled=False,
-        external_search_hook=hook,
-    )
-
-    with patch("backend.services.memory_context_service.EXTERNAL_MEMORY_SEARCH_ENABLED", False):
-        await svc.build_context(tenant_id="t1", user_id="u1", query="hello")
-
-    hook.assert_not_awaited()
 
 
 @pytest.mark.asyncio
