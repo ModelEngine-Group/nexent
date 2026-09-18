@@ -213,32 +213,37 @@ export function AgentSpace({ active }: { active: boolean }) {
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
-    const menuItems: MenuProps["items"] = [
-      {
-        key: "copy",
-        label: t("agentRepository.card.copy"),
-        icon: <Copy className="size-3.5" aria-hidden />,
-        onClick: () => setCopyListing(listing),
-      },
-      ...(showAdminMenu
-        ? [
-            {
-              key: "takeDown",
-              label: t("repository.listingStatus.takeDown"),
-              icon: <PackageX className="size-3.5" aria-hidden />,
-              danger: true,
-              disabled: isTakingDown,
-              onClick: () => confirmTakeDown(listing),
-            },
-          ]
-        : []),
-    ];
+    const menuItems: MenuProps["items"] = showAdminMenu
+      ? [
+          {
+            key: "takeDown",
+            label: t("repository.listingStatus.takeDown"),
+            icon: <PackageX className="size-3.5" aria-hidden />,
+            danger: true,
+            disabled: isTakingDown,
+            onClick: () => confirmTakeDown(listing),
+          },
+        ]
+      : [];
 
     return (
       <ResourceCard
         key={listing.agent_repository_id}
         className="h-full min-h-0"
-        title={title}
+        title={
+          <span className="inline-flex max-w-full items-center gap-2">
+            <span className="truncate">{title}</span>
+            <span
+              className="inline-flex shrink-0 items-center gap-1 text-xs font-normal text-slate-500 dark:text-slate-400"
+              aria-label={t("agentRepository.detail.downloads", {
+                count: downloads.toLocaleString(),
+              })}
+            >
+              <Download className="size-3.5" aria-hidden />
+              {downloads.toLocaleString()}
+            </span>
+          </span>
+        }
         onClick={() => setDetailListingId(listing.agent_repository_id)}
         descriptionLines={descriptionLines}
         icon={
@@ -282,27 +287,29 @@ export function AgentSpace({ active }: { active: boolean }) {
         footerLayout="inline"
         meta={author ? <span className="truncate">{author}</span> : undefined}
         headerActions={
-          <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-            <Button
-              type="text"
-              size="small"
-              className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-              icon={<MoreHorizontal className="size-4" aria-hidden />}
-              loading={isTakingDown}
-              aria-label={t("agentRepository.mine.menu.more")}
-            />
-          </Dropdown>
+          showAdminMenu ? (
+            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+              <Button
+                type="text"
+                size="small"
+                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                icon={<MoreHorizontal className="size-4" aria-hidden />}
+                loading={isTakingDown}
+                aria-label={t("agentRepository.mine.menu.more")}
+              />
+            </Dropdown>
+          ) : undefined
         }
         footer={
-          <span
-            className="inline-flex items-center gap-1"
-            aria-label={t("agentRepository.detail.downloads", {
-              count: downloads.toLocaleString(),
-            })}
+          <Button
+            type="text"
+            size="small"
+            className="h-7 px-1 text-xs text-slate-500 hover:text-primary"
+            icon={<Copy className="size-3.5" aria-hidden />}
+            onClick={() => setCopyListing(listing)}
           >
-            <Download className="size-3.5" aria-hidden />
-            {downloads.toLocaleString()}
-          </span>
+            {t("agentRepository.card.copy")}
+          </Button>
         }
       />
     );

@@ -46,7 +46,15 @@ test("agent repository displays up to twelve unified cards in four desktop colum
     agentSpace,
     /onClick=\{\(\) => setDetailListingId\(listing\.agent_repository_id\)\}/
   );
-  assert.match(agentSpace, /key: "copy"/);
+  assert.doesNotMatch(agentSpace, /key: "copy"/);
+  assert.match(
+    agentSpace,
+    /title=\{[\s\S]*t\("agentRepository\.detail\.downloads"/
+  );
+  assert.match(
+    agentSpace,
+    /footer=\{[\s\S]*onClick=\{\(\) => setCopyListing\(listing\)\}/
+  );
   assert.match(agentSpace, /footerLayout="inline"/);
   assert.match(agentSpace, /badge=\{[\s\S]*listing\.version_label/);
   assert.match(agentSpace, /Grid\.useBreakpoint\(\)/);
