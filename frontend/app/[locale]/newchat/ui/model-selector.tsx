@@ -54,14 +54,16 @@ export type ModelOption = {
   keywords?: readonly string[];
   /**
    * Reasoning effort levels the model supports. Pass `true` for the default
-   * low/medium/high levels, or a custom list. Omit for models without
-   * configurable reasoning.
+   * The catalog-provided effort levels, or a custom list. Omit for models
+   * without configurable reasoning.
    */
   efforts?: boolean | readonly ModelSelectorEffortOption[];
+  /** Default effort from the model capability profile. */
+  defaultEffort?: string;
 };
 
 function getModelEfforts(
-  model: ModelOption | undefined,
+  model: ModelOption | undefined
 ): readonly ModelSelectorEffortOption[] | undefined {
   if (!model?.efforts) return undefined;
   return model.efforts === true ? DEFAULT_EFFORT_OPTIONS : model.efforts;
@@ -69,7 +71,7 @@ function getModelEfforts(
 
 function resolveEffort(
   efforts: readonly ModelSelectorEffortOption[] | undefined,
-  effort: string | undefined,
+  effort: string | undefined
 ): string | undefined {
   if (effort === undefined) return undefined;
   return efforts?.some((e) => e.id === effort) ? effort : undefined;
@@ -83,11 +85,11 @@ function resolveEffort(
 export function resolveModelEffort(
   models: readonly ModelOption[],
   modelId: string | undefined,
-  effort: string | undefined,
+  effort: string | undefined
 ): string | undefined {
   return resolveEffort(
     getModelEfforts(models.find((m) => m.id === modelId)),
-    effort,
+    effort
   );
 }
 
@@ -114,7 +116,7 @@ function useControllableState<T>({
       if (!isControlled) setInternal(next);
       onChangeRef.current?.(next);
     },
-    [isControlled],
+    [isControlled]
   );
   return [value, setValue] as const;
 }
@@ -134,14 +136,14 @@ type ModelSelectorContextValue = {
 };
 
 const ModelSelectorContext = createContext<ModelSelectorContextValue | null>(
-  null,
+  null
 );
 
 function useModelSelectorContext() {
   const ctx = useContext(ModelSelectorContext);
   if (!ctx) {
     throw new Error(
-      "ModelSelector sub-components must be used within ModelSelector.Root",
+      "ModelSelector sub-components must be used within ModelSelector.Root"
     );
   }
   return ctx;
@@ -196,7 +198,11 @@ function ModelSelectorRoot({
   });
   const [effort, setEffort] = useControllableState({
     prop: effortProp,
-    defaultProp: defaultEffort,
+    defaultProp:
+      defaultEffort ??
+      models.find(
+        (model) => model.id === (valueProp ?? defaultValue ?? models[0]?.id)
+      )?.defaultEffort,
     onChange: onEffortChange,
   });
   const [open, setOpen] = useControllableState({
@@ -204,10 +210,38 @@ function ModelSelectorRoot({
     defaultProp: defaultOpen ?? false,
     onChange: onOpenChange,
   });
-
   const selectedModel = models.find((m) => m.id === value);
+
+  // Model lists are loaded asynchronously.  Without this sync an initially
+  // empty list leaves the selector permanently unselected because
+  // useState(defaultProp) only evaluates on the first render.
+  useEffect(() => {
+    if (value === undefined && models[0]) {
+      setValue(models[0].id);
+    }
+  }, [models, value, setValue]);
+
+  const previousModelIdRef = useRef(value);
+  useEffect(() => {
+    if (effortProp !== undefined) {
+      previousModelIdRef.current = value;
+      return;
+    }
+    if (previousModelIdRef.current !== value) {
+      if (selectedModel?.defaultEffort !== undefined) {
+        setEffort(selectedModel.defaultEffort);
+      }
+      previousModelIdRef.current = value;
+    }
+  }, [effortProp, selectedModel?.defaultEffort, setEffort, value]);
+
   const efforts = getModelEfforts(selectedModel);
-  const activeEffort = resolveEffort(efforts, effort);
+  const resolvedDefaultEffort =
+    selectedModel?.defaultEffort &&
+    efforts?.some((option) => option.id === selectedModel.defaultEffort)
+      ? selectedModel.defaultEffort
+      : undefined;
+  const activeEffort = resolveEffort(efforts, effort) ?? resolvedDefaultEffort;
   const contextValue = useMemo(
     () => ({
       models,
@@ -228,7 +262,7 @@ function ModelSelectorRoot({
       activeEffort,
       setEffort,
       setOpen,
-    ],
+    ]
   );
 
   return (
@@ -261,7 +295,7 @@ export const modelSelectorTriggerVariants = cva(
       variant: "outline",
       size: "default",
     },
-  },
+  }
 );
 
 export type ModelSelectorTriggerProps = ComponentPropsWithoutRef<
@@ -314,7 +348,8 @@ function ModelSelectorValue({
 }: ModelSelectorValueProps) {
   const { t } = useTranslation();
   const { selectedModel, efforts, effort } = useModelSelectorContext();
-  const resolvedPlaceholder = placeholder ?? t("chat.modelSelector.selectModel");
+  const resolvedPlaceholder =
+    placeholder ?? t("chat.modelSelector.selectModel");
 
   if (!selectedModel) {
     return (
@@ -366,7 +401,7 @@ function ModelSelectorContent({
       sideOffset={sideOffset}
       className={cn(
         "bg-popover/95 w-72 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
-        className,
+        className
       )}
       {...props}
     >
@@ -422,7 +457,7 @@ function ModelSelectorList({
       data-slot="model-selector-list"
       className={cn(
         "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-        className,
+        className
       )}
       {...props}
     >
@@ -544,7 +579,7 @@ function ModelSelectorEffort({
       data-slot="model-selector-effort"
       className={cn(
         "flex items-center justify-between gap-3 border-t px-3 py-2",
-        className,
+        className
       )}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
         // cmdk's root keydown handler claims Enter to select the highlighted
@@ -557,7 +592,11 @@ function ModelSelectorEffort({
       <span className="text-muted-foreground text-xs">{resolvedLabel}</span>
       <div
         role="group"
-        aria-label={typeof resolvedLabel === "string" ? resolvedLabel : t("chat.modelSelector.reasoningEffort")}
+        aria-label={
+          typeof resolvedLabel === "string"
+            ? resolvedLabel
+            : t("chat.modelSelector.reasoningEffort")
+        }
         className="flex items-center gap-0.5"
       >
         {efforts.map((option) => {
@@ -573,7 +612,7 @@ function ModelSelectorEffort({
                 "focus-visible:ring-ring/50 cursor-pointer rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
                 isActive
                   ? "bg-accent text-accent-foreground font-medium"
-                  : "text-muted-foreground hover:text-foreground",
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
               {option.name}
@@ -656,7 +695,7 @@ type ModelSelectorComponent = typeof ModelSelectorImpl & {
 };
 
 const ModelSelector = memo(
-  ModelSelectorImpl,
+  ModelSelectorImpl
 ) as unknown as ModelSelectorComponent;
 
 ModelSelector.displayName = "ModelSelector";

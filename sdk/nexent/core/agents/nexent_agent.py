@@ -299,7 +299,10 @@ class NexentAgent:
             max_output_tokens=model_config.max_output_tokens,
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
+            reasoning_capability=model_config.reasoning_capability,
         )
+        if model_config.reasoning_effort is not None:
+            model_kwargs["reasoning_effort"] = model_config.reasoning_effort
         if self.cancellation_scope is not None:
             model_kwargs["cancellation_scope"] = self.cancellation_scope
         if model_config.concurrency_limit is not None:

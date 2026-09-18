@@ -1015,6 +1015,8 @@ export const conversationService = {
       }>;
       agent_id?: number; // Add agent_id parameter
       model_id?: number; // Optional model override
+      reasoning_effort?:
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
       version_no?: number; // Optional version override
       is_debug?: boolean; // Add debug mode parameter
       is_resume?: boolean; // Add resume mode parameter for streaming recovery
@@ -1070,6 +1072,9 @@ export const conversationService = {
       }
       if (params.model_id !== undefined && params.model_id !== null) {
         requestParams.model_id = params.model_id;
+      }
+      if (params.reasoning_effort !== undefined) {
+        requestParams.reasoning_effort = params.reasoning_effort;
       }
       if (params.version_no !== undefined && params.version_no !== null) {
         requestParams.version_no = params.version_no;

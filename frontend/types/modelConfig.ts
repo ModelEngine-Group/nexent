@@ -1,9 +1,6 @@
 // Model connection status type
 export type ModelConnectStatus =
-  | "not_detected"
-  | "detecting"
-  | "available"
-  | "unavailable";
+  "not_detected" | "detecting" | "available" | "unavailable";
 
 // API response type
 export interface ApiResponse<T = any> {
@@ -21,7 +18,13 @@ export type ModelSource =
   | "tokenpony"
   | "OpenAI-API-Compatible"
   | "modelengine"
-  | "volcengine";
+  | "volcengine"
+  | "deepseek"
+  | "zhipu"
+  | "anthropic"
+  | "google"
+  | "mistral"
+  | "xai";
 
 // Model type
 export type ModelType =
@@ -35,6 +38,19 @@ export type ModelType =
   | "vlm3"
   | "vlm4"
   | "multi_embedding";
+
+export type ReasoningEffort =
+  "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface ReasoningCapability {
+  status: "supported" | "unsupported" | "unknown";
+  control: "toggle" | "effort";
+  levels: ReasoningEffort[];
+  default?: ReasoningEffort | null;
+  wire_format?: "reasoning_effort" | "thinking_toggle" | "thinking_budget";
+  effort_budgets?: Record<string, number>;
+  source: "catalog" | "operator" | "unknown";
+}
 
 // Model option interface
 export interface ModelOption {
@@ -67,6 +83,9 @@ export interface ModelOption {
   temperature?: number;
   topP?: number;
   extraParams?: Record<string, unknown>;
+  reasoningCapability?: ReasoningCapability;
+  /** Persisted model-level default, stored in extra_params.reasoning_effort. */
+  defaultReasoningEffort?: ReasoningEffort;
 }
 
 // Application configuration interface
@@ -124,10 +143,7 @@ export interface CapacitySuggestionFields {
 }
 
 export type CapacitySuggestionMatchKind =
-  | "catalog_exact"
-  | "catalog_fuzzy"
-  | "provider_discovery"
-  | "none";
+  "catalog_exact" | "catalog_fuzzy" | "provider_discovery" | "none";
 
 export type CapacitySuggestionConfidence = "high" | "medium" | "low";
 
@@ -196,11 +212,11 @@ export interface ModelValidationResponse {
  * field-level mapping is needed between backend and frontend.
  */
 export interface ModelCatalogProviderInfo {
-  id: string;                    // e.g. "silicon", "dashscope" (Pydantic field name)
-  display_name: string;          // human-readable (zh-CN) name for UI buttons
-  base_url?: string | null;      // default API base URL for this provider
-  supported_types: string[];     // llm / embedding / rerank / ...
-  model_count?: number;          // how many preset models are registered
+  id: string; // e.g. "silicon", "dashscope" (Pydantic field name)
+  display_name: string; // human-readable (zh-CN) name for UI buttons
+  base_url?: string | null; // default API base URL for this provider
+  supported_types: string[]; // llm / embedding / rerank / ...
+  model_count?: number; // how many preset models are registered
 }
 
 /**
@@ -226,6 +242,7 @@ export interface ModelCatalogProfile {
   support_tool_calls?: boolean | null;
   support_structured_outputs?: boolean | null;
   support_reasoning?: boolean | null;
+  reasoning_capability?: ReasoningCapability | null;
   support_vision?: boolean | null;
   is_multimodal_inputs?: boolean | null;
   modality?: string | null;
@@ -249,7 +266,7 @@ export interface ModelCatalogProfile {
 /** Entry from GET /model/catalog/{provider}/models */
 export interface ModelCatalogModelEntry {
   provider_key: string;
-  model_name: string;          // e.g. "Qwen/Qwen3-8B" (slash allowed in URL path)
+  model_name: string; // e.g. "Qwen/Qwen3-8B" (slash allowed in URL path)
   profile: ModelCatalogProfile;
 }
 
@@ -283,12 +300,7 @@ export interface ModelCatalogEnvelope<T> {
 
 /** Field type for fixed inference params, mirrors backend FieldSpec.type */
 export type InferenceFieldType =
-  | "str"
-  | "int"
-  | "float"
-  | "bool"
-  | "select"
-  | "array_str";
+  "str" | "int" | "float" | "bool" | "select" | "array_str";
 
 /** Single field specification, mirrors backend FieldSpec Pydantic model. */
 export interface InferenceFieldSpec {

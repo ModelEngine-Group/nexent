@@ -210,10 +210,43 @@ def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[s
     if not extra_params or not isinstance(extra_params, dict):
         return None
     extra_body = dict(extra_params)
+    # This is a dedicated ModelConfig field, not a provider request-body key.
+    extra_body.pop("reasoning_effort", None)
     custom = extra_body.pop("__custom__", None)
     if custom and isinstance(custom, dict):
         extra_body.update(custom)
     return extra_body if extra_body else None
+
+
+def _resolve_reasoning_capability(
+    model_name: str,
+    base_url: Optional[str],
+    provider_hint: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Resolve catalog reasoning metadata without coupling import-time setup."""
+    try:
+        from configs.model_catalog_loader import resolve_reasoning_capability
+    except ImportError:
+        return None
+    return resolve_reasoning_capability(
+        model_name=model_name,
+        base_url=base_url,
+        provider_hint=provider_hint,
+    )
+
+
+def _resolve_model_reasoning_effort(
+    extra_params: Optional[Dict[str, Any]],
+    capability: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Use a persisted model default when valid, otherwise the catalog default."""
+    if not isinstance(capability, dict) or capability.get("status") != "supported":
+        return None
+    levels = capability.get("levels") or []
+    saved = extra_params.get("reasoning_effort") if isinstance(extra_params, dict) else None
+    if saved in levels:
+        return saved
+    return capability.get("default") if capability.get("default") in levels else None
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -909,13 +942,19 @@ async def create_model_config_list(tenant_id):
     model_list = []
     extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     for record in records:
+        model_name = add_repo_to_name(
+            model_repo=record["model_repo"],
+            model_name=record["model_name"],
+        )
+        reasoning_capability = _resolve_reasoning_capability(
+            model_name=model_name,
+            base_url=record.get("base_url"),
+            provider_hint=record.get("model_factory"),
+        )
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
                         api_key=record.get("api_key", ""),
-                        model_name=add_repo_to_name(
-                                model_repo=record["model_repo"],
-                                model_name=record["model_name"],
-                            ),
+                        model_name=model_name,
                         url=record["base_url"],
                         ssl_verify=record.get("ssl_verify", True),
                         model_factory=record.get("model_factory"),
@@ -937,6 +976,10 @@ async def create_model_config_list(tenant_id):
                         # temperature/top_p/extra_params flow into SDK.
                         temperature=record.get("temperature"),
                         top_p=record.get("top_p"),
+                        reasoning_capability=reasoning_capability,
+                        reasoning_effort=_resolve_model_reasoning_effort(
+                            record.get("extra_params"), reasoning_capability
+                        ),
                         extra_body=_build_extra_body(record.get("extra_params"))))
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
@@ -2200,6 +2243,7 @@ async def create_agent_run_info(
     is_debug: bool = False,
     override_version_no: int | None = None,
     override_model_id: int | None = None,
+    reasoning_effort: str | None = None,
     requested_output_tokens: int | None = None,
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     conversation_id: Optional[int] = None,
@@ -2301,12 +2345,40 @@ async def create_agent_run_info(
                     if override_extra and isinstance(override_extra, dict):
                         merged = dict(mc.extra_body or {})
                         for k, v in override_extra.items():
+                            if k == "reasoning_effort":
+                                if isinstance(v, str):
+                                    mc.reasoning_effort = v
+                                continue
                             if k == "__custom__" and isinstance(v, dict):
                                 merged.update(v)
                             else:
                                 merged[k] = v
                         mc.extra_body = merged if merged else None
+                    if override_entry.get("reasoning_effort") is not None:
+                        mc.reasoning_effort = override_entry["reasoning_effort"]
                     break
+
+    # A request-level effort is valid only when the selected model has an
+    # explicit catalog capability. Unknown/custom models fail closed instead
+    # of silently pretending to support a provider-specific control.
+    if reasoning_effort is not None:
+        selected_config = next(
+            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
+            None,
+        )
+        capability = selected_config.reasoning_capability if selected_config else None
+        supported_levels = (capability or {}).get("levels", [])
+        if (
+            not selected_config
+            or not isinstance(capability, dict)
+            or capability.get("status") != "supported"
+            or capability.get("control") != "effort"
+            or reasoning_effort not in supported_levels
+        ):
+            raise ValidationError(
+                "The selected model does not support the requested reasoning effort"
+            )
+        selected_config.reasoning_effort = reasoning_effort
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")

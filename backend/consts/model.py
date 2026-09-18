@@ -819,6 +819,13 @@ class AgentRequest(BaseModel):
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
     model_id: Optional[int] = None
+    reasoning_effort: Optional[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
+        default=None,
+        description=(
+            "Optional per-run reasoning effort. None inherits the selected model "
+            "or Agent default."
+        ),
+    )
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     version_no: Optional[int] = None
     is_debug: Optional[bool] = False
@@ -2238,6 +2245,49 @@ class DeleteMcpServiceRequest(BaseModel):
 # =============================================================================
 
 
+class ReasoningCapability(BaseModel):
+    """Explicit reasoning control capability declared by the model catalog."""
+
+    status: Literal["supported", "unsupported", "unknown"] = "unknown"
+    control: Literal["toggle", "effort"] = "effort"
+    levels: List[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(default_factory=list)
+    default: Optional[Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
+    wire_format: Literal["reasoning_effort", "thinking_toggle", "thinking_budget"] = "reasoning_effort"
+    effort_budgets: Dict[str, int] = Field(default_factory=dict)
+    source: Literal["catalog", "operator", "unknown"] = "unknown"
+
+    @model_validator(mode="after")
+    def validate_levels(self) -> "ReasoningCapability":
+        if self.status == "supported" and self.control == "effort" and not self.levels:
+            raise ValueError("Effort reasoning capability must declare at least one level")
+        if self.default is not None and self.default not in self.levels:
+            raise ValueError("Reasoning default must be included in reasoning levels")
+        if any(level not in self.levels for level in self.effort_budgets):
+            raise ValueError("Reasoning budget keys must be included in reasoning levels")
+        if any(value < 1024 for value in self.effort_budgets.values()):
+            raise ValueError("Reasoning budgets must be at least 1024 tokens")
+        if self.status == "supported" and self.wire_format == "thinking_budget":
+            missing_budgets = {
+                level for level in self.levels if level != "none" and level not in self.effort_budgets
+            }
+            if missing_budgets:
+                raise ValueError(
+                    "Thinking-budget reasoning capability must declare a budget for every enabled level"
+                )
+        if self.status != "supported":
+            self.levels = []
+            self.default = None
+            self.effort_budgets = {}
+        return self
+
+
+# Canonical values accepted by the model-level reasoning default.  The
+# provider catalog still decides which values are valid for a specific model.
+REASONING_EFFORT_VALUES = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+)
+
+
 class ModelCatalogProfile(BaseModel):
     """从预置模型目录中读取的单个模型的完整配置描述。
 
@@ -2260,6 +2310,10 @@ class ModelCatalogProfile(BaseModel):
     timeout_seconds: Optional[int] = Field(None, gt=0, description="Per-request timeout in seconds")
     concurrency_limit: Optional[int] = Field(None, gt=0, description="Maximum concurrent requests for this model")
     capability_profile_version: Optional[str] = Field(None, description="Approved provider/model capability profile version")
+    reasoning_capability: Optional[ReasoningCapability] = Field(
+        None,
+        description="Explicit reasoning control capability for this model",
+    )
     requires_appid: bool = Field(False, description="Whether the model requires model_appid auth (STT/TTS)")
     requires_access_token: bool = Field(False, description="Whether the model requires access_token auth (STT/TTS)")
     forced_temperature: Optional[float] = Field(
@@ -2390,7 +2444,12 @@ def get_extra_param_keys_for_type(model_type: str) -> List[str]:
     for the given model type (i.e., fields without a dedicated DB column).
     """
     specs = FIXED_INFERENCE_FIELDS_BY_TYPE.get(model_type, [])
-    return [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
+    keys = [s.key for s in specs if s.key not in _FIELDS_WITH_DEDICATED_COLUMN]
+    if model_type in {"llm", "chat"}:
+        # Stored in the existing JSONB column so this feature remains
+        # backwards-compatible with installations that have no migration.
+        keys.append("reasoning_effort")
+    return keys
 
 
 _INVALID_CUSTOM_VALUE = object()
@@ -2493,6 +2552,14 @@ def filter_extra_params(model_type: str, extra_params: Optional[Dict[str, Any]])
                 filtered["__custom__"] = clean_custom
             continue
         if key in allowed:
+            if key == "reasoning_effort" and value not in REASONING_EFFORT_VALUES:
+                logger.warning(
+                    "Dropped invalid reasoning_effort value %r; expected one of %s",
+                    value,
+                    sorted(REASONING_EFFORT_VALUES),
+                )
+                dropped.append(key)
+                continue
             filtered[key] = value
         else:
             dropped.append(key)

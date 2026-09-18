@@ -10,6 +10,8 @@ import type {
   InferenceFieldSpec,
   InferenceFieldSpecsByType,
   InferenceFieldType,
+  ReasoningCapability,
+  ReasoningEffort,
 } from "@/types/modelConfig";
 
 // =============================================================================
@@ -70,6 +72,8 @@ export interface ModelAdvancedSettingsProps {
    * (override mode): makes "empty = inherit this value" visible. Keys match
    * spec.key (snake_case). */
   inheritedDefaults?: Record<string, unknown>;
+  /** Capability metadata for the model-level default reasoning selector. */
+  reasoningCapability?: ReasoningCapability;
 }
 
 /** Keys that have dedicated DB columns or are stored as top-level fields (not in extra_params). */
@@ -301,6 +305,12 @@ export const advancedSettingsValueFromRecord = (
     } else if (spec.key in extra) {
       value[spec.key] = extra[spec.key];
     }
+  }
+
+  // The model-level reasoning default is catalog-driven rather than part of
+  // the generic field-spec payload, but it still lives in extra_params.
+  if (typeof extra.reasoning_effort === "string") {
+    value.reasoning_effort = extra.reasoning_effort;
   }
 
   // Pass through user-defined custom params (extra_params.__custom__).
@@ -613,6 +623,7 @@ export const ModelAdvancedSettings = ({
   mode = "default",
   disabled = false,
   inheritedDefaults,
+  reasoningCapability,
 }: ModelAdvancedSettingsProps) => {
   const { t } = useTranslation();
   // STT/TTS auth fields (AppID, Access Token) only apply to Volcano Engine.
@@ -680,6 +691,55 @@ export const ModelAdvancedSettings = ({
     ([k], i) => k !== "" && customEntries.findIndex(([k2]) => k2 === k) !== i
   );
 
+  const reasoningLevels =
+    mode === "default" &&
+    reasoningCapability?.status === "supported" &&
+    reasoningCapability.levels.length > 0
+      ? reasoningCapability.levels
+      : [];
+  const reasoningEffort = value.reasoning_effort as ReasoningEffort | undefined;
+  const reasoningLabel = (level: ReasoningEffort) =>
+    level === "none"
+      ? t("model.advanced.reasoningOff", { defaultValue: "关闭" })
+      : level === "minimal"
+        ? t("model.advanced.reasoningMinimal", { defaultValue: "最低" })
+        : level === "low"
+          ? t("model.advanced.reasoningLow", { defaultValue: "低" })
+          : level === "medium"
+            ? t("model.advanced.reasoningMedium", { defaultValue: "中" })
+            : level === "high"
+              ? t("model.advanced.reasoningHigh", { defaultValue: "高" })
+              : level === "xhigh"
+                ? t("model.advanced.reasoningXHigh", { defaultValue: "超高" })
+                : t("model.advanced.reasoningMax", { defaultValue: "最大" });
+
+  const renderReasoningEffort = reasoningLevels.length > 0 && (
+    <div>
+      <label className="block mb-1 text-sm font-medium text-gray-700">
+        {t("model.advanced.defaultReasoningEffort", {
+          defaultValue: "默认思考挡位",
+        })}
+      </label>
+      <Select
+        className="w-full"
+        value={reasoningEffort}
+        disabled={disabled}
+        options={reasoningLevels.map((level) => ({
+          value: level,
+          label: reasoningLabel(level),
+        }))}
+        onChange={(next: ReasoningEffort | undefined) =>
+          onChange({ ...value, reasoning_effort: next })
+        }
+      />
+      <div className="mt-1 text-xs text-gray-500">
+        {t("model.advanced.defaultReasoningEffortHint", {
+          defaultValue: "聊天界面可在此模型的挡位范围内临时切换。",
+        })}
+      </div>
+    </div>
+  );
+
   const commitCustomEntries = (nextEntries: [string, string][]) => {
     onChange({ ...value, [CUSTOM_KEY]: nextEntries });
   };
@@ -706,7 +766,7 @@ export const ModelAdvancedSettings = ({
     commitCustomEntries(next);
   };
 
-  if (specList.length === 0) {
+  if (specList.length === 0 && reasoningLevels.length === 0) {
     return (
       <div className="space-y-3">
         <Empty
@@ -739,6 +799,7 @@ export const ModelAdvancedSettings = ({
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {renderReasoningEffort}
         {specList.map((spec) => {
           const fieldValue = value[spec.key];
           const rangeHint =

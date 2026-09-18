@@ -202,9 +202,7 @@ export interface Nl2aResourceCandidate {
 }
 
 export type Nl2aInstallationFormKind =
-  | "SKILL_CONFIG"
-  | "MCP_REMOTE"
-  | "MCP_CONTAINER";
+  "SKILL_CONFIG" | "MCP_REMOTE" | "MCP_CONTAINER";
 
 export interface Nl2aResourceInstallationOption {
   option_id: string;
@@ -1462,8 +1460,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const history = historyMessages.map((msg) => {
       const customMetadata = isNl2Agent
         ? (msg.metadata?.custom as
-            | { nl2agentCardAction?: Nl2AgentCardAction }
-            | undefined)
+            { nl2agentCardAction?: Nl2AgentCardAction } | undefined)
         : undefined;
       const text = customMetadata?.nl2agentCardAction
         ? JSON.stringify(customMetadata.nl2agentCardAction)
@@ -1518,6 +1515,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
+    const reasoningEffort = context.config?.reasoningEffort;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1526,6 +1524,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     } else if (modelName) {
       // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
+    }
+    if (!isResume && typeof reasoningEffort === "string" && reasoningEffort) {
+      requestBody.reasoning_effort = reasoningEffort;
     }
 
     log.log(
@@ -1563,8 +1564,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       if (abortHandled) return;
       abortHandled = true;
       const abortReason = abortSignal?.reason as
-        | { detach?: boolean }
-        | undefined;
+        { detach?: boolean } | undefined;
       if (abortReason?.detach) {
         log.log(
           `[ChatModelAdapter] Local stream detached from conversation ${backendConversationId ?? "unknown"}`
@@ -1592,8 +1592,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
 
     let agentResponse:
-      | ReadableStreamDefaultReader<Uint8Array>
-      | { type: "json"; data: unknown };
+      ReadableStreamDefaultReader<Uint8Array> | { type: "json"; data: unknown };
     let returnedRuntimeMetadataVersion: number | undefined;
     try {
       agentResponse = await conversationService.runAgent(
@@ -2665,7 +2664,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               flushOpenReasoning();
             }
             const partType =
-              chunk.type === "step_count" ? "reasoning" : mapChunkType(chunk.type);
+              chunk.type === "step_count"
+                ? "reasoning"
+                : mapChunkType(chunk.type);
             if (chunk.type === "parse") {
               flushOpenReasoning(chunk.invocation_id);
               if (chunk.content.trim()) {

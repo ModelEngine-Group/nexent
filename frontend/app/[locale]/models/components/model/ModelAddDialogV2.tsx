@@ -24,10 +24,12 @@ import { modelService } from "@/services/modelService";
 import {
   InferenceFieldSpecsByType,
   ModelCatalogFullPayload,
+  ModelCatalogProfile,
   ModelCatalogProviderInfo,
   ModelConfig,
   ModelOption,
   ModelType,
+  ReasoningCapability,
   SingleModelConfig,
 } from "@/types/modelConfig";
 import { MODEL_TYPES } from "@/const/modelConfig";
@@ -200,6 +202,7 @@ interface BatchRowState {
   // Embedding-specific: multimodal switch + chunk size range slider
   isMultimodal: boolean;
   chunkSizeRange: [number, number];
+  reasoningCapability?: ReasoningCapability;
 }
 
 /** Resolve the effective model type for a batch row: embedding + multimodal → multi_embedding. */
@@ -292,6 +295,9 @@ const makeInitialRowState = (
   catalogProfile?: any
 ): BatchRowState => {
   const advanced = advancedSettingsValueFromRecord(catalogProfile, {}, modelType);
+  if (catalogProfile?.reasoning_capability?.default) {
+    advanced.reasoning_effort = catalogProfile.reasoning_capability.default;
+  }
   // STT/TTS default provider to DashScope (阿里灵积) when not provided by the
   // catalog, matching the original ModelAddDialog (sttProvider/ttsProvider:
   // "dashscope"). Ensures the STT服务商 dropdown is pre-selected when a voice
@@ -319,6 +325,7 @@ const makeInitialRowState = (
     checking: false,
     isMultimodal: false,
     chunkSizeRange: [DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE],
+    reasoningCapability: catalogProfile?.reasoning_capability ?? undefined,
   };
 };
 
@@ -445,6 +452,11 @@ export const ModelAddDialogV2 = ({
     if (model.modelFactory) advancedValue.model_factory = model.modelFactory;
     if (model.modelAppid) advancedValue.model_appid = model.modelAppid;
     if (model.accessToken) advancedValue.access_token = model.accessToken;
+    const defaultReasoningEffort =
+      model.defaultReasoningEffort ?? model.reasoningCapability?.default;
+    if (defaultReasoningEffort) {
+      advancedValue.reasoning_effort = defaultReasoningEffort;
+    }
     setCustomAdvanced(advancedValue);
     setCustomConnectivity({ status: null, message: "" });
     // Edit mode: if the existing model already carries capacity values, show
@@ -455,6 +467,37 @@ export const ModelAddDialogV2 = ({
       Object.values(prefilled).some((v) => v !== "")
     );
   }, [isOpen, model, inferenceSpecs]);
+
+  const findCatalogProfile = useCallback(
+    (modelName: string): ModelCatalogProfile | undefined => {
+      const provider = catalog?.providers.find(
+        (entry) => entry.provider_info.id === providerKey
+      );
+      const normalizedName = modelName.trim().toLowerCase();
+      return provider?.models.find(
+        (entry) => entry.model_name.trim().toLowerCase() === normalizedName
+      )?.profile;
+    },
+    [catalog, providerKey]
+  );
+
+  const customReasoningCapability =
+    model?.reasoningCapability ??
+    findCatalogProfile(customForm.name)?.reasoning_capability ??
+    undefined;
+
+  useEffect(() => {
+    const defaultEffort = customReasoningCapability?.default;
+    if (
+      defaultEffort &&
+      customAdvanced.reasoning_effort === undefined
+    ) {
+      setCustomAdvanced((previous) => ({
+        ...previous,
+        reasoning_effort: defaultEffort,
+      }));
+    }
+  }, [customReasoningCapability, customAdvanced.reasoning_effort]);
 
   // ---------- Tab B: debounced capacity auto-lookup on model name ----------
   // When the operator types a model name in the custom-access form, wait for a
@@ -564,7 +607,8 @@ export const ModelAddDialogV2 = ({
     const initStates: Record<string, BatchRowState> = {};
     await Promise.all(
       rows.map(async (row) => {
-        const initialState = makeInitialRowState(row.model_type);
+        const catalogProfile = findCatalogProfile(row.model_name);
+        const initialState = makeInitialRowState(row.model_type, catalogProfile);
         // Default display_name to model name + 5-char random suffix
         initialState.advanced.display_name = defaultDisplayName(row.model_name);
         // Unified capacity source: query capability_profiles.py / bundled
@@ -597,7 +641,7 @@ export const ModelAddDialogV2 = ({
       })
     );
     setRowStates(initStates);
-  }, [baseUrl, providerKey]);
+  }, [baseUrl, providerKey, findCatalogProfile]);
 
   const handleFetchModels = useCallback(async () => {
     if (!apiKey.trim()) {
@@ -1718,6 +1762,11 @@ export const ModelAddDialogV2 = ({
                   }))
                 }
                 mode="default"
+                reasoningCapability={
+                  settingsState.modelType === MODEL_TYPES.LLM
+                    ? settingsState.reasoningCapability
+                    : undefined
+                }
               />
             )}
           </div>
@@ -1817,6 +1866,11 @@ export const ModelAddDialogV2 = ({
             value={customAdvanced}
             onChange={setCustomAdvanced}
             mode="default"
+            reasoningCapability={
+              customForm.type === MODEL_TYPES.LLM
+                ? customReasoningCapability
+                : undefined
+            }
           />
         </div>
       </Modal>

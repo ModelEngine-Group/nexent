@@ -92,7 +92,9 @@ class OpenAIModel(OpenAIServerModel):
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
     def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
-                 ssl_verify=True, model_factory: Optional[str] = None,
+                 ssl_verify=True, reasoning_effort: Optional[str] = None,
+                 reasoning_capability: Optional[Dict[str, Any]] = None,
+                 model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
                  max_output_tokens: Optional[int] = None,
@@ -117,6 +119,10 @@ class OpenAIModel(OpenAIServerModel):
             observer: MessageObserver instance for tracking model output
             temperature: Sampling temperature (default: 0.2)
             top_p: Top-p sampling parameter (default: 0.95)
+            reasoning_effort: Optional canonical reasoning effort level declared
+                               by the selected model's capability profile.
+            reasoning_capability: Optional catalog metadata describing how the
+                                 canonical effort maps to the provider wire format.
             ssl_verify: Whether to verify SSL certificates (default: True).
                        Set to False for local services without SSL support.
             timeout_seconds: Timeout in seconds for HTTP requests (default: None, uses client default).
@@ -151,6 +157,8 @@ class OpenAIModel(OpenAIServerModel):
         self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
+        self.reasoning_effort = reasoning_effort
+        self.reasoning_capability = reasoning_capability or None
         self.stop_event = (
             cancellation_scope.stop_event if cancellation_scope else threading.Event()
         )
@@ -352,6 +360,7 @@ class OpenAIModel(OpenAIServerModel):
             completion_kwargs["extra_body"] = self._translate_thinking_flag(
                 self.extra_body
             )
+        self._apply_reasoning_control(completion_kwargs)
 
         trusted_budget_snapshot = (
             context_budget_snapshot or self.context_budget_snapshot
@@ -912,6 +921,47 @@ class OpenAIModel(OpenAIServerModel):
             translated["enable_thinking"] = thinking
         return translated
 
+    def _apply_reasoning_control(self, completion_kwargs: Dict[str, Any]) -> None:
+        """Apply the catalog's canonical effort using the provider wire format.
+
+        Most OpenAI-compatible endpoints accept a top-level
+        ``reasoning_effort``. A few providers expose the same concept as a
+        ``thinking`` object, so the catalog declares that translation instead
+        of making the runtime guess from a model name.
+        """
+        if self.reasoning_effort is None:
+            return
+
+        capability = self.reasoning_capability or {}
+        wire_format = capability.get("wire_format", "reasoning_effort")
+        if wire_format not in {"reasoning_effort", "thinking_toggle", "thinking_budget"}:
+            wire_format = "reasoning_effort"
+
+        if wire_format == "reasoning_effort":
+            completion_kwargs["reasoning_effort"] = self.reasoning_effort
+            return
+
+        extra_body = dict(completion_kwargs.get("extra_body") or {})
+        thinking = extra_body.get("thinking")
+        thinking = dict(thinking) if isinstance(thinking, dict) else {}
+
+        if self.reasoning_effort == "none":
+            thinking["type"] = "disabled"
+            thinking.pop("budget_tokens", None)
+        else:
+            thinking["type"] = "enabled"
+            if wire_format == "thinking_budget":
+                budgets = capability.get("effort_budgets") or {}
+                budget = budgets.get(self.reasoning_effort)
+                if budget is None:
+                    raise ValueError(
+                        f"Missing thinking budget for reasoning effort: {self.reasoning_effort}"
+                    )
+                thinking["budget_tokens"] = budget
+
+        extra_body["thinking"] = thinking
+        completion_kwargs["extra_body"] = self._translate_thinking_flag(extra_body)
+
     def _sampling_fallback_kwargs(
         self, exc: Exception, completion_kwargs: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -1038,7 +1088,10 @@ class OpenAIModel(OpenAIServerModel):
                 max_tokens=5,
             )
             if self.extra_body:
-                completion_kwargs["extra_body"] = self.extra_body
+                completion_kwargs["extra_body"] = self._translate_thinking_flag(
+                    self.extra_body
+                )
+            self._apply_reasoning_control(completion_kwargs)
 
             # Offload the blocking SDK call to a thread pool to avoid blocking the event loop
             await run_blocking(

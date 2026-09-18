@@ -76,6 +76,88 @@ class TestModelCatalogLoaderSmoke:
                     else:
                         assert getattr(model_cfg, "model_type", None)
 
+    def test_openai_reasoning_presets_declare_supported_efforts(self):
+        from configs.model_catalog_loader import get_model_profile
+
+        expected_levels = {
+            "o3": ["low", "medium", "high"],
+            "o3-mini": ["low", "medium", "high"],
+            "o4-mini": ["low", "medium", "high"],
+            "gpt-5": ["minimal", "low", "medium", "high"],
+            "gpt-5-mini": ["minimal", "low", "medium", "high"],
+            "gpt-5.1": ["none", "low", "medium", "high"],
+        }
+
+        for model_name, levels in expected_levels.items():
+            profile = get_model_profile("openai", model_name)
+            assert profile is not None, f"Missing OpenAI preset: {model_name}"
+            assert profile.reasoning_capability is not None
+            assert profile.reasoning_capability.status == "supported"
+            assert profile.reasoning_capability.control == "effort"
+            assert profile.reasoning_capability.levels == levels
+            assert profile.reasoning_capability.default in levels
+
+    def test_major_vendor_reasoning_presets_declare_wire_formats(self):
+        from configs.model_catalog_loader import get_model_profile
+
+        expected = {
+            ("deepseek", "deepseek-v4-pro"): (["low", "high", "max"], "reasoning_effort"),
+            ("zhipu", "glm-4.7"): (["none", "high"], "thinking_toggle"),
+            ("anthropic", "claude-sonnet-4-5-20250929"): (
+                ["none", "low", "medium", "high"],
+                "thinking_budget",
+            ),
+            ("google", "gemini-3.8-flash"): (["low", "medium", "high"], "reasoning_effort"),
+            ("mistral", "mistral-medium-3-5"): (["none", "high"], "reasoning_effort"),
+            ("xai", "grok-4.6"): (["low", "medium", "high", "xhigh"], "reasoning_effort"),
+            ("dashscope", "qwen3.8-max"): (["low", "medium", "xhigh"], "reasoning_effort"),
+            ("volcengine", "doubao-seed-2-1-pro-260628"): (["none", "high"], "thinking_toggle"),
+        }
+
+        for (provider, model_name), (levels, wire_format) in expected.items():
+            profile = get_model_profile(provider, model_name)
+            assert profile is not None, f"Missing preset: {provider}/{model_name}"
+            assert profile.model_factory == provider
+            assert profile.reasoning_capability is not None
+            assert profile.reasoning_capability.levels == levels
+            assert profile.reasoning_capability.wire_format == wire_format
+
+        claude = get_model_profile("anthropic", "claude-sonnet-4-5-20250929")
+        assert claude is not None and claude.reasoning_capability is not None
+        assert claude.reasoning_capability.effort_budgets == {
+            "low": 2048,
+            "medium": 8192,
+            "high": 16384,
+        }
+
+    def test_historical_and_new_model_ids_use_conservative_reasoning_fallbacks(self):
+        from configs.model_catalog_loader import resolve_reasoning_capability
+
+        historical = resolve_reasoning_capability(
+            "deepseek-reasoner", provider_hint="OpenAI-API-Compatible"
+        )
+        assert historical is not None
+        assert historical["levels"] == ["low", "high", "max"]
+
+        silicon_historical = resolve_reasoning_capability(
+            "deepseek-reasoner", provider_hint="silicon"
+        )
+        assert silicon_historical is not None
+        assert silicon_historical["default"] == "high"
+
+        new_openai_id = resolve_reasoning_capability(
+            "o3-pro", provider_hint="OpenAI-API-Compatible"
+        )
+        assert new_openai_id is not None
+        assert new_openai_id["default"] == "medium"
+
+        # An exact catalog entry with no reasoning declaration remains
+        # explicitly unsupported; heuristics must not over-enable it.
+        known_non_reasoning = resolve_reasoning_capability(
+            "deepseek-ai/DeepSeek-R1", provider_hint="silicon"
+        )
+        assert known_non_reasoning is None
+
     def test_pydantic_models_match_catalog(self):
         from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo
         from configs.model_catalog_loader import (

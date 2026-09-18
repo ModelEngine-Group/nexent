@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -81,6 +82,7 @@ def _safe_load_json(path: str) -> Dict[str, Any]:
 def _normalize_provider_models(
     provider_id_str: str,
     base_url: str,
+    provider_factory: Optional[str],
     raw_models: Any,
 ) -> Dict[str, ModelCatalogProfile]:
     """Normalize the raw ``models`` mapping of one provider into profiles."""
@@ -96,7 +98,7 @@ def _normalize_provider_models(
         try:
             profile = _build_model_profile(
                 provider_base_url=base_url,
-                provider_factory=None,
+                provider_factory=provider_factory,
                 model_name=model_name_str,
                 raw=model_raw,
             )
@@ -121,12 +123,14 @@ def _normalize_provider(provider_id: Any, provider_raw: Any) -> Optional[Dict[st
 
     display_name = str(provider_raw.get("display_name") or provider_id_str)
     base_url = str(provider_raw.get("base_url") or "").strip()
+    provider_factory = _raw_nonempty_str(provider_raw, "model_factory")
 
     return {
         "display_name": display_name,
         "base_url": base_url,
+        "model_factory": provider_factory,
         "models": _normalize_provider_models(
-            provider_id_str, base_url, provider_raw.get("models")
+            provider_id_str, base_url, provider_factory, provider_raw.get("models")
         ),
     }
 
@@ -263,6 +267,7 @@ def _build_model_profile(
         timeout_seconds=_raw_positive_int(raw, "timeout_seconds"),
         concurrency_limit=_raw_positive_int(raw, "concurrency_limit"),
         capability_profile_version=_raw_nonempty_str(raw, "capability_profile_version"),
+        reasoning_capability=raw.get("reasoning_capability"),
         requires_appid=_raw_bool(raw, "requires_appid"),
         requires_access_token=_raw_bool(raw, "requires_access_token"),
         forced_temperature=_raw_forced_temperature(raw),
@@ -468,6 +473,12 @@ _PROVIDER_URL_HINTS: Iterable[tuple[str, str]] = (
     ("tokenpony", "tokenpony"),
     ("volcengine", "volces"),
     ("volcengine", "volcengine"),
+    ("deepseek", "api.deepseek.com"),
+    ("zhipu", "open.bigmodel.cn"),
+    ("anthropic", "api.anthropic.com"),
+    ("google", "generativelanguage.googleapis.com"),
+    ("mistral", "api.mistral.ai"),
+    ("xai", "api.x.ai"),
     ("openai", "api.openai.com"),
     ("modelengine", "modelengine"),
 )
@@ -486,6 +497,137 @@ def infer_provider_from_base_url(base_url: str) -> Optional[str]:
     for provider_id, keyword in _PROVIDER_URL_HINTS:
         if keyword in lowered:
             return provider_id
+    return None
+
+
+def resolve_reasoning_capability(
+    model_name: str,
+    base_url: Optional[str] = None,
+    provider_hint: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Resolve reasoning capability from an exact profile or safe ID family.
+
+    Exact catalog entries are authoritative.  When an older/custom row is not
+    an exact key, deterministic vendor/model-ID rules cover known families so
+    newly released IDs do not lose the selector until the catalog is updated.
+    Unknown IDs still return ``None``.
+    """
+    if not model_name:
+        return None
+
+    provider_id = str(provider_hint or "").strip()
+    if not get_provider_info(provider_id):
+        provider_id = infer_provider_from_base_url(str(base_url or "")) or ""
+    model_name_lower = str(model_name).strip().lower()
+    model_leaf = model_name_lower.rsplit("/", 1)[-1]
+
+    # A provider factory is not always persisted for older/custom rows. Infer
+    # the vendor from the model id before falling back to an OpenAI-compatible
+    # URL. This keeps historical rows discoverable after the catalog grows.
+    if not provider_id:
+        provider_id = _infer_provider_from_model_id(model_leaf) or ""
+
+    inferred_provider = _infer_provider_from_model_id(model_leaf)
+
+    if provider_id:
+        profile = get_model_profile(provider_id, model_name)
+        if profile is not None:
+            # An explicit catalog entry without reasoning metadata is an
+            # intentional unsupported declaration; do not override it with a
+            # broad name heuristic.
+            if profile.reasoning_capability is None:
+                return None
+            return profile.reasoning_capability.model_dump(mode="json")
+
+    heuristic_provider = provider_id
+    if provider_id in {
+        "",
+        "custom",
+        "OpenAI-API-Compatible",
+        "silicon",
+        "modelengine",
+    } and inferred_provider:
+        heuristic_provider = inferred_provider
+    return _infer_reasoning_capability_from_model_id(model_leaf, heuristic_provider)
+
+
+def _infer_provider_from_model_id(model_id: str) -> Optional[str]:
+    """Infer a known vendor from a model id when an old row lacks provider data."""
+    value = str(model_id or "").lower()
+    if "deepseek" in value:
+        return "deepseek"
+    if "claude" in value:
+        return "anthropic"
+    if "gemini" in value:
+        return "google"
+    if "grok" in value:
+        return "xai"
+    if re.match(r"^(?:o[1-4](?:[-.]|$)|gpt-5(?:[-.]|$))", value):
+        return "openai"
+    if re.match(r"^(?:glm|chatglm)[-_]", value):
+        return "zhipu"
+    if "qwen" in value or "qwq" in value:
+        return "dashscope"
+    if "mistral" in value or "magistral" in value:
+        return "mistral"
+    return None
+
+
+def _infer_reasoning_capability_from_model_id(
+    model_id: str,
+    provider_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Return a conservative capability for recognized model-id families.
+
+    Exact catalog entries always win. This fallback is for provider model IDs
+    introduced after the bundled catalog version and for historical custom
+    rows whose provider/model name was not an exact catalog key.
+    """
+    value = str(model_id or "").lower()
+    provider = str(provider_id or "").lower()
+
+    def effort(levels: List[str], default: str, wire_format: str = "reasoning_effort"):
+        return {
+            "status": "supported",
+            "control": "effort",
+            "levels": levels,
+            "default": default,
+            "wire_format": wire_format,
+            "source": "operator",
+        }
+
+    if provider == "deepseek" and (
+        re.search(r"deepseek[-_]?v4", value) or "deepseek-reasoner" in value
+    ):
+        return effort(["low", "high", "max"], "high")
+    if provider == "zhipu" and re.match(r"(?:glm|chatglm)[-_]?(?:4\.[5-9]|5)", value):
+        return {
+            "status": "supported",
+            "control": "toggle",
+            "levels": ["none", "high"],
+            "default": "high",
+            "wire_format": "thinking_toggle",
+            "source": "operator",
+        }
+    if provider == "anthropic" and re.search(r"claude[-_].*4", value):
+        return effort(
+            ["none", "low", "medium", "high"],
+            "medium",
+            "thinking_budget",
+        ) | {"effort_budgets": {"low": 2048, "medium": 8192, "high": 16384}}
+    if provider == "google" and re.search(r"gemini[-_](?:2\.5|3|4)", value):
+        return effort(["low", "medium", "high"], "high")
+    if provider == "openai" and re.match(r"(?:o[1-4]|gpt-5)(?:[-.]|$)", value):
+        levels = ["low", "medium", "high"] if value.startswith("o") else ["minimal", "low", "medium", "high"]
+        return effort(levels, "medium")
+    if provider == "xai" and re.match(r"grok[-_]4", value):
+        return effort(["low", "medium", "high", "xhigh"], "high")
+    if provider in {"dashscope", "silicon", "modelengine"} and (
+        re.search(r"qwen[-_]?3", value) or "qwq" in value
+    ):
+        return effort(["low", "medium", "xhigh"], "medium")
+    if provider == "mistral" and re.search(r"(?:magistral|mistral[-_]medium|mistral[-_]large)", value):
+        return effort(["none", "high"], "high")
     return None
 
 

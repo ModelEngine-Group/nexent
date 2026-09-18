@@ -15,6 +15,7 @@ import {
   ModelCatalogProfile,
   ModelCatalogFullPayload,
   InferenceFieldSpecsByType,
+  ReasoningEffort,
 } from "@/types/modelConfig";
 
 import { getAuthHeaders } from "@/lib/auth";
@@ -131,6 +132,13 @@ const mapInferenceParamsFromApi = (model: any) => ({
   temperature: model.temperature,
   topP: model.top_p,
   extraParams: model.extra_params,
+  defaultReasoningEffort:
+    typeof model.extra_params?.reasoning_effort === "string" &&
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+      model.extra_params.reasoning_effort
+    )
+      ? (model.extra_params.reasoning_effort as ReasoningEffort)
+      : undefined,
 });
 
 const mapCapacitySuggestionFromApi = (
@@ -245,6 +253,7 @@ export const modelService = {
           ...mapCapacityFieldsFromApi(model),
           // v2.6.0 inference params (model-level defaults)
           ...mapInferenceParamsFromApi(model),
+          reasoningCapability: model.reasoning_capability ?? undefined,
           // STT specific fields
           modelAppid: model.model_appid,
           accessToken: model.access_token,
@@ -983,6 +992,8 @@ export const modelService = {
           apiUrl: model.base_url || "",
           displayName: model.display_name || model.model_name || model.name,
           connect_status: model.connect_status as ModelConnectStatus,
+          ...mapInferenceParamsFromApi(model),
+          reasoningCapability: model.reasoning_capability ?? undefined,
         }));
       }
 
@@ -1041,6 +1052,7 @@ export const modelService = {
             ...mapCapacityFieldsFromApi(model),
             // v2.6.0 inference params (model-level defaults)
             ...mapInferenceParamsFromApi(model),
+            reasoningCapability: model.reasoning_capability ?? undefined,
             // STT specific fields
             modelAppid: model.model_appid,
             accessToken: model.access_token,
