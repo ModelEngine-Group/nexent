@@ -302,7 +302,7 @@ export function AgentSpace({ active }: { active: boolean }) {
         }
         footer={
           <Button
-            type="text"
+            type="default"
             size="small"
             className="h-7 px-1 text-xs text-slate-500 hover:text-primary"
             icon={<Copy className="size-3.5" aria-hidden />}
