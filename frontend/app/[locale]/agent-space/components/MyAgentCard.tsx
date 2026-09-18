@@ -69,7 +69,6 @@ export function MyAgentCard({
   const tags = agent.tags?.filter((tag) => tag.trim()) ?? [];
   const published = (agent.current_version_no ?? 0) > 0;
   const repositoryInfo = agent.repository_info ?? [];
-  const hasRepositoryInfo = repositoryInfo.length > 0;
   const repositoryStatusBadge =
     getMineCardRepositoryStatusBadge(repositoryInfo);
   const footerDate = formatMineDate(agent.version_create_time);
@@ -138,10 +137,12 @@ export function MyAgentCard({
               <h3 className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
                 {title}
               </h3>
-              {hasRepositoryInfo ? (
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                  <Share2 className="size-2.5" aria-hidden />
-                  {t("agentRepository.mine.onHub")}
+              {repositoryStatusBadge ? (
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
+                >
+                  {t(repositoryStatusBadge.labelKey)}{" "}
+                  {repositoryStatusBadge.versionLabel}
                 </span>
               ) : null}
             </div>
@@ -167,14 +168,6 @@ export function MyAgentCard({
                     ? t("agentRepository.mine.lifecycle.published")
                     : t("agentRepository.mine.lifecycle.draft")}
                 </span>
-                {repositoryStatusBadge ? (
-                  <span
-                    className={`rounded-md px-1.5 py-0.5 font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
-                  >
-                    {t(repositoryStatusBadge.labelKey)}{" "}
-                    {repositoryStatusBadge.versionLabel}
-                  </span>
-                ) : null}
               </div>
             </div>
           </div>
