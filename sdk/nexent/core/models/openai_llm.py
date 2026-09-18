@@ -773,7 +773,7 @@ class OpenAIModel(OpenAIServerModel):
                     raise
                 if attempt >= self.retry_config.max_attempts:
                     if not is_timeout:
-                        logging.exception(
+                        logger.exception(
                             "Model call failed after %d attempts: %s",
                             attempt, str(e),
                         )
@@ -1051,5 +1051,5 @@ class OpenAIModel(OpenAIServerModel):
             # If no exception is raised, the connection is successful
             return True
         except Exception as e:
-            logging.error(f"Connection test failed: {str(e)}")
+            logger.error(f"Connection test failed: {str(e)}")
             return False
