@@ -1463,8 +1463,8 @@ def test_cmsr_001_init_disables_hidden_openai_transport_retries():
     assert captured["client_kwargs"]["max_retries"] == 0
 
 
-def test_ut_sdk_tlm_035_uses_public_httpx_timeout():
-    """Use public httpx rather than a version-specific OpenAI private alias."""
+def test_ut_sdk_tlm_035_falls_back_to_public_httpx_timeout_for_test_double():
+    """Use public httpx when the injected OpenAI client has no HTTP base."""
 
     class SDKTimeout:
         def __init__(self, *, connect, read, write, pool):
@@ -1482,6 +1482,29 @@ def test_ut_sdk_tlm_035_uses_public_httpx_timeout():
     assert (timeout.connect, timeout.read, timeout.write, timeout.pool) == (
         10.0, 60.0, 30.0, 10.0,
     )
+
+
+def test_cmsr_compatible_timeout_uses_default_clients_http_implementation():
+    """OpenAI's httpx2 client must receive an httpx2 timeout, not httpx.Timeout."""
+
+    compatible_timeout = MagicMock()
+    timeout_type = MagicMock(return_value=compatible_timeout)
+    http_module = SimpleNamespace(Timeout=timeout_type)
+    compatible_client_base = type("Client", (), {})
+    compatible_client_base.__module__ = "httpx2._client"
+    default_client = type("DefaultClient", (compatible_client_base,), {})
+
+    with patch.object(openai_llm_module.importlib, "import_module", return_value=http_module):
+        result = openai_llm_module._build_compatible_http_timeout(
+            default_client,
+            connect=10.0,
+            read=60.0,
+            write=30.0,
+            pool=10.0,
+        )
+
+    assert result is compatible_timeout
+    timeout_type.assert_called_once_with(connect=10.0, read=60.0, write=30.0, pool=10.0)
 
 
 # ---------------------------------------------------------------------------

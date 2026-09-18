@@ -11,6 +11,7 @@ from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
 import asyncio
+import importlib
 import time
 import json
 import httpx
@@ -75,6 +76,33 @@ STOP_EVENT_INTERRUPTED_MESSAGE = "Model is interrupted by stop event"
 
 class EmptyModelResponseError(RuntimeError):
     """Raised when a completed provider stream contains no user-visible content."""
+
+
+def _build_compatible_http_timeout(
+    default_http_client_type: type,
+    *,
+    connect: float,
+    read: float,
+    write: float,
+    pool: float,
+):
+    """Build a timeout owned by the HTTP implementation used by OpenAI.
+
+    OpenAI 3.x may use ``httpx2`` internally while Nexent still imports the
+    public ``httpx`` package for its own exception handling. Passing an
+    ``httpx.Timeout`` into an ``httpx2.Client`` nests incompatible timeout
+    objects and fails before the first provider request. Resolve the timeout
+    class from ``DefaultHttpxClient``'s public base class instead, falling
+    back to ``httpx`` for older OpenAI releases and test doubles.
+    """
+    for base in getattr(default_http_client_type, "__mro__", ()):
+        module_root = getattr(base, "__module__", "").partition(".")[0]
+        if not module_root.startswith("httpx"):
+            continue
+        timeout_type = getattr(importlib.import_module(module_root), "Timeout", None)
+        if timeout_type is not None:
+            return timeout_type(connect=connect, read=read, write=write, pool=pool)
+    return httpx.Timeout(connect=connect, read=read, write=write, pool=pool)
 
 
 def _is_timeout_error(exc: BaseException) -> bool:
@@ -202,7 +230,8 @@ class OpenAIModel(OpenAIServerModel):
 
             http_client = DefaultHttpxClient(
                 verify=ssl_verify,
-                timeout=httpx.Timeout(
+                timeout=_build_compatible_http_timeout(
+                    DefaultHttpxClient,
                     connect=connect_timeout_seconds,
                     read=self.read_timeout_seconds,
                     write=write_timeout_seconds,
