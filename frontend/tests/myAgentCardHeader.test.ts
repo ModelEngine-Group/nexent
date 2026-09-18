@@ -7,11 +7,11 @@ const cardPath = new URL(
   import.meta.url
 );
 
-test("my agent lifecycle badge aligns with the top-right more menu", async () => {
+test("my agent lifecycle badge sits below the top-right more menu", async () => {
   const card = await readFile(cardPath, "utf8");
 
   assert.match(
     card,
-    /<div className="flex shrink-0 items-center gap-1\.5">[\s\S]*agentRepository\.mine\.lifecycle\.published[\s\S]*<Dropdown/
+    /<div className="flex shrink-0 flex-col items-end gap-1\.5">[\s\S]*<Dropdown[\s\S]*agentRepository\.mine\.lifecycle\.published/
   );
 });

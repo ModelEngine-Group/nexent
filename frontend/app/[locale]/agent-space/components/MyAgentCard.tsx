@@ -161,18 +161,7 @@ export function MyAgentCard({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5">
-          <span
-            className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-              published
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-            }`}
-          >
-            {published
-              ? t("agentRepository.mine.lifecycle.published")
-              : t("agentRepository.mine.lifecycle.draft")}
-          </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
           {menuItems.length > 0 ? (
             <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
               <Button
@@ -184,6 +173,17 @@ export function MyAgentCard({
               />
             </Dropdown>
           ) : null}
+          <span
+            className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+              published
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+            }`}
+          >
+            {published
+              ? t("agentRepository.mine.lifecycle.published")
+              : t("agentRepository.mine.lifecycle.draft")}
+          </span>
         </div>
       </div>
 
