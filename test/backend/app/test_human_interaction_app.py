@@ -42,6 +42,15 @@ def test_snapshot_and_conversation_use_signed_tenant_and_user(boundary):
     service.light_snapshot.assert_called_once_with(RUN, "tenant-a", "owner")
 
 
+def test_run_snapshot_uses_signed_tenant_and_user(boundary):
+    client, service, verify = boundary
+    response = client.get(BASE + f"/{RUN}", headers={"Authorization": "Bearer internal-token"})
+    assert response.status_code == 200
+    assert response.json() == {"run_id": RUN, "status": "WAITING_HUMAN"}
+    verify.assert_called_once_with("Bearer internal-token")
+    service.light_snapshot.assert_called_once_with(RUN, "tenant-a", "owner")
+
+
 @pytest.mark.parametrize("path", ["/capabilities", f"/{RUN}", "/conversation/7", f"/{RUN}/events"])
 def test_invalid_internal_token_is_rejected(boundary, path):
     client, service, verify = boundary

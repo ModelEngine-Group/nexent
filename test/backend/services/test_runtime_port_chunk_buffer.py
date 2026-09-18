@@ -286,3 +286,71 @@ def test_wait_until_ready_calls_flush_before_status_transition():
 
     port.flush_chunks_until_idle.assert_called_once()
     assert fake_tx.run.status == "RUNNING"
+
+
+# --- in-flight emit and failure recovery --------------------------------------
+
+def test_flush_until_idle_treats_in_flight_emit_as_busy():
+    """An empty buffer is NOT idle while an async emit is handing chunks to
+    the DB thread — flush keeps polling until the emit completes.
+    """
+    port = _make_port()
+    port.emit_chunks = MagicMock()
+    port._emit_in_flight.set()
+    result: dict = {}
+
+    def clear_soon():
+        time.sleep(0.06)
+        port._emit_in_flight.clear()
+
+    threading.Thread(target=clear_soon, daemon=True).start()
+
+    def run_flush():
+        started = time.monotonic()
+        port.flush_chunks_until_idle(max_wait_ms=2000, settle_ms=10)
+        result["elapsed"] = time.monotonic() - started
+
+    worker = threading.Thread(target=run_flush, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive(), "flush_chunks_until_idle blocked past hard deadline"
+    # Without the in-flight guard the flush would settle at ~10ms on the
+    # empty buffer; observing >= 50ms proves it waited for the emit.
+    assert result["elapsed"] >= 0.05, result
+    assert not port._emit_in_flight.is_set()
+
+
+def test_flush_until_idle_restores_chunks_when_emit_chunks_raises():
+    """A failed DB emit must not lose drained chunks — they go back to the
+    shared buffer for the next flush attempt.
+    """
+    port = _make_port()
+    port.emit_chunks = MagicMock(side_effect=RuntimeError("db down"))
+    port.add_chunk("c1")
+    port.add_chunk("c2")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        port.flush_chunks_until_idle(max_wait_ms=200, settle_ms=10)
+
+    assert port.peek_chunks() == 2
+    assert not port._emit_in_flight.is_set(), "begin_emit without end_emit leaked"
+
+
+def test_finish_flush_failure_still_writes_terminal_status():
+    """A chunk-flush failure inside finish must not prevent the terminal
+    status row (and its human_run event) from being written.
+    """
+    port = _make_port()
+    port.flush_chunks_until_idle = MagicMock(side_effect=RuntimeError("flush failed"))
+    port.transaction = MagicMock()
+    fake_tx = MagicMock()
+    fake_tx.run.status = "RUNNING"
+    fake_tx.requests.return_value = []
+    port.transaction.return_value = contextmanager(lambda: iter([fake_tx]))()
+
+    port.finish("COMPLETED")
+
+    port.flush_chunks_until_idle.assert_called_once()
+    assert fake_tx.run.status == "COMPLETED"
+    fake_tx.emit.assert_called_once()
