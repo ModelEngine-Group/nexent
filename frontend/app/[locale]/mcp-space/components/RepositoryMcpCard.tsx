@@ -1,5 +1,5 @@
 import { Button, Dropdown, type MenuProps } from "antd";
-import { Download, MoreHorizontal, Trash2, User } from "lucide-react";
+import { Download, MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import ResourceCard from "@/components/resource/ResourceCard";
@@ -53,7 +53,7 @@ export default function RepositoryMcpCard({
     <ResourceCard
       className="h-full"
       title={service.name}
-      footerLayout="stacked"
+      footerLayout="inline"
       icon={
         <TransportIcon
           transportType={service.transportType}
@@ -88,12 +88,8 @@ export default function RepositoryMcpCard({
         </>
       }
       meta={
-        <span
-          className="inline-flex min-w-0 items-center gap-1 truncate"
-          title={author}
-        >
-          <User className="size-3.5 shrink-0 text-slate-400" />
-          <span className="truncate">{author}</span>
+        <span className="truncate" title={author}>
+          {author}
         </span>
       }
       headerActions={
@@ -125,18 +121,16 @@ export default function RepositoryMcpCard({
         </>
       }
       footer={
-        <div className="flex justify-end">
-          <Button
-            type={installed ? "default" : "primary"}
-            disabled={installed}
-            icon={<Download className="size-3.5" />}
-            onClick={() => onInstall(service)}
-          >
-            {installed
-              ? t("mcpTools.repository.installed")
-              : t("mcpTools.repository.install")}
-          </Button>
-        </div>
+        <Button
+          type={installed ? "default" : "primary"}
+          disabled={installed}
+          icon={<Download className="size-3.5" />}
+          onClick={() => onInstall(service)}
+        >
+          {installed
+            ? t("mcpTools.repository.installed")
+            : t("mcpTools.repository.install")}
+        </Button>
       }
       onClick={() => onSelect(service)}
     />
