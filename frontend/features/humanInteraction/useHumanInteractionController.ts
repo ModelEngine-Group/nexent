@@ -67,26 +67,14 @@ export function useHumanInteractionController({
     new Map<string, { body: string; idempotencyKey: string }>()
   );
   const onEnabledChangeRef = useRef(onEnabledChange);
-  // Rate-limit snapshot requests to avoid thundering herds when the agent
-  // stream emits many HITL chunks (thinking, parse, model_output_thinking…)
-  // per second — the adapter's chunk loop and our SSE subscription each try
-  // to refresh on every event, which would otherwise multiply into 10+
-  // HTTP calls per second. Two guards protect us:
-  //   1. `refreshInFlight` — dedupe concurrent callers; one snapshot in
-  //      flight absorbs all requests that arrive before it resolves.
-  //   2. `lastSnapshotAt` — minimum 3s between snapshots so even a burst
-  //      after the in-flight resolves does not immediately re-hit the DB.
+  // Rate-limit snapshots: dedupe in-flight callers and enforce a 3s min interval.
   const refreshInFlight = useRef(false);
   const lastSnapshotAt = useRef(0);
   const MIN_SNAPSHOT_INTERVAL_MS = 3000;
-  // Mirror of the latest `run` state for use inside refresh guards. Using a
-  // ref (instead of closing over `run`) keeps `refresh` stable so downstream
-  // effects do not re-run on every snapshot.
+  // Mirror of the latest `run` state; keeps `refresh` dependencies stable.
   const runRef = useRef<HumanRun | null>(null);
   activeConversation.current = conversationId;
 
-  // Tracks which run we currently have an SSE subscription open for.
-  // When this changes, the subscription effect tears down the old one and opens a new one.
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -118,11 +106,11 @@ export function useHumanInteractionController({
       setActiveRunId(null);
       return null;
     }
-    // Guard 1: already a snapshot in flight — coalesce, don't duplicate.
+    // Guard 1: coalesce while a snapshot is in flight.
     if (refreshInFlight.current) {
       return runRef.current;
     }
-    // Guard 2: minimum interval since last snapshot — skip if too soon.
+    // Guard 2: respect the minimum snapshot interval.
     const now = Date.now();
     if (now - lastSnapshotAt.current < MIN_SNAPSHOT_INTERVAL_MS) {
       return runRef.current;
@@ -161,21 +149,12 @@ export function useHumanInteractionController({
     }
   }, [conversationId]);
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Discovery: one-shot snapshots at conversation change and agent-pause.
-  //
-  // No polling anywhere in this file. We refresh exactly when we know a
-  // fresh snapshot is needed:
-  //   1. The user switched conversationId → a new HITL run might exist there.
-  //   2. The agent stream just paused (isRunning went true → false) → the
-  //      most likely moment a HITL run was just created (ask_user()).
-  //
-  // After a snapshot reveals a run, the SSE subscription below takes over
-  // and keeps the run state live without further HTTP polling.
-  // ──────────────────────────────────────────────────────────────────────────
+  /**
+   * Discovery: one-shot snapshots at conversation change and agent pause.
+   * After a snapshot reveals a run, the SSE subscription below keeps it live.
+   */
 
   useEffect(() => {
-    // conversationId changed: clear stale state and snapshot once.
     runRef.current = null;
     setRun(null);
     setError("");
@@ -184,38 +163,24 @@ export function useHumanInteractionController({
     setActiveRunId(null);
     if (!available || !conversationId) return;
     void refresh();
-    // Intentionally does NOT depend on refresh — we want a one-shot fire
-    // when conversationId changes, not a re-snapshot every time refresh is
-    // recreated (e.g. when auth headers drift).
+    // One-shot fire on conversation change; do not re-run when refresh changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [available, conversationId]);
 
   useEffect(() => {
-    // Agent stream just paused → a HITL run may have been created mid-turn.
-    // Snapshot once to discover it; SSE will then keep us updated. The dual
-    // guards inside refresh() (in-flight dedupe + 3s min interval) already
-    // handle any burst from isRunning thrashing or adapter callbacks.
+    // Agent stream paused → a HITL run may have just been created (ask_user).
     if (isRunning || !available || !conversationId) return;
     void refresh();
   }, [isRunning, available, conversationId, refresh]);
 
-  // Incremented to force SSE resubscribe after a transient network disconnect.
-  // Terminal-status closes from the backend do NOT bump this — we don't want
-  // to reconnect runs that are already COMPLETED/FAILED.
+  // Retry tick for SSE resubscribe after transient network disconnects;
+  // terminal closes must not trigger a reconnect.
   const [retryTick, setRetryTick] = useState(0);
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // SSE subscription to the HITL run events stream.
-  //
-  // Once the discovery effects below set activeRunId, this effect opens an
-  // EventSource against GET /{run_id}/events. The native EventSource API has
-  // built-in auto-reconnect with exponential backoff, so transient network
-  // drops heal themselves. We only proactively close on terminal status.
-  //
-  // Every non-heartbeat event triggers a single refresh() — event-driven
-  // (1 HTTP call per SSE event) vs the original timer-driven polling
-  // (12+ calls/min regardless of activity).
-  // ──────────────────────────────────────────────────────────────────────────
+  /**
+   * SSE subscription to the run events stream; every event triggers one
+   * rate-limited refresh(). Native auto-reconnect handles transient drops.
+   */
 
   useEffect(() => {
     if (!activeRunId) return;
@@ -228,9 +193,8 @@ export function useHumanInteractionController({
     es.onmessage = (ev) => {
       if (tornDown || stoppedByUs) return;
       if (!ev.data) return;
-      // Detect terminal status inside a human_run event so we can close the
-      // stream proactively and stop EventSource from auto-reconnecting
-      // forever against a run that is already COMPLETED/FAILED.
+      // Close proactively on terminal status so EventSource stops
+      // auto-reconnecting against a run that already finished.
       try {
         const parsed = JSON.parse(ev.data);
         if (
@@ -241,22 +205,19 @@ export function useHumanInteractionController({
         ) {
           stoppedByUs = true;
           es.close();
-          // One final refresh so the UI has the definitive terminal snapshot.
           void refresh();
           return;
         }
       } catch {
-        // Not JSON — still refresh, just don't try to parse.
+        // Not JSON — refresh without parsing.
       }
       void refresh();
     };
 
     es.onerror = () => {
       if (tornDown || stoppedByUs) return;
-      // Leave the native EventSource auto-reconnect behaviour alone — it
-      // already handles transient drops with exponential backoff. When the
-      // browser gives up entirely (after many retries), we do one snapshot
-      // and retry from scratch after 2s if the run is still alive.
+      // Let native auto-reconnect handle transient drops; fall back to a
+      // manual resubscribe once the browser gives up and the run is alive.
       void refresh().then((latest) => {
         if (tornDown || stoppedByUs) return;
         if (!latest || TERMINAL_STATUSES.has(latest.status)) return;
@@ -275,12 +236,7 @@ export function useHumanInteractionController({
     };
   }, [activeRunId, retryTick]);
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Drive activeRunId from run snapshot.
-  //
-  // When refresh() returns a non-null run we subscribe to its events stream.
-  // When it returns null we tear down any existing subscription.
-  // ──────────────────────────────────────────────────────────────────────────
+  // Subscribe to a discovered run's events stream; null tears it down.
 
   useEffect(() => {
     if (!run) {
@@ -289,10 +245,6 @@ export function useHumanInteractionController({
     }
     setActiveRunId((prev) => (prev !== run.run_id ? run.run_id : prev));
   }, [run]);
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Agent stream resume (unchanged from original logic).
-  // ──────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (isRunning || !resume.current) return;

@@ -18,6 +18,14 @@ from .models import digest, redact
 
 class RuntimeInteractionPort:
     def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False, stop_event=None):
+        """Bind the port and set up async-worker chunk coordination.
+
+        ``_chunk_buffer`` stages processed observer chunks: the async consumer
+        appends via add_chunk and the worker flushes before each HITL event so
+        chunk rows precede human_interaction rows in DB event order.
+        ``_emit_in_flight`` marks an in-flight hand-off to the DB thread so an
+        empty buffer is not mistaken for "async is idle".
+        """
         self.service = service
         self.repository = service.repository
         self.cipher = service.cipher
@@ -30,25 +38,12 @@ class RuntimeInteractionPort:
         self.allowed_tools = frozenset(allowed_tools)
         self.live_resume = live_resume
         self.stop_event = stop_event
-        # Thread-safe shared buffer for already-processed observer chunks
-        # (model_output_thinking / parse ...). The async consumer loop in
-        # application.py calls ``add_chunk`` after every processed chunk; the
-        # worker thread calls ``flush_chunks_until_idle`` right before emitting
-        # any HITL event so chunks always land in DB before the corresponding
-        # human_interaction / human_execution row.
         self._chunk_buffer: list[str] = []
         self._chunk_buffer_lock = threading.Lock()
-        # Set by the async consumer (application.py's _flush_if_due) right
-        # before it hands buffered chunks to run_blocking(emit_chunks). The
-        # worker's flush_chunks_until_idle uses this to distinguish "buffer
-        # empty because async just handed chunks to the DB thread" from
-        # "buffer empty because async is truly idle".
         self._emit_in_flight = threading.Event()
         with self.transaction() as tx:
             self.checkpoint = self.cipher.open(tx.run.checkpoint)
             self.request_payload = self.cipher.open(tx.run.request_payload)
-
-    # --- Shared chunk buffer (async-producer ↔ worker-consumer) --------
 
     def add_chunk(self, chunk: str) -> None:
         """Append a processed chunk from the async consumer to the shared buffer."""
@@ -56,19 +51,14 @@ class RuntimeInteractionPort:
             self._chunk_buffer.append(chunk)
 
     def take_chunks(self) -> list[str]:
-        """Atomically drain the shared buffer for immediate persistence."""
+        """Atomically drain the shared buffer for persistence."""
         with self._chunk_buffer_lock:
             chunks = self._chunk_buffer
             self._chunk_buffer = []
         return chunks
 
     def peek_chunks(self) -> int:
-        """Return the number of buffered chunks without draining them.
-
-        Used by the async consumer loop to decide whether to hand chunks
-        to the DB thread — the buffer stays intact so a concurrent drain
-        never sees a transiently-empty buffer.
-        """
+        """Return the number of buffered chunks without draining them."""
         with self._chunk_buffer_lock:
             return len(self._chunk_buffer)
 
@@ -83,18 +73,9 @@ class RuntimeInteractionPort:
     def flush_chunks_until_idle(self, *, max_wait_ms: int = 500, settle_ms: int = 20) -> None:
         """Wait for the async consumer to drain the observer queue, then persist.
 
-        **Worker-thread only.** The worker is the sole producer of observer
-        messages. Once ``model()`` returns and the worker enters ask_user, no
-        more tokens are pushed — every remaining chunk in the observer queue
-        will eventually reach the shared buffer via ``port.add_chunk`` (async
-        loop). This method polls the shared buffer: if it stays empty for
-        ``settle_ms`` AND there is no in-flight emit (pending DB transaction
-        from the async consumer) the async loop has fully consumed the
-        observer. We run a final flush before returning.
-
-        ``max_wait_ms`` is a **hard upper bound** measured from function entry
-        — it is NOT reset when new chunks appear, so the worker cannot be
-        blocked indefinitely.
+        Worker-thread only. Returns once the buffer has stayed empty for
+        ``settle_ms`` with no in-flight emit; ``max_wait_ms`` is a hard
+        upper bound measured from entry and never resets.
         """
         hard_deadline = time.monotonic() + max_wait_ms / 1000.0
         idle_since: float | None = None
@@ -109,27 +90,20 @@ class RuntimeInteractionPort:
                 try:
                     self.emit_chunks(chunks)
                 except Exception:
-                    # Never lose drained chunks: put them back so a later
-                    # flush (or the caller's recovery path) can retry.
+                    # Never lose drained chunks; put them back for retry.
                     for chunk in chunks:
                         self.add_chunk(chunk)
                     raise
                 idle_since = None
             elif self._emit_in_flight.is_set():
-                # Buffer is empty but async is still handing chunks to the
-                # DB thread (emit_chunks in run_blocking). Treat as non-idle
-                # so settle_ms doesn't fire on a transient empty window.
+                # Empty buffer is not idle while an emit is in flight.
                 idle_since = None
             elif idle_since is None:
                 idle_since = now
             elif now - idle_since >= settle_ms / 1000.0:
-                # Buffer has been empty long enough and nothing is in-flight
-                # — observer must be drained.
                 break
 
             time.sleep(min(settle_ms / 1000.0, hard_deadline - now))
-
-    # -------------------------------------------------------------------
 
     @contextmanager
     def transaction(self, *, receipt=False):
@@ -173,8 +147,7 @@ class RuntimeInteractionPort:
         self.authorize()
         suspended = False
         feedback = None
-        # Wait for async to drain observer queue, then flush so model_output_thinking /
-        # parse rows precede the human_run status transition below.
+        # Flush so buffered chunks precede the human_run status row in DB order.
         self.flush_chunks_until_idle()
         with self.transaction() as tx:
             tx.run.checkpoint = self.cipher.seal(checkpoint)
@@ -240,8 +213,7 @@ class RuntimeInteractionPort:
                     raise RunTerminated("Execution lease is no longer valid")
                 self.service._expire(tx)
                 if tx.run.status == "READY":
-                    # Wait for async to drain observer queue, then flush so
-                    # any lingering batched chunks precede the human_run row.
+                    # Flush so lingering chunks precede the human_run row.
                     self.flush_chunks_until_idle()
                     tx.run.status = "RUNNING"
                     tx.emit({"type": "human_run", "content": {
@@ -260,9 +232,8 @@ class RuntimeInteractionPort:
         suspended = False
         steering_requested = False
         outcome = None
-        # Wait for async to drain observer queue, then flush BEFORE opening the
-        # HITL transaction so that model_output_thinking / parse rows land in DB
-        # with lower seq numbers than any subsequent human_interaction row.
+        # Flush before the transaction so chunk rows get lower seq numbers
+        # than any subsequent human_interaction row.
         self.flush_chunks_until_idle()
         with self.transaction() as tx:
             if tx.run.pause_requested:
@@ -342,8 +313,7 @@ class RuntimeInteractionPort:
         return outcome
 
     def receipt(self, slot, result, *, uncertain=False):
-        # Wait for async to drain observer queue, then flush before recording
-        # execution outcome so the DB event order is chunks → human_execution.
+        # Flush so the DB event order is chunks → human_execution.
         self.flush_chunks_until_idle()
         with self.transaction(receipt=True) as tx:
             execution = tx.execution(slot)
@@ -385,10 +355,10 @@ class RuntimeInteractionPort:
             ]
 
     def finish(self, outcome):
-        # Wait for async to drain observer queue, then flush remaining batched
-        # chunks before the final human_run status row. Chunk-flush failures
-        # must NOT prevent the terminal row from being written — wrap in
-        # try/except so we always attempt the status transaction.
+        """Write the terminal run status, flushing buffered chunks first.
+
+        A flush failure must not prevent the terminal status row.
+        """
         try:
             self.flush_chunks_until_idle()
         except Exception:

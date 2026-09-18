@@ -164,25 +164,20 @@ async def execute_attempt(job, lease):
         port.allowed_tools = _allowed_tool_names(config.tools)
         run_info.human_interaction = runtime_type(port)
 
-        # Flush strategy: 50ms interval + 16-chunk batch.
-        # Processed chunks go into port.add_chunk() (a shared buffer that the
-        # worker thread can drain before emitting HITL events), giving us
-        # two layers of safety:
-        #   1. The async loop flushes frequently on its own (timed / batched).
-        #   2. The worker thread flushes before opening every HITL transaction,
-        #      guaranteeing chunk rows precede human_interaction in DB order.
         _FLUSH_INTERVAL = 0.05
         _FLUSH_BATCH = 16
 
         last_flush = time.monotonic()
 
         async def _flush_if_due() -> None:
+            """Flush buffered chunks on the interval/batch trigger to keep DB order.
+
+            The async loop flushes on its own; the worker flushes again before
+            each HITL transaction. Peek first and never take-put-back — that
+            would open a transiently empty window the worker's idle poll can
+            mistake for "async is done".
+            """
             nonlocal last_flush
-            # Peek first — only drain when we actually intend to persist.
-            # Never take-put-back: that creates a transiently-empty window
-            # that the worker's 20ms idle poll can mistake for "async is
-            # done". peek_chunks() keeps the buffer intact, so a concurrent
-            # drain always sees consistent state.
             if (time.monotonic() - last_flush >= _FLUSH_INTERVAL
                     or port.peek_chunks() >= _FLUSH_BATCH):
                 buffered = port.take_chunks()
@@ -206,22 +201,17 @@ async def execute_attempt(job, lease):
         try:
             anext_task = asyncio.create_task(chunk_iter.__anext__())
             while True:
-                # asyncio.wait does NOT cancel the task on timeout, so the same
-                # pending anext keeps running if the worker later resumes and
-                # produces more chunks.
+                # On timeout the task stays pending; the worker may resume it later.
                 done, pending = await asyncio.wait(
                     {anext_task},
                     timeout=_FLUSH_INTERVAL,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if pending:
-                    # Timeout — no new chunk yet. Flush what we have so the DB
-                    # ordering stays correct when the worker next emits a
-                    # human_interaction / human_execution row synchronously.
+                    # No new chunk yet; flush what we have to keep DB order.
                     await _flush_if_due()
                     continue
 
-                # anext_task completed
                 task = done.pop()
                 try:
                     chunk = task.result()
@@ -239,8 +229,7 @@ async def execute_attempt(job, lease):
                 await chunk_iter.aclose()
             except Exception:
                 pass
-            # Final flush — any leftover buffered chunks must precede finish()
-            # in the DB event sequence.
+            # Final flush so leftover chunks precede finish() in DB order.
             leftover = port.take_chunks()
             if leftover:
                 try:

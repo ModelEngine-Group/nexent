@@ -100,7 +100,7 @@ class HumanInteractionService:
 
         Kept for the SSE stream's initial handshake where a terminal-status
         request needs a lock-held check. Prefer :meth:`light_snapshot` for
-        read-only callers that do not need to mutate state.
+        read-only callers.
         """
         with self.repository.transaction(run_id, tenant_id, user_id) as tx:
             run = self.require(tx)
@@ -108,13 +108,7 @@ class HumanInteractionService:
             return self._build_snapshot(run, tx)
 
     def light_snapshot(self, run_id, tenant_id, user_id):
-        """Read-only snapshot: no lock, no writes, no expiration scan.
-
-        Used by the polling endpoint, SSE reconnects, and any caller that
-        only needs current state without contending with write paths.
-        Expiration is handled separately by :meth:`expire_waiting` and
-        inline inside :meth:`decide`.
-        """
+        """Read-only snapshot: no lock, no writes, no expiration scan."""
         with self.repository.read_only(run_id, tenant_id, user_id) as tx:
             if tx is None:
                 raise InteractionError("Human interaction run was not found", 404)
