@@ -46,7 +46,7 @@ const STATUS_BADGE_CLASS: Record<"pending" | "shared" | "rejected", string> = {
   pending:
     "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
   shared:
-    "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+    "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
   rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
