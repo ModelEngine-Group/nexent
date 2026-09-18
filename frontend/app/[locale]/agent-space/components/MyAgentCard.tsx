@@ -45,8 +45,7 @@ const MENU_ACTION_I18N: Record<MineCardMenuAction, string> = {
 const STATUS_BADGE_CLASS: Record<"pending" | "shared" | "rejected", string> = {
   pending:
     "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
-  shared:
-    "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
+  shared: "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
   rejected: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300",
 };
 
@@ -146,48 +145,46 @@ export function MyAgentCard({
                 </span>
               ) : null}
             </div>
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px]">
-              <div className="min-w-0 text-slate-500 dark:text-slate-400">
-                {versionLabel != null ? (
-                  <span className="inline-flex items-center gap-1.5 truncate">
-                    <span
-                      className="size-1.5 shrink-0 rounded-full bg-primary"
-                      aria-hidden
-                    />
-                    {t("agentRepository.mine.currentVersion", {
-                      version: versionLabel,
-                    })}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-                <span
-                  className={`rounded-md px-1.5 py-0.5 font-medium ${
-                    published
-                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                      : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-                  }`}
-                >
-                  {published
-                    ? t("agentRepository.mine.lifecycle.published")
-                    : t("agentRepository.mine.lifecycle.draft")}
+            <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              {versionLabel != null ? (
+                <span className="inline-flex items-center gap-1.5 truncate">
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-primary"
+                    aria-hidden
+                  />
+                  {t("agentRepository.mine.currentVersion", {
+                    version: versionLabel,
+                  })}
                 </span>
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
 
-        {menuItems.length > 0 ? (
-          <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-            <Button
-              type="text"
-              size="small"
-              className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-              icon={<MoreHorizontal className="size-4" aria-hidden />}
-              aria-label={t("agentRepository.mine.menu.more")}
-            />
-          </Dropdown>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span
+            className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+              published
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+            }`}
+          >
+            {published
+              ? t("agentRepository.mine.lifecycle.published")
+              : t("agentRepository.mine.lifecycle.draft")}
+          </span>
+          {menuItems.length > 0 ? (
+            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+              <Button
+                type="text"
+                size="small"
+                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                icon={<MoreHorizontal className="size-4" aria-hidden />}
+                aria-label={t("agentRepository.mine.menu.more")}
+              />
+            </Dropdown>
+          ) : null}
+        </div>
       </div>
 
       <p className="mt-3 line-clamp-2 min-h-[2.75rem] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
