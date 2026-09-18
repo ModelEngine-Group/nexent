@@ -143,6 +143,76 @@ def test_authorization_headers_maps_missing_jwt_configuration(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_forward_agent_evaluation_trial_run_posts_runtime_request(monkeypatch):
+    captured = {}
+
+    async def handler(request: httpx.Request):
+        captured["request"] = request
+        return httpx.Response(200, json={"answer": "ok", "scores": {"judge": 1.0}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(proxy, "RUNTIME_SERVICE_URL", "http://runtime:5014")
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+
+    def create_client(**kwargs):
+        client.headers.update(kwargs["headers"])
+        return client
+
+    monkeypatch.setattr(proxy, "create_httpx_client", create_client)
+
+    result = await proxy.forward_agent_evaluation_trial_run(
+        agent_id=7,
+        agent_version_no=3,
+        query="hello",
+        judge_model_id=99,
+        evaluator_ids=[5],
+        language="zh",
+        user_id="user-a",
+        tenant_id="tenant-a",
+    )
+
+    assert result == {"answer": "ok", "scores": {"judge": 1.0}}
+    request = captured["request"]
+    assert str(request.url) == "http://runtime:5014/api/agent-evaluations/internal/trial-run"
+    assert request.headers["authorization"] == "Bearer jwt"
+    assert json.loads(request.content) == {
+        "agent_id": 7,
+        "agent_version_no": 3,
+        "query": "hello",
+        "judge_model_id": 99,
+        "evaluator_ids": [5],
+        "language": "zh",
+    }
+    assert client.is_closed is True
+
+
+@pytest.mark.asyncio
+async def test_forward_agent_evaluation_trial_run_maps_upstream_error(monkeypatch):
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(500, content=b'{"detail":"failed"}')
+        )
+    )
+    monkeypatch.setattr(proxy, "generate_internal_runtime_jwt", lambda *_: "jwt")
+    monkeypatch.setattr(proxy, "create_httpx_client", lambda **_: client)
+
+    with pytest.raises(RuntimeUpstreamError) as exc_info:
+        await proxy.forward_agent_evaluation_trial_run(
+            agent_id=7,
+            agent_version_no=3,
+            query="hello",
+            judge_model_id=99,
+            evaluator_ids=None,
+            language="zh",
+            user_id="user-a",
+            tenant_id="tenant-a",
+        )
+
+    assert exc_info.value.status_code == 500
+    assert client.is_closed is True
+
+
+@pytest.mark.asyncio
 async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch):
     stream = TrackingStream([b"data: one\n\n", b"data: two\n\n"])
     captured = {}
