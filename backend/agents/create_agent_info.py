@@ -79,6 +79,8 @@ from consts.const import (
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
     LOCAL_MCP_SERVER,
+    get_tenant_local_mcp_server,
+    TOKEN,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
@@ -2375,7 +2377,7 @@ async def create_agent_run_info(
                     break
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
-    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     remote_mcp_list.append({
         "remote_mcp_server_name": "outer-apis",
         "remote_mcp_server": default_mcp_url,
@@ -2404,6 +2406,10 @@ async def create_agent_run_info(
             }
             if url == default_mcp_url:
                 mcp_config["httpx_client_factory"] = create_httpx_client
+                mcp_config["headers"] = {
+                    "X-Tenant-ID": str(tenant_id),
+                    "X-Nexent-Internal-Token": TOKEN,
+                }
             headers = {}
             auth_token = mcp_record.get("authorization_token")
             if auth_token:

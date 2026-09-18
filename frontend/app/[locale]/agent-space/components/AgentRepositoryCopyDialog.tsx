@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { App, Button, Modal, Radio, Space, Spin, Tag } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Modal, Radio, Select, Space, Spin, Tag } from "antd";
 import {
   AlertCircle,
   CheckCircle2,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
+import { useModelList } from "@/hooks/model/useModelList";
 import {
   useImportAgentFromRepository,
   useRepositoryImportPrecheck,
@@ -36,16 +37,15 @@ import type {
   RepositoryImportRequirementType,
 } from "@/types/agentRepository";
 
-const TYPE_ICON: Record<
-  RepositoryImportRequirementType,
-  typeof Database
-> = {
+const TYPE_ICON: Record<RepositoryImportRequirementType, typeof Database> = {
   model: Cpu,
   knowledge_base: Database,
   mcp: Plug,
   skill: Sparkles,
   tool: Wrench,
 };
+
+const OFFICIAL_TENANT_ID = "__nexent_official__";
 
 interface AgentRepositoryCopyDialogProps {
   listing: AgentRepositoryListingItem | null;
@@ -79,13 +79,21 @@ export function AgentRepositoryCopyDialog({
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [abnormalOpen, setAbnormalOpen] = useState(true);
   const [availableOpen, setAvailableOpen] = useState(true);
-  const [skillResolutionActions, setSkillResolutionActions] = useState<Record<string, "rename" | "use_existing">>({});
+  const [skillResolutionActions, setSkillResolutionActions] = useState<
+    Record<string, "rename" | "use_existing">
+  >({});
+  const [selectedModelId, setSelectedModelId] = useState<number>();
+  const [selectedEmbeddingModelId, setSelectedEmbeddingModelId] =
+    useState<number>();
 
   const agentRepositoryId = listing?.agent_repository_id ?? null;
   const listingTitle =
     listing?.display_name?.trim() ||
     listing?.name?.trim() ||
     t("agentRepository.card.untitled");
+  const isOfficialListing =
+    listing?.is_official === true ||
+    listing?.publisher_tenant_id === OFFICIAL_TENANT_ID;
 
   const {
     data: precheck,
@@ -96,6 +104,9 @@ export function AgentRepositoryCopyDialog({
   } = useRepositoryImportPrecheck(agentRepositoryId, open);
 
   const importMutation = useImportAgentFromRepository();
+  const { availableLlmModels, models: tenantModels } = useModelList({
+    enabled: open,
+  });
 
   const abnormalItems = useMemo(
     () => precheck?.items.filter((item) => !item.available) ?? [],
@@ -107,10 +118,58 @@ export function AgentRepositoryCopyDialog({
   );
 
   const skillConflictItems = useMemo(
-    () => abnormalItems.filter((item) => item.type === "skill" && item.reason_code === "skill_duplicate"),
+    () =>
+      abnormalItems.filter(
+        (item) =>
+          item.type === "skill" && item.reason_code === "skill_duplicate"
+      ),
     [abnormalItems]
   );
   const hasSkillConflicts = skillConflictItems.length > 0;
+  const officialKnowledgeItems = useMemo(
+    () =>
+      precheck?.items.filter((item) => item.type === "knowledge_base") ?? [],
+    [precheck]
+  );
+  const hasOfficialKnowledge = isOfficialListing && officialKnowledgeItems.length > 0;
+  const hasExistingOfficialKnowledge = Boolean(
+    hasOfficialKnowledge &&
+      officialKnowledgeItems.every((item) => item.available)
+  );
+  const availableEmbeddingModels = useMemo(
+    () =>
+      tenantModels.filter(
+        (model) =>
+          (model.type === "embedding" || model.type === "multi_embedding") &&
+          model.connect_status === "available"
+      ),
+    [tenantModels]
+  );
+  const officialEmbeddingModelMissing = Boolean(
+    isOfficialListing &&
+      hasOfficialKnowledge &&
+      !hasExistingOfficialKnowledge &&
+      availableEmbeddingModels.length === 0
+  );
+
+  useEffect(() => {
+    if (!open || !isOfficialListing) return;
+    setSelectedModelId((current) => current ?? availableLlmModels[0]?.id);
+    if (hasOfficialKnowledge && !hasExistingOfficialKnowledge) {
+      setSelectedEmbeddingModelId(
+        (current) => current ?? availableEmbeddingModels[0]?.id
+      );
+    } else if (hasExistingOfficialKnowledge) {
+      setSelectedEmbeddingModelId(undefined);
+    }
+  }, [
+    open,
+    isOfficialListing,
+    hasOfficialKnowledge,
+    hasExistingOfficialKnowledge,
+    availableLlmModels,
+    availableEmbeddingModels,
+  ]);
 
   const percent = precheck?.percent ?? 0;
   const hasAbnormal = precheck?.has_abnormal ?? false;
@@ -131,17 +190,47 @@ export function AgentRepositoryCopyDialog({
     const skillResolutions = hasSkillConflicts
       ? skillConflictItems.map((item) => ({
           skill_name: item.name,
-          action: (skillResolutionActions[item.name] ?? "rename") as "rename" | "use_existing",
+          action: (skillResolutionActions[item.name] ?? "rename") as
+            | "rename"
+            | "use_existing",
           ...(skillResolutionActions[item.name] !== "use_existing"
             ? { new_name: item.suggested_new_name || `${item.name} 副本` }
             : {}),
         }))
       : undefined;
 
+    if (
+      isOfficialListing &&
+      (!selectedModelId ||
+        (hasOfficialKnowledge &&
+          !hasExistingOfficialKnowledge &&
+          !selectedEmbeddingModelId))
+    ) {
+      message.error(
+        officialEmbeddingModelMissing
+          ? "当前租户未配置可用向量模型，请先配置后再复制官方智能体"
+          : "请先选择语言模型和向量模型"
+      );
+      return;
+    }
+
     try {
       await importMutation.mutateAsync({
         agentRepositoryId,
         skillResolutions,
+        modelOptions: isOfficialListing
+          ? {
+              modelIds: selectedModelId
+                ? { [listing.name]: selectedModelId }
+                : undefined,
+              embeddingModelIds:
+                hasOfficialKnowledge &&
+                !hasExistingOfficialKnowledge &&
+                selectedEmbeddingModelId
+                  ? { [listing.name]: selectedEmbeddingModelId }
+                  : undefined,
+            }
+          : undefined,
       });
       message.success(
         t("agentRepository.copy.success", { name: listingTitle })
@@ -180,6 +269,8 @@ export function AgentRepositoryCopyDialog({
     setAbnormalOpen(true);
     setAvailableOpen(true);
     setSkillResolutionActions({});
+    setSelectedModelId(undefined);
+    setSelectedEmbeddingModelId(undefined);
   };
 
   return (
@@ -197,7 +288,9 @@ export function AgentRepositoryCopyDialog({
             type="primary"
             icon={<Copy className="size-4" />}
             loading={importMutation.isPending}
-            disabled={!precheck || isLoading || isError}
+            disabled={
+              !precheck || isLoading || isError || officialEmbeddingModelMissing
+            }
             onClick={handleCopy}
           >
             {t("agentRepository.card.copy")}
@@ -288,10 +381,16 @@ export function AgentRepositoryCopyDialog({
           {hasSkillConflicts ? (
             <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
               <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                {t("agentRepository.copy.skillDuplicate.title", "Skill Name Conflict Detected")}
+                {t(
+                  "agentRepository.copy.skillDuplicate.title",
+                  "Skill Name Conflict Detected"
+                )}
               </p>
               <p className="text-xs text-amber-700 dark:text-amber-300">
-                {t("agentRepository.copy.skillDuplicate.message", "Choose how to handle each conflicting skill:")}
+                {t(
+                  "agentRepository.copy.skillDuplicate.message",
+                  "Choose how to handle each conflicting skill:"
+                )}
               </p>
               <div className="space-y-3">
                 {skillConflictItems.map((item) => (
@@ -313,22 +412,78 @@ export function AgentRepositoryCopyDialog({
                     >
                       <Space direction="vertical" size={8}>
                         <Radio value="rename">
-                          {t("agentRepository.copy.skillDuplicate.rename", "Install as new skill")}
+                          {t(
+                            "agentRepository.copy.skillDuplicate.rename",
+                            "Install as new skill"
+                          )}
                           <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
-                            {t("agentRepository.copy.skillDuplicate.renameTarget", {
-                              name: item.suggested_new_name || `${item.name} 副本`,
-                              defaultValue: `New name: ${item.suggested_new_name || `${item.name} 副本`}`,
-                            })}
+                            {t(
+                              "agentRepository.copy.skillDuplicate.renameTarget",
+                              {
+                                name:
+                                  item.suggested_new_name ||
+                                  `${item.name} 副本`,
+                                defaultValue: `New name: ${item.suggested_new_name || `${item.name} 副本`}`,
+                              }
+                            )}
                           </span>
                         </Radio>
                         <Radio value="use_existing">
-                          {t("agentRepository.copy.skillDuplicate.useExisting", "Use existing local skill")}
+                          {t(
+                            "agentRepository.copy.skillDuplicate.useExisting",
+                            "Use existing local skill"
+                          )}
                         </Radio>
                       </Space>
                     </Radio.Group>
                   </div>
                 ))}
               </div>
+            </section>
+          ) : null}
+
+          {isOfficialListing ? (
+            <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                选择本次安装使用的模型
+              </p>
+              <div className="space-y-2">
+                <label className="block text-xs text-slate-600 dark:text-slate-300">
+                  语言模型
+                </label>
+                <Select
+                  className="w-full"
+                  placeholder="请选择语言模型"
+                  value={selectedModelId}
+                  onChange={setSelectedModelId}
+                  options={availableLlmModels.map((model) => ({
+                    value: model.id,
+                    label: model.displayName || model.name,
+                  }))}
+                />
+              </div>
+              {hasOfficialKnowledge && !hasExistingOfficialKnowledge ? (
+                <div className="space-y-2">
+                  <label className="block text-xs text-slate-600 dark:text-slate-300">
+                    向量模型
+                  </label>
+                  <Select
+                    className="w-full"
+                    placeholder="请选择向量模型"
+                    value={selectedEmbeddingModelId}
+                    onChange={setSelectedEmbeddingModelId}
+                    options={availableEmbeddingModels.map((model) => ({
+                      value: model.id,
+                      label: model.displayName || model.name,
+                    }))}
+                  />
+                </div>
+              ) : null}
+              {officialEmbeddingModelMissing ? (
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  当前租户未配置可用向量模型，请先配置后再复制官方智能体。
+                </p>
+              ) : null}
             </section>
           ) : null}
 
