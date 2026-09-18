@@ -1,11 +1,10 @@
-import json
 import logging
 from http import HTTPStatus
 from typing import Any
 
 from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt, TypeAdapter, ValidationError
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
@@ -70,6 +69,7 @@ class TrialRunRequest(BaseModel):
 # New Code Reliability Rating from A to C when flagged as Critical.
 _AUTH_REQUIRED_MSG = "Authentication required"
 _UNKNOWN_ID = "<unknown>"
+_AGENT_IDS_ADAPTER = TypeAdapter(list[StrictInt])
 
 
 def _parse_agent_ids(raw_agent_ids: str | None) -> list[int]:
@@ -78,21 +78,12 @@ def _parse_agent_ids(raw_agent_ids: str | None) -> list[int]:
         return []
 
     try:
-        agent_ids = json.loads(raw_agent_ids)
-    except json.JSONDecodeError as exc:
+        agent_ids = _AGENT_IDS_ADAPTER.validate_json(raw_agent_ids)
+    except ValidationError as exc:
         raise AppException(
             ErrorCode.COMMON_PARAMETER_INVALID,
             "agent_ids must be a JSON list of integers",
         ) from exc
-
-    if not isinstance(agent_ids, list) or any(
-        not isinstance(agent_id, int) or isinstance(agent_id, bool)
-        for agent_id in agent_ids
-    ):
-        raise AppException(
-            ErrorCode.COMMON_PARAMETER_INVALID,
-            "agent_ids must be a JSON list of integers",
-        )
 
     return list(dict.fromkeys(agent_ids))
 
