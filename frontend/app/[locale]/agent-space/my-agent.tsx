@@ -3,17 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Empty, Input, Popover, Spin } from "antd";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Plus,
-  Search,
-  Tag,
-  Upload,
-} from "lucide-react";
+import { App, Button, Empty, Input, Spin } from "antd";
+import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal, {
   type CreatedAgentResult,
 } from "@/components/agent/CreateAgentModal";
@@ -29,10 +21,6 @@ import {
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
-import {
-  openImportWizardWithFile,
-  type ImportAgentData,
-} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
 import {
   isCancelableRepositoryStatus,
@@ -53,7 +41,7 @@ import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
 import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
 import { MyAgentCard } from "./components/MyAgentCard";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
-import TagFilterControls from "@/components/tag/TagFilterControls";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { TagResourcePredicate } from "@/types/tagManagement";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { mapAgentVersionDetail } from "@/lib/agentRepositoryDetail";
@@ -153,9 +141,6 @@ export function MyAgent({ active }: { active: boolean }) {
     setTagPredicates(value);
     setPage(1);
   };
-  const [importWizardVisible, setImportWizardVisible] = useState(false);
-  const [importWizardData, setImportWizardData] =
-    useState<ImportAgentData | null>(null);
   const [createAgentModalVisible, setCreateAgentModalVisible] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalAgent, setReviewModalAgent] =
@@ -214,18 +199,6 @@ export function MyAgent({ active }: { active: boolean }) {
       queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
     ]);
     router.push(`/${locale}/agents?agent_id=${agentId}`);
-  };
-
-  const handleImportAgent = async () => {
-    await openImportWizardWithFile({
-      onSuccess: (agentData) => {
-        setImportWizardData(agentData);
-        setImportWizardVisible(true);
-      },
-      message: message,
-      t: t,
-      log: log,
-    });
   };
 
   const handleEdit = (
@@ -459,99 +432,50 @@ export function MyAgent({ active }: { active: boolean }) {
     normalizedQuery.length > 0 ||
     tagPredicates.length > 0;
   const showFilteredEmpty = !isLoading && !isError && agents.length === 0;
-  const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
-  const showPagination = !isLoading && !isError && totalPages > 1;
-
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative min-w-0 flex-1">
           <Input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t("agentRepository.mine.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            className="h-11 rounded-xl"
+            className="h-10 rounded-xl"
             allowClear
           />
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            className="flex h-11 items-center gap-1.5"
-            onClick={handleImportAgent}
-          >
-            <Upload className="size-4" aria-hidden />
-            {t("agentConfig.button.import")}
-          </Button>
-          <Button
-            type="primary"
-            className="flex h-11 items-center gap-1.5"
-            onClick={handleCreateAgent}
-          >
-            <Plus className="size-4" aria-hidden />
-            {t("agentRepository.mine.newAgentButton")}
-          </Button>
-        </div>
+        <TagFilterPopover
+          definitions={tagDefinitions ?? []}
+          value={tagPredicates}
+          onChange={onTagPredicatesChange}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <div className="flex flex-wrap gap-1.5">
-          {MINE_OWNERSHIP_FILTERS.map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              onClick={() => onOwnershipChange(filter)}
-              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+        {MINE_OWNERSHIP_FILTERS.map((filter) => (
+          <button
+            key={filter}
+            type="button"
+            onClick={() => onOwnershipChange(filter)}
+            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              ownership === filter
+                ? "bg-primary text-white"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            }`}
+          >
+            {t(ownershipLabelKey[filter])}
+            <span
+              className={`rounded px-1.5 text-xs ${
                 ownership === filter
-                  ? "bg-primary text-white"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  ? "bg-white/20"
+                  : "bg-white/70 text-slate-500 dark:bg-slate-900/50 dark:text-slate-400"
               }`}
             >
-              {t(ownershipLabelKey[filter])}
-              <span
-                className={`rounded px-1.5 text-xs ${
-                  ownership === filter
-                    ? "bg-white/20"
-                    : "bg-white/70 text-slate-500 dark:bg-slate-900/50 dark:text-slate-400"
-                }`}
-              >
-                {counts[filter]}
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="ml-auto shrink-0">
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            content={
-              <div className="w-72">
-                <TagFilterControls
-                  definitions={tagDefinitions ?? []}
-                  value={tagPredicates}
-                  onChange={onTagPredicatesChange}
-                />
-                {tagPredicates.length > 0 ? (
-                  <button
-                    type="button"
-                    className="mt-2 text-xs text-blue-600 hover:underline"
-                    onClick={() => onTagPredicatesChange([])}
-                  >
-                    {t("repository.tagFilter.clear")}
-                  </button>
-                ) : null}
-              </div>
-            }
-          >
-            <Button
-              type={tagPredicates.length > 0 ? "primary" : "default"}
-              className="h-11"
-              icon={<Tag className="size-3.5" aria-hidden />}
-            >
-              {t("repository.tagFilter.button")}
-            </Button>
-          </Popover>
-        </div>
+              {counts[filter]}
+            </span>
+          </button>
+        ))}
       </div>
 
       {isLoading ? (
@@ -581,6 +505,9 @@ export function MyAgent({ active }: { active: boolean }) {
           <ResourceCardGrid
             items={agents}
             columns={4}
+            page={page}
+            total={total}
+            onPageChange={setPage}
             paginateItems={false}
             showToolbar={false}
             renderItem={(agent) =>
@@ -616,45 +543,6 @@ export function MyAgent({ active }: { active: boolean }) {
               )
             }
           />
-
-          {showPagination ? (
-            <div className="flex items-center justify-center gap-1.5 pt-2">
-              <Button
-                type="default"
-                className="flex size-9 items-center justify-center rounded-lg p-0"
-                disabled={page <= 1}
-                onClick={() => setPage(Math.max(1, page - 1))}
-                aria-label={t("repository.pagination.prev")}
-              >
-                <ChevronLeft className="size-4" aria-hidden />
-              </Button>
-              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-                (pageNumber) => (
-                  <Button
-                    key={pageNumber}
-                    type={pageNumber === page ? "primary" : "default"}
-                    className="flex size-9 items-center justify-center rounded-lg p-0"
-                    onClick={() => setPage(pageNumber)}
-                    aria-label={t("repository.pagination.page", {
-                      page: pageNumber,
-                    })}
-                    aria-current={pageNumber === page ? "page" : undefined}
-                  >
-                    {pageNumber}
-                  </Button>
-                )
-              )}
-              <Button
-                type="default"
-                className="flex size-9 items-center justify-center rounded-lg p-0"
-                disabled={page >= totalPages}
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                aria-label={t("repository.pagination.next")}
-              >
-                <ChevronRight className="size-4" aria-hidden />
-              </Button>
-            </div>
-          ) : null}
         </>
       )}
 
@@ -680,25 +568,6 @@ export function MyAgent({ active }: { active: boolean }) {
         open={active && createAgentModalVisible}
         onCancel={() => setCreateAgentModalVisible(false)}
         onCreated={handleAgentCreated}
-      />
-
-      <AgentImportWizard
-        visible={active && importWizardVisible}
-        onCancel={() => {
-          setImportWizardVisible(false);
-          setImportWizardData(null);
-        }}
-        initialData={importWizardData}
-        onImportComplete={async () => {
-          setImportWizardVisible(false);
-          setImportWizardData(null);
-          await Promise.all([
-            invalidateAgentRepositoryCaches(queryClient),
-            queryClient.invalidateQueries({
-              queryKey: [AGENTS_LIST_QUERY_KEY],
-            }),
-          ]);
-        }}
       />
       <AgentRepositoryDetailModal
         open={active && detailTarget != null}
