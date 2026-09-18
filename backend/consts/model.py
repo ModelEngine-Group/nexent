@@ -581,8 +581,11 @@ class ModelRequest(BaseModel):
     # Edit-dialog connectivity probes omit the stored api_key (the backend
     # never returns it to the client). When set, /temporary_healthcheck falls
     # back to the persisted key for this model instead of probing with the
-    # "sk-no-api-key" placeholder.
-    model_id: Optional[int] = None
+    # "sk-no-api-key" placeholder. Named probe_model_id (NOT model_id):
+    # create/update endpoints spread model_dump() straight into
+    # INSERT/UPDATE column lists, so a field named model_id would inject an
+    # explicit NULL primary key and bypass the sequence default.
+    probe_model_id: Optional[int] = None
 
 
 class CapacitySuggestionFields(BaseModel):

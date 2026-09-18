@@ -595,8 +595,8 @@ async def check_temporary_model_health(
         # returns the persisted key to the client, and the dialog leaves the
         # field empty to "keep existing"). Fall back to the stored key so
         # verifying does not require retyping it.
-        if request.model_id is not None and request.api_key in (None, "", "sk-no-api-key"):
-            stored_model = get_model_by_model_id(request.model_id, tenant_id=tenant_id)
+        if request.probe_model_id is not None and request.api_key in (None, "", "sk-no-api-key"):
+            stored_model = get_model_by_model_id(request.probe_model_id, tenant_id=tenant_id)
             if stored_model and stored_model.get("api_key"):
                 request.api_key = stored_model["api_key"]
         result = await verify_model_config_connectivity(request.model_dump())

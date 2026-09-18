@@ -844,7 +844,9 @@ export const modelService = {
         model_type: config.modelType,
         api_key: config.apiKey || "sk-no-api-key",
         base_url: config.baseUrl || "",
-        ...(config.modelId !== undefined ? { model_id: config.modelId } : {}),
+        ...(config.modelId !== undefined
+          ? { probe_model_id: config.modelId }
+          : {}),
         ...(config.maxTokens !== undefined
           ? { max_tokens: config.maxTokens }
           : {}),
