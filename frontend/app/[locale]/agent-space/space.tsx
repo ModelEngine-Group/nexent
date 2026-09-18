@@ -7,7 +7,6 @@ import {
   Bot,
   Copy,
   Download,
-  Eye,
   MoreHorizontal,
   PackageX,
   Search,
@@ -149,25 +148,33 @@ export function AgentSpace({ active }: { active: boolean }) {
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
-    const menuItems: MenuProps["items"] = showAdminMenu
-      ? [
-          {
-            key: "takeDown",
-            label: t("repository.listingStatus.takeDown"),
-            icon: <PackageX className="size-3.5" aria-hidden />,
-            danger: true,
-            disabled: isTakingDown,
-            onClick: () => confirmTakeDown(listing),
-          },
-        ]
-      : [];
+    const menuItems: MenuProps["items"] = [
+      {
+        key: "copy",
+        label: t("agentRepository.card.copy"),
+        icon: <Copy className="size-3.5" aria-hidden />,
+        onClick: () => setCopyListing(listing),
+      },
+      ...(showAdminMenu
+        ? [
+            {
+              key: "takeDown",
+              label: t("repository.listingStatus.takeDown"),
+              icon: <PackageX className="size-3.5" aria-hidden />,
+              danger: true,
+              disabled: isTakingDown,
+              onClick: () => confirmTakeDown(listing),
+            },
+          ]
+        : []),
+    ];
 
     return (
       <ResourceCard
         key={listing.agent_repository_id}
         className="h-full"
         title={title}
-        subtitle={author}
+        onClick={() => setDetailListingId(listing.agent_repository_id)}
         icon={
           <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
             {listing.icon?.trim() ? (
@@ -179,6 +186,13 @@ export function AgentSpace({ active }: { active: boolean }) {
         }
         description={
           listing.description?.trim() || t("agentRepository.card.noDescription")
+        }
+        badge={
+          listing.version_label ? (
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              {listing.version_label}
+            </span>
+          ) : undefined
         }
         tags={
           tags.length > 0 || toolCount > 0 ? (
@@ -199,61 +213,30 @@ export function AgentSpace({ active }: { active: boolean }) {
             </>
           ) : undefined
         }
-        meta={
-          <>
-            {listing.version_label ? (
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <span
-                  className="size-1.5 rounded-full bg-primary"
-                  aria-hidden
-                />
-                {listing.version_label}
-              </span>
-            ) : null}
-            <span
-              className="inline-flex items-center gap-1"
-              aria-label={t("agentRepository.detail.downloads", {
-                count: downloads.toLocaleString(),
-              })}
-            >
-              <Download className="size-3.5" aria-hidden />
-              {downloads.toLocaleString()}
-            </span>
-          </>
-        }
+        footerLayout="inline"
+        meta={author ? <span className="truncate">{author}</span> : undefined}
         headerActions={
-          showAdminMenu ? (
-            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-              <Button
-                type="text"
-                size="small"
-                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-                icon={<MoreHorizontal className="size-4" aria-hidden />}
-                loading={isTakingDown}
-                aria-label={t("agentRepository.mine.menu.more")}
-              />
-            </Dropdown>
-          ) : undefined
+          <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+            <Button
+              type="text"
+              size="small"
+              className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+              icon={<MoreHorizontal className="size-4" aria-hidden />}
+              loading={isTakingDown}
+              aria-label={t("agentRepository.mine.menu.more")}
+            />
+          </Dropdown>
         }
         footer={
-          <div className="flex items-center gap-2">
-            <Button
-              type="primary"
-              className="min-w-0 flex-1"
-              icon={<Copy className="size-3.5" />}
-              onClick={() => setCopyListing(listing)}
-            >
-              {t("agentRepository.card.copy")}
-            </Button>
-            <Button
-              type="default"
-              className="min-w-0 flex-1"
-              icon={<Eye className="size-3.5" />}
-              onClick={() => setDetailListingId(listing.agent_repository_id)}
-            >
-              {t("agentRepository.card.detail")}
-            </Button>
-          </div>
+          <span
+            className="inline-flex items-center gap-1"
+            aria-label={t("agentRepository.detail.downloads", {
+              count: downloads.toLocaleString(),
+            })}
+          >
+            <Download className="size-3.5" aria-hidden />
+            {downloads.toLocaleString()}
+          </span>
         }
       />
     );

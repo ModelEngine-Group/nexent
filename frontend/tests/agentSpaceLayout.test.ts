@@ -37,6 +37,13 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.match(agentSpace, /<ResourceCard\s/);
   assert.match(agentSpace, /paginateItems=\{false\}/);
   assert.match(agentSpace, /onPageChange=\{setPage\}/);
+  assert.match(
+    agentSpace,
+    /onClick=\{\(\) => setDetailListingId\(listing\.agent_repository_id\)\}/
+  );
+  assert.match(agentSpace, /key: "copy"/);
+  assert.match(agentSpace, /footerLayout="inline"/);
+  assert.match(agentSpace, /badge=\{[\s\S]*listing\.version_label/);
   assert.match(mineAgent, /export function MyAgent/);
   assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{4\}/);
 });
