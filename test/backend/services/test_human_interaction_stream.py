@@ -87,7 +87,7 @@ async def test_durable_event_ids_allow_replay_without_skipping_snapshot_backlog(
 
     snapshot = {"run_id": "run", "conversation_id": 7, "status": "COMPLETED", "event_seq": 3}
     service = MagicMock()
-    service.snapshot.return_value = snapshot
+    service.light_snapshot.return_value = snapshot
     service.repository.events.return_value = [
         {"seq": 2, "payload": {"type": "human_decision", "content": {"status": "DECIDED"}}},
         {"seq": 3, "payload": {"chunk_cipher": "encrypted"}},
@@ -102,7 +102,7 @@ async def test_durable_event_ids_allow_replay_without_skipping_snapshot_backlog(
     assert chunks[2] == 'id: 3\ndata: {"type":"final_answer","content":"done"}\n\n'
     assert chunks[-1].startswith("data: ")
     service.repository.events.assert_called_once_with("run", 1)
-    assert all(call.args == ("run", "tenant", "owner") for call in service.snapshot.call_args_list)
+    assert all(call.args == ("run", "tenant", "owner") for call in service.light_snapshot.call_args_list)
 
 
 @pytest.mark.asyncio
@@ -112,7 +112,7 @@ async def test_future_event_cursor_is_rejected_before_streaming(monkeypatch):
     from services.human_interaction.models import InteractionError
 
     service = MagicMock()
-    service.snapshot.return_value = {"event_seq": 3}
+    service.light_snapshot.return_value = {"event_seq": 3}
     monkeypatch.setattr(application, "require_enabled", lambda: service)
     with pytest.raises(InteractionError) as error:
         await application.stream_run("run", "tenant", "owner", after=4)

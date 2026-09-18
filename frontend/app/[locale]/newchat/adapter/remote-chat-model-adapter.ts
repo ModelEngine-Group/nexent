@@ -2034,11 +2034,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     let firstTokenTime: number | undefined;
     let toolCallCount = 0;
     let storedTiming: ReturnType<typeof buildTimingResult> | null = null;
+    let hitlTerminal: boolean | undefined = undefined;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || hitlTerminal) break;
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -2058,6 +2059,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             if (value && typeof value.run_id === "string")
               humanRunId = value.run_id;
             custom?.onHumanInteractionEvent?.();
+            // Terminal HITL status: stop reading so isRunning flips false
+            // without waiting for the backend to close the stream.
+            if (
+              value &&
+              typeof value.status === "string" &&
+              ["COMPLETED", "FAILED", "STOPPED", "EXPIRED"].includes(value.status)
+            ) {
+              hitlTerminal = true;
+              break;
+            }
             continue;
           }
           if (
