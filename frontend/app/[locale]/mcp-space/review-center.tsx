@@ -20,9 +20,9 @@ import McpRepositoryReviewConfirmModal, {
   type McpRepositoryReviewAction,
 } from "./components/McpRepositoryReviewConfirmModal";
 import TransportIcon from "./components/shared/TransportIcon";
-import { PlaceholderBox } from "./mcp-space-shared";
+import { PlaceholderBox } from "./my-mcp";
 
-export function McpReviewCenter({
+export function ReviewCenter({
   browser,
   onSelect,
   onReviewed,

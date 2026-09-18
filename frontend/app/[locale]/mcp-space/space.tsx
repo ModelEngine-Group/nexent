@@ -1,30 +1,144 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { App, Button } from "antd";
+import { App, Button, Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { Plus, Tag } from "lucide-react";
 import { parseMcpReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
+import { FILTER_ALL, McpToolsServicesTab } from "@/const/mcpTools";
+import { filterByDeploymentType, matchesNameOrTag } from "@/lib/mcpTools";
+import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
-import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 import { useMcpCommunityReview } from "@/hooks/mcpTools/useMcpCommunityReview";
 import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAdd";
+import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
 import { useTagLibraries } from "@/hooks/useTagManagement";
 import { deleteCommunityMcpTool } from "@/services/mcpToolsService";
-import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
-import { McpToolsServicesTab } from "@/const/mcpTools";
-import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
+import RepositoryTagFilter from "@/components/tag/RepositoryTagFilter";
+import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
+import McpToolsPagination from "./components/McpToolsPagination";
+import RepositoryMcpCard from "./components/RepositoryMcpCard";
+import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
 import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
 import McpCommunityDetailModal from "./components/add/community/McpCommunityDetailModal";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
 import RepositoryMcpDetailModal from "./components/RepositoryMcpDetailModal";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
-import { getDeduplicatedMineItems } from "./mcp-space-shared";
+import {
+  type DeploymentFilter,
+  getDeduplicatedMineItems,
+  PlaceholderBox,
+} from "./my-mcp";
+
+export function McpSpace({
+  browser,
+  localServices,
+  isAdmin,
+  actions,
+  onSelect,
+  onInstall,
+  onOffline,
+}: {
+  browser: ReturnType<typeof useMcpCommunityBrowser>;
+  localServices: McpServiceItem[];
+  isAdmin: boolean;
+  actions: React.ReactNode;
+  onSelect: (service: CommunityMcpCard) => void;
+  onInstall: (service: CommunityMcpCard) => void;
+  onOffline: (service: CommunityMcpCard) => void;
+}) {
+  const { t } = useTranslation("common");
+  const [deploymentType] = useState<DeploymentFilter>(FILTER_ALL);
+
+  const filteredServices = useMemo(() => {
+    return filterByDeploymentType(browser.services, deploymentType).filter(
+      (item) => matchesNameOrTag(item, browser.filters.search)
+    );
+  }, [browser.services, browser.filters.search, deploymentType]);
+
+  const isInstalled = (service: CommunityMcpCard) => {
+    return localServices.some((localService) => {
+      if (localService.permission !== "EDIT") return false;
+      if (
+        service.communityId &&
+        localService.communityId === service.communityId
+      )
+        return true;
+      return localService.name === service.name;
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <McpToolsSearchFilterBar
+        search={browser.filters.search}
+        actions={actions}
+        searchActions={
+          <RepositoryTagFilter
+            value={
+              browser.filters.tag === FILTER_ALL
+                ? undefined
+                : browser.filters.tag
+            }
+            tags={browser.tagStats}
+            onChange={(value) =>
+              browser.updateFilter("tag", value ?? FILTER_ALL)
+            }
+          />
+        }
+        onSearchChange={(value) => browser.updateFilter("search", value)}
+      />
+
+      <p className="text-sm text-slate-500">
+        {t("mcpTools.repository.installHint")}
+      </p>
+
+      {browser.loading ? (
+        <PlaceholderBox>
+          <Spin />
+        </PlaceholderBox>
+      ) : filteredServices.length === 0 ? (
+        <PlaceholderBox>
+          <Empty description={t("mcpTools.repository.empty")} />
+        </PlaceholderBox>
+      ) : (
+        <ResourceCardGrid
+          items={filteredServices}
+          columns={3}
+          paginateItems={false}
+          showToolbar={false}
+          renderItem={(service, index) => (
+            <RepositoryMcpCard
+              key={`${service.communityId || service.name}-${index}`}
+              service={service}
+              isAdmin={isAdmin}
+              installed={isInstalled(service)}
+              onInstall={onInstall}
+              onSelect={onSelect}
+              onOffline={onOffline}
+            />
+          )}
+        />
+      )}
+
+      {filteredServices.length > 0 ? (
+        <McpToolsPagination
+          mode="offset"
+          current={browser.page}
+          pageSize={browser.pageSize}
+          total={browser.total}
+          onChange={browser.setPage}
+        />
+      ) : null}
+    </div>
+  );
+}
 
 export function useMcpSpaceController() {
   const { t } = useTranslation("common");

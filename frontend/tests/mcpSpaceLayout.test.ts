@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 const route = new URL("../app/[locale]/mcp-space/", import.meta.url);
@@ -10,13 +10,21 @@ const agentPage = new URL(
 
 test("MCP space delegates each tab to a separate component", async () => {
   const page = await readFile(new URL("page.tsx", route), "utf8");
-  for (const component of [
-    "McpRepository",
-    "MyMcpServices",
-    "McpReviewCenter",
-  ]) {
+  for (const component of ["McpSpace", "MyMcp", "ReviewCenter"]) {
     assert.match(page, new RegExp(`<${component}\\b`));
     assert.doesNotMatch(page, new RegExp(`function ${component}\\b`));
+  }
+  const files = await readdir(route);
+  for (const name of ["space.tsx", "my-mcp.tsx", "review-center.tsx"]) {
+    assert.ok(files.includes(name), `${name} is a separate tab component`);
+  }
+  for (const name of [
+    "repository.tsx",
+    "my-mcp-services.tsx",
+    "mcp-space-shared.tsx",
+    "use-mcp-space-controller.tsx",
+  ]) {
+    assert.ok(!files.includes(name), `${name} is no longer needed`);
   }
   assert.doesNotMatch(
     page,

@@ -7,10 +7,9 @@ import { Inbox, Puzzle, ShieldCheck, User } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { McpToolsServicesTab } from "@/const/mcpTools";
-import { McpRepository } from "./repository";
-import { MyMcpServices } from "./my-mcp-services";
-import { McpReviewCenter } from "./review-center";
-import { useMcpSpaceController } from "./use-mcp-space-controller";
+import { McpSpace, useMcpSpaceController } from "./space";
+import { MyMcp } from "./my-mcp";
+import { ReviewCenter } from "./review-center";
 
 const mcpToolsTheme = {
   token: { colorPrimary: "#2563eb", colorInfo: "#0284c7" },
@@ -102,13 +101,13 @@ export default function McpToolsPage() {
               </Tabs>
 
               {tab === McpToolsServicesTab.REPOSITORY ? (
-                <McpRepository {...controller.repositoryProps} />
+                <McpSpace {...controller.repositoryProps} />
               ) : null}
               {tab === McpToolsServicesTab.MINE ? (
-                <MyMcpServices {...controller.mineProps} />
+                <MyMcp {...controller.mineProps} />
               ) : null}
               {tab === McpToolsServicesTab.REVIEW && isAdmin ? (
-                <McpReviewCenter {...controller.reviewProps} />
+                <ReviewCenter {...controller.reviewProps} />
               ) : null}
 
               {controller.dialogs}
