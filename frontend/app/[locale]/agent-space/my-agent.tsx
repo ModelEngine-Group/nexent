@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Empty, Input, Spin } from "antd";
+import { App, Button, Empty, Grid, Input, Spin } from "antd";
 import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import CreateAgentModal, {
@@ -52,7 +52,9 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "created",
   "others",
 ];
-const MINE_PAGE_SIZE = 12;
+const CARD_GAP = 20;
+const MIN_CARD_HEIGHT = 240;
+const PAGINATION_HEIGHT = 60;
 
 export function MyAgent({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
@@ -63,13 +65,58 @@ export function MyAgent({ active }: { active: boolean }) {
   const queryClient = useQueryClient();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
+  const screens = Grid.useBreakpoint();
+  const gridRegionRef = useRef<HTMLDivElement>(null);
+  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
+    null
+  );
+  const columns = screens.xxl
+    ? 4
+    : screens.xl
+      ? 3
+      : screens.lg || screens.md || screens.sm
+        ? 2
+        : screens.xs
+          ? 1
+          : 4;
+  const pageBottomPadding = screens.sm ? 40 : 32;
+  const rows = getRowCount(
+    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
+  );
+  const pageSize = columns * rows;
+  const measureGridHeight = useCallback(() => {
+    if (!active || !gridRegionRef.current) return;
+
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const { top } = gridRegionRef.current.getBoundingClientRect();
+    setAvailableGridHeight(
+      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
+    );
+  }, [active, pageBottomPadding]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const frame = window.requestAnimationFrame(measureGridHeight);
+    const observer = new ResizeObserver(measureGridHeight);
+    const visualViewport = window.visualViewport;
+    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
+    window.addEventListener("resize", measureGridHeight);
+    visualViewport?.addEventListener("resize", measureGridHeight);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", measureGridHeight);
+      visualViewport?.removeEventListener("resize", measureGridHeight);
+    };
+  }, [active, measureGridHeight]);
   const [ownership, setOwnership] = useState<MineOwnershipFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
     []
   );
   const [page, setPage] = useState(1);
-  const pageSize = MINE_PAGE_SIZE;
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
     tagLibraries?.find(
@@ -107,6 +154,13 @@ export function MyAgent({ active }: { active: boolean }) {
   const agents = useMemo(() => data?.items ?? [], [data?.items]);
   const counts = data?.counts ?? { all: 0, created: 0, others: 0 };
   const total = data?.pagination?.total ?? 0;
+  const gridHeight =
+    availableGridHeight === null
+      ? undefined
+      : Math.max(
+          0,
+          availableGridHeight - (total > pageSize ? PAGINATION_HEIGHT : 0)
+        );
   const reviewDeepLink = useMemo(
     () => parseReviewDeepLinkParams(searchParams),
     [searchParams]
@@ -478,73 +532,81 @@ export function MyAgent({ active }: { active: boolean }) {
         ))}
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Spin size="large" />
-        </div>
-      ) : isError ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {t("agentRepository.mine.loadError")}
-          </p>
-          <Button type="primary" onClick={() => refetch()} loading={isFetching}>
-            {t("repository.common.retry")}
-          </Button>
-        </div>
-      ) : showFilteredEmpty ? (
-        <Empty
-          className="py-16"
-          description={
-            hasActiveFilter
-              ? t("agentRepository.mine.emptyFiltered")
-              : t("agentRepository.mine.empty")
-          }
-        />
-      ) : (
-        <>
-          <ResourceCardGrid
-            items={agents}
-            columns={4}
-            page={page}
-            total={total}
-            onPageChange={setPage}
-            paginateItems={false}
-            showToolbar={false}
-            renderItem={(agent) =>
-              isNewAgentPaddingItem(agent) ? (
-                <CreateNewAgentCard
-                  key="new-agent-padding"
-                  onClick={handleCreateAgent}
-                />
-              ) : (
-                <MyAgentCard
-                  key={agent.agent_id}
-                  agent={agent}
-                  onEdit={() => handleEdit(agent.agent_id, agent.permission)}
-                  onView={() =>
-                    setDetailTarget({
-                      agentId: agent.agent_id,
-                      versionNo: agent.current_version_no ?? 0,
-                    })
-                  }
-                  onApplyListing={() => handleApplyListing(agent)}
-                  onViewReview={(mode) => handleViewReview(agent, mode)}
-                  onDelete={() => handleDeleteAgent(agent)}
-                  onEvaluate={() => handleEvaluate(agent)}
-                  isApplying={
-                    applyingAgentId === agent.agent_id &&
-                    createListingMutation.isPending
-                  }
-                  isDeleting={
-                    deleteAgentMutation.isPending &&
-                    deleteAgentMutation.variables === agent.agent_id
-                  }
-                />
-              )
+      <div ref={gridRegionRef} className="min-h-0">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Spin size="large" />
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {t("agentRepository.mine.loadError")}
+            </p>
+            <Button
+              type="primary"
+              onClick={() => refetch()}
+              loading={isFetching}
+            >
+              {t("repository.common.retry")}
+            </Button>
+          </div>
+        ) : showFilteredEmpty ? (
+          <Empty
+            className="py-16"
+            description={
+              hasActiveFilter
+                ? t("agentRepository.mine.emptyFiltered")
+                : t("agentRepository.mine.empty")
             }
           />
-        </>
-      )}
+        ) : (
+          <>
+            <ResourceCardGrid
+              items={agents}
+              columns={columns}
+              rows={rows}
+              gridHeight={gridHeight}
+              page={page}
+              total={total}
+              onPageChange={setPage}
+              paginateItems={false}
+              showToolbar={false}
+              renderItem={(agent) =>
+                isNewAgentPaddingItem(agent) ? (
+                  <CreateNewAgentCard
+                    key="new-agent-padding"
+                    onClick={handleCreateAgent}
+                  />
+                ) : (
+                  <MyAgentCard
+                    key={agent.agent_id}
+                    agent={agent}
+                    onEdit={() => handleEdit(agent.agent_id, agent.permission)}
+                    onView={() =>
+                      setDetailTarget({
+                        agentId: agent.agent_id,
+                        versionNo: agent.current_version_no ?? 0,
+                      })
+                    }
+                    onApplyListing={() => handleApplyListing(agent)}
+                    onViewReview={(mode) => handleViewReview(agent, mode)}
+                    onDelete={() => handleDeleteAgent(agent)}
+                    onEvaluate={() => handleEvaluate(agent)}
+                    isApplying={
+                      applyingAgentId === agent.agent_id &&
+                      createListingMutation.isPending
+                    }
+                    isDeleting={
+                      deleteAgentMutation.isPending &&
+                      deleteAgentMutation.variables === agent.agent_id
+                    }
+                  />
+                )
+              }
+            />
+          </>
+        )}
+      </div>
 
       <MineApplyListingModal
         open={active && applyModalOpen}
@@ -579,5 +641,16 @@ export function MyAgent({ active }: { active: boolean }) {
         onRetry={() => refetchDetail()}
       />
     </div>
+  );
+}
+
+function getRowCount(availableHeight: number) {
+  if (availableHeight <= 0) return 3;
+  return Math.min(
+    3,
+    Math.max(
+      1,
+      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
+    )
   );
 }
