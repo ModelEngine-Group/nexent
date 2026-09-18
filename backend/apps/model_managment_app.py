@@ -20,6 +20,7 @@ from consts.model import (
     BatchCreateModelsRequest,
     CapacitySuggestionFields,
     ModelRequest,
+    ModelProbeRequest,
     ModelCapacitySuggestionRequest,
     ModelCapacitySuggestionResponse,
     ProviderModelRequest,
@@ -581,7 +582,7 @@ async def check_model_health(
 
 @router.post("/temporary_healthcheck")
 async def check_temporary_model_health(
-    request: ModelRequest, authorization: Optional[str] = Header(None)
+    request: ModelProbeRequest, authorization: Optional[str] = Header(None)
 ):
     """Verify connectivity for the provided model configuration without persisting it.
 

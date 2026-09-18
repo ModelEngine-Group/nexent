@@ -578,13 +578,22 @@ class ModelRequest(BaseModel):
     # forwards them to model_capacity_suggestion_accept_total.
     accepted_suggestion_match_kind: Optional[str] = None
     accepted_capability_profile_version: Optional[str] = None
+
+
+class ModelProbeRequest(ModelRequest):
+    """Request payload for POST /model/temporary_healthcheck only.
+
+    Extends ModelRequest with probe-only fields. Never send this to the
+    create/update endpoints: they spread model_dump() straight into
+    INSERT/UPDATE column lists, so any field that is not a real
+    model_record_t column makes SQLAlchemy raise "Unconsumed column names"
+    (and a field matching a column name would inject wrong data — the
+    model_id NULL primary-key bug).
+    """
     # Edit-dialog connectivity probes omit the stored api_key (the backend
     # never returns it to the client). When set, /temporary_healthcheck falls
     # back to the persisted key for this model instead of probing with the
-    # "sk-no-api-key" placeholder. Named probe_model_id (NOT model_id):
-    # create/update endpoints spread model_dump() straight into
-    # INSERT/UPDATE column lists, so a field named model_id would inject an
-    # explicit NULL primary key and bypass the sequence default.
+    # "sk-no-api-key" placeholder.
     probe_model_id: Optional[int] = None
 
 
