@@ -61,7 +61,11 @@ test("agent repository displays up to twelve unified cards in four desktop colum
     agentSpace,
     /footer=\{[\s\S]*onClick=\{\(\) => setCopyListing\(listing\)\}/
   );
-  assert.match(agentSpace, /footer=\{[\s\S]*type="default"/);
+  assert.match(agentSpace, /footer=\{[\s\S]*type="primary"/);
+  assert.match(
+    agentSpace,
+    /footer=\{[\s\S]*className="h-8 px-3 text-xs font-medium shadow-sm"/
+  );
   assert.match(agentSpace, /footerLayout="inline"/);
   assert.match(agentSpace, /badge=\{[\s\S]*listing\.version_label/);
   assert.match(agentSpace, /Grid\.useBreakpoint\(\)/);

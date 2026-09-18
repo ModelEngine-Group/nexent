@@ -302,9 +302,9 @@ export function AgentSpace({ active }: { active: boolean }) {
         }
         footer={
           <Button
-            type="default"
+            type="primary"
             size="small"
-            className="h-7 px-1 text-xs text-slate-500 hover:text-primary"
+            className="h-8 px-3 text-xs font-medium shadow-sm"
             icon={<Copy className="size-3.5" aria-hidden />}
             onClick={() => setCopyListing(listing)}
           >
