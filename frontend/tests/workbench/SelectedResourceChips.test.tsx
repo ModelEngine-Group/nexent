@@ -61,3 +61,23 @@ it("UT-FE-WB-029 clicking a Skill label opens configuration instead of removing 
   expect(edit).toHaveBeenCalledOnce();
   expect(remove).not.toHaveBeenCalled();
 });
+
+it("renders system Agent default Skills without a remove action", () => {
+  render(
+    <SelectedResourceChips
+      resources={{
+        skills: [{ id: 7, name: "docx", removable: false }],
+        onSelectAgent: vi.fn(),
+        onRemoveAgent: vi.fn(),
+      }}
+      onEditSkill={vi.fn()}
+      onRemoveSkill={vi.fn()}
+      onEditKnowledge={vi.fn()}
+    />
+  );
+
+  expect(screen.getByRole("button", { name: "Skill · docx" })).toBeEnabled();
+  expect(
+    screen.queryByRole("button", { name: "移除 Skill · docx" })
+  ).toBeNull();
+});

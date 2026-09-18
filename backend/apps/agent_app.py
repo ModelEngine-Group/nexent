@@ -68,7 +68,10 @@ from management.services.agent.service import (
 from services.prompt_service import generate_guardrail_rules_impl
 from services.human_interaction.models import InteractionError
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
-from services.workbench_service import build_workbench_capability_preview
+from services.workbench_service import (
+    build_workbench_capability_preview,
+    build_workbench_main_profile,
+)
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from services.agent_version_service import (
@@ -118,7 +121,18 @@ async def get_workbench_bootstrap_api(
     authorization: Optional[str] = Header(None),
 ):
     """Return server-authoritative Workbench modes and creation capabilities."""
-    get_current_user_id(authorization)
+    _, tenant_id = get_current_user_id(authorization)
+    try:
+        generic_agent = build_workbench_main_profile(tenant_id)
+    except Exception:
+        logger.exception(
+            "Failed to load workbench_main presentation profile for tenant %s",
+            tenant_id,
+        )
+        generic_agent = {
+            "display_name": "Nexent Workbench",
+            "default_skill_resources": [],
+        }
     return {
         "code": 0,
         "message": "success",
@@ -131,6 +145,7 @@ async def get_workbench_bootstrap_api(
                 "skill_create": {"enabled": False},
                 "agent_create": {"enabled": False},
             },
+            "generic_agent": generic_agent,
         },
     }
 

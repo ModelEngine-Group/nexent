@@ -27,6 +27,7 @@ export interface ChatProps {
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   modelSelectionScope?: "agent" | "tenant";
+  fallbackAgentName?: string;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   showConversationTitle?: boolean;
@@ -81,6 +82,7 @@ export const Chat: FC<ChatProps> = ({
   onChatModeChange = () => undefined,
   showModelSelector = true,
   modelSelectionScope = "agent",
+  fallbackAgentName = "Nexent Workbench",
   selectedModelId,
   onModelChange,
   showConversationTitle = true,
@@ -119,7 +121,8 @@ export const Chat: FC<ChatProps> = ({
         <Thread
           agent={{
             id: "__workbench_empty__",
-            name: "智能体工作台",
+            name: fallbackAgentName,
+            display_name: fallbackAgentName,
             description: "",
             model: "",
             max_step: 8,
@@ -136,7 +139,7 @@ export const Chat: FC<ChatProps> = ({
           isDictationConfigured={isDictationConfigured}
           readOnly={readOnly}
           readOnlyReason={readOnlyReason}
-          showConversationTitle={false}
+          showConversationTitle={showConversationTitle}
           workbenchPresentation={workbenchPresentation}
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}

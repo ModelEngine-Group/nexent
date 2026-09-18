@@ -47,12 +47,22 @@ export interface WorkbenchCapabilityPreview {
 export interface WorkbenchBootstrap {
   schema_version: 3;
   modes: Record<WorkbenchMode, { enabled: boolean }>;
+  generic_agent?: {
+    agent_id?: number;
+    version_no?: number;
+    display_name: string;
+    default_skill_resources: Array<{
+      skill_id: number;
+      name: string;
+      description: string;
+    }>;
+  };
 }
 
 export interface WorkbenchResourceControls {
   agentName?: string;
   agents?: Array<{ id: number; name: string; remove: () => void }>;
-  skills: Array<{ id: number; name: string }>;
+  skills: Array<{ id: number; name: string; removable?: boolean }>;
   onSelectAgent: () => void;
   onRemoveAgent: () => void;
   creationActions?: import("react").ReactNode;

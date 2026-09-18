@@ -480,7 +480,7 @@ export const Composer: FC<ComposerProps> = ({
                 placeholder={t("chat.composer.placeholder")}
                 className={cn(
                   "mb-1 max-h-48 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground",
-                  workbenchPresentation && "min-h-28 px-5 py-4"
+                  workbenchPresentation && "px-4 py-2"
                 )}
                 rows={1}
                 submitMode="enter"
@@ -523,8 +523,7 @@ export const Composer: FC<ComposerProps> = ({
             <div
               className={cn(
                 "relative mx-2 mb-2 flex items-center justify-between gap-2",
-                workbenchPresentation &&
-                  "mx-4 flex-wrap pt-2 sm:flex-nowrap"
+                workbenchPresentation && "mx-4 flex-wrap pt-2 sm:flex-nowrap"
               )}
             >
               <div

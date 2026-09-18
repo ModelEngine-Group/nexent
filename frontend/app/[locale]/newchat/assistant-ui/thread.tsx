@@ -720,13 +720,22 @@ const ThreadView: FC<ThreadViewProps> = ({
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span className="text-sm font-medium text-foreground">
-                    {hasMessages ? conversationTitle : displayName}
+                    {workbenchPresentation || hasMessages
+                      ? conversationTitle
+                      : displayName}
                   </span>
                   {hasMessages && variant !== "embedded" && (
                     <span className="text-xs text-muted-foreground">
                       {displayName}
                     </span>
                   )}
+                  {!hasMessages &&
+                    workbenchPresentation &&
+                    variant !== "embedded" && (
+                      <span className="text-xs text-muted-foreground">
+                        {displayName}
+                      </span>
+                    )}
                 </div>
                 {hasMessages && conversationId && (
                   <Button
@@ -1544,8 +1553,15 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
-                if ((part as typeof part & { name?: string }).name === "user-steering") {
-                  return <UserGuidanceMessage data={(part as typeof part & { data?: unknown }).data} />;
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "user-steering"
+                ) {
+                  return (
+                    <UserGuidanceMessage
+                      data={(part as typeof part & { data?: unknown }).data}
+                    />
+                  );
                 }
                 if (
                   (part as typeof part & { name?: string }).name ===

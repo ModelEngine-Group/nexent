@@ -90,16 +90,74 @@ def test_ut_be_wb_006_resolution_is_deep_copy_and_relation_write_free(mocker):
     assert tree.root_skills[0].config_values == {"base": True, "nested": {"x": 1}}
 
 
-def test_empty_skill_mounts_do_not_restore_agent_defaults(mocker):
-    """UT-BE-WB-010/UT-BE-WB-028: an empty full selection remains empty."""
+def test_empty_runtime_mounts_keep_published_agent_defaults(
+    mocker, published_instances
+):
+    """Published Agent Skills remain active when no runtime Skills are added."""
     mocker.patch.object(workbench_service, "resolve_root_version", return_value=3)
     mocker.patch.object(
         workbench_service,
         "search_agent_info_by_agent_id",
         return_value={"agent_id": 7, "name": "Root"},
     )
+    published_instances.return_value = [
+        {"skill_id": 11, "config_values": {"enabled": True}}
+    ]
+    mocker.patch.object(
+        workbench_service.skill_db,
+        "get_skill_by_id",
+        return_value={
+            "skill_id": 11,
+            "name": "docx",
+            "description": "Create documents",
+            "tool_ids": [],
+            "config_values": {},
+            "config_schemas": [{"name": "enabled", "type": "boolean"}],
+        },
+    )
     _, tree = workbench_service.resolve_workbench_config(_config(3), tenant_id="tenant")
-    assert workbench_service.runtime_skill_snapshot(tree) == []
+    snapshot = workbench_service.runtime_skill_snapshot(tree)
+    assert [skill["name"] for skill in snapshot] == ["docx"]
+    assert snapshot[0]["config_values"] == {"enabled": True}
+
+
+def test_workbench_main_profile_exposes_published_default_skills(mocker):
+    mocker.patch.object(
+        workbench_service.system_agent_provider,
+        "get_workbench_main_ref",
+        return_value=SimpleNamespace(agent_id=99, version_no=4),
+    )
+    skill_service = mocker.patch.object(
+        workbench_service.SkillService,
+        "get_enabled_skills_for_agent",
+        return_value=[
+            {
+                "skill_id": 7,
+                "name": "canvas-design_1",
+                "description": "Design canvas artifacts",
+            }
+        ],
+    )
+
+    profile = workbench_service.build_workbench_main_profile("tenant")
+
+    assert profile == {
+        "agent_id": 99,
+        "version_no": 4,
+        "display_name": "Nexent Workbench",
+        "default_skill_resources": [
+            {
+                "skill_id": 7,
+                "name": "canvas-design_1",
+                "description": "Design canvas artifacts",
+            }
+        ],
+    }
+    skill_service.assert_called_once_with(
+        agent_id=99,
+        tenant_id="tenant",
+        version_no=4,
+    )
 
 
 def test_ut_be_wb_014_missing_skill_fails_before_snapshot(mocker):

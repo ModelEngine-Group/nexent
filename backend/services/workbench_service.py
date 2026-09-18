@@ -154,12 +154,28 @@ def _resolve_skill_mounts(
     published_instances: Tuple[Mapping[str, Any], ...] = (),
     user_id: Optional[str] = None,
 ) -> Tuple[ResolvedSkillMount, ...]:
-    if not mounts:
+    if not mounts and not published_instances:
         return ()
+    runtime_mounts = {int(mount["skill_id"]): mount for mount in mounts}
+    effective_mounts: list[Mapping[str, Any]] = []
+    seen_skill_ids: set[int] = set()
+    for instance in published_instances:
+        skill_id = int(instance["skill_id"])
+        if skill_id in seen_skill_ids:
+            continue
+        seen_skill_ids.add(skill_id)
+        effective_mounts.append(
+            runtime_mounts.pop(
+                skill_id,
+                {"skill_id": skill_id, "config_values": {}},
+            )
+        )
+    effective_mounts.extend(runtime_mounts.values())
+
     resolved = []
     role = _get_user_role(user_id) if user_id else None
     groups = set(query_group_ids_by_user(user_id) or []) if user_id else set()
-    for mount in mounts:
+    for mount in effective_mounts:
         skill_id = int(mount["skill_id"])
         skill = skill_db.get_skill_by_id(skill_id, tenant_id)
         if skill is None:
@@ -204,6 +220,29 @@ def _resolve_skill_mounts(
                     raise WorkbenchError("RUNTIME_SKILL_TOOL_CONFLICT")
                 values[name] = value
     return tuple(replace(skill, tool_definitions=tuple(deepcopy(definitions[tool_id]) for tool_id in skill.tool_ids)) for skill in resolved)
+
+
+def build_workbench_main_profile(tenant_id: str) -> Dict[str, Any]:
+    """Return public presentation metadata for the tenant system root."""
+    ref = system_agent_provider.get_workbench_main_ref(tenant_id)
+    skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
+        agent_id=ref.agent_id,
+        tenant_id=tenant_id,
+        version_no=ref.version_no,
+    )
+    return {
+        "agent_id": ref.agent_id,
+        "version_no": ref.version_no,
+        "display_name": "Nexent Workbench",
+        "default_skill_resources": [
+            {
+                "skill_id": int(skill["skill_id"]),
+                "name": str(skill.get("name") or skill["skill_id"]),
+                "description": str(skill.get("description") or ""),
+            }
+            for skill in skills
+        ],
+    }
 
 
 def resolve_skill_config(schemas, defaults, published, runtime):
