@@ -102,18 +102,29 @@ export function MyAgentCard({
     };
   });
 
-  if (menuActions.length > 0) {
+  if (canEvaluate) {
+    menuItems.push({
+      key: "evaluate",
+      icon: <LineChart className="size-3.5" aria-hidden />,
+      label: t("agentRepository.mine.evaluate"),
+      onClick: onEvaluate,
+    });
+  }
+
+  if (menuItems.length > 0 && canEdit) {
     menuItems.push({ type: "divider" });
   }
 
-  menuItems.push({
-    key: "delete",
-    danger: true,
-    icon: <Trash2 className="size-3.5" aria-hidden />,
-    label: t("common.delete"),
-    disabled: isDeleting,
-    onClick: onDelete,
-  });
+  if (canEdit) {
+    menuItems.push({
+      key: "delete",
+      danger: true,
+      icon: <Trash2 className="size-3.5" aria-hidden />,
+      label: t("common.delete"),
+      disabled: isDeleting,
+      onClick: onDelete,
+    });
+  }
 
   return (
     <ResourceCard title={title} className="h-full">
@@ -134,31 +145,42 @@ export function MyAgentCard({
                 </span>
               ) : null}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span
-                className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
-                  published
-                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                    : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-                }`}
-              >
-                {published
-                  ? t("agentRepository.mine.lifecycle.published")
-                  : t("agentRepository.mine.lifecycle.draft")}
-              </span>
-              {repositoryStatusBadge ? (
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px]">
+              <div className="min-w-0 text-slate-500 dark:text-slate-400">
+                {versionLabel != null ? (
+                  <span className="truncate">
+                    {t("agentRepository.mine.currentVersion", {
+                      version: versionLabel,
+                    })}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
                 <span
-                  className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
+                  className={`rounded-md px-1.5 py-0.5 font-medium ${
+                    published
+                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                      : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                  }`}
                 >
-                  {t(repositoryStatusBadge.labelKey)}{" "}
-                  {repositoryStatusBadge.versionLabel}
+                  {published
+                    ? t("agentRepository.mine.lifecycle.published")
+                    : t("agentRepository.mine.lifecycle.draft")}
                 </span>
-              ) : null}
+                {repositoryStatusBadge ? (
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 font-medium ${STATUS_BADGE_CLASS[repositoryStatusBadge.variant]}`}
+                  >
+                    {t(repositoryStatusBadge.labelKey)}{" "}
+                    {repositoryStatusBadge.versionLabel}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
 
-        {canEdit ? (
+        {menuItems.length > 0 ? (
           <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
             <Button
               type="text"
@@ -188,36 +210,20 @@ export function MyAgentCard({
         </div>
       ) : null}
 
-      <div className="mt-auto flex flex-col gap-3">
-        <div className="flex min-h-[1.75rem] items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          <div className="min-w-0">
-            {versionLabel != null ? (
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  className="size-1.5 rounded-full bg-primary"
-                  aria-hidden
-                />
-                {t("agentRepository.mine.currentVersion", {
-                  version: versionLabel,
-                })}
-              </span>
-            ) : null}
-          </div>
-          <div className="shrink-0">
-            {footerDate ? (
-              <span className="inline-flex items-center gap-1">
-                <Clock className="size-3.5" aria-hidden />
-                {footerDate}
-              </span>
-            ) : null}
-          </div>
+      <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+        <div className="min-w-0">
+          {footerDate ? (
+            <span className="inline-flex items-center gap-1">
+              <Clock className="size-3.5" aria-hidden />
+              {footerDate}
+            </span>
+          ) : null}
         </div>
-
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {canEdit ? (
             <Button
               type="default"
-              className="min-w-0 flex-1"
+              size="small"
               icon={<Pencil className="size-3.5" aria-hidden />}
               onClick={onEdit}
             >
@@ -226,7 +232,7 @@ export function MyAgentCard({
           ) : (
             <Button
               type="default"
-              className="min-w-0 flex-1"
+              size="small"
               icon={<Eye className="size-3.5" aria-hidden />}
               onClick={onView}
               disabled={!canView}
@@ -234,15 +240,6 @@ export function MyAgentCard({
               {t("agentRepository.mine.view")}
             </Button>
           )}
-          <Button
-            type="default"
-            className="min-w-0 flex-1"
-            icon={<LineChart className="size-3.5" aria-hidden />}
-            onClick={onEvaluate}
-            disabled={!canEvaluate}
-          >
-            {t("agentRepository.mine.evaluate")}
-          </Button>
         </div>
       </div>
     </ResourceCard>
