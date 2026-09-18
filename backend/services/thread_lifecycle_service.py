@@ -79,6 +79,14 @@ runtime_thread_manager = ThreadManager(
 config_thread_manager = ThreadManager(
     service_name="config",
     lane_policies={
+        "agent-run": LanePolicy(
+            name="agent-run",
+            max_workers=RUNTIME_AGENT_THREAD_MAX_WORKERS,
+            max_queue_size=RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE,
+            queue_timeout_seconds=RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS,
+            cancel_grace_seconds=RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS,
+            shutdown_grace_seconds=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
+        ),
         "control-io": LanePolicy(
             name="control-io",
             max_workers=16,

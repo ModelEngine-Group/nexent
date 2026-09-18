@@ -918,6 +918,36 @@ def test_run_agent_to_final_answer_extracts_final_answer_chunks(service_module):
     assert result[0] == "hello world"
 
 
+def test_run_agent_to_final_answer_uses_supplied_thread_manager(service_module):
+    """Trial runs can select Config's local, started agent-run lane."""
+    import asyncio
+
+    service_module.AgentRequest = MagicMock()
+    service_module.prepare_agent_run = AsyncMock(
+        return_value=(MagicMock(name="run_info"), MagicMock(name="memory_ctx"))
+    )
+    config_manager = MagicMock()
+
+    async def _fake_agent_run(_run_info, *, thread_manager):
+        assert thread_manager is config_manager
+        yield json.dumps({"type": "final_answer", "content": "ok"})
+
+    service_module.agent_run = _fake_agent_run
+
+    result = asyncio.run(
+        service_module._run_agent_to_final_answer(
+            agent_id=1,
+            tenant_id="t1",
+            user_id="u1",
+            query="q",
+            version_no=1,
+            thread_manager=config_manager,
+        )
+    )
+
+    assert result[0] == "ok"
+
+
 def test_evaluation_conversation_ids_are_isolated_and_stable(service_module):
     first = service_module._evaluation_conversation_id(10, 20)
     second = service_module._evaluation_conversation_id(10, 21)
@@ -1959,6 +1989,31 @@ class TestScoreWithEvaluators:
         assert scores == {"n1": 0.9, "c1": 1.0}
         executor.submit.assert_called_once()
 
+    def test_with_llm_evaluators_uses_supplied_manager_and_owner(self, service_module, monkeypatch):
+        executor = MagicMock()
+        future = MagicMock()
+        executor.submit.return_value = types.SimpleNamespace(future=future)
+        monkeypatch.setattr(
+            service_module,
+            "_collect_llm_results",
+            MagicMock(return_value=({"n1": 0.9}, {"n1": "r"})),
+        )
+
+        service_module._score_with_evaluators(
+            {1: {"evaluator_type": "llm", "name": "n1"}},
+            "sys",
+            "t1",
+            "q",
+            "e",
+            "a",
+            99,
+            thread_manager=executor,
+            thread_owner="config",
+        )
+
+        submitted_spec = executor.submit.call_args.args[1]
+        assert submitted_spec.owner == "config"
+
 
 # ---------------------------------------------------------------------------
 # Run limits / evaluator freeze / no-set mode
@@ -2985,7 +3040,10 @@ class TestTrialRunEvaluatorImpl:
         service_module.get_prompt_template = MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         service_module.JiuwenSDKAdapter = MagicMock()
 
+        received = {}
+
         async def _fake_eval(**kwargs):
+            received.update(kwargs)
             return "ans", [], {"judge-a": 0.9}, {"judge-a": "ok"}
 
         service_module._evaluate_query = _fake_eval
@@ -2998,6 +3056,8 @@ class TestTrialRunEvaluatorImpl:
             "scores": {"judge-a": 0.9},
             "reasons": {"judge-a": "ok"},
         }
+        assert received["thread_manager"] is service_module.config_thread_manager
+        assert received["thread_owner"] == "config"
 
     def test_sdk_unavailable_raises(self, service_module):
         import asyncio

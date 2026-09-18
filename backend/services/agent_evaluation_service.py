@@ -419,6 +419,7 @@ async def _run_agent_to_final_answer(
     version_no: int,
     history: list[dict[str, Any]] | None = None,
     conversation_id: int | None = None,
+    thread_manager=None,
 ) -> tuple[str, list[dict]]:
     """Run agent once; return (final_answer_text, [all_observer_events])."""
     run_conversation_id = conversation_id if conversation_id is not None else 0
@@ -448,7 +449,7 @@ async def _run_agent_to_final_answer(
         runtime_events: list[dict] = []
         async for chunk in agent_run(
             agent_run_info,
-            thread_manager=runtime_thread_manager,
+            thread_manager=thread_manager or runtime_thread_manager,
         ):
             try:
                 data = json.loads(chunk)
@@ -997,9 +998,11 @@ def _score_with_evaluators(
     runtime_events: list[dict] | None = None,
     context_window: int = 4096,
     conversation_history: list[dict[str, Any]] | None = None,
+    thread_manager=None,
+    thread_owner: str = "runtime",
 ) -> tuple:
     """Score one case with all evaluators. Code evaluators run serially (fast);
-    LLM evaluators run in parallel through the Runtime evaluation lane."""
+    LLM evaluators run in parallel through the selected evaluation lane."""
     code_evals = {
         eid: ev for eid, ev in evaluators.items() if ev.get("evaluator_type") == "code"
     }
@@ -1015,11 +1018,11 @@ def _score_with_evaluators(
         return scores, reasons
 
     futures = {
-        runtime_thread_manager.submit(
+        (thread_manager or runtime_thread_manager).submit(
             "evaluation",
             ManagedTaskSpec(
                 task_name="agent-evaluation-judge",
-                owner="runtime",
+                owner=thread_owner,
             ),
             _call_one_llm_evaluator,
             eid, ev, judge_system_prompt, tenant_id,
@@ -1380,6 +1383,8 @@ async def _evaluate_query(
     history: list[dict[str, Any]] | None = None,
     expected: str = "",
     conversation_id: int | None = None,
+    thread_manager=None,
+    thread_owner: str = "runtime",
 ) -> tuple[str, list[dict] | None, dict, dict]:
     """Run agent + score with evaluators. Returns (answer, events, scores, reasons)."""
     answer_text, events = await _run_agent_to_final_answer(
@@ -1390,6 +1395,7 @@ async def _evaluate_query(
         version_no=agent_version_no,
         history=history,
         conversation_id=conversation_id,
+        thread_manager=thread_manager,
     )
     if evaluators:
         score, reason = _score_with_evaluators(
@@ -1403,6 +1409,8 @@ async def _evaluate_query(
             runtime_events=runtime_events or events,
             context_window=context_window,
             conversation_history=history,
+            thread_manager=thread_manager,
+            thread_owner=thread_owner,
         )
     else:
         score, reason = adapter.evaluate_semantic_consistency(
@@ -2394,5 +2402,7 @@ async def trial_run_evaluator_impl(
         evaluators=evaluators,
         judge_system_prompt=judge_system_prompt,
         language=language,
+        thread_manager=config_thread_manager,
+        thread_owner="config",
     )
     return {"query": query, "answer": answer_text, "scores": score, "reasons": reason}
