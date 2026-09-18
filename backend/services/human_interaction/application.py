@@ -216,6 +216,10 @@ async def execute_attempt(job, lease):
                 try:
                     chunk = task.result()
                 except StopAsyncIteration:
+                    # Stream exhausted: drop the consumed task so the finally
+                    # block does not re-raise its StopAsyncIteration and skip
+                    # the leftover flush plus the terminal finish() write.
+                    anext_task = None
                     break
                 port.add_chunk(chunk)
                 await _flush_if_due()
