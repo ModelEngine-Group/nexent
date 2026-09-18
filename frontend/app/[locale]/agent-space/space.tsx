@@ -46,7 +46,7 @@ export function AgentSpace({ active }: { active: boolean }) {
   const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
     null
   );
-  const columns = screens.xl
+  const columns = screens.xxl
     ? 4
     : screens.lg
       ? 3
