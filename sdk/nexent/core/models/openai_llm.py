@@ -91,7 +91,7 @@ def _is_timeout_error(exc: BaseException) -> bool:
 class OpenAIModel(OpenAIServerModel):
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
-    def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
+    def __init__(self, observer: Optional[MessageObserver] = None, temperature=0.2, top_p=0.95,
                  ssl_verify=True, model_factory: Optional[str] = None,
                  display_name: Optional[str] = None,
                  extra_body: Optional[Dict[str, Any]] = None,
@@ -114,7 +114,10 @@ class OpenAIModel(OpenAIServerModel):
         Initialize OpenAI Model with observer and SSL verification option.
 
         Args:
-            observer: MessageObserver instance for tracking model output
+            observer: MessageObserver instance for tracking model output.
+                       Defaults to None, in which case a fresh instance is
+                       created per model so callers that omit it still get a
+                       working streaming path.
             temperature: Sampling temperature (default: 0.2)
             top_p: Top-p sampling parameter (default: 0.95)
             ssl_verify: Whether to verify SSL certificates (default: True).
@@ -148,7 +151,11 @@ class OpenAIModel(OpenAIServerModel):
         capacity_snapshot: Optional[Dict[str, Any]] = kwargs.pop("capacity_snapshot", None)
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
 
-        self.observer = observer
+        # Build the observer lazily rather than defaulting in the signature:
+        # a signature-level instance would be shared by every model, and the
+        # bare class (the previous default) crashed the streaming path with
+        # an unbound-method TypeError as soon as the first token arrived.
+        self.observer = observer if observer is not None else MessageObserver()
         self.temperature = temperature
         self.top_p = top_p
         self.stop_event = (
