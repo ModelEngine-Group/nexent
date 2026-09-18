@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, NoReturn
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import httpx
 from nexent.utils.http_client_manager import http_client_manager
@@ -147,6 +147,36 @@ def _get_list_path(tenant_id: str | None = None) -> str:
     return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/KnowledgeBases"
 
 
+def _get_channels_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped ingestion-pipeline (channel) API path."""
+    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/Channels"
+
+
+def _get_doc_history_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped knowledge-file history API path.
+
+    Unlike the document list endpoint this one is NOT knowledge-base scoped:
+    it is addressed by pipeline file-system id plus source directory, which is
+    why callers resolve a channel first.
+    """
+    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/KnowledgeFiles/History"
+
+
+def _build_list_query(page: int, page_size: int, keyword: str | None = None) -> str:
+    """Build the query string for a knowledge-base list request.
+
+    AIDP applies ``keyword`` server-side (matching on the KB name), so the
+    value is forwarded verbatim. The parameter is omitted entirely when no
+    keyword is supplied, which keeps plain listing requests byte-identical to
+    the pre-search behaviour (same URL, so upstream caches still hit).
+    """
+    query = f"?page={page}&page_size={page_size}"
+    normalized_keyword = (keyword or "").strip()
+    if normalized_keyword:
+        query += f"&keyword={quote(normalized_keyword, safe='')}"
+    return query
+
+
 def _timestamp_to_iso(value: Any) -> str | None:
     """Convert a numeric Unix timestamp (seconds or milliseconds) to ISO-8601 UTC.
 
@@ -188,6 +218,37 @@ def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
 
     updated_raw = raw.get("update_time")
     out["updated_at"] = _timestamp_to_iso(updated_raw)
+    return out
+
+
+def _normalize_doc_status(value: Any) -> str | None:
+    """Normalize an AIDP file status to its canonical upper-case token.
+
+    AIDP reports ``COMPLETED`` / ``PROCESSING`` / ``FAILED``; normalizing here
+    means the frontend can compare against one form regardless of upstream
+    capitalization. ``None`` is returned for missing/blank values so callers can
+    tell "no status reported" apart from a real status.
+    """
+    if isinstance(value, str) and value.strip():
+        return value.strip().upper()
+    return None
+
+
+def _normalize_history_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Map an AIDP knowledge-file history item to the frontend document shape.
+
+    The history payload carries the same identity fields as the document list
+    (``file_ino_no`` / ``file_name`` / ``file_size`` / ``file_type`` /
+    ``first_upload_time``) plus a processing ``status``. A blank or missing
+    upstream status is dropped rather than forwarded as whitespace, so callers
+    can treat "no status reported" as a single state.
+    """
+    out = _normalize_aidp_doc(raw)
+    status = _normalize_doc_status(raw.get("status"))
+    if status is None:
+        out.pop("status", None)
+    else:
+        out["status"] = status
     return out
 
 
@@ -295,8 +356,12 @@ def fetch_aidp_knowledge_bases_impl(
     api_key: str,
     page: int = 1,
     page_size: int = 10,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
-    """Fetch a single page from AIDP API (simple passthrough)."""
+    """Fetch a single page from AIDP API (simple passthrough).
+
+    ``keyword`` is forwarded to AIDP as an optional server-side filter.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
@@ -304,7 +369,7 @@ def fetch_aidp_knowledge_bases_impl(
         "Content-Type": "application/json",
     }
 
-    list_path = f"{_get_list_path()}?page={page}&page_size={page_size}"
+    list_path = f"{_get_list_path()}{_build_list_query(page, page_size, keyword)}"
     list_url = urljoin(f"{normalized_url}/", list_path)
     logger.info("Fetching AIDP knowledge bases from %s", list_url)
 
@@ -381,6 +446,7 @@ def _normalize_response(raw: Dict[str, Any]) -> Dict[str, Any]:
 def fetch_all_aidp_knowledge_bases_impl(
     server_url: str,
     api_key: str,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
     """Fetch every AIDP knowledge-base page using the dedicated Count API.
 
@@ -389,6 +455,12 @@ def fetch_all_aidp_knowledge_bases_impl(
     the number of pages, and every list request uses the configured tenant.
     Duplicate resources are removed by ``kds_id`` while preserving their
     first-seen order.
+
+    ``keyword`` is forwarded to every list call so AIDP filters server-side.
+    The Count API has no keyword support, so the page count is deliberately
+    derived from the unfiltered total: AIDP returns the matching subset on the
+    earliest pages and empty pages afterwards, which this loop tolerates. The
+    caller therefore still receives every match.
     """
     normalized_url = _validate_params(server_url, api_key)
     page_size = 100
@@ -430,7 +502,10 @@ def fetch_all_aidp_knowledge_bases_impl(
         list_started_at = time.perf_counter()
 
         for current_page in range(1, total_pages + 1):
-            page_path = f"{_get_list_path()}?page={current_page}&page_size={page_size}"
+            page_path = (
+                f"{_get_list_path()}"
+                f"{_build_list_query(current_page, page_size, keyword)}"
+            )
             current_url = urljoin(f"{normalized_url}/", page_path)
 
             logger.info(
@@ -1271,6 +1346,270 @@ def list_aidp_docs_impl(
         if isinstance(value, list):
             result["value"] = [
                 _normalize_aidp_doc(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+# ==================== Knowledge-file history (all-status listing) ====================
+
+# Channel entries are read through alias lists because AIDP deployments spell
+# these fields differently. Only the forms actually observed are listed; adding
+# a new spelling here is enough to support another deployment.
+_CHANNEL_FS_ID_KEYS = ("fs_id", "fsId", "file_system_id", "fileSystemId")
+_CHANNEL_SRC_DIR_KEYS = (
+    "src_dir",
+    "srcDir",
+    "source_dir",
+    "sourceDir",
+    "dir_path",
+    "dirPath",
+)
+_CHANNEL_KB_ID_KEYS = (
+    "kds_id",
+    "kdsId",
+    "knowledge_base_id",
+    "knowledgeBaseId",
+    "kb_id",
+    "kbId",
+    "knowledge_base_ids",
+    "knowledgeBaseIds",
+)
+
+
+def _first_non_empty_string(item: Dict[str, Any], keys: tuple) -> str | None:
+    """Return the first non-empty string among ``keys``, or ``None``."""
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _references_kb_id(value: Any, kds_id: str) -> bool:
+    """Return whether a channel field references ``kds_id``.
+
+    Accepts a scalar id, a list of ids, or a directory string such as
+    ``/knowledge/<kds_id>`` — a channel is bound to a knowledge base either by
+    an explicit id field or by pointing its source directory at that KB.
+    """
+    if isinstance(value, str):
+        return value == kds_id or kds_id in value.split("/")
+    if isinstance(value, (list, tuple, set)):
+        return any(_references_kb_id(entry, kds_id) for entry in value)
+    return False
+
+
+def select_aidp_channel(
+    channels: List[Dict[str, Any]],
+    kds_id: str | None = None,
+) -> Dict[str, str] | None:
+    """Pick the ingestion channel whose files feed ``kds_id``.
+
+    Selection order:
+      1. a channel that references ``kds_id`` (id field or source directory),
+      2. otherwise the first channel carrying both ``fs_id`` and a source dir.
+
+    Step 2 covers deployments that keep a single channel per tenant, where the
+    history lookup is intentionally directory-wide. Returns ``None`` when no
+    channel carries the pair the history API needs, so the caller can fall back
+    to the completed-files listing.
+    """
+    usable: List[Dict[str, str]] = []
+    for channel in channels:
+        if not isinstance(channel, dict):
+            continue
+        fs_id = _first_non_empty_string(channel, _CHANNEL_FS_ID_KEYS)
+        src_dir = _first_non_empty_string(channel, _CHANNEL_SRC_DIR_KEYS)
+        if not fs_id or not src_dir:
+            continue
+        usable.append({"fs_id": fs_id, "src_dir": src_dir})
+        if kds_id and (
+            any(
+                _references_kb_id(channel.get(key), kds_id)
+                for key in _CHANNEL_KB_ID_KEYS
+            )
+            or _references_kb_id(src_dir, kds_id)
+        ):
+            return usable[-1]
+
+    return usable[0] if usable else None
+
+
+def list_aidp_channels_impl(
+    server_url: str,
+    api_key: str,
+    tenant_id: str | None = None,
+) -> Dict[str, Any]:
+    """List the tenant's ingestion pipelines via AIDP API.
+
+    Endpoint: ``GET /KnowledgeBase/Tenants/{tenant}/Channels``
+    Response: ``{"value": [{"fs_id": ..., "src_dir": ...}, ...]}``
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    channels_path = _get_channels_path(tenant_id)
+    channels_url = urljoin(f"{normalized_url}/", channels_path)
+    logger.info("Listing AIDP channels from %s", channels_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.get(channels_url, headers=headers),
+            context="list-channels",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP channel list response format",
+            )
+        value = result.get("value")
+        if isinstance(value, list):
+            result["value"] = [item for item in value if isinstance(item, dict)]
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def list_aidp_doc_history_impl(
+    server_url: str,
+    api_key: str,
+    fs_id: str,
+    dir_path: str,
+    tenant_id: str | None = None,
+) -> Dict[str, Any]:
+    """List every file in a channel directory regardless of processing status.
+
+    Endpoint: ``POST /KnowledgeBase/Tenants/{tenant}/KnowledgeFiles/History``
+    Body: ``{"fs_id": <str>, "dir_path": <str>}``
+    Response: ``{"value": [<document with status>, ...]}``
+
+    Unlike ``list_aidp_docs_impl`` this returns files that are still being
+    chunked/embedded (``PROCESSING``) or that failed (``FAILED``), which is what
+    lets the UI show an upload immediately instead of only after ingestion.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    normalized_fs_id = fs_id.strip() if isinstance(fs_id, str) else ""
+    normalized_dir_path = dir_path.strip() if isinstance(dir_path, str) else ""
+    if not normalized_fs_id or not normalized_dir_path:
+        raise AppException(
+            ErrorCode.AIDP_CONFIG_INVALID,
+            "AIDP file history requires a non-empty fs_id and dir_path",
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    history_path = _get_doc_history_path(tenant_id)
+    history_url = urljoin(f"{normalized_url}/", history_path)
+    logger.info(
+        "Listing AIDP knowledge-file history from %s (fs_id=%s, dir_path=%s)",
+        history_url,
+        normalized_fs_id,
+        normalized_dir_path,
+    )
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                history_url,
+                headers=headers,
+                json={"fs_id": normalized_fs_id, "dir_path": normalized_dir_path},
+            ),
+            context=f"list-doc-history:{normalized_fs_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP file history response format",
+            )
+        value = result.get("value")
+        if isinstance(value, list):
+            result["value"] = [
+                _normalize_history_doc(item) if isinstance(item, dict) else item
                 for item in value
             ]
         return result

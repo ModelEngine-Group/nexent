@@ -35,6 +35,7 @@ import {
   validateAidpFiles,
 } from "@/services/uploadService";
 import { getAidpUploadFailureDetails } from "@/ext_components/aidp/services/aidpUploadUtils";
+import { collectUploadedFileIds } from "@/lib/aidpDocumentStatus";
 import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
 import {
   AIDP_MODAL_STYLES,
@@ -163,7 +164,10 @@ interface AidpCreateKbModalProps {
   open: boolean;
   existingKbs: AidpKnowledgeBaseItem[];
   onCancel: () => void;
-  onSuccess: (knowledgeBase: AidpKnowledgeBaseItem) => void;
+  onSuccess: (
+    knowledgeBase: AidpKnowledgeBaseItem,
+    uploadedFileIds?: string[]
+  ) => void;
 }
 
 const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
@@ -242,6 +246,9 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
 
   const handleSubmit = async () => {
     let knowledgeBaseCreated = false;
+    // Files AIDP accepted while creating the KB. Reported to the parent so it
+    // can keep refreshing the document list until they finish processing.
+    let uploadedFileIds: string[] = [];
     let createdKnowledgeBase: AidpKnowledgeBaseItem | null = null;
 
     try {
@@ -300,12 +307,14 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
           fileList
         );
         showAidpCreateUploadResult(result, i18n.language, t);
+        uploadedFileIds = collectUploadedFileIds(result.success_list);
       } else {
         message.success(t("aidpKnowledge.createKbSuccess"));
       }
 
       handleReset();
-      if (createdKnowledgeBase) onSuccess(createdKnowledgeBase);
+      if (createdKnowledgeBase)
+        onSuccess(createdKnowledgeBase, uploadedFileIds);
     } catch (error) {
       const reason = getAidpCreateErrorReason(error, knowledgeBaseCreated, t);
       message.error(
@@ -315,7 +324,8 @@ const AidpCreateKbModal: React.FC<AidpCreateKbModalProps> = ({
       );
       if (knowledgeBaseCreated) {
         handleReset();
-        if (createdKnowledgeBase) onSuccess(createdKnowledgeBase);
+        if (createdKnowledgeBase)
+          onSuccess(createdKnowledgeBase, uploadedFileIds);
       }
     } finally {
       setLoading(false);

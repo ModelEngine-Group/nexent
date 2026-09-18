@@ -38,6 +38,7 @@ from ext_components.aidp.consts.aidp_exceptions import (
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_access_service import (
+    get_cached_aidp_channels,
     get_cached_aidp_doc_count,
     get_cached_aidp_kb_detail,
     invalidate_aidp_catalog_cache,
@@ -58,10 +59,13 @@ from ext_components.aidp.services.aidp_service import (
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
     get_aidp_kb_impl,
+    list_aidp_channels_impl,
+    list_aidp_doc_history_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
     remove_aidp_docs_impl,
     stream_aidp_doc_impl,
+    select_aidp_channel,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
@@ -75,6 +79,12 @@ AIDP_MAX_UPLOAD_FILE_COUNT = 50
 AIDP_SMALL_FILE_MAX_SIZE_BYTES = 20 * 1024 * 1024
 AIDP_OTHER_FILE_MAX_SIZE_BYTES = 1024 * 1024 * 1024
 AIDP_SMALL_FILE_EXTENSIONS = {"txt", "xls", "xlsx", "csv"}
+
+# AIDP document statuses (mirrors the file-history vocabulary). Only PROCESSING
+# matters here: it is the non-terminal status that keeps the frontend polling
+# for updates, and it is reported as a count so polling does not stop while a
+# still-processing file sits on another page.
+_STATUS_PROCESSING = "PROCESSING"
 
 
 def _upload_failure(file_name: str, reason_zh: str, reason_en: str) -> dict:
@@ -271,8 +281,16 @@ def _is_user_role(user_id: str, tenant_id: str) -> bool:
     return (role or "USER").upper() == "USER"
 
 
-def _current_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
-    """Return the current AIDP catalog intersected with local user access."""
+def _current_accessible_rows(
+    user_id: str,
+    tenant_id: str,
+    keyword: str | None = None,
+) -> list[dict]:
+    """Return the current AIDP catalog intersected with local user access.
+
+    ``keyword`` is forwarded to AIDP so the remote catalog is already narrowed
+    before the permission intersection runs.
+    """
     server_url, api_key = _credentials()
     snapshot = resolve_current_aidp_access(
         server_url=server_url,
@@ -280,6 +298,7 @@ def _current_accessible_rows(user_id: str, tenant_id: str) -> list[dict]:
         user_id=user_id,
         tenant_id=tenant_id,
         aidp_tenant_id="aidp",
+        keyword=keyword,
     )
     return snapshot.accessible_rows
 
@@ -324,6 +343,131 @@ def _load_cached_doc_count(server_url: str, api_key: str, kb_id: str) -> int:
     )
 
 
+def _resolve_doc_history_channel(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> dict | None:
+    """Resolve the ingestion channel whose directory feeds ``kds_id``.
+
+    Returns ``None`` when AIDP exposes no channel carrying both ``fs_id`` and a
+    source directory, in which case the caller keeps using the completed-files
+    listing.
+    """
+    channels = get_cached_aidp_channels(
+        server_url=server_url,
+        api_key=api_key,
+        loader=lambda: list_aidp_channels_impl(server_url, api_key),
+    )
+    return select_aidp_channel(channels, kds_id)
+
+
+async def _load_doc_history(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> dict | None:
+    """Fetch the all-status document history for ``kds_id`` when available.
+
+    Any failure degrades to the legacy completed-files listing rather than
+    failing the request: the channel/history endpoints are newer than the
+    document list and may be missing on older AIDP builds, and a knowledge base
+    with no matching channel must still render its ingested files. Every
+    degraded case is logged with the offending KB so the cause stays traceable.
+    """
+    try:
+        channel = await run_blocking(
+            "aidp-doc-history-channel",
+            _resolve_doc_history_channel,
+            server_url,
+            api_key,
+            kds_id,
+            lane="control-io",
+            owner="config",
+        )
+        if not channel:
+            logger.info(
+                "No AIDP channel resolved for KB %s; falling back to completed-files listing",
+                kds_id,
+            )
+            return None
+        return await run_blocking(
+            "aidp-doc-history",
+            list_aidp_doc_history_impl,
+            server_url,
+            api_key,
+            channel["fs_id"],
+            channel["src_dir"],
+            lane="control-io",
+            owner="config",
+        )
+    except AppException as exc:
+        logger.warning(
+            "AIDP file history unavailable for KB %s (%s); falling back to completed-files listing",
+            kds_id,
+            exc,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 - history is an optional enhancement
+        logger.warning(
+            "Unexpected error while reading AIDP file history for KB %s: %r; "
+            "falling back to completed-files listing",
+            kds_id,
+            exc,
+        )
+        return None
+
+
+def _history_sort_key(item: dict) -> tuple:
+    """Sort key placing the most recently uploaded file first.
+
+    Numeric upload timestamps sort above entries that only expose an ISO
+    ``created_at`` string, and entries with neither sink to the bottom — the
+    ordering is only ever used to bring fresh uploads to the top of page 1.
+    """
+    raw = item.get("first_upload_time")
+    if raw is None:
+        raw = item.get("create_time")
+    try:
+        return (1, float(raw))
+    except (TypeError, ValueError):
+        created_at = item.get("created_at")
+        return (0, created_at) if isinstance(created_at, str) else (0, "")
+
+
+def _paginate_history_documents(result: dict, page: int, page_size: int) -> dict:
+    """Slice an all-status history payload into one page.
+
+    The history API returns the whole channel directory in one response, so the
+    total is exact and the document Count endpoint is not needed. Newest files
+    come first so an upload shows up at the top of page 1 as soon as it is
+    accepted, instead of only after ingestion completes.
+
+    ``processing_count`` covers the WHOLE directory, not just the returned page:
+    the frontend keeps polling while it is non-zero, so a file still being
+    processed on another page also keeps the status column live.
+    """
+    raw_items = result.get("value")
+    items = (
+        [item for item in raw_items if isinstance(item, dict)]
+        if isinstance(raw_items, list)
+        else []
+    )
+    ordered = sorted(items, key=_history_sort_key, reverse=True)
+    start = (page - 1) * page_size
+    end = start + page_size
+    processing_count = sum(
+        1 for item in ordered if item.get("status") == _STATUS_PROCESSING
+    )
+    return {
+        "value": ordered[start:end],
+        "total_count": len(ordered),
+        "has_more": end < len(ordered),
+        "total_reliable": True,
+        "processing_count": processing_count,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
@@ -334,21 +478,38 @@ async def list_knowledge_bases(
     request: Request,
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
+    keyword: Annotated[
+        str | None,
+        Query(max_length=200, description="Optional name filter forwarded to AIDP"),
+    ] = None,
 ) -> JSONResponse:
-    """List KBs the caller can access.
+    """List KBs the caller can access, optionally filtered by name.
 
     Resolution order:
-    1. Fetch every KB visible to the currently configured AIDP credentials.
+    1. Fetch the AIDP catalog visible to the configured credentials, narrowed
+       server-side by ``keyword`` when one is supplied.
     2. Intersect that catalog with the caller's effective Nexent permissions.
     3. Paginate the intersection, then fetch details for the visible page.
+
+    A non-blank ``keyword`` therefore narrows both the fetched set and the
+    reported ``total_count``: both describe the filtered, permission-scoped set.
     """
     user_id, tenant_id = await _auth(request)
 
     server_url, api_key = _credentials()
+    normalized_keyword = (keyword or "").strip() or None
     started_at = time.perf_counter()
+    # ``run_blocking`` (not a bare to_thread) keeps AIDP catalog reads on the
+    # managed control-io lane, and the keyword is still forwarded so the remote
+    # catalog is narrowed server-side before the permission intersection.
     rows = await run_blocking(
-        "aidp-accessible-rows", _current_accessible_rows, user_id, tenant_id,
-        lane="control-io", owner="config",
+        "aidp-accessible-rows",
+        _current_accessible_rows,
+        user_id,
+        tenant_id,
+        normalized_keyword,
+        lane="control-io",
+        owner="config",
     )
     access_resolve_ms = (time.perf_counter() - started_at) * 1000
     total_count = len(rows)
@@ -728,6 +889,28 @@ async def list_documents(
 
     server_url, api_key = _credentials()
     started_at = time.perf_counter()
+
+    # Preferred source: the all-status history, so files appear in the list
+    # while they are still being chunked/embedded (and when they failed). The
+    # payload covers the whole channel directory, so this branch paginates
+    # in-process and reports an exact total.
+    history_result = await _load_doc_history(server_url, api_key, kds_id)
+    if history_result is not None:
+        result = _paginate_history_documents(history_result, page, page_size)
+        logger.info(
+            "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
+            "page_count=%d total_count=%d total_reliable=True source=history",
+            (time.perf_counter() - started_at) * 1000,
+            kds_id,
+            page,
+            page_size,
+            len(result["value"]),
+            result["total_count"],
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+    # Fallback: the completed-files listing (historical behaviour), used when
+    # AIDP has no channel/history support for this knowledge base.
     list_result, count_result = await asyncio.gather(
         run_blocking(
             "aidp-list-documents",
@@ -777,11 +960,14 @@ async def list_documents(
 
     result["total_count"] = int(total_count)
     result["has_more"] = has_more
+    # The completed-files listing carries no processing statuses, so nothing
+    # keeps the frontend polling for this knowledge base.
+    result["processing_count"] = 0
     if not count_reliable:
         result["total_reliable"] = False
     logger.info(
         "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
-        "page_count=%d total_count=%d total_reliable=%s",
+        "page_count=%d total_count=%d total_reliable=%s source=completed",
         (time.perf_counter() - started_at) * 1000,
         kds_id,
         page,

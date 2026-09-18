@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Input, Pagination, Tooltip } from "antd";
@@ -30,6 +30,12 @@ interface AidpKnowledgeListProps {
   hasMore: boolean;
   currentPage: number;
   pageSize: number;
+  /** Raw search box value. The parent debounces it before querying, so this is
+   *  intentionally the un-debounced text the user is currently typing. The
+   *  filtering itself happens server-side (AIDP narrows on the KB name) and the
+   *  client-side filter below only keeps the rendered page consistent with it. */
+  keyword: string;
+  onKeywordChange: (value: string) => void;
   onPageChange: (page: number) => void;
   onSelect: (kb: AidpKnowledgeBaseItem) => void;
   onRefresh: () => void;
@@ -61,6 +67,8 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   hasMore,
   currentPage,
   pageSize,
+  keyword,
+  onKeywordChange,
   onPageChange,
   onSelect,
   onRefresh,
@@ -69,7 +77,6 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   onDelete,
 }) => {
   const { t } = useTranslation();
-  const [searchKeyword, setSearchKeyword] = useState("");
 
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
@@ -83,20 +90,20 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   }, [groupListData]);
 
   const displayedKbs = useMemo(() => {
-    const keyword = searchKeyword.trim().toLowerCase();
+    const normalizedKeyword = keyword.trim().toLowerCase();
     return [...kbs]
       .filter((kb) => {
-        if (!keyword) return true;
+        if (!normalizedKeyword) return true;
         return [kb.kds_name, kb.description]
           .filter(Boolean)
-          .some((value) => value!.toLowerCase().includes(keyword));
+          .some((value) => value!.toLowerCase().includes(normalizedKeyword));
       })
       .sort((a, b) => {
         const aTime = Date.parse(a.updated_at || a.created_at || "") || 0;
         const bTime = Date.parse(b.updated_at || b.created_at || "") || 0;
         return bTime - aTime;
       });
-  }, [kbs, searchKeyword]);
+  }, [kbs, keyword]);
 
   const getGroupNames = (groupIds?: number[]) =>
     (groupIds ?? [])
@@ -327,8 +334,8 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
             size="large"
             placeholder={t("knowledgeBase.search.placeholder")}
             prefix={<Search className="h-4 w-4 text-gray-400" />}
-            value={searchKeyword}
-            onChange={(event) => setSearchKeyword(event.target.value)}
+            value={keyword}
+            onChange={(event) => onKeywordChange(event.target.value)}
             className="h-10 min-w-[240px] max-w-[420px] flex-1 !rounded-lg"
             allowClear
           />

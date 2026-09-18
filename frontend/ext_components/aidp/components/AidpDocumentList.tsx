@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Modal, Pagination, Upload, message, Tooltip } from "antd";
+import { Button, Modal, Pagination, Tag, Upload, message, Tooltip } from "antd";
 import {
   FileTextOutlined,
   InboxOutlined,
@@ -13,10 +13,95 @@ import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowle
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
 import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
 import log from "@/lib/logger";
+import {
+  AIDP_DOCUMENT_STATUS,
+  collectUploadedFileIds,
+  normalizeAidpDocStatus,
+} from "@/lib/aidpDocumentStatus";
+import { TruncatedText } from "@/components/common/TruncatedText";
 import { partitionAidpFiles } from "@/services/uploadService";
 import { getAidpUploadFailureDetails } from "@/ext_components/aidp/services/aidpUploadUtils";
 
 const { Dragger } = Upload;
+
+// AIDP rejects a re-uploaded file with a per-file reason, but that reason is
+// shaped exactly like any other upload failure — the user cannot tell a
+// duplicate apart from a genuine error. The wording AIDP actually returns is
+// "文件已存在，请重命名或删除已有文件" / "File already exists. Please rename or
+// delete the existing file.", which never contains the literal word
+// "duplicate". Match on those phrases in BOTH languages (the backend returns
+// reason_zh and reason_en together, independently of the UI language) plus the
+// generic duplicate markers, case-insensitively so upstream capitalisation
+// changes cannot silently break the detection.
+const DUPLICATE_UPLOAD_REASON_MARKERS = [
+  "already exists",
+  "duplicate",
+  "已存在",
+  "重复",
+];
+
+const isDuplicateUploadReason = (
+  ...reasons: Array<string | undefined>
+): boolean => {
+  const haystack = reasons
+    .filter((reason): reason is string => Boolean(reason))
+    .join(" ")
+    .toLowerCase();
+  if (!haystack) return false;
+  return DUPLICATE_UPLOAD_REASON_MARKERS.some((marker) =>
+    haystack.includes(marker)
+  );
+};
+
+/**
+ * Table cell showing the ingestion status of a document.
+ *
+ * `PROCESSING` is blue because the file is still on its way in (chunking,
+ * embedding, indexing) and the list keeps refreshing itself until it resolves;
+ * `COMPLETED` green and `FAILED` red are the two terminal outcomes. A missing
+ * status means the backend fell back to the completed-files listing, which only
+ * reports ingested files — those render as a dash like any other empty cell. An
+ * unrecognised status is shown verbatim rather than hidden, so a new AIDP
+ * status is visible instead of silently blank.
+ */
+const DocumentStatusCell: React.FC<{ status?: string }> = ({ status }) => {
+  const { t } = useTranslation();
+  const normalized = normalizeAidpDocStatus(status);
+
+  if (!normalized) {
+    return <td className="px-4 py-3 text-sm text-gray-600">-</td>;
+  }
+
+  if (normalized === AIDP_DOCUMENT_STATUS.PROCESSING) {
+    return (
+      <td className="px-4 py-3">
+        <Tag color="processing">{t("aidpKnowledge.docStatusProcessing")}</Tag>
+      </td>
+    );
+  }
+
+  if (normalized === AIDP_DOCUMENT_STATUS.COMPLETED) {
+    return (
+      <td className="px-4 py-3">
+        <Tag color="success">{t("aidpKnowledge.docStatusCompleted")}</Tag>
+      </td>
+    );
+  }
+
+  if (normalized === AIDP_DOCUMENT_STATUS.FAILED) {
+    return (
+      <td className="px-4 py-3">
+        <Tag color="error">{t("aidpKnowledge.docStatusFailed")}</Tag>
+      </td>
+    );
+  }
+
+  return (
+    <td className="px-4 py-3">
+      <Tag>{status}</Tag>
+    </td>
+  );
+};
 
 const resolveDownloadFilename = (response: Response, fallback: string) => {
   const contentDisposition = response.headers.get("content-disposition") || "";
@@ -45,7 +130,11 @@ interface AidpDocumentListProps {
   currentPage: number;
   pageSize: number;
   onPageChange: (page: number) => void;
-  onDocsUploaded: () => void;
+  /** Called after documents change, with the ids AIDP returned for any newly
+   *  accepted uploads (an empty list for deletions/refreshes). The parent uses
+   *  them to keep refreshing the list until each uploaded file reports a
+   *  terminal processing status. */
+  onDocsUploaded: (uploadedFileIds: string[]) => void;
   onRefresh: () => void;
 }
 
@@ -137,7 +226,9 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
               message.error(t("aidpKnowledge.deleteDocFailed"));
             }
             if (result.summary.success > 0) {
-              onDocsUploaded();
+              // Deletions are not uploads: nothing to wait for, so the parent
+              // simply refreshes the list.
+              onDocsUploaded([]);
             }
           } catch (error) {
             log.error("Failed to delete AIDP document:", error);
@@ -162,11 +253,22 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           fileList
         );
 
-        const failureDetails = getAidpUploadFailureDetails(
-          result.failed_list,
-          i18n.language,
-          t("aidpKnowledge.uploadFailed")
-        );
+        // A rejected duplicate is not an error the user can debug, so give it a
+        // dedicated message instead of echoing AIDP's "please rename or delete"
+        // instruction, which is not actionable in this dialog. Every other
+        // failure keeps the shared reason formatter.
+        const failureDetails = result.failed_list.map((item) => {
+          if (isDuplicateUploadReason(item.reason_zh, item.reason_en)) {
+            return t("aidpKnowledge.uploadDuplicateFile", {
+              fileName: item.file_name,
+            });
+          }
+          return getAidpUploadFailureDetails(
+            [item],
+            i18n.language,
+            t("aidpKnowledge.uploadFailed")
+          )[0];
+        });
         const failureLines = failureDetails.map((detail, index) => (
           <div key={`${index}-${detail}`}>{detail}</div>
         ));
@@ -191,12 +293,12 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
               {failureLines}
             </div>
           );
-          onDocsUploaded();
+          onDocsUploaded(collectUploadedFileIds(result.success_list));
         } else {
           message.success(
             t("aidpKnowledge.uploadSuccess", { count: result.summary.success })
           );
-          onDocsUploaded();
+          onDocsUploaded(collectUploadedFileIds(result.success_list));
         }
       } catch (error) {
         const reason =
@@ -333,6 +435,9 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                     {t("aidpKnowledge.docType")}
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                    {t("aidpKnowledge.docStatus")}
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
                     {t("aidpKnowledge.docSize")}
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -350,12 +455,13 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                     className="transition-colors hover:bg-gray-50"
                   >
                     <td className="max-w-[280px] px-4 py-3">
-                      <div
+                      {/* Clamped with a hover tooltip: file names are often
+                          longer than the column, and the native `title`
+                          attribute also fires when nothing was clipped. */}
+                      <TruncatedText
+                        text={doc.file_name}
                         className="truncate text-sm font-medium text-gray-800"
-                        title={doc.file_name}
-                      >
-                        {doc.file_name}
-                      </div>
+                      />
                       <div
                         className="mt-1 truncate text-xs text-gray-400"
                         title={String(doc.file_ino_no)}
@@ -366,6 +472,7 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {doc.file_type || "-"}
                     </td>
+                    <DocumentStatusCell status={doc.status} />
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {formatSize(doc.file_size)}
                     </td>

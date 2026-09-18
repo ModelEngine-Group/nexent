@@ -277,6 +277,59 @@ class TestFetchAllAidpKnowledgeBasesImpl:
             "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/KnowledgeBases?page=2&page_size=100",
         ]
 
+    def test_forwards_url_encoded_keyword_on_every_page(self, aidp_service_module):
+        """The keyword rides along on every list request, percent-encoded."""
+        aidp_service_module.count_aidp_kbs_impl.return_value = 101
+        page1 = MagicMock(status_code=200)
+        page1.raise_for_status.return_value = None
+        page1.json.return_value = {"value": [{"kds_id": "kb-1"}], "next_link": None}
+        page2 = MagicMock(status_code=200)
+        page2.raise_for_status.return_value = None
+        page2.json.return_value = {"value": [{"kds_id": "kb-1"}], "next_link": None}
+        mock_client = MagicMock()
+        mock_client.get.side_effect = [page1, page2]
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+
+        aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            keyword="季度 报告",
+        )
+
+        encoded = "%E5%AD%A3%E5%BA%A6%20%E6%8A%A5%E5%91%8A"
+        requested_urls = [call.args[0] for call in mock_client.get.call_args_list]
+        assert requested_urls == [
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/KnowledgeBases"
+            f"?page=1&page_size=100&keyword={encoded}",
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/KnowledgeBases"
+            f"?page=2&page_size=100&keyword={encoded}",
+        ]
+
+    def test_omits_keyword_parameter_when_blank(self, aidp_service_module):
+        """A blank keyword must produce the same URL as an unfiltered call."""
+        aidp_service_module.count_aidp_kbs_impl.return_value = 1
+        page1 = MagicMock(status_code=200)
+        page1.raise_for_status.return_value = None
+        page1.json.return_value = {"value": [{"kds_id": "kb-1"}], "next_link": None}
+        mock_client = MagicMock()
+        mock_client.get.return_value = page1
+        mock_manager = MagicMock()
+        mock_manager.get_sync_client.return_value = mock_client
+        aidp_service_module.http_client_manager = mock_manager
+
+        aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            keyword="   ",
+        )
+
+        assert mock_client.get.call_args.args[0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/KnowledgeBases"
+            "?page=1&page_size=100"
+        )
+
     def test_deduplicates_kds_ids_across_pages(self, aidp_service_module):
         aidp_service_module.count_aidp_kbs_impl.return_value = 101
         page1 = MagicMock(status_code=200)
@@ -2352,5 +2405,358 @@ class TestListAidpModelsImpl:
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.list_aidp_models_impl(
                 server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+# ---------------------------------------------------------------------------
+# select_aidp_channel tests
+# ---------------------------------------------------------------------------
+class TestSelectAidpChannel:
+    """Tests for select_aidp_channel (channel -> history addressing helper)."""
+
+    def test_matches_channel_by_explicit_kds_id(self, aidp_service_module):
+        channels = [
+            {"fs_id": "fs-a", "src_dir": "/dir/a", "kds_id": "kb-a"},
+            {"fs_id": "fs-b", "src_dir": "/dir/b", "kds_id": "kb-b"},
+        ]
+        assert aidp_service_module.select_aidp_channel(channels, "kb-b") == {
+            "fs_id": "fs-b",
+            "src_dir": "/dir/b",
+        }
+
+    def test_matches_channel_by_source_directory(self, aidp_service_module):
+        channels = [
+            {"fs_id": "fs-a", "src_dir": "/dir/a"},
+            {"fs_id": "fs-b", "src_dir": "/knowledge/kb-b"},
+        ]
+        assert aidp_service_module.select_aidp_channel(channels, "kb-b") == {
+            "fs_id": "fs-b",
+            "src_dir": "/knowledge/kb-b",
+        }
+
+    def test_matches_channel_by_id_list(self, aidp_service_module):
+        channels = [
+            {"fs_id": "fs-a", "src_dir": "/dir/a", "knowledge_base_ids": ["kb-x", "kb-y"]},
+        ]
+        assert aidp_service_module.select_aidp_channel(channels, "kb-y")["fs_id"] == "fs-a"
+
+    def test_accepts_alias_field_names(self, aidp_service_module):
+        channels = [{"fsId": "fs-alias", "srcDir": "/dir/alias"}]
+        assert aidp_service_module.select_aidp_channel(channels, "kb-1") == {
+            "fs_id": "fs-alias",
+            "src_dir": "/dir/alias",
+        }
+
+    def test_falls_back_to_first_usable_channel(self, aidp_service_module):
+        """Single-channel deployments are addressed by the only channel there is."""
+        channels = [
+            {"fs_id": "fs-only", "src_dir": "/dir/only"},
+        ]
+        assert aidp_service_module.select_aidp_channel(channels, "unrelated-kb") == {
+            "fs_id": "fs-only",
+            "src_dir": "/dir/only",
+        }
+
+    def test_skips_entries_missing_fs_id_or_dir(self, aidp_service_module):
+        channels = [
+            {"fs_id": "", "src_dir": "/dir/empty"},
+            {"fs_id": "fs-a", "src_dir": ""},
+            {"kds_id": "kb-a"},
+            {"fs_id": "fs-ok", "src_dir": "/dir/ok"},
+        ]
+        assert aidp_service_module.select_aidp_channel(channels, "kb-a") == {
+            "fs_id": "fs-ok",
+            "src_dir": "/dir/ok",
+        }
+
+    def test_returns_none_when_nothing_usable(self, aidp_service_module):
+        assert aidp_service_module.select_aidp_channel([], "kb-1") is None
+        assert aidp_service_module.select_aidp_channel(
+            [{"fs_id": "fs-a"}, "not-a-dict"], "kb-1"
+        ) is None
+
+
+# ---------------------------------------------------------------------------
+# list_aidp_channels_impl tests
+# ---------------------------------------------------------------------------
+class TestListAidpChannelsImpl:
+    """Tests for list_aidp_channels_impl (GET .../Channels endpoint)."""
+
+    @pytest.mark.parametrize(
+        "server_url,api_key",
+        [("", "token"), ("ftp://bad", "token"), ("http://ok", "")],
+    )
+    def test_invalid_config(self, aidp_service_module, server_url, api_key):
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_channels_impl(
+                server_url=server_url, api_key=api_key
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
+
+    def test_success_requests_tenant_scoped_path(self, aidp_service_module):
+        mock_resp = _make_success_response({
+            "value": [{"fs_id": "fs-1", "src_dir": "/dir/1"}],
+        })
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="get", response=mock_resp
+        )
+
+        result = aidp_service_module.list_aidp_channels_impl(
+            server_url="http://127.0.0.1:30081", api_key="jwt-token"
+        )
+
+        assert result["value"] == [{"fs_id": "fs-1", "src_dir": "/dir/1"}]
+        call_args = mock_client.get.call_args
+        assert call_args[0][0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/Channels"
+        )
+        assert call_args.kwargs["headers"]["Authorization"] == "Bearer jwt-token"
+
+    def test_tenant_override_is_forwarded(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": []})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="get", response=mock_resp
+        )
+
+        aidp_service_module.list_aidp_channels_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            tenant_id="other",
+        )
+
+        assert "/KnowledgeBase/Tenants/other/Channels" in mock_client.get.call_args[0][0]
+
+    def test_non_dict_entries_are_dropped(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": ["junk", {"fs_id": "fs-1"}]})
+        _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
+
+        result = aidp_service_module.list_aidp_channels_impl(
+            server_url="http://127.0.0.1:30081", api_key="jwt-token"
+        )
+
+        assert result["value"] == [{"fs_id": "fs-1"}]
+
+    def test_non_list_value_is_passed_through(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": "not-a-list"})
+        _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
+
+        result = aidp_service_module.list_aidp_channels_impl(
+            server_url="http://127.0.0.1:30081", api_key="jwt-token"
+        )
+
+        assert result["value"] == "not-a-list"
+
+    def test_non_dict_response_raises(self, aidp_service_module):
+        mock_resp = _make_success_response([1, 2, 3])
+        _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_channels_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    @pytest.mark.parametrize("status_code,expected", [
+        (401, ErrorCode.AIDP_AUTH_ERROR),
+        (403, ErrorCode.AIDP_AUTH_ERROR),
+        (429, ErrorCode.AIDP_RATE_LIMIT),
+        (500, ErrorCode.AIDP_SERVICE_ERROR),
+    ])
+    def test_http_errors_are_mapped(self, aidp_service_module, status_code, expected):
+        _setup_mock_client(
+            aidp_service_module, method="get",
+            side_effect=_make_http_error(status_code),
+        )
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_channels_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+        assert exc_info.value.error_code == expected
+
+    def test_connection_error(self, aidp_service_module):
+        request = httpx.Request("GET", "http://127.0.0.1:30081")
+        _setup_mock_client(
+            aidp_service_module, method="get",
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_channels_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_json_parse_value_error(self, aidp_service_module):
+        mock_resp = _make_success_response({})
+        mock_resp.json.side_effect = ValueError("bad json")
+        _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_channels_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+# ---------------------------------------------------------------------------
+# list_aidp_doc_history_impl tests
+# ---------------------------------------------------------------------------
+class TestListAidpDocHistoryImpl:
+    """Tests for list_aidp_doc_history_impl (POST .../KnowledgeFiles/History)."""
+
+    @pytest.mark.parametrize("fs_id,dir_path", [
+        ("", "/dir/1"),
+        ("fs-1", ""),
+        ("   ", "/dir/1"),
+        ("fs-1", "   "),
+    ])
+    def test_missing_address_params_raise_without_request(
+        self, aidp_service_module, fs_id, dir_path
+    ):
+        mock_client = _setup_mock_client(aidp_service_module, method="post")
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_doc_history_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+                fs_id=fs_id,
+                dir_path=dir_path,
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
+        mock_client.post.assert_not_called()
+
+    def test_success_posts_body_and_normalizes_status(self, aidp_service_module):
+        mock_resp = _make_success_response({
+            "value": [
+                {
+                    "file_ino_no": "f-1",
+                    "file_name": "doc.pdf",
+                    "first_upload_time": 1718000000,
+                    "status": "processing",
+                },
+                {
+                    "file_ino_no": "f-2",
+                    "file_name": "done.txt",
+                    "first_upload_time": 1718000100,
+                    "status": " COMPLETED ",
+                },
+            ],
+        })
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="post", response=mock_resp
+        )
+
+        result = aidp_service_module.list_aidp_doc_history_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            fs_id="fs-1",
+            dir_path="/aidp/knowledge/kb-1",
+        )
+
+        assert [item["status"] for item in result["value"]] == [
+            "PROCESSING", "COMPLETED",
+        ]
+        # Timestamps are normalized like every other document payload.
+        assert result["value"][0]["created_at"] is not None
+
+        call_args = mock_client.post.call_args
+        assert call_args[0][0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp/KnowledgeFiles/History"
+        )
+        assert call_args.kwargs["json"] == {
+            "fs_id": "fs-1",
+            "dir_path": "/aidp/knowledge/kb-1",
+        }
+        assert call_args.kwargs["headers"]["Authorization"] == "Bearer jwt-token"
+
+    def test_items_without_status_keep_no_status_key(self, aidp_service_module):
+        mock_resp = _make_success_response({
+            "value": [{"file_ino_no": "f-1", "file_name": "doc.txt"}],
+        })
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        result = aidp_service_module.list_aidp_doc_history_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            fs_id="fs-1",
+            dir_path="/dir/1",
+        )
+
+        assert "status" not in result["value"][0]
+
+    def test_blank_status_is_not_reported(self, aidp_service_module):
+        mock_resp = _make_success_response({
+            "value": [{"file_ino_no": "f-1", "status": "   "}],
+        })
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        result = aidp_service_module.list_aidp_doc_history_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            fs_id="fs-1",
+            dir_path="/dir/1",
+        )
+
+        assert "status" not in result["value"][0]
+
+    def test_non_dict_response_raises(self, aidp_service_module):
+        mock_resp = _make_success_response([1, 2])
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_doc_history_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+                fs_id="fs-1",
+                dir_path="/dir/1",
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    @pytest.mark.parametrize("status_code,expected", [
+        (401, ErrorCode.AIDP_AUTH_ERROR),
+        (403, ErrorCode.AIDP_AUTH_ERROR),
+        (429, ErrorCode.AIDP_RATE_LIMIT),
+        (500, ErrorCode.AIDP_SERVICE_ERROR),
+    ])
+    def test_http_errors_are_mapped(self, aidp_service_module, status_code, expected):
+        _setup_mock_client(
+            aidp_service_module, method="post",
+            side_effect=_make_http_error(status_code, method="POST"),
+        )
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_doc_history_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+                fs_id="fs-1",
+                dir_path="/dir/1",
+            )
+        assert exc_info.value.error_code == expected
+
+    def test_connection_error(self, aidp_service_module):
+        request = httpx.Request("POST", "http://127.0.0.1:30081")
+        _setup_mock_client(
+            aidp_service_module, method="post",
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_doc_history_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+                fs_id="fs-1",
+                dir_path="/dir/1",
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_json_parse_value_error(self, aidp_service_module):
+        mock_resp = _make_success_response({})
+        mock_resp.json.side_effect = ValueError("bad json")
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_doc_history_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+                fs_id="fs-1",
+                dir_path="/dir/1",
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR

@@ -11,7 +11,18 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles         (list docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Remove  (remove docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Download (download doc)
+  - GET    /KnowledgeBase/Tenants/{tenant}/Channels                                   (ingestion channels)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeFiles/History                     (all-status file history)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
+
+Document status simulation (drives the "processing status" UI):
+  * Uploaded documents start as ``PROCESSING`` and flip to ``COMPLETED`` once
+    ``_PROCESSING_SECONDS`` have elapsed, so polling behaviour can be observed
+    end to end. Tune it with ``POST /_mock/processing-seconds?seconds=N``.
+  * ``POST /_mock/doc-status?kds_id=&file_ino_no=&status=FAILED`` forces one
+    document into a terminal state without waiting for the timer.
+  * ``GET .../KnowledgeFiles`` keeps returning COMPLETED documents only (mirrors
+    real AIDP), while ``POST .../KnowledgeFiles/History`` returns every status.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
@@ -60,6 +71,23 @@ EXPECTED_API_KEY = "mock-aidp-key"
 TENANT = "aidp"  # tenant segment used in all path prefixes
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
 _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
+_CHANNELS_PATH = f"/KnowledgeBase/Tenants/{TENANT}/Channels"
+_DOC_HISTORY_PATH = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeFiles/History"
+
+# Document status constants mirroring the real AIDP vocabulary.
+STATUS_PROCESSING = "PROCESSING"
+STATUS_COMPLETED = "COMPLETED"
+STATUS_FAILED = "FAILED"
+_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED}
+
+# One ingestion channel per knowledge base. ``src_dir`` embeds the KB id, which
+# is how the backend matches a channel to the KB it is listing, and how this
+# mock maps a History ``dir_path`` back to its documents.
+_CHANNEL_ROOT = "/aidp/knowledge"
+
+# Seconds an uploaded document stays PROCESSING before turning COMPLETED.
+# Overridable at runtime through POST /_mock/processing-seconds.
+_PROCESSING_SECONDS = 8.0
 
 # Directory for persisted runtime state. Lives next to this file so the mock
 # is self-contained (no absolute paths) and stays out of version control via
@@ -250,6 +278,50 @@ def _content_disposition(filename: str) -> str:
 
 
 # =============================================================================
+# Document status helpers
+# =============================================================================
+def _channel_src_dir(kds_id: str) -> str:
+    """Return the source directory of a knowledge base's ingestion channel."""
+    return f"{_CHANNEL_ROOT}/{kds_id}"
+
+
+def _kds_id_from_dir_path(dir_path: Optional[str]) -> Optional[str]:
+    """Reverse ``_channel_src_dir`` so a History request maps back to one KB."""
+    if not isinstance(dir_path, str):
+        return None
+    prefix = f"{_CHANNEL_ROOT}/"
+    if not dir_path.startswith(prefix):
+        return None
+    return dir_path[len(prefix):].strip("/") or None
+
+
+def _doc_effective_status(doc: Dict[str, Any]) -> str:
+    """Return the document's current status, advancing the processing timer.
+
+    Documents persisted before status simulation existed (and the seed data)
+    carry no status at all and are treated as already ingested.
+    """
+    status = doc.get("status")
+    if status is None or status == "":
+        return STATUS_COMPLETED
+    if status == STATUS_PROCESSING:
+        deadline = doc.get("processing_until")
+        if isinstance(deadline, (int, float)) and time.time() < deadline:
+            return STATUS_PROCESSING
+        return STATUS_COMPLETED
+    return str(status)
+
+
+def _visible_in_completed_listing(doc: Dict[str, Any]) -> bool:
+    """Whether a document appears in the legacy completed-files listing.
+
+    Real AIDP only exposes ingested files there; files still being processed are
+    invisible, which is exactly the behaviour the history endpoint replaces.
+    """
+    return _doc_effective_status(doc) == STATUS_COMPLETED
+
+
+# =============================================================================
 # Request Models
 # =============================================================================
 class CreateKbBody(BaseModel):
@@ -263,6 +335,21 @@ class CreateKbBody(BaseModel):
 class UpdateKbBody(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+
+
+class DocHistoryBody(BaseModel):
+    """Body of POST .../KnowledgeFiles/History (channel + directory scoped)."""
+
+    fs_id: Optional[str] = None
+    dir_path: Optional[str] = None
+
+
+class DocStatusBody(BaseModel):
+    """Body of POST /_mock/doc-status (test control over one document)."""
+
+    kds_id: str
+    file_ino_no: str
+    status: Literal["PROCESSING", "COMPLETED", "FAILED"] = "FAILED"
 
 
 class MetadataCondition(BaseModel):
@@ -384,6 +471,42 @@ def reset_failures() -> JSONResponse:
     })
 
 
+@app.post("/_mock/processing-seconds")
+def set_processing_seconds(
+    seconds: float = Query(8.0, ge=0.0, le=600.0, description="Seconds a new upload stays PROCESSING"),
+) -> JSONResponse:
+    """Tune how long newly uploaded documents stay PROCESSING.
+
+    Set 0 to make uploads complete immediately, or a large value to keep the
+    frontend's status polling running while you inspect it.
+    """
+    global _PROCESSING_SECONDS
+    _PROCESSING_SECONDS = seconds
+    logger.info("MOCK CONFIG  processing seconds = %s", seconds)
+    return JSONResponse(content={"processing_seconds": _PROCESSING_SECONDS})
+
+
+@app.post("/_mock/doc-status")
+def force_doc_status(body: DocStatusBody) -> JSONResponse:
+    """Force one document into a given status (used to render FAILED in the UI)."""
+    docs = _DOCUMENTS_BY_KB.get(body.kds_id, [])
+    for doc in docs:
+        if doc.get("file_ino_no") == body.file_ino_no:
+            doc["status"] = body.status
+            doc.pop("processing_until", None)
+            _save_state()
+            logger.info(
+                "MOCK CONFIG  kds_id=%s file=%s status=%s",
+                body.kds_id, body.file_ino_no, body.status,
+            )
+            return JSONResponse(content={"doc": {**doc, "status": body.status}})
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Document {body.file_ino_no} not found in {body.kds_id}",
+    )
+
+
 # =============================================================================
 # Knowledge Base CRUD
 # =============================================================================
@@ -442,7 +565,11 @@ def count_documents(
     _check_auth(authorization)
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    count = len(_DOCUMENTS_BY_KB.get(kds_id, []))
+    # Only ingested files count on the legacy endpoint, matching the list.
+    count = len([
+        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if _visible_in_completed_listing(doc)
+    ])
     logger.info("COUNT DOCS  kds_id=%s count=%d", kds_id, count)
     return JSONResponse(content={"count": count})
 
@@ -580,6 +707,11 @@ async def upload_documents(
                 "file_size": len(content),
                 "file_type": (f.filename.rsplit(".", 1)[-1] if f.filename and "." in f.filename else "bin"),
                 "create_time": int(time.time()),
+                # Uploaded files enter the ingestion pipeline immediately: the
+                # legacy list endpoint hides them until the timer elapses, while
+                # the history endpoint reports them as PROCESSING.
+                "status": STATUS_PROCESSING,
+                "processing_until": time.time() + _PROCESSING_SECONDS,
             }
             _DOCUMENTS_BY_KB.setdefault(kds_id, []).append(doc)
             success_docs.append(doc)
@@ -621,13 +753,21 @@ def list_documents(
     page_size: int = Query(20, ge=1, le=100),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """List documents in a knowledge base with pagination."""
+    """List documents in a knowledge base with pagination.
+
+    Only ingested (COMPLETED) files are returned: real AIDP hides files that are
+    still being chunked/embedded here, which is why the frontend used to show
+    nothing right after an upload.
+    """
     _check_auth(authorization)
 
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    all_docs = _DOCUMENTS_BY_KB.get(kds_id, [])
+    all_docs = [
+        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if _visible_in_completed_listing(doc)
+    ]
     start = (page - 1) * page_size
     end = start + page_size
     items = [_public_document(doc) for doc in all_docs[start:end]]
@@ -728,6 +868,69 @@ def download_document(
         media_type=content_type,
         headers=response_headers,
     )
+
+
+# =============================================================================
+# Ingestion channels + knowledge-file history
+# =============================================================================
+
+
+@app.get(_CHANNELS_PATH)
+def list_channels(
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """List ingestion channels (one per knowledge base in this mock).
+
+    A channel exposes the file-system id and source directory the history
+    endpoint is addressed with, plus ``kds_id`` so a caller can associate the
+    channel with the knowledge base it feeds.
+    """
+    _check_auth(authorization)
+
+    items = [
+        {
+            "fs_id": f"mock-fs-{kds_id}",
+            "src_dir": _channel_src_dir(kds_id),
+            "kds_id": kds_id,
+            "name": kb.get("kds_name"),
+        }
+        for kds_id, kb in _KNOWLEDGE_BASES.items()
+    ]
+    logger.info("LIST CHANNELS  returned=%d", len(items))
+    return JSONResponse(content={"value": items})
+
+
+@app.post(_DOC_HISTORY_PATH)
+def knowledge_file_history(
+    body: DocHistoryBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """List every file in a channel directory, whatever its processing status.
+
+    ``dir_path`` maps back to a knowledge base through the channel directory
+    layout, so one KB's history stays isolated from the others. Documents that
+    are still PROCESSING are included with their live status.
+    """
+    _check_auth(authorization)
+
+    kds_id = _kds_id_from_dir_path(body.dir_path)
+    if not kds_id or kds_id not in _KNOWLEDGE_BASES:
+        logger.info("FILE HISTORY  unknown dir_path=%r -> empty", body.dir_path)
+        return JSONResponse(content={"value": []})
+
+    items = [
+        {
+            **doc,
+            "dir_path": _channel_src_dir(kds_id),
+            "status": _doc_effective_status(doc),
+        }
+        for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+    ]
+    logger.info(
+        "FILE HISTORY  fs_id=%s dir_path=%s returned=%d",
+        body.fs_id, body.dir_path, len(items),
+    )
+    return JSONResponse(content={"value": items})
 
 
 # =============================================================================
