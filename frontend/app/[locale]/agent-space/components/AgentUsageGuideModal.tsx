@@ -40,6 +40,7 @@ export function AgentUsageGuideModal({
   const [activeTab, setActiveTab] = useState("share");
   const agentId = agent?.agent_id;
   const agentName = agent?.name?.trim() || "agent";
+  const agentInternalName = agent?.internal_name?.trim() || agentName;
   const { canManageShare } = getAgentUsageGuideAccess({
     currentVersionNo: agent?.current_version_no,
     permission: agent?.permission,
@@ -126,7 +127,7 @@ export function AgentUsageGuideModal({
     frontendConfigQuery.data?.northboundBaseUrl,
     typeof window === "undefined" ? undefined : window.location.origin
   );
-  const northboundCurl = buildNorthboundCurl(agentName, northboundUrl);
+  const northboundCurl = buildNorthboundCurl(agentInternalName, northboundUrl);
   const a2aGuideState = getA2AGuideState({
     isLoading: a2aQuery.isLoading,
     isError: a2aQuery.isError,
@@ -302,6 +303,9 @@ export function AgentUsageGuideModal({
                         size="small"
                         className="absolute right-2 top-2"
                         style={{
+                          position: "absolute",
+                          right: 8,
+                          top: 8,
                           color: "#f8fafc",
                           backgroundColor: "#1e293b",
                           borderColor: "#475569",

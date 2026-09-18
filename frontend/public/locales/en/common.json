@@ -2236,7 +2236,7 @@
   "agentUsageGuide.northbound.stepKey": "Generate or rotate an API Key in your profile.",
   "agentUsageGuide.northbound.stepCall": "Call the northbound endpoint with your Agent internal name.",
   "agentUsageGuide.northbound.stepResult": "Receive the streaming response from the Agent.",
-  "agentUsageGuide.northbound.keyNotice": "The example never reads your API Key. API Key rotation does not change this Agent sharing link.",
+  "agentUsageGuide.northbound.keyNotice": "The example never reads your API Key. An API Key can call only Agents in its tenant, and rotating it does not change this Agent sharing link.",
   "agentUsageGuide.northbound.docs": "View Northbound API documentation",
   "agentUsageGuide.a2a.notEnabled": "A2A is not enabled for this published Agent. Edit the Agent and publish an A2A version to expose its A2A endpoints.",
   "agentSharePage.unavailable": "This Agent share is unavailable.",

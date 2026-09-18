@@ -82,6 +82,8 @@ export interface MyAgentRepositoryInfoItem {
 export interface MyEditableAgentItem {
   agent_id: number;
   name?: string | null;
+  /** Stable internal name required by northbound API calls. */
+  internal_name?: string | null;
   description?: string | null;
   current_version_no?: number | null;
   version_label?: string | null;

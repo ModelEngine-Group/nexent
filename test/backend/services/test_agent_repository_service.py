@@ -543,6 +543,7 @@ async def test_list_my_editable_agents_impl_returns_items_and_counts():
     assert len(result["items"]) == 1
     assert result["items"][0]["agent_id"] == 1
     assert result["items"][0]["name"] == "Agent One"
+    assert result["items"][0]["internal_name"] == "agent_one"
     assert result["items"][0]["permission"] == "EDIT"
     assert result["items"][0]["repository_info"] == []
     assert result["pagination"] == {

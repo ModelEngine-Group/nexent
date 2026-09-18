@@ -41,6 +41,7 @@ vi.mock("@/app/[locale]/agents/components/a2a/A2AServerSettingsPanel", () => ({
 const editableAgent: MyEditableAgentItem = {
   agent_id: 41,
   name: "Demo Agent",
+  internal_name: "demo_agent",
   description: "Demo",
   current_version_no: 3,
   version_label: "v3",
@@ -354,7 +355,7 @@ describe("Agent usage guide component coverage", () => {
     await openTab(user, "agentUsageGuide.tabs.northbound");
     const example = await screen.findByText(/\/nb\/v1\/chat\/run/);
     expect(example.textContent).toContain("<YOUR_API_KEY>");
-    expect(example.textContent).toContain("Demo Agent");
+    expect(example.textContent).toContain("demo_agent");
   });
 
   it("keeps guide tab content stable and lets a backdrop click close the modal", async () => {
@@ -422,7 +423,7 @@ describe("Agent usage guide component coverage", () => {
       within(codePanel).getByRole("button", { name: "common.copy" })
     ).toHaveAttribute(
       "style",
-      "color: rgb(248, 250, 252); background-color: rgb(30, 41, 59); border-color: rgb(71, 85, 105);"
+      "position: absolute; right: 8px; top: 8px; color: rgb(248, 250, 252); background-color: rgb(30, 41, 59); border-color: rgb(71, 85, 105);"
     );
   });
 

@@ -1,4 +1,4 @@
-import { API_ENDPOINTS, fetchWithErrorHandling } from "./api";
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 export interface AgentShareLink {
   agent_id: number;
@@ -19,13 +19,17 @@ async function readShareResponse(
 
 export const agentShareService = {
   async get(agentId: number): Promise<AgentShareLink | null> {
-    const response = await fetchWithErrorHandling(
-      API_ENDPOINTS.agent.share(agentId)
-    );
-    if (response.status === 404) {
-      return null;
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.agent.share(agentId)
+      );
+      return readShareResponse(response);
+    } catch (error) {
+      if (error instanceof ApiError && Number(error.code) === 404) {
+        return null;
+      }
+      throw error;
     }
-    return readShareResponse(response);
   },
 
   async enable(agentId: number): Promise<AgentShareLink> {

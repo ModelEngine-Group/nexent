@@ -2219,7 +2219,7 @@
   "agentUsageGuide.northbound.stepKey": "在个人资料中生成或轮换 API Key。",
   "agentUsageGuide.northbound.stepCall": "使用智能体内部名称调用北向接口。",
   "agentUsageGuide.northbound.stepResult": "接收智能体的流式响应。",
-  "agentUsageGuide.northbound.keyNotice": "示例不会读取你的 API Key；轮换 API Key 不会影响此智能体的分享链接。",
+  "agentUsageGuide.northbound.keyNotice": "示例不会读取你的 API Key；API Key 只能调用其所属租户中的智能体，轮换 API Key 不会影响此智能体的分享链接。",
   "agentUsageGuide.northbound.docs": "查看北向 API 文档",
   "agentUsageGuide.a2a.notEnabled": "此已发布智能体尚未启用 A2A。请编辑智能体并发布 A2A 版本后再暴露 A2A 接口。",
   "agentSharePage.unavailable": "此智能体分享链接不存在或已失效。",

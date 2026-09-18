@@ -10359,6 +10359,16 @@ def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
 
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
+def test_get_agent_by_name_impl_uses_lookup_error_for_missing_agent(mock_search, mock_query_versions):
+    """Preserve the missing-Agent condition for HTTP callers to map to 404."""
+    mock_search.side_effect = ValueError("agent not found")
+
+    with pytest.raises(LookupError, match="agent not found"):
+        get_agent_by_name_impl("missing_agent", "tenant_1")
+
+
+@patch("management.services.agent.management.query_version_list")
+@patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_empty_name_service(mock_search, mock_query_versions):
     """Test that empty agent name in impl raises Exception."""
     with pytest.raises(Exception, match="agent_name required"):
