@@ -25,10 +25,10 @@ test("agent repository displays up to twelve unified cards in four desktop colum
     readFile(mineAgentPath, "utf8"),
   ]);
 
-  assert.match(agentSpace, /const REPOSITORY_PAGE_SIZE = 12;/);
+  assert.match(agentSpace, /const pageSize = columns \* rows;/);
   assert.match(
     agentSpace,
-    /<ResourceCardGrid\s+items=\{listings\}\s+columns=\{4\}/
+    /<ResourceCardGrid\s+items=\{listings\}\s+columns=\{columns\}/
   );
   assert.match(
     agentSpace,
@@ -44,6 +44,8 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.match(agentSpace, /key: "copy"/);
   assert.match(agentSpace, /footerLayout="inline"/);
   assert.match(agentSpace, /badge=\{[\s\S]*listing\.version_label/);
+  assert.match(agentSpace, /Grid\.useBreakpoint\(\)/);
+  assert.match(agentSpace, /gridHeight=\{/);
   assert.match(mineAgent, /export function MyAgent/);
   assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{4\}/);
 });

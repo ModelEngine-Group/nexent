@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
-import { App, Button, Dropdown, Empty, Input, Modal, Spin } from "antd";
+import { App, Button, Dropdown, Empty, Grid, Input, Modal, Spin } from "antd";
 import {
   Bot,
   Copy,
@@ -32,13 +32,58 @@ import {
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { mapRepositoryListingDetail } from "@/lib/agentRepositoryDetail";
 
-const REPOSITORY_PAGE_SIZE = 12;
+const CARD_GAP = 20;
+const MIN_CARD_HEIGHT = 220;
+const PAGINATION_HEIGHT = 60;
 
 export function AgentSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
   const showAdminMenu = user?.role === USER_ROLES.ADMIN;
+  const screens = Grid.useBreakpoint();
+  const gridRegionRef = useRef<HTMLDivElement>(null);
+  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
+    null
+  );
+  const columns = screens.xl
+    ? 4
+    : screens.lg
+      ? 3
+      : screens.md || screens.sm
+        ? 2
+        : screens.xs
+          ? 1
+          : 4;
+  const rows = getRowCount(
+    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
+  );
+  const pageSize = columns * rows;
+  const measureGridHeight = useCallback(() => {
+    if (!active || !gridRegionRef.current) return;
+
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const { top } = gridRegionRef.current.getBoundingClientRect();
+    setAvailableGridHeight(Math.max(0, Math.floor(viewportHeight - top - 24)));
+  }, [active]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const frame = window.requestAnimationFrame(measureGridHeight);
+    const observer = new ResizeObserver(measureGridHeight);
+    const visualViewport = window.visualViewport;
+    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
+    window.addEventListener("resize", measureGridHeight);
+    visualViewport?.addEventListener("resize", measureGridHeight);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", measureGridHeight);
+      visualViewport?.removeEventListener("resize", measureGridHeight);
+    };
+  }, [active, measureGridHeight]);
   const [searchQuery, setSearchQuery] = useState("");
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
     []
@@ -60,14 +105,14 @@ export function AgentSpace({ active }: { active: boolean }) {
     () => ({
       status: "shared" as const,
       page,
-      page_size: REPOSITORY_PAGE_SIZE,
+      page_size: pageSize,
       ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
       ...(searchTagPredicates.length > 0
         ? { search_tag_predicates: searchTagPredicates }
         : {}),
       ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
     }),
-    [page, searchQuery, searchTagPredicates, tagPredicates]
+    [page, pageSize, searchQuery, searchTagPredicates, tagPredicates]
   );
   const { data, isLoading, isError, isFetching, refetch } =
     useAgentRepositoryListings(listingParams, active);
@@ -172,7 +217,7 @@ export function AgentSpace({ active }: { active: boolean }) {
     return (
       <ResourceCard
         key={listing.agent_repository_id}
-        className="h-full"
+        className="h-full min-h-0"
         title={title}
         onClick={() => setDetailListingId(listing.agent_repository_id)}
         icon={
@@ -264,38 +309,53 @@ export function AgentSpace({ active }: { active: boolean }) {
       <p className="text-sm text-slate-500 dark:text-slate-400">
         {t("agentRepository.page.repositoryHint")}
       </p>
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Spin size="large" />
-        </div>
-      ) : isError ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {t("agentRepository.page.loadError")}
-          </p>
-          <Button type="primary" onClick={() => refetch()} loading={isFetching}>
-            {t("repository.common.retry")}
-          </Button>
-        </div>
-      ) : (
-        <ResourceCardGrid
-          items={listings}
-          columns={4}
-          rows={3}
-          page={page}
-          total={total}
-          onPageChange={setPage}
-          paginateItems={false}
-          showToolbar={false}
-          emptyState={
-            <Empty
-              className="py-16"
-              description={t("agentRepository.page.empty")}
-            />
-          }
-          renderItem={renderListing}
-        />
-      )}
+      <div ref={gridRegionRef} className="min-h-0">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Spin size="large" />
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-200 py-16 text-center dark:border-slate-700">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              {t("agentRepository.page.loadError")}
+            </p>
+            <Button
+              type="primary"
+              onClick={() => refetch()}
+              loading={isFetching}
+            >
+              {t("repository.common.retry")}
+            </Button>
+          </div>
+        ) : (
+          <ResourceCardGrid
+            items={listings}
+            columns={columns}
+            rows={rows}
+            gridHeight={
+              availableGridHeight === null
+                ? undefined
+                : Math.max(
+                    0,
+                    availableGridHeight -
+                      (total > pageSize ? PAGINATION_HEIGHT : 0)
+                  )
+            }
+            page={page}
+            total={total}
+            onPageChange={setPage}
+            paginateItems={false}
+            showToolbar={false}
+            emptyState={
+              <Empty
+                className="py-16"
+                description={t("agentRepository.page.empty")}
+              />
+            }
+            renderItem={renderListing}
+          />
+        )}
+      </div>
       <AgentRepositoryDetailModal
         open={active && detailListingId != null}
         onClose={() => setDetailListingId(null)}
@@ -313,5 +373,16 @@ export function AgentSpace({ active }: { active: boolean }) {
         }}
       />
     </div>
+  );
+}
+
+function getRowCount(availableHeight: number) {
+  if (availableHeight <= 0) return 3;
+  return Math.min(
+    3,
+    Math.max(
+      1,
+      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
+    )
   );
 }
