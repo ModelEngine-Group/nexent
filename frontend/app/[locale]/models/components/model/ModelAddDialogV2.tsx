@@ -1066,6 +1066,20 @@ export const ModelAddDialogV2 = ({
         ctx.resolvedModelType === MODEL_TYPES.MULTI_EMBEDDING
           ? "multiEmbedding"
           : ctx.resolvedModelType;
+      // Never steal an occupied default slot: adding or editing a model is
+      // not an intent to change the tenant default. Persist only when the
+      // slot is empty (add: deterministic onboarding default, mirroring the
+      // backend backfill) or when the submitted model already occupies the
+      // slot (edit: keep the slot's apiKey/url in sync with the model's new
+      // values).
+      const currentSlotDisplayName = modelConfig?.[configKey]?.displayName;
+      const slotIsFree = !currentSlotDisplayName;
+      const submitsCurrentSlotModel =
+        !!model &&
+        currentSlotDisplayName === (model.displayName || model.name);
+      if (!slotIsFree && !submitsCurrentSlotModel) {
+        return;
+      }
       const existingApiKey = modelConfig?.[configKey]?.apiConfig?.apiKey || "";
       const nextModelConfig: SingleModelConfig = {
         id: 0,
