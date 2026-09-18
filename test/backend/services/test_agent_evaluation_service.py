@@ -447,6 +447,7 @@ _services_pkg.evaluation_prompt_service = _eval_prompt_service_module
 _thread_lifecycle_service_module = types.ModuleType(
     "services.thread_lifecycle_service"
 )
+_thread_lifecycle_service_module.config_thread_manager = MagicMock()
 _thread_lifecycle_service_module.runtime_thread_manager = MagicMock()
 sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_service_module
 _services_pkg.thread_lifecycle_service = _thread_lifecycle_service_module
@@ -1150,7 +1151,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
     pool_mock = MagicMock()
     future = MagicMock()
     pool_mock.submit.return_value = types.SimpleNamespace(future=future)
-    service_module.runtime_thread_manager = pool_mock
+    service_module.config_thread_manager = pool_mock
 
     run = service_module.create_agent_evaluation_run_impl(
         tenant_id="t1",
@@ -1207,8 +1208,8 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
     """The published version number flows from ``resolve_latest_published_version_no``."""
     create_mock = _wire_full_db_module(service_module)
     service_module.resolve_latest_published_version_no.return_value = 13
-    service_module.runtime_thread_manager = MagicMock()
-    service_module.runtime_thread_manager.submit.return_value = types.SimpleNamespace(
+    service_module.config_thread_manager = MagicMock()
+    service_module.config_thread_manager.submit.return_value = types.SimpleNamespace(
         future=MagicMock()
     )
 
@@ -1221,6 +1222,35 @@ def test_create_agent_evaluation_run_uses_resolved_version_no(service_module):
     )
 
     assert create_mock.call_args.kwargs["agent_version_no"] == 13
+
+
+def test_create_background_work_uses_config_manager_not_runtime_manager(service_module):
+    """BE-UT-EVAL-DISPATCH-001: Config owns setup and dispatch submission."""
+    config_manager = MagicMock()
+    future = MagicMock()
+    config_manager.submit.return_value = types.SimpleNamespace(future=future)
+    runtime_manager = MagicMock()
+    service_module.config_thread_manager = config_manager
+    service_module.runtime_thread_manager = runtime_manager
+
+    callback_target = MagicMock()
+    service_module._run_in_background(
+        callback_target,
+        "payload",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        agent_evaluation_id=99,
+    )
+
+    config_manager.submit.assert_called_once()
+    lane, task_spec, submitted_fn, submitted_arg = config_manager.submit.call_args.args
+    assert lane == "evaluation"
+    assert task_spec.owner == "config"
+    assert task_spec.run_id == "99"
+    assert submitted_fn is callback_target
+    assert submitted_arg == "payload"
+    runtime_manager.submit.assert_not_called()
+    future.add_done_callback.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

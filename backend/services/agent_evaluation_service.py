@@ -62,7 +62,10 @@ from database.evaluation_set_db import (
 from database.evaluator_db import get_evaluator
 from management.services.agent.service import prepare_agent_run
 from services.evaluation_set_service import resolve_latest_published_version_no
-from services.thread_lifecycle_service import runtime_thread_manager
+from services.thread_lifecycle_service import (
+    config_thread_manager,
+    runtime_thread_manager,
+)
 from utils.llm_utils import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template
 
@@ -1054,12 +1057,12 @@ def _check_run_limits(tenant_id: str) -> None:
 def _run_in_background(
     fn, *fn_args, tenant_id, user_id, agent_evaluation_id, language="zh"
 ):
-    """Submit fn to the Runtime evaluation lane and attach failure cleanup."""
-    execution = runtime_thread_manager.submit(
+    """Submit Config-owned evaluation setup or dispatch work in the background."""
+    execution = config_thread_manager.submit(
         "evaluation",
         ManagedTaskSpec(
             task_name="agent-evaluation-run",
-            owner="runtime",
+            owner="config",
             run_id=str(agent_evaluation_id),
         ),
         fn,
