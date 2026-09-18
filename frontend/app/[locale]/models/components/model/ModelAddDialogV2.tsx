@@ -18,17 +18,14 @@ import {
 } from "antd";
 import { LoaderCircle, Settings, Settings2 } from "lucide-react";
 
-import { useConfig } from "@/hooks/useConfig";
 import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
 import { modelService } from "@/services/modelService";
 import {
   InferenceFieldSpecsByType,
   ModelCatalogFullPayload,
   ModelCatalogProviderInfo,
-  ModelConfig,
   ModelOption,
   ModelType,
-  SingleModelConfig,
 } from "@/types/modelConfig";
 import { MODEL_TYPES } from "@/const/modelConfig";
 import log from "@/lib/logger";
@@ -336,7 +333,6 @@ export const ModelAddDialogV2 = ({
 }: ModelAddDialogV2Props) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { modelConfig, updateModelConfig, saveConfig } = useConfig();
 
   // ---------- shared state ----------
   const [activeTab, setActiveTab] = useState<"batch" | "custom">("batch");
@@ -1060,47 +1056,13 @@ export const ModelAddDialogV2 = ({
   );
 
   // Persist the custom-tab model into the local config (best-effort).
-  const persistCustomLocalConfig = useCallback(
-    async (ctx: ReturnType<typeof buildCustomRequestContext>, displayNameValue: string) => {
-      const configKey: keyof ModelConfig =
-        ctx.resolvedModelType === MODEL_TYPES.MULTI_EMBEDDING
-          ? "multiEmbedding"
-          : ctx.resolvedModelType;
-      // Never steal an occupied default slot: adding or editing a model is
-      // not an intent to change the tenant default. Persist only when the
-      // slot is empty (add: deterministic onboarding default, mirroring the
-      // backend backfill) or when the submitted model already occupies the
-      // slot (edit: keep the slot's apiKey/url in sync with the model's new
-      // values).
-      const currentSlotDisplayName = modelConfig?.[configKey]?.displayName;
-      const slotIsFree = !currentSlotDisplayName;
-      const submitsCurrentSlotModel =
-        !!model &&
-        currentSlotDisplayName === (model.displayName || model.name);
-      if (!slotIsFree && !submitsCurrentSlotModel) {
-        return;
-      }
-      const existingApiKey = modelConfig?.[configKey]?.apiConfig?.apiKey || "";
-      const nextModelConfig: SingleModelConfig = {
-        id: 0,
-        modelName: customForm.name,
-        displayName: displayNameValue,
-        apiConfig: {
-          apiKey: model
-            ? customForm.apiKey || existingApiKey
-            : customForm.apiKey,
-          modelUrl: customForm.url,
-        },
-        ...ctx.capacityPayload,
-      };
-      updateModelConfig({ [configKey]: nextModelConfig });
-      const ok = await saveConfig();
-      if (!ok) {
-        log.warn("Failed to persist model config after custom add");
-      }
-    },
-    [customForm, model, modelConfig, updateModelConfig, saveConfig]
-  );
+  // REMOVED: this used to write the submitted model into the default-model
+  // slot config (and save it), which stole an occupied default whenever the
+  // frontend's cached config was stale/empty. Default-slot changes now have
+  // a single source of truth on the server: the create-time backfill fills
+  // only empty/dangling slots (auto_configured_defaults), and editing a
+  // model never touches slots. The slot's apiKey/url are derived from the
+  // model record at config-load time, so no frontend sync is needed.
 
   const handleCustomSubmit = useCallback(async () => {
     if (!validateCustomForm()) return;
@@ -1129,8 +1091,6 @@ export const ModelAddDialogV2 = ({
         createResult = await submitCustomCreatePath(ctx, displayNameValue, maxTokensValue);
       }
 
-      await persistCustomLocalConfig(ctx, displayNameValue);
-
       message.success(
         model
           ? t("model.dialog.editSuccess", { defaultValue: "模型更新成功" })
@@ -1157,7 +1117,7 @@ export const ModelAddDialogV2 = ({
     } finally {
       setLoading(false);
     }
-  }, [customForm, customAdvanced, customCapacity, tenantId, model, message, t, onClose, onSuccess, validateCustomForm, buildCustomRequestContext, submitCustomEditPath, submitCustomCreatePath, persistCustomLocalConfig]);
+  }, [customForm, customAdvanced, customCapacity, tenantId, model, message, t, onClose, onSuccess, validateCustomForm, buildCustomRequestContext, submitCustomEditPath, submitCustomCreatePath]);
 
   const resetCustomForm = useCallback(() => {
     setCustomForm({
