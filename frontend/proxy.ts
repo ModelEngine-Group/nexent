@@ -14,7 +14,7 @@ function withoutBasePath(pathname: string): string {
   return pathname.slice(BASE_PATH.length) || "/";
 }
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const appPathname = withoutBasePath(pathname);
 

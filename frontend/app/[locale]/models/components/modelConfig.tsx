@@ -1318,7 +1318,7 @@ export const ModelConfigSection = forwardRef<
           <Alert
             type="warning"
             showIcon
-            message={t("modelConfig.capacityCoverage.warning", {
+            title={t("modelConfig.capacityCoverage.warning", {
               bareCount: capacityCoverage.bareCount,
               total: capacityCoverage.totalLlmVlm,
             })}
