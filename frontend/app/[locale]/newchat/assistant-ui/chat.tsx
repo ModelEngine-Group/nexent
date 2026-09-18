@@ -26,6 +26,7 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelSelectionScope?: "agent" | "tenant";
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   showConversationTitle?: boolean;
@@ -79,6 +80,7 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  modelSelectionScope = "agent",
   selectedModelId,
   onModelChange,
   showConversationTitle = true,
@@ -128,6 +130,7 @@ export const Chat: FC<ChatProps> = ({
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
           showModelSelector={showModelSelector}
+          modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
           isDictationConfigured={isDictationConfigured}
@@ -163,6 +166,7 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      modelSelectionScope={modelSelectionScope}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
       showConversationTitle={showConversationTitle}

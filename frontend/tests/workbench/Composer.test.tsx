@@ -113,12 +113,17 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () 
     expect(
       left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  const planning = screen.getByRole("button", {
+    name: "chat.composer.planning",
+  });
   expect(
-    screen.queryByRole("button", { name: "chat.composer.planning" })
-  ).toBeNull();
+    screen.getByRole("button", { name: "chat.composer.execution" })
+  ).toBeInTheDocument();
+  expect(planning.parentElement?.parentElement).toHaveClass("border-b");
   const creationAction = screen.getByRole("button", { name: "Skill 创建" });
   expect(creationAction.closest("fieldset")).toBeNull();
-  before(creationAction, screen.getByRole("textbox"));
+  before(creationAction, planning);
+  before(planning, screen.getByRole("textbox"));
   const chips = screen.getByLabelText("当前挂载资源");
   before(screen.getByRole("textbox"), chips);
   before(chips, screen.getByRole("button", { name: "模型" }));
@@ -151,6 +156,12 @@ it("UT-FE-WB-015 creation composer excludes resources and keeps the draft editab
   );
   expect(screen.queryByRole("button", { name: "Agent" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Skills" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.planning" })
+  ).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.execution" })
+  ).toBeNull();
   expect(screen.queryByRole("button", { name: /knowledgeScope/ })).toBeNull();
   expect(screen.getByRole("textbox")).toBeEnabled();
   expect(screen.getByRole("button", { name: "模型" })).toBeEnabled();

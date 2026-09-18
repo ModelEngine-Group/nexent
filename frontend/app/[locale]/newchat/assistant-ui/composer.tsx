@@ -369,7 +369,7 @@ export const Composer: FC<ComposerProps> = ({
             {disabledReason}
           </p>
         ) : null}
-        {!compact && !workbenchPresentation && <PlanView />}
+        {!compact && !creationMode && <PlanView />}
         {creationMode && (
           <div className="px-4 pt-4">
             <button
@@ -386,7 +386,7 @@ export const Composer: FC<ComposerProps> = ({
         )}
 
         {/* Mode switcher above input */}
-        {!compact && !workbenchPresentation && (
+        {!compact && !creationMode && (
           <div className="flex items-center border-b border-border px-3 py-2">
             {/* Mode switcher */}
             <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
@@ -524,7 +524,7 @@ export const Composer: FC<ComposerProps> = ({
               className={cn(
                 "relative mx-2 mb-2 flex items-center justify-between gap-2",
                 workbenchPresentation &&
-                  "mx-4 flex-wrap border-t border-border pt-2 sm:flex-nowrap"
+                  "mx-4 flex-wrap pt-2 sm:flex-nowrap"
               )}
             >
               <div

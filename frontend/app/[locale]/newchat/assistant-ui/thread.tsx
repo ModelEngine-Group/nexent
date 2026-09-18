@@ -69,6 +69,10 @@ import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
+import {
+  deriveModelOptions,
+  type ModelSelectionScope,
+} from "@/features/workbench/modelOptions";
 import type { ModelOption } from "../ui/model-selector";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
@@ -183,6 +187,7 @@ export interface ThreadProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -212,59 +217,15 @@ export interface ThreadProps {
  * Falls back to model_name for single model scenarios.
  */
 const useAgentModels = (
-  agent: Agent | PublishedAgent
+  agent: Agent | PublishedAgent,
+  scope: ModelSelectionScope
 ): readonly ModelOption[] => {
   const { models: availableModels } = useModelList();
 
-  return useMemo(() => {
-    const typedAgent = agent as PublishedAgent;
-    const { model_ids, model_names } = typedAgent;
-
-    if (
-      model_ids &&
-      model_ids.length > 0 &&
-      model_names &&
-      model_names.length > 0
-    ) {
-      const configuredModels = model_ids.map((id, i) => ({
-        id: String(id),
-        name: model_names?.[i] || `Model ${id}`,
-      }));
-      const availableModelIds = new Set(
-        availableModels
-          .filter((model) => model.connect_status === "available")
-          .map((model) => String(model.id))
-      );
-      return configuredModels.filter((model) =>
-        availableModelIds.has(model.id)
-      );
-    }
-
-    // Fallback for single model: check model_name on typedAgent
-    const modelName = (typedAgent as unknown as { model_name?: string })
-      .model_name;
-    const modelIsAvailable = availableModels.some(
-      (model) =>
-        model.connect_status === "available" &&
-        (model.displayName === modelName || model.name === modelName)
-    );
-    if (modelName && modelIsAvailable) {
-      return [{ id: modelName, name: modelName }];
-    }
-
-    // Fallback to the single model field (used by AgentDraft / debug panel)
-    const singleModel = (typedAgent as unknown as { model?: string }).model;
-    const singleModelIsAvailable = availableModels.some(
-      (model) =>
-        model.connect_status === "available" &&
-        (model.displayName === singleModel || model.name === singleModel)
-    );
-    if (singleModel && singleModelIsAvailable) {
-      return [{ id: singleModel, name: singleModel }];
-    }
-
-    return [];
-  }, [agent, availableModels]);
+  return useMemo(
+    () => deriveModelOptions(agent, availableModels, scope),
+    [agent, availableModels, scope]
+  );
 };
 
 export const Thread: FC<ThreadProps> = ({
@@ -280,6 +241,7 @@ export const Thread: FC<ThreadProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  modelSelectionScope = "agent",
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -301,7 +263,7 @@ export const Thread: FC<ThreadProps> = ({
   onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
-  const models = useAgentModels(agent);
+  const models = useAgentModels(agent, modelSelectionScope);
   const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
   const selectedModelIsValid = Boolean(
     selectedModelId && models.some((model) => model.id === selectedModelId)

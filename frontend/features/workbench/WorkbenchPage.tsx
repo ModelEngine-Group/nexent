@@ -880,6 +880,11 @@ const HomeContent: FC = () => {
               ? selectedAgent
               : null
           }
+          modelSelectionScope={
+            workbenchState.config.agent_mounts.length === 1
+              ? "agent"
+              : "tenant"
+          }
           selectedModelId={workbenchState.config.model_id?.toString()}
           onModelChange={(id) => void handleModelChange(id)}
           onAgentSelected={handleAgentSelectedFromLanding}
