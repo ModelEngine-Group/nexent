@@ -140,7 +140,7 @@ export default function ResourceCardGrid<T>({
         </div>
       ) : null}
       <div
-        className={`grid grid-cols-1 gap-5 sm:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))] ${
+        className={`grid grid-cols-1 gap-5 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))] ${
           gridHeight !== undefined
             ? "grid-rows-[repeat(var(--resource-card-rows),minmax(0,1fr))]"
             : ""

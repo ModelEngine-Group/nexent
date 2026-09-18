@@ -14,6 +14,10 @@ const resourceCardPath = new URL(
   "../components/resource/ResourceCard.tsx",
   import.meta.url
 );
+const resourceCardGridPath = new URL(
+  "../components/resource/ResourceCardGrid.tsx",
+  import.meta.url
+);
 const mineAgentPath = new URL(
   "../app/[locale]/agent-space/my-agent.tsx",
   import.meta.url
@@ -24,11 +28,13 @@ const reviewCenterPath = new URL(
 );
 
 test("agent repository displays up to twelve unified cards in four desktop columns", async () => {
-  const [agentSpace, mineAgent, resourceCard] = await Promise.all([
-    readFile(agentSpacePath, "utf8"),
-    readFile(mineAgentPath, "utf8"),
-    readFile(resourceCardPath, "utf8"),
-  ]);
+  const [agentSpace, mineAgent, resourceCard, resourceCardGrid] =
+    await Promise.all([
+      readFile(agentSpacePath, "utf8"),
+      readFile(mineAgentPath, "utf8"),
+      readFile(resourceCardPath, "utf8"),
+      readFile(resourceCardGridPath, "utf8"),
+    ]);
 
   assert.match(agentSpace, /const pageSize = columns \* rows;/);
   assert.match(
@@ -70,6 +76,8 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.match(resourceCard, /descriptionLines\?: number/);
   assert.match(resourceCard, /min-h-\[240px\]/);
   assert.match(resourceCard, /WebkitLineClamp: descriptionLines/);
+  assert.match(resourceCardGrid, /min-\[576px\]:grid-cols-2/);
+  assert.doesNotMatch(resourceCardGrid, /sm:grid-cols-2/);
   assert.match(mineAgent, /export function MyAgent/);
   assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{4\}/);
 });
