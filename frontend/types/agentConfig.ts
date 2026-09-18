@@ -133,6 +133,7 @@ export interface PublishedAgent {
   example_questions?: string[];
   allow_chat_metadata?: boolean;
   icon_url?: string;
+  tags?: string[];
 }
 
 export interface Agent {
@@ -140,6 +141,7 @@ export interface Agent {
   name: string;
   display_name?: string;
   description: string;
+  tags?: string[];
   author?: string;
   /** Nexent user_id of the agent creator (owner). */
   created_by?: string | null;

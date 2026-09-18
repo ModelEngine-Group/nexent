@@ -294,6 +294,107 @@ def test_fail_streaming_assistant_messages_returns_empty_without_rows(
     query.update.assert_not_called()
 
 
+@pytest.mark.parametrize("config_version,metadata_version", [(1, 9), (2, 8)])
+def test_ut_be_wb_027_joint_conflict_has_no_partial_mutation(
+    monkeypatch, mock_session_ctx, config_version, metadata_version
+):
+    """UT-BE-WB-027: either version conflict prevents all joint mutations."""
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from backend.database.conversation_db import replace_conversation_workbench_and_metadata
+    from backend.database.conversation_db import WorkbenchConfigVersionConflict
+
+    session, ctx = mock_session_ctx
+    record = SimpleNamespace(
+        workbench_config={"agent_mounts": [{"agent_id": 7}]},
+        workbench_config_version=2,
+        runtime_metadata={"department": "sales"},
+        runtime_metadata_version=9,
+        agent_id=7, knowledge_scope=None,
+    )
+    before = deepcopy(vars(record))
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    with pytest.raises((WorkbenchConfigVersionConflict, RuntimeMetadataVersionConflict)):
+        replace_conversation_workbench_and_metadata(
+            1, "user", {"agent_mounts": [{"agent_id": 8}]}, config_version,
+            {"department": "finance"}, metadata_version,
+        )
+    assert vars(record) == before
+    session.flush.assert_not_called()
+
+
+@pytest.mark.parametrize("joint", [False, True])
+def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch, mock_session_ctx, joint):
+    """UT-BE-WB-027: identical config still checks its independent version."""
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from backend.database.conversation_db import (
+        replace_conversation_workbench_config, replace_conversation_workbench_and_metadata,
+        WorkbenchConfigVersionConflict,
+    )
+
+    session, ctx = mock_session_ctx
+    config = {"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]}
+    record = SimpleNamespace(
+        workbench_config=deepcopy(config), workbench_config_version=2,
+        runtime_metadata={"department": "sales"}, runtime_metadata_version=9,
+        agent_id=7, knowledge_scope=None,
+    )
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    before = deepcopy(vars(record))
+    def commit(version):
+        if joint:
+            return replace_conversation_workbench_and_metadata(1, "user", config, version, {"department": "finance"}, 9)
+        return replace_conversation_workbench_config(1, "user", config, version, only_if_changed=True)
+
+    query = MagicMock()
+    query.where.return_value = query
+    query.with_for_update.return_value = query
+    monkeypatch.setattr("backend.database.conversation_db.select", lambda *_args: query)
+    with pytest.raises(WorkbenchConfigVersionConflict):
+        commit(1)
+    assert vars(record) == before
+    session.flush.assert_not_called()
+    result = commit(2)
+    assert result["workbench_config_version"] == 2
+    assert record.runtime_metadata_version == (10 if joint else 9)
+    assert query.with_for_update.call_count == 2
+    assert session.scalars.call_args.args[0] is query
+    if not joint:
+        session.flush.assert_not_called()
+
+
+@pytest.mark.parametrize("joint", [False, True])
+def test_workbench_topology_is_locked_with_no_partial_write(monkeypatch, mock_session_ctx, joint):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from backend.database.conversation_db import (
+        replace_conversation_workbench_config, replace_conversation_workbench_and_metadata,
+    )
+    from backend.database.conversation_db import WorkbenchError
+
+    session, ctx = mock_session_ctx
+    record = SimpleNamespace(
+        workbench_config={"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]},
+        workbench_config_version=2, runtime_metadata={"department": "sales"}, runtime_metadata_version=9,
+        agent_id=7, knowledge_scope=None,
+    )
+    before = deepcopy(vars(record))
+    session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr("backend.database.conversation_db.get_db_session", lambda: ctx)
+    config = {**record.workbench_config, "agent_mounts": [{"agent_id": 8, "version_no": 3}]}
+    with pytest.raises(WorkbenchError) as raised:
+        if joint:
+            replace_conversation_workbench_and_metadata(1, "user", config, 2, {"department": "finance"}, 9)
+        else:
+            replace_conversation_workbench_config(1, "user", config, 2)
+    assert raised.value.code == "WORKBENCH_TOPOLOGY_LOCKED"
+    assert vars(record) == before
+    session.flush.assert_not_called()
+
+
 @pytest.fixture(autouse=True)
 def reset_captured():
     """Reset captured SQLAlchemy values before each test."""

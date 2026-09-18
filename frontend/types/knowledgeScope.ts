@@ -1,6 +1,7 @@
 export type KnowledgeScopeMode = "inherit" | "override" | "disabled";
 
 export interface ConversationKnowledgeScope {
+  retrieval_config?: Record<string, unknown> | null;
   schema_version: 1;
   local: {
     mode: KnowledgeScopeMode;
@@ -23,6 +24,7 @@ export interface KnowledgeCapabilities {
   };
   sources: {
     local: {
+      default_retrieval_config?: Record<string, unknown>;
       enabled: boolean;
       max_select: number;
       requires_same_embedding_model: boolean;
@@ -31,6 +33,7 @@ export interface KnowledgeCapabilities {
       default_range_values: string[];
     };
     aidp: {
+      default_retrieval_config?: Record<string, unknown>;
       enabled: boolean;
       max_select: number;
       default_summary: string;

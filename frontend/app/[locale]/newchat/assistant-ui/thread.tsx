@@ -175,6 +175,7 @@ export interface ThreadProps {
   generatedTitle?: string;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   conversationId?: number;
   onBack?: () => void;
   selectedModelId?: string;
@@ -197,8 +198,13 @@ export interface ThreadProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
+  readOnlyReason?: string;
   showComposer?: boolean;
   interactionContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 /**
@@ -222,7 +228,7 @@ const useAgentModels = (
     ) {
       const configuredModels = model_ids.map((id, i) => ({
         id: String(id),
-        name: model_names[i] ?? `Model ${id}`,
+        name: model_names?.[i] || `Model ${id}`,
       }));
       const availableModelIds = new Set(
         availableModels
@@ -266,6 +272,7 @@ export const Thread: FC<ThreadProps> = ({
   generatedTitle,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   conversationId,
   onBack,
   selectedModelId,
@@ -285,8 +292,13 @@ export const Thread: FC<ThreadProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   readOnly = false,
+  readOnlyReason,
   showComposer = true,
   interactionContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent);
@@ -510,6 +522,7 @@ export const Thread: FC<ThreadProps> = ({
         agent={agent}
         welcomeTitle={welcomeTitle}
         welcomeSuggestions={welcomeSuggestions}
+        welcomeContent={welcomeContent}
         onBack={onBack}
         models={models}
         selectedModelId={effectiveSelectedModelId}
@@ -529,8 +542,13 @@ export const Thread: FC<ThreadProps> = ({
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
+        readOnlyReason={readOnlyReason}
         showComposer={showComposer}
         interactionContent={interactionContent}
+        workbenchPresentation={workbenchPresentation}
+        workbenchResources={workbenchResources}
+        onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+        onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -608,6 +626,7 @@ interface ThreadViewProps {
   agent: Agent | PublishedAgent;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -646,14 +665,20 @@ interface ThreadViewProps {
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
+  readOnlyReason?: string;
   showComposer: boolean;
   interactionContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   onBack,
   models,
   selectedModelId,
@@ -689,8 +714,13 @@ const ThreadView: FC<ThreadViewProps> = ({
   runtimeMetadata,
   onRuntimeMetadataChange,
   readOnly,
+  readOnlyReason,
   showComposer,
   interactionContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const { t } = useTranslation();
 
@@ -815,11 +845,13 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent
-              agent={agent}
-              title={welcomeTitle}
-              suggestions={welcomeSuggestions}
-            />
+            (welcomeContent ?? (
+              <ThreadWelcomeContent
+                agent={agent}
+                title={welcomeTitle}
+                suggestions={welcomeSuggestions}
+              />
+            ))
           )}
           {interactionContent}
         </ThreadPrimitive.Viewport>
@@ -850,6 +882,11 @@ const ThreadView: FC<ThreadViewProps> = ({
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
+              disabledReason={readOnlyReason}
+              workbenchPresentation={workbenchPresentation}
+              workbenchResources={workbenchResources}
+              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
             />
           </ThreadPrimitive.ViewportFooter>
         )}

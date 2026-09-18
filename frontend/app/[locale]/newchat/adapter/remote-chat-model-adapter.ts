@@ -9,6 +9,8 @@ import type {
 } from "@assistant-ui/react";
 
 import { conversationService } from "@/services/conversationService";
+import { ApiError } from "@/services/api";
+import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
 import { humanInteractionClient } from "@/features/humanInteraction/client";
 import { appendGuidanceMessage } from "@/features/humanInteraction/guidanceMessage";
@@ -288,6 +290,10 @@ interface NexentRunConfig {
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
   onRuntimeMetadataSent?: (version?: number) => void;
+  workbenchConfig?: import("@/features/workbench").WorkbenchSessionConfig;
+  workbenchConfigVersion?: number;
+  onWorkbenchConfigVersion?: (version: number) => void;
+  onWorkbenchConfigConflict?: (query: string) => Promise<void>;
 }
 
 function notifyKnowledgeScopeResolved(
@@ -328,6 +334,7 @@ export interface SubAgentPartMetadata {
   subagentId: number | string;
   runId: string;
   agentName: string;
+  invocationName?: string;
   depth: number;
   task?: string;
   isRunning?: boolean;
@@ -338,12 +345,14 @@ interface SubAgentStartPayload {
   agent_name?: string;
   task?: string;
   invocation_id?: string;
+  invocation_name?: string;
 }
 
 interface SubAgentEndPayload {
   agent_id?: number | string | null;
   agent_name?: string;
   invocation_id?: string;
+  invocation_name?: string;
 }
 
 function parseSubAgentStart(content: string): SubAgentStartPayload {
@@ -1535,6 +1544,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
     );
 
+    // Workbench v3 owns model selection; legacy composer state is only a projection.
+    const workbenchConfig = custom?.workbenchConfig;
+    if (workbenchConfig)
+      requestBody.model_id = workbenchConfig.model_id ?? undefined;
+
     let backendConversationId = hasServerConversationId
       ? numericServerThreadId
       : null;
@@ -1630,13 +1644,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : (requestBody.model_id as number | undefined),
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
+          entrypoint: workbenchConfig ? "workbench" : undefined,
+          workbench: workbenchConfig,
+          expected_workbench_config_version: custom?.workbenchConfigVersion,
         },
         abortSignal,
         (conversationId) => {
           const numericId = Number(conversationId);
           if (!Number.isNaN(numericId) && numericId > 0) {
             backendConversationId = numericId;
-            if (abortSignal?.aborted) {
+            if (userAborted) {
               custom?.onGenerationStopped?.(numericId);
               void stopBackendRun(numericId);
             }
@@ -1654,10 +1671,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         (runId) => {
           backendRunId = runId;
           onRunId?.(runId);
-          if (abortSignal?.aborted) {
+          if (userAborted) {
             void stopBackendRun(runId);
           }
-        }
+        },
+        (version) => custom?.onWorkbenchConfigVersion?.(version)
       );
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
@@ -1674,6 +1692,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         return;
       }
       log.error("[ChatModelAdapter] Agent request failed:", error);
+      if (
+        error instanceof ApiError &&
+        error.code === "WORKBENCH_CONFIG_VERSION_CONFLICT"
+      ) {
+        await custom?.onWorkbenchConfigConflict?.(visibleQuery);
+      }
       throw error;
     }
 
@@ -1810,6 +1834,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       runId: string;
       agentId: number | string;
       agentName: string;
+      invocationName?: string;
       task?: string;
       depth: number;
       isRunning: boolean;
@@ -1838,6 +1863,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         subagentId: top.agentId,
         runId: top.runId,
         agentName: top.agentName,
+        invocationName: top.invocationName,
         depth: top.depth,
         task: top.task,
         isRunning: top.isRunning,
@@ -1905,6 +1931,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         subagentId: entry.agentId,
         runId: entry.runId,
         agentName: entry.agentName,
+        invocationName: entry.invocationName,
         depth: entry.depth,
         task: entry.task,
         isRunning: entry.isRunning,
@@ -2083,6 +2110,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           // Internal status / resume events: skip
           if (chunk.type === "status") continue;
 
+          if (chunk.type === "workbench_config_resolved") {
+            notifyWorkbenchConfigResolved(
+              chunk.content,
+              custom?.onWorkbenchConfigVersion
+            );
+            continue;
+          }
           if (chunk.type === "user_steering") {
             if (appendGuidanceMessage(contentParts, chunk.content)) {
               yield buildStreamResult(contentParts);
@@ -2336,6 +2370,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               runId,
               agentId,
               agentName: payload.agent_name || chunk.agent_name || "subagent",
+              invocationName: payload.invocation_name,
               task: payload.task,
               depth:
                 typeof chunk.depth === "number"
@@ -2561,7 +2596,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           if (chunk.type === "step_count") {
             flushOpenReasoning(chunk.invocation_id);
           }
-          if (chunk.type === "user_steering") {
+          if (chunk.type === "workbench_config_resolved") {
+            notifyWorkbenchConfigResolved(
+              chunk.content,
+              custom?.onWorkbenchConfigVersion
+            );
+          } else if (chunk.type === "user_steering") {
             if (appendGuidanceMessage(contentParts, chunk.content)) {
               yield buildStreamResult(contentParts);
             }

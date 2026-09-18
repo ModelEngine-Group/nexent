@@ -65,6 +65,7 @@ class RunSkillScriptTool(Tool):
         on_complete: Optional[Any] = None,
         execution_backend: Optional[Any] = None,
         authorized_skill_names: Optional[Sequence[str]] = None,
+        isolated_skills_root: bool = False,
     ):
         """Initialize the tool with local skills directory and agent context.
         Args:
@@ -89,6 +90,7 @@ class RunSkillScriptTool(Tool):
         self.workspace_path = workspace_path
         self.on_complete = on_complete
         self.execution_backend = execution_backend
+        self.isolated_skills_root = isolated_skills_root
         self.authorized_skill_names = (
             frozenset(name for name in (authorized_skill_names or []) if name)
             if authorized_skill_names is not None
@@ -109,8 +111,15 @@ class RunSkillScriptTool(Tool):
     def _get_skill_manager(self):
         """Lazy load skill manager."""
         if self.skill_manager is None:
-            from nexent.skills import SkillManager
-            self.skill_manager = SkillManager(self.local_skills_dir)
+            if self.isolated_skills_root:
+                from nexent.skills.skill_manager import SkillManager
+                manager = object.__new__(SkillManager)
+                manager.base_skills_dir = os.path.abspath(self.local_skills_dir)
+                manager._initialized = True
+                self.skill_manager = manager
+            else:
+                from nexent.skills import SkillManager
+                self.skill_manager = SkillManager(self.local_skills_dir)
         return self.skill_manager
 
     @staticmethod

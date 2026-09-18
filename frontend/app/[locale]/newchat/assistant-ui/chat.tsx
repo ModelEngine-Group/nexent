@@ -26,6 +26,8 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  selectedModelId?: string;
+  onModelChange?: (modelId: string) => void;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -42,6 +44,12 @@ export interface ChatProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
   interactionContent?: ReactNode;
+  readOnlyReason?: string;
+  landingContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -71,6 +79,8 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  selectedModelId,
+  onModelChange,
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -84,6 +94,12 @@ export const Chat: FC<ChatProps> = ({
   onRuntimeMetadataChange,
   readOnly = false,
   interactionContent,
+  readOnlyReason,
+  landingContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -95,6 +111,39 @@ export const Chat: FC<ChatProps> = ({
   if (!selectedAgent) {
     if (isLoadingAgents) {
       return <AgentsLoadingState />;
+    }
+    if (workbenchPresentation || landingContent) {
+      return (
+        <Thread
+          agent={{
+            id: "__workbench_empty__",
+            name: "智能体工作台",
+            description: "",
+            model: "",
+            max_step: 8,
+            provide_run_summary: false,
+            tools: [],
+          }}
+          welcomeContent={landingContent}
+          selectedModelId={selectedModelId}
+          onModelChange={onModelChange}
+          showModelSelector={showModelSelector}
+          chatMode={chatMode}
+          onChatModeChange={onChatModeChange}
+          isDictationConfigured={isDictationConfigured}
+          readOnly={readOnly}
+          readOnlyReason={readOnlyReason}
+          showConversationTitle={false}
+          workbenchPresentation={workbenchPresentation}
+          workbenchResources={workbenchResources}
+          onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+          onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+          knowledgeScope={knowledgeScope}
+          knowledgePreview={knowledgePreview}
+          knowledgeCapabilities={knowledgeCapabilities}
+          onKnowledgeScopeChange={onKnowledgeScopeChange}
+        />
+      );
     }
     return (
       <AgentLandingPage
@@ -114,6 +163,8 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      selectedModelId={selectedModelId}
+      onModelChange={onModelChange}
       showConversationTitle={showConversationTitle}
       isDictationConfigured={isDictationConfigured}
       knowledgeScope={knowledgeScope}
@@ -127,6 +178,11 @@ export const Chat: FC<ChatProps> = ({
       onRuntimeMetadataChange={onRuntimeMetadataChange}
       readOnly={readOnly}
       interactionContent={interactionContent}
+      readOnlyReason={readOnlyReason}
+      workbenchPresentation={workbenchPresentation}
+      workbenchResources={workbenchResources}
+      onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+      onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
     />
   );
 };

@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
+import { CreationExamples } from "@/features/workbench/components/CreationExamples";
 import {
   ArrowUp,
   Mic,
@@ -20,6 +22,7 @@ import {
   ListChecks,
   ChevronDown,
   Database,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -55,6 +58,7 @@ import type {
   KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
 import { ConversationKnowledgeScopeModal } from "./conversation-knowledge-scope-modal";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import type { SkillFileContent } from "@/types/skill";
 import { SkillFileMentionPopover } from "../ui/skill-file-mention";
 import { DirectiveChip } from "../ui/directive-text";
@@ -90,6 +94,11 @@ export interface ComposerProps {
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   allowRuntimeMetadata?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 // Simple tooltip wrapper
@@ -219,6 +228,11 @@ export const Composer: FC<ComposerProps> = ({
   onRuntimeMetadataChange,
   allowRuntimeMetadata = false,
   disabled = false,
+  disabledReason,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const { t, i18n } = useTranslation();
   const zh = i18n.language.startsWith("zh");
@@ -233,13 +247,18 @@ export const Composer: FC<ComposerProps> = ({
   };
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const creationMode =
+    workbenchPresentation?.mode === "skill_create" ||
+    workbenchPresentation?.mode === "agent_create"
+      ? workbenchPresentation.mode
+      : null;
 
+  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
   const hasIncompatibleScope = Boolean(
+    isDeploymentReady &&
     knowledgeScope &&
-    ((knowledgeScope.local.mode === "override" &&
-      !knowledgeCapabilities?.sources.local.enabled) ||
-      (knowledgeScope.aidp.mode === "override" &&
-        !knowledgeCapabilities?.sources.aidp.enabled))
+    ((knowledgeScope.local.mode === "override" && enableAidpKnowledge) ||
+      (knowledgeScope.aidp.mode === "override" && !enableAidpKnowledge))
   );
 
   const knowledgeSummary = useMemo(() => {
@@ -323,20 +342,51 @@ export const Composer: FC<ComposerProps> = ({
   ]);
 
   return (
-    <div className="relative w-full">
+    <div className="relative w-full min-w-0">
       <QueuedRunMessageStrip key={queue?.scope} />
+      {workbenchPresentation &&
+        !compact &&
+        (creationMode ? (
+          <CreationExamples
+            mode={creationMode}
+            onBack={workbenchPresentation.onExitCreation}
+          />
+        ) : (
+          workbenchPresentation.actions
+        ))}
       <fieldset
-        disabled={disabled}
-        aria-disabled={disabled}
+        disabled={disabled && !disabledReason}
+        aria-disabled={disabled && !disabledReason}
         className={cn(
           "relative m-0 flex min-w-0 w-full flex-col overflow-visible rounded-2xl border border-border bg-card p-0 shadow-sm",
-          disabled && "cursor-not-allowed opacity-60"
+          workbenchPresentation &&
+            "rounded-3xl shadow-[0_12px_36px_-14px_rgba(0,0,0,0.18)]",
+          disabled && !disabledReason && "cursor-not-allowed opacity-60"
         )}
       >
-        {!compact && <PlanView />}
+        {disabled && disabledReason ? (
+          <p className="px-3 pb-1 text-xs text-amber-700" role="status">
+            {disabledReason}
+          </p>
+        ) : null}
+        {!compact && !workbenchPresentation && <PlanView />}
+        {creationMode && (
+          <div className="px-4 pt-4">
+            <button
+              type="button"
+              onClick={workbenchPresentation?.onExitCreation}
+              disabled={isRunning}
+              className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary"
+              aria-label="退出创建模式"
+            >
+              {creationMode === "skill_create" ? "Skill 创建" : "Agent创建"}
+              <span aria-hidden>×</span>
+            </button>
+          </div>
+        )}
 
         {/* Mode switcher above input */}
-        {!compact && (
+        {!compact && !workbenchPresentation && (
           <div className="flex items-center border-b border-border px-3 py-2">
             {/* Mode switcher */}
             <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
@@ -386,6 +436,12 @@ export const Composer: FC<ComposerProps> = ({
                 enqueue();
               }
             }}
+            onSubmitCapture={(event) => {
+              if (disabled) {
+                event.preventDefault();
+                event.stopPropagation();
+              }
+            }}
           >
             {!compact && !bufferedInput && <ComposerAttachments />}
             {bufferedInput || queueLocked ? (
@@ -420,15 +476,63 @@ export const Composer: FC<ComposerProps> = ({
               />
             ) : (
               <ComposerPrimitive.Input
+                data-workbench-composer
                 placeholder={t("chat.composer.placeholder")}
-                className="mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground"
+                className={cn(
+                  "mb-1 max-h-48 min-h-14 w-full resize-none bg-transparent px-3 py-1 text-sm outline-none placeholder:text-muted-foreground",
+                  workbenchPresentation && "min-h-28 px-5 py-4"
+                )}
                 rows={1}
                 submitMode="enter"
                 autoFocus
               />
             )}
-            <div className="relative mx-2 mb-2 flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1">
+            {!compact && workbenchResources && (
+              <SelectedResourceChips
+                resources={workbenchResources}
+                scope={knowledgeScope}
+                knowledgeNames={{
+                  local: Object.fromEntries(
+                    (knowledgePreview?.local.knowledge_ids || []).map(
+                      (id, index) => [
+                        id,
+                        knowledgePreview?.local.display_names[index] ||
+                          `#${id}`,
+                      ]
+                    )
+                  ),
+                  aidp: Object.fromEntries(
+                    (knowledgePreview?.aidp.kds_ids || []).map((id, index) => [
+                      id,
+                      knowledgePreview?.aidp.display_names[index] || `#${id}`,
+                    ])
+                  ),
+                }}
+                disabled={isRunning}
+                onEditSkill={onOpenWorkbenchSkillPicker}
+                onRemoveSkill={onRemoveWorkbenchSkill}
+                onEditKnowledge={() => setKnowledgeModalOpen(true)}
+                onKnowledgeChange={(scope) => {
+                  // The controller presents save/conflict errors; keep rejected saves out of the event loop.
+                  void Promise.resolve(onKnowledgeScopeChange?.(scope)).catch(
+                    () => undefined
+                  );
+                }}
+              />
+            )}
+            <div
+              className={cn(
+                "relative mx-2 mb-2 flex items-center justify-between gap-2",
+                workbenchPresentation &&
+                  "mx-4 flex-wrap border-t border-border pt-2 sm:flex-nowrap"
+              )}
+            >
+              <div
+                className={cn(
+                  "flex min-w-0 items-center gap-1",
+                  workbenchPresentation && "flex-wrap sm:flex-nowrap"
+                )}
+              >
                 {showModelSelector && (
                   <ModelSelector
                     models={models}
@@ -436,18 +540,46 @@ export const Composer: FC<ComposerProps> = ({
                     onValueChange={onModelChange}
                     variant="ghost"
                     size="sm"
-                    className="shrink-0 text-xs"
+                    className="shrink-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground"
                   />
                 )}
+                {!compact && workbenchResources && (
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                      disabled={isRunning}
+                      onClick={workbenchResources.onSelectAgent}
+                    >
+                      <Bot className="size-3.5" />
+                      Agent
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0 gap-1.5 px-2 text-xs"
+                      disabled={isRunning}
+                      onClick={onOpenWorkbenchSkillPicker}
+                    >
+                      <Lightbulb className="size-3.5" />
+                      Skills
+                    </Button>
+                  </>
+                )}
                 {!compact &&
-                  (knowledgeCapabilities?.sources.local.enabled ||
+                  !creationMode &&
+                  (workbenchPresentation ||
+                    knowledgeCapabilities?.sources.local.enabled ||
                     knowledgeCapabilities?.sources.aidp.enabled ||
                     knowledgeScope) && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-muted-foreground"
+                      className="h-8 min-w-0 max-w-64 gap-1.5 px-2 text-xs text-foreground"
                       onClick={() => setKnowledgeModalOpen(true)}
                       disabled={isRunning}
                       title={
@@ -457,7 +589,9 @@ export const Composer: FC<ComposerProps> = ({
                       }
                     >
                       <Database className="size-3.5 shrink-0" />
-                      <span className="truncate">{knowledgeSummary}</span>
+                      <span className="truncate">
+                        {workbenchPresentation ? "知识库" : knowledgeSummary}
+                      </span>
                     </Button>
                   )}
                 {!compact &&
@@ -470,7 +604,7 @@ export const Composer: FC<ComposerProps> = ({
                     />
                   )}
               </div>
-              <div className="ml-auto flex items-center gap-1">
+              <div className="ml-auto flex shrink-0 items-center gap-1">
                 {!compact && !bufferedInput && !queueLocked && (
                   <ComposerAddAttachment />
                 )}
@@ -546,11 +680,11 @@ export const Composer: FC<ComposerProps> = ({
                         <Square className="size-4 fill-current" />
                       </Button>
                     ) : (
-                      <ComposerSendOrCancel />
+                      <ComposerSendOrCancel disabled={disabled} />
                     )}
                   </>
                 ) : queue?.entry ? null : (
-                  <ComposerSendOrCancel />
+                  <ComposerSendOrCancel disabled={disabled} />
                 )}
               </div>
             </div>
@@ -583,7 +717,7 @@ export const Composer: FC<ComposerProps> = ({
 // the click handler to actually fire. The tooltip wrapper sits outside so its
 // Trigger can use `asChild` against the Button. `AuiIf` toggles between the
 // two branches declaratively based on `thread.isRunning`.
-const ComposerSendOrCancel: FC = () => {
+const ComposerSendOrCancel: FC<{ disabled?: boolean }> = ({ disabled }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -595,6 +729,7 @@ const ComposerSendOrCancel: FC = () => {
             <Button
               size="icon"
               variant="outline"
+              aria-label={t("chat.composer.stopGenerating")}
               className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
             >
               <Square className="size-4 fill-current" />
@@ -608,7 +743,7 @@ const ComposerSendOrCancel: FC = () => {
             <Button
               size="icon"
               className="size-8 rounded-full ml-2"
-              disabled={!hasText}
+              disabled={disabled || !hasText}
               aria-label={t("chat.composer.send")}
             >
               <ArrowUp className="size-5" />

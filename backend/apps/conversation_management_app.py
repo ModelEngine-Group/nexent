@@ -7,6 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from consts.model import (
     BatchDeleteConversationRequest,
     ConversationKnowledgeScopeUpdateRequest,
+    WorkbenchConfigUpdateRequest,
     ConversationRequest,
     ConversationResponse,
     GenerateTitleRequest,
@@ -14,7 +15,13 @@ from consts.model import (
     OpinionRequest,
     RenameRequest,
 )
-from consts.exceptions import ConversationNotFoundError, ValidationError, TokenExpiredError
+from consts.exceptions import (
+    ConversationNotFoundError,
+    ValidationError,
+    TokenExpiredError,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
+)
 from database.conversation_db import get_conversation_list_page
 from services.conversation_management_service import (
     create_new_conversation,
@@ -25,6 +32,7 @@ from services.conversation_management_service import (
     get_sources_service,
     rename_conversation_service,
     update_conversation_knowledge_scope_service,
+    update_conversation_workbench_config_service,
     update_message_opinion_service, get_message_id_by_index_impl,
 )
 from utils.auth_utils import get_current_user_id, get_current_user_info
@@ -209,11 +217,15 @@ async def update_conversation_knowledge_scope_endpoint(
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         scope = request.scope.model_dump(mode="json") if request.scope is not None else None
+        version_kwargs = {}
+        if request.expected_workbench_config_version is not None:
+            version_kwargs["expected_workbench_config_version"] = request.expected_workbench_config_version
         result = update_conversation_knowledge_scope_service(
             conversation_id=conversation_id,
             knowledge_scope=scope,
             user_id=user_id,
             tenant_id=tenant_id,
+            **version_kwargs,
         )
         return ConversationResponse(
             code=0,
@@ -222,6 +234,11 @@ async def update_conversation_knowledge_scope_endpoint(
         )
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except WorkbenchConfigVersionConflict as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail={
+            "code": "WORKBENCH_CONFIG_VERSION_CONFLICT",
+            "current_version": exc.current_version,
+        }) from exc
     except ValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -235,6 +252,39 @@ async def update_conversation_knowledge_scope_endpoint(
     except Exception as exc:
         logging.error("Failed to update conversation knowledge scope: %s", exc)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.patch("/{conversation_id}/workbench-config", response_model=ConversationResponse)
+async def update_conversation_workbench_config_endpoint(
+    conversation_id: int,
+    request: WorkbenchConfigUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Replace canonical Workbench config using its independent optimistic lock."""
+
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        result = update_conversation_workbench_config_service(
+            conversation_id=conversation_id,
+            config=request.config.model_dump(mode="json"),
+            expected_version=request.expected_version,
+            user_id=user_id,
+        )
+        return ConversationResponse(code=0, message="success", data=result)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except WorkbenchConfigVersionConflict as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail={
+                "code": "WORKBENCH_CONFIG_VERSION_CONFLICT",
+                "current_version": exc.current_version,
+            },
+        ) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "WORKBENCH_CONFIG_INVALID"}) from exc
 
 
 @router.post("/sources", response_model=Dict[str, Any])

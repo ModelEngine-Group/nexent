@@ -183,6 +183,7 @@ export const fetchAgentList = async (tenantId?: string) => {
       is_a2a_server: agent.is_a2a_server || false,
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
       icon_url: agent.icon_url,
+      tags: normalizeTags(agent.tags),
     }));
 
     return {

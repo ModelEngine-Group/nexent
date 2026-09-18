@@ -1,4 +1,10 @@
 {
+  "workbench.creationExamples.skill.invoiceExtraction": "帮我创建一个「发票信息提取」Skill：上传发票图片或 PDF，自动识别发票代码、发票号码、开票日期、购买方、销售方、金额、税额。支持增值税普通发票和专用发票，输出为结构化 JSON，支持批量上传。",
+  "workbench.creationExamples.skill.contractReview": "帮我创建一个「合同关键信息审查」Skill：上传合同 PDF 或 Word，提取合同主体、金额、履约期限、付款条件、违约责任和争议解决条款，标记缺失项与高风险条款，并输出结构化审查结果。",
+  "workbench.creationExamples.skill.meetingNotes": "帮我创建一个「会议纪要整理」Skill：上传会议录音或文字记录，识别议题、关键结论、待办事项、负责人和截止时间，生成结构化会议纪要，并支持导出 Markdown。",
+  "workbench.creationExamples.agent.knowledgeAssistant": "帮我创建一个企业知识问答助手的应用，满足员工自然语言提问、智能检索多源知识库、整合分散信息生成准确答案、支持知识溯源的需求。",
+  "workbench.creationExamples.agent.customerService": "帮我创建一个智能客服应用，能够识别用户问题意图，结合产品知识库回答售前和售后问题，信息不足时主动追问，无法解决时转人工，并保留引用来源。",
+  "workbench.creationExamples.agent.businessAnalysis": "帮我创建一个经营数据分析助手的应用，支持上传 Excel 或 CSV，用自然语言查询核心指标、同比环比和异常波动，生成分析结论与可视化建议，并说明数据口径。",
   "assistant.name": "{productName}",
   "mainPage.layout.title": "{productName} | 智能问答",
   "mainPage.layout.titleTemplate": "%s | {productName} 智能问答",

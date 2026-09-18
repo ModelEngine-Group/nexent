@@ -55,6 +55,8 @@ export const API_ENDPOINTS = {
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
+    workbenchConfig: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench-config`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     batchDelete: `${API_BASE_URL}/conversation/batch-delete`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
@@ -101,6 +103,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     knowledgeCapabilities: (agentId: number) =>
       `${API_BASE_URL}/agent/${agentId}/knowledge-capabilities`,
+    workbenchBootstrap: `${API_BASE_URL}/agent/workbench/bootstrap`,
+    workbenchPreview: `${API_BASE_URL}/agent/workbench/capabilities/preview`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,

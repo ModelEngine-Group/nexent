@@ -1,22 +1,43 @@
 "use client";
 
+import { ResourceSelectionActions } from "@/features/workbench/components/ResourceSelectionActions";
+
+import { SelectedResourceTags } from "@/features/workbench/components/SelectedResourceTags";
+
+import {
+  ResourceSelectionGrid,
+  RESOURCE_SELECTION_AREA_CLASS,
+} from "@/features/workbench/components/ResourceSelectionGrid";
+import {
+  ResourcePagination,
+  resourcePage,
+} from "@/features/workbench/components/ResourcePagination";
+
 import { useEffect, useMemo, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
-import { Alert, Button, Checkbox, Empty, Modal, Spin, message } from "antd";
+import { Alert, Button, Empty, Input, Modal, Spin, message } from "antd";
 
-import { Can } from "@/components/permission/Can";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
-import { KB_LAYOUT, KB_TAG_VARIANTS } from "@/const/knowledgeBaseLayout";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
+import type { ToolParam } from "@/types/agentConfig";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
   KnowledgeScopeEffectivePreview,
 } from "@/types/knowledgeScope";
 import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
+import { ResourceCard } from "@/features/workbench";
+import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
+import { useToolList } from "@/hooks/agent/useToolList";
+import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
+  getSemanticToolName,
+} from "@/lib/managedKnowledgeTools";
+import { RestoreDefaultsButton } from "@/features/workbench/components/RestoreDefaultsButton";
 
 interface ConversationKnowledgeScopeModalProps {
   open: boolean;
@@ -71,7 +92,11 @@ const normalizeScopeForSource = (
       local: { mode: "disabled", knowledge_ids: [] },
     };
   }
-  return copyScope(null);
+  return {
+    schema_version: 1,
+    local: { mode: "disabled", knowledge_ids: [] },
+    aidp: { mode: "disabled", kds_ids: [] },
+  };
 };
 
 export const ConversationKnowledgeScopeModal: FC<
@@ -79,6 +104,27 @@ export const ConversationKnowledgeScopeModal: FC<
 > = ({ open, value, capabilities, onCancel, onConfirm }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
+  const { availableTools, isLoading: toolsLoading } = useToolList({
+    enabled: open && isDeploymentReady,
+  });
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const [retrievalConfig, setRetrievalConfig] = useState<
+    Record<string, unknown>
+  >({});
+  const [paramDraft, setParamDraft] = useState<Record<string, unknown>>({});
+  const knowledgeTool = availableTools.find(
+    (tool) =>
+      getSemanticToolName(tool) ===
+      (enableAidpKnowledge ? "aidp_search" : "knowledge_base_search")
+  );
+  const configurableParams: ToolParam[] = (
+    knowledgeTool?.initParams || []
+  ).filter(
+    (param: ToolParam) =>
+      !["index_names", "kds_list"].includes(param.name) &&
+      !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
+  );
   const { user } = useAuthorizationContext();
   const { data: groupListData } = useGroupList(user?.tenantId ?? null);
   const groupNameById = useMemo(
@@ -91,16 +137,11 @@ export const ConversationKnowledgeScopeModal: FC<
       ),
     [groupListData]
   );
-  const hasSourceConflict = Boolean(
-    capabilities?.sources.local.enabled && capabilities.sources.aidp.enabled
-  );
-  const configuredSource: "local" | "aidp" | null = hasSourceConflict
+  const configuredSource: "local" | "aidp" | null = !isDeploymentReady
     ? null
-    : capabilities?.sources.local.enabled
-      ? "local"
-      : capabilities?.sources.aidp.enabled
-        ? "aidp"
-        : null;
+    : enableAidpKnowledge
+      ? "aidp"
+      : "local";
   const [draft, setDraft] = useState<ConversationKnowledgeScope>(() =>
     normalizeScopeForSource(value, configuredSource)
   );
@@ -111,6 +152,7 @@ export const ConversationKnowledgeScopeModal: FC<
     []
   );
   const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [initialSelectedIds, setInitialSelectedIds] = useState<string[]>([]);
   const [initialSelectionWasFiltered, setInitialSelectionWasFiltered] =
@@ -118,19 +160,41 @@ export const ConversationKnowledgeScopeModal: FC<
   const [defaultSelectedIds, setDefaultSelectedIds] = useState<string[]>([]);
   const [selectionTouched, setSelectionTouched] = useState(false);
   const [restoreDefaultClicked, setRestoreDefaultClicked] = useState(false);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    setPage(1);
+  }, [open, search, enableAidpKnowledge]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !configuredSource) return;
+    setParamsOpen(false);
+    const incompatible =
+      configuredSource === "aidp"
+        ? value?.local.mode === "override"
+        : value?.aidp.mode === "override";
+    setRetrievalConfig(
+      incompatible ? {} : structuredClone(value?.retrieval_config || {})
+    );
     const normalized = normalizeScopeForSource(value, configuredSource);
     setDraft(normalized);
     setInitialSelectionWasFiltered(false);
     setSelectionTouched(false);
     setRestoreDefaultClicked(false);
+    setSearch("");
+    setListError(false);
     let cancelled = false;
     setLoading(true);
     Promise.all([
       configuredSource === "local"
-        ? knowledgeBaseService.getKnowledgeBasesInfo(false, false)
+        ? knowledgeBaseService.getKnowledgeBasesInfo(
+            false,
+            false,
+            null,
+            null,
+            undefined,
+            { strict: true }
+          )
         : Promise.resolve({ knowledgeBases: [] }),
       configuredSource === "aidp"
         ? knowledgeBaseService.getAidpKnowledgeBasesAll()
@@ -203,7 +267,10 @@ export const ConversationKnowledgeScopeModal: FC<
         );
       })
       .catch(() => {
-        if (!cancelled) message.error(t("chat.knowledgeScope.listLoadFailed"));
+        if (!cancelled) {
+          setListError(true);
+          message.error(t("chat.knowledgeScope.listLoadFailed"));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -336,7 +403,9 @@ export const ConversationKnowledgeScopeModal: FC<
       );
       return;
     }
-    const maxSelect = capabilities?.sources[source].max_select ?? 0;
+    const maxSelect =
+      capabilities?.sources[source].max_select ??
+      (source === "local" ? 50 : 10);
     if (maxSelect > 0 && currentValues.length >= maxSelect) {
       message.warning(t("chat.knowledgeScope.maxSelect", { count: maxSelect }));
       return;
@@ -365,7 +434,7 @@ export const ConversationKnowledgeScopeModal: FC<
   };
 
   const handleConfirm = async () => {
-    if (!configuredSource) return;
+    if (!configuredSource || loading || saving || listError) return;
     const selectedIds =
       configuredSource === "local"
         ? draft.local.knowledge_ids
@@ -382,6 +451,9 @@ export const ConversationKnowledgeScopeModal: FC<
       nextScope = buildInheritScope(configuredSource);
     }
     if (!validateLocalEmbeddingModels()) return;
+    if (Object.keys(retrievalConfig).length)
+      nextScope.retrieval_config = structuredClone(retrievalConfig);
+    else delete nextScope.retrieval_config;
     const localNamesById = new Map(
       localOptions.map((option) => [String(option.value), String(option.label)])
     );
@@ -415,6 +487,10 @@ export const ConversationKnowledgeScopeModal: FC<
     setSaving(true);
     try {
       await onConfirm(nextScope, preview);
+    } catch {
+      message.error(
+        t("chat.knowledgeScope.saveFailed", "知识库配置保存失败，请重试")
+      );
     } finally {
       setSaving(false);
     }
@@ -423,10 +499,15 @@ export const ConversationKnowledgeScopeModal: FC<
   const renderSource = (source: "local" | "aidp") => {
     const values =
       source === "local" ? draft.local.knowledge_ids : draft.aidp.kds_ids;
-    const knowledgeBases =
+    const allKnowledgeBases =
       source === "local" ? localKnowledgeBases : aidpKnowledgeBases;
+    const filteredKnowledgeBases = allKnowledgeBases.filter((kb) =>
+      [kb.name, kb.display_name, kb.description].some((value) =>
+        value?.toLowerCase().includes(search.trim().toLowerCase())
+      )
+    );
     const selectedSet = new Set(values);
-    const selectedKnowledgeBases = knowledgeBases.filter((knowledgeBase) =>
+    const selectedKnowledgeBases = allKnowledgeBases.filter((knowledgeBase) =>
       selectedSet.has(getKnowledgeBaseId(source, knowledgeBase))
     );
     const selectedLocalModel =
@@ -435,13 +516,13 @@ export const ConversationKnowledgeScopeModal: FC<
           ? getEmbeddingIdentity(selectedKnowledgeBases[0])
           : ""
         : "";
-    const selectableKnowledgeBases = knowledgeBases.filter(
-      (knowledgeBase) =>
-        source !== "local" ||
-        !selectedLocalModel ||
-        !getEmbeddingIdentity(knowledgeBase) ||
-        getEmbeddingIdentity(knowledgeBase) === selectedLocalModel
-    );
+    const isCompatible = (knowledgeBase: KnowledgeBase) =>
+      source !== "local" ||
+      !selectedLocalModel ||
+      !getEmbeddingIdentity(knowledgeBase) ||
+      getEmbeddingIdentity(knowledgeBase) === selectedLocalModel;
+    const knowledgeBases = filteredKnowledgeBases;
+    const selectableKnowledgeBases = knowledgeBases.filter(isCompatible);
     const selectableIds = selectableKnowledgeBases.map((knowledgeBase) =>
       getKnowledgeBaseId(source, knowledgeBase)
     );
@@ -451,7 +532,11 @@ export const ConversationKnowledgeScopeModal: FC<
 
     const handleSelectAll = () => {
       if (allSelected) {
-        updateSelectedValues(source, []);
+        const visible = new Set(selectableIds);
+        updateSelectedValues(
+          source,
+          values.filter((id) => !visible.has(id))
+        );
         return;
       }
       let candidates = selectableKnowledgeBases;
@@ -464,7 +549,9 @@ export const ConversationKnowledgeScopeModal: FC<
           );
         }
       }
-      const maxSelect = capabilities?.sources[source].max_select ?? 0;
+      const maxSelect =
+        capabilities?.sources[source].max_select ??
+        (source === "local" ? 50 : 10);
       const mergedIds = Array.from(
         new Set([
           ...values,
@@ -485,83 +572,38 @@ export const ConversationKnowledgeScopeModal: FC<
 
     return (
       <div className="overflow-hidden rounded-lg border border-border bg-background">
-        <div className="border-b border-blue-100 bg-blue-50 px-4 py-3">
+        <div className="rounded bg-blue-50 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-blue-800">
-                {source === "local"
-                  ? t("chat.knowledgeScope.localTab")
-                  : t("chat.knowledgeScope.aidpTab")}
-              </div>
-              <div className="mt-0.5 text-xs text-blue-700">
-                {t("knowledgeBase.selected.prefix")} {values.length}{" "}
-                {t("knowledgeBase.selected.suffix")}
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {knowledgeBases.length > 0 && (
-                <Button
-                  type="link"
-                  size="small"
-                  className="h-auto p-0 font-medium"
-                  onClick={handleSelectAll}
-                >
-                  {allSelected
-                    ? t("common.deselectAll")
-                    : t("knowledgeBase.button.selectAll")}
-                </Button>
-              )}
-              {values.length > 0 && (
-                <Button
-                  type="link"
-                  size="small"
-                  danger
-                  className="h-auto p-0 font-medium"
-                  onClick={() => updateSelectedValues(source, [])}
-                >
-                  {t("knowledgeBase.button.clearSelection")}
-                </Button>
-              )}
-            </div>
+            <SelectedResourceTags
+              items={selectedKnowledgeBases.map((kb) => ({
+                id: getKnowledgeBaseId(source, kb),
+                name: kb.display_name || kb.name,
+              }))}
+              onRemove={(id) => toggleKnowledgeBase(source, id)}
+            />
+            <ResourceSelectionActions
+              allSelected={allSelected}
+              hasSelection={values.length > 0}
+              disabled={loading || saving || listError}
+              empty={selectableIds.length === 0}
+              onToggleAll={handleSelectAll}
+              onClear={() => updateSelectedValues(source, [])}
+            />
           </div>
-          {selectedKnowledgeBases.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {selectedKnowledgeBases.map((knowledgeBase) => {
-                const id = getKnowledgeBaseId(source, knowledgeBase);
-                const name = knowledgeBase.display_name || knowledgeBase.name;
-                return (
-                  <span
-                    key={id}
-                    className="inline-flex max-w-48 items-center rounded bg-blue-100 px-2 py-0.5 text-sm font-medium text-blue-800"
-                  >
-                    <span className="truncate" title={name}>
-                      {name}
-                    </span>
-                    <button
-                      type="button"
-                      className="ml-1.5 shrink-0 text-blue-600 hover:text-blue-800"
-                      onClick={() => toggleKnowledgeBase(source, id)}
-                      aria-label={t("knowledgeBase.button.removeKb", {
-                        name,
-                      })}
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-          )}
         </div>
 
         {knowledgeBases.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("chat.knowledgeScope.empty")}
-          />
+          <div
+            className={`${RESOURCE_SELECTION_AREA_CLASS} flex items-center justify-center`}
+          >
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("chat.knowledgeScope.empty")}
+            />
+          </div>
         ) : (
-          <div className="max-h-80 divide-y divide-border overflow-y-auto">
-            {knowledgeBases.map((knowledgeBase) => {
+          <ResourceSelectionGrid className="p-1">
+            {resourcePage(knowledgeBases, page).map((knowledgeBase) => {
               const id = getKnowledgeBaseId(source, knowledgeBase);
               const isSelected = selectedSet.has(id);
               const modelIdentity = getEmbeddingIdentity(knowledgeBase);
@@ -576,121 +618,65 @@ export const ConversationKnowledgeScopeModal: FC<
                 .map((groupId) => groupNameById.get(groupId))
                 .filter((groupName): groupName is string => Boolean(groupName));
               return (
-                <div
-                  role="button"
-                  tabIndex={disabledByModel ? -1 : 0}
+                <ResourceCard
+                  resourceType="knowledge"
                   key={id}
-                  className={`flex w-full items-start gap-3 px-4 ${KB_LAYOUT.ROW_PADDING} text-left transition-colors ${
-                    disabledByModel
-                      ? "cursor-not-allowed bg-muted/30 opacity-50"
-                      : "hover:bg-muted/40"
-                  }`}
-                  onClick={() => {
-                    if (!disabledByModel) {
-                      toggleKnowledgeBase(source, id);
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (
-                      !disabledByModel &&
-                      (event.key === "Enter" || event.key === " ")
-                    ) {
-                      event.preventDefault();
-                      toggleKnowledgeBase(source, id);
-                    }
-                  }}
-                  aria-disabled={disabledByModel}
-                  title={
+                  title={name}
+                  tags={knowledgeBase.tags || []}
+                  description={knowledgeBase.description || undefined}
+                  subtitle={`${knowledgeBase.documentCount ?? 0} ${t("knowledgeBase.document", "篇文档")}`}
+                  selected={isSelected}
+                  disabled={disabledByModel}
+                  onClick={() => toggleKnowledgeBase(source, id)}
+                  actions={
+                    <Button
+                      size="small"
+                      aria-label="编辑"
+                      onClick={() => router.push("/knowledges")}
+                    >
+                      编辑
+                    </Button>
+                  }
+                  badges={[
+                    source === "local" ? "本地" : "AIDP",
+                    knowledgeBase.permission,
+                    ...(source === "local" &&
+                    knowledgeBase.embeddingModel &&
+                    knowledgeBase.embeddingModel !== "unknown"
+                      ? [
+                          t("knowledgeBase.tag.model", {
+                            model: knowledgeBase.embeddingModel,
+                          }),
+                        ]
+                      : []),
+                    ...(knowledgeBase.ingroup_permission === "PRIVATE"
+                      ? [t("knowledgeBase.ingroup.permission.PRIVATE")]
+                      : groupNames),
+                    ...(knowledgeBase.is_multimodal ? ["multimodal"] : []),
+                  ]}
+                  disabledReason={
                     disabledByModel
                       ? t("chat.knowledgeScope.embeddingMismatch")
                       : undefined
                   }
-                >
-                  <Checkbox
-                    checked={isSelected}
-                    disabled={disabledByModel}
-                    className="mt-1"
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={() => toggleKnowledgeBase(source, id)}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className={`${KB_LAYOUT.KB_NAME_TEXT} truncate text-foreground`}
-                      title={name}
-                    >
-                      {name}
-                    </div>
-                    {source === "aidp" && (
-                      <div
-                        className="mt-1 line-clamp-2 text-xs text-muted-foreground"
-                        title={
-                          knowledgeBase.description ||
-                          t("aidpKnowledge.noDescription")
-                        }
-                      >
-                        {knowledgeBase.description ||
-                          t("aidpKnowledge.noDescription")}
-                      </div>
-                    )}
-                    <div
-                      className={`flex flex-wrap items-center ${KB_LAYOUT.TAG_MARGIN} ${KB_LAYOUT.TAG_SPACING}`}
-                    >
-                      {source === "local" &&
-                        knowledgeBase.embeddingModel &&
-                        knowledgeBase.embeddingModel !== "unknown" && (
-                          <span
-                            className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.model}`}
-                          >
-                            {t("knowledgeBase.tag.model", {
-                              model: knowledgeBase.embeddingModel,
-                            })}
-                          </span>
-                        )}
-                      {source === "aidp" && (
-                        <span
-                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                        >
-                          {knowledgeBase.createdAt
-                            ? t("aidpKnowledge.createdAt", {
-                                date: new Date(
-                                  knowledgeBase.createdAt
-                                ).toLocaleDateString(),
-                              })
-                            : t("aidpKnowledge.createdAtUnknown")}
-                        </span>
-                      )}
-                      {knowledgeBase.ingroup_permission === "PRIVATE" ? (
-                        <span
-                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.default}`}
-                        >
-                          {t("knowledgeBase.ingroup.permission.PRIVATE")}
-                        </span>
-                      ) : (
-                        <Can permission="group:read">
-                          {groupNames.map((groupName) => (
-                            <span
-                              key={groupName}
-                              className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} border border-blue-200 bg-blue-100 text-blue-800`}
-                            >
-                              {groupName}
-                            </span>
-                          ))}
-                        </Can>
-                      )}
-                      {knowledgeBase.is_multimodal && (
-                        <span
-                          className={`${KB_LAYOUT.TAG_PADDING} ${KB_LAYOUT.TAG_ROUNDED} ${KB_LAYOUT.TAG_TEXT} ${KB_TAG_VARIANTS.red}`}
-                        >
-                          multimodal
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  footer={
+                    disabledByModel
+                      ? t("chat.knowledgeScope.embeddingMismatch")
+                      : isSelected
+                        ? t("common.selected", "已选择")
+                        : t("common.select", "选择")
+                  }
+                />
               );
             })}
-          </div>
+          </ResourceSelectionGrid>
         )}
+        <ResourcePagination
+          current={page}
+          total={knowledgeBases.length}
+          onChange={setPage}
+          disabled={loading || saving}
+        />
       </div>
     );
   };
@@ -704,39 +690,58 @@ export const ConversationKnowledgeScopeModal: FC<
       okText={t("chat.knowledgeScope.confirm")}
       cancelText={t("chat.knowledgeScope.cancel")}
       confirmLoading={saving}
-      width={720}
+      okButtonProps={{ disabled: loading || listError || !configuredSource }}
+      width={920}
+      centered
       footer={(_, { OkBtn, CancelBtn }) => (
         <div className="flex items-center justify-between">
-          <button
-            type="button"
-            className="text-sm text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              if (!configuredSource) return;
-              setDraft(
-                configuredSource === "local"
-                  ? {
-                      schema_version: 1,
-                      local: {
-                        mode: "override",
-                        knowledge_ids: defaultSelectedIds,
-                      },
-                      aidp: { mode: "disabled", kds_ids: [] },
-                    }
-                  : {
-                      schema_version: 1,
-                      local: { mode: "disabled", knowledge_ids: [] },
-                      aidp: {
-                        mode: "override",
-                        kds_ids: defaultSelectedIds,
-                      },
-                    }
-              );
-              setSelectionTouched(true);
-              setRestoreDefaultClicked(true);
-            }}
-          >
-            {t("chat.knowledgeScope.restoreDefault")}
-          </button>
+          <div className="flex items-center gap-3">
+            <RestoreDefaultsButton
+              disabled={loading || listError || saving || !configuredSource}
+              onClick={() => {
+                if (!configuredSource) return;
+                setDraft(
+                  configuredSource === "local"
+                    ? {
+                        schema_version: 1,
+                        local: {
+                          mode: "override",
+                          knowledge_ids: defaultSelectedIds,
+                        },
+                        aidp: { mode: "disabled", kds_ids: [] },
+                      }
+                    : {
+                        schema_version: 1,
+                        local: { mode: "disabled", knowledge_ids: [] },
+                        aidp: {
+                          mode: "override",
+                          kds_ids: defaultSelectedIds,
+                        },
+                      }
+                );
+                setSelectionTouched(true);
+                setRestoreDefaultClicked(true);
+                setRetrievalConfig({});
+              }}
+            >
+              {t("chat.knowledgeScope.restoreDefault")}
+            </RestoreDefaultsButton>
+            <Button
+              disabled={
+                loading ||
+                saving ||
+                toolsLoading ||
+                !knowledgeTool ||
+                !configuredSource
+              }
+              onClick={() => {
+                setParamDraft(structuredClone(retrievalConfig));
+                setParamsOpen(true);
+              }}
+            >
+              配置
+            </Button>
+          </div>
           <div className="flex gap-2">
             <CancelBtn />
             <OkBtn />
@@ -745,10 +750,8 @@ export const ConversationKnowledgeScopeModal: FC<
       )}
     >
       {value &&
-        ((value.local.mode === "override" &&
-          !capabilities?.sources.local.enabled) ||
-          (value.aidp.mode === "override" &&
-            !capabilities?.sources.aidp.enabled)) && (
+        ((value.local.mode === "override" && configuredSource === "aidp") ||
+          (value.aidp.mode === "override" && configuredSource === "local")) && (
           <Alert
             className="mb-3"
             type="warning"
@@ -780,15 +783,54 @@ export const ConversationKnowledgeScopeModal: FC<
           }
         />
       )}
-      <Spin spinning={loading}>
+      <Spin spinning={loading || !isDeploymentReady}>
         {configuredSource ? (
-          <div className="space-y-3 py-2">{renderSource(configuredSource)}</div>
-        ) : hasSourceConflict ? (
-          <Alert
-            type="error"
-            showIcon
-            title={t("chat.knowledgeScope.sourceConflict")}
-          />
+          <div className="space-y-3 py-2">
+            <Input.Search
+              aria-label="搜索知识库"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="搜索名称或描述"
+              allowClear
+            />
+            <Modal
+              open={paramsOpen}
+              title={t("agent.knowledge.configModal.title")}
+              onCancel={() => setParamsOpen(false)}
+              okText="确定"
+              cancelText="取消"
+              onOk={() => {
+                setRetrievalConfig(structuredClone(paramDraft));
+                setParamsOpen(false);
+              }}
+            >
+              <KnowledgeRetrievalParamsForm
+                params={configurableParams}
+                values={Object.fromEntries(
+                  configurableParams.map((param) => [
+                    param.name,
+                    paramDraft[param.name] ??
+                      (configuredSource
+                        ? capabilities?.sources[configuredSource]
+                            .default_retrieval_config?.[param.name]
+                        : undefined) ??
+                      param.value ??
+                      param.default,
+                  ])
+                )}
+                onChange={(name, nextValue) =>
+                  setParamDraft((current) => {
+                    const next = { ...current };
+                    if (nextValue === null || nextValue === undefined)
+                      delete next[name];
+                    else next[name] = nextValue;
+                    return next;
+                  })
+                }
+              />
+            </Modal>
+            {renderSource(configuredSource)}
+          </div>
         ) : (
           <Empty description={t("chat.knowledgeScope.noTool")} />
         )}
