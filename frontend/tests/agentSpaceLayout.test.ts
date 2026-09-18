@@ -54,7 +54,9 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.match(agentSpace, /descriptionLines=\{descriptionLines\}/);
   assert.match(agentSpace, /const pageBottomPadding = screens\.sm \? 40 : 32;/);
   assert.match(agentSpace, /viewportHeight - top - pageBottomPadding - 8/);
+  assert.match(agentSpace, /const MIN_CARD_HEIGHT = 240;/);
   assert.match(resourceCard, /descriptionLines\?: number/);
+  assert.match(resourceCard, /min-h-\[240px\]/);
   assert.match(resourceCard, /WebkitLineClamp: descriptionLines/);
   assert.match(mineAgent, /export function MyAgent/);
   assert.match(mineAgent, /<ResourceCardGrid[\s\S]*columns=\{4\}/);

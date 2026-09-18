@@ -33,7 +33,7 @@ import {
 import { mapRepositoryListingDetail } from "@/lib/agentRepositoryDetail";
 
 const CARD_GAP = 20;
-const MIN_CARD_HEIGHT = 220;
+const MIN_CARD_HEIGHT = 240;
 const PAGINATION_HEIGHT = 60;
 
 export function AgentSpace({ active }: { active: boolean }) {
