@@ -173,6 +173,11 @@ export const ModelEditDialogV2 = ({
           filteredSpecs,
           model.type
         );
+        const defaultReasoningEffort =
+          model.defaultReasoningEffort ?? model.reasoningCapability?.default;
+        if (defaultReasoningEffort) {
+          advancedValue.reasoning_effort = defaultReasoningEffort;
+        }
         setAdvanced(advancedValue);
       } else {
         setAdvanced({});
@@ -1006,6 +1011,7 @@ export const ModelEditDialogV2 = ({
             value={advanced}
             onChange={setAdvanced}
             mode="default"
+            reasoningCapability={model.reasoningCapability}
           />
         </div>
       </Modal>

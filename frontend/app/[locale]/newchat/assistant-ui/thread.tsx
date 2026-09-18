@@ -214,23 +214,56 @@ const useAgentModels = (
     const typedAgent = agent as PublishedAgent;
     const { model_ids, model_names } = typedAgent;
 
+    const toSelectorModel = (id: string, fallbackName: string) => {
+      const model = availableModels.find(
+        (item) =>
+          String(item.id) === id ||
+          item.name === id ||
+          item.displayName === id
+      );
+      const capability = model?.reasoningCapability;
+      const supportsEffort =
+        capability?.status === "supported" && capability.levels.length > 0;
+      const defaultEffort =
+        model?.defaultReasoningEffort &&
+        capability?.levels.includes(model.defaultReasoningEffort)
+          ? model.defaultReasoningEffort
+          : capability?.default;
+      return {
+        id,
+        name: fallbackName,
+        ...(supportsEffort
+          ? {
+              efforts: capability.levels.map((level) => ({
+                id: level,
+                name:
+                  level === "none"
+                    ? "Off"
+                    : level[0].toUpperCase() + level.slice(1),
+              })),
+              defaultEffort: defaultEffort ?? undefined,
+            }
+          : {}),
+      };
+    };
+
     if (
       model_ids &&
       model_ids.length > 0 &&
       model_names &&
       model_names.length > 0
     ) {
-      const configuredModels = model_ids.map((id, i) => ({
-        id: String(id),
-        name: model_names[i] ?? `Model ${id}`,
-      }));
-      const availableModelIds = new Set(
-        availableModels
-          .filter((model) => model.connect_status === "available")
-          .map((model) => String(model.id))
+      const configuredModels = model_ids.map((id, i) =>
+        toSelectorModel(String(id), model_names[i] ?? `Model ${id}`)
       );
-      return configuredModels.filter((model) =>
-        availableModelIds.has(model.id)
+      return configuredModels.filter((configuredModel) =>
+        availableModels.some(
+          (model) =>
+            model.connect_status !== "unavailable" &&
+            (String(model.id) === configuredModel.id ||
+              model.name === configuredModel.id ||
+              model.displayName === configuredModel.id)
+        )
       );
     }
 
@@ -239,22 +272,28 @@ const useAgentModels = (
       .model_name;
     const modelIsAvailable = availableModels.some(
       (model) =>
-        model.connect_status === "available" &&
+        model.connect_status !== "unavailable" &&
         (model.displayName === modelName || model.name === modelName)
     );
     if (modelName && modelIsAvailable) {
-      return [{ id: modelName, name: modelName }];
+      const model = availableModels.find(
+        (item) => item.displayName === modelName || item.name === modelName
+      );
+      return [toSelectorModel(String(model?.id ?? modelName), modelName)];
     }
 
     // Fallback to the single model field (used by AgentDraft / debug panel)
     const singleModel = (typedAgent as unknown as { model?: string }).model;
     const singleModelIsAvailable = availableModels.some(
       (model) =>
-        model.connect_status === "available" &&
+        model.connect_status !== "unavailable" &&
         (model.displayName === singleModel || model.name === singleModel)
     );
     if (singleModel && singleModelIsAvailable) {
-      return [{ id: singleModel, name: singleModel }];
+      const model = availableModels.find(
+        (item) => item.displayName === singleModel || item.name === singleModel
+      );
+      return [toSelectorModel(String(model?.id ?? singleModel), singleModel)];
     }
 
     return [];
@@ -1545,8 +1584,15 @@ const AssistantMessage: FC<{
                 }
                 return <Sources {...part} />;
               case "data":
-                if ((part as typeof part & { name?: string }).name === "user-steering") {
-                  return <UserGuidanceMessage data={(part as typeof part & { data?: unknown }).data} />;
+                if (
+                  (part as typeof part & { name?: string }).name ===
+                  "user-steering"
+                ) {
+                  return (
+                    <UserGuidanceMessage
+                      data={(part as typeof part & { data?: unknown }).data}
+                    />
+                  );
                 }
                 if (
                   (part as typeof part & { name?: string }).name ===

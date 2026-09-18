@@ -591,6 +591,9 @@ openai_mod._base_client = openai_base_client_mod
 sys.modules["openai"] = openai_mod
 sys.modules["openai._base_client"] = openai_base_client_mod
 module_mocks["openai._base_client"] = openai_base_client_mod
+# The patch.dict() import below uses the MagicMock registered in
+# module_mocks["openai"]. Keep the client constructor available there too.
+module_mocks["openai"].DefaultHttpxClient = openai_mod.DefaultHttpxClient
 
 # Dynamically load the module directly by file path
 MODULE_NAME = "nexent.core.models.openai_llm"
@@ -2749,3 +2752,46 @@ def test_translate_thinking_passthrough_without_flag(openai_model_instance):
     openai_model_instance.model_id = "Qwen/Qwen3"
     original = {"other_param": "x"}
     assert openai_model_instance._translate_thinking_flag(original) == original
+
+
+def test_reasoning_effort_uses_top_level_wire_field(openai_model_instance):
+    openai_model_instance.reasoning_effort = "max"
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "reasoning_effort",
+    }
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {"reasoning_effort": "max"}
+
+
+def test_reasoning_toggle_uses_thinking_object(openai_model_instance):
+    openai_model_instance.reasoning_effort = "none"
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "thinking_toggle",
+    }
+    completion_kwargs = {"extra_body": {"custom": True}}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {
+        "extra_body": {"custom": True, "thinking": {"type": "disabled"}},
+    }
+
+
+def test_reasoning_budget_uses_anthropic_compatible_extra_body(openai_model_instance):
+    openai_model_instance.reasoning_effort = "medium"
+    openai_model_instance.reasoning_capability = {
+        "wire_format": "thinking_budget",
+        "effort_budgets": {"medium": 8192},
+    }
+    completion_kwargs = {}
+
+    openai_model_instance._apply_reasoning_control(completion_kwargs)
+
+    assert completion_kwargs == {
+        "extra_body": {
+            "thinking": {"type": "enabled", "budget_tokens": 8192},
+        },
+    }
