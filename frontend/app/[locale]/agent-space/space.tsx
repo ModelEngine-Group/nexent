@@ -260,8 +260,14 @@ export function AgentSpace({ active }: { active: boolean }) {
         }
         badge={
           listing.version_label ? (
-            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-              {listing.version_label}
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-primary"
+                aria-hidden
+              />
+              {t("agentRepository.mine.currentVersion", {
+                version: listing.version_label,
+              })}
             </span>
           ) : undefined
         }
