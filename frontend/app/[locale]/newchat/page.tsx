@@ -583,7 +583,9 @@ const HomeContent: FC<{
         onRuntimeMetadataSent: handleRuntimeMetadataSent,
         onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
         onGenerationStopped: handleGenerationStopped,
-        onHumanInteractionEvent: hitlController.refresh,
+        // HITL events (ask_user suspend, run transitions) must bypass the
+        // snapshot throttle: the event stream goes quiet afterwards.
+        onHumanInteractionEvent: () => hitlController.refresh(true),
         enablePlan: chatMode === "planning",
         enableHitl,
         ...(activeThreadId
