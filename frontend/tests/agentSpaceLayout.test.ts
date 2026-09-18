@@ -60,7 +60,7 @@ test("agent repository displays up to twelve unified cards in four desktop colum
   assert.match(agentSpace, /Grid\.useBreakpoint\(\)/);
   assert.match(
     agentSpace,
-    /const columns = screens\.xxl\s*\? 4\s*:\s*screens\.lg\s*\? 3/
+    /const columns = screens\.xxl\s*\? 4\s*:\s*screens\.xl\s*\? 3\s*:\s*screens\.lg \|\| screens\.md \|\| screens\.sm\s*\? 2/
   );
   assert.match(agentSpace, /gridHeight=\{/);
   assert.match(agentSpace, /descriptionLines=\{descriptionLines\}/);

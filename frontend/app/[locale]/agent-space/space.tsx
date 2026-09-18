@@ -48,9 +48,9 @@ export function AgentSpace({ active }: { active: boolean }) {
   );
   const columns = screens.xxl
     ? 4
-    : screens.lg
+    : screens.xl
       ? 3
-      : screens.md || screens.sm
+      : screens.lg || screens.md || screens.sm
         ? 2
         : screens.xs
           ? 1
