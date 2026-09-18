@@ -2014,7 +2014,7 @@
   "agentRepository.mine.status.updateReviewing": "更新审核中",
   "agentRepository.mine.status.listed": "已上架",
   "agentRepository.mine.status.rejected": "审核驳回",
-  "agentRepository.mine.currentVersion": "当前 {{version}}",
+  "agentRepository.mine.currentVersion": "当前版本 {{version}}",
   "agentRepository.mine.onlineVersionShort": "线上 {{version}}",
   "agentRepository.mine.edit": "编辑",
   "agentRepository.mine.backToRepository": "返回Agent 仓库",

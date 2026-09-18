@@ -149,7 +149,11 @@ export function MyAgentCard({
             <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px]">
               <div className="min-w-0 text-slate-500 dark:text-slate-400">
                 {versionLabel != null ? (
-                  <span className="truncate">
+                  <span className="inline-flex items-center gap-1.5 truncate">
+                    <span
+                      className="size-1.5 shrink-0 rounded-full bg-primary"
+                      aria-hidden
+                    />
                     {t("agentRepository.mine.currentVersion", {
                       version: versionLabel,
                     })}
