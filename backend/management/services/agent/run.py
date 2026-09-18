@@ -133,6 +133,7 @@ def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> in
     """Join mergeable unit fragments once and return finalized UTF-8 bytes."""
     finalized_bytes = 0
     for unit in message_units:
+        unit.pop("_attempt_id", None)
         fragments = unit.pop("_content_fragments", None)
         if fragments is not None:
             content = "".join(fragments)
@@ -140,6 +141,17 @@ def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> in
             unit["unit_content"] = content
         finalized_bytes += len(str(unit.get("unit_content", "")).encode("utf-8"))
     return finalized_bytes
+
+
+def _rollback_model_attempt_units(
+    message_units: list[dict[str, Any]], attempt_id: str
+) -> int:
+    """Remove uncommitted model fragments for one physical model attempt."""
+    original_count = len(message_units)
+    message_units[:] = [
+        unit for unit in message_units if unit.get("_attempt_id") != attempt_id
+    ]
+    return original_count - len(message_units)
 
 
 def _unregister_agent_run_after_execution(
@@ -521,6 +533,8 @@ async def _stream_agent_chunks(
                         current_unit is not None
                         and mergeable
                         and current_unit.get("type") == chunk_type
+                        and current_unit.get("_attempt_id") == data.get("attempt_id")
+                        and current_unit.get("invocation_id") == data.get("invocation_id")
                     ):
                         # Continuing chunk - use current unit's index
                         data["unit_index"] = current_unit["unit_index"]
@@ -536,6 +550,16 @@ async def _stream_agent_chunks(
                     )
             except Exception:
                 # Malformed chunk: emit as-is and skip persistence bookkeeping.
+                await channel.publish(f"data: {chunk}\n\n")
+                yield f"data: {chunk}\n\n"
+                continue
+
+            if chunk_type == "model_attempt_control":
+                phase = data.get("phase")
+                attempt_id = data.get("attempt_id")
+                current_unit = None
+                if phase == "rollback" and isinstance(attempt_id, str):
+                    _rollback_model_attempt_units(buffered_units, attempt_id)
                 await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
                 continue
@@ -637,6 +661,8 @@ async def _stream_agent_chunks(
                     current_unit is not None
                     and mergeable
                     and current_unit.get("type") == chunk_type
+                    and current_unit.get("_attempt_id") == data.get("attempt_id")
+                    and current_unit.get("invocation_id") == data.get("invocation_id")
                 )
 
                 if is_continuation:
@@ -763,6 +789,7 @@ async def _stream_agent_chunks(
                             "unit_content": persisted_content,
                             "tool_call_id": data.get("tool_call_id"),
                             "invocation_id": data.get("invocation_id"),
+                            "_attempt_id": data.get("attempt_id"),
                             "mergeable": mergeable,
                         }
                         if mergeable:
@@ -815,9 +842,17 @@ async def _stream_agent_chunks(
             else "failed"
         )
         outcome = getattr(agent_run_info, "attempt_outcome", None)
-        if getattr(agent_run_info, "human_interaction", None) is not None and isinstance(outcome, str):
+        if (
+            getattr(agent_run_info, "human_interaction", None) is not None
+            and isinstance(outcome, str)
+        ):
             terminal_status = outcome if stream_completed_normally else "recovery_required"
             agent_run_info.attempt_outcome = terminal_status
+        elif outcome in {"failed", "stopped"}:
+            # A typed terminal model error is delivered as a normal observer
+            # ``error`` chunk, so the async iterator can finish normally while
+            # the worker outcome still authoritatively marks the run failed.
+            terminal_status = outcome
 
         try:
             skill_file_payloads = list(captured_skill_files.values())

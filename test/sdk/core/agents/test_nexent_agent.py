@@ -2028,6 +2028,32 @@ def test_agent_run_with_observer_with_exception(nexent_agent_instance, mock_core
     )
 
 
+def test_cmsr_004_terminal_model_error_emits_one_safe_error(
+    nexent_agent_instance, mock_core_agent
+):
+    nexent_agent_instance.agent = mock_core_agent
+    terminal_error_type = nexent_agent.ModelInvocationTerminalError
+    model_error_code = terminal_error_type.safe_message.__globals__["ModelErrorCode"]
+    terminal = terminal_error_type(
+        model_error_code.SERVICE_UNAVAILABLE,
+        5,
+        cause=RuntimeError("private provider body"),
+    )
+    mock_core_agent.run.side_effect = terminal
+
+    with pytest.raises(terminal_error_type) as exc_info:
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    assert exc_info.value is terminal
+    mock_core_agent.observer.add_message.assert_called_once_with(
+        agent_name="test_agent",
+        process_type=ProcessType.ERROR,
+        content="The model service is temporarily unavailable. Please try again later.",
+        error_code="model_service_unavailable",
+        retryable=False,
+    )
+
+
 def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):
     """Test agent_run_with_observer raises TypeError when agent is not a CoreAgent."""
     nexent_agent_instance.agent = "not_core_agent"
