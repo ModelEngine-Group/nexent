@@ -9,6 +9,8 @@ export interface ResourceCardProps {
   /** Secondary text displayed directly below the title. */
   subtitle?: ReactNode;
   description?: ReactNode;
+  /** Maximum number of visible description lines before truncation. */
+  descriptionLines?: number;
   icon?: ReactNode;
   /** Status or lifecycle content displayed beside the title. */
   badge?: ReactNode;
@@ -35,6 +37,7 @@ export default function ResourceCard({
   title,
   subtitle,
   description,
+  descriptionLines = 3,
   icon,
   badge,
   tags,
@@ -121,7 +124,14 @@ export default function ResourceCard({
             </div>
             <div className="flex flex-1 flex-col">
               {description ? (
-                <div className="mt-4 line-clamp-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                <div
+                  className="mt-4 min-h-0 overflow-hidden text-sm leading-6 text-slate-600 dark:text-slate-300"
+                  style={{
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: descriptionLines,
+                  }}
+                >
                   {description}
                 </div>
               ) : null}

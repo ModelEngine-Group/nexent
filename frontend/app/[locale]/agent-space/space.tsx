@@ -119,6 +119,23 @@ export function AgentSpace({ active }: { active: boolean }) {
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
   const listings = data?.items ?? [];
   const total = data?.pagination?.total ?? 0;
+  const gridHeight =
+    availableGridHeight === null
+      ? undefined
+      : Math.max(
+          0,
+          availableGridHeight - (total > pageSize ? PAGINATION_HEIGHT : 0)
+        );
+  const cardHeight =
+    gridHeight === undefined
+      ? undefined
+      : Math.max(0, (gridHeight - CARD_GAP * (rows - 1)) / rows);
+  const descriptionLines =
+    cardHeight === undefined || cardHeight >= 320
+      ? 3
+      : cardHeight >= 260
+        ? 2
+        : 1;
   const updatingRepositoryId = updateStatusMutation.isPending
     ? (updateStatusMutation.variables?.agentRepositoryId ?? null)
     : null;
@@ -220,6 +237,7 @@ export function AgentSpace({ active }: { active: boolean }) {
         className="h-full min-h-0"
         title={title}
         onClick={() => setDetailListingId(listing.agent_repository_id)}
+        descriptionLines={descriptionLines}
         icon={
           <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
             {listing.icon?.trim() ? (
@@ -332,15 +350,7 @@ export function AgentSpace({ active }: { active: boolean }) {
             items={listings}
             columns={columns}
             rows={rows}
-            gridHeight={
-              availableGridHeight === null
-                ? undefined
-                : Math.max(
-                    0,
-                    availableGridHeight -
-                      (total > pageSize ? PAGINATION_HEIGHT : 0)
-                  )
-            }
+            gridHeight={gridHeight}
             page={page}
             total={total}
             onPageChange={setPage}
