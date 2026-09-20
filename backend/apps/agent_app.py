@@ -165,6 +165,8 @@ async def agent_run_api(
         ) from e
     except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
         return _runtime_overload_response(exc)
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent run error: {str(e)}")
         # Only expose actual error in debug mode for better diagnosis
@@ -212,6 +214,8 @@ async def northbound_agent_run_api(
         ) from exc
     except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
         return _runtime_overload_response(exc)
+    except AppException:
+        raise
     except Exception as exc:
         logger.error("Northbound agent run error: %s", exc)
         raise HTTPException(
