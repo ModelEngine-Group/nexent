@@ -70,16 +70,18 @@ app.include_router(router)
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def mock_requester_context():
+    """Provide a stable authenticated requester for user-list endpoint tests."""
+    with patch(
+        "apps.user_app.get_current_user_context",
+        return_value=("admin-1", "tenant1", "ADMIN"),
+    ):
+        yield
+
+
 class TestGetUsersEndpoint:
     """Test get_users_endpoint (POST /users/list)"""
-
-    @pytest.fixture(autouse=True)
-    def mock_requester_context(self):
-        with patch(
-            "apps.user_app.get_current_user_context",
-            return_value=("admin-1", "tenant1", "ADMIN"),
-        ):
-            yield
 
     def test_get_users_success_with_pagination(self):
         """Test successful user list retrieval with pagination"""
