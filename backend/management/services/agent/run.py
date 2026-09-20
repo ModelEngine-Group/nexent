@@ -101,7 +101,10 @@ from utils.auth_utils import get_current_user_info, get_user_language
 from utils.agent_stream_utils import (
     enrich_file_uploads_with_presigned_urls as _enrich_file_uploads_with_presigned_urls,
     extract_json_objects_from_text as _extract_json_objects_from_text,
+    finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments,
+    is_stream_unit_continuation as _is_continuation,
     process_skill_file_uploads as _process_skill_file_uploads,
+    rollback_model_attempt_units as _rollback_model_attempt_units,
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
     serialize_stream_unit_content as _serialize_stream_unit_content,
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
@@ -127,31 +130,6 @@ _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
 _agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 _external_memory_ingest_tasks: set[asyncio.Task[None]] = set()
 _fa_extraction_tasks: set[asyncio.Task[None]] = set()
-
-
-def _finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int:
-    """Join mergeable unit fragments once and return finalized UTF-8 bytes."""
-    finalized_bytes = 0
-    for unit in message_units:
-        unit.pop("_attempt_id", None)
-        fragments = unit.pop("_content_fragments", None)
-        if fragments is not None:
-            content = "".join(fragments)
-            unit["content"] = content
-            unit["unit_content"] = content
-        finalized_bytes += len(str(unit.get("unit_content", "")).encode("utf-8"))
-    return finalized_bytes
-
-
-def _rollback_model_attempt_units(
-    message_units: list[dict[str, Any]], attempt_id: str
-) -> int:
-    """Remove uncommitted model fragments for one physical model attempt."""
-    original_count = len(message_units)
-    message_units[:] = [
-        unit for unit in message_units if unit.get("_attempt_id") != attempt_id
-    ]
-    return original_count - len(message_units)
 
 
 def _unregister_agent_run_after_execution(
@@ -523,19 +501,11 @@ async def _stream_agent_chunks(
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
 
-                # Add unit_index to the chunk data for frontend resume skip logic.
-                # This allows frontend to accurately skip chunks that were already persisted.
-                # For mergeable types (continuing chunks), use the current unit's index.
-                # For new units, use the next_unit_index that will be assigned.
+                # Use the current unit index for continuations and the next index
+                # for new units so the frontend can skip persisted resume chunks.
                 if streaming_message_id is not None and chunk_type:
                     mergeable = chunk_type in _MERGEABLE_TYPES
-                    if (
-                        current_unit is not None
-                        and mergeable
-                        and current_unit.get("type") == chunk_type
-                        and current_unit.get("_attempt_id") == data.get("attempt_id")
-                        and current_unit.get("invocation_id") == data.get("invocation_id")
-                    ):
+                    if _is_continuation(current_unit, mergeable, chunk_type, data):
                         # Continuing chunk - use current unit's index
                         data["unit_index"] = current_unit["unit_index"]
                     elif chunk_type not in ("search_content_placeholder",):
@@ -657,12 +627,8 @@ async def _stream_agent_chunks(
             # stream reaches a terminal state.
             if streaming_message_id is not None and chunk_type:
                 mergeable = chunk_type in _MERGEABLE_TYPES
-                is_continuation = (
-                    current_unit is not None
-                    and mergeable
-                    and current_unit.get("type") == chunk_type
-                    and current_unit.get("_attempt_id") == data.get("attempt_id")
-                    and current_unit.get("invocation_id") == data.get("invocation_id")
+                is_continuation = _is_continuation(
+                    current_unit, mergeable, chunk_type, data
                 )
 
                 if is_continuation:

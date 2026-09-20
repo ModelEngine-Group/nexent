@@ -8,6 +8,7 @@ import pytest
 from management.services.agent import run as agent_run_service
 from management.services.agent.run import (
     _finalize_buffered_unit_fragments,
+    _is_continuation,
     _rollback_model_attempt_units,
 )
 
@@ -41,6 +42,19 @@ def test_cmsr_003_attempt_metadata_is_never_persisted():
             "content": "hello world",
         }
     ]
+
+
+def test_cmsr_003_continuation_requires_matching_attempt_and_invocation():
+    current = {
+        "type": "model_output_thinking",
+        "_attempt_id": "attempt-1",
+        "invocation_id": "subagent-1",
+    }
+    matching = {"attempt_id": "attempt-1", "invocation_id": "subagent-1"}
+    sibling = {"attempt_id": "attempt-2", "invocation_id": "subagent-1"}
+
+    assert _is_continuation(current, True, "model_output_thinking", matching)
+    assert not _is_continuation(current, True, "model_output_thinking", sibling)
 
 
 def _agent_request():
