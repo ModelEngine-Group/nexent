@@ -42,7 +42,6 @@ from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
 from management.services.agent.service import (
     get_agent_info_impl,
     get_agent_icon_impl,
-    get_creating_sub_agent_info_impl,
     update_agent_info_impl,
     upload_agent_icon_impl,
     delete_agent_impl,
@@ -368,19 +367,6 @@ async def get_agent_by_name_api(
         logger.error(f"Agent by name lookup error: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent not found.")
-
-
-@agent_config_router.get("/get_creating_sub_agent_id")
-async def get_creating_sub_agent_info_api(authorization: Optional[str] = Header(None)):
-    """
-    Create a new sub agent, return agent_ID
-    """
-    try:
-        return await get_creating_sub_agent_info_impl(authorization)
-    except Exception as e:
-        logger.error(f"Agent create error: {str(e)}")
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent create error.")
 
 
 @agent_config_router.post("/update")
