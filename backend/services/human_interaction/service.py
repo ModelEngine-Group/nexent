@@ -78,6 +78,16 @@ class HumanInteractionService:
                 raise InteractionError("Run initialization was interrupted")
             run.status = "READY" if succeeded else "FAILED"
 
+    def cancel_queued(self, run_id, tenant_id, user_id):
+        """Cancel only an unclaimed initial run, atomically against dispatch."""
+        with self.repository.transaction(run_id, tenant_id, user_id) as tx:
+            run = self.require(tx)
+            if run.status != "READY" or run.fence != 0 or run.lock_owner is not None:
+                return False
+            run.status = "FAILED"
+            tx.emit({"type": "human_run", "content": {"run_id": run_id, "status": run.status}})
+            return True
+
     def _project_request(self, request, run_id):
         payload = self.cipher.open(request.payload)
         return {"request_id": request.request_id, "run_id": run_id, "kind": request.kind,
@@ -304,6 +314,8 @@ class HumanInteractionService:
 
     def expire_waiting(self):
         for run_id in self.repository.waiting_ids():
-            with self.repository.transaction(run_id) as tx:
-                if tx is not None:
+            # Recovery precedes claim_due: never let one busy run block every
+            # unrelated run from being dispatched by this scheduler.
+            with self.repository.transaction(run_id, skip_locked=True) as tx:
+                if tx is not None and tx.run.status == "WAITING_HUMAN":
                     self._expire(tx)

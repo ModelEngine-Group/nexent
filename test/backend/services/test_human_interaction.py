@@ -1278,10 +1278,14 @@ async def test_attachment_request_starts_native_run_without_losing_files(service
     async def stream(run_id, tenant, user):
         return service.snapshot(run_id, tenant, user)
 
+    async def dispatch(_service, run_id, tenant, user):
+        assert service.repository.claim("worker", 1, 120)[0]["run_id"] == run_id
+
     monkeypatch.setattr(application, "authorize_run", authorize)
+    monkeypatch.setattr(application, "_wait_for_dispatch", dispatch)
     monkeypatch.setattr(application, "stream_run", stream)
     result = await application.start_run(request, "tenant-a", "owner", "en", skip_user_save=skip_user_save)
-    assert result["status"] == "READY"
+    assert result["status"] == "RUNNING"
     assert saved_messages == ([] if skip_user_save else [request])
     with service.repository.transaction(result["run_id"]) as tx:
         saved = service.cipher.open(tx.run.request_payload)

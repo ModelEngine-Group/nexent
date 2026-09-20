@@ -152,17 +152,24 @@ class RunTransaction:
 
 
 class HumanInteractionRepository:
-    def __init__(self, session_factory=get_db_session):
+    def __init__(self, session_factory=get_db_session, *, lock_timeout_ms=5000):
         self.session_factory = session_factory
         self.validator = None
+        self.lock_timeout_ms = lock_timeout_ms
 
     @contextmanager
-    def transaction(self, run_id, tenant_id=None, user_id=None):
+    def transaction(self, run_id, tenant_id=None, user_id=None, *, skip_locked=False):
         with self.session_factory() as session, session.no_autoflush:
+            # A stuck run must not monopolize control workers indefinitely.
+            # SET LOCAL semantics keep this limit out of other pooled callers.
+            session.execute(
+                text("SELECT set_config('lock_timeout', :timeout, true)"),
+                {"timeout": f"{self.lock_timeout_ms}ms"},
+            )
             conditions = [HumanRun.run_id == run_id, HumanRun.delete_flag == "N"]
             if tenant_id is not None:
                 conditions.extend([HumanRun.tenant_id == tenant_id, HumanRun.user_id == user_id])
-            run = session.scalar(select(HumanRun).where(*conditions).with_for_update())
+            run = session.scalar(select(HumanRun).where(*conditions).with_for_update(skip_locked=skip_locked))
             tx = RunTransaction(session, run, self.validator, user_id) if run else None
             yield tx
             if tx:

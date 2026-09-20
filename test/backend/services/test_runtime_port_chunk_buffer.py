@@ -288,6 +288,43 @@ def test_wait_until_ready_calls_flush_before_status_transition():
     assert fake_tx.run.status == "RUNNING"
 
 
+def test_resume_with_buffered_chunks_never_reenters_the_locked_run():
+    """A second PostgreSQL session cannot acquire the worker's own row lock."""
+    from datetime import datetime, timezone
+
+    from services.human_interaction.runtime_port import RuntimeInteractionPort
+
+    port = _make_port()
+    tx = MagicMock()
+    tx.run.status = "READY"
+    tx.run.fence = port.fence
+    tx.run.lock_owner = port.owner_id
+    tx.run.lock_until = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    locked = False
+
+    @contextmanager
+    def transaction(*args, **kwargs):
+        nonlocal locked
+        assert not locked, "self-deadlock: nested FOR UPDATE on the same run"
+        locked = True
+        try:
+            yield tx
+        finally:
+            locked = False
+
+    port.repository.transaction = transaction
+    port.transaction = types.MethodType(RuntimeInteractionPort.transaction, port)
+    port.emit_chunks = types.MethodType(RuntimeInteractionPort.emit_chunks, port)
+    port.add_chunk("buffered-before-resume")
+
+    port._wait_until_ready()
+
+    assert tx.run.status == "RUNNING"
+    assert port.peek_chunks() == 0
+    assert tx.emit.call_args_list[0].args[0] == {"chunk_cipher": "sealed"}
+    assert tx.emit.call_args_list[1].args[0]["content"]["status"] == "RUNNING"
+
+
 # --- in-flight emit and failure recovery --------------------------------------
 
 def test_flush_until_idle_treats_in_flight_emit_as_busy():

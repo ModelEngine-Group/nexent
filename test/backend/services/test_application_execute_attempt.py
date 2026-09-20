@@ -23,7 +23,9 @@ async def _run_blocking_mock(*args, **kwargs):
     """
     fn = args[1]
     rest = args[2:]
-    return fn(*rest)
+    kwargs.pop("lane", None)
+    kwargs.pop("owner", None)
+    return fn(*rest, **kwargs)
 
 
 async def _authorize_mock(*args, **kwargs):
@@ -127,7 +129,7 @@ def _patched_application(make_port, fake_stream, prepare_mock):
     with patch.object(application, "get_service", lambda: MagicMock()), \
          patch.object(application, "RuntimeInteractionPort", make_port), \
          patch.object(application, "authorize_run", _authorize_mock), \
-         patch("nexent.core.concurrency.run_blocking", _run_blocking_mock), \
+         patch.object(application, "run_blocking", _run_blocking_mock), \
          patch("management.services.agent.run.prepare_agent_run", prepare_mock), \
          patch("management.services.agent.run._stream_agent_chunks", fake_stream), \
          patch("management.services.agent.run._unregister_agent_run_after_execution",
@@ -169,23 +171,15 @@ async def test_flush_if_due_uses_peek_then_take_without_transiently_empty_buffer
         return fake_info, None
 
     with _patched_application(make_port, fake_stream, prepare_mock) as application:
-        try:
-            await application.execute_attempt(*_execute_attempt_args())
-        except StopAsyncIteration:
-            # The async consumer loop hit the StopAsyncIteration re-raised
-            # from the finally block — that's fine, we still ran through
-            # the entire consumer loop including _flush_if_due + final flush.
-            pass
-        except Exception as exc:
-            pytest.fail(f"execute_attempt raised unexpected {type(exc).__name__}: {exc!r}")
+        await application.execute_attempt(*_execute_attempt_args())
 
     port = port_ref["p"]
     total_persisted = sum(len(batch) for batch in port._emits)
     # Timing-sensitive — the sleep in fake_stream may cause the "final" chunk
     # to land in either the timed _flush_if_due path or the final-flush path.
     # Either way, every chunk that was added must be accounted for.
-    assert total_persisted >= 3, (
-        f"Expected >=3 chunks persisted, got {total_persisted} batches={port._emits}"
+    assert total_persisted == 4, (
+        f"Expected 4 chunks persisted, got {total_persisted} batches={port._emits}"
     )
 
     # begin_emit must have been paired with end_emit — otherwise we would
@@ -229,6 +223,22 @@ async def _run_execute_attempt(fake_stream, fake_info, *, port_hook=None, refs=N
         await application.execute_attempt(*_execute_attempt_args())
 
     return port_ref["p"], finish_calls
+
+
+@pytest.mark.parametrize("chunks", [[], ["final"], [f"chunk-{i}" for i in range(19)]])
+async def test_normal_completion_flushes_every_chunk_and_finishes_completed(chunks):
+    info = _FakeInfo()
+    info.attempt_outcome = "completed"
+
+    async def fake_stream(**_):
+        for chunk in chunks:
+            yield chunk
+
+    port, outcomes = await _run_execute_attempt(fake_stream, info)
+
+    assert [chunk for batch in port._emits for chunk in batch] == chunks
+    assert outcomes == ["completed"]
+    assert not port._emit_in_flight.is_set()
 
 
 async def test_leftover_chunks_flush_in_finally_before_failed_finish():

@@ -2,15 +2,9 @@
 
 import asyncio
 import json
+import logging
 import time
-from contextlib import suppress
 from functools import lru_cache
-
-from fastapi.responses import StreamingResponse
-from nexent.core.concurrency import run_blocking
-from nexent.core.human_interaction.contracts import RecoveryRequired, RunTerminated
-from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
-from nexent.core.human_interaction.runtime import HumanInteractionRuntime
 
 from consts.const import (
     HITL_ACCEPT_NEW_RUNS,
@@ -19,14 +13,23 @@ from consts.const import (
     HITL_MAX_CONCURRENCY,
     HITL_TOOL_APPROVAL_ENABLED,
     HITL_WAIT_SECONDS,
+    RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS,
 )
+from consts.exceptions import RuntimeQueueTimeoutError
 from database.human_interaction_db import HumanInteractionRepository
+from fastapi.responses import StreamingResponse
+from nexent.core.concurrency import run_blocking
+from nexent.core.human_interaction.contracts import RecoveryRequired, RunTerminated
+from nexent.core.human_interaction.live_runtime import LiveHumanInteractionRuntime
+from nexent.core.human_interaction.runtime import HumanInteractionRuntime
 from nexent.scheduler import ClaimedJob, LeaseScheduler, SchedulerConfig
 
 from .crypto import PayloadCipher
 from .models import InteractionError
 from .runtime_port import RuntimeInteractionPort
 from .service import TERMINAL_STATUSES, HumanInteractionService
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -112,7 +115,10 @@ async def execute_attempt(job, lease):
             except Exception as exc:
                 raise RunTerminated("Run authorization could not be revalidated") from exc
 
-        port = RuntimeInteractionPort(service, identity, lease.owner_id, authorize, live_resume=True)
+        port = await run_blocking(
+            "hitl-port-create", RuntimeInteractionPort, service, identity, lease.owner_id, authorize,
+            live_resume=True, lane="control-io", owner=__name__,
+        )
         saved = port.request_payload
         if saved.get("runtime_mode") == "native-live-v1" and port.checkpoint:
             raise RecoveryRequired("The original native execution is no longer available")
@@ -222,9 +228,11 @@ async def execute_attempt(job, lease):
                 anext_task = asyncio.create_task(chunk_iter.__anext__())
         finally:
             if anext_task is not None:
-                anext_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await anext_task
+                if not anext_task.done():
+                    anext_task.cancel()
+                # The loop already consumed this task's outcome. Awaiting it
+                # again would re-raise StopAsyncIteration and skip final flush.
+                await asyncio.gather(anext_task, return_exceptions=True)
             try:
                 await chunk_iter.aclose()
             except Exception:
@@ -363,6 +371,40 @@ async def stream_run(run_id, tenant_id, user_id, *, after=0):
     })
 
 
+async def _wait_for_dispatch(service, run_id, tenant_id, user_id):
+    """Bound initial admission even when every HITL slot is waiting for a person."""
+    timeout = RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS
+    deadline = asyncio.get_running_loop().time() + timeout
+    try:
+        while True:
+            snapshot = await run_blocking(
+                "hitl-dispatch-snapshot", service.light_snapshot, run_id, tenant_id, user_id,
+                lane="control-io", owner=__name__,
+            )
+            if snapshot["status"] != "READY" or snapshot["attempt_active"]:
+                return
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                cancelled = await run_blocking(
+                    "hitl-expire-queued", service.cancel_queued, run_id, tenant_id, user_id,
+                    lane="control-io", owner=__name__,
+                )
+                if not cancelled:
+                    # The scheduler won the same row lock and has started it.
+                    return
+                logger.warning(
+                    "event=hitl_queue_timeout run_id=%s phase=dispatch timeout_seconds=%s", run_id, timeout,
+                )
+                raise RuntimeQueueTimeoutError(timeout)
+            await asyncio.sleep(min(0.1, remaining))
+    except asyncio.CancelledError:
+        await run_blocking(
+            "hitl-cancel-queued", service.cancel_queued, run_id, tenant_id, user_id,
+            lane="control-io", owner=__name__,
+        )
+        raise
+
+
 async def start_run(request, tenant_id, user_id, language, *, skip_user_save=False):
     from agents.agent_run_manager import agent_run_manager
     from management.services.agent.run import save_messages
@@ -380,7 +422,10 @@ async def start_run(request, tenant_id, user_id, language, *, skip_user_save=Fal
         "runtime_knowledge_context": getattr(request, "_runtime_knowledge_context", None),
     }
     await authorize_run(payload["request"], tenant_id, user_id)
-    if service.repository.latest(tenant_id, user_id, request.conversation_id, active_only=True):
+    if await run_blocking(
+        "hitl-latest-run", service.repository.latest, tenant_id, user_id, request.conversation_id,
+        active_only=True, lane="control-io", owner=__name__,
+    ):
         raise InteractionError("This conversation already has an active run")
     reservation = agent_run_manager.reserve_agent_run(request.conversation_id, user_id)
     run_id = None
@@ -390,7 +435,10 @@ async def start_run(request, tenant_id, user_id, language, *, skip_user_save=Fal
             ready=False, lane="control-io", owner=__name__,
         )
         if not skip_user_save:
-            save_messages(request, "user", user_id, tenant_id)
+            await run_blocking(
+                "hitl-save-user-message", save_messages, request, "user", user_id, tenant_id,
+                lane="control-io", owner=__name__,
+            )
         await run_blocking(
             "hitl-service-initialized", service.initialized, run_id, tenant_id, user_id, succeeded=True,
             lane="control-io", owner=__name__,
@@ -404,4 +452,5 @@ async def start_run(request, tenant_id, user_id, language, *, skip_user_save=Fal
         raise
     finally:
         agent_run_manager.release_agent_run_reservation(request.conversation_id, user_id, reservation)
+    await _wait_for_dispatch(service, run_id, tenant_id, user_id)
     return await stream_run(run_id, tenant_id, user_id)

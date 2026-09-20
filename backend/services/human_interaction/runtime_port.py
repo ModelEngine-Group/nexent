@@ -74,8 +74,8 @@ class RuntimeInteractionPort:
         """Wait for the async consumer to drain the observer queue, then persist.
 
         Worker-thread only. Returns once the buffer has stayed empty for
-        ``settle_ms`` with no in-flight emit; ``max_wait_ms`` is a hard
-        upper bound measured from entry and never resets.
+        ``settle_ms`` with no in-flight emit; ``max_wait_ms`` bounds idle
+        polling and never resets. Database lock waits have a separate limit.
         """
         hard_deadline = time.monotonic() + max_wait_ms / 1000.0
         idle_since: float | None = None
@@ -207,14 +207,15 @@ class RuntimeInteractionPort:
             if now >= next_authorization_check:
                 self.authorize()
                 next_authorization_check = now + 5.0
+            # Flushing opens another DB session. Never do it while holding the
+            # run's FOR UPDATE lock: that session would wait on this worker.
+            self.flush_chunks_until_idle()
             with self.repository.transaction(self.run_id, self.tenant_id, self.user_id) as tx:
                 if (tx is None or tx.run.fence != self.fence or tx.run.lock_owner != self.owner_id
                         or tx.run.lock_until is None or tx.run.lock_until <= utcnow()):
                     raise RunTerminated("Execution lease is no longer valid")
                 self.service._expire(tx)
                 if tx.run.status == "READY":
-                    # Flush so lingering chunks precede the human_run row.
-                    self.flush_chunks_until_idle()
                     tx.run.status = "RUNNING"
                     tx.emit({"type": "human_run", "content": {
                         "run_id": self.run_id, "status": "RUNNING",
@@ -345,7 +346,11 @@ class RuntimeInteractionPort:
 
     def visible_guidance(self):
         """Return accepted composer input for the normal stream/history presentation path."""
-        with self.transaction(receipt=True) as tx:
+        # Presentation polling must not queue behind a writer's row lock.
+        with self.repository.read_only(self.run_id, self.tenant_id, self.user_id) as tx:
+            if (tx is None or tx.run.fence != self.fence or tx.run.lock_owner != self.owner_id
+                    or tx.run.lock_until is None or tx.run.lock_until <= utcnow()):
+                raise RunTerminated("Execution lease is no longer valid")
             requests = sorted(tx.requests(), key=lambda item: (item.create_time, item.request_id))
             return [
                 {"request_id": item.request_id, "text": self.cipher.open(item.decision)["text"],
