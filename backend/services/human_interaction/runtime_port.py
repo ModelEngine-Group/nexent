@@ -1,5 +1,6 @@
 """Fenced tool dispatch adapter. Approval and STARTED are consumed under one run lock."""
 
+import threading
 import time
 from contextlib import contextmanager
 from datetime import timezone
@@ -17,6 +18,14 @@ from .models import digest, redact
 
 class RuntimeInteractionPort:
     def __init__(self, service, identity, owner_id, authorize, allowed_tools=(), *, live_resume=False, stop_event=None):
+        """Bind the port and set up async-worker chunk coordination.
+
+        ``_chunk_buffer`` stages processed observer chunks: the async consumer
+        appends via add_chunk and the worker flushes before each HITL event so
+        chunk rows precede human_interaction rows in DB event order.
+        ``_emit_in_flight`` marks an in-flight hand-off to the DB thread so an
+        empty buffer is not mistaken for "async is idle".
+        """
         self.service = service
         self.repository = service.repository
         self.cipher = service.cipher
@@ -29,9 +38,72 @@ class RuntimeInteractionPort:
         self.allowed_tools = frozenset(allowed_tools)
         self.live_resume = live_resume
         self.stop_event = stop_event
+        self._chunk_buffer: list[str] = []
+        self._chunk_buffer_lock = threading.Lock()
+        self._emit_in_flight = threading.Event()
         with self.transaction() as tx:
             self.checkpoint = self.cipher.open(tx.run.checkpoint)
             self.request_payload = self.cipher.open(tx.run.request_payload)
+
+    def add_chunk(self, chunk: str) -> None:
+        """Append a processed chunk from the async consumer to the shared buffer."""
+        with self._chunk_buffer_lock:
+            self._chunk_buffer.append(chunk)
+
+    def take_chunks(self) -> list[str]:
+        """Atomically drain the shared buffer for persistence."""
+        with self._chunk_buffer_lock:
+            chunks = self._chunk_buffer
+            self._chunk_buffer = []
+        return chunks
+
+    def peek_chunks(self) -> int:
+        """Return the number of buffered chunks without draining them."""
+        with self._chunk_buffer_lock:
+            return len(self._chunk_buffer)
+
+    def begin_emit(self) -> None:
+        """Signal that the async consumer is handing chunks to run_blocking(emit_chunks)."""
+        self._emit_in_flight.set()
+
+    def end_emit(self) -> None:
+        """Signal that the async consumer's run_blocking(emit_chunks) has returned."""
+        self._emit_in_flight.clear()
+
+    def flush_chunks_until_idle(self, *, max_wait_ms: int = 500, settle_ms: int = 20) -> None:
+        """Wait for the async consumer to drain the observer queue, then persist.
+
+        Worker-thread only. Returns once the buffer has stayed empty for
+        ``settle_ms`` with no in-flight emit; ``max_wait_ms`` is a hard
+        upper bound measured from entry and never resets.
+        """
+        hard_deadline = time.monotonic() + max_wait_ms / 1000.0
+        idle_since: float | None = None
+
+        while True:
+            now = time.monotonic()
+            if now >= hard_deadline:
+                break
+
+            chunks = self.take_chunks()
+            if chunks:
+                try:
+                    self.emit_chunks(chunks)
+                except Exception:
+                    # Never lose drained chunks; put them back for retry.
+                    for chunk in chunks:
+                        self.add_chunk(chunk)
+                    raise
+                idle_since = None
+            elif self._emit_in_flight.is_set():
+                # Empty buffer is not idle while an emit is in flight.
+                idle_since = None
+            elif idle_since is None:
+                idle_since = now
+            elif now - idle_since >= settle_ms / 1000.0:
+                break
+
+            time.sleep(min(settle_ms / 1000.0, hard_deadline - now))
 
     @contextmanager
     def transaction(self, *, receipt=False):
@@ -75,6 +147,8 @@ class RuntimeInteractionPort:
         self.authorize()
         suspended = False
         feedback = None
+        # Flush so buffered chunks precede the human_run status row in DB order.
+        self.flush_chunks_until_idle()
         with self.transaction() as tx:
             tx.run.checkpoint = self.cipher.seal(checkpoint)
             if tx.run.pause_requested:
@@ -139,6 +213,8 @@ class RuntimeInteractionPort:
                     raise RunTerminated("Execution lease is no longer valid")
                 self.service._expire(tx)
                 if tx.run.status == "READY":
+                    # Flush so lingering chunks precede the human_run row.
+                    self.flush_chunks_until_idle()
                     tx.run.status = "RUNNING"
                     tx.emit({"type": "human_run", "content": {
                         "run_id": self.run_id, "status": "RUNNING",
@@ -156,6 +232,9 @@ class RuntimeInteractionPort:
         suspended = False
         steering_requested = False
         outcome = None
+        # Flush before the transaction so chunk rows get lower seq numbers
+        # than any subsequent human_interaction row.
+        self.flush_chunks_until_idle()
         with self.transaction() as tx:
             if tx.run.pause_requested:
                 self.service._request_steering(tx)
@@ -234,6 +313,8 @@ class RuntimeInteractionPort:
         return outcome
 
     def receipt(self, slot, result, *, uncertain=False):
+        # Flush so the DB event order is chunks → human_execution.
+        self.flush_chunks_until_idle()
         with self.transaction(receipt=True) as tx:
             execution = tx.execution(slot)
             if execution is None or execution.status != "STARTED":
@@ -274,6 +355,14 @@ class RuntimeInteractionPort:
             ]
 
     def finish(self, outcome):
+        """Write the terminal run status, flushing buffered chunks first.
+
+        A flush failure must not prevent the terminal status row.
+        """
+        try:
+            self.flush_chunks_until_idle()
+        except Exception:
+            pass
         with self.transaction(receipt=True) as tx:
             if tx.run.status in {"STOPPED", "EXPIRED"}:
                 return

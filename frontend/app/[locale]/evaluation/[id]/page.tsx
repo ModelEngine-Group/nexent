@@ -1386,7 +1386,7 @@ export default function EvaluationDetailPage() {
               <Alert
                 type="info"
                 showIcon
-                message={t("agentEvaluation.overallReview")}
+                title={t("agentEvaluation.overallReview")}
                 description={
                   <Text style={{ fontSize: 13, color: "#555" }}>
                     {analysisReport.summary}

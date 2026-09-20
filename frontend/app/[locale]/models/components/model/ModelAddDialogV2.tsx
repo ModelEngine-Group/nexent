@@ -1292,7 +1292,7 @@ export const ModelAddDialogV2 = ({
       }
       width={900}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <Tabs
         activeKey={activeTab}
@@ -1581,7 +1581,7 @@ export const ModelAddDialogV2 = ({
                   )}
                 </Space>
                 {customConnectivity.message && (
-                  <Alert type="error" showIcon message={customConnectivity.message} />
+                  <Alert type="error" showIcon title={customConnectivity.message} />
                 )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t">
@@ -1741,7 +1741,7 @@ export const ModelAddDialogV2 = ({
         cancelText={t("common.cancel", { defaultValue: "取消" })}
         width={640}
         centered
-        destroyOnClose={false}
+        destroyOnHidden={false}
         styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
       >
         <div className="space-y-4">
