@@ -40,6 +40,7 @@ class ProcessType(Enum):
     MODEL_OUTPUT_THINKING = "model_output_thinking"  # model streaming output, thinking content
     MODEL_OUTPUT_DEEP_THINKING = "model_output_deep_thinking"  # model streaming output, deep thinking content
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
+    MODEL_ATTEMPT_CONTROL = "model_attempt_control"  # hidden begin/rollback/commit boundary
 
     STEP_COUNT = "step_count"  # current step of agent
     PARSE = "parse"  # code parsing result
@@ -177,6 +178,9 @@ class MessageObserver:
         self._current_invocation_id: ContextVar[str | None] = ContextVar(
             "current_invocation_id", default=None
         )
+        self._model_attempt_id: ContextVar[str | None] = ContextVar(
+            "model_attempt_id", default=None
+        )
 
     @property
     def token_buffer(self) -> deque:
@@ -248,6 +252,7 @@ class MessageObserver:
             ProcessType.PLAN: default_transformer,
             ProcessType.PLAN_STEP_UPDATE: default_transformer,
             ProcessType.AUTOMATION_PROPOSAL: default_transformer,
+            ProcessType.MODEL_ATTEMPT_CONTROL: default_transformer,
         }
 
     def _active_subagent(self) -> tuple | None:
@@ -274,6 +279,7 @@ class MessageObserver:
         invocation_id: str | None = None,
         explicit_agent_id: bool = False,
         explicit_invocation_id: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Append a ``Message`` with the current sub-agent context auto-stamped.
 
@@ -305,8 +311,50 @@ class MessageObserver:
                 depth=resolved_depth,
                 tool_call_id=tool_call_id,
                 invocation_id=resolved_invocation,
+                attempt_id=(
+                    self._model_attempt_id.get()
+                    if process_type in {
+                        ProcessType.MODEL_OUTPUT_THINKING,
+                        ProcessType.MODEL_OUTPUT_DEEP_THINKING,
+                        ProcessType.MODEL_OUTPUT_CODE,
+                    }
+                    else None
+                ),
+                metadata=metadata,
             ).to_json()
         )
+
+    def _reset_model_stream_state(self) -> None:
+        self.token_buffer.clear()
+        self.think_buffer.clear()
+        self.current_mode = ProcessType.MODEL_OUTPUT_THINKING
+        self.in_think_mode = False
+
+    def begin_model_attempt(self, attempt_id: str, attempt: int) -> None:
+        self._reset_model_stream_state()
+        self._model_attempt_id.set(attempt_id)
+        self._emit(
+            ProcessType.MODEL_ATTEMPT_CONTROL,
+            "",
+            metadata={"phase": "begin", "attempt_id": attempt_id, "attempt": attempt},
+        )
+
+    def rollback_model_attempt(self, attempt_id: str, attempt: int) -> None:
+        self._reset_model_stream_state()
+        self._emit(
+            ProcessType.MODEL_ATTEMPT_CONTROL,
+            "",
+            metadata={"phase": "rollback", "attempt_id": attempt_id, "attempt": attempt},
+        )
+        self._model_attempt_id.set(None)
+
+    def commit_model_attempt(self, attempt_id: str, attempt: int) -> None:
+        self._emit(
+            ProcessType.MODEL_ATTEMPT_CONTROL,
+            "",
+            metadata={"phase": "commit", "attempt_id": attempt_id, "attempt": attempt},
+        )
+        self._model_attempt_id.set(None)
 
     def add_model_new_token(self, new_token):
         """
@@ -607,6 +655,11 @@ class MessageObserver:
             agent_id=kwargs.get("agent_id"),
             agent_name=kwargs.get("agent_name"),
             explicit_agent_id=explicit_agent_id,
+            metadata={
+                key: kwargs[key]
+                for key in ("error_code", "retryable")
+                if key in kwargs
+            },
         )
 
     @contextmanager
@@ -750,7 +803,8 @@ class Message:
     def __init__(self, message_type: ProcessType, content, tool_name: str = None,
                  tool_arguments: dict = None, agent_id=None, agent_name: str = None,
                  depth: int = 0, tool_call_id: str | None = None,
-                 invocation_id: str | None = None):
+                 invocation_id: str | None = None, attempt_id: str | None = None,
+                 metadata: dict[str, Any] | None = None):
         self.message_type = message_type
         self.content = content
         self.tool_name = tool_name
@@ -760,6 +814,8 @@ class Message:
         self.depth = depth
         self.tool_call_id = tool_call_id
         self.invocation_id = invocation_id
+        self.attempt_id = attempt_id
+        self.metadata = metadata or {}
 
     # generate json format and convert to string
     def to_json(self):
@@ -786,4 +842,7 @@ class Message:
             result["depth"] = self.depth
         if self.invocation_id is not None:
             result["invocation_id"] = self.invocation_id
+        if self.attempt_id is not None:
+            result["attempt_id"] = self.attempt_id
+        result.update(self.metadata)
         return json.dumps(result, ensure_ascii=False)

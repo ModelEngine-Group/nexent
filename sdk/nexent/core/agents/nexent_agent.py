@@ -21,6 +21,7 @@ from smolagents.tools import Tool
 
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 from ..models.openai_llm import OpenAIModel
+from ..model_errors import ModelInvocationTerminalError
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
@@ -1177,6 +1178,15 @@ class NexentAgent:
                     if self.agent.stop_event.is_set():
                         observer.add_message(self.agent.agent_name, ProcessType.WARNING,
                                              "Agent execution interrupted by external stop signal")
+                except ModelInvocationTerminalError as e:
+                    observer.add_message(
+                        agent_name=self.agent.agent_name,
+                        process_type=ProcessType.ERROR,
+                        content=e.safe_message(getattr(observer, "lang", "en")),
+                        error_code=e.error_code.value,
+                        retryable=False,
+                    )
+                    raise
                 except Exception as e:
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
