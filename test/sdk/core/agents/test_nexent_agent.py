@@ -1961,6 +1961,28 @@ def test_agent_run_with_observer_with_error_in_step(nexent_agent_instance, mock_
         "", ProcessType.WARNING, "Test error occurred")
 
 
+def test_agent_run_with_observer_suppresses_internal_protocol_repair_warning(
+    nexent_agent_instance, mock_core_agent
+):
+    """A retained safety step may guide the model without leaking repair text."""
+    nexent_agent_instance.agent = mock_core_agent
+    mock_core_agent.stop_event.is_set.return_value = False
+    mock_action_step = MagicMock(spec=ActionStep)
+    mock_action_step.timing = MagicMock(duration=1.0)
+    mock_action_step.step_number = 1
+    mock_action_step.error = "internal repair"
+    mock_action_step._suppress_user_error = True
+    mock_action_step.output = "Final answer"
+    mock_core_agent.run.return_value = [mock_action_step]
+
+    nexent_agent_instance.agent_run_with_observer("test query")
+
+    assert not any(
+        call_.args[1:3] == (ProcessType.WARNING, "internal repair")
+        for call_ in mock_core_agent.observer.add_message.call_args_list
+    )
+
+
 def test_agent_run_with_observer_skips_non_action_step(nexent_agent_instance, mock_core_agent):
     """Test agent_run_with_observer skips non-ActionStep logs."""
     # Setup
@@ -3779,6 +3801,7 @@ class TestCreateSingleAgent:
             tools=[],
             max_steps=5,
             model_name="test_model",
+            output_protocol="final_answer_envelope",
         )
 
         with patch.object(nexent_agent, "CoreAgent", return_value=mock_core_agent) as mock_core_agent_fn:
@@ -3790,6 +3813,7 @@ class TestCreateSingleAgent:
         context_runtime = mock_core_agent_fn.call_args.kwargs["context_runtime"]
         assert result is mock_core_agent
         assert context_runtime.items == [context_item]
+        assert mock_core_agent_fn.call_args.kwargs["output_protocol"] == "final_answer_envelope"
 
     def test_create_single_agent_with_prompt_templates(self, nexent_agent_instance, mock_model_config):
         """Test create_single_agent correctly passes prompt_templates."""
