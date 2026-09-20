@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
@@ -104,7 +105,7 @@ function TenantList({
   onPageChange?: (page: number) => void;
   onTenantsRefetch: () => Promise<unknown>;
   loading?: boolean;
-  t: (key: string, options?: any) => string;
+  t: TFunction;
   onUserListRefresh?: () => void;
   onInvitationListRefresh?: () => void;
   locale?: string;

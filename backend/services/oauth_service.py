@@ -484,17 +484,9 @@ async def complete_pending_oauth_account(
         )
     except TenantResourceLimitError:
         # The Supabase identity was created before the local tenant-limit check.
-        try:
-            admin_client.auth.admin.delete_user(supabase_user_id)
-            logger.info(
-                "Rolled back Supabase user %s after failed OAuth registration",
-                supabase_user_id,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to roll back Supabase user %s after failed OAuth registration",
-                supabase_user_id,
-            )
+        from utils.auth_utils import delete_supabase_user
+
+        delete_supabase_user(supabase_user_id)
         raise
 
     invitation_result = use_invitation_code(normalized_invite_code, supabase_user_id)

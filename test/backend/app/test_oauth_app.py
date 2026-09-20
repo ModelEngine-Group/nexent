@@ -946,6 +946,31 @@ class TestCompleteOAuth(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.CONFLICT)
 
+    def test_complete_returns_429_for_tenant_resource_limit(self):
+        complete_mock = AsyncMock(
+            side_effect=_TenantResourceLimitError(
+                "Tenant user limit reached: maximum 10000 users per tenant",
+                resource="users",
+                scope="tenant",
+                limit=10000,
+                current_count=10000,
+            )
+        )
+
+        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+            response = client.post(
+                "/user/oauth/complete",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                json={
+                    "email": "limit@example.com",
+                    "password": "secret1",
+                    "invite_code": "ABC123",
+                },
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(response.json()["details"]["limit"], 10000)
+
 
 class TestGetAccounts(unittest.TestCase):
     def test_returns_500_on_service_error(self):
