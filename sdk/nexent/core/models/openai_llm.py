@@ -891,7 +891,7 @@ class OpenAIModel(OpenAIServerModel):
                     ) from e
                 if attempt >= self.retry_config.max_attempts:
                     if not is_timeout:
-                        logger.error(
+                        logger.exception(
                             "event=model_retry_exhausted attempt=%d/%d "
                             "error_type=%s error_code=%s",
                             attempt,

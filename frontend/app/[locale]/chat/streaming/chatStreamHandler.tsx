@@ -818,9 +818,7 @@ export const handleStreamResponse = async (
                       codeBlock.content += processedContent;
                     } else {
                       // Create new main content block for code
-                      const blockId = `model-code-${Date.now()}-${Math.random()
-                        .toString(36)
-                        .substring(2, 7)}`;
+                      const blockId = `model-code-${crypto.randomUUID()}`;
                       currentStep.contents.push({
                         id: blockId,
                         type: chatConfig.messageTypes.MODEL_OUTPUT_CODE,

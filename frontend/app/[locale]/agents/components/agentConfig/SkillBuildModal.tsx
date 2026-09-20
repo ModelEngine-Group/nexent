@@ -674,6 +674,17 @@ export default function SkillBuildModal({
     setIsStreaming(false);
   };
 
+  const handleAttemptRollback = (event: Nl2SkillStreamEvent): boolean => {
+    if (
+      event.type === "model_attempt_control" &&
+      event.phase === "rollback"
+    ) {
+      rollbackDraftStream();
+      return true;
+    }
+    return false;
+  };
+
   const handleNl2SkillStreamEvent = useCallback(
     (event: Nl2SkillStreamEvent) => {
       if (event.type === "target_files") {
@@ -682,13 +693,7 @@ export default function SkillBuildModal({
       if (event.type === "agent_new_run" || event.type === "step_count") {
         setIsStreaming(true);
       }
-      if (
-        event.type === "model_attempt_control" &&
-        event.phase === "rollback"
-      ) {
-        rollbackDraftStream();
-        return;
-      }
+      if (handleAttemptRollback(event)) return;
       if (event.type === "skill_body" || event.type === "file_content") {
         beginDraftStream();
         setIsStreaming(true);

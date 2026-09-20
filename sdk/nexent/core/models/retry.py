@@ -82,6 +82,58 @@ class ModelErrorClassification:
     error_code: ModelErrorCode
 
 
+def _classify_status_code(status: object) -> ModelErrorClassification | None:
+    if not isinstance(status, int):
+        return None
+    if status == 429:
+        return ModelErrorClassification(True, ModelErrorCode.RATE_LIMIT_EXHAUSTED)
+    if 500 <= status < 600:
+        return ModelErrorClassification(True, ModelErrorCode.SERVICE_UNAVAILABLE)
+    if status in (401, 403):
+        return ModelErrorClassification(False, ModelErrorCode.AUTHENTICATION_ERROR)
+    if status == 404:
+        return ModelErrorClassification(False, ModelErrorCode.NOT_FOUND)
+    if status in (400, 422):
+        return ModelErrorClassification(False, ModelErrorCode.INVALID_REQUEST)
+    return ModelErrorClassification(False, ModelErrorCode.UNKNOWN_ERROR)
+
+
+def _contains_any(message: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in message for marker in markers)
+
+
+def _classify_message(message: str) -> ModelErrorClassification | None:
+    context_markers = ("context_length", "context length", "token limit")
+    auth_markers = ("401", "unauthorized", "403", "forbidden", "api key", "authentication")
+    not_found_markers = ("404", "not found")
+    invalid_markers = (
+        "400", "bad request", "422", "unprocessable", "invalid",
+    )
+    if _contains_any(message, context_markers):
+        return ModelErrorClassification(False, ModelErrorCode.CONTEXT_OVERFLOW)
+    if _contains_any(message, auth_markers):
+        return ModelErrorClassification(False, ModelErrorCode.AUTHENTICATION_ERROR)
+    if _contains_any(message, not_found_markers):
+        return ModelErrorClassification(False, ModelErrorCode.NOT_FOUND)
+    if _contains_any(message, invalid_markers):
+        return ModelErrorClassification(False, ModelErrorCode.INVALID_REQUEST)
+    return None
+
+
+def _retryable_error_code(marker: str) -> ModelErrorCode:
+    if any(token in marker for token in ("timeout", "timed out", "time out")) or marker == "etimedout":
+        return ModelErrorCode.TIMEOUT
+    if marker in {"429", "rate limit", "rate_limit"}:
+        return ModelErrorCode.RATE_LIMIT_EXHAUSTED
+    service_markers = {
+        "500", "502", "503", "504", "server error", "service unavailable",
+        "temporarily unavailable", "try again", "gateway timeout", "bad gateway",
+    }
+    if marker in service_markers:
+        return ModelErrorCode.SERVICE_UNAVAILABLE
+    return ModelErrorCode.CONNECTION_ERROR
+
+
 def classify_model_error(exc: BaseException) -> ModelErrorClassification:
     """Classify an exception raised by a model invocation.
 
@@ -95,35 +147,14 @@ def classify_model_error(exc: BaseException) -> ModelErrorClassification:
     the error message so it also covers raw httpx / aiohttp network failures
     that surface as generic exceptions.
     """
-    status = getattr(exc, "status_code", None)
-    if isinstance(status, int):
-        if status == 429:
-            return ModelErrorClassification(True, ModelErrorCode.RATE_LIMIT_EXHAUSTED)
-        if 500 <= status < 600:
-            return ModelErrorClassification(True, ModelErrorCode.SERVICE_UNAVAILABLE)
-        if status in (401, 403):
-            return ModelErrorClassification(False, ModelErrorCode.AUTHENTICATION_ERROR)
-        if status == 404:
-            return ModelErrorClassification(False, ModelErrorCode.NOT_FOUND)
-        if status in (400, 422):
-            return ModelErrorClassification(False, ModelErrorCode.INVALID_REQUEST)
-        return ModelErrorClassification(False, ModelErrorCode.UNKNOWN_ERROR)
+    status_classification = _classify_status_code(getattr(exc, "status_code", None))
+    if status_classification is not None:
+        return status_classification
 
     msg = str(exc).lower()
-    non_retryable_markers = (
-        "401", "unauthorized", "403", "forbidden",
-        "404", "not found", "400", "bad request", "422", "unprocessable",
-        "invalid", "api key", "authentication", "context_length",
-        "context length", "token limit",
-    )
-    if any(marker in msg for marker in ("context_length", "context length", "token limit")):
-        return ModelErrorClassification(False, ModelErrorCode.CONTEXT_OVERFLOW)
-    if any(marker in msg for marker in ("401", "unauthorized", "403", "forbidden", "api key", "authentication")):
-        return ModelErrorClassification(False, ModelErrorCode.AUTHENTICATION_ERROR)
-    if any(marker in msg for marker in ("404", "not found")):
-        return ModelErrorClassification(False, ModelErrorCode.NOT_FOUND)
-    if any(marker in msg for marker in non_retryable_markers):
-        return ModelErrorClassification(False, ModelErrorCode.INVALID_REQUEST)
+    message_classification = _classify_message(msg)
+    if message_classification is not None:
+        return message_classification
 
     if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
         return ModelErrorClassification(True, ModelErrorCode.TIMEOUT)
@@ -142,13 +173,7 @@ def classify_model_error(exc: BaseException) -> ModelErrorClassification:
     )
     for marker in retryable_markers:
         if marker in msg:
-            if "timeout" in marker or "timed out" in marker or "time out" in marker or marker == "etimedout":
-                return ModelErrorClassification(True, ModelErrorCode.TIMEOUT)
-            if marker in {"429", "rate limit", "rate_limit"}:
-                return ModelErrorClassification(True, ModelErrorCode.RATE_LIMIT_EXHAUSTED)
-            if marker in {"500", "502", "503", "504", "server error", "service unavailable", "temporarily unavailable", "try again", "gateway timeout", "bad gateway"}:
-                return ModelErrorClassification(True, ModelErrorCode.SERVICE_UNAVAILABLE)
-            return ModelErrorClassification(True, ModelErrorCode.CONNECTION_ERROR)
+            return ModelErrorClassification(True, _retryable_error_code(marker))
 
     # Unknown error: prefer failing fast over retrying blindly.
     return ModelErrorClassification(False, ModelErrorCode.UNKNOWN_ERROR)
