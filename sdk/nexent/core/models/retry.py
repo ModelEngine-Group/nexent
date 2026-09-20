@@ -26,6 +26,16 @@ from dataclasses import dataclass
 from ..model_errors import ModelErrorCode, ModelInvocationTerminalError
 
 
+__all__ = [
+    "DEFAULT_MODEL_RETRY",
+    "ModelErrorClassification",
+    "ModelErrorCode",
+    "ModelInvocationTerminalError",
+    "ModelRetryConfig",
+    "classify_model_error",
+]
+
+
 @dataclass
 class ModelRetryConfig:
     """Configuration for exponential backoff retries on transient model errors.

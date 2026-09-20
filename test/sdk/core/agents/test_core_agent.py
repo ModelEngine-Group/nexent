@@ -283,6 +283,18 @@ def _load_core_agent_module():
     agent_context_mod.ContextManagerConfig = MagicMock()
     sys.modules["sdk.nexent.core.agents.agent_context"] = agent_context_mod
 
+    context_pkg = ModuleType("sdk.nexent.core.agents.context")
+    context_pkg.__path__ = [os.path.join(project_root, "sdk", "nexent", "core", "agents", "context")]
+    sys.modules["sdk.nexent.core.agents.context"] = context_pkg
+
+    context_budget_mod = ModuleType("sdk.nexent.core.agents.context.budget")
+    context_budget_mod.message_role = (
+        lambda message: message.get("role", "")
+        if isinstance(message, dict)
+        else getattr(message, "role", "")
+    )
+    sys.modules["sdk.nexent.core.agents.context.budget"] = context_budget_mod
+
     context_runtime_pkg = ModuleType("sdk.nexent.core.context_runtime")
     context_runtime_contracts_mod = ModuleType("sdk.nexent.core.context_runtime.contracts")
     context_runtime_contracts_mod.ContextRuntime = MagicMock()
