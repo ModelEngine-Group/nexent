@@ -1894,3 +1894,64 @@ def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]
+
+
+class TestModelAuditEntries:
+    def test_model_create_emits_audit_entry_without_credentials(self, client, caplog):
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        with patch("backend.apps.model_managment_app.get_current_user_id") as mock_user, \
+                patch("backend.apps.model_managment_app.create_model_for_tenant", new_callable=AsyncMock) as mock_create:
+            mock_user.return_value = ("user-1", "tenant-1")
+            mock_create.return_value = {"auto_configured_defaults": []}
+
+            with caplog.at_level(logging.INFO, logger="audit.auth"):
+                response = client.post(
+                    "/model/create",
+                    headers={"Authorization": "Bearer token"},
+                    json={"model_name": "gpt-x", "model_type": "llm",
+                          "base_url": "https://api.example.com/v1",
+                          "api_key": "sk-secret", "display_name": "GPT X"},
+                )
+
+        assert response.status_code == 200
+        message = caplog.records[-1].getMessage()
+        assert "event=model_create" in message
+        assert "result=success" in message
+        assert "user_id=user-1" in message
+        assert '"model_name":"gpt-x"' in message
+        assert '"base_url":"https://api.example.com/v1"' in message
+        assert "sk-secret" not in message
+
+    def test_manage_batch_import_emits_audit_entry(self, client, caplog):
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        with patch("backend.apps.model_managment_app.get_current_user_id") as mock_user, \
+                patch("backend.apps.model_managment_app.batch_create_models_for_tenant", new_callable=AsyncMock) as mock_batch:
+            mock_user.return_value = ("admin-1", "admin-tenant")
+            mock_batch.return_value = {"auto_configured_defaults": []}
+
+            with caplog.at_level(logging.INFO, logger="audit.auth"):
+                response = client.post(
+                    "/model/manage/batch_create",
+                    headers={"Authorization": "Bearer token"},
+                    json={"tenant_id": "tenant-9", "provider": "silicon", "type": "llm",
+                          "api_key": "sk-batch",
+                          "models": [
+                              {"model_name": "Qwen/Qwen2.5-7B", "model_repo": "Qwen", "display_name": "qwen-7b"},
+                              {"model_name": "Qwen/Qwen2.5-14B", "model_repo": "Qwen"},
+                          ]},
+                )
+
+        assert response.status_code == 200
+        message = caplog.records[-1].getMessage()
+        assert "event=tenant_model_batch_import" in message
+        assert "result=success" in message
+        assert "user_id=admin-1" in message
+        assert '"target_tenant_id":"tenant-9"' in message
+        assert '"provider":"silicon"' in message
+        assert '"models_count":2' in message
+        assert '"model_repo":"Qwen"' in message
+        assert "sk-batch" not in message

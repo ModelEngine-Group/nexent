@@ -177,6 +177,7 @@ class TestReasonFromException:
         assert reason_from_exception(UnauthorizedError("x")) == "unauthorized"
         assert reason_from_exception(ForbiddenError("x")) == "forbidden"
         assert reason_from_exception(NotFoundException("x")) == "not_found"
+        assert reason_from_exception(LookupError("x")) == "not_found"
         assert reason_from_exception(DuplicateError("x")) == "duplicate"
         assert reason_from_exception(ValidationError("x")) == "validation_error"
         assert reason_from_exception(ValueError("x")) == "validation_error"

@@ -116,6 +116,8 @@ def reason_from_exception(exc: Exception) -> str:
         return "forbidden"
     if isinstance(exc, NotFoundException):
         return "not_found"
+    if isinstance(exc, LookupError):
+        return "not_found"
     if isinstance(exc, DuplicateError):
         return "duplicate"
     if isinstance(exc, (ValidationError, ValueError, PydanticValidationError)):
