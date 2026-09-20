@@ -982,40 +982,15 @@ def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     assert "Agent not found" in response.json()["detail"]
 
 
-# get_creating_sub_agent_info_api Tests
+# Legacy creating-sub-agent endpoint removal
 # ---------------------------------------------------------------------------
 
 
-def test_get_creating_sub_agent_info_api_success(mocker, mock_auth_header):
-    """Test get_creating_sub_agent_info_api success case."""
-    mock_get_creating_agent = mocker.patch(
-        "apps.agent_app.get_creating_sub_agent_info_impl", new_callable=AsyncMock)
-    mock_get_creating_agent.return_value = {"agent_id": 456}
+def test_legacy_creating_sub_agent_endpoint_is_not_exposed():
+    """Agent creation must use POST /agent/update instead of draft allocation."""
+    response = config_client.get("/agent/get_creating_sub_agent_id")
 
-    response = config_client.get(
-        "/agent/get_creating_sub_agent_id",
-        headers=mock_auth_header
-    )
-
-    assert response.status_code == 200
-    mock_get_creating_agent.assert_called_once_with(
-        mock_auth_header["Authorization"])
-    assert response.json()["agent_id"] == 456
-
-
-def test_get_creating_sub_agent_info_api_exception(mocker, mock_auth_header):
-    """Test get_creating_sub_agent_info_api exception handling."""
-    mock_get_creating_agent = mocker.patch(
-        "apps.agent_app.get_creating_sub_agent_info_impl", new_callable=AsyncMock)
-    mock_get_creating_agent.side_effect = Exception("Test error")
-
-    response = config_client.get(
-        "/agent/get_creating_sub_agent_id",
-        headers=mock_auth_header
-    )
-
-    assert response.status_code == 500
-    assert "Agent create error" in response.json()["detail"]
+    assert response.status_code == 404
 
 
 # update_agent_info_api Tests

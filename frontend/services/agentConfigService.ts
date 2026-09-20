@@ -257,54 +257,6 @@ export const fetchPublishedAgentList = async () => {
 };
 
 /**
- * get creating sub agent id
- * @param mainAgentId current main agent id
- * @returns new sub agent id
- */
-export const getCreatingSubAgentId = async () => {
-  try {
-    const response = await fetch(API_ENDPOINTS.agent.getCreatingSubAgentId, {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      success: true,
-      data: {
-        agentId: data.agent_id,
-        name: data.name,
-        displayName: data.display_name,
-        description: data.description,
-        enabledToolIds: data.enable_tool_id_list || [],
-        modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
-        modelNames:
-          data.model_names || (data.model_name ? [data.model_name] : []),
-        maxSteps: data.max_steps,
-        requestedOutputTokens: data.requested_output_tokens ?? null,
-        businessDescription: data.business_description,
-        dutyPrompt: data.duty_prompt,
-        constraintPrompt: data.constraint_prompt,
-        fewShotsPrompt: data.few_shots_prompt,
-        sub_agent_id_list: data.sub_agent_id_list || [],
-      },
-      message: "",
-    };
-  } catch (error) {
-    log.error("Failed to get creating sub agent ID:", error);
-    return {
-      success: false,
-      data: null,
-      message: "agentConfig.agents.createSubAgentIdFailed",
-    };
-  }
-};
-
-/**
  * update tool config
  * @param toolId tool id
  * @param agentId agent id
