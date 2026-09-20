@@ -4,11 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "antd";
 import { evaluationService } from "@/services/evaluationService";
 import { useTranslation } from "react-i18next";
-import type { EvaluationHistoryItem, AgentEvaluationRun } from "@/types/agentEvaluation";
+import type {
+  EvaluationHistoryItem,
+  AgentEvaluationRun,
+} from "@/types/agentEvaluation";
 
 const POLL_INTERVAL_MS = 2000;
 
-export function useEvaluationHistory(agentId: number, onCompleted?: (item: EvaluationHistoryItem) => void) {
+export function useEvaluationHistory(
+  agentId: number,
+  onCompleted?: (item: EvaluationHistoryItem) => void
+) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const [history, setHistory] = useState<EvaluationHistoryItem[]>([]);
@@ -43,7 +49,10 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
   });
 
   const fetchRuns = useCallback(async () => {
-    return evaluationService.listAgentEvaluationsByAgent(agentId, { limit: 100, offset: 0 });
+    return evaluationService.listAgentEvaluations([agentId], {
+      limit: 100,
+      offset: 0,
+    });
   }, [agentId]);
 
   const stopPolling = useCallback(() => {
@@ -96,7 +105,10 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
                 const prev = previous.find(
                   (r) => r.agent_evaluation_id === item.agent_evaluation_id
                 );
-                if (prev && (prev.status === "PENDING" || prev.status === "RUNNING")) {
+                if (
+                  prev &&
+                  (prev.status === "PENDING" || prev.status === "RUNNING")
+                ) {
                   onCompletedRef.current(item);
                 }
               }
@@ -116,10 +128,14 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
       setDeletingId(evaluationId);
       try {
         await evaluationService.deleteAgentEvaluation(evaluationId);
-        setHistory((prev) => prev.filter((r) => r.agent_evaluation_id !== evaluationId));
+        setHistory((prev) =>
+          prev.filter((r) => r.agent_evaluation_id !== evaluationId)
+        );
         return { success: true };
       } catch (err: any) {
-        message.error(err?.message || t("agentEvaluation.message.deleteRunFailed"));
+        message.error(
+          err?.message || t("agentEvaluation.message.deleteRunFailed")
+        );
         return { success: false };
       } finally {
         setDeletingId(null);
@@ -128,5 +144,12 @@ export function useEvaluationHistory(agentId: number, onCompleted?: (item: Evalu
     [t, message]
   );
 
-  return { history, loading, deletingId, loadHistory: fetchRuns, deleteRun, setHistory };
+  return {
+    history,
+    loading,
+    deletingId,
+    loadHistory: fetchRuns,
+    deleteRun,
+    setHistory,
+  };
 }

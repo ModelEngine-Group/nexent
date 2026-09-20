@@ -4725,6 +4725,7 @@
   "agentEvaluation.queryCountRequired": "Please select at least one runtime evaluator",
   "agentEvaluation.save": "Save",
   "agentEvaluation.sectionTitle": "Evaluation Tasks",
+  "agentEvaluation.allAgents": "All agents",
   "agentEvaluation.selectAgent": "Please select an agent",
   "agentEvaluation.selectEvalSet": "Please select an evaluation set",
   "agentEvaluation.selectVersion": "Please select a version",

@@ -4739,6 +4739,7 @@
   "agentEvaluation.queryCountRequired": "请选择至少一个运行时评估器",
   "agentEvaluation.save": "保存",
   "agentEvaluation.sectionTitle": "评测任务",
+  "agentEvaluation.allAgents": "全部智能体",
   "agentEvaluation.selectAgent": "请选择智能体",
   "agentEvaluation.selectEvalSet": "请选择评测集",
   "agentEvaluation.selectVersion": "请选择版本",
