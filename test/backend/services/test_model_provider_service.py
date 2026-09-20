@@ -2123,7 +2123,7 @@ async def test_prepare_model_dict_modelengine_base_url_stripping():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_modelengine_success():
-    """ModelEngine provider models are fetched via the unified OpenAI-compatible adapter."""
+    """ModelEngine provider models are fetched via the dedicated ModelEngineProvider adapter."""
     model_data = {"provider": "modelengine", "model_type": "llm"}
 
     expected_models = [
@@ -2136,7 +2136,7 @@ async def test_get_provider_models_modelengine_success():
     ]
 
     with mock.patch(
-        "backend.services.model_provider_service.OpenAICompatibleProvider"
+        "backend.services.model_provider_service.ModelEngineProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = expected_models
@@ -2151,11 +2151,11 @@ async def test_get_provider_models_modelengine_success():
 
 @pytest.mark.asyncio
 async def test_get_provider_models_modelengine_empty_result():
-    """Should handle empty result from the unified adapter for ModelEngine provider."""
+    """Should handle empty result from the ModelEngine adapter for ModelEngine provider."""
     model_data = {"provider": "modelengine", "model_type": "embedding"}
 
     with mock.patch(
-        "backend.services.model_provider_service.OpenAICompatibleProvider"
+        "backend.services.model_provider_service.ModelEngineProvider"
     ) as mock_provider_class:
         mock_provider_instance = mock.AsyncMock()
         mock_provider_instance.get_models.return_value = []
