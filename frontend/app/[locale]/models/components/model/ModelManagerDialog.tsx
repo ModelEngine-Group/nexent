@@ -1,0 +1,499 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Alert, Button, Checkbox, Input, Modal, Tag, Tooltip } from "antd";
+import {
+  KeyOutlined,
+  LinkOutlined,
+  EditOutlined,
+  DownOutlined,
+  RightOutlined,
+  DeleteOutlined,
+} from "@ant-design/icons";
+
+import { ModelOption, ModelSource } from "@/types/modelConfig";
+
+/**
+ * v2.6.1 redesign (v0 design): batch manage models by connection.
+ *
+ * Models imported from the same provider share one "connection" (source +
+ * API key + base URL). The dialog groups the library by connection so an
+ * operator can rotate a key or move a whole group to another endpoint in
+ * one action, or remove a batch of models at once.
+ *
+ * Backend contract: each member is updated with a partial payload
+ * (api_key + base_url only) via the single-model update endpoint, and
+ * deletes go through the existing per-model delete endpoint. Default-slot
+ * cleanup for deleted models is handled by the caller.
+ */
+
+export interface ConnectionGroup {
+  key: string;
+  source: ModelSource;
+  apiKey: string;
+  apiUrl: string;
+  models: ModelOption[];
+}
+
+export function groupByConnection(models: ModelOption[]): ConnectionGroup[] {
+  const map = new Map<string, ConnectionGroup>();
+  for (const m of models) {
+    const key = `${m.source}|${m.apiKey}|${m.apiUrl}`;
+    let group = map.get(key);
+    if (!group) {
+      group = {
+        key,
+        source: m.source,
+        apiKey: m.apiKey ?? "",
+        apiUrl: m.apiUrl ?? "",
+        models: [],
+      };
+      map.set(key, group);
+    }
+    group.models.push(m);
+  }
+  return Array.from(map.values());
+}
+
+function maskKey(key: string) {
+  if (!key) return "未设置";
+  if (key.length <= 8) return `${key.slice(0, 2)}••••${key.slice(-2)}`;
+  return `${key.slice(0, 5)}••••${key.slice(-4)}`;
+}
+
+export function ModelManagerDialog({
+  open,
+  mode,
+  models,
+  onClose,
+  onUpdateGroup,
+  onDeleteModels,
+  updating,
+  deleting,
+}: {
+  open: boolean;
+  mode: "editGroup" | "deleteGroup";
+  models: ModelOption[];
+  onClose: () => void;
+  onUpdateGroup: (
+    group: ConnectionGroup,
+    patch: { apiKey: string; url: string }
+  ) => Promise<void>;
+  onDeleteModels: (targets: ModelOption[]) => Promise<void>;
+  updating?: boolean;
+  deleting?: boolean;
+}) {
+  const { t } = useTranslation();
+  const groups = useMemo(() => groupByConnection(models), [models]);
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={720}
+      centered
+      destroyOnClose
+      title={
+        <span className="text-base">
+          {mode === "editGroup"
+            ? t("modelConfig.batchEdit.title", { defaultValue: "批量修改" })
+            : t("modelConfig.batchDelete.title", { defaultValue: "批量删除" })}
+        </span>
+      }
+    >
+      <p className="mb-4 text-sm text-muted-foreground">
+        {mode === "editGroup"
+          ? t("modelConfig.batchEdit.description", {
+              defaultValue:
+                "按连接（相同服务商 + API Key + Base URL）分组，修改将应用到该连接下全部模型。",
+            })
+          : t("modelConfig.batchDelete.description", {
+              defaultValue:
+                "可删除整条连接（含其下全部模型），也可仅勾选部分模型删除。",
+            })}
+      </p>
+      {mode === "editGroup" ? (
+        <EditGroupContent
+          groups={groups}
+          onUpdateGroup={onUpdateGroup}
+          updating={!!updating}
+          onDone={onClose}
+        />
+      ) : (
+        <DeleteGroupContent
+          groups={groups}
+          onDeleteModels={onDeleteModels}
+          deleting={!!deleting}
+          onDone={onClose}
+        />
+      )}
+    </Modal>
+  );
+}
+
+/* ------------------------------ 批量修改 ------------------------------ */
+
+function EditGroupContent({
+  groups,
+  onUpdateGroup,
+  updating,
+  onDone,
+}: {
+  groups: ConnectionGroup[];
+  onUpdateGroup: (
+    group: ConnectionGroup,
+    patch: { apiKey: string; url: string }
+  ) => Promise<void>;
+  updating: boolean;
+  onDone: () => void;
+}) {
+  const { t } = useTranslation();
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  return (
+    <div className="flex max-h-[60vh] flex-col">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+        {groups.map((g) => {
+          const isEditing = editingKey === g.key;
+          const isOpen = !!expanded[g.key];
+          return (
+            <div key={g.key} className="overflow-hidden rounded-xl border">
+              <div className="flex items-start justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Tag className="m-0">{g.source}</Tag>
+                    <span className="text-xs text-muted-foreground">
+                      {t("modelConfig.batchEdit.modelCount", {
+                        count: g.models.length,
+                        defaultValue: `${g.models.length} 个模型`,
+                      })}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <Tooltip title={g.apiKey}>
+                      <span className="inline-flex items-center gap-1 font-mono">
+                        <KeyOutlined className="text-[11px]" />
+                        {maskKey(g.apiKey)}
+                      </span>
+                    </Tooltip>
+                    <span className="inline-flex items-center gap-1 truncate font-mono">
+                      <LinkOutlined className="text-[11px]" />
+                      {g.apiUrl || "—"}
+                    </span>
+                  </div>
+                </div>
+                {!isEditing && (
+                  <Button
+                    size="small"
+                    icon={<EditOutlined />}
+                    onClick={() => setEditingKey(g.key)}
+                  >
+                    {t("common.edit", { defaultValue: "修改" })}
+                  </Button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setExpanded((s) => ({ ...s, [g.key]: !s[g.key] }))
+                }
+                className="flex w-full items-center gap-1 border-t px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {isOpen ? <DownOutlined /> : <RightOutlined />}
+                {isOpen
+                  ? t("modelConfig.batchEdit.collapse", {
+                      defaultValue: "收起",
+                    })
+                  : t("modelConfig.batchEdit.expand", {
+                      defaultValue: "查看下属模型",
+                    })}
+              </button>
+              {isOpen && (
+                <ul className="divide-y border-t">
+                  {g.models.map((m) => (
+                    <li
+                      key={`${m.id}-${m.displayName}`}
+                      className="px-4 py-2 text-sm"
+                    >
+                      <span className="font-medium">{m.displayName}</span>
+                      <span className="ml-2 font-mono text-xs text-muted-foreground">
+                        {m.name}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {isEditing && (
+                <EditGroupForm
+                  group={g}
+                  saving={updating}
+                  onSave={async (patch) => {
+                    await onUpdateGroup(g, patch);
+                    setEditingKey(null);
+                  }}
+                  onCancel={() => setEditingKey(null)}
+                />
+              )}
+            </div>
+          );
+        })}
+        {groups.length === 0 && (
+          <p className="py-12 text-center text-sm text-muted-foreground">
+            {t("modelConfig.list.emptyLibrary", {
+              defaultValue: "模型库为空",
+            })}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 flex justify-end border-t pt-4">
+        <Button onClick={onDone}>
+          {t("common.done", { defaultValue: "完成" })}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function EditGroupForm({
+  group,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  group: ConnectionGroup;
+  saving: boolean;
+  onSave: (patch: { apiKey: string; url: string }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [apiKey, setApiKey] = useState(group.apiKey);
+  const [url, setUrl] = useState(group.apiUrl);
+
+  return (
+    <div className="space-y-4 border-t bg-secondary/30 p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <EditOutlined className="text-primary" />
+        {t("modelConfig.batchEdit.editingTitle", {
+          count: group.models.length,
+          defaultValue: `修改连接（${group.models.length} 个模型）`,
+        })}
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            {t("modelConfig.batchEdit.apiKey", { defaultValue: "API Key" })}
+          </label>
+          <Input.Password
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-..."
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            {t("modelConfig.batchEdit.baseUrl", { defaultValue: "Base URL" })}
+          </label>
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://api.example.com/v1"
+          />
+        </div>
+      </div>
+      <Alert
+        type="info"
+        showIcon
+        message={t("modelConfig.batchEdit.applyHint", {
+          count: group.models.length,
+          names: group.models.map((m) => m.name).join("、"),
+          defaultValue: `以下修改将应用到该连接下全部 ${group.models.length} 个模型`,
+        })}
+        description={
+          <span className="font-mono text-xs">
+            {group.models.map((m) => m.name).join("、")}
+          </span>
+        }
+      />
+      <div className="flex justify-end gap-2">
+        <Button size="small" onClick={onCancel}>
+          {t("common.cancel", { defaultValue: "取消" })}
+        </Button>
+        <Button
+          size="small"
+          type="primary"
+          loading={saving}
+          disabled={!url.trim()}
+          onClick={() => onSave({ apiKey: apiKey.trim(), url: url.trim() })}
+        >
+          {t("common.save", { defaultValue: "保存修改" })}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------ 批量删除 ------------------------------ */
+
+function DeleteGroupContent({
+  groups,
+  onDeleteModels,
+  deleting,
+  onDone,
+}: {
+  groups: ConnectionGroup[];
+  onDeleteModels: (targets: ModelOption[]) => Promise<void>;
+  deleting: boolean;
+  onDone: () => void;
+}) {
+  const { t } = useTranslation();
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+
+  const modelKey = (m: ModelOption) => `${m.id}-${m.displayName}-${m.type}`;
+  const selectedModels = useMemo(
+    () =>
+      groups
+        .flatMap((g) => g.models)
+        .filter((m) => selectedKeys.has(modelKey(m))),
+    [groups, selectedKeys]
+  );
+
+  function toggleModel(m: ModelOption) {
+    setSelectedKeys((s) => {
+      const next = new Set(s);
+      const k = modelKey(m);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  }
+
+  function toggleGroup(models: ModelOption[], on: boolean) {
+    setSelectedKeys((s) => {
+      const next = new Set(s);
+      models.forEach((m) =>
+        on ? next.add(modelKey(m)) : next.delete(modelKey(m))
+      );
+      return next;
+    });
+  }
+
+  return (
+    <div className="flex max-h-[60vh] flex-col">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+        {groups.map((g) => {
+          const keys = g.models.map(modelKey);
+          const selCount = keys.filter((k) => selectedKeys.has(k)).length;
+          const all = selCount === keys.length;
+          const some = selCount > 0 && !all;
+          return (
+            <div key={g.key} className="overflow-hidden rounded-xl border">
+              <div className="flex items-start justify-between gap-3 border-b bg-secondary/30 px-4 py-3">
+                <button
+                  type="button"
+                  className="flex min-w-0 items-start gap-3 text-left"
+                  onClick={() => toggleGroup(g.models, !all)}
+                >
+                  <Checkbox checked={all} indeterminate={some} />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2">
+                      <Tag className="m-0">{g.source}</Tag>
+                      <span className="text-xs text-muted-foreground">
+                        {t("modelConfig.batchEdit.modelCount", {
+                          count: g.models.length,
+                          defaultValue: `${g.models.length} 个模型`,
+                        })}
+                      </span>
+                    </span>
+                    <span className="mt-1.5 flex items-center gap-x-4 text-xs text-muted-foreground">
+                      <span className="font-mono">{maskKey(g.apiKey)}</span>
+                      <span className="truncate font-mono">{g.apiUrl}</span>
+                    </span>
+                  </span>
+                </button>
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => toggleGroup(g.models, true)}
+                >
+                  {t("modelConfig.batchDelete.selectGroup", {
+                    defaultValue: "选整条",
+                  })}
+                </Button>
+              </div>
+              <ul className="divide-y">
+                {g.models.map((m) => {
+                  const on = selectedKeys.has(modelKey(m));
+                  return (
+                    <li key={modelKey(m)}>
+                      <button
+                        type="button"
+                        onClick={() => toggleModel(m)}
+                        className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-secondary/40 ${
+                          on ? "bg-secondary/30" : ""
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <Checkbox checked={on} />
+                          <span className="truncate font-medium">
+                            {m.displayName}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {m.type}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
+        {groups.length === 0 && (
+          <p className="py-12 text-center text-sm text-muted-foreground">
+            {t("modelConfig.list.emptyLibrary", {
+              defaultValue: "模型库为空",
+            })}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between border-t pt-4">
+        <span className="text-sm text-muted-foreground">
+          {t("modelConfig.batchDelete.selectedCount", {
+            count: selectedModels.length,
+            defaultValue: `已选 ${selectedModels.length} 个模型`,
+          })}
+        </span>
+        <div className="flex gap-2">
+          <Button onClick={onDone}>
+            {t("common.cancel", { defaultValue: "取消" })}
+          </Button>
+          <Button
+            danger
+            type="primary"
+            loading={deleting}
+            disabled={selectedModels.length === 0}
+            icon={<DeleteOutlined />}
+            onClick={async () => {
+              await onDeleteModels(selectedModels);
+              onDone();
+            }}
+          >
+            {t("modelConfig.batchDelete.confirm", {
+              count: selectedModels.length,
+              defaultValue: `删除 ${selectedModels.length} 个模型`,
+            })}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

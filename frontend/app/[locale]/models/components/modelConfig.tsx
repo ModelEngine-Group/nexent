@@ -12,7 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { Alert, App, Button, Card, Tag } from "antd";
-import { Plus, ShieldCheck, RefreshCw } from "lucide-react";
+import { Plus, ShieldCheck, RefreshCw, Pencil, Trash2 } from "lucide-react";
 import { ExclamationCircleFilled } from "@ant-design/icons";
 
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
@@ -30,6 +30,10 @@ import log from "@/lib/logger";
 import { ModelAddDialogV2 } from "./model/ModelAddDialogV2";
 import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
 import { ModelLibraryList } from "./model/ModelLibraryList";
+import {
+  ModelManagerDialog,
+  ConnectionGroup,
+} from "./model/ModelManagerDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -78,6 +82,14 @@ export const ModelConfigSection = forwardRef<
   const [editingCardModel, setEditingCardModel] = useState<ModelOption | null>(
     null
   );
+
+  // v2.6.1 redesign: batch edit / delete dialog
+  const [managerMode, setManagerMode] = useState<"editGroup" | "deleteGroup">(
+    "editGroup"
+  );
+  const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [batchUpdating, setBatchUpdating] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   const { invalidate } = useModelList();
   // Error state management
@@ -169,6 +181,67 @@ export const ModelConfigSection = forwardRef<
     setEditingCardModel(model);
   }, []);
 
+  /**
+   * Blank the default-model slots that reference any of the given display
+   * names (deleted models must not keep occupying a slot). Shared by the
+   * single delete confirm and the batch delete dialog.
+   */
+  const clearDefaultSlotsFor = useCallback(
+    (displayNames: string[]) => {
+      const removed = new Set(displayNames);
+      let configUpdates: any = {};
+      const selectedPairs: [string, string, string][] = [
+        ["llm", "main", "llm"],
+        ["embedding", "embedding", "embedding"],
+        ["embedding", "multi_embedding", "multiEmbedding"],
+        ["reranker", "reranker", "rerank"],
+        ["multimodal", "vlm", "vlm"],
+        ["multimodal", "vlm2", "vlm2"],
+        ["multimodal", "vlm3", "vlm3"],
+        ["multimodal", "vlm4", "vlm4"],
+        ["voice", "stt", "stt"],
+        ["voice", "tts", "tts"],
+      ];
+      const blank = (voice: boolean) => {
+        const base = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+        if (voice) {
+          return {
+            ...base,
+            modelFactory: "",
+            modelAppid: "",
+            accessToken: "",
+          };
+        }
+        return base;
+      };
+      selectedPairs.forEach(([cat, opt, cfgKey]) => {
+        const current = selectedModels[cat]?.[opt];
+        if (current && removed.has(current)) {
+          setSelectedModels((p) => ({
+            ...p,
+            [cat]: { ...p[cat], [opt]: "" },
+          }));
+          if (cfgKey === "embedding" || cfgKey === "multiEmbedding") {
+            configUpdates[cfgKey] = { ...blank(false), dimension: 0 };
+          } else if (cfgKey === "stt" || cfgKey === "tts") {
+            configUpdates[cfgKey] = blank(true);
+          } else {
+            configUpdates[cfgKey] = blank(false);
+          }
+        }
+      });
+      if (Object.keys(configUpdates).length > 0) {
+        updateModelConfig(configUpdates);
+        scheduleAutoSave();
+      }
+    },
+    [selectedModels, updateModelConfig]
+  );
+
   const handleCardDelete = useCallback(
     async (model: ModelOption) => {
       modal.confirm({
@@ -206,69 +279,100 @@ export const ModelConfigSection = forwardRef<
             message.error(msg);
             throw e;
           }
-          // Clear default selections if they reference this model
-          const disp = model.displayName;
-          let configUpdates: any = {};
-          const selectedPairs: [string, string, string][] = [
-            ["llm", "main", "llm"],
-            ["embedding", "embedding", "embedding"],
-            ["embedding", "multi_embedding", "multiEmbedding"],
-            ["reranker", "reranker", "rerank"],
-            ["multimodal", "vlm", "vlm"],
-            ["multimodal", "vlm2", "vlm2"],
-            ["multimodal", "vlm3", "vlm3"],
-            ["voice", "stt", "stt"],
-            ["voice", "tts", "tts"],
-          ];
-          const blank = (voice: boolean) => {
-            const base = {
-              modelName: "",
-              displayName: "",
-              apiConfig: { apiKey: "", modelUrl: "" },
-            };
-            if (voice) {
-              return {
-                ...base,
-                modelFactory: "",
-                modelAppid: "",
-                accessToken: "",
-              };
-            }
-            return base;
-          };
-          selectedPairs.forEach(([cat, opt, cfgKey]) => {
-            if (selectedModels[cat]?.[opt] === disp) {
-              setSelectedModels((p) => ({
-                ...p,
-                [cat]: { ...p[cat], [opt]: "" },
-              }));
-              if (cfgKey === "embedding" || cfgKey === "multiEmbedding") {
-                configUpdates[cfgKey] = {
-                  ...blank(false),
-                  dimension: 0,
-                };
-              } else if (cfgKey === "stt" || cfgKey === "tts") {
-                configUpdates[cfgKey] = blank(true);
-              } else {
-                configUpdates[cfgKey] = blank(false);
-              }
-            }
-          });
-          if (Object.keys(configUpdates).length > 0) {
-            updateModelConfig(configUpdates);
-            scheduleAutoSave();
-          }
+          clearDefaultSlotsFor([model.displayName]);
           message.success(
             t("model.message.deleteSuccess", {
-              name: disp,
-              defaultValue: `已删除：${disp}`,
+              name: model.displayName,
+              defaultValue: `已删除：${model.displayName}`,
             })
           );
           await loadModelLists(true);
         },
       });
     },
-    [message, modal, modelConfig, selectedModels, t, updateModelConfig]
+    [message, modal, t, clearDefaultSlotsFor]
+  );
+
+  /* ------------------ v2.6.1 redesign: batch operations ------------------ */
+
+  const handleBatchUpdateGroup = useCallback(
+    async (group: ConnectionGroup, patch: { apiKey: string; url: string }) => {
+      setBatchUpdating(true);
+      let failed = 0;
+      for (const m of group.models) {
+        try {
+          // Partial update: only api_key + base_url are sent; the backend
+          // leaves every other field untouched.
+          await modelService.updateSingleModel({
+            currentDisplayName: m.displayName,
+            url: patch.url,
+            apiKey: patch.apiKey,
+            source: m.source,
+          });
+        } catch (e: any) {
+          failed += 1;
+          log.error("batch update model failed", m.displayName, e);
+        }
+      }
+      setBatchUpdating(false);
+      if (failed === 0) {
+        message.success(
+          t("modelConfig.batchEdit.success", {
+            count: group.models.length,
+            defaultValue: `已更新 ${group.models.length} 个模型`,
+          })
+        );
+      } else {
+        message.warning(
+          t("modelConfig.batchEdit.partialFailure", {
+            failed,
+            total: group.models.length,
+            defaultValue: `${group.models.length} 个模型中 ${failed} 个更新失败`,
+          })
+        );
+      }
+      await loadModelLists(true);
+    },
+    [message, t]
+  );
+
+  const handleBatchDeleteModels = useCallback(
+    async (targets: ModelOption[]) => {
+      setBatchDeleting(true);
+      const failed: string[] = [];
+      for (const m of targets) {
+        try {
+          await modelService.deleteCustomModel(m.displayName, m.source);
+        } catch (e: any) {
+          failed.push(m.displayName);
+          log.error("batch delete model failed", m.displayName, e);
+        }
+      }
+      setBatchDeleting(false);
+      clearDefaultSlotsFor(
+        targets
+          .filter((m) => !failed.includes(m.displayName))
+          .map((m) => m.displayName)
+      );
+      if (failed.length === 0) {
+        message.success(
+          t("modelConfig.batchDelete.success", {
+            count: targets.length,
+            defaultValue: `已删除 ${targets.length} 个模型`,
+          })
+        );
+      } else {
+        message.warning(
+          t("modelConfig.batchDelete.partialFailure", {
+            failed: failed.length,
+            total: targets.length,
+            defaultValue: `${targets.length} 个模型中 ${failed.length} 个删除失败`,
+          })
+        );
+      }
+      await loadModelLists(true);
+    },
+    [message, t, clearDefaultSlotsFor]
   );
 
   /* ------------------ Connectivity resolution ------------------ */
@@ -990,6 +1094,29 @@ export const ModelConfigSection = forwardRef<
                   </span>
                 </Button>
               )}
+              <Button
+                size="middle"
+                icon={<Pencil size={14} />}
+                onClick={() => {
+                  setManagerMode("editGroup");
+                  setIsManagerOpen(true);
+                }}
+              >
+                {t("modelConfig.batchEdit.title", { defaultValue: "批量修改" })}
+              </Button>
+              <Button
+                size="middle"
+                danger
+                icon={<Trash2 size={14} />}
+                onClick={() => {
+                  setManagerMode("deleteGroup");
+                  setIsManagerOpen(true);
+                }}
+              >
+                {t("modelConfig.batchDelete.title", {
+                  defaultValue: "批量删除",
+                })}
+              </Button>
               {/* v2.6.0: new Add Model dialog with Tabs (batch import + custom access) */}
               <Can permission="model:create">
                 <Button
@@ -1053,6 +1180,18 @@ export const ModelConfigSection = forwardRef<
               }, 100);
             }
           }}
+        />
+
+        {/* v2.6.1 redesign: batch edit / delete by connection group */}
+        <ModelManagerDialog
+          open={isManagerOpen}
+          mode={managerMode}
+          models={models}
+          onClose={() => setIsManagerOpen(false)}
+          onUpdateGroup={handleBatchUpdateGroup}
+          onDeleteModels={handleBatchDeleteModels}
+          updating={batchUpdating}
+          deleting={batchDeleting}
         />
 
         <ModelAddDialogV2
