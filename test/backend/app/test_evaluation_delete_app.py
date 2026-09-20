@@ -41,7 +41,7 @@ _STUB_SYMBOLS = {
         "update_evaluation_set_case_impl",
     ),
     "database.agent_evaluation_db": ("update_annotation_schema_ids",),
-    "utils.auth_utils": ("get_current_user_id", "get_current_user_info"),
+    "utils.auth_utils": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
     "utils.evaluation_set_excel_utils": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
