@@ -208,7 +208,7 @@ Nexent 智能体基于 [smolagents](https://github.com/huggingface/smolagents) �
 
 ![ReAct循环](./assets/start-chat/ReAct.png)
 
-循环逻辑在前端是Reasoning重复直到模型判断可以直接生成最终答案，或达到最大步骤数。最终答案以 Markdown 格式输出，支持标题、列表、表格、代码块和链接；若使用了检索工具，还需在对应内容后添加引用标记 `[[字母+数字]]`，以支持溯源。
+循环逻辑在前端表现为 Reasoning 重复，直到模型通过 Agent Runtime 的 `final_answer(...)` 动作显式提交最终答案，或达到最大步骤数。最终答案以 Markdown 格式输出，支持标题、列表、表格、代码块和链接；若使用了检索工具，还需在对应内容后添加引用标记 `[[字母+数字]]`，以支持溯源。
 
 ### 3. 查看代码和工具调用过程
 
