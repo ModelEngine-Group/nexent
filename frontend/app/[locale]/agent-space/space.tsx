@@ -230,20 +230,7 @@ export function AgentSpace({ active }: { active: boolean }) {
       <ResourceCard
         key={listing.agent_repository_id}
         className="h-full min-h-0"
-        title={
-          <span className="inline-flex max-w-full items-center gap-2">
-            <span className="truncate">{title}</span>
-            <span
-              className="inline-flex shrink-0 items-center gap-1 text-xs font-normal text-slate-500 dark:text-slate-400"
-              aria-label={t("agentRepository.detail.downloads", {
-                count: downloads.toLocaleString(),
-              })}
-            >
-              <Download className="size-3.5" aria-hidden />
-              {downloads.toLocaleString()}
-            </span>
-          </span>
-        }
+        title={title}
         onClick={() => setDetailListingId(listing.agent_repository_id)}
         descriptionLines={descriptionLines}
         icon={
@@ -293,18 +280,29 @@ export function AgentSpace({ active }: { active: boolean }) {
         footerLayout="inline"
         meta={author ? <span className="truncate">{author}</span> : undefined}
         headerActions={
-          showAdminMenu ? (
-            <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
-              <Button
-                type="text"
-                size="small"
-                className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
-                icon={<MoreHorizontal className="size-4" aria-hidden />}
-                loading={isTakingDown}
-                aria-label={t("agentRepository.mine.menu.more")}
-              />
-            </Dropdown>
-          ) : undefined
+          <>
+            <span
+              className="inline-flex shrink-0 items-center gap-1 text-xs font-normal text-slate-500 dark:text-slate-400"
+              aria-label={t("agentRepository.detail.downloads", {
+                count: downloads.toLocaleString(),
+              })}
+            >
+              <Download className="size-3.5" aria-hidden />
+              {downloads.toLocaleString()}
+            </span>
+            {showAdminMenu ? (
+              <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
+                <Button
+                  type="text"
+                  size="small"
+                  className="size-8 shrink-0 text-slate-400 hover:text-slate-600"
+                  icon={<MoreHorizontal className="size-4" aria-hidden />}
+                  loading={isTakingDown}
+                  aria-label={t("agentRepository.mine.menu.more")}
+                />
+              </Dropdown>
+            ) : null}
+          </>
         }
         footer={
           <Button
