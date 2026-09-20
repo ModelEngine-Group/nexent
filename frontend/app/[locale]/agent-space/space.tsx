@@ -328,7 +328,7 @@ export function AgentSpace({ active }: { active: boolean }) {
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t("agentRepository.page.searchPlaceholder")}
             prefix={<Search className="size-4 text-slate-400" aria-hidden />}
-            className="h-11 rounded-xl"
+            className="rounded-xl"
             allowClear
           />
         </div>
