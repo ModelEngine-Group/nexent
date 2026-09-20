@@ -4,18 +4,17 @@
 | --- | --- |
 | **创建者** | Architect-9e918769-33c2-406f-a9aa-ac60396f4875 |
 | **创建时间** | 2026-09-18 15:25 |
-| **版本** | v0.1 |
+| **版本** | v0.2 |
 | **状态** | 草稿 |
 | **JIRA** | CHEN-183 |
-| **上游 PRD** | 无法发布（Confluence/JIRA 未配置凭据与域名，见风险与边界 RISK-1） |
-
-> 文档头部元数据遵循 `multica-technical-design` 模板（`design-template.md`）。
+| **上游 PRD** | 无法发布（Confluence/JIRA 未配置域名与凭据，见风险与边界 RISK-1） |
 
 ## 修订记录
 
 | 日期 | 版本 | 作者 | 变更 |
 | --- | --- | --- | --- |
 | 2026-09-18 | v0.1 | Architect-9e918769-33c2-406f-a9aa-ac60396f4875 | 初稿 |
+| 2026-09-18 | v0.2 | Architect-9e918769-33c2-406f-a9aa-ac60396f4875 | 按第 1 轮架构评审 FAIL（REV-1/2/3 + SUG-1~5）修订：收敛分桶口径与补种机制、升版本并逐条回应 |
 
 ## 理解（当前系统做什么）
 
@@ -57,22 +56,31 @@
    - `start_date_ms` + `end_date_ms`（含端点）：`create_time` 落在 [start_date_ms, end_date_ms] 区间内。
    - `agent_id`（int，可选）：`ConversationRecord.agent_id == agent_id`。
    - `keyword`（str，可选）：`conversation_title` 模糊包含匹配（`like %keyword%`），大小写不敏感（后端用 `ilike` 或转小写比对）。
-   - 三个维度在 SQL 层用 `and_` 组合（必然满足 AC-4 可组合）；分页复用现有 `offset/limit` 与 metadata 分桶。实现上可将过滤条件放进现有 `stmt` 的 `.where(...)` 链（`get_conversation_list` 模式，line 819 已有 `user_id` 条件与 `delete_flag` 过滤，直接在其上加条件即可）。
-2. **详情复用**：查看完整消息（AC-5）直接复用现有 `GET /conversation/{conversation_id}` + `get_conversation_history_service`，前端调用 `conversationService.getDetail()`，**无需新增后端详情接口**。
+   - 三个维度在 SQL 层用 `and_` 组合（必然满足 AC-4 可组合）；分页复用现有 `offset/limit` 与 metadata 分桶。实现上可将过滤条件放进现有 `stmt` 的 `.where(...)` 链（`get_conversation_list_page` 模式，line 877 已有 `user_id` 条件与 `delete_flag` 过滤，直接在其上加条件即可）。
+2. **补种机制（REV-2 已收敛）**：为 `/conversation-manage` 提供侧边栏路由**权限种子**，新增**版本化迁移**（`backend/deploy/sql/migrations/`，参照现有 `add_*_menu_permissions` 逐路由补种范式，见 `deploy/sql` 目录既有迁移）：
+   - 迁移为**持有 `conversation` 列表/`chat` 相关角色权限**的角色补种 `/conversation-manage` 路由（`LEFT_NAV_MENU` 条目），**不含 SU 超级用户**（SU 不走 `LEFT_NAV_MENU` 驱动）。
+   - 迁移**幂等可回滚**（`if not exists` / 可逆 down），与现有逐路由补种模式保持一致。
+   - DECISION-2 已收敛，见评审回应 REV-2。
+3. **详情复用**：查看完整消息（AC-5）直接复用现有 `GET /conversation/{conversation_id}` + `get_conversation_history_service`，前端调用 `conversationService.getDetail()`，**无需新增后端详情接口**。
 
 ### 前端（新建「对话管理」页面）
 
 1. **路由与侧边栏**：新增路径 `/conversation-manage`。在 `frontend/` 的导航配置中：
    - `SideNavigation.tsx` `ROUTE_CONFIG` 增加一条菜单项（Icon 用现有 lucide 图标库，`labelKey` 指向新的多语言 key），挂在合适分组（建议独立一级项或挂 `chat` 相关分组，具体位置以现有分组结构为准）。
-   - 由于侧边栏路由由后端 `LEFT_NAV_MENU` 角色权限驱动，新增路由需在**角色权限种子数据**中补充 `/conversation-manage` 条目（后端 `deploy/sql` 种子或运行时权限数据），否则菜单不展示（AC- 依赖侧边栏入口）。此项由 @BackendDev 与后端权限配置协同确认。
+   - 由于侧边栏路由由后端 `LEFT_NAV_MENU` 角色权限驱动，新增路由依赖**版本化权限补种迁移**（见后端步骤 2，REV-2 已收敛）在角色权限种子数据中补充 `/conversation-manage` 条目，否则菜单不展示。此项由 @BackendDev 与后端权限配置协同确认。
    - 若按现有模式由路由守卫 `accessibleRoutes` 控制，前端需同步该路径到需鉴权可访问列表。
 2. **页面组件**：新建页面目录（如 `frontend/app/[locale]/conversation-manage/`），复用 `memory/MemoryManager.tsx` 的「筛选器 + 分页表格 + 空态」范式：
    - **筛选区**：日期范围选择（`DatePicker.RangePicker`，将 dayjs 范围转成 `start_date_ms/end_date_ms`）、智能体下拉（`Select`，选项来自现有 agent 列表服务）、名称关键字输入框（`Input`，模糊搜索，可带防抖）。
    - **列表区**：`Table`（列：标题、智能体、创建时间、更新时间、操作「查看」），服务端分页（`offset/limit`），滚底或分页器翻页。
-   - **详情查看（AC-5）**：点击行「查看」→ 打开详情（复用 `conversationService.getDetail()` 返回的消息历史，用现有消息渲染组件展示完整对话）。
+   - **详情查看（AC-5）**：点击行「查看」→ 打开详情（复用 `conversationService.getDetail()` 返回的消息历史，用现有消息渲染组件展示完整对话）；消息渲染组件归属明确复用 `app/[locale]/newchat`（assistant-ui）侧的既有消息气泡 / 来源渲染组件（SUG-4 已采纳，见评审回应）。
    - **空态（AC-6）**：无匹配时展示 `Empty`（复用 `memory` 页 `Empty.PRESENTED_IMAGE_SIMPLE` 风格），区分「初始无数据」与「筛选无结果」文案。
    - 多语言：在 `frontend/public/locales/{zh,en}/common.json` 补充 `sidebar.conversationManage` 与页面文案 key（遵循 i18n 约定）。
 3. **查询 Hook**：新增或扩展 `useConversationManagement`，支持筛选参数（`startDateMs/endDateMs/agentId/keyword`），筛选变化时 `refetch` / reset queryKey。
+
+## 数据与状态（范围涉及时必填）
+
+- **会话归属**：维持 `created_by == user_id`（当前用户）视图，符合现有会话数据权限边界。
+- **分桶元数据（REV-1 已收敛）**：沿用 `total / today / last_7_days / older`；当有筛选条件（日期区间 / agent / keyword 任一）时，**四个分桶均按筛选后的结果集口径计算**，与 `total` 同一 WHERE 链、同一次查询、**无子查询**（分桶与筛选天然同源）。空态判定以 `total` 为准。无筛选时保持现状口径（向后兼容）。DECISION-1 已收敛，见评审回应 REV-1。有筛选时不再对分桶维持「全量口径」割裂。
 
 ## 受影响组件
 
@@ -81,57 +89,20 @@
 | `backend/apps/conversation_management_app.py` | 修改 | `list_conversations_endpoint` 增加可选筛选 query 参数 |
 | `backend/database/conversation_db.py` | 修改 | `get_conversation_list_page` 增加日期区间 / agent / keyword 过滤 |
 | `backend/consts/model_models.py` | 修改（小） | 必要时扩展分页响应模型（若需回显筛选条件到响应） |
-| `backend/deploy/sql` 权限种子 | 修改 | 为 `LEFT_NAV_MENU` 补充 `/conversation-manage` 路由权限（需 @BackendDev 确认种子机制） |
+| `backend/deploy/sql` 权限种子 | 修改 | 为 `LEFT_NAV_MENU` 补充 `/conversation-manage` 条目（**版本化迁移**形式，REV-2 已收敛，见评审回应） |
 | `frontend/app/[locale]/conversation-manage/` | 新增 | 新页面目录与组件 |
 | `frontend/components/navigation/SideNavigation.tsx` | 修改 | 新增 `ROUTE_CONFIG` 菜单项 |
 | `frontend/services/conversationService.ts` | 修改 | `getList` 增加筛选参数透传 |
 | `frontend/types/conversation.ts` | 修改 | 扩展列表请求参数与响应类型 |
 | `frontend/hooks/chat/useConversationManagement.ts` | 修改 | 支持筛选参数与重置 |
 | `frontend/public/locales/{zh,en}/common.json` | 修改 | 新增页面与侧边栏多语言 key |
-| `frontend/services/api.ts` | 修改 | `API_ENDPOINTS.conversation` 若有新增端点则登记（详情复用则无） |
-
-## 数据与状态（范围涉及时必填）
-
-列表查询本身**不新增表 / 字段**；全部筛选落在现有 `conversation_record_t.create_time`、`conversation_record_t.agent_id`、`conversation_record_t.conversation_title` 上，无数据迁移。
-
-- 会话归属：维持 `created_by == user_id`（当前用户）视图，符合现有会话数据权限边界。
-- 分桶元数据：沿用 `total / today / last_7_days / older`；当有筛选条件时，`total` 反映筛选后的总数（空态判定依据），`today/last_7_days/older` 仍按现有口径计算（若需一致可由后端统一在有筛选时对分桶也按筛选生效，待 @BackendDev 确认）。
-- 状态：无新增状态机。
 
 ## 接口与契约边界
 
 - **请求侧**：`GET /conversation/list` 新增可选 query：`start_date_ms`、`end_date_ms`（ms 时间戳，含端点）、`agent_id`（int）、`keyword`（str）。不传 = 全量（向后兼容）。
 - **响应侧**：复用现有 `ConversationResponse` 契约（`code/message/data` 信封），列表项字段不变，避免破坏前端现有消费方。
 - **鉴权 / 错误**：沿用现有 `authorization` Header 与会话过期处理（`TokenExpiredError` → 401），错误码沿用 `code != 0` 约定。
-- **前后端边界**：时间筛选由前端将 dayjs 区间转成 ms 时间戳传后端；名称模糊筛选由后端 SQL 完成（防止前端拉全量再筛）；智能体筛选下拉选项取前端 agent 列表服务。
-
-## 实现步骤
-
-### 前端（@FrontendDev）
-
-1. 在 `SideNavigation.tsx` `ROUTE_CONFIG` 增加 `/conversation-manage` 菜单项（Icon + `labelKey` + 分组）；确认 `accessibleRoutes` 鉴权守卫放行该路径。
-2. 在 `frontend/public/locales/{zh,en}/common.json` 补充 `sidebar.conversationManage` 与页面文案 key。
-3. 扩展 `types/conversation.ts`：列表查询参数类型加 `startDateMs? / endDateMs? / agentId? / keyword?`。
-4. 扩展 `conversationService.getList`，条件拼接 query 参数。
-5. 新建 `app/[locale]/conversation-manage/` 页面，按 `memory/MemoryManager.tsx` 范式实现筛选器 + 分页表格 + 空态 + 详情查看（复用 `getDetail` 与消息渲染组件）。
-6. 新建/扩展 `useConversationManagement` hook，支持筛选参数与重置；`npm run check-all` 校验 TS / lint / build。
-
-### 后端（@BackendDev）
-
-1. `conversation_db.py::get_conversation_list_page` 增加 `start_date_ms/end_date_ms/agent_id/keyword` 可选参数，在现有 `where` 链上用 `and_` 组合；`keyword` 用大小写不敏感的 `ilike`。
-2. `conversation_management_app.py::list_conversations_endpoint` 透传这些 query 参数（`Optional`，默认 `None`）。
-3. 为后端补充单元测试：日期区间、agent 过滤、名称关键词、三者组合、空结果、参数缺省行为向后兼容。
-4. 与前端协商标识分桶口径在有筛选时是否同步（见待决事项 DECISION-1）。
-5. 确认 `/conversation-manage` 路由在 `LEFT_NAV_MENU` 权限种子中的登记方式（DB 迁移或运行时权限），保证侧边栏可展示。
-
-## 非功能需求（按需）
-
-| 维度 | 要求 | 设计对策 |
-| --- | --- | --- |
-| 性能 | 列表分页 + 筛选不拖垮接口 | 筛选全部下推到 SQL 层 + 索引覆盖 `(create_time, agent_id)`；分页复用 `offset/limit`；名称模糊需评估全表 `ilike` 成本，数据量小时可接受，量大时见 RISK-2 |
-| 安全 / 权限 | 会话数据不可越权 | 维持 `created_by == user_id` 过滤；沿用现有鉴权 / 会话过期处理 |
-| 可用性 / 降级 | 空态与加载态友好 | 空态区分「无数据 / 筛选无结果」；保留 loading 与错误态 |
-| 可观测性 | 排查问题 | 沿用现有 `logging` 与前端 `log`；错误码透传 |
+- **前后端边界**：时间筛选由前端将 dayjs 区间转成 ms 时间戳传后端；名称模糊筛选由后端 SQL 完成；智能体筛选下拉选项取前端 agent 列表服务。
 
 ## 验证计划
 
@@ -143,18 +114,19 @@
 | 三条件组合 | 同时选区间 + agent + 名称 → 交集结果 | AC-4 |
 | 查看完整消息 | 点击会话 → 详情展示完整历史 | AC-5 |
 | 空态 | 无匹配（或筛选无结果）→ 展示空态 | AC-6 |
+| 分桶随筛选同口径 | 有筛选时 total 与四桶同 WHERE 链、无子查询 | AC-1 + REV-1 |
 | 向后兼容 | 不传筛选参数 → 行为与现状一致（含分桶 metadata） | 回归 |
 
 ## 需求追溯
 
 | AC- / FR- / BR- | 设计决策摘要 | 实现步骤引用 |
 | --- | --- | --- |
-| AC-1 | 后端 `start_date_ms/end_date_ms` 区间过滤 | 后端步骤 1、前端步骤 3-5 |
+| AC-1 | 后端 `start_date_ms/end_date_ms` 区间过滤 | 后端步骤 1、前端步骤 2-5 |
 | AC-2 | 后端 `agent_id` 过滤 + 前端 agent 下拉 | 后端步骤 1、前端步骤 2-5 |
-| AC-3 | 后端 `keyword` ilike 模糊 + 前端输入框 | 后端步骤 1、前端步骤 5 |
+| AC-3 | 后端 `keyword` ilike 模糊 + 前端输入框 | 后端步骤 1、前端步骤 2-5 |
 | AC-4 | SQL 层 `and_` 组合三条件 | 后端步骤 1 |
-| AC-5 | 复用 `getDetail` + 现有消息渲染 | 前端步骤 5 |
-| AC-6 | Table + Empty 空态 | 前端步骤 5 |
+| AC-5 | 复用 `getDetail` + 现有消息渲染 | 前端步骤 2 |
+| AC-6 | Table + Empty 空态 | 前端步骤 2 |
 | 非目标（编辑/删除/全文搜索/导出） | 明确不做 | 非目标 |
 
 ## 风险与边界
@@ -163,22 +135,29 @@
 | --- | --- | --- |
 | RISK-1 | Confluence / JIRA 未配置域名与凭据（`config.yaml` 为占位符 `http://your-domain.atlassian.net...`，环境无 `JIRA_*`/`CONFLUENCE_*` 变量），设计文档无法按 platform skill 发布到 Confluence | 本次以 **Git 仓库 `docs/design/CHEN-183/design.md`** 作为稳定引用回传；Confluence 发布步骤保留为后续（凭据就绪后由 platform skill 落地） |
 | RISK-2 | `conversation_title` 全表 `ilike %kw%` 在话量极大时触发顺序扫描 | 数据量小（当前阶段）直接可用；量大时评估 `pg_trgm` 或既有 title 倒排；纳入性能验证 |
-| RISK-3 | 新增侧边栏路由若无 `LEFT_NAV_MENU` 权限记录，菜单不展示 / 路由守卫拦截 | 由 @BackendDev 确认权限种子机制并补齐 `/conversation-manage`；前端同步 `accessibleRoutes` |
-| RISK-4 | 分桶 metadata 在有筛选时的口径可能误导「总数」展示 | 空态以 `total` 为准；分桶口径是否随筛选取决于 DECISION-1 |
+| RISK-3 | 新增侧边栏路由若无 `LEFT_NAV_MENU` 权限记录，菜单不展示 / 路由守卫拦截 | **REV-2 已收敛**：通过版本化补种迁移为持会话/chat 相关权限角色补 `/conversation-manage`（不含 SU，幂等可回滚）；由 @BackendDev 确认种子机制并落地；前端同步 `accessibleRoutes` |
+| RISK-4 | 分桶 metadata 在有筛选时的口径可能误导「总数」展示 | **REV-1 已收敛**：有筛选时四桶随筛选同口径、与 total 同 WHERE 链、无子查询；空态以 `total` 为准 |
 | RISK-5 | FrontendDev 的现有 chat 页与会话侧栏共用 `getList`，改签名可能波及 | `getList` 新增参数全可选 + 默认不传保持原行为，避免破坏现有消费方 |
 
 ## 待决事项
 
 | 编号 | 问题 | 负责人 | 截止 |
 | --- | --- | --- | --- |
-| DECISION-1 | 有筛选条件时，`today / last_7_days / older` 分桶是随筛选同步还是保持全量口径 | @BackendDev + Leader | 实现前 |
-| DECISION-2 | `/conversation-manage` 菜单挂靠的导航分组与可见角色范围（影响 `LEFT_NAV_MENU` 权限种子） | @Leader（产品） | 开发启动前 |
+| DECISION-1 | 有筛选条件时，`today / last_7_days / older` 分桶是随筛选同步还是保持全量口径 | **已收敛（Leader）** | 已收敛 |
+| DECISION-2 | `/conversation-manage` 菜单挂靠的导航分组与可见角色范围（影响 `LEFT_NAV_MENU` 权限种子） | **已收敛（Leader）** | 已收敛 |
 
 ## 评审回应
 
 | 评审项 | 原意见 | 处理摘要 | 备注 |
 | --- | --- | --- | --- |
-| （本轮新稿，待评审） | — | — | 无历史评审 |
+| REV-1 | 有筛选条件时，分桶 metadata（today / last_7_days / older）口径不明，可能误导「总数」 | **已收敛**：有筛选时四桶均按筛选后的结果集口径计算，与 `total` 同一 WHERE 链、同一次查询、无子查询（分桶与筛选同源），空态以 `total` 为准；无筛选时保持现状口径。DECISION-1 关闭 | 数据与状态、后端步骤 2 |
+| REV-2 | 新增侧边栏路由的权限种子机制不明（`LEFT_NAV_MENU`），仅「由 @BackendDev 确认」不足以作为设计 | **已收敛**：明确为**版本化增量迁移**（`deploy/sql/migrations/`），参照现有逐路由补种范式；为持会话/chat 相关角色权限的角色补 `/conversation-manage`，**不含 SU**（SU 不走 LEFT_NAV_MENU），**幂等可回滚**。DECISION-2 关闭 | 后端步骤 2、RISK-3 |
+| REV-3 | 版本未升、评审回应缺失、修订记录未更新 | **已修订**：升 v0.2，修订记录补充 v0.2 行，本节逐条回应 | 修订记录 |
+| SUG-1 | 分桶 filter 参数建议随 total 同源 | 已采纳并贯彻（REV-1 收敛为同 WHERE 链、无子查询） | — |
+| SUG-2 | 建议选定一个稳定的设计交付引用（Git 或 Confluence 二选一） | 已采纳：以 Git 仓库 `docs/design/CHEN-183/design.md` 为稳定引用（RISK-1） | 交付说明 |
+| SUG-3 | 建议前端复用现有筛选器 + 表格 + 空态页面范式 | 已采纳：复用 `memory/MemoryManager.tsx` 范式（前端步骤 2） | — |
+| SUG-4 | 建议消息详情复用现有消息渲染组件（assistant-ui / chat 页） | 已采纳：详情复用 `getDetail()` + 现有消息气泡 / 来源渲染组件（前端步骤 2） | — |
+| SUG-5 | 建议多语言 key 遵循现有 i18n 约定集中管理 | 已采纳：language keys 收进 `common.json` 并遵循命名约定 | 前端步骤 2 |
 
 ## 上下游协作
 
@@ -187,4 +166,4 @@
 
 ## 交付说明（本 run）
 
-设计产物落位到 Git 仓库 `docs/design/CHEN-183/design.md`（分支 `agent/architect/02700bba0782`）。Confluence / JIRA 发布因凭据缺失暂不可用（RISK-1），以 Git 引用作为稳定参考回传 Leader。
+设计产物落位到 Git 仓库 `docs/design/CHEN-183/design.md`（分支 `agent/architect/02700bba0782`）。Confluence / JIRA 发布因凭据缺失暂不可用（RISK-1），以 Git 引用作为稳定引用回传 Leader。
