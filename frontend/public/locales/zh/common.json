@@ -778,7 +778,7 @@
   "knowledgeBase.upload.status.uploading": "上传中",
   "knowledgeBase.upload.status.completed": "已完成",
   "knowledgeBase.upload.status.failed": "上传失败",
-  "knowledgeBase.upload.invalidFileType": "只支持 PDF、Word、PPT、Excel、MD、TXT、CSV、JSON、EPUB、HTML、XML 文件格式！",
+  "knowledgeBase.upload.invalidFileType": "只支持 PDF、Word、PPT、Excel、MD、TXT、CSV、TSV、JSON、EPUB、HTML、XML 文件格式！",
   "knowledgeBase.check.nameError": "检查知识库名称失败",
   "knowledgeBase.fetch.error": "获取知识库信息失败",
   "knowledgeBase.fetch.retryError": "获取知识库信息失败，请稍后重试",

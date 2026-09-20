@@ -69,7 +69,9 @@ class _XlrdProxy(types.ModuleType):
         return _Book()
 
 
-if "xlrd" not in sys.modules or not hasattr(sys.modules["xlrd"], "open_workbook"):
+try:
+    import xlrd
+except ImportError:
     sys.modules["xlrd"] = _XlrdProxy()
 
 _tmp_root = os.path.abspath(os.path.join(_test_root, "..", ".pytest-tmp"))

@@ -1,4 +1,5 @@
-from io import BytesIO
+import csv
+from io import BytesIO, StringIO
 import sys
 import types
 
@@ -23,6 +24,26 @@ sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
 sys.modules.setdefault("unstructured_inference.logger", fake_logger)
 
 from sdk.nexent.data_process.file_splitter import FileSplitter
+
+
+@pytest.mark.parametrize("filename", ["sample.tsv", "sample.TSV"])
+def test_tsv_split_preserves_headers_and_quoted_fields(filename):
+    rows = [
+        ["姓名", "备注"],
+        ["张三", "包含逗号,和制表符\t"],
+        ["李四", '多行\n和"引号"'],
+        ["王五", "普通内容"],
+    ]
+    buffer = StringIO()
+    csv.writer(buffer, delimiter="\t").writerows(rows)
+    parts = FileSplitter().file_process(buffer.getvalue().encode(), filename, max_size=65)
+    assert len(parts) > 1
+    actual_rows = []
+    for part in parts:
+        parsed = list(csv.reader(StringIO(part.getvalue().decode()), delimiter="\t"))
+        assert parsed[0] == rows[0]
+        actual_rows.extend(parsed[1:])
+    assert actual_rows == rows[1:]
 
 
 def test_file_process_docx_single_part_returns_original(monkeypatch):

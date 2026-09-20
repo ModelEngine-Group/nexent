@@ -69,7 +69,11 @@ class UnstructuredProcessor(FileProcessor):
             # Prepare partition parameters
             partition_kwargs = self._prepare_partition_kwargs(
                 file_data, chunking_strategy, processed_params)
-            from unstructured.partition.auto import partition
+            if filename and filename.lower().endswith(".tsv"):
+                # Byte-only auto detection can mistake TSV for plain text or CSV.
+                from unstructured.partition.tsv import partition_tsv as partition
+            else:
+                from unstructured.partition.auto import partition
             # Execute file partitioning
             elements = partition(**partition_kwargs)
 
@@ -208,7 +212,8 @@ class UnstructuredProcessor(FileProcessor):
             List of supported file formats
         """
         return [
-            ".txt", ".pdf", ".docx", ".doc", ".html", ".htm", ".md", ".rtf", ".odt", ".pptx", ".ppt", ".json", ".epub", ".csv", ".xml"
+            ".txt", ".pdf", ".docx", ".doc", ".html", ".htm", ".md", ".rtf", ".odt",
+            ".pptx", ".ppt", ".json", ".epub", ".csv", ".tsv", ".xml",
         ]
 
     def validate_file_format(self, filename: str) -> bool:

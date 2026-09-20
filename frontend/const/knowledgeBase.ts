@@ -125,10 +125,19 @@ export const FILE_EXTENSIONS = {
   MD: 'md',
   EPUB: 'epub',
   CSV: 'csv',
+  TSV: 'tsv',
   HTML: 'html',
   XML: 'xml',
   JSON: 'json'
 } as const;
+
+// Use the same extensions for file selection and upload validation.
+export const KNOWLEDGE_BASE_ALLOWED_EXTENSIONS: readonly string[] = [
+  ...Object.values(FILE_EXTENSIONS),
+  'markdown',
+];
+export const KNOWLEDGE_BASE_ACCEPT_STRING = KNOWLEDGE_BASE_ALLOWED_EXTENSIONS
+  .map((extension) => `.${extension}`).join(',');
 
 // File type constants
 export const FILE_TYPES = {
@@ -140,6 +149,7 @@ export const FILE_TYPES = {
   MARKDOWN: 'Markdown',
   EPUB: 'EPUB',
   CSV: 'CSV',
+  TSV: 'TSV',
   JSON: 'JSON',
   HTML: 'HTML',
   XML: 'XML',
@@ -158,6 +168,7 @@ export const EXTENSION_TO_TYPE_MAP = {
   [FILE_EXTENSIONS.TXT]: FILE_TYPES.TEXT,
   [FILE_EXTENSIONS.MD]: FILE_TYPES.MARKDOWN,
   [FILE_EXTENSIONS.CSV]: FILE_TYPES.CSV,
+  [FILE_EXTENSIONS.TSV]: FILE_TYPES.TSV,
   [FILE_EXTENSIONS.JSON]: FILE_TYPES.JSON,
   [FILE_EXTENSIONS.HTML]: FILE_TYPES.HTML,
   [FILE_EXTENSIONS.XML]: FILE_TYPES.XML,

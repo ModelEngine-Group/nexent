@@ -9,12 +9,14 @@ from copy import copy
 from io import BytesIO, StringIO, TextIOWrapper
 from typing import List
 
+from .excel_utils import load_excel_workbook
+
 
 class FileSplitter:
 
-    def split_csv_by_size(self, csv_bytes, max_size, encoding="utf-8"):
+    def split_csv_by_size(self, csv_bytes, max_size, encoding="utf-8", delimiter=","):
         text = csv_bytes.decode(encoding)
-        reader = list(csv.reader(StringIO(text)))
+        reader = list(csv.reader(StringIO(text), delimiter=delimiter))
 
         if not reader:
             return []
@@ -26,7 +28,7 @@ class FileSplitter:
 
         def build_csv_bytes(sub_rows):
             buffer = StringIO()
-            writer = csv.writer(buffer)
+            writer = csv.writer(buffer, delimiter=delimiter)
 
             writer.writerow(header)
             writer.writerows(sub_rows)
@@ -151,14 +153,14 @@ class FileSplitter:
                 continue
 
     def split_excel(self, excel_bytes, max_size):
-        from openpyxl import Workbook, load_workbook
+        from openpyxl import Workbook
 
         file_size = len(excel_bytes)
 
         if file_size <= max_size:
             return [BytesIO(excel_bytes)]
 
-        wb = load_workbook(BytesIO(excel_bytes), data_only=False)
+        wb = load_excel_workbook(excel_bytes)
 
         sheet_data = {}
 
@@ -479,6 +481,14 @@ class FileSplitter:
                 file_data,
                 max_size=max_size,
                 encoding=kwargs.get("encoding", "utf-8"),
+            )
+
+        if ext == ".tsv":
+            return self.split_csv_by_size(
+                file_data,
+                max_size=max_size,
+                encoding=kwargs.get("encoding", "utf-8"),
+                delimiter="\t",
             )
 
         if ext == ".epub":

@@ -5,6 +5,7 @@ import type { UploadFile, UploadProps, RcFile } from 'antd/es/upload/interface';
 import { App, Upload } from 'antd';
 
 import { NAME_CHECK_STATUS } from '@/const/agentConfig';
+import { KNOWLEDGE_BASE_ACCEPT_STRING } from '@/const/knowledgeBase';
 import log from "@/lib/logger";
 import { 
   checkKnowledgeBaseName,
@@ -254,7 +255,7 @@ const UploadArea = forwardRef<UploadAreaRef, UploadAreaProps>(
       fileList,
       onChange: handleChange,
       customRequest: handleCustomRequest,
-      accept: ".pdf,.doc,.docx,.pptx,.xlsx,.md,.txt,.csv,.json,.epub,.xml,.html",
+      accept: KNOWLEDGE_BASE_ACCEPT_STRING,
       showUploadList: true,
       disabled: disabled,
       progress: {

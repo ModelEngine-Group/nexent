@@ -4,6 +4,7 @@ import { NAME_CHECK_STATUS } from '@/const/agentConfig';
 import {
   AIDP_ALLOWED_EXTENSIONS,
   AIDP_ALLOWED_MIME_TYPES,
+  KNOWLEDGE_BASE_ALLOWED_EXTENSIONS,
   KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
 } from '@/const/knowledgeBase';
 import knowledgeBaseService from '@/services/knowledgeBaseService';
@@ -58,11 +59,14 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
     'application/pdf',
     'application/msword', // .doc
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+    'application/vnd.ms-powerpoint', // .ppt
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-excel', // .xls
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'text/markdown',
     'text/plain',
     'text/csv',
+    'text/tab-separated-values',
     'application/csv',
     'application/epub',
     'application/epub+zip',
@@ -77,16 +81,8 @@ export const validateFileType = (file: File, t: TFunction, message: any): boolea
 
   // If MIME type is empty or not in the list, check by file extension
   if (!isValidType) {
-    const name = file.name.toLowerCase();
-    if (
-      name.endsWith('.md') ||
-      name.endsWith('.markdown') ||
-      name.endsWith('.csv') ||
-      name.endsWith('.doc') ||
-      name.endsWith('.docx')
-    ) {
-      isValidType = true;
-    }
+    const extension = file.name.toLowerCase().split('.').pop() ?? '';
+    isValidType = file.name.includes('.') && KNOWLEDGE_BASE_ALLOWED_EXTENSIONS.includes(extension);
   }
 
   if (!isValidType) {

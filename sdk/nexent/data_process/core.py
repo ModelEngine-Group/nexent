@@ -21,7 +21,8 @@ class DataProcessCore:
 
     Supported file types:
     - Excel files: .xlsx, .xls
-    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt, .epub, .xml, .csv, .json
+    - Generic files: .txt, .pdf, .docx, .doc, .html, .htm, .md, .rtf, .odt, .pptx, .ppt,
+      .epub, .xml, .csv, .tsv, .json
 
     Supported input methods:
     - In-memory byte data
@@ -42,6 +43,7 @@ class DataProcessCore:
     # Supported split extensions (exclude ppt/pptx/html)
     SPLIT_EXTENSIONS = {
         ".csv",
+        ".tsv",
         ".epub",
         ".xlsx",
         ".xls",
@@ -244,6 +246,7 @@ class DataProcessCore:
                 ".json",
                 ".xml",
                 ".csv",
+                ".tsv",
             ]
 
         return {"excel": list(self.EXCEL_EXTENSIONS), "generic": generic_formats}

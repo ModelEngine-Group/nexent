@@ -1,9 +1,9 @@
-import io
 import os
 from copy import deepcopy
 from typing import Dict, List
 
 from .base import FileProcessor
+from .excel_utils import load_excel_workbook
 
 
 class OpenPyxlProcessor(FileProcessor):
@@ -36,11 +36,8 @@ class OpenPyxlProcessor(FileProcessor):
 
     def _load_workbook(self, file_data: bytes):
         """Load Excel workbook"""
-        import openpyxl
-
         try:
-            file_obj = io.BytesIO(file_data)
-            wb_original = openpyxl.load_workbook(file_obj)
+            wb_original = load_excel_workbook(file_data)
 
             wb_copy = deepcopy(wb_original)
             return wb_original, wb_copy

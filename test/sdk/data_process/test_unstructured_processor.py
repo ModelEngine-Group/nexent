@@ -1,4 +1,6 @@
 import io
+from pathlib import Path
+import shutil
 import sys
 import types
 import pytest
@@ -20,6 +22,31 @@ sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
 sys.modules.setdefault("unstructured_inference.logger", fake_logger)
 
 from sdk.nexent.data_process.unstructured_processor import UnstructuredProcessor
+
+
+@pytest.mark.parametrize("filename", ["sample.tsv", "sample.TSV"])
+@pytest.mark.parametrize("strategy", ["basic", "by_title", "none"])
+def test_real_tsv_parsing_preserves_tabular_content(filename, strategy):
+    pytest.importorskip("unstructured.partition.tsv")
+    raw = '姓名\t备注\n张三\t"包含逗号,和制表符\t"\n李四\t"多行\n内容"\n'.encode()
+    chunks = UnstructuredProcessor().process_file(raw, strategy, filename)
+    content = "\n".join(chunk["content"] for chunk in chunks)
+    for expected in ["姓名", "备注", "张三", "李四", "包含逗号,和制表符", "多行", "内容"]:
+        assert expected in content
+    assert all(chunk["filename"] == filename for chunk in chunks)
+    if strategy != "none":
+        assert all(chunk["metadata"]["element_type"] in ("Table", "TableChunk") for chunk in chunks)
+
+
+@pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice is required for binary PPT")
+def test_real_legacy_ppt_parsing():
+    pytest.importorskip("unstructured.partition.ppt")
+    raw = (Path(__file__).parents[2] / "assets" / "legacy_upload.ppt").read_bytes()
+    chunks = UnstructuredProcessor().process_file(raw, "basic", "legacy.ppt")
+    content = "\n".join(chunk["content"] for chunk in chunks)
+    assert "Legacy PowerPoint upload" in content
+    assert "Knowledge base regression content." in content
+    assert all(chunk["filename"] == "legacy.ppt" for chunk in chunks)
 
 
 def setup_partition_mock(mocker: MockFixture, return_value):
@@ -419,7 +446,8 @@ class TestUnstructuredProcessor:
         assert ".csv" in result
         assert ".xml" in result
         assert ".epub" in result
-        assert len(result) == 15
+        assert ".tsv" in result
+        assert len(result) == 16
 
     @pytest.mark.parametrize(
         "filename,expected",
@@ -585,7 +613,7 @@ class TestUnstructuredProcessor:
         # HTML already supported
         assert ".html" in formats
 
-    @pytest.mark.parametrize("filename", ["test.json", "test.epub", "test.csv", "test.xml", "test.html"])
+    @pytest.mark.parametrize("filename", ["test.json", "test.epub", "test.csv", "test.tsv", "test.TSV", "test.xml", "test.html"])
     def test_validate_file_format_new_types(self, processor, filename):
         """Verify that the newly added file type can pass format verification."""
         assert processor.validate_file_format(filename) is True

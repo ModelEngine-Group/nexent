@@ -218,6 +218,8 @@ class TestDataProcessCore:
             ("test.pdf", "Unstructured", "UniversalImageExtractor"),
             ("test.docx", "Unstructured", "UniversalImageExtractor"),
             ("test.pptx", "Unstructured", None),
+            ("test.ppt", "Unstructured", "UniversalImageExtractor"),
+            ("test.tsv", "Unstructured", None),
             ("test.txt", "Unstructured", None),
             ("test.html", "Unstructured", None),
         ]
@@ -267,6 +269,7 @@ class TestDataProcessCore:
         assert ".txt" in result["generic"]
         assert ".pdf" in result["generic"]
         assert ".docx" in result["generic"]
+        assert ".tsv" in result["generic"]
 
     def test_get_supported_strategies(self, core):
         """Test getting supported chunking strategies"""
@@ -291,6 +294,9 @@ class TestDataProcessCore:
         [
             ("test.xlsx", True),
             ("test.xls", True),
+            ("test.ppt", True),
+            ("test.tsv", True),
+            ("test.TSV", True),
             ("test.pdf", True),
             ("test.docx", True),
             ("test.txt", True),

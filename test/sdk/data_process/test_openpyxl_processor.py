@@ -1,4 +1,6 @@
 import io
+from datetime import datetime
+from pathlib import Path
 import pytest
 from pytest_mock import MockFixture
 from unittest.mock import Mock, MagicMock, patch
@@ -21,6 +23,55 @@ sys.modules.setdefault("unstructured_inference.models.tables", fake_tables)
 sys.modules.setdefault("unstructured_inference.logger", fake_logger)
 
 from sdk.nexent.data_process.openpyxl_processor import OpenPyxlProcessor
+from sdk.nexent.data_process.excel_utils import load_excel_workbook
+from sdk.nexent.data_process.file_splitter import FileSplitter
+
+
+@pytest.fixture
+def legacy_excel_bytes():
+    import xlrd
+
+    if not hasattr(xlrd, "__version__"):
+        pytest.skip("A real xlrd installation is required for binary XLS regression tests")
+    return (Path(__file__).parents[2] / "assets" / "legacy_upload.xls").read_bytes()
+
+
+def test_load_binary_xls_preserves_cell_types_and_merged_cells(legacy_excel_bytes):
+    workbook = load_excel_workbook(legacy_excel_bytes)
+    sheet = workbook["数据"]
+    assert sheet["A2"].value == "张三"
+    assert sheet["B2"].value == 12
+    assert sheet["B3"].value == 0
+    assert sheet["C2"].value == datetime(2026, 9, 20)
+    assert sheet["D2"].value is True
+    assert sheet["D3"].value is False
+    assert sheet["E3"].value == "多行\n内容"
+    assert str(next(iter(workbook["说明"].merged_cells.ranges))) == "A1:B1"
+
+
+@pytest.mark.parametrize("filename", ["legacy.xls", "legacy.XLS"])
+def test_process_binary_xls_content(legacy_excel_bytes, filename):
+    chunks = OpenPyxlProcessor().process_file(legacy_excel_bytes, "basic", filename)
+    content = "\n".join(chunk["content"] for chunk in chunks)
+    for expected in ["张三", "李四", "2026-09-20", "True", "False", "多行<br>内容", "第二行"]:
+        assert expected in content
+    assert all(chunk["filename"] == filename for chunk in chunks)
+    assert all(chunk["metadata"]["file_type"] == "xls" for chunk in chunks)
+
+
+def test_binary_xls_split_parts_can_be_processed_with_original_filename(legacy_excel_bytes):
+    parts = FileSplitter().file_process(
+        legacy_excel_bytes, "legacy.xls", max_size=len(legacy_excel_bytes) // 2,
+    )
+    assert len(parts) == 2
+    chunks = [
+        chunk for part in parts
+        for chunk in OpenPyxlProcessor().process_file(part.getvalue(), "basic", "legacy.xls")
+    ]
+    content = "\n".join(chunk["content"] for chunk in chunks)
+    assert content.count("张三") == 1
+    assert content.count("李四") == 1
+    assert all(chunk["filename"] == "legacy.xls" for chunk in chunks)
 
 
 class TestOpenPyxlProcessor:
