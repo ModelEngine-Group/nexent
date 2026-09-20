@@ -23,7 +23,8 @@ from consts.const import (
     SUPABASE_JWT_SECRET,
     JWT_EXPIRY_SECONDS,
 )
-from consts.exceptions import OAuthLinkError, OAuthProviderError
+from consts.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
+from utils.auth_utils import delete_supabase_user
 from services.asset_owner_visibility import require_asset_owner_enabled
 from consts.oauth_providers import (
     get_all_provider_definitions,
@@ -475,12 +476,17 @@ async def complete_pending_oauth_account(
     user_role = _role_from_invitation_type(invitation_info.get("code_type", "USER_INVITE"))
     is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
-    insert_user_tenant(
-        user_id=supabase_user_id,
-        tenant_id=tenant_id,
-        user_role=user_role,
-        user_email=final_email,
-    )
+    try:
+        insert_user_tenant(
+            user_id=supabase_user_id,
+            tenant_id=tenant_id,
+            user_role=user_role,
+            user_email=final_email,
+        )
+    except TenantResourceLimitError:
+        # The Supabase identity was created before the local tenant-limit check.
+        delete_supabase_user(supabase_user_id)
+        raise
 
     invitation_result = use_invitation_code(normalized_invite_code, supabase_user_id)
     group_ids = invitation_result.get("group_ids", [])
