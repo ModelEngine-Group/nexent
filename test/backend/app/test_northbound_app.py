@@ -1,6 +1,7 @@
 """Unit tests for backend.apps.northbound_app module."""
 import sys
 import os
+from http import HTTPStatus
 
 # The conftest.py sets up all mocks
 
