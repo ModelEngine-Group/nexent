@@ -863,7 +863,28 @@ class NexentAgent:
                 if self.sandbox_config.level != SandboxLevel.LOCAL:
                     try:
                         warm_start = time.time()
-                        python_executor("[0, None]")
+                        current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
+                        warmup_metadata = replace(
+                            current_metadata,
+                            agent_id=(
+                                getattr(agent_config, "_sub_agent_id", None)
+                                if _managed_context else current_metadata.agent_id
+                            ),
+                            agent_name=agent_config.name,
+                            agent_display_name=agent_config.display_name,
+                            model_name=agent_config.model_name,
+                        )
+                        with get_monitoring_manager().trace_agent_step(
+                            "agent.sandbox.warmup",
+                            warmup_metadata,
+                            step_type="sandbox_warmup",
+                            **{
+                                "sandbox.level": self.sandbox_config.level.value,
+                                "sandbox.scope": self.sandbox_config.scope.value,
+                                "sandbox.backend": getattr(python_executor, "_nexent_backend", "unknown"),
+                            },
+                        ):
+                            python_executor("[0, None]")
                         warm_dur = time.time() - warm_start
                         backend = getattr(python_executor, "_nexent_backend", "unknown")
                         if backend == "local":
