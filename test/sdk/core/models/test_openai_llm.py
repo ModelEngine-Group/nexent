@@ -2266,6 +2266,36 @@ def test_call_can_defer_successful_attempt_commit_for_core_agent(openai_model_in
     assert result.model_attempt_number == 1
 
 
+def test_call_can_suppress_semantic_repair_stream(openai_model_instance):
+    """A semantic repair is observed internally without publishing raw tokens."""
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = '<code>final_answer("ok")</code>'
+    mock_chunk.choices[0].delta.role = "assistant"
+    mock_chunk.choices[0].delta.reasoning = "internal repair reasoning"
+    mock_chunk.choices[0].delta.reasoning_content = None
+    mock_chunk.choices[0].finish_reason = "stop"
+    mock_chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    openai_model_instance.observer.reset_mock()
+
+    with patch.object(openai_model_instance, "_prepare_completion_kwargs", return_value={}):
+        openai_model_instance.client.chat.completions.create.return_value = [mock_chunk]
+        result = openai_model_instance(
+            messages=[{"role": "user", "content": "repair"}],
+            _token_tracker=MagicMock(),
+            _defer_attempt_commit=True,
+            _suppress_attempt_stream=True,
+        )
+
+    openai_model_instance.observer.begin_model_attempt.assert_not_called()
+    openai_model_instance.observer.add_model_reasoning_content.assert_not_called()
+    openai_model_instance.observer.add_model_new_token.assert_not_called()
+    openai_model_instance.observer.flush_remaining_tokens.assert_not_called()
+    openai_model_instance.observer.commit_model_attempt.assert_not_called()
+    openai_model_instance.observer.rollback_model_attempt.assert_not_called()
+    assert result.model_attempt_commit_deferred is False
+
+
 def test_call_token_estimation_with_list_content(openai_model_instance):
     """Test __call__ method extracts text from list-formatted content when usage info is None (line 220)."""
 

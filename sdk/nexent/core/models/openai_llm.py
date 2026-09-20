@@ -121,6 +121,7 @@ def _is_timeout_error(exc: BaseException) -> bool:
 
 class OpenAIModel(OpenAIServerModel):
     supports_deferred_attempt_commit = True
+    supports_suppressed_attempt_stream = True
 
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
@@ -281,6 +282,7 @@ class OpenAIModel(OpenAIServerModel):
                  context_rebuild=None, _overflow_recovery_ordinal: int = 0,
                  _model_attempts_used: int = 0,
                  _defer_attempt_commit: bool = False,
+                 _suppress_attempt_stream: bool = False,
                  **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
 
@@ -325,6 +327,7 @@ class OpenAIModel(OpenAIServerModel):
                     _overflow_recovery_ordinal=_overflow_recovery_ordinal,
                     _model_attempts_used=_model_attempts_used,
                     _defer_attempt_commit=_defer_attempt_commit,
+                    _suppress_attempt_stream=_suppress_attempt_stream,
                     **kwargs,
                 )
 
@@ -465,7 +468,7 @@ class OpenAIModel(OpenAIServerModel):
                 raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
             attempt_id = uuid.uuid4().hex
             begin_attempt = getattr(self.observer, "begin_model_attempt", None)
-            if callable(begin_attempt):
+            if callable(begin_attempt) and not _suppress_attempt_stream:
                 begin_attempt(attempt_id, attempt)
             self._monitoring.add_span_event("model_attempt_begin", {
                 "attempt_id": attempt_id,
@@ -529,7 +532,8 @@ class OpenAIModel(OpenAIServerModel):
                 nonstandard_chunk_count = 0
 
                 # Reset output mode
-                self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
+                if not _suppress_attempt_stream:
+                    self.observer.current_mode = ProcessType.MODEL_OUTPUT_THINKING
 
                 # Track streaming metrics
                 stream_start_time = time.time()
@@ -566,8 +570,9 @@ class OpenAIModel(OpenAIServerModel):
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
                             reasoning_char_count += len(str(reasoning_content))
-                            self.observer.add_model_reasoning_content(
-                                reasoning_content)
+                            if not _suppress_attempt_stream:
+                                self.observer.add_model_reasoning_content(
+                                    reasoning_content)
                             if token_tracker and not first_token_received:
                                 token_tracker.record_first_token()
                                 first_token_received = True
@@ -583,7 +588,8 @@ class OpenAIModel(OpenAIServerModel):
                             if token_tracker:
                                 token_tracker.record_token(new_token)
 
-                            self.observer.add_model_new_token(new_token)
+                            if not _suppress_attempt_stream:
+                                self.observer.add_model_new_token(new_token)
                             token_join.append(new_token)
                             role = chunk.choices[0].delta.role
 
@@ -595,7 +601,8 @@ class OpenAIModel(OpenAIServerModel):
                             raise RuntimeError(STOP_EVENT_INTERRUPTED_MESSAGE)
 
                     # Send end marker
-                    self.observer.flush_remaining_tokens()
+                    if not _suppress_attempt_stream:
+                        self.observer.flush_remaining_tokens()
                     model_output = "".join(token_join)
                     self.last_finish_reason = finish_reason
                     if finish_reason == "length":
@@ -727,13 +734,17 @@ class OpenAIModel(OpenAIServerModel):
                     message.role = MessageRole.ASSISTANT
                     message.model_attempt_id = attempt_id
                     message.model_attempt_number = attempt
-                    message.model_attempt_commit_deferred = _defer_attempt_commit
-                    attempt_event = (
-                        "model_attempt_commit_deferred"
-                        if _defer_attempt_commit
-                        else "model_attempt_commit"
+                    message.model_attempt_commit_deferred = (
+                        _defer_attempt_commit and not _suppress_attempt_stream
                     )
-                    if not _defer_attempt_commit:
+                    attempt_event = "model_attempt_stream_suppressed"
+                    if not _suppress_attempt_stream:
+                        attempt_event = (
+                            "model_attempt_commit_deferred"
+                            if _defer_attempt_commit
+                            else "model_attempt_commit"
+                        )
+                    if not _defer_attempt_commit and not _suppress_attempt_stream:
                         commit_attempt = getattr(self.observer, "commit_model_attempt", None)
                         if callable(commit_attempt):
                             commit_attempt(attempt_id, attempt)
@@ -751,7 +762,7 @@ class OpenAIModel(OpenAIServerModel):
                     raise e
             except EmptyModelResponseError as empty_error:
                 rollback_attempt = getattr(self.observer, "rollback_model_attempt", None)
-                if callable(rollback_attempt):
+                if callable(rollback_attempt) and not _suppress_attempt_stream:
                     rollback_attempt(attempt_id, attempt)
                 self._monitoring.add_span_event("model_attempt_rollback", {
                     "attempt_id": attempt_id,
@@ -782,7 +793,7 @@ class OpenAIModel(OpenAIServerModel):
                 continue
             except Exception as e:
                 rollback_attempt = getattr(self.observer, "rollback_model_attempt", None)
-                if callable(rollback_attempt):
+                if callable(rollback_attempt) and not _suppress_attempt_stream:
                     rollback_attempt(attempt_id, attempt)
                 self._monitoring.add_span_event("model_attempt_rollback", {
                     "attempt_id": attempt_id,
@@ -853,6 +864,7 @@ class OpenAIModel(OpenAIServerModel):
                         _overflow_recovery_ordinal=_overflow_recovery_ordinal + 1,
                         _model_attempts_used=attempt,
                         _defer_attempt_commit=_defer_attempt_commit,
+                        _suppress_attempt_stream=_suppress_attempt_stream,
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)
